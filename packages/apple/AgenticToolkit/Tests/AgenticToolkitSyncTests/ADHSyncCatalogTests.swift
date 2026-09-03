@@ -2,9 +2,15 @@ import XCTest
 @testable import AgenticToolkitSync
 
 final class ADHSyncCatalogTests: XCTestCase {
+    /// The two counts below are the point of this test: they fail loudly when the
+    /// catalog changes, so a regeneration gets reviewed instead of landing silently.
+    /// `gen_sync_catalog.py` lives in the adh repo and writes ONLY ADHSyncCatalog.swift
+    /// \- it does not know this file exists, so whoever regenerates the catalog must
+    /// update these by hand. They already drifted once (79/27 -> 97/44) across three
+    /// regenerations before anyone noticed.
     func testCatalogShape() {
-        XCTAssertEqual(ADHSyncCatalog.all.count, 79)
-        XCTAssertEqual(ADHSyncCatalog.pullOnly.count, 27)
+        XCTAssertEqual(ADHSyncCatalog.all.count, 97)
+        XCTAssertEqual(ADHSyncCatalog.pullOnly.count, 44)
         // pullOnly ⊆ all
         let names = Set(ADHSyncCatalog.all.map(\.resource))
         XCTAssertTrue(ADHSyncCatalog.pullOnly.isSubset(of: names))
