@@ -155,6 +155,7 @@
 		1EEFE431083CCF3925C185D3 /* ViewLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9319B761DD5270D28B8481E2 /* ViewLayout.swift */; };
 		1F762A1296F59D124018F8ED /* push-response.json in Resources */ = {isa = PBXBuildFile; fileRef = 143C755D06213BB388725A7E /* push-response.json */; };
 		1F82BB5F3A05C2EC5EA33C3E /* HelpPopoverController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA57516E7069664BACDE318E /* HelpPopoverController.swift */; };
+		2100DFF698EEDBF49865E60C /* MarkdownProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77245D9492D343EBE3CCBF00 /* MarkdownProjection.swift */; };
 		2125F6B2452D2F4219527E71 /* PaneSpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144A2EACA59A6D6F77EE1E93 /* PaneSpacing.swift */; };
 		219BAC26897C034850C48212 /* ProjectReconcilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC74E3CD9ADAEEFAA40964A9 /* ProjectReconcilerTests.swift */; };
 		220A22CD447935610FE1745D /* ComposableTabsAddPaneViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A415A4602A9DA05E4A6F175 /* ComposableTabsAddPaneViewController.swift */; };
@@ -189,6 +190,7 @@
 		2EF17EFADEC347D2378D953D /* ScriptedSyncTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4227F1507971AE3E5EE59F2E /* ScriptedSyncTransport.swift */; };
 		2F7018CA09E898114B776295 /* ThemeProjectTopicPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C340CF52370B10C851EF9AEA /* ThemeProjectTopicPanel.swift */; };
 		3026B15B7983DC1A60A293F0 /* ThemeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BEBF68C631AE4951A5D9B3F /* ThemeUITests.swift */; };
+		3053A36AED1FBD4A22CBA187 /* MarkdownProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77245D9492D343EBE3CCBF00 /* MarkdownProjection.swift */; };
 		310E6C2444553437BE7A139F /* AgenticToolkitCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF857DF2BB3D2BE006BBA101 /* AgenticToolkitCore.framework */; };
 		31192FAB78B40EB7225BEC0A /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5CD36148C38DB0350750DD /* ChatMessage.swift */; };
 		31A88BF7DC0FDD533274EF01 /* ThemeEditorSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 318E853592964F2E3951830F /* ThemeEditorSplitViewController.swift */; };
@@ -704,6 +706,7 @@
 		F49A964B68167270ADE07DCF /* ComposableTabsPaneViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C5EBCBE46FB9FF0162C243F /* ComposableTabsPaneViewController.swift */; };
 		F4D86ECD74EE501DA0000A75 /* WindowSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92FB7BCCF9327A97360842B /* WindowSpec.swift */; };
 		F5AB8E6391384BBB1AE4DCBD /* AgenticToolkitSync.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 085D01FE73EBFAD731A18864 /* AgenticToolkitSync.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		F5C391D722FB664EAE73F66F /* MarkdownProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81681FCEFF6AA152FAABD981 /* MarkdownProjectionTests.swift */; };
 		F5D3294BDAD1EC4BAEC5A2D2 /* ProjectTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D57AD5D38D8C72ADF74A428 /* ProjectTreeTests.swift */; };
 		F60EBB3962E3DA57237A45D3 /* SettingsCardViewsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1A0FFC5577C5D0B4163F80 /* SettingsCardViewsTests.swift */; };
 		F6A41347A5C59CF128546AA8 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C44178A173495CCDBE1371AC /* libsqlite3.tbd */; };
@@ -1762,6 +1765,7 @@
 		7615EF17189A8626BE0FE04F /* TerminalAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearance.swift; sourceTree = "<group>"; };
 		761ECEB86250F372D3ECAB3A /* ProjectDatabase+Layout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProjectDatabase+Layout.swift"; sourceTree = "<group>"; };
 		768F7C74EBACCA21B475C0B6 /* PlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceholderTests.swift; sourceTree = "<group>"; };
+		77245D9492D343EBE3CCBF00 /* MarkdownProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownProjection.swift; sourceTree = "<group>"; };
 		77597ACD52332EF3CEE84240 /* DiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryView.swift; sourceTree = "<group>"; };
 		77C55B5DFE0A8C3062B85181 /* SystemMemoryMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMemoryMonitorTests.swift; sourceTree = "<group>"; };
 		77F936C990586064FBEEDBA5 /* SecretStoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecretStoring.swift; sourceTree = "<group>"; };
@@ -1785,6 +1789,7 @@
 		8018A3762727060A9F378AC2 /* ConditionalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionalView.swift; sourceTree = "<group>"; };
 		80B2A3D33F2CD7481690F696 /* FontViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontViewModel.swift; sourceTree = "<group>"; };
 		80F6AEF2C35429822C9FB844 /* RangeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangeViewModel.swift; sourceTree = "<group>"; };
+		81681FCEFF6AA152FAABD981 /* MarkdownProjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownProjectionTests.swift; sourceTree = "<group>"; };
 		817F82444C74B3C73FA1A61C /* LogWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogWindowController.swift; sourceTree = "<group>"; };
 		81CA2D5179DA394DDBFE62A3 /* LocalInferenceGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalInferenceGuardTests.swift; sourceTree = "<group>"; };
 		831448F23EB8464AE194DE61 /* SqliteStorageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SqliteStorageProvider.swift; sourceTree = "<group>"; };
@@ -3065,6 +3070,7 @@
 		72DE40CE903D718834483D58 /* Markdown */ = {
 			isa = PBXGroup;
 			children = (
+				77245D9492D343EBE3CCBF00 /* MarkdownProjection.swift */,
 				CAF729C4B81A698492FAE06C /* MarkdownReExports.swift */,
 				C3860A37A22BA7423296A49D /* MarkdownRemoteWriter.swift */,
 				553B286FB8AF6CC860C1CE5F /* MarkdownSchema.swift */,
@@ -3237,6 +3243,7 @@
 		8E1BD98CEFFE9C7884C46589 /* AgenticToolkitMarkdownTests */ = {
 			isa = PBXGroup;
 			children = (
+				81681FCEFF6AA152FAABD981 /* MarkdownProjectionTests.swift */,
 				38E51905C6DBE63117871354 /* MarkdownSchemaTests.swift */,
 				6FC6C409507D1337FE6D7438 /* MarkdownStoreTests.swift */,
 				8F6CE4270FD855B12EA44D5C /* MarkdownTaxonomyTests.swift */,
@@ -5013,6 +5020,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F5C391D722FB664EAE73F66F /* MarkdownProjectionTests.swift in Sources */,
 				772A1FD07A6DB3E5DDC7B107 /* MarkdownSchemaTests.swift in Sources */,
 				4703F5AE9FA929546D0BBCC7 /* MarkdownStoreTests.swift in Sources */,
 				3D888ED3B2394DB186243C7F /* MarkdownTaxonomyTests.swift in Sources */,
@@ -5651,6 +5659,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2100DFF698EEDBF49865E60C /* MarkdownProjection.swift in Sources */,
 				1688F5A31F8C2F4FE1DE175F /* MarkdownReExports.swift in Sources */,
 				7F99A7D6A2BA48450288AAAE /* MarkdownRemoteWriter.swift in Sources */,
 				BA3D1A1ACC2D20B62E1FAA43 /* MarkdownSchema.swift in Sources */,
@@ -5713,6 +5722,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3053A36AED1FBD4A22CBA187 /* MarkdownProjection.swift in Sources */,
 				52CB6981F4000DBBED581CCE /* MarkdownReExports.swift in Sources */,
 				449FCC7A607AA97A04F126F8 /* MarkdownRemoteWriter.swift in Sources */,
 				C1CF8C47B6F113AE8AE4D2E0 /* MarkdownSchema.swift in Sources */,
