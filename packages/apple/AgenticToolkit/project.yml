@@ -373,6 +373,11 @@ targets:
       - target: AgenticToolkitDatabase
         embed: true
         codeSign: true
+      # MarkdownStoreTests imports AgenticToolkitSync directly (LocalMutation,
+      # SyncStoreFailure), same transitive-linking reason as above.
+      - target: AgenticToolkitSync
+        embed: true
+        codeSign: true
       - package: GRDB
         product: GRDB
 
