@@ -62,6 +62,30 @@ public enum MarkdownSchema {
         """
     }
 
+    /// Creates the nine mirrored tables directly against a connection —
+    /// every statement is `CREATE TABLE/INDEX IF NOT EXISTS`, so this has no
+    /// `DatabaseMigrator` bookkeeping to conflict with `migrate(_:)`, which
+    /// runs the same DDL (plus the local-only outbox table) through the
+    /// migrator on every path that goes through `MarkdownStore.init`.
+    ///
+    /// This exists for `MarkdownProjection.createTables(in:)`, called from
+    /// `GRDBSyncStore.prepare(resources:in:)` — a host that builds a bare
+    /// `GRDBSyncStore` directly on `MarkdownProjection`, bypassing
+    /// `MarkdownStore` entirely, needs `prepare` alone to leave it with a
+    /// working schema rather than "no such table: markdown" on its first
+    /// pulled change. It does not turn `PRAGMA foreign_keys` on — that
+    /// pragma is a no-op inside a transaction (see `migrate(_:)`'s doc
+    /// comment), and `prepare` always runs inside one — so a caller on that
+    /// bypass path must still do that itself, the way `migrate(_:)` does via
+    /// `writeWithoutTransaction`.
+    public static func createTables(in conn: Database) throws {
+        try conn.execute(sql: documentDDL)
+        for name in ["notes", "docs", "papers"] {
+            try conn.execute(sql: markerTable(name))
+        }
+        try conn.execute(sql: taxonomyDDL)
+    }
+
     public static func migrator() -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("markdown-v1") { conn in

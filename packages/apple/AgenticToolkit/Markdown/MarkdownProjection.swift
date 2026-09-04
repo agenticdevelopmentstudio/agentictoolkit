@@ -8,9 +8,16 @@ import AgenticToolkitSyncGRDB
 ///
 /// It is a table-driven mapper rather than nine hand-written statements: a
 /// resource is a table name plus a column list, and both directions are
-/// generated from that one description. A column added to the DDL and forgotten
-/// here would silently stop syncing, so the description lives next to the DDL's
-/// own column list and the schema test asserts them both.
+/// generated from that one description. `resources`/`syncResources` derive
+/// from `MarkdownSchema.tables` directly, so the set of resources this
+/// projection claims cannot drift from the DDL's own table list — a table
+/// added to the schema and forgotten here is structurally impossible. The
+/// per-resource *column* lists in `specificColumns` below are still
+/// hand-maintained prose, though, so a column added to one table's DDL and
+/// forgotten in its entry here is not caught by the type system; the
+/// regression test `MarkdownProjectionTests.columnListsMatchTheRealSchema`
+/// cross-checks every resource's known columns against `PRAGMA
+/// table_info(...)` at runtime to catch that drift instead.
 public struct MarkdownProjection: SyncMirrorProjection {
 
     /// The columns every mirrored table carries, minus `id` and `sync_version`,
@@ -23,8 +30,14 @@ public struct MarkdownProjection: SyncMirrorProjection {
 
     /// Columns whose incoming value is an ISO-8601 timestamp and must be
     /// round-tripped through `MarkdownTimestamp` before it is written — see
-    /// `normalizedTimestamp(_:)`.
-    private static let timestampColumns: Set<String> = ["created_at", "updated_at", "deleted_at"]
+    /// `normalizedTimestamp(_:)`. `sync_stamped_at` is on every projected
+    /// table and comes straight off the wire like the other three; nothing
+    /// orders or range-filters on it today, but if that ever changes it
+    /// inherits the same `.`-before-`Z` inversion this task exists to kill,
+    /// so it is normalised now rather than left as a trap for later.
+    private static let timestampColumns: Set<String> = [
+        "created_at", "updated_at", "deleted_at", "sync_stamped_at"
+    ]
 
     /// `created_at`/`updated_at` are `NOT NULL` with no schema `DEFAULT` on
     /// every projected table, yet a local `stage(_:)` mutation never carries
@@ -66,11 +79,17 @@ public struct MarkdownProjection: SyncMirrorProjection {
         "content.markdown", "content.notes", "content.docs", "content.papers"
     ]
 
-    public static let syncResources: [SyncResource] = specificColumns.keys.sorted().map {
+    /// The single source of truth for which resources this projection
+    /// claims — `MarkdownSchema.tables` itself, so `resources` and
+    /// `syncResources` cannot name a resource the schema doesn't create a
+    /// table for, or vice versa.
+    private static let resourceNames: [String] = MarkdownSchema.tables.map { "content.\($0)" }
+
+    public static let syncResources: [SyncResource] = resourceNames.map {
         SyncResource(resource: $0, schemaVersion: 1)
     }
 
-    public let resources = Set(specificColumns.keys)
+    public let resources = Set(resourceNames)
 
     public init() {}
 
@@ -82,18 +101,31 @@ public struct MarkdownProjection: SyncMirrorProjection {
         Self.commonColumns + (Self.specificColumns[resource] ?? [])
     }
 
-    /// Called from `GRDBSyncStore.prepare(resources:in:)`, which is itself
-    /// preceded — on every path that actually reaches this projection today
-    /// — by `MarkdownSchema.migrate(_:)` against the `BoundedDatabase` this
-    /// connection belongs to (see `MarkdownStore.init`). That call goes
-    /// through `DatabaseMigrator.migrate(_ writer: any DatabaseWriter)`,
-    /// which only accepts a pool/queue, not the `Database` connection this
-    /// method is handed — so the DDL cannot be (re-)run from here, and this
-    /// is a deliberate no-op rather than a second migration pass. A host
-    /// that builds a bare `GRDBSyncStore` directly on this projection, never
-    /// calling `MarkdownSchema.migrate` itself, must do so before `prepare`
-    /// — this method has no way to make that happen on its own.
-    public func createTables(in conn: Database) throws {}
+    /// Exposed for `MarkdownProjectionTests.columnListsMatchTheRealSchema`:
+    /// the full set of columns this projection expects a resource's table to
+    /// have, `id` and `sync_version` included — the two `columns(for:)`
+    /// leaves out because the store passes them separately.
+    static func knownColumns(for resource: String) -> Set<String> {
+        Set(["id", "sync_version"] + commonColumns + (specificColumns[resource] ?? []))
+    }
+
+    /// Called from `GRDBSyncStore.prepare(resources:in:)`. On the
+    /// `MarkdownStore` path this is redundant — `MarkdownStore.init` already
+    /// ran `MarkdownSchema.migrate(_:)` against the same database before
+    /// `prepare` ever runs — but `MarkdownSchema.createTables(in:)` is every
+    /// `CREATE TABLE/INDEX IF NOT EXISTS` statement the schema owns, so
+    /// running it twice is a no-op, not a second migration pass (it is a
+    /// direct DDL run, not `DatabaseMigrator`, which has no `Database`-taking
+    /// overload — only `migrate(_ writer: any DatabaseWriter)` — and so
+    /// could not be called from here regardless). This is what makes the
+    /// `SyncMirrorProjection` contract actually hold for a host that builds a
+    /// bare `GRDBSyncStore` directly on this projection without going
+    /// through `MarkdownStore`: `prepare` alone now leaves it with a working
+    /// schema instead of "no such table: markdown" on the first pulled
+    /// change.
+    public func createTables(in conn: Database) throws {
+        try MarkdownSchema.createTables(in: conn)
+    }
 
     /// Only the fields actually present in `data` are written — `.null` and
     /// "the key is absent" are different things here, not the same NULL.
@@ -115,6 +147,50 @@ public struct MarkdownProjection: SyncMirrorProjection {
     /// `UPDATE` leaves an omitted column untouched instead of blanking it —
     /// while a key sent explicitly as `.null` (adh clearing `public_route`,
     /// say) still lands as SQL NULL, because it *is* present.
+    /// A pulled change from `apply(_:advancingTo:)` is adh's whole current
+    /// row; a local mutation staged through `stage(_:)` is a deliberate
+    /// partial patch (see the doc comment above on why only present keys are
+    /// otherwise bound). Both funnel through this one method with no signal
+    /// distinguishing them (`GRDBSyncStore`'s `SyncMirrorProjection` call
+    /// sites hand `upsert` the same four arguments either way), so the
+    /// delete-state columns are the one exception carved into the
+    /// "present-keys-only" rule below: `deleted_at` on every table, plus
+    /// `is_deleted` on `content.markdown`, are always written into the
+    /// `ON CONFLICT` `SET` clause, whether or not `data` supplies them.
+    ///
+    /// This closes a real hole a full-row pull would otherwise fall into: a
+    /// server delete-then-restore lands as two upserts (the delete itself
+    /// goes through `markDeleted`, not this method) — sorry, lands as one
+    /// `markDeleted` call for the delete and one `upsert` call for the
+    /// restore — and if adh's wire format omits a key whose new value is
+    /// null (as it does), the restore's payload carries `is_deleted: false`
+    /// (present, not null) but never mentions `deleted_at` at all, since its
+    /// new value on the server is null. Binding only present keys would
+    /// leave `deleted_at` at its stale, still-tombstoned value forever —
+    /// invisible to `rows`/`row` (`WHERE deleted_at IS NULL`) even though
+    /// `document(id:)` (which gates on `is_deleted` alone) would show it
+    /// again. The five taxonomy tables have no `is_deleted` at all, so for
+    /// them an un-forced `deleted_at` would make a restore unrecoverable,
+    /// not just inconsistent.
+    ///
+    /// `excluded.deleted_at`/`excluded.is_deleted` resolve correctly even
+    /// when `data` never supplies them and they are absent from this
+    /// `INSERT`'s own column list: SQLite fills the `excluded` pseudo-row
+    /// with the value the statement *would* have inserted for every table
+    /// column, including one it defaults — `NULL` for `deleted_at` (no
+    /// `DEFAULT`, nullable), `0` for `is_deleted` (`DEFAULT 0`) — so nothing
+    /// needs adding to `bound`/`arguments` for this to work.
+    ///
+    /// This is safe on the local `stage(_:)` path too, for a narrower reason
+    /// than "it happens to work": `content.markdown` and its three marker
+    /// resources are pull-only (`MarkdownStore` queues their edits over REST
+    /// instead — Task 10) and never reach `upsert` through `stage(_:)` at
+    /// all, so `is_deleted` is never force-set there. The five taxonomy
+    /// resources that DO reach `upsert` through `stage(_:)` only ever do so
+    /// immediately after their own fresh `INSERT` in `MarkdownTaxonomy`
+    /// (`createCategory`, `createKeyword`, `addCategoryEdge`, `assignItem`),
+    /// so `deleted_at` is NULL on that row already — forcing it back to NULL
+    /// on conflict is a no-op, not a clobber.
     public func upsert(
         resource: String, id: String, syncVersion: Int,
         data: [String: JSONValue], in conn: Database
@@ -123,9 +199,12 @@ public struct MarkdownProjection: SyncMirrorProjection {
         let bound = columns(for: resource).filter {
             data[$0] != nil || Self.requiredWithNoDefault.contains($0)
         }
+        let alwaysAssigned: Set<String> = resource == "content.markdown"
+            ? ["deleted_at", "is_deleted"] : ["deleted_at"]
+        let assignmentColumns = ["sync_version"] + Array(Set(present).union(alwaysAssigned)).sorted()
         let names = ["id", "sync_version"] + bound
         let placeholders = names.map { _ in "?" }.joined(separator: ", ")
-        let assignments = (["sync_version"] + present)
+        let assignments = assignmentColumns
             .map { "\($0) = excluded.\($0)" }
             .joined(separator: ", ")
         var arguments: [(any DatabaseValueConvertible)?] = [id, syncVersion]
@@ -245,7 +324,13 @@ public struct MarkdownProjection: SyncMirrorProjection {
         }
         switch json {
         case .string(let text): return text
-        case .number(let number): return number == number.rounded() ? Int(number) : number
+        // `Int(number)` traps on a non-finite value (`number == number.rounded()`
+        // is true for both `+infinity` and `-infinity`), so `isFinite` must be
+        // checked first. Unreachable from `JSONDecoder` today — JSON has no
+        // literal for infinity or NaN — but this guard is one comparison and
+        // removes the trap as a live possibility for any future `JSONValue`
+        // producer.
+        case .number(let number): return number.isFinite && number == number.rounded() ? Int(number) : number
         case .bool(let flag): return flag ? 1 : 0
         case .null, .none: return nil
         case .array, .object:
