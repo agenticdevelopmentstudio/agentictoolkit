@@ -3,6 +3,7 @@ import Combine
 
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticToolkitLanguage
 
 /// A file browser — the tree, and the footer that adds and removes roots — so
 /// one can be dropped into any AppKit container: a document pane, a sidebar, a
@@ -36,6 +37,10 @@ public final class FileBrowserViewController: NSViewController {
     private let config: FileTreeConfig
     private let ignorePatterns: [String]
 
+    /// The app-wide open-document registry, threaded down to the tree so it
+    /// can show a dirty indicator on a node with unsaved changes.
+    private let documentStore: TextDocumentStore
+
     /// One manager per root, keyed by the root it scans, so rebuilding the list
     /// after an add or a remove reuses every manager that survived — a scanned
     /// tree is not rescanned because a *different* directory appeared.
@@ -46,7 +51,8 @@ public final class FileBrowserViewController: NSViewController {
         roots: roots,
         directories: directories,
         selection: selection,
-        restoration: restoration
+        restoration: restoration,
+        documentStore: documentStore
     )
 
     private let addButton = NSButton(title: "", target: nil, action: nil)
@@ -67,13 +73,16 @@ public final class FileBrowserViewController: NSViewController {
     ///   - ignorePatterns: Wildcard filename patterns to leave out of the tree.
     ///   - selection: The selection this tree drives. Defaults to one of its
     ///     own, so a browser used alone needs to know nothing about it.
+    ///   - documentStore: The app-wide open-document registry, threaded down
+    ///     to the tree for its dirty indicator. Injected — never built here.
     public init(
         directories: FileBrowserDirectories,
         excludedURL: URL,
         config: FileTreeConfig = .default,
         ignorePatterns: [String] = [],
         selection: FileBrowserSelection = FileBrowserSelection(),
-        restoration: FileBrowserRestorationState = FileBrowserRestorationState()
+        restoration: FileBrowserRestorationState = FileBrowserRestorationState(),
+        documentStore: TextDocumentStore
     ) {
         self.directories = directories
         self.excludedURL = excludedURL
@@ -81,6 +90,7 @@ public final class FileBrowserViewController: NSViewController {
         self.ignorePatterns = ignorePatterns
         self.selection = selection
         self.restoration = restoration
+        self.documentStore = documentStore
         super.init(nibName: nil, bundle: nil)
 
         rebuildManagers()
@@ -97,7 +107,8 @@ public final class FileBrowserViewController: NSViewController {
         config: FileTreeConfig = .default,
         ignorePatterns: [String] = [],
         selection: FileBrowserSelection = FileBrowserSelection(),
-        restoration: FileBrowserRestorationState = FileBrowserRestorationState()
+        restoration: FileBrowserRestorationState = FileBrowserRestorationState(),
+        documentStore: TextDocumentStore
     ) {
         self.init(
             directories: FileBrowserDirectories(primary: rootURL),
@@ -105,7 +116,8 @@ public final class FileBrowserViewController: NSViewController {
             config: config,
             ignorePatterns: ignorePatterns,
             selection: selection,
-            restoration: restoration
+            restoration: restoration,
+            documentStore: documentStore
         )
     }
 

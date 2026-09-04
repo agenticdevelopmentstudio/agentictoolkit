@@ -3,6 +3,7 @@ import SwiftUI
 
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticToolkitLanguage
 
 /// AppKit host for the file *display* half of the browser: whatever the tree has
 /// selected, shown with syntax highlighting.
@@ -16,8 +17,19 @@ public final class FileViewerViewController: NSViewController {
     /// The selection this viewer follows.
     public let selection: FileBrowserSelection
 
-    public init(selection: FileBrowserSelection) {
+    /// The app-wide open-document registry and debounced autosave scheduler —
+    /// shared, never built here (see `FileEditorView.init`).
+    private let documentStore: TextDocumentStore
+    private let saveScheduler: TextDocumentSaveScheduler
+
+    public init(
+        selection: FileBrowserSelection,
+        documentStore: TextDocumentStore,
+        saveScheduler: TextDocumentSaveScheduler
+    ) {
         self.selection = selection
+        self.documentStore = documentStore
+        self.saveScheduler = saveScheduler
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -27,7 +39,13 @@ public final class FileViewerViewController: NSViewController {
     }
 
     public override func loadView() {
-        let hosting = NSHostingView(rootView: FileViewerPaneView(selection: selection).themedRoot())
+        let hosting = NSHostingView(
+            rootView: FileViewerPaneView(
+                selection: selection,
+                documentStore: documentStore,
+                saveScheduler: saveScheduler
+            ).themedRoot()
+        )
         hosting.frame = NSRect(x: 0, y: 0, width: 520, height: 400)
         view = hosting
     }
@@ -37,8 +55,14 @@ public final class FileViewerViewController: NSViewController {
 private struct FileViewerPaneView: View {
 
     @ObservedObject var selection: FileBrowserSelection
+    let documentStore: TextDocumentStore
+    let saveScheduler: TextDocumentSaveScheduler
 
     var body: some View {
-        FileEditorView(selectedNode: selection.selectedNode)
+        FileEditorView(
+            selectedNode: selection.selectedNode,
+            documentStore: documentStore,
+            saveScheduler: saveScheduler
+        )
     }
 }

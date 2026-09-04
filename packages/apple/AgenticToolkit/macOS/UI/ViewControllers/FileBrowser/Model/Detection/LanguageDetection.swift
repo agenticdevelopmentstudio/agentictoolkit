@@ -25,4 +25,34 @@ public enum LanguageDetection {
 
         return CodeLanguage.detectLanguageFrom(url: url)
     }
+
+    /// Maps a detected `CodeLanguage` to the language identifier the Language
+    /// Server Protocol expects (the `languageId` on `textDocument/didOpen`,
+    /// etc.) — see the LSP spec's "Text Document Item" `languageId` table
+    /// (`csharp`, `javascriptreact`, `shellscript`, `plaintext`, ...).
+    /// `CodeEditLanguages.TreeSitterLanguage`'s raw values are named for
+    /// tree-sitter grammars, not LSP, and disagree with the spec in exactly
+    /// the cases enumerated below (`cSharp` vs `csharp`, `jsx` vs
+    /// `javascriptreact`, `bash` vs `shellscript`, `objc` vs `objective-c`,
+    /// `plainText` vs `plaintext`, `goMod`/`ocamlInterface`, `markdownInline`).
+    /// Every other language's tree-sitter raw value already matches its LSP
+    /// identifier (`swift`, `python`, `json`, `html`, `css`, `yaml`, ...), so
+    /// only the mismatches are special-cased and everything else falls
+    /// through to the raw value. This is the single place that mapping is
+    /// made — nowhere else in the toolkit should derive an LSP `languageId`
+    /// from a file extension independently.
+    public static func lspLanguageId(for language: CodeLanguage) -> String {
+        switch language.id {
+        case .bash: return "shellscript"
+        case .cSharp: return "csharp"
+        case .jsx: return "javascriptreact"
+        case .tsx: return "typescriptreact"
+        case .objc: return "objective-c"
+        case .plainText: return "plaintext"
+        case .goMod: return "go.mod"
+        case .ocamlInterface: return "ocaml.interface"
+        case .markdownInline: return "markdown"
+        default: return language.id.rawValue
+        }
+    }
 }

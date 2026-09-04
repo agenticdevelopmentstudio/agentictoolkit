@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import AgenticToolkitMacOS
+@testable import AgenticToolkitLanguage
 
 /// Clicking a file has to show it. The tree and the viewer are separate
 /// controllers joined by one `FileBrowserSelection`, so these pin the join —
@@ -30,7 +31,9 @@ final class FileBrowserSplitViewControllerTests: XCTestCase {
         FileBrowserSplitViewController(
             rootURL: directory,
             excludedURL: directory.appendingPathComponent("Cache.pkg"),
-            autosaveName: autosaveName
+            autosaveName: autosaveName,
+            documentStore: TextDocumentStore(),
+            saveScheduler: TextDocumentSaveScheduler(write: { _ in })
         )
     }
 

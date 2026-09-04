@@ -3,6 +3,8 @@ import Combine
 
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticToolkitLanguage
+import LanguageServerProtocol
 
 /// The file tree: one collapsible section per root directory, and the files and
 /// folders under it.
@@ -30,6 +32,13 @@ final class FileTreeOutlineViewController: NSViewController {
     /// The folders that should be open and the file that should be selected —
     /// what the browser looked like last time.
     private let restoration: FileBrowserRestorationState
+
+    /// The app-wide open-document registry — consulted for the dirty
+    /// indicator on a node whose file has unsaved changes open in the editor.
+    private let documentStore: TextDocumentStore
+
+    /// Keeps the `documentStore` subscription below alive; dropped in `deinit`.
+    private var documentStoreObservation: TextDocumentStoreObservation?
 
     private let outline = ThemedOutlineView(role: .windowBackground)
     private let scrollView = ThemedScrollView()
@@ -80,12 +89,14 @@ final class FileTreeOutlineViewController: NSViewController {
         roots: FileBrowserRootsModel,
         directories: FileBrowserDirectories,
         selection: FileBrowserSelection,
-        restoration: FileBrowserRestorationState
+        restoration: FileBrowserRestorationState,
+        documentStore: TextDocumentStore
     ) {
         self.roots = roots
         self.directories = directories
         self.selection = selection
         self.restoration = restoration
+        self.documentStore = documentStore
         self.pendingSelectionPath = restoration.selectedPath
         super.init(nibName: nil, bundle: nil)
     }
@@ -156,6 +167,30 @@ final class FileTreeOutlineViewController: NSViewController {
                 }
             }
             .store(in: &cancellables)
+
+        // A document opening, changing dirty state, or closing redraws only
+        // the one row it affects — never `reloadData()`, which would collapse
+        // every disclosed folder and drop the current selection just because
+        // the user kept typing.
+        documentStoreObservation = documentStore.addObserver { [weak self] event in
+            self?.handleDocumentEvent(event)
+        }
+    }
+
+    /// Redraws the row for `uri`'s file, if the tree currently has one drawn —
+    /// a document event for a file that is not on screen (a collapsed folder,
+    /// a root removed since) has nothing to redraw.
+    private func handleDocumentEvent(_ event: TextDocumentEvent) {
+        let uri: DocumentUri
+        switch event {
+        case .opened(let eventURI, _, _, _): uri = eventURI
+        case .changed(let eventURI, _, _): uri = eventURI
+        case .closed(let eventURI): uri = eventURI
+        }
+        guard let url = URL(string: uri) else { return }
+        let row = self.row(forPath: url.path)
+        guard row >= 0, let item = outline.item(atRow: row) else { return }
+        outline.reloadItem(item)
     }
 
     // MARK: - Model observation
@@ -502,7 +537,8 @@ extension FileTreeOutlineViewController: NSOutlineViewDataSource, NSOutlineViewD
                 palette: palette
             )
         case let node as FileTreeNode:
-            return FileTreeNodeRowView(node: node, palette: palette)
+            let isDirty = documentStore.document(for: node.url.documentUri)?.isDirty ?? false
+            return FileTreeNodeRowView(node: node, palette: palette, isDirty: isDirty)
         default:
             return nil
         }
@@ -553,7 +589,7 @@ private class FileTreeRowView: NSView {
 @MainActor
 private final class FileTreeNodeRowView: FileTreeRowView {
 
-    init(node: FileTreeNode, palette: SemanticPalette) {
+    init(node: FileTreeNode, palette: SemanticPalette, isDirty: Bool = false) {
         let icon = NSImageView(image: NSImage(
             systemSymbolName: node.systemImageName,
             accessibilityDescription: node.isDirectory ? "Folder" : "File"
@@ -573,6 +609,23 @@ private final class FileTreeNodeRowView: FileTreeRowView {
         name.toolTip = node.url.path
 
         var views: [NSView] = [icon, name]
+
+        // Unlike the git-status badge above (git's own fixed vocabulary), this
+        // marker is app chrome — a document open in the editor with unsaved
+        // changes — so it takes its color from the theme rather than a fixed
+        // one, the same way everything else in this row that is not git's own
+        // signal does.
+        if isDirty {
+            let dot = NSImageView(image: NSImage(
+                systemSymbolName: "circle.fill",
+                accessibilityDescription: "Unsaved changes"
+            )?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular)) ?? NSImage())
+            dot.contentTintColor = palette.nsColor(.warning)
+            dot.setContentHuggingPriority(.required, for: .horizontal)
+            dot.accessibilityID("whippet.filebrowser.dirty-indicator")
+            views.append(dot)
+        }
+
         if let status = node.gitStatus {
             let badge = ThemedLabel(string: status.displayCharacter, role: .primaryText, textRole: .code)
             badge.textColor = status.nsColor
