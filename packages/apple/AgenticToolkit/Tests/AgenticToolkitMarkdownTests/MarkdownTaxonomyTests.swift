@@ -70,6 +70,26 @@ struct MarkdownTaxonomyTests {
         }
     }
 
+    @Test("adding the same edge twice does not stage a phantom mutation")
+    func duplicateEdgeDoesNotStagePhantomMutation() throws {
+        let store = try store()
+        let top = try store.createCategory(name: "Top")
+        let sub = try store.createCategory(name: "Sub")
+        try store.addCategoryEdge(parent: top.id, child: sub.id)
+        try store.addCategoryEdge(parent: top.id, child: sub.id)
+        let edgeRows = try store.database.read { conn in
+            try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM category_edges")
+        }
+        let edgeOps = try store.database.read { conn in
+            try Int.fetchOne(
+                conn, sql: "SELECT COUNT(*) FROM _sync_outbox WHERE resource = 'content.category_edges'")
+        }
+        // The category creates above also stage two upserts; only the edge's
+        // own resource is counted here, so this isolates the edge mutator.
+        #expect(edgeRows == 1)
+        #expect(edgeOps == 1)
+    }
+
     @Test("assigning a category files the document under it")
     func categoryAssignment() throws {
         let store = try store()
@@ -87,6 +107,24 @@ struct MarkdownTaxonomyTests {
         try store.assignCategory(category.id, toDocument: document.id)
         try store.assignCategory(category.id, toDocument: document.id)
         #expect(try store.categories(forDocument: document.id).count == 1)
+    }
+
+    @Test("assigning the same category twice does not stage a phantom mutation")
+    func duplicateCategoryAssignmentDoesNotStagePhantomMutation() throws {
+        let store = try store()
+        let document = try store.createDocument(content: "hello", markers: [])
+        let category = try store.createCategory(name: "Recipes")
+        try store.assignCategory(category.id, toDocument: document.id)
+        try store.assignCategory(category.id, toDocument: document.id)
+        let itemRows = try store.database.read { conn in
+            try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM category_items")
+        }
+        let itemOps = try store.database.read { conn in
+            try Int.fetchOne(
+                conn, sql: "SELECT COUNT(*) FROM _sync_outbox WHERE resource = 'content.category_items'")
+        }
+        #expect(itemRows == 1)
+        #expect(itemOps == 1)
     }
 
     @Test("a category item records the polymorphic target kind adh uses")
@@ -117,5 +155,23 @@ struct MarkdownTaxonomyTests {
         #expect(throws: (any Error).self) {
             _ = try store.createKeyword(label: "swift")
         }
+    }
+
+    @Test("assigning the same keyword twice does not stage a phantom mutation")
+    func duplicateKeywordAssignmentDoesNotStagePhantomMutation() throws {
+        let store = try store()
+        let document = try store.createDocument(content: "hello", markers: [])
+        let keyword = try store.createKeyword(label: "swift")
+        try store.assignKeyword(keyword.id, toDocument: document.id)
+        try store.assignKeyword(keyword.id, toDocument: document.id)
+        let itemRows = try store.database.read { conn in
+            try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM keyword_items")
+        }
+        let itemOps = try store.database.read { conn in
+            try Int.fetchOne(
+                conn, sql: "SELECT COUNT(*) FROM _sync_outbox WHERE resource = 'content.keyword_items'")
+        }
+        #expect(itemRows == 1)
+        #expect(itemOps == 1)
     }
 }
