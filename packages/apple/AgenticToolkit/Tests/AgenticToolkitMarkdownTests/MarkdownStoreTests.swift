@@ -140,6 +140,80 @@ struct MarkdownStoreTests {
         #expect(try store.pendingRemoteOps(limit: 10)[0].payload["title"] == nil)
     }
 
+    @Test("an update queues visibility, stage and route alongside content")
+    func updatePayloadCarriesAuthoredFields() throws {
+        let store = try store()
+        var document = try store.createDocument(content: "first", markers: [])
+        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
+        document.visibility = .public
+        try store.updateDocument(document)
+        let queued = try store.pendingRemoteOps(limit: 10)
+        #expect(queued.count == 1)
+        #expect(queued[0].payload["content"] == .string("first"))
+        #expect(queued[0].payload["visibility"] == .string("public"))
+        #expect(queued[0].payload["stage"] == .string("draft"))
+        #expect(queued[0].payload["public_route"] == .null)
+    }
+
+    @Test("clearing a public route queues an explicit null, not an omitted key")
+    func clearingRouteQueuesExplicitNull() throws {
+        let store = try store()
+        var document = try store.createDocument(content: "first", markers: [])
+        document.publicRoute = "/first"
+        try store.updateDocument(document)
+        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
+
+        document.publicRoute = nil
+        try store.updateDocument(document)
+        let queued = try store.pendingRemoteOps(limit: 10)
+        #expect(queued.count == 1)
+        #expect(queued[0].payload["public_route"] == .null)
+        #expect(queued[0].payload.keys.contains("public_route"))
+    }
+
+    @Test("a merge does not drop a field an earlier queued update already set")
+    func mergePreservesEarlierAuthoredFields() throws {
+        let store = try store()
+        var document = try store.createDocument(content: "first", markers: [])
+        // The `create` is still pending, so both updates below coalesce into it
+        // rather than into a fresh `update` row — this exercises the same
+        // field-wise merge branch either way.
+        document.visibility = .public
+        try store.updateDocument(document)
+        document.content = "second"
+        try store.updateDocument(document)
+
+        let queued = try store.pendingRemoteOps(limit: 10)
+        #expect(queued.count == 1)
+        #expect(queued[0].intent == .create)
+        #expect(queued[0].payload["visibility"] == .string("public"))
+        #expect(queued[0].payload["content"] == .string("second"))
+    }
+
+    @Test("an outbox row with an unreadable intent throws rather than defaulting to update")
+    func pendingRemoteOpsThrowsOnUnknownIntent() throws {
+        let store = try store()
+        _ = try store.createDocument(content: "x", markers: [])
+        try store.database.write { conn in
+            try conn.execute(sql: "UPDATE _markdown_outbox SET intent = 'bogus'")
+        }
+        #expect(throws: MarkdownStoreError.unknownRemoteIntent("bogus")) {
+            try store.pendingRemoteOps(limit: 10)
+        }
+    }
+
+    @Test("an outbox row with a corrupt payload throws rather than reading as empty")
+    func pendingRemoteOpsThrowsOnCorruptPayload() throws {
+        let store = try store()
+        _ = try store.createDocument(content: "x", markers: [])
+        try store.database.write { conn in
+            try conn.execute(sql: "UPDATE _markdown_outbox SET payload = 'not json'")
+        }
+        #expect(throws: (any Error).self) {
+            try store.pendingRemoteOps(limit: 10)
+        }
+    }
+
     @Test("an update that arrives while a create is pending merges into the create")
     func updateMergesIntoPendingCreate() throws {
         let store = try store()
