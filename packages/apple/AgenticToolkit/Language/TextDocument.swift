@@ -225,9 +225,21 @@ public final class TextDocument {
     private func roundedDownToValidBoundary(_ clampedOffset: Int) -> Int {
         guard clampedOffset > 0, clampedOffset < utf16Length else { return clampedOffset }
         let units = text.utf16
+        // `utf16Length` can be stale relative to `text` for a brief window
+        // inside `apply(_:)` (mutated `text`, not-yet-rebuilt `utf16Length` —
+        // see the comment on the `events` computation there), so passing the
+        // guard above does not guarantee `clampedOffset` is still a
+        // dereferenceable index into the *current* `text.utf16`. Requiring
+        // `currentIndex < units.endIndex` (rather than merely resolving via
+        // `limitedBy`, which also accepts landing exactly on `endIndex`)
+        // catches that case before the subscripts below run — `endIndex`
+        // resolves fine as an `Index` but traps on subscript. This also
+        // guarantees `previousIndex < units.endIndex`, since it is always one
+        // position before `currentIndex`.
         guard
             let previousIndex = units.index(units.startIndex, offsetBy: clampedOffset - 1, limitedBy: units.endIndex),
-            let currentIndex = units.index(units.startIndex, offsetBy: clampedOffset, limitedBy: units.endIndex)
+            let currentIndex = units.index(units.startIndex, offsetBy: clampedOffset, limitedBy: units.endIndex),
+            currentIndex < units.endIndex
         else {
             return clampedOffset
         }
