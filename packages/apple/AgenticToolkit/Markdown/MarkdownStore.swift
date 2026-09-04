@@ -1,12 +1,8 @@
 import Foundation
 import GRDB
-// Re-exported (not merely imported): MarkdownDocument, MarkdownText, Frontmatter
-// and friends live in AgenticDeveloperToolkit, but every consumer of this store
-// — including its own test target, which never imports AgenticDeveloperToolkit
-// directly — reaches them through `AgenticToolkitMarkdown`. Mirrors
-// `Core/Theme/ThemeReExports.swift`'s re-export of the same module for the
-// theme model.
-@_exported import AgenticDeveloperToolkit
+// `AgenticDeveloperToolkit` is re-exported from `MarkdownReExports.swift`, so
+// every type it defines (`MarkdownDocument`, `MarkdownText`, `Frontmatter`,
+// ...) is already in scope here without an explicit import.
 import AgenticToolkitDatabase
 import AgenticToolkitSync
 import AgenticToolkitSyncGRDB
@@ -47,6 +43,12 @@ public enum MarkdownStoreError: Error, Equatable {
     /// practice — it exists so the UTF-8 decode stays a failable initializer
     /// rather than an unsafe cast (SwiftLint's `optional_data_string_conversion`).
     case payloadEncodingFailed
+    /// An `_markdown_outbox` row's `intent` column does not match any
+    /// `MarkdownRemoteIntent` case. This store is the only writer of that
+    /// column, so it means on-disk corruption, not a legitimate unknown
+    /// intent — silently coercing it to `.update` would push adh a content
+    /// write for what might have been a `delete`.
+    case unknownRemoteIntent(String)
 }
 
 /// The nine mirrored tables, plus the local REST queue, over one GRDB database.
@@ -93,9 +95,15 @@ public final class MarkdownStore: @unchecked Sendable {
             pullOnlyResources: Set(MarkdownProjection.pullOnlyResources),
             projection: projection)
 
-        // One transaction: the schema and the sync bookkeeping that indexes it
-        // must arrive together, or a crash between them leaves a database that
-        // has tables the store will not write to. `prepare(resources:in:)` is
+        // Two separate transactions, not one — `MarkdownSchema.migrate` runs its
+        // own `writeWithoutTransaction` PRAGMA call and `DatabaseMigrator`
+        // transaction internally, and cannot join the `write { }` below even if
+        // this init tried. That is safe rather than a hazard: both steps are
+        // `IF NOT EXISTS`-shaped — the DDL (`CREATE TABLE IF NOT EXISTS`) and
+        // `prepare(resources:in:)`'s own idempotent bookkeeping inserts — so a
+        // crash between them just leaves work for the next `MarkdownStore.init`
+        // to redo; a re-run self-heals rather than leaving a half-built
+        // database that the store won't write to. `prepare(resources:in:)` is
         // the connection-taking overload from Task 8 — the async one would hop
         // queues and deadlock the pool's writer from inside this `write`.
         try MarkdownSchema.migrate(database)
@@ -174,8 +182,22 @@ public final class MarkdownStore: @unchecked Sendable {
             var updated = document
             updated.updatedAt = now
             try write(updated, in: conn)
-            try enqueue(.update, for: document.id,
-                        payload: ["content": .string(document.content)], at: now, in: conn)
+            // All four keys, every time — not just `content`. `visibility`, `stage`
+            // and `public_route` are client-authored (unlike `title`/hash/size/
+            // version, which adh derives), so a caller that only touched one of
+            // them still needs it on the wire. `public_route` is sent as JSON
+            // `null` rather than omitted when there is none: omitting the key
+            // means "unchanged" to adh, which would make clearing a route
+            // impossible. Sending the document's full authored state on every
+            // update (rather than a diff) is also what keeps `enqueue`'s
+            // field-wise merge safe — a later update can never carry a smaller,
+            // stale-looking payload that erases a field an earlier queued op set.
+            try enqueue(.update, for: document.id, payload: [
+                "content": .string(document.content),
+                "visibility": .string(document.visibility.rawValue),
+                "stage": .string(document.stage.rawValue),
+                "public_route": document.publicRoute.map(JSONValue.string) ?? .null
+            ], at: now, in: conn)
         }
     }
 
@@ -210,11 +232,19 @@ public final class MarkdownStore: @unchecked Sendable {
                 sql: "SELECT * FROM _markdown_outbox ORDER BY created_at, op_id LIMIT ?",
                 arguments: [limit]
             ).map { row in
-                MarkdownRemoteOp(
+                // An unreadable `intent` or `payload` is on-disk corruption, not a
+                // legitimate default — `?? .update` / `?? [:]` would silently turn
+                // it into a content push (or drop already-queued fields), so both
+                // throw instead of guessing.
+                let rawIntent: String = row["intent"]
+                guard let intent = MarkdownRemoteIntent(rawValue: rawIntent) else {
+                    throw MarkdownStoreError.unknownRemoteIntent(rawIntent)
+                }
+                return MarkdownRemoteOp(
                     opID: row["op_id"],
                     documentID: row["document_id"],
-                    intent: MarkdownRemoteIntent(rawValue: row["intent"]) ?? .update,
-                    payload: (try? self.decodePayload(row["payload"])) ?? [:],
+                    intent: intent,
+                    payload: try self.decodePayload(row["payload"]),
                     createdAt: MarkdownTimestamp.date(row["created_at"]) ?? Date())
             }
         }
@@ -230,6 +260,15 @@ public final class MarkdownStore: @unchecked Sendable {
     /// A throw stops the drain with the failing op still queued — order matters
     /// (a `create` before its `update`), so skipping past a failure would push
     /// an update for a document adh has never seen.
+    ///
+    /// Never call this from inside a `database.write { }` block. It `await`s
+    /// the network writer between reading and clearing each op, and that
+    /// `await` may resume on a different thread than the one that entered the
+    /// surrounding `write` — `BoundedDatabase`'s reentrancy tracks the writer
+    /// via a thread-local (`currentDB`), so resuming elsewhere finds no
+    /// in-progress write and the next nested `database.write`/`.read` call
+    /// blocks forever waiting on a writer this thread already (invisibly)
+    /// holds.
     public func drainRemoteQueue(into writer: any MarkdownRemoteWriter, limit: Int = 100) async throws {
         for remoteOp in try pendingRemoteOps(limit: limit) {
             try await writer.send(remoteOp)
@@ -360,7 +399,11 @@ public final class MarkdownStore: @unchecked Sendable {
             arguments: [documentID, target.rawValue])
 
         if let existing {
-            var merged = (try? decodePayload(existing["payload"])) ?? [:]
+            // Not `(try? ...) ?? [:]` — a corrupt existing payload here is worse
+            // than in `pendingRemoteOps`: falling back to `[:]` would silently
+            // discard every field the earlier, already-queued op set, rather than
+            // merely misreporting one row's intent.
+            var merged = try decodePayload(existing["payload"])
             for (key, value) in payload { merged[key] = value }
             try conn.execute(
                 sql: "UPDATE _markdown_outbox SET payload = ? WHERE op_id = ?",
