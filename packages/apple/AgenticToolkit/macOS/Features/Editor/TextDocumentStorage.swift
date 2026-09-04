@@ -153,20 +153,36 @@ public final class TextDocumentStorage: NSTextStorage {
     // `ComposableTabsViewController.swift`).
 
     override public var string: String {
-        backingStore.string
+        // See the class-level comment on `backingStore`: correctness here
+        // rests entirely on AppKit calling this only from the main thread.
+        // Fail loudly the moment that assumption is ever false, rather than
+        // silently racing.
+        dispatchPrecondition(condition: .onQueue(.main))
+        return backingStore.string
     }
 
     override public func attributes(
         at location: Int,
         effectiveRange range: NSRangePointer?
     ) -> [NSAttributedString.Key: Any] {
-        backingStore.attributes(at: location, effectiveRange: range)
+        // See the class-level comment on `backingStore`: correctness here
+        // rests entirely on AppKit calling this only from the main thread.
+        // Fail loudly the moment that assumption is ever false, rather than
+        // silently racing.
+        dispatchPrecondition(condition: .onQueue(.main))
+        return backingStore.attributes(at: location, effectiveRange: range)
     }
 
     /// Direction 1 — AppKit (or a caller acting on its behalf) edits the
     /// storage: apply it to the backing string, tell the layout manager, then
     /// push the same edit into `document`.
     override public func replaceCharacters(in range: NSRange, with str: String) {
+        // See the class-level comment on `backingStore`: correctness here
+        // rests entirely on AppKit calling this only from the main thread.
+        // Fail loudly the moment that assumption is ever false, rather than
+        // silently racing.
+        dispatchPrecondition(condition: .onQueue(.main))
+
         let currentDocument = document
         let guardState = localEditGuard
 
@@ -181,13 +197,18 @@ public final class TextDocumentStorage: NSTextStorage {
         edited([.editedCharacters, .editedAttributes], range: range, changeInLength: changeInLength)
 
         MainActor.assumeIsolated { guardState.isApplyingLocalEdit = true }
+        defer { MainActor.assumeIsolated { guardState.isApplyingLocalEdit = false } }
         _ = MainActor.assumeIsolated {
             currentDocument.apply([TextEdit(range: editedRange, newText: str)])
         }
-        MainActor.assumeIsolated { guardState.isApplyingLocalEdit = false }
     }
 
     override public func setAttributes(_ attrs: [NSAttributedString.Key: Any]?, range: NSRange) {
+        // See the class-level comment on `backingStore`: correctness here
+        // rests entirely on AppKit calling this only from the main thread.
+        // Fail loudly the moment that assumption is ever false, rather than
+        // silently racing.
+        dispatchPrecondition(condition: .onQueue(.main))
         backingStore.setAttributes(attrs, range: range)
         edited(.editedAttributes, range: range, changeInLength: 0)
     }
