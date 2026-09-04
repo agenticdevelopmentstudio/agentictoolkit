@@ -6,16 +6,25 @@ import type { MaskedProviderConfig, ProviderCatalogEntry } from "@agentic-toolki
 
 /**
  * The GitHub App path through the integrations feature, end to end as the operator walks
- * it: save the APP (its id and private key) on the ecosystem, then connect an INSTALLATION
- * of it by being sent to GitHub.
+ * it: save the APP (its id and private key) on the ecosystem — and that is the whole walk,
+ * because saving it is also what connects it.
  *
- * Both halves have failed silently before. The credentials form is chosen by shape, not by
- * name — a provider that declares any `configFields` gets the api_key editor instead — so
- * one plausible-looking line in the catalog is enough to make the app id and private key
- * have no surface anywhere, which is exactly what happened. And the connect step's whole
- * job is to leave: what it must get right is not what it renders but the state it stashes
- * before the browser goes, because that stash is the only thing the callback route has to
- * work out what it is finishing.
+ * THE SECOND STEP USED TO BE A REDIRECT, and its removal is what most of this file is now
+ * about. "Connect account" → "Continue to GitHub App" existed to let a person choose which
+ * account to install on; but by the time an app id and a private key have been typed here,
+ * that choice was already made on github.com, and the backend can read it back from those
+ * two values alone. A dialog that asks a question whose answer it already holds is not a
+ * safeguard, it is a step that can be skipped — and every operator who did not know to take
+ * it was left with a saved integration connected to nothing.
+ *
+ * So the assertions below are mostly ABSENCES, and absences are what regress quietly: no
+ * Connect-account button, no Continue-to-GitHub dialog, no second integration row when a
+ * refused key is corrected and re-submitted.
+ *
+ * The credentials form's own hazard is unchanged: it is chosen by shape, not by name — a
+ * provider that declares any `configFields` gets the api_key editor instead — so one
+ * plausible-looking line in the catalog is enough to make the app id and private key have
+ * no surface anywhere, which is exactly what happened once.
  *
  * shipr's pushes are the server's, made with an installation token minted from that private
  * key, so "GitHub is connected" is the load-bearing precondition of every run.
@@ -30,62 +39,49 @@ vi.mock("@agentic-toolkit/auth", async (importOriginal) => {
   return { ...actual, reportUnexpectedAuthError: vi.fn() };
 });
 
-const { getInstallUrl, updateProviderConfig, createProviderConfig } = vi.hoisted(() => ({
+const {
+  getInstallUrl,
+  updateProviderConfig,
+  createProviderConfig,
+  adoptInstallations,
+  listConnections,
+} = vi.hoisted(() => ({
   getInstallUrl: vi.fn(),
   updateProviderConfig: vi.fn(),
   createProviderConfig: vi.fn(),
+  adoptInstallations: vi.fn(),
+  listConnections: vi.fn(),
 }));
 vi.mock("@agentic-toolkit/data/integrations", () => ({
-  integrationsApi: { getInstallUrl, updateProviderConfig, createProviderConfig },
+  integrationsApi: {
+    getInstallUrl,
+    updateProviderConfig,
+    createProviderConfig,
+    adoptInstallations,
+    listConnections,
+  },
   oauthCallbackUrl: () => "https://app.example.test/integrations/oauth-callback",
 }));
 
 import { ConnectAccountDialog } from "./ConnectAccountDialog";
 import { IntegrationDetailView } from "./IntegrationDetailView";
-import { intToInput, type IntegrationInput } from "./IntegrationDetail";
-import { readPendingConnect } from "./oauth-callback-store";
+import { intBlank, intToInput, type IntegrationInput } from "./IntegrationDetail";
 
 // The hub vitest config has no global afterEach; tear each render (+ its portalled dialog)
 // down explicitly so it doesn't leak into the next test.
 afterEach(cleanup);
-afterEach(() => {
-  restoreLocation?.();
-  restoreLocation = null;
-});
 beforeEach(() => {
   getInstallUrl.mockReset();
+  updateProviderConfig.mockReset();
+  createProviderConfig.mockReset();
+  adoptInstallations.mockReset();
+  listConnections.mockReset();
+  // The default for the tests that are about the FORM: nothing installed, nothing connected.
+  // Each connect test states its own.
+  adoptInstallations.mockResolvedValue({ connected: [], skipped: [] });
+  listConnections.mockResolvedValue([]);
   sessionStorage.clear();
 });
-
-let restoreLocation: (() => void) | null = null;
-
-/**
- * Somewhere for the browser to go.
- *
- * jsdom's `Location` will not have `assign` replaced on it, so the whole `window.location`
- * property is swapped for the duration of a test — the same trick the auth package's
- * LoginCard test uses. `pathname` is fixed here because the dialog reads it as the
- * `returnTo` it stashes.
- */
-const RETURN_TO = "/settings/integrations";
-
-function captureNavigation(): string[] {
-  const original = window.location;
-  const assigned: string[] = [];
-  Object.defineProperty(window, "location", {
-    configurable: true,
-    value: {
-      ...original,
-      pathname: RETURN_TO,
-      assign: (url: string) => {
-        assigned.push(url);
-      },
-    },
-  });
-  restoreLocation = () =>
-    Object.defineProperty(window, "location", { configurable: true, value: original });
-  return assigned;
-}
 
 /**
  * The catalog's own entry for `github-app`, trimmed to what these components read.
@@ -196,95 +192,197 @@ describe("the ecosystem credentials form for a GitHub App", () => {
   });
 });
 
-function connectDialog(providerConfig: MaskedProviderConfig | null) {
-  return render(
-    <ConnectAccountDialog
+/** Mirrors how the Add dialog wires the shared view in mode='add'. */
+function AddForm({ onSaved = () => {} }: { onSaved?: (row: MaskedProviderConfig) => void }) {
+  const [draft, setDraft] = useState<IntegrationInput>(() => intBlank("github-app"));
+  return (
+    <IntegrationDetailView
       provider={GITHUB_APP}
       ecosystemId="eco-1"
-      providerConfig={providerConfig}
-      open
-      onOpenChange={() => {}}
-      onConnected={() => {}}
-    />,
+      mode="add"
+      config={null}
+      draft={draft}
+      onChange={setDraft}
+      onSaved={onSaved}
+    />
   );
 }
 
-describe("connecting an installation", () => {
-  it("sends the installer to GitHub rather than asking them for anything", () => {
-    connectDialog(SAVED);
-    // No credential entry here at all, by design: the account and the repositories are
-    // picked on GitHub's own installation page, which is the picker we would otherwise be
-    // rebuilding — and which is the only place that selection can actually be made.
-    expect(screen.getByRole("button", { name: "Continue to GitHub App" })).toBeTruthy();
-    expect(screen.getByText(/choose the account to install on/)).toBeTruthy();
-    expect(screen.getByText(/Nothing is connected until you finish there/)).toBeTruthy();
+/** Fill the three fields the app needs, in the state the operator leaves them in. */
+function fillTheApp(): void {
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "ADH deploys" } });
+  fireEvent.change(screen.getByLabelText("App ID"), { target: { value: "123456" } });
+  fireEvent.change(screen.getByLabelText("Private key"), {
+    target: { value: "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----" },
   });
+}
 
-  it("stashes what the callback route needs before it hands the browser over", async () => {
-    const assigned = captureNavigation();
-    getInstallUrl.mockResolvedValue({
-      url: "https://github.test/apps/adh/installations/new?state=st-1",
-      state: "st-1",
+describe("adding the app IS connecting it", () => {
+  it("connects every installation the app can already see, with nothing in between", async () => {
+    createProviderConfig.mockResolvedValue(SAVED);
+    adoptInstallations.mockResolvedValue({
+      connected: [
+        { installationId: "99", accountLogin: "acme", targetType: "Organization" },
+        { installationId: "100", accountLogin: "someone", targetType: "User" },
+      ],
+      skipped: [],
     });
+    const saved = vi.fn();
 
-    connectDialog(SAVED);
-    fireEvent.click(screen.getByRole("button", { name: "Continue to GitHub App" }));
+    render(<AddForm onSaved={saved} />);
+    fillTheApp();
+    fireEvent.click(screen.getByRole("button", { name: "Add Integration" }));
 
-    await waitFor(() => expect(assigned).toHaveLength(1));
-    expect(getInstallUrl).toHaveBeenCalledWith("github-app", {
+    await waitFor(() => expect(saved).toHaveBeenCalledWith(SAVED));
+    // The config row is named EXPLICITLY. The backend must not resolve the app itself: its
+    // resolver falls through to the platform-global app, whose installations belong to other
+    // tenants, and enumerating those here would connect this ecosystem to someone else's org.
+    expect(adoptInstallations).toHaveBeenCalledWith("github-app", {
       ecosystemId: "eco-1",
-      serviceType: "code",
+      providerConfigId: "cfg-1",
     });
-    // The page is about to leave, and it comes back to a route that knows nothing except
-    // the state in the URL. Everything the finish needs is stashed under that state first
-    // — an assign that ran before the stash returns to a callback that cannot finish.
-    expect(assigned[0]).toBe("https://github.test/apps/adh/installations/new?state=st-1");
-    expect(readPendingConnect("st-1")).toEqual({
-      authMethod: "github_app",
-      providerId: "github-app",
-      serviceType: "code",
-      ecosystemId: "eco-1",
-      returnTo: RETURN_TO,
+    expect(await screen.findByText(/Connected acme, someone\./)).toBeTruthy();
+  });
+
+  it("says what was already connected instead of reporting it as new", async () => {
+    createProviderConfig.mockResolvedValue(SAVED);
+    adoptInstallations.mockResolvedValue({
+      connected: [],
+      // A skip that carries a connectionId is one THIS ecosystem already holds — re-saving a
+      // working integration has to read as a no-op, not as a failure to connect.
+      skipped: [
+        {
+          installationId: "99",
+          accountLogin: "acme",
+          targetType: "Organization",
+          connectionId: "conn-1",
+          skipped: "already connected",
+        },
+      ],
     });
+    const saved = vi.fn();
+
+    render(<AddForm onSaved={saved} />);
+    fillTheApp();
+    fireEvent.click(screen.getByRole("button", { name: "Add Integration" }));
+
+    await waitFor(() => expect(saved).toHaveBeenCalled());
+    expect(screen.getByText(/acme was already connected\./)).toBeTruthy();
   });
 
-  it("carries no redirect_uri, because the app owns where it returns to", async () => {
-    const assigned = captureNavigation();
-    getInstallUrl.mockResolvedValue({ url: "https://github.test/install", state: "st-2" });
+  it("stays open on GitHub's own words when the key is refused", async () => {
+    createProviderConfig.mockResolvedValue(SAVED);
+    // The enumeration IS the credential test — this is the only moment a bad app id or an
+    // unimportable private key can be caught while the operator is still looking at it.
+    adoptInstallations.mockRejectedValue(new Error("401 A JSON web token could not be decoded"));
+    const saved = vi.fn();
 
-    connectDialog(SAVED);
-    fireEvent.click(screen.getByRole("button", { name: "Continue to GitHub App" }));
-    await waitFor(() => expect(assigned).toHaveLength(1));
+    render(<AddForm onSaved={saved} />);
+    fillTheApp();
+    fireEvent.click(screen.getByRole("button", { name: "Add Integration" }));
 
-    // An installation returns to the setup URL configured ON the app; a redirect_uri sent
-    // from here is at best ignored and at worst a mismatch GitHub refuses.
-    expect(getInstallUrl.mock.calls[0]?.[1]).not.toHaveProperty("redirectUri");
-    expect(readPendingConnect("st-2")).not.toHaveProperty("redirectUri");
-  });
-
-  it("refuses to start when no app has been saved yet", () => {
-    // The install URL is built from the app's own id and private key, so with no config
-    // saved there is not even a page to send the installer to. Said here rather than
-    // discovered as an opaque failure one click later.
-    connectDialog(null);
-    expect(screen.queryByRole("button", { name: "Continue to GitHub App" })).toBeNull();
-    expect(screen.getByText(/Save this integration's client configuration first/)).toBeTruthy();
-    expect(getInstallUrl).not.toHaveBeenCalled();
-  });
-
-  it("says so plainly when the forge refuses, and stays where it is", async () => {
-    const assigned = captureNavigation();
-    getInstallUrl.mockRejectedValue(new Error("app not found"));
-
-    connectDialog(SAVED);
-    fireEvent.click(screen.getByRole("button", { name: "Continue to GitHub App" }));
-
-    expect(await screen.findByText("app not found")).toBeTruthy();
-    // Nothing was stashed and nothing navigated, so the button is simply clickable again.
-    expect(assigned).toEqual([]);
     expect(
-      (screen.getByRole("button", { name: "Continue to GitHub App" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
+      await screen.findByText(/GitHub refused these credentials: 401 A JSON web token/),
+    ).toBeTruthy();
+    // The dialog must NOT close: closing would land on a connections list that is empty for a
+    // reason nothing on that screen can state.
+    expect(saved).not.toHaveBeenCalled();
+  });
+
+  it("corrects the saved row on a retry rather than adding a second integration", async () => {
+    createProviderConfig.mockResolvedValue(SAVED);
+    updateProviderConfig.mockResolvedValue(SAVED);
+    adoptInstallations.mockRejectedValueOnce(new Error("401 bad key")).mockResolvedValue({
+      connected: [{ installationId: "99", accountLogin: "acme", targetType: "Organization" }],
+      skipped: [],
+    });
+    const saved = vi.fn();
+
+    render(<AddForm onSaved={saved} />);
+    fillTheApp();
+    fireEvent.click(screen.getByRole("button", { name: "Add Integration" }));
+    await screen.findByText(/GitHub refused these credentials/);
+
+    // The operator pastes the right key and presses OK again. The row from the first attempt
+    // is already saved, so a second create would leave two integrations behind — one of them
+    // permanently broken, and both named the same thing.
+    fireEvent.change(screen.getByLabelText("Private key"), {
+      target: { value: "-----BEGIN RSA PRIVATE KEY-----\nright\n-----END RSA PRIVATE KEY-----" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Integration" }));
+
+    await waitFor(() => expect(saved).toHaveBeenCalledWith(SAVED));
+    expect(createProviderConfig).toHaveBeenCalledTimes(1);
+    expect(updateProviderConfig).toHaveBeenCalledTimes(1);
+    expect(updateProviderConfig.mock.calls[0]?.[1]).toBe("cfg-1");
+  });
+
+  it("does not claim success for an app that is installed nowhere", async () => {
+    createProviderConfig.mockResolvedValue(SAVED);
+    // Valid credentials, no installations: the credentials proved themselves by answering at
+    // all, but there is nothing to connect, and "integration added" would be the lie the empty
+    // connections list is then left to explain.
+    adoptInstallations.mockResolvedValue({ connected: [], skipped: [] });
+    const saved = vi.fn();
+
+    render(<AddForm onSaved={saved} />);
+    fillTheApp();
+    fireEvent.click(screen.getByRole("button", { name: "Add Integration" }));
+
+    expect(await screen.findByText(/isn't installed on any account yet/)).toBeTruthy();
+    expect(saved).not.toHaveBeenCalled();
+  });
+});
+
+describe("the connect step that is no longer there", () => {
+  it("offers no Connect-account button on a saved GitHub App", async () => {
+    render(<SavedForm />);
+    // The button, and the "Continue to GitHub App" dialog behind it, are the intermediate step
+    // this whole path removed. Nothing may put them back for this auth method.
+    await waitFor(() => expect(adoptInstallations).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Connect account" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue to GitHub App" })).toBeNull();
+  });
+
+  it("picks up an installation added since the app was saved, on its own", async () => {
+    // The save-time connect only ever sees what existed then. An app installed on a SECOND
+    // organization afterwards has to be picked up by something, and with no button to press
+    // that something is opening the integration.
+    render(<SavedForm />);
+    await waitFor(() =>
+      expect(adoptInstallations).toHaveBeenCalledWith("github-app", {
+        ecosystemId: "eco-1",
+        providerConfigId: "cfg-1",
+      }),
+    );
+  });
+
+  it("explains an empty list instead of pointing at a button that does not exist", async () => {
+    render(<SavedForm />);
+    expect(await screen.findByText(/isn't installed on any account yet/)).toBeTruthy();
+    expect(screen.queryByText("No account connected.")).toBeNull();
+  });
+
+  it("carries GitHub's refusal into the connections section", async () => {
+    adoptInstallations.mockRejectedValue(new Error("401 A JSON web token could not be decoded"));
+    render(<SavedForm />);
+    expect(await screen.findByText(/401 A JSON web token could not be decoded/)).toBeTruthy();
+  });
+
+  it("opens no dialog for a github_app, whatever asks it to", () => {
+    // ConnectAccountDialog has no `github_app` case at all now — mounted with one it falls to
+    // the "can't be connected here" default rather than growing a second, divergent way in.
+    render(
+      <ConnectAccountDialog
+        provider={GITHUB_APP}
+        ecosystemId="eco-1"
+        providerConfig={SAVED}
+        open
+        onOpenChange={() => {}}
+        onConnected={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Continue to GitHub App" })).toBeNull();
+    expect(getInstallUrl).not.toHaveBeenCalled();
   });
 });

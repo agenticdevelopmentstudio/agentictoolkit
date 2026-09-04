@@ -30,13 +30,19 @@ import { errMsg } from "@agentic-toolkit/data";
  *   • app_password  → connect the saved config's handle + app-password (no inline entry)
  *   • oauth         → getAuthUrl → stash context → browser redirect (finished on the callback route)
  *   • oauth_instance→ registerInstance from the saved config → stash context → redirect to authorizeUrl
- *   • github_app    → getInstallUrl → stash context → redirect to the provider's own install
- *                     page, where the installer picks the account and the repositories
  *   • plaid_link    → mints a link token, opens Plaid Link (PlaidLinkLauncher), then
  *                     exchanges the returned public_token via connect.
  *
  * Direct (non-redirect) methods finish in place and call `onConnected` to refresh.
  * Redirect methods hand off to `app/integrations/oauth-callback`.
+ *
+ * `github_app` IS NOT HERE, and its absence is the design. Every method above exists because a
+ * person has to answer something at the provider — which account, which credentials. A GitHub
+ * App has already been answered: the account was chosen on github.com at install time, and the
+ * backend reads it back from the saved app id and private key. So it connects at SAVE time
+ * (`useIntegrationSubmit`) and again when its connections are listed (`ProviderConnections`),
+ * and never opens a dialog. Adding a `github_app` case back here would restore the
+ * "Connect account → Continue to GitHub" detour those two paths exist to remove.
  */
 export function ConnectAccountDialog({
   provider,
@@ -60,17 +66,14 @@ export function ConnectAccountDialog({
   const serviceType = provider.serviceTypes[0] ?? "";
   // api_key providers render their declared configFields (same spec as the ecosystem editor).
   const specFields = provider.configFields ?? [];
-  // Every real-account connect (app_password / oauth / oauth_instance / plaid_link /
-  // github_app) sources its creds from the saved config, so connecting is blocked until one
-  // exists. github_app is no exception: the install URL is built from the app's own id and
-  // private key, so with no config saved there is not even a page to send the installer to.
+  // Every real-account connect (app_password / oauth / oauth_instance / plaid_link) sources its
+  // creds from the saved config, so connecting is blocked until one exists.
   const providerConfigId = providerConfig?.id;
   const needsConfig =
     authMethod === "app_password" ||
     authMethod === "oauth" ||
     authMethod === "oauth_instance" ||
-    authMethod === "plaid_link" ||
-    authMethod === "github_app";
+    authMethod === "plaid_link";
   const blocked = needsConfig && providerConfigId == null;
   // Non-secret fields read off the saved config for display + register-schema compliance.
   const configIdentifier = String(providerConfig?.config.identifier ?? "").trim();
@@ -183,29 +186,6 @@ export function ConnectAccountDialog({
         window.location.assign(url);
       },
       "Couldn't start the OAuth flow.",
-    );
-  };
-
-  // github_app: mint the app's INSTALL url, stash the return context under the signed state,
-  // then hand the browser to the provider. No redirectUri — the app returns to the setup URL
-  // configured on it — and nothing to enter here: the account and the repositories are picked
-  // on the provider's own installation page, which is the picker we would otherwise be
-  // rebuilding. The page leaves, so `busy` stays set.
-  const onGithubApp = () => {
-    const returnTo = currentReturnTo();
-    return run(
-      () => integrationsApi.getInstallUrl(providerId, { ecosystemId, serviceType }),
-      ({ url, state }) => {
-        stashPendingConnect(state, {
-          authMethod: "github_app",
-          providerId,
-          serviceType,
-          ecosystemId,
-          returnTo,
-        });
-        window.location.assign(url);
-      },
-      "Couldn't start the installation.",
     );
   };
 
@@ -367,25 +347,6 @@ export function ConnectAccountDialog({
                 Cancel
               </Button>
               <Button type="button" onClick={() => void onOAuth()} disabled={busy}>
-                {busy ? "Redirecting…" : `Continue to ${displayName}`}
-              </Button>
-            </div>
-          </div>
-        );
-      case "github_app":
-        return (
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-apt-text-muted">
-              You&apos;ll be sent to {displayName} to choose the account to install on and
-              which repositories it can reach, then returned here. Nothing is connected until
-              you finish there.
-            </p>
-            <ErrorText error={error} />
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-                Cancel
-              </Button>
-              <Button type="button" onClick={() => void onGithubApp()} disabled={busy}>
                 {busy ? "Redirecting…" : `Continue to ${displayName}`}
               </Button>
             </div>

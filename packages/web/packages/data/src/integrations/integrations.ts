@@ -20,6 +20,8 @@
 import { authedJson, authedRequest, decodeBase64UrlJson, isNotFound } from "../http";
 import { enc } from "../client-helpers";
 import type {
+  AdoptInstallationsBodyType,
+  AdoptInstallationsResultRow,
   AuthUrlResultRow,
   ConnectRequestBody,
   CreateProviderConfigBody,
@@ -66,6 +68,8 @@ export type ConnectRequest = ConnectRequestBody;
 
 /** `{ url, state }` — the OAuth authorize URL + the round-trip CSRF state. */
 export type AuthUrlResult = AuthUrlResultRow;
+export type AdoptInstallationsBody = AdoptInstallationsBodyType;
+export type AdoptInstallationsResult = AdoptInstallationsResultRow;
 
 /** Body for register-instance (self-hosted OAuth, e.g. Mastodon). */
 export type RegisterInstanceBody = RegisterInstanceBodyType;
@@ -409,6 +413,26 @@ export const integrationsApi = {
     if (params.serviceType) qs.set("serviceType", params.serviceType);
     return authedJson<AuthUrlResult>(
       `${BASE}/providers/${enc(providerId)}/install-url?${qs.toString()}`,
+    );
+  },
+
+  /**
+   * Connect every installation the saved GitHub App can already see — `github_app`
+   * providers only (400 otherwise).
+   *
+   * This is the redirect-free connect, and it is also the credential test: the backend can
+   * only answer by signing a JWT the provider accepts, so a wrong app id or an unreadable
+   * private key fails HERE, at the moment they were entered, rather than at the first
+   * deploy. An installation already in service is reported under `skipped` rather than
+   * taken, so calling it twice is safe.
+   */
+  async adoptInstallations(
+    providerId: string,
+    body: AdoptInstallationsBody,
+  ): Promise<AdoptInstallationsResult> {
+    return authedJson<AdoptInstallationsResult>(
+      `${BASE}/providers/${enc(providerId)}/adopt-installations`,
+      { method: "POST", body: JSON.stringify(body) },
     );
   },
 

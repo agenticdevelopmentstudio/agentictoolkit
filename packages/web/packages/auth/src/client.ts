@@ -122,7 +122,7 @@ export function extractErrorMessage(body: unknown, fallback: string): string {
     if (typeof obj.message === 'string') return obj.message
     // RFC 9457 problem+json, which the backend's integration routers emit:
     // `{ type, title, status, detail, instance }`. `detail` is the sentence about THIS
-    // occurrence — "no GitHub App is configured", "the private key is in PKCS#1 form" —
+    // occurrence — "no GitHub App is configured", "the private key could not be read" —
     // while `title` is only the status reason phrase. Reading `title` first turned every
     // failure on that whole surface into the words "Bad Request", with the one line that
     // said what to do about it parsed and then dropped. `detail` therefore wins, and it is

@@ -244,6 +244,35 @@ export interface RegisterInstanceResultRow {
   clientId: string;
 }
 
+/** Body for adopting a GitHub App's existing installations. */
+export interface AdoptInstallationsBodyType {
+  /** Target ecosystem id (the caller must manage it) */
+  ecosystemId: string;
+  /** The saved provider-config holding the app id and private key. REQUIRED: the backend
+   *  reads it by id rather than resolving, because the resolver falls through to the
+   *  platform-global app, whose installations belong to other tenants. */
+  providerConfigId: string;
+  /** Defaults to the provider primary service type */
+  serviceType?: string;
+}
+
+/** One installation, and what became of it. */
+export interface AdoptedInstallationRow {
+  installationId: string;
+  accountLogin: string;
+  targetType: string;
+  /** The connection holding it — set when this call made one, or when one already did. */
+  connectionId?: string;
+  /** Why it was not connected. Absent on success. */
+  skipped?: string;
+}
+
+/** `{ connected, skipped }` from adopt-installations. */
+export interface AdoptInstallationsResultRow {
+  connected: AdoptedInstallationRow[];
+  skipped: AdoptedInstallationRow[];
+}
+
 /** Body for the Plaid link-token mint. */
 export interface LinkTokenBodyType {
   /** Target ecosystem id (the caller must manage it) */
