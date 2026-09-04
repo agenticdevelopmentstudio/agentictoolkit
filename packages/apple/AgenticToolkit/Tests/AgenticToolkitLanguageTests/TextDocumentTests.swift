@@ -157,4 +157,47 @@ struct TextDocumentTests {
         document.replaceAll(with: "fresh from disk")
         #expect(document.isDirty == false)
     }
+
+    // MARK: - Part 0 carried-over fixes
+
+    @Test("apply reports the range it actually mutated, not the caller's out-of-range request")
+    func applyReportsTheClampedRangeNotTheRequestedRange() {
+        let document = TextDocument(uri: "file:///clamp-apply.txt", languageId: "plaintext", text: "abc")
+        let requestedRange = LSPRange(start: Position(line: 0, character: 10), end: Position(line: 0, character: 20))
+
+        let events = document.apply([TextEdit(range: requestedRange, newText: "X")])
+
+        #expect(events.count == 1)
+        let clampedRange = LSPRange(start: Position(line: 0, character: 3), end: Position(line: 0, character: 3))
+        #expect(events.first?.range == clampedRange)
+        #expect(events.first?.range != requestedRange)
+    }
+
+    @Test("an offset inside a surrogate pair rounds down and round-trips stably")
+    func surrogatePairOffsetRoundsDownAndRoundTrips() {
+        // "a😀b" — 'a' at unit 0, the emoji's surrogate pair at units 1-2, 'b' at unit 3.
+        let document = TextDocument(uri: "file:///surrogate.txt", languageId: "plaintext", text: "a😀b")
+
+        let midSurrogatePosition = document.position(forUTF16Offset: 2)
+        let roundedDownPosition = Position(line: 0, character: 1)
+        #expect(midSurrogatePosition == roundedDownPosition)
+
+        let roundTrippedOffset = document.utf16Offset(for: midSurrogatePosition)
+        #expect(roundTrippedOffset == 1)
+        #expect(document.position(forUTF16Offset: roundTrippedOffset) == midSurrogatePosition)
+    }
+
+    @Test("an offset between a CRLF's \\r and \\n rounds down and round-trips stably")
+    func crlfSplitOffsetRoundsDownAndRoundTrips() {
+        // "a\r\nb" — 'a' at unit 0, '\r' at unit 1, '\n' at unit 2, 'b' at unit 3.
+        let document = TextDocument(uri: "file:///crlf-split.txt", languageId: "plaintext", text: "a\r\nb")
+
+        let midCRLFPosition = document.position(forUTF16Offset: 2)
+        let roundedDownPosition = Position(line: 0, character: 1)
+        #expect(midCRLFPosition == roundedDownPosition)
+
+        let roundTrippedOffset = document.utf16Offset(for: midCRLFPosition)
+        #expect(roundTrippedOffset == 1)
+        #expect(document.position(forUTF16Offset: roundTrippedOffset) == midCRLFPosition)
+    }
 }

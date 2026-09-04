@@ -56,8 +56,12 @@ public final class TextDocument {
     /// An offset past the end of the text clamps to the end position; this
     /// never traps — a language server can and does send a stale range after
     /// a fast edit.
+    ///
+    /// An offset landing strictly inside a UTF-16 surrogate pair or between
+    /// the `\r` and `\n` of a CRLF is rounded down to the nearest valid
+    /// boundary before it is resolved — see `roundedDownToValidBoundary(_:)`.
     public func position(forUTF16Offset offset: Int) -> Position {
-        let clamped = max(0, min(offset, utf16Length))
+        let clamped = roundedDownToValidBoundary(max(0, min(offset, utf16Length)))
         var low = 0
         var high = lineStarts.count - 1
         while low < high {
@@ -74,13 +78,16 @@ public final class TextDocument {
     /// A `Position` past the end of the text (either an out-of-range line or
     /// an out-of-range character within a valid line) clamps to the text's
     /// length rather than trapping.
+    ///
+    /// The resulting offset is rounded down to the nearest valid boundary
+    /// before it is returned — see `roundedDownToValidBoundary(_:)`.
     public func utf16Offset(for position: Position) -> Int {
         let lastLine = lineStarts.count - 1
         let line = max(0, min(position.line, lastLine))
         let lineStart = lineStarts[line]
         let lineEnd = line < lastLine ? lineStarts[line + 1] : utf16Length
         let character = max(0, min(position.character, lineEnd - lineStart))
-        return lineStart + character
+        return roundedDownToValidBoundary(lineStart + character)
     }
 
     public func range(for nsRange: NSRange) -> LSPRange {
@@ -119,19 +126,29 @@ public final class TextDocument {
             replaceUTF16Range(start: entry.start, end: entry.end, with: entry.edit.newText)
         }
 
+        // Built from the clamped offsets that were actually mutated, using
+        // `range(for:)` against the still-stale `lineStarts`/`utf16Length`
+        // (this batch's line index isn't rebuilt until just below) — the
+        // same pre-edit document those offsets were resolved against. This
+        // must happen before that rebuild: the caller's original
+        // `entry.edit.range` may not equal what was actually mutated once
+        // offsets were clamped to the document's bounds, and reporting the
+        // wrong range desynchronizes a language server's mirror of the
+        // document.
+        let events = resolved.map { entry in
+            TextDocumentContentChangeEvent(
+                range: range(for: NSRange(location: entry.start, length: entry.end - entry.start)),
+                rangeLength: entry.end - entry.start,
+                text: entry.edit.newText
+            )
+        }
+
         version += 1
         isDirty = true
         let index = TextDocument.computeLineIndex(text)
         lineStarts = index.starts
         utf16Length = index.length
 
-        let events = resolved.map { entry in
-            TextDocumentContentChangeEvent(
-                range: entry.edit.range,
-                rangeLength: entry.end - entry.start,
-                text: entry.edit.newText
-            )
-        }
         changeHandler?(version, events)
         return events
     }
@@ -153,6 +170,34 @@ public final class TextDocument {
     }
 
     // MARK: - Private
+
+    /// Rounds a UTF-16 offset already clamped to `[0, utf16Length]` down to
+    /// the nearest boundary that does not split a UTF-16 surrogate pair or a
+    /// CRLF line terminator.
+    ///
+    /// Neither case traps on its own — converting such an offset into a
+    /// `String.Index` and using it to slice `text` rounds it down silently
+    /// and implicitly, because a `String.Index` can only address a Unicode
+    /// scalar boundary. That behavior is accidental, not chosen, so this
+    /// makes the same choice explicitly: an offset arrives here from a
+    /// language server working against a slightly stale mirror of the
+    /// document, and rounding toward the earlier boundary keeps an edit
+    /// inside the region the server meant rather than spilling past it.
+    private func roundedDownToValidBoundary(_ clampedOffset: Int) -> Int {
+        guard clampedOffset > 0, clampedOffset < utf16Length else { return clampedOffset }
+        let units = text.utf16
+        guard
+            let previousIndex = units.index(units.startIndex, offsetBy: clampedOffset - 1, limitedBy: units.endIndex),
+            let currentIndex = units.index(units.startIndex, offsetBy: clampedOffset, limitedBy: units.endIndex)
+        else {
+            return clampedOffset
+        }
+        let previousUnit = units[previousIndex]
+        let currentUnit = units[currentIndex]
+        let splitsSurrogatePair = (0xD800...0xDBFF).contains(previousUnit) && (0xDC00...0xDFFF).contains(currentUnit)
+        let splitsCRLF = previousUnit == 0x0D && currentUnit == 0x0A
+        return (splitsSurrogatePair || splitsCRLF) ? clampedOffset - 1 : clampedOffset
+    }
 
     /// Replaces the UTF-16 code units `[start, end)` of `text` with
     /// `newText`. Callers are responsible for offsets that are valid against
