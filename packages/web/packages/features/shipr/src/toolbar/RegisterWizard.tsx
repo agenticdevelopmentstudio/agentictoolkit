@@ -36,11 +36,19 @@ import { useSubmit } from './dialogs';
  * out of what an installation actually granted, which is the only list whose every entry is
  * reachable.
  *
- * THERE IS NO ORG-AND-REPO BROWSER HERE, and building one would be a mistake rather than an
- * omission: GitHub's own installation page is that browser, it is where the grant is made, and
- * a picker of ours could only ever offer repositories we hold no token for. When the list is
- * missing what the operator wants, the answer is to grant it there — so the empty state points
- * at Integrations rather than at a search box.
+ * THE PICK IS AN ORG-AND-REPO BROWSER — owners down the left, that owner's repositories down
+ * the right, and a filter over both. It is a browser over WHAT THE INSTALLATION GRANTED and
+ * nothing else, which is the distinction that matters: an installation covering four orgs and
+ * two hundred repositories arrived here as one flat scrolling column sorted by a slug whose
+ * first half repeated for pages, and finding a repository in it meant reading the same owner
+ * forty times. Grouping is free — every row already carries its owner — and it turns that
+ * column into two short ones.
+ *
+ * What is still deliberately absent is a picker of repositories we hold no token for. GitHub's
+ * own installation page is where the GRANT is made, and offering a repository outside it would
+ * put the failure at the first push of a run instead of at the moment of choosing. So the
+ * empty state still points at Integrations rather than at a search box: the filter narrows what
+ * was granted, it never reaches past it.
  *
  * WHAT IT IS ABOUT TO DO, in the words the confirm step uses: read the repository's committed
  * `.shipr` on its main branch; find or create the deployment repository, always private; seed
@@ -338,6 +346,160 @@ export function RegisterWizard({
 
 // ── step 1 ────────────────────────────────────────────────────────────────────
 
+/**
+ * The org-and-repo browser: owners on the left, that owner's repositories on the right.
+ *
+ * ONE filter drives both columns, and it matches the WHOLE slug rather than the column it is
+ * drawn above. `acme` narrows to that owner's repositories, `site` narrows to repositories so
+ * named across every owner, and `acme/site` does both — which is the same string an operator
+ * would have typed into the free-text field this dialog replaced, so the thing they already
+ * know how to type still works. Two filters, one per column, would have made "which box does
+ * `acme/site` go in" a question with a wrong answer.
+ *
+ * The owner column is derived, never fetched: every row already carries its owner, so there is
+ * no second call and no state that can disagree with the list it summarises.
+ */
+function RepoBrowser({
+  repos,
+  registered,
+  slug,
+  onPick,
+}: {
+  repos: readonly ForgeRepository[];
+  registered: ReadonlySet<string>;
+  slug: string;
+  onPick: (repo: ForgeRepository) => void;
+}): React.ReactElement {
+  const [filter, setFilter] = React.useState('');
+  const [ownerPick, setOwnerPick] = React.useState<string | null>(null);
+
+  // A new installation is a new list of owners, and the old pick names nobody in it. Keyed on
+  // the array rather than on a connection id, because this component is handed the list and
+  // never the thing that produced it.
+  React.useEffect(() => {
+    setFilter('');
+    setOwnerPick(null);
+  }, [repos]);
+
+  const needle = filter.trim().toLowerCase();
+  const matched = React.useMemo(
+    () => (needle ? repos.filter((r) => r.slug.toLowerCase().includes(needle)) : repos),
+    [repos, needle],
+  );
+
+  /** `owner → its repositories`, in the order the forge listed them, owners sorted. */
+  const byOwner = React.useMemo(() => {
+    const map = new Map<string, ForgeRepository[]>();
+    for (const repo of matched) {
+      const owner = ownerOf(repo.slug);
+      const bucket = map.get(owner);
+      if (bucket) bucket.push(repo);
+      else map.set(owner, [repo]);
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [matched]);
+
+  // The shown owner is DERIVED rather than stored, so a filter that narrows the list past the
+  // operator's pick still shows repositories instead of an empty right-hand column. The picked
+  // repository's own owner wins when nothing has been clicked, which is what makes reopening
+  // the step land where it was left.
+  const owners = byOwner.map(([owner]) => owner);
+  const owner =
+    (ownerPick && owners.includes(ownerPick) ? ownerPick : null) ??
+    (slug && owners.includes(ownerOf(slug)) ? ownerOf(slug) : null) ??
+    owners[0] ??
+    '';
+  const shown = byOwner.find(([o]) => o === owner)?.[1] ?? [];
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Input
+        aria-label="Filter repositories"
+        placeholder="Filter — owner, name, or owner/name"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
+      {byOwner.length === 0 ? (
+        <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
+          No repository this installation granted matches “{filter.trim()}”.
+        </p>
+      ) : (
+        <div className="grid grid-cols-[minmax(0,11rem)_1fr] overflow-hidden rounded border border-apt-border bg-apt-surface-2">
+          <ul
+            aria-label="Organizations"
+            className="flex max-h-64 flex-col overflow-auto border-r border-apt-border"
+          >
+            {byOwner.map(([o, list]) => (
+              <li key={o}>
+                <button
+                  type="button"
+                  aria-pressed={o === owner}
+                  aria-label={`${o} — ${list.length} ${list.length === 1 ? 'repository' : 'repositories'}`}
+                  onClick={() => setOwnerPick(o)}
+                  className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+                    o === owner
+                      ? 'bg-apt-gold/15 text-apt-text'
+                      : 'text-apt-text hover:bg-apt-gold/10'
+                  }`}
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono">{o}</span>
+                  <span className="shrink-0 text-apt-text-muted">{list.length}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <ul aria-label="Repositories" className="flex max-h-64 flex-col overflow-auto">
+            {shown.map((repo) => {
+              const taken = registered.has(repo.slug);
+              return (
+                <li key={repo.slug}>
+                  {/* Disabled, not omitted — see `registeredSlugs`. */}
+                  <button
+                    type="button"
+                    disabled={taken}
+                    aria-pressed={repo.slug === slug}
+                    // SPELLED OUT, because the row's own text runs together when it is read
+                    // rather than seen: two adjacent spans with no space between them are
+                    // announced as `acme/siteprivate · trunk`. It names the FULL slug even
+                    // though the column shows only the repository half — the owner is a
+                    // heading in the other column, which a row read on its own does not carry.
+                    aria-label={
+                      taken
+                        ? `${repo.slug} — already registered`
+                        : repo.private
+                          ? `${repo.slug} — private, default branch ${repo.defaultBranch}`
+                          : `${repo.slug} — default branch ${repo.defaultBranch}`
+                    }
+                    onClick={() => onPick(repo)}
+                    className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+                      taken
+                        ? 'cursor-not-allowed text-apt-text-muted opacity-60'
+                        : repo.slug === slug
+                          ? 'bg-apt-gold/15 text-apt-text'
+                          : 'text-apt-text hover:bg-apt-gold/10'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-mono">
+                      {nameOf(repo.slug)}
+                    </span>
+                    <span className="shrink-0 text-apt-text-muted">
+                      {taken
+                        ? 'already registered'
+                        : repo.private
+                          ? `private · ${repo.defaultBranch}`
+                          : repo.defaultBranch}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StepConnection({
   connections,
   connectionId,
@@ -416,51 +578,12 @@ function StepConnection({
             onManageConnections={onManageConnections}
           />
         ) : (
-          <ul className="flex max-h-64 flex-col overflow-auto rounded border border-apt-border bg-apt-surface-2">
-            {repos.map((repo) => {
-              const taken = registered.has(repo.slug);
-              return (
-                <li key={repo.slug}>
-                  {/* Disabled, not omitted — see `registeredSlugs`. */}
-                  <button
-                    type="button"
-                    disabled={taken}
-                    aria-pressed={repo.slug === slug}
-                    // SPELLED OUT, because the row's own text runs together when it is read
-                    // rather than seen: two adjacent spans with no space between them are
-                    // announced as `acme/siteprivate · trunk`. The slug is the whole point of
-                    // the row, so it gets to be the name, and the tail is said in words.
-                    aria-label={
-                      taken
-                        ? `${repo.slug} — already registered`
-                        : repo.private
-                          ? `${repo.slug} — private, default branch ${repo.defaultBranch}`
-                          : `${repo.slug} — default branch ${repo.defaultBranch}`
-                    }
-                    onClick={() => onPick(repo)}
-                    className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
-                      taken
-                        ? 'cursor-not-allowed text-apt-text-muted opacity-60'
-                        : repo.slug === slug
-                          ? 'bg-apt-gold/15 text-apt-text'
-                          : 'text-apt-text hover:bg-apt-gold/10'
-                    }`}
-                  >
-                    <span className="min-w-0 flex-1 truncate font-mono">
-                      {repo.slug}
-                    </span>
-                    <span className="shrink-0 text-apt-text-muted">
-                      {taken
-                        ? 'already registered'
-                        : repo.private
-                          ? `private · ${repo.defaultBranch}`
-                          : repo.defaultBranch}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <RepoBrowser
+            repos={repos}
+            registered={registered}
+            slug={slug}
+            onPick={onPick}
+          />
         )}
       </div>
 

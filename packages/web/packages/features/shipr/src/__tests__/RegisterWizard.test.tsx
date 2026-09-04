@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RegisterWizard } from '../toolbar/RegisterWizard';
@@ -45,10 +45,16 @@ const DECLARED: DeclarationResponse = {
 
 function draw(
   declaration: DeclarationResponse,
-  over: { registeredSlugs?: string[]; onSubmit?: (b: RegisterRequest) => Promise<void> } = {},
+  over: {
+    registeredSlugs?: string[];
+    onSubmit?: (b: RegisterRequest) => Promise<void>;
+    repositories?: typeof REPOSITORIES;
+  } = {},
 ) {
   const client = {
-    connectionRepositories: vi.fn().mockResolvedValue({ repositories: REPOSITORIES }),
+    connectionRepositories: vi
+      .fn()
+      .mockResolvedValue({ repositories: over.repositories ?? REPOSITORIES }),
     connectionDeclaration: vi.fn().mockResolvedValue(declaration),
   };
   const onSubmit = over.onSubmit ?? vi.fn().mockResolvedValue(undefined);
@@ -206,6 +212,96 @@ describe('RegisterWizard — step 2 on the fallback', () => {
     expect(
       screen.getByText(/deployments\.eu\.repo is not owner\/name/),
     ).toBeTruthy();
+  });
+});
+
+/**
+ * The org-and-repo browser.
+ *
+ * An installation covering several orgs arrived here as ONE flat column sorted by a slug whose
+ * first half repeated for pages. What is pinned below is that the owner is now a column of its
+ * own, that picking one narrows the other, and that the filter reaches BOTH halves of the slug
+ * — a filter that only matched the visible half would silently hide the repository an operator
+ * typed the full name of.
+ */
+const MANY = [
+  { slug: 'acme/site', defaultBranch: 'trunk', private: true },
+  { slug: 'acme/taken', defaultBranch: 'main', private: false },
+  { slug: 'sandbox/site', defaultBranch: 'main', private: false },
+  { slug: 'sandbox/toys', defaultBranch: 'main', private: false },
+];
+
+/** The repository column, addressed by the label the browser gives it. */
+const repoList = () => screen.getByRole('list', { name: 'Repositories' });
+
+describe('RegisterWizard — the org and repo browser', () => {
+  it('lists the owners once each, with what each one holds', async () => {
+    draw(FALLBACK, { repositories: MANY });
+    const orgs = await screen.findByRole('list', { name: 'Organizations' });
+    expect(
+      within(orgs).getByRole('button', { name: 'acme — 2 repositories' }),
+    ).toBeTruthy();
+    expect(
+      within(orgs).getByRole('button', { name: 'sandbox — 2 repositories' }),
+    ).toBeTruthy();
+  });
+
+  it('shows one owner’s repositories at a time, and switches on the click', async () => {
+    draw(FALLBACK, { repositories: MANY });
+    await screen.findByRole('button', { name: 'acme — 2 repositories' });
+    // The first owner is open, because a browser that opens on nothing makes the operator
+    // click twice to see the list they came for.
+    expect(within(repoList()).getByRole('button', { name: /acme\/site\b/ })).toBeTruthy();
+    expect(within(repoList()).queryByRole('button', { name: /sandbox\/toys/ })).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'sandbox — 2 repositories' }));
+    expect(within(repoList()).getByRole('button', { name: /sandbox\/toys/ })).toBeTruthy();
+    expect(within(repoList()).queryByRole('button', { name: /acme\/taken/ })).toBeNull();
+  });
+
+  it('filters on the whole slug, so the owner half narrows the owners', async () => {
+    draw(FALLBACK, { repositories: MANY });
+    await screen.findByRole('button', { name: 'acme — 2 repositories' });
+
+    await userEvent.type(screen.getByLabelText('Filter repositories'), 'sandbox');
+    // The owner column is derived from what matched, so filtering by owner IS choosing one.
+    expect(screen.queryByRole('button', { name: /^acme — / })).toBeNull();
+    expect(within(repoList()).getByRole('button', { name: /sandbox\/site/ })).toBeTruthy();
+  });
+
+  it('filters on the repository half across every owner at once', async () => {
+    // `site` exists under both owners, and the point of one filter over two columns is that
+    // this shows both rather than only the one whose column happens to be open.
+    draw(FALLBACK, { repositories: MANY });
+    await screen.findByRole('button', { name: 'acme — 2 repositories' });
+
+    await userEvent.type(screen.getByLabelText('Filter repositories'), 'site');
+    expect(screen.getByRole('button', { name: 'acme — 1 repository' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'sandbox — 1 repository' })).toBeTruthy();
+    expect(within(repoList()).queryByRole('button', { name: /acme\/taken/ })).toBeNull();
+  });
+
+  it('says the filter matched nothing rather than drawing an empty frame', async () => {
+    draw(FALLBACK, { repositories: MANY });
+    await screen.findByRole('button', { name: 'acme — 2 repositories' });
+
+    await userEvent.type(screen.getByLabelText('Filter repositories'), 'nope');
+    expect(
+      screen.getByText(/No repository this installation granted matches/),
+    ).toBeTruthy();
+  });
+
+  it('picks a repository from a column that shows only its name', async () => {
+    // The owner is a heading in the other column now, so the row's own text is the name alone
+    // — but the pick still carries the full slug, which is what the wizard registers.
+    const { client } = draw(FALLBACK, { repositories: MANY });
+    await screen.findByRole('button', { name: 'acme — 2 repositories' });
+    await userEvent.click(
+      within(repoList()).getByRole('button', { name: /acme\/site\b/ }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText(/step 2 of 3/);
+    expect(client.connectionDeclaration).toHaveBeenCalledWith('c1', 'acme/site', 'trunk');
   });
 });
 
