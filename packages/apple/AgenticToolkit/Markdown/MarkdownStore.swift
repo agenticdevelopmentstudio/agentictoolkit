@@ -67,8 +67,8 @@ public final class MarkdownStore: @unchecked Sendable {
     /// pushes through its outbox (Task 11).
     public let syncStore: GRDBSyncStore
 
-    private let customerID: String
-    private let ecosystemID: String
+    let customerID: String
+    let ecosystemID: String
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
