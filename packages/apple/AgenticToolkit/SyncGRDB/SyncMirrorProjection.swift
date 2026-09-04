@@ -32,6 +32,26 @@ public protocol SyncMirrorProjection: Sendable {
         resource: String, id: String, syncVersion: Int,
         data: [String: JSONValue], in conn: Database) throws
 
+    /// The `isFullRow`-aware overload of the requirement above. `isFullRow`
+    /// tells the projection whether `data` is the server's whole current row
+    /// (`true` — a pulled change from `apply`) or a deliberate partial patch
+    /// (`false` — a local mutation staged through `stage(_:)`); a projection
+    /// that force-binds a column regardless of whether `data` supplies it
+    /// (e.g. a delete-state tombstone on a full-row pull) needs that signal
+    /// to avoid doing the same thing to a partial patch, where it would
+    /// silently overwrite a column the patch never meant to touch.
+    ///
+    /// This has a default implementation below that forwards to the
+    /// original requirement above, ignoring `isFullRow` — so a projection
+    /// written before this parameter existed (or one with no reason to care
+    /// about the distinction) needs no changes at all to keep conforming.
+    /// `GRDBSyncStore`'s two call sites always call this overload directly,
+    /// naming which case they are; only a projection that wants to
+    /// distinguish the two overrides it.
+    func upsert(
+        resource: String, id: String, syncVersion: Int,
+        data: [String: JSONValue], isFullRow: Bool, in conn: Database) throws
+
     /// `syncVersion` is `nil` for a local delete, which has no server version
     /// yet; the projection should leave the stored version alone in that case.
     func markDeleted(resource: String, id: String, syncVersion: Int?, in conn: Database) throws
@@ -50,4 +70,23 @@ public protocol SyncMirrorProjection: Sendable {
     func rows(resource: String, limit: Int, offset: Int, in conn: Database) throws -> [[String: JSONValue]]
 
     func row(resource: String, id: String, in conn: Database) throws -> [String: JSONValue]?
+}
+
+public extension SyncMirrorProjection {
+    /// Default for the `isFullRow`-aware requirement: forward to the
+    /// original `upsert(resource:id:syncVersion:data:in:)`, discarding
+    /// `isFullRow`. This is what makes adding the new requirement
+    /// source-compatible for every conformer written before it existed —
+    /// dispatch through `any SyncMirrorProjection` still resolves to this
+    /// default for a type that never overrides it (the same
+    /// default-satisfies-a-requirement mechanism `Collection.count` uses:
+    /// the default runs unless the conformer supplies its own
+    /// implementation of this exact requirement, in which case dispatch
+    /// picks that one instead, even through an existential).
+    func upsert(
+        resource: String, id: String, syncVersion: Int,
+        data: [String: JSONValue], isFullRow: Bool, in conn: Database
+    ) throws {
+        try upsert(resource: resource, id: id, syncVersion: syncVersion, data: data, in: conn)
+    }
 }

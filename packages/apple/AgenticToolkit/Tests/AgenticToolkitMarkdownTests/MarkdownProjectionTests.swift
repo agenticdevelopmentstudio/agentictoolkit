@@ -260,7 +260,7 @@ struct MarkdownProjectionTests {
         }
     }
 
-    @Test("sync_txid round-trips through a pulled upsert")
+    @Test("sync_txid and sync_stamped_at round-trip through a pulled upsert")
     func syncTxidRoundTrips() async throws {
         let store = try store()
         try await store.syncStore.apply([
@@ -275,6 +275,12 @@ struct MarkdownProjectionTests {
             let syncTxid = try Int.fetchOne(
                 conn, sql: "SELECT sync_txid FROM markdown WHERE id = 'm1'")
             #expect(syncTxid == 99)
+            // `sync_stamped_at` is one of `timestampColumns` (round 1 fix
+            // #5), so it must come out normalised the same as
+            // created_at/updated_at, not merely non-nil.
+            let syncStampedAt = try String.fetchOne(
+                conn, sql: "SELECT sync_stamped_at FROM markdown WHERE id = 'm1'")
+            #expect(syncStampedAt == "2026-01-01T00:00:01.000Z")
         }
     }
 
@@ -367,6 +373,77 @@ struct MarkdownProjectionTests {
             let deletedAt = try String.fetchOne(
                 conn, sql: "SELECT deleted_at FROM markdown WHERE id = 'm1'")
             #expect(deletedAt == "2026-01-01T00:00:00.000Z")
+            // This payload — `deleted_at` present, `is_deleted` absent — is
+            // exactly the shape fix #1's round-2 regression fell into:
+            // `excluded.is_deleted` falling back to the column's own
+            // `DEFAULT 0` would leave `is_deleted = 0` while `deleted_at` is
+            // non-null, the two flags disagreeing. `is_deleted` must be
+            // *derived* from `deleted_at` here, not defaulted independently.
+            let isDeleted = try Int.fetchOne(
+                conn, sql: "SELECT is_deleted FROM markdown WHERE id = 'm1'")
+            #expect(isDeleted == 1)
+        }
+    }
+
+    /// The regression fix #1's round-1 force-bind introduced: a payload that
+    /// carries a genuine tombstone (`deleted_at` present) but omits
+    /// `is_deleted` — the shape `deletedAtColumnIsNormalisedOnIngest` above
+    /// already sends — must hide the row through *both* of the projection's
+    /// visibility gates, not just one. `document(id:)` gates on `is_deleted`
+    /// alone; `liveRow`/`rows`/`row` gate on `deleted_at` alone. Before this
+    /// round's fix, `is_deleted` silently defaulted to 0 (unset) while
+    /// `deleted_at` stayed non-null, so the two disagreed: `document(id:)`
+    /// showed a server-deleted document as live while `liveRow` still hid
+    /// it.
+    @Test("deleted_at without is_deleted hides the row via document(id:) and liveRow")
+    func deletedAtWithoutIsDeletedHidesTheRowEverywhere() async throws {
+        let store = try store()
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.markdown", id: "m1", op: .upsert, syncVersion: "1",
+                       data: ["title": .string("t"), "content": .string("c"),
+                              "created_at": .string("2026-01-01T00:00:00Z"),
+                              "updated_at": .string("2026-01-01T00:00:00Z"),
+                              "deleted_at": .string("2026-01-02T00:00:00Z")])
+        ], advancingTo: nil)
+        #expect(try store.document(id: "m1") == nil)
+        #expect(try store.syncStore.liveRow(resource: "content.markdown", id: "m1") == nil)
+    }
+
+    /// The fix for concern B (round 2): `upsert`'s `isFullRow` parameter is
+    /// what stops a local `stage(_:)` partial patch from force-clearing a
+    /// tombstone the way a full-row pull is allowed to. This pins the
+    /// behaviour directly, independent of whether any current
+    /// `MarkdownTaxonomy` write method actually does this today — a future
+    /// one staging a partial patch against an existing, previously-deleted
+    /// taxonomy row must not resurrect it.
+    @Test("a partial local stage against a tombstoned row leaves the tombstone intact")
+    func partialLocalStageDoesNotResurrectATombstonedRow() async throws {
+        let store = try store()
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.categories", id: "c1", op: .upsert, syncVersion: "1",
+                       data: ["name": .string("Recipes"),
+                              "created_at": .string("2026-01-01T00:00:00Z"),
+                              "updated_at": .string("2026-01-01T00:00:00Z")])
+        ], advancingTo: nil)
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.categories", id: "c1", op: .delete, syncVersion: "2", data: nil)
+        ], advancingTo: nil)
+        #expect(try store.syncStore.liveRow(resource: "content.categories", id: "c1") == nil)
+
+        // A partial local patch — the `stage(_:)` shape every
+        // `MarkdownTaxonomy` write method sends — against the now-tombstoned
+        // row. It never mentions `deleted_at`.
+        try store.database.write { conn in
+            try store.syncStore.stage(LocalMutation(
+                resource: "content.categories", rowId: "c1", type: .upsert,
+                data: ["name": .string("renamed")]), in: conn)
+        }
+
+        #expect(try store.syncStore.liveRow(resource: "content.categories", id: "c1") == nil)
+        try store.database.read { conn in
+            let deletedAt = try String.fetchOne(
+                conn, sql: "SELECT deleted_at FROM categories WHERE id = 'c1'")
+            #expect(deletedAt != nil)
         }
     }
 }

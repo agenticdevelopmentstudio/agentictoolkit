@@ -198,9 +198,14 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
                                 resource: change.resource, id: change.id,
                                 syncVersion: version, in: conn)
                         } else {
+                            // A pulled change is adh's whole current row, not a
+                            // partial patch — `isFullRow: true` is what lets a
+                            // projection force-bind a delete-state column here
+                            // that it must leave alone on `stage`'s partial-patch
+                            // path below.
                             try projection.upsert(
                                 resource: change.resource, id: change.id, syncVersion: version,
-                                data: change.data ?? [:], in: conn)
+                                data: change.data ?? [:], isFullRow: true, in: conn)
                         }
                         continue
                     }
@@ -293,9 +298,15 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
                 try projection.markDeleted(
                     resource: mutation.resource, id: mutation.rowId, syncVersion: nil, in: conn)
             } else {
+                // A staged local mutation is a deliberate partial patch, not
+                // adh's whole row — `isFullRow: false` is what stops a
+                // projection from force-binding a delete-state column here
+                // the way it does on the pull path above, which would
+                // otherwise silently clear a tombstone the patch never meant
+                // to touch.
                 try projection.upsert(
                     resource: mutation.resource, id: mutation.rowId, syncVersion: base ?? 0,
-                    data: mutation.data ?? [:], in: conn)
+                    data: mutation.data ?? [:], isFullRow: false, in: conn)
             }
         } else {
             let table = try Self.mirrorTableName(for: mutation.resource)
