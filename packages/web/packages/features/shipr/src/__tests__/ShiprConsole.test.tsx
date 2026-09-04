@@ -220,7 +220,7 @@ describe('ShiprConsole — the gear menu', () => {
     window.history.replaceState(null, '', '/acme?workspace=acme#connections');
     try {
       render(<ShiprConsole client={stubClient()} />);
-      expect(await screen.findByText('Connections', { selector: '[data-slot="dialog-title"]' }))
+      expect(await screen.findByText('Integrations', { selector: '[data-slot="dialog-title"]' }))
         .toBeTruthy();
       // And ONLY that one. Connections used to be a child of Configure, so the return leg
       // opened both and landed the operator on repository settings they had not asked for,
@@ -242,7 +242,7 @@ describe('ShiprConsole — the gear menu', () => {
     expect(integrations).not.toBeDisabled();
     await userEvent.click(integrations);
     expect(
-      await screen.findByText('Connections', { selector: '[data-slot="dialog-title"]' }),
+      await screen.findByText('Integrations', { selector: '[data-slot="dialog-title"]' }),
     ).toBeTruthy();
     expect(
       screen.queryByText('Configure', { selector: '[data-slot="dialog-title"]' }),

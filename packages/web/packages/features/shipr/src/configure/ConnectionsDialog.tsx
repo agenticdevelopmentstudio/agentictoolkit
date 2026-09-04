@@ -191,7 +191,7 @@ export function ConnectionsDialog({
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="flex h-[80vh] max-w-5xl flex-col gap-4">
         <DialogHeader>
-          <DialogTitle>Connections</DialogTitle>
+          <DialogTitle>Integrations</DialogTitle>
         </DialogHeader>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-apt-border">
           {/* Mounted only while open, like Configure's own body: the ecosystem resolution is
@@ -199,13 +199,14 @@ export function ConnectionsDialog({
               closes. */}
           {open ? <ConnectionsBody client={client} onChanged={onChanged} /> : null}
         </div>
-        {/* ONE button, and it says Done rather than OK. Every write on this screen has already
-            happened — the detail view owns its own Save, and removing an integration confirms
-            itself — so there is nothing here for a Cancel to abandon, and offering one would
-            promise an undo that does not exist. */}
+        {/* ONE button, and it says OK — the word every dialog in this console dismisses on,
+            so an operator never has to read the footer to know which one closes it. There is no
+            Cancel beside it because every write on this screen has already happened: the detail
+            view owns its own Save, and removing an integration confirms itself. A Cancel here
+            would promise an undo that does not exist. */}
         <DialogFooter>
           <Button type="button" onClick={onClose}>
-            Done
+            OK
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -260,7 +261,7 @@ function ConnectionsBody({
         ecosystemId={ecosystemId}
         providerIds={PROVIDERS}
         addFilter={ADD_FILTER}
-        levelTitle="Connections"
+        levelTitle="Integrations"
         onChanged={onChanged}
       />
     </StandaloneRailHost>

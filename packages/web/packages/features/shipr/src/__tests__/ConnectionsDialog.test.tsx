@@ -103,12 +103,14 @@ describe('the Connections dialog frame', () => {
     ).toBeInTheDocument();
   });
 
-  it('offers Done and nothing to cancel', async () => {
-    // Every write on this screen has already happened — the detail view owns its own Save,
-    // and removing an integration confirms itself — so a Cancel would promise an undo that
-    // does not exist.
+  it('offers OK and nothing to cancel', async () => {
+    // OK, not Done: it is the word every dialog in this console dismisses on, and a footer
+    // that varies by dialog makes an operator read it to find the button that closes. There is
+    // no Cancel because every write on this screen has already happened — the detail view owns
+    // its own Save, and removing an integration confirms itself — so one would promise an undo
+    // that does not exist.
     const { onClose } = draw();
-    await userEvent.click(await screen.findByRole('button', { name: 'Done' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'OK' }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
   });
@@ -133,7 +135,7 @@ describe('the Connections dialog frame', () => {
     // mounted when it closes, so the body is what has to go.
     render(<ConnectionsDialog {...PROPS} open={false} />);
     expect(screen.queryByText('integrations detail')).toBeNull();
-    expect(dialog('Connections')).toBeUndefined();
+    expect(dialog('Integrations')).toBeUndefined();
   });
 });
 

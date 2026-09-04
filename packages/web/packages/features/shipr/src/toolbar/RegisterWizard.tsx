@@ -40,7 +40,7 @@ import { useSubmit } from './dialogs';
  * omission: GitHub's own installation page is that browser, it is where the grant is made, and
  * a picker of ours could only ever offer repositories we hold no token for. When the list is
  * missing what the operator wants, the answer is to grant it there — so the empty state points
- * at Connections rather than at a search box.
+ * at Integrations rather than at a search box.
  *
  * WHAT IT IS ABOUT TO DO, in the words the confirm step uses: read the repository's committed
  * `.shipr` on its main branch; find or create the deployment repository, always private; seed
@@ -80,7 +80,7 @@ export interface RegisterWizardProps {
    * one thing the operator needs to stop looking.
    */
   registeredSlugs?: readonly string[];
-  /** Leave for the Connections pane. Called when the installation granted nothing, which is a
+  /** Leave for the Integrations dialog. Called when the installation granted nothing, which is a
    *  problem only that surface can fix. */
   onManageConnections?: () => void;
   onSubmit: (body: RegisterRequest) => Promise<void>;
@@ -520,9 +520,12 @@ function Missing({
   return (
     <div className="flex flex-col items-start gap-2 rounded border border-apt-border bg-apt-surface-2 px-3 py-2">
       <p className="text-xs text-apt-text-muted">{text}</p>
+      {/* The button is labelled for where it GOES, not for what the prop is called. The
+          destination is the dialog the toolbar's Integrations button opens, and a button that
+          said "Connections" would land the operator on a title they had not asked for. */}
       {onManageConnections ? (
         <Button type="button" size="sm" variant="ghost" onClick={onManageConnections}>
-          Connections
+          Integrations
         </Button>
       ) : null}
     </div>
