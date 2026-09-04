@@ -16,15 +16,14 @@ vi.mock('../live', () => ({
 }));
 
 /**
- * The Connections dialog's two outside edges, stubbed — because one spec below opens it.
+ * The Connections dialog's two outside edges, stubbed — because two specs below open it.
  *
- * `#connections` in the address opens Configure, and Configure's `connectionsOpen` initialises
- * from that same fragment, so the Connections body mounts on the SAME render. That body resolves
- * the workspace's infrastructure ecosystem, which is a real `GET /api/ecosystem/ecosystems`
- * against an unmocked `fetch`. It never made the spec fail: the assertion resolves first and
- * react-query swallows the rejection, so the request left as an unhandled fetch to a host jsdom
- * has no route to — passing, then, for a reason unrelated to what is under test, and failing
- * later against whatever a future runner does with real network calls.
+ * `#connections` in the address opens that dialog, whose body resolves the workspace's
+ * infrastructure ecosystem, which is a real `GET /api/ecosystem/ecosystems` against an unmocked
+ * `fetch`. It never made the spec fail: the assertion resolves first and react-query swallows
+ * the rejection, so the request left as an unhandled fetch to a host jsdom has no route to —
+ * passing, then, for a reason unrelated to what is under test, and failing later against
+ * whatever a future runner does with real network calls.
  *
  * `CONNECTIONS_HASH` is the REAL one (`importOriginal`): it is the string both ends of the OAuth
  * round-trip must agree on, and this file's whole point is that the console recognises it. A
@@ -217,20 +216,37 @@ describe('ShiprConsole — the gear menu', () => {
    * operator was. Without this the new connection lands on a bare tree with every dialog
    * closed, which reads as the connect having failed rather than succeeded.
    */
-  it('reopens Configure — and Connections inside it — when the address names Connections', async () => {
+  it('reopens Connections when the address names it', async () => {
     window.history.replaceState(null, '', '/acme?workspace=acme#connections');
     try {
       render(<ShiprConsole client={stubClient()} />);
-      expect(await screen.findByText('Configure', { selector: '[data-slot="dialog-title"]' }))
-        .toBeTruthy();
-      // Configure alone is not the destination: the fragment names Connections, and a return
-      // leg that stopped one dialog short would leave the operator looking at repository
-      // settings with no sign the connect they left to make had landed.
       expect(await screen.findByText('Connections', { selector: '[data-slot="dialog-title"]' }))
         .toBeTruthy();
+      // And ONLY that one. Connections used to be a child of Configure, so the return leg
+      // opened both and landed the operator on repository settings they had not asked for,
+      // with the dialog they left to fill stacked on top of it.
+      expect(
+        screen.queryByText('Configure', { selector: '[data-slot="dialog-title"]' }),
+      ).toBeNull();
     } finally {
       window.history.replaceState(null, '', '/');
     }
+  });
+
+  it('opens Connections from Integrations on the bar, with nothing selected', async () => {
+    // The forge accounts are the ecosystem's, not this tree's — so the button that opens them
+    // is live from the moment the console is, and it is a sibling of Configure rather than
+    // something inside it.
+    render(<ShiprConsole client={stubClient()} />);
+    const integrations = await screen.findByRole('button', { name: 'Integrations' });
+    expect(integrations).not.toBeDisabled();
+    await userEvent.click(integrations);
+    expect(
+      await screen.findByText('Connections', { selector: '[data-slot="dialog-title"]' }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText('Configure', { selector: '[data-slot="dialog-title"]' }),
+    ).toBeNull();
   });
 
   it('leaves Configure shut on an ordinary load', async () => {

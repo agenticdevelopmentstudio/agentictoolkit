@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { RefreshCw, Rocket, SlidersHorizontal, Square, Wrench } from 'lucide-react';
+import { Plug, RefreshCw, Rocket, SlidersHorizontal, Square, Wrench } from 'lucide-react';
 
 import { Button } from '@agenticdevelopertoolkit/ui/components/button';
 import { Spinner } from '@agenticdevelopertoolkit/ui/components/spinner';
@@ -9,7 +9,8 @@ import { Spinner } from '@agenticdevelopertoolkit/ui/components/spinner';
 import type { ActionId, ToolbarState } from './actions';
 
 /**
- * The button bar: the verbs that MOVE COMMITS, plus the one door to configuration.
+ * The button bar: the verbs that MOVE COMMITS, then the two doors that are not verbs at all
+ * — Configure, and Integrations out on the right.
  *
  * It used to carry the folder verbs too — new folder, rename, move, delete, select,
  * register, unregister — nine controls above a tree, most of them dead most of the time.
@@ -22,6 +23,12 @@ import type { ActionId, ToolbarState } from './actions';
  * while those two are about a forge on the other end of a network call, and neither belongs
  * to the folder it happened to be filed under. Configure is where they live now, and it is
  * on this bar rather than in a menu because it is a place rather than an act.
+ *
+ * Integrations came back OUT of Configure for the mirror of that reason. It had been a button
+ * on the repository list's bar, two clicks in, filed under the rows that depend on it — which
+ * made the forge credentials read as a per-repository setting rather than as the one thing
+ * every run in the workspace goes out over. It is a place too, and a different place, so it
+ * gets its own door.
  *
  * It draws and nothing else — every button is a callback, and whether a button is live is
  * `toolbarState`'s answer, computed elsewhere and passed in. That split is what lets the
@@ -41,10 +48,12 @@ export interface ToolbarProps {
   onDeploy: () => void;
   /** Stop the work in flight. Live only while there IS work — see `toolbarState`. */
   onCancel: () => void;
-  /** Open the Configure dialog: the list of registered repositories, their settings, the
-   *  register wizard, and the forge connections behind all of it. Always live — what may be
-   *  done in there is gated in there. */
+  /** Open the Configure dialog: the list of registered repositories, their settings, and
+   *  the register wizard. Always live — what may be done in there is gated in there. */
   onConfigure: () => void;
+  /** Open Integrations: the forge accounts every run goes out over. Always live — see
+   *  `integrations` in `toolbarState`. */
+  onIntegrations: () => void;
   /**
    * Which button started the work that is in flight, if any.
    *
@@ -111,6 +120,7 @@ export function Toolbar({
   onDeploy,
   onCancel,
   onConfigure,
+  onIntegrations,
   active = null,
   className,
 }: ToolbarProps): React.ReactElement {
@@ -164,17 +174,35 @@ export function Toolbar({
         onClick={onCancel}
       />
 
-      {/* Last, and always live. It is the only control here that is not a verb: the three
-          before it do something to what is selected, this one opens the place where what is
-          selected came from. A viewer who cannot register anything still gets in — and finds
-          Add and Remove refused with a reason, which is more of an answer than a grey button
-          out here could give them. */}
+      {/* Always live. It is not a verb: the three before it do something to what is
+          selected, this one opens the place where what is selected came from. A viewer who
+          cannot register anything still gets in — and finds Add and Remove refused with a
+          reason, which is more of an answer than a grey button out here could give them. */}
       <Action
         id="configure"
         state={state}
         label="Configure"
         icon={<SlidersHorizontal className="adh-button__icon" />}
         onClick={onConfigure}
+      />
+
+      {/* PUSHED TO THE FAR RIGHT, and alone over there, because it is the only control on
+          this bar that is not about this console's own contents. Status, Prepare, Deploy and
+          Cancel act on the selected rows; Configure opens the list those rows come from. This
+          one opens the credentials all of it runs out over — the same accounts every other
+          shipr workspace uses, owned by the ecosystem rather than by this tree — so it sits
+          across the gap rather than fifth in a row of five.
+
+          It used to be two clicks inside Configure, on a bar under a repository list it has
+          nothing to do with. That placement was the reason it was hard to find and the reason
+          it read as a setting on the repositories rather than the thing they all depend on. */}
+      <div className="flex-1" />
+      <Action
+        id="integrations"
+        state={state}
+        label="Integrations"
+        icon={<Plug className="adh-button__icon" />}
+        onClick={onIntegrations}
       />
     </div>
   );

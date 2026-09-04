@@ -112,6 +112,7 @@ export function IntegrationsPane({
   ecosystemId,
   providerIds,
   levelTitle = "Integrations",
+  addFilter,
   leaf,
   onChanged,
 }: {
@@ -131,6 +132,14 @@ export function IntegrationsPane({
    *  because a rail level called "Integrations" holding only Stripe rows, inside a site called
    *  Billing, names the wrong thing three times. */
   levelTitle?: string;
+  /**
+   * What the Add-integration picker's filter box starts on — passed straight through. Shipr's
+   * Connections passes `"Code"`, so the picker opens on the forges instead of on the alphabet.
+   *
+   * Distinct from `providerIds`, which is a restriction: this is a starting value the operator
+   * can see in the box and clear.
+   */
+  addFilter?: string;
   /** Accepted for the ScopedPane prop shape; the breadcrumb + level title name the pane now. */
   title?: ReactNode;
   /** Accepted for the ScopedPane prop shape; there is no button bar to host a "?" popover now. */
@@ -477,6 +486,7 @@ export function IntegrationsPane({
         onOpenChange={setModalOpen}
         ecosystemId={ecosystemId ?? ""}
         providers={offerableProviders}
+        initialFilter={addFilter}
         // Do NOT close the modal here — it stays open so the user can add another; it closes via
         // its own ✕/Escape. Selecting the new address means the created instance's detail is
         // showing once they DO close it.

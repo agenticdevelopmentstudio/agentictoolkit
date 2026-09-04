@@ -14,13 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@agenticdevelopertoolkit/ui/components/dialog';
-import { Download, Minus, Plug, Plus, Upload } from 'lucide-react';
+import { Download, Minus, Plus, Upload } from 'lucide-react';
 
-import {
-  ConnectionsDialog,
-  connectionsHashPresent,
-  syncConnectionsHash,
-} from './ConnectionsDialog';
 import { buildDocument } from '../exchange/document';
 import { downloadDocument } from '../exchange/files';
 import { ImportDialog } from '../exchange/ImportDialog';
@@ -41,14 +36,12 @@ import type {
 import type { ShiprClient } from '../client';
 
 /**
- * Configuration: the repositories this console knows about, what each one is made of, and
- * the forge credentials all of it runs on.
+ * Configuration: the repositories this console knows about, and what each one is made of.
  *
  * ONE PLACE, because they are one subject. Registering used to be an entry in a folder's
- * gear menu, unregistering another one two lines below it, a repository's settings a third,
- * and the connections they all depend on were not in this product at all — they were a
- * different site. Four doors onto one question ("what is set up here, and how"), none of
- * which showed the other three.
+ * gear menu, unregistering another one two lines below it, and a repository's settings a
+ * third — three doors onto one question ("what is registered here, and how"), none of which
+ * showed the other two.
  *
  * IT IS A DIALOG, NOT A PAGE. Configuration is not the answer to "how is this fleet doing",
  * which is the whole of the console behind it; opening this is a deliberate detour, and it
@@ -70,10 +63,19 @@ import type { ShiprClient } from '../client';
  * nodes, so a bar whose buttons had just greyed out sat stale until something unrelated
  * moved, and the level had to carry a `busy` it did not otherwise need to force the issue.
  *
- * CONNECTIONS IS ITS OWN DIALOG ({@link ConnectionsDialog}), not a third pane in this one.
- * The reason is structural and is written out there: a pane published into this rail while
- * the repository list is unselected is sliced off before it can draw, which took the only
- * "Add integration" button in the feature with it.
+ * INTEGRATIONS IS NOT IN HERE AT ALL any more — it is `ConnectionsDialog`, opened from the
+ * console's own toolbar. It had been a button on this bar, and that was wrong twice over.
+ * Structurally, a pane published into this rail while the repository list is unselected is
+ * sliced off before it can draw, which took the only "Add integration" button in the feature
+ * with it. And in meaning: filed under a bar that says Add / Remove / Import / Export over a
+ * list of repositories, the forge accounts read as a property of that list. They are not.
+ * The list belongs to this workspace; the accounts belong to the ecosystem, and every
+ * workspace on it goes out over the same ones.
+ *
+ * What survives of the connection here is one-way and read-only: {@link connections} is
+ * passed down so the register wizard and the importer can OFFER a connection to register
+ * against, and {@link onManageConnections} is the way out to the dialog that manages them —
+ * the console swaps this dialog for that one, rather than stacking a third modal.
  */
 
 const REPOS_LEVEL_ID = 'shipr-configure-repos';
@@ -102,11 +104,15 @@ export interface ConfigureDialogProps {
   /** A run is in flight from this console. Add and Remove stand down; settings do not — see
    *  `configure` in `toolbarState`. */
   busy?: boolean;
+  /** The forge accounts the wizard and the importer may register AGAINST. Read-only here —
+   *  this dialog no longer manages them; see {@link onManageConnections}. */
   connections?: readonly ForgeConnection[];
-  /** A connection was added, removed or re-credentialed on the Connections dialog, so whoever
-   *  read {@link connections} should read them again. Optional: a host that has no way to
-   *  re-read simply shows the list it has until the next load. */
-  onConnectionsChanged?: () => void;
+  /** Leave for the Integrations dialog, because the operator has just found that
+   *  {@link connections} is empty or missing the account they want. The host is expected to
+   *  CLOSE this dialog and open that one — they are siblings on the console, not nested, so
+   *  there is no stack to come back to. Optional: a host with nowhere to send them simply
+   *  does not offer the link. */
+  onManageConnections?: () => void;
   onRegister: (body: RegisterRequest) => Promise<void>;
   /** Unregister every mirror and retire the source row. One call, not one per mirror: the
    *  backend expands a `dev_repo` scope itself, and a browser tab closed halfway through a
@@ -150,7 +156,7 @@ function ConfigureBody({
   verbs,
   busy = false,
   connections,
-  onConnectionsChanged,
+  onManageConnections,
   onRegister,
   onRemove,
   onSaveSettings,
@@ -159,17 +165,6 @@ function ConfigureBody({
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [wizard, setWizard] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
-  /* Seeded from the address, and written back to it — see `CONNECTIONS_HASH`. This body is
-     mounted only while Configure is open, and Configure is what the console opens when it
-     finds that hash, so reading it here is reading it once per arrival rather than racing
-     the console's own effect. */
-  const [connectionsOpen, setConnectionsOpen] = React.useState(connectionsHashPresent);
-  React.useEffect(() => {
-    syncConnectionsHash(connectionsOpen);
-  }, [connectionsOpen]);
-  /* Configure closing takes Connections with it, so the hash has to go too — the effect
-     above cannot see it, because this whole body unmounts. */
-  React.useEffect(() => () => syncConnectionsHash(false), []);
   const [removing, setRemoving] = React.useState<Row | null>(null);
 
   /** Why the bar just refused a press — see `BarButton`. Null when nothing was refused. */
@@ -257,10 +252,9 @@ function ConfigureBody({
   return (
     <>
       {/* ABOVE the rail, and the dialog's bar rather than the list's — see the note at the
-          top of this file. Connections is not gated: reading which credentials exist is not
-          a write, and a viewer who cannot register anything is still the person most likely
-          to be asked why a run failed to reach the forge. That dialog refuses its own
-          writes. */}
+          top of this file. Every button on it acts on the repository list, which is what
+          makes it the right bar for them and was what made it the wrong bar for the forge
+          accounts that used to sit on its right-hand end. */}
       <div className="flex items-center gap-2">
         <BarButton
           label="Add"
@@ -297,16 +291,6 @@ function ConfigureBody({
           onClick={() => downloadDocument(buildDocument({ groups, items }))}
           onRefused={setRefused}
         />
-        <div className="flex-1" />
-        <Button
-          type="button"
-          size="xs"
-          variant="ghost"
-          onClick={() => setConnectionsOpen(true)}
-        >
-          <Plug />
-          Connections
-        </Button>
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-apt-border">
@@ -358,10 +342,18 @@ function ConfigureBody({
         groups={groups}
         connections={connections}
         registeredSlugs={rows.map((r) => r.devRepo.slug)}
-        onManageConnections={() => {
-          setWizard(false);
-          setConnectionsOpen(true);
-        }}
+        /* Closes the wizard on the way out. The console is about to swap this whole dialog
+           for Integrations, so leaving the wizard open would leave it mounted behind a
+           dialog it can no longer be seen from — and showing again, mid-form, if the
+           operator came back to Configure. */
+        onManageConnections={
+          onManageConnections
+            ? () => {
+                setWizard(false);
+                onManageConnections();
+              }
+            : undefined
+        }
         onSubmit={onRegister}
       />
 
@@ -372,13 +364,6 @@ function ConfigureBody({
         items={items}
         connections={connections}
         onImport={onImport}
-      />
-
-      <ConnectionsDialog
-        open={connectionsOpen}
-        onClose={() => setConnectionsOpen(false)}
-        client={client}
-        onChanged={onConnectionsChanged}
       />
 
       <TypeToConfirmDialog
@@ -508,8 +493,8 @@ function DetailPane({
   return (
     <TopicSelectHint noun="repository" listTitle="Repositories">
       Its deployment repositories, the branches they are cut from, and which environments
-      each one ships to. Add registers a new one; Connections holds the forge credentials
-      every run goes out over.
+      each one ships to. Add registers a new one — against a forge account from Integrations,
+      out on the right of the toolbar.
     </TopicSelectHint>
   );
 }

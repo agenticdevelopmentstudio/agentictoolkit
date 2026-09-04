@@ -1,31 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import * as React from 'react';
 
 import { useStackLevel } from '@agentic-toolkit/resource';
 
-import type { AccessVerb, DevRepo, Environment, RepoItem } from '../types';
+import type { DevRepo, Environment, RepoItem } from '../types';
 
 /**
  * The Configure dialog's FRAME — the three things that are true of it before any of its
- * contents are: where the bar is, what the footer's two buttons commit, and that Connections
- * is a dialog of its own.
+ * contents are: where the bar is, what the footer's two buttons commit, and that the forge
+ * accounts are NOT in here.
  *
  * All three were reported as defects against a build that had none of them, and two of the
- * three are invisible to a type checker and to every other test in this package: a bar
- * hung inside the rail still renders, a modal with no footer still closes, and a rail level
- * published where the stack cannot reach it still registers. The only way any of them fails
- * loudly is a test that asks the DOM where things ended up.
+ * three are invisible to a type checker and to every other test in this package: a bar hung
+ * inside the rail still renders, and a modal with no footer still closes. The only way either
+ * fails loudly is a test that asks the DOM where things ended up.
  *
- * `IntegrationsPane` is stood in for, because what is being pinned is not the pane — it is
- * the POSITION the pane is mounted in. The stub publishes a rail level with an `onNew`
- * exactly as the real one does, through the real `useStackLevel` and the real rail host, so
- * the "Add integration" button it asks for is drawn by the real machinery or not at all.
- * Under the old arrangement it was not: the pane sat in Configure's detail area while
- * Configure's repository list was UNSELECTED, and `HierarchicalDetailView` renders levels
- * only as far as the first unselected one, so the level carrying that button was sliced off
- * every time.
+ * `IntegrationsPane` is stood in for because this file is about the frame, not the pane; what
+ * the dialog it now lives in has to get right is pinned in `ConnectionsDialog.test.tsx`.
  */
 
 vi.mock('@agentic-toolkit/data/ecosystems', () => ({
@@ -160,18 +153,15 @@ describe('the Configure dialog frame', () => {
     expect(screen.queryByRole('button', { name: /^Save/ })).toBeNull();
   });
 
-  it('opens Connections as its own dialog, where its add button can be drawn', async () => {
-    draw();
-    await userEvent.click(await screen.findByRole('button', { name: 'Connections' }));
-    const connections = await waitFor(() => dialog('Connections'));
-    // The whole point: the integrations level is the FIRST level of this dialog's own rail
-    // rather than an orphan under Configure's unselected repository list, so the "+" it
-    // publishes is inside the frontier the view renders.
-    expect(
-      within(connections).getByRole('button', { name: 'Add integration' }),
-    ).toBeInTheDocument();
-    // And it is a second dialog, not a pane: Configure is still open behind it.
-    expect(dialog('Configure')).toBeTruthy();
+  it('does not hold the forge accounts at all — they are a door of their own', async () => {
+    // Integrations left this dialog. It was a button on the repository list's bar, two clicks
+    // in and filed under the rows that depend on it, which made credentials owned by the
+    // ECOSYSTEM read as a per-repository setting. It is on the toolbar now, and this dialog
+    // has no way in — see `ConnectionsDialog.test.tsx` for what it opens.
+    draw([mirror({})]);
+    await screen.findByText('acme/site');
+    expect(screen.queryByRole('button', { name: 'Connections' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Integrations' })).toBeNull();
   });
 });
 
@@ -220,116 +210,5 @@ describe('the fleet as a file', () => {
     expect(await waitFor(() => dialog('Import configuration'))).toBeTruthy();
     // The bar button opens a plan; it never applies one.
     expect(onImport).not.toHaveBeenCalled();
-  });
-});
-
-/**
- * Connections is the one modal in this console whose open-ness is in the URL, and the reason
- * is that it is the one an operator can LEAVE THE APP from. Connecting a GitHub App sends the
- * browser to github.com; `/integrations/oauth-callback` returns it to the URL the connect
- * started on. Every other dialog here is React state and can be, because nothing ever unmounts
- * the page beneath it — this one has to survive a document that was thrown away and rebuilt.
- *
- * Without the hash the operator came back to a bare tree with every dialog closed and their
- * new connection nowhere in sight, which reads as the connect having failed. Nothing about
- * that is visible to a type checker, and no other test in this package ever leaves the page.
- */
-describe('Connections is the one dialog the address bar knows about', () => {
-  const at = (url: string) => window.history.replaceState(null, '', url);
-
-  beforeEach(() => at('/acme/repos?workspace=acme'));
-  afterEach(() => at('/'));
-
-  it('writes the hash when Connections opens, leaving the path and query alone', async () => {
-    draw();
-    await userEvent.click(await screen.findByRole('button', { name: 'Connections' }));
-    await waitFor(() => expect(window.location.hash).toBe('#connections'));
-    // `?workspace=` is what the console reads its tree with, so a round-trip that dropped it
-    // would come back to someone else's workspace — or to none.
-    expect(window.location.pathname).toBe('/acme/repos');
-    expect(window.location.search).toBe('?workspace=acme');
-  });
-
-  it('opens Connections straight away when the address already names it', async () => {
-    // The shape of the return leg: the callback routed here, and this body mounts fresh.
-    at('/acme/repos?workspace=acme#connections');
-    draw();
-    expect(await waitFor(() => dialog('Connections'))).toBeTruthy();
-  });
-
-  it('takes the hash back out when Connections closes', async () => {
-    at('/acme/repos?workspace=acme#connections');
-    draw();
-    const connections = await waitFor(() => dialog('Connections'));
-    await userEvent.click(within(connections).getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(window.location.hash).toBe(''));
-    expect(window.location.pathname).toBe('/acme/repos');
-  });
-
-  it('takes the hash back out when Configure itself closes', async () => {
-    at('/acme/repos?workspace=acme#connections');
-    // Configure closing unmounts the body, so its own effect can never see the change — the
-    // cleanup is what clears the address. A stale `#connections` would reopen Connections on
-    // the next Configure, over and over, with no way to make it stop.
-    const props = {
-      onClose: () => {},
-      client: { workspace: 'acme' } as never,
-      groups: [],
-      items: [],
-      verbs: ['C', 'R', 'U', 'D', 'M'] as AccessVerb[],
-      onRegister: () => Promise.resolve(),
-      onRemove: () => Promise.resolve(),
-      onSaveSettings: () => Promise.resolve(),
-      onImport: () => Promise.resolve(),
-    };
-    const { rerender } = render(<ConfigureDialog open {...props} />);
-    await waitFor(() => dialog('Connections'));
-    rerender(<ConfigureDialog open={false} {...props} />);
-    await waitFor(() => expect(window.location.hash).toBe(''));
-  });
-
-  it("takes somebody else's fragment, and gives it back when it closes", async () => {
-    // A fragment names a position within the page — an anchor a deep link aimed at, a scroll
-    // target a shared URL carried — and this dialog wants the same slot. DECLINING to open
-    // over one, which is what this did, looked like the conservative reading and was not: an
-    // operator who arrived by a deep link got a Connections dialog whose GitHub round-trip
-    // could never reopen it, because the address is the only carrier that survives the
-    // document being thrown away and the branch that writes it had refused to run. So the
-    // fragment is displaced and remembered rather than either overwritten or deferred to.
-    at('/acme/repos?workspace=acme#pricing');
-    draw();
-    await userEvent.click(await screen.findByRole('button', { name: 'Connections' }));
-    const connections = await waitFor(() => dialog('Connections'));
-    await waitFor(() => expect(window.location.hash).toBe('#connections'));
-    // The path and query are untouched either way — `?workspace=` is what the tree is read
-    // with, and only the fragment was ever this function's to claim.
-    expect(window.location.search).toBe('?workspace=acme');
-
-    await userEvent.click(within(connections).getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(screen.queryAllByRole('dialog')).toHaveLength(1));
-    // Restored, not cleared: the deep link the operator followed is still where they left it.
-    expect(window.location.hash).toBe('#pricing');
-  });
-
-  it('hands Next a null history state, not the entry Next itself stamped', async () => {
-    // Next patches `replaceState` and forwards any call whose state carries its `__NA` / `_N`
-    // marker — which is every entry Next wrote, i.e. the one we would be reading back —
-    // straight to the native implementation, skipping the router's own bookkeeping. The
-    // fragment then never reaches `canonicalUrl`, and the next render that touches history
-    // puts the old address back. `null` is the shape the patch is written for: it copies
-    // Next's internal fields across itself and updates the router with the new URL.
-    const spy = vi.spyOn(window.history, 'replaceState');
-    try {
-      draw();
-      await userEvent.click(await screen.findByRole('button', { name: 'Connections' }));
-      await waitFor(() => expect(window.location.hash).toBe('#connections'));
-      const wroteTheHash = spy.mock.calls.find(([, , url]) =>
-        String(url).endsWith('#connections'),
-      );
-      expect(wroteTheHash).toBeTruthy();
-      expect(wroteTheHash![0]).toBeNull();
-    } finally {
-      spy.mockRestore();
-    }
   });
 });

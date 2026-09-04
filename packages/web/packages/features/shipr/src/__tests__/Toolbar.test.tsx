@@ -17,6 +17,7 @@ function handlers() {
     onDeploy: vi.fn(),
     onCancel: vi.fn(),
     onConfigure: vi.fn(),
+    onIntegrations: vi.fn(),
   };
 }
 
@@ -58,8 +59,9 @@ describe('Toolbar', () => {
     // The folder verbs moved into the rail's gear menu, where they sit beside the row they
     // act on. What is left is what the bar was for — plus Cancel, which is not a fourth verb
     // but the inverse of the other three, and Configure, which is not a verb at all: it is
-    // the door to where the rows came from. Order is asserted, not just membership: Configure
-    // is LAST because everything before it acts on the selection and it does not.
+    // the door to where the rows came from. Order is asserted, not just membership: the two
+    // doors come after the four verbs, and Integrations comes last of all — it is the only
+    // control here that is about neither the selection nor this console's own contents.
     draw();
     const labels = screen
       .getAllByRole('button')
@@ -70,6 +72,7 @@ describe('Toolbar', () => {
       'Deploy',
       'Cancel — Nothing is running.',
       'Configure',
+      'Integrations',
     ]);
   });
 
@@ -79,12 +82,14 @@ describe('Toolbar', () => {
     // answer that is a button rather than the browser's stop. Configure stays live beside it
     // because reading which repositories are registered is not a second run — and the dialog
     // refuses its OWN writes while the console is busy, which is the honest place for that.
+    // Integrations stays live for the same reason, and a harder one: a run that failed to
+    // reach the forge is exactly when an operator goes looking at the credentials.
     draw({ busy: true });
     const enabled = screen
       .getAllByRole('button')
       .filter((b) => !(b as HTMLButtonElement).disabled)
       .map((b) => b.textContent);
-    expect(enabled).toEqual(['Cancel', 'Configure']);
+    expect(enabled).toEqual(['Cancel', 'Configure', 'Integrations']);
   });
 
   it('opens Configure for a viewer who may not change a thing', async () => {
@@ -97,6 +102,19 @@ describe('Toolbar', () => {
     await userEvent.click(configure);
     expect(h.onConfigure).toHaveBeenCalledTimes(1);
     expect(h.onRun).not.toHaveBeenCalled();
+  });
+
+  it('opens Integrations from the bar, without going through Configure first', async () => {
+    // The whole point of moving it out. It used to be a button on Configure's repository
+    // list, two clicks in and filed under the rows that depend on it; a viewer who cannot
+    // register anything still gets in, because reading which forges this console can reach
+    // is not a write and the dialog refuses its own.
+    const h = draw({ verbs: ['R'] });
+    const integrations = screen.getByRole('button', { name: 'Integrations' });
+    expect(integrations).not.toBeDisabled();
+    await userEvent.click(integrations);
+    expect(h.onIntegrations).toHaveBeenCalledTimes(1);
+    expect(h.onConfigure).not.toHaveBeenCalled();
   });
 
   it('stops the work when Cancel is pressed', async () => {

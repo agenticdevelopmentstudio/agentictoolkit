@@ -37,6 +37,7 @@ export type ActionId =
   | 'deploy'
   | 'cancel'
   | 'configure'
+  | 'integrations'
   | 'register'
   | 'unregister'
   | 'newGroup'
@@ -123,6 +124,14 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
     // settings is not a write, and locking the operator out of them for the duration of a
     // deploy is a mode with nothing to gain from it.
     configure: OK,
+
+    // ALWAYS LIVE for the same reason, and it is a different question from Configure's.
+    // Configure asks "which repositories does this console know about"; this asks "which
+    // forges can it reach at all", which is the answer an operator wants when a run failed
+    // to get out — and the person most likely to be asked that is a viewer who can register
+    // nothing. Reading which credentials exist is not a write, and the dialog refuses its
+    // own writes, so there is nothing out here for a grey button to protect.
+    integrations: OK,
 
     // Register INVENTS a row, so it is about the rail rather than about the selection: the
     // bar it now hangs in belongs to the dialog's list of repositories, and a folder is one

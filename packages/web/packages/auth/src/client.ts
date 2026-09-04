@@ -106,7 +106,13 @@ export async function exchangeSsoCode(
 
 export function extractErrorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === 'object') {
-    const obj = body as { error?: unknown; message?: unknown; title?: unknown }
+    const obj = body as {
+      error?: unknown
+      message?: unknown
+      title?: unknown
+      detail?: unknown
+      status?: unknown
+    }
     if (typeof obj.error === 'string') return obj.error
     // Nested { error: { message } } (the backend's structured error shape).
     if (obj.error && typeof obj.error === 'object') {
@@ -114,6 +120,17 @@ export function extractErrorMessage(body: unknown, fallback: string): string {
       if (typeof nested.message === 'string') return nested.message
     }
     if (typeof obj.message === 'string') return obj.message
+    // RFC 9457 problem+json, which the backend's integration routers emit:
+    // `{ type, title, status, detail, instance }`. `detail` is the sentence about THIS
+    // occurrence — "no GitHub App is configured", "the private key is in PKCS#1 form" —
+    // while `title` is only the status reason phrase. Reading `title` first turned every
+    // failure on that whole surface into the words "Bad Request", with the one line that
+    // said what to do about it parsed and then dropped. `detail` therefore wins, and it is
+    // recognized by the pair that identifies the document rather than by `detail` alone,
+    // so a legacy body that happens to carry a `detail` field keeps its old reading.
+    if (typeof obj.detail === 'string' && typeof obj.title === 'string' && typeof obj.status === 'number') {
+      return obj.detail
+    }
     if (typeof obj.title === 'string') return obj.title
   }
   return fallback

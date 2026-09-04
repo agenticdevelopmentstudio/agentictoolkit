@@ -252,16 +252,52 @@ function FieldsForMethod({
   return <OAuthFields {...props} />;
 }
 
-export function IntegrationDetailView({
+
+/**
+ * THE CREATE/SAVE HALF, hoisted out of the component that draws it.
+ *
+ * A hook rather than a method on the view, because the button does not always live inside the
+ * view. The Add flow puts it in a dialog FOOTER — under the scroll region, beside Cancel, where
+ * a form's OK button belongs and where Enter can reach it — and a button rendered in one subtree
+ * cannot be moved into another. Lifting the state is what keeps exactly one copy of "is this
+ * draft submittable, and what happens when it is", wherever it happens to be drawn.
+ */
+export interface IntegrationSubmit {
+  /** Create (`mode: 'add'`) or update (`'saved'`). Never throws — a failure lands on `error`. */
+  run: () => Promise<void>;
+  busy: boolean;
+  /** A create succeeded and the form was cleared so another instance can be added. */
+  added: boolean;
+  error: string | null;
+  /** Valid, and — in `'saved'` mode — actually different from what is stored. */
+  canSubmit: boolean;
+  /** Why it cannot be submitted, or null. A REASON rather than a bare boolean, because the gate
+   *  disables the button and a disabled button that will not say why is the whole problem. */
+  blockedReason: string | null;
+  /** Whether the operator has typed enough for `blockedReason` to be worth voicing. */
+  touched: boolean;
+  /** What the button says, idle and mid-flight. */
+  label: string;
+  busyLabel: string;
+}
+
+export function useIntegrationSubmit({
   provider,
   ecosystemId,
   mode,
-  config,
+  config = null,
   draft,
   onChange,
   onSaved,
-  onRotated,
-}: IntegrationDetailViewProps) {
+}: {
+  provider: ProviderCatalogEntry;
+  ecosystemId: string;
+  mode: "add" | "saved";
+  config?: MaskedProviderConfig | null;
+  draft: IntegrationInput;
+  onChange: (next: IntegrationInput) => void;
+  onSaved?: (row: MaskedProviderConfig) => void;
+}): IntegrationSubmit {
   const [busy, setBusy] = useState(false);
   const [added, setAdded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -274,63 +310,101 @@ export function IntegrationDetailView({
     mode === "saved" && config ? intToInput(config, provider) : null,
   );
 
-  // Why the draft can't be submitted, or null — a REASON, not the boolean this used to be,
-  // because the gate disables the button and a disabled button that won't say why is the whole
-  // problem. `intValidate` already returns the exact sentence for a missing spec field or Client
-  // ID; the name rule gets the same wording the toolkit's service editor uses. Name first: it is
-  // the first field on the card.
+  // `intValidate` already returns the exact sentence for a missing spec field or Client ID; the
+  // name rule gets the same wording the toolkit's service editor uses. Name first: it is the
+  // first field on the card.
   const blockedReason =
     draft.name.trim() === "" ? NAME_REQUIRED_MESSAGE : intValidate(draft, provider, config ?? null);
   // 'add' has no baseline to diff against — any valid draft is submittable. 'saved' also
   // requires an actual change vs. the loaded instance (name-inclusive: unlike the pane-exit
   // guard, a name-only edit should still enable this view's own Save button).
-  const dirty = mode === "add" || baseline === null || intDiffers(draft, baseline, { includeName: true });
+  const dirty =
+    mode === "add" || baseline === null || intDiffers(draft, baseline, { includeName: true });
   // `busy` is deliberately NOT folded in (that belongs at the button, per useDirtyDraft's note):
-  // canSave is a statement about the DRAFT, so the reason below can key off the same term.
-  const canSave = dirty && blockedReason === null;
+  // canSubmit is a statement about the DRAFT, so the reason below can key off the same term.
+  const canSubmit = dirty && blockedReason === null;
   // Whether to VOICE the reason. 'add' hard-codes `dirty` true, so it can't double as "the user
   // has given us something to complain about" — an empty Add form must not open by scolding.
   const touched =
     mode === "add" ? intDiffers(draft, intBlank(provider.providerId), { includeName: true }) : dirty;
 
-  const doAdd = async () => {
+  const run = async () => {
+    // The guard is HERE and not only on the button, because Enter reaches this through a form
+    // submit as well now — and a keystroke must not be able to post a draft a click could not.
+    if (!canSubmit || busy) return;
     setBusy(true);
-    setAdded(false);
     setError(null);
     try {
-      const row = await integrationsApi.createProviderConfig(
-        ecosystemId,
-        intToCreateBody(draft, provider),
+      if (mode === "add") {
+        setAdded(false);
+        const row = await integrationsApi.createProviderConfig(
+          ecosystemId,
+          intToCreateBody(draft, provider),
+        );
+        setAdded(true);
+        // Clear the form but stay open so another instance can be added.
+        onChange({ ...intBlank(provider.providerId), name: "" });
+        onSaved?.(row);
+      } else {
+        if (!config) return;
+        const row = await integrationsApi.updateProviderConfig(ecosystemId, config.id, {
+          name: draft.name.trim(),
+          ...intToBody(draft, provider),
+        });
+        setBaseline(intToInput(row, provider));
+        onSaved?.(row);
+      }
+    } catch (e) {
+      setError(
+        errMsg(
+          e,
+          mode === "add" ? "Couldn't add the integration." : "Couldn't save the integration.",
+        ),
       );
-      setAdded(true);
-      // Clear the form but stay open so another instance can be added.
-      onChange({ ...intBlank(provider.providerId), name: "" });
-      onSaved?.(row);
-    } catch (e) {
-      setError(errMsg(e, "Couldn't add the integration."));
     } finally {
       setBusy(false);
     }
   };
 
-  const doSave = async () => {
-    if (!config) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const row = await integrationsApi.updateProviderConfig(ecosystemId, config.id, {
-        name: draft.name.trim(),
-        ...intToBody(draft, provider),
-      });
-      setBaseline(intToInput(row, provider));
-      onSaved?.(row);
-    } catch (e) {
-      setError(errMsg(e, "Couldn't save the integration."));
-    } finally {
-      setBusy(false);
-    }
+  return {
+    run,
+    busy,
+    added,
+    error,
+    canSubmit,
+    blockedReason,
+    touched,
+    label: mode === "add" ? "Add Integration" : "Save",
+    busyLabel: mode === "add" ? "Adding…" : "Saving…",
   };
+}
 
+export type IntegrationDetailBodyProps = Omit<IntegrationDetailViewProps, "onSaved"> & {
+  /** The lifted submit state — `useIntegrationSubmit`'s return. */
+  submit: IntegrationSubmit;
+  /**
+   * The HOST is drawing the submit button, so this body must not draw a second one.
+   *
+   * Set by the per-provider Add dialog, whose OK lives in its footer. The error line and the
+   * blocked-reason line stay here either way: both are about the FIELDS, and an explanation of
+   * why a button is grey belongs beside the field that greyed it, not orphaned under a footer
+   * two scroll regions away.
+   */
+  hideSubmit?: boolean;
+};
+
+/** The cards, with no opinion about where the submit button goes. */
+export function IntegrationDetailBody({
+  provider,
+  ecosystemId,
+  mode,
+  config,
+  draft,
+  onChange,
+  onRotated,
+  submit,
+  hideSubmit = false,
+}: IntegrationDetailBodyProps) {
   const showConnections = mode === "saved" && CONNECTION_METHODS.includes(provider.authMethod);
   // Synced-row browsing (reddit / google-calendar today) belongs to a SAVED instance — there is
   // nothing to browse while adding one. Empty for every other provider, which renders no section.
@@ -344,33 +418,40 @@ export function IntegrationDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Card 1 — provider info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{provider.displayName}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {provider.subtitle && (
-            <p className="text-xs uppercase tracking-wide text-apt-text-dim">{provider.subtitle}</p>
-          )}
-          {provider.description && <p className="text-sm text-apt-text">{provider.description}</p>}
-          {provider.links.length > 0 && (
-            <div className="flex flex-wrap gap-3">
-              {provider.links.map((l) => (
-                <a
-                  key={l.url}
-                  href={l.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-apt-gold hover:underline"
-                >
-                  {l.label} ↗
-                </a>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Card 1 — provider info. NOT drawn when the host is drawing the submit button, because
+          that host is the per-provider Add dialog: its title bar already carries the provider's
+          name and its description line already carries this copy, and repeating both an inch
+          lower is how a dialog that should be four fields tall becomes a page. */}
+      {!hideSubmit && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{provider.displayName}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {provider.subtitle && (
+              <p className="text-xs uppercase tracking-wide text-apt-text-dim">
+                {provider.subtitle}
+              </p>
+            )}
+            {provider.description && <p className="text-sm text-apt-text">{provider.description}</p>}
+            {provider.links.length > 0 && (
+              <div className="flex flex-wrap gap-3">
+                {provider.links.map((l) => (
+                  <a
+                    key={l.url}
+                    href={l.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-apt-gold hover:underline"
+                  >
+                    {l.label} ↗
+                  </a>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Card 2 — config: name + auth fields + create/save */}
       <Card>
@@ -398,36 +479,29 @@ export function IntegrationDetailView({
             config={config ?? null}
           />
 
-          {mode === "add" ? (
-            <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2">
+            {!hideSubmit && (
               <div>
-                <Button variant="default" disabled={!canSave || busy} onClick={() => void doAdd()}>
-                  {busy ? "Adding…" : "Add Integration"}
+                <Button
+                  type="button"
+                  variant="default"
+                  disabled={!submit.canSubmit || submit.busy}
+                  onClick={() => void submit.run()}
+                >
+                  {submit.busy ? submit.busyLabel : submit.label}
                 </Button>
               </div>
-              {added && <p className="text-sm text-apt-green">integration added</p>}
-              <ErrorText error={error} />
-              {!error && blockedReason && touched && (
-                <p className="text-sm text-apt-text-muted" role="status">
-                  {blockedReason}
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <div>
-                <Button variant="default" disabled={!canSave || busy} onClick={() => void doSave()}>
-                  {busy ? "Saving…" : "Save"}
-                </Button>
-              </div>
-              <ErrorText error={error} />
-              {!error && blockedReason && touched && (
-                <p className="text-sm text-apt-text-muted" role="status">
-                  {blockedReason}
-                </p>
-              )}
-            </div>
-          )}
+            )}
+            {!hideSubmit && submit.added && (
+              <p className="text-sm text-apt-green">integration added</p>
+            )}
+            <ErrorText error={submit.error} />
+            {!submit.error && submit.blockedReason && submit.touched && (
+              <p className="text-sm text-apt-text-muted" role="status">
+                {submit.blockedReason}
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -446,15 +520,19 @@ export function IntegrationDetailView({
         />
       )}
 
-      {/* Card 3 — what this does */}
-      <Card>
-        <CardHeader>
-          <CardTitle>What this does</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-apt-text-muted">{describeCapabilities(provider)}</p>
-        </CardContent>
-      </Card>
+      {/* Card 3 — what this does. Suppressed alongside Card 1 for the Add dialog: the picker the
+          operator just came through said what each service does, in its own words, and a dialog
+          that re-answers a question already answered is a dialog they have to scroll past. */}
+      {!hideSubmit && (
+        <Card>
+          <CardHeader>
+            <CardTitle>What this does</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-apt-text-muted">{describeCapabilities(provider)}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {showConnections && (
         <ProviderConnections
@@ -475,4 +553,12 @@ export function IntegrationDetailView({
       )}
     </div>
   );
+}
+
+/** The self-contained view: owns its own submit and draws its own button. This is what the
+ *  saved-instance detail mounts; the Add dialog composes the hook and the body itself, so that
+ *  its OK can sit in the footer where Enter and Escape can reach it. */
+export function IntegrationDetailView(props: IntegrationDetailViewProps) {
+  const submit = useIntegrationSubmit(props);
+  return <IntegrationDetailBody {...props} submit={submit} />;
 }

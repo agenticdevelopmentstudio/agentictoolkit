@@ -8,7 +8,10 @@ import { AlertModal } from '@agenticdevelopertoolkit/ui/components/alert-modal';
 import { useRunningRepos } from './activity/useRunningRepos';
 import { isFinished, useRuns } from './activity/useRuns';
 import { ConfigureDialog } from './configure/ConfigureDialog';
-import { connectionsHashPresent } from './configure/ConnectionsDialog';
+import {
+  connectionsHashPresent,
+  ConnectionsDialog,
+} from './configure/ConnectionsDialog';
 import { applyImport, ImportError } from './exchange/apply';
 import type { ImportPlan } from './exchange/plan';
 import { GroupDetailPane } from './GroupDetailPane';
@@ -64,9 +67,11 @@ import type {
  * THE THREE VERBS NEED A TARGET. Status, Prepare and Deploy act on what is selected and are
  * dead without a selection. The folder verbs — add, rename, move, delete, select, settings —
  * hang off the gear in a rail's own header, where "here" is unambiguous. Everything that is
- * about SETUP rather than about a folder or a run — registering a repository, removing one,
- * and the forge connections both of those go out over — is behind Configure, which is a
- * place and therefore a button on the bar rather than an entry in a menu.
+ * about SETUP rather than about a folder or a run — registering a repository and removing
+ * one — is behind Configure, which is a place and therefore a button on the bar rather than
+ * an entry in a menu. The forge accounts both of those go out over are one door further out:
+ * Integrations, on the far right of the same bar, because they belong to the ecosystem rather
+ * than to this workspace's tree and every console on it shares them.
  */
 
 /** What the ROOT rail is a list of. The breadcrumb keeps the workspace's own name. */
@@ -77,11 +82,11 @@ export interface ShiprConsoleProps {
   /** The caller's forge connections, for the register wizard. The console does not read
    *  them itself: they live behind `/integrations`, which is the host's concern. */
   connections?: readonly ConnectionOption[];
-  /** Re-read {@link connections}. Called when the Configure dialog's Connections pane
-   *  reports a write — connecting an account there is exactly what adds an installation to
-   *  that list, and without this seam the wizard opened next would still be offering the
-   *  installations from before it. Optional: a host with nothing to re-read may omit it and
-   *  the list simply stays as it loaded. */
+  /** Re-read {@link connections}. Called when the Integrations dialog reports a write —
+   *  connecting an account there is exactly what adds an installation to that list, and
+   *  without this seam the wizard opened next would still be offering the installations from
+   *  before it. Optional: a host with nothing to re-read may omit it and the list simply
+   *  stays as it loaded. */
   onConnectionsChanged?: () => void;
   /** Breadcrumb root — the workspace's name, as the host already knows it. */
   rootLabel?: string;
@@ -174,6 +179,10 @@ function Console({
     // No payload. Configure is a PLACE, not an act on a row: it opens on nothing selected
     // and the operator chooses inside it, so there is nothing for this console to hand it.
     | { kind: 'configure' }
+    // A SIBLING of Configure, not a child of it. The forge accounts are the ecosystem's, not
+    // this tree's, and being one modal shallower is what lets that dialog own the address —
+    // see `syncConnectionsHash`.
+    | { kind: 'connections' }
     | { kind: 'deploy' }
     // The REF, not the row: the tree is re-read while a dialog is open (a run lands, a
     // folder's contents change), and a captured row would go stale behind it.
@@ -182,7 +191,7 @@ function Console({
   const close = React.useCallback(() => setModal({ kind: 'none' }), []);
 
   /**
-   * Reopen Configure when the address names Connections — the return leg of a forge connect.
+   * Reopen Integrations when the address names it — the return leg of a forge connect.
    *
    * Connecting a GitHub App leaves the app entirely, so the document that held this state is
    * gone by the time the operator comes back; `/integrations/oauth-callback` returns them to
@@ -190,11 +199,11 @@ function Console({
    * in the console they were. Without this the new connection lands on a bare tree with every
    * dialog closed, which reads as the connect having failed.
    *
-   * Once, on mount, and only to OPEN: Configure's own body owns the hash from then on, and a
-   * console that re-asserted it would fight the operator closing the dialog.
+   * Once, on mount, and only to OPEN: the dialog itself owns the hash from then on, and a
+   * console that re-asserted it would fight the operator closing it.
    */
   React.useEffect(() => {
-    if (connectionsHashPresent()) setModal({ kind: 'configure' });
+    if (connectionsHashPresent()) setModal({ kind: 'connections' });
   }, []);
 
   const groups = tree.data?.groups ?? [];
@@ -770,6 +779,7 @@ function Console({
             onDeploy={() => setModal({ kind: 'deploy' })}
             onCancel={() => void onCancel()}
             onConfigure={() => setModal({ kind: 'configure' })}
+            onIntegrations={() => setModal({ kind: 'connections' })}
             active={activeAction}
           />
         }
@@ -880,11 +890,23 @@ function Console({
         verbs={verbs}
         busy={busy}
         connections={connections}
-        onConnectionsChanged={onConnectionsChanged}
+        // The wizard's way out to the accounts it registers against. Swapping the modal
+        // rather than nesting one: they are siblings, and two stacked dialogs over a console
+        // is a stack an operator has to unwind twice to get back to the tree.
+        onManageConnections={() => setModal({ kind: 'connections' })}
         onRegister={onRegister}
         onRemove={onRemove}
         onSaveSettings={onSaveSettings}
         onImport={onImport}
+      />
+
+      {/* The forge accounts every run goes out over. Mounted BESIDE Configure rather than
+          inside it — see the `connections` arm of `Modal` above. */}
+      <ConnectionsDialog
+        open={modal.kind === 'connections'}
+        onClose={close}
+        client={client}
+        onChanged={onConnectionsChanged}
       />
 
       <DeployDialog

@@ -26,6 +26,13 @@ import type { ShiprClient } from '../client';
  * integration" button could not be drawn AT ALL — which is to say there was no way to
  * connect a GitHub account from this console.
  *
+ * OPENED FROM THE TOOLBAR NOW, not from inside Configure. The console mounts it beside
+ * Configure rather than under it, and `Integrations` on the far right of the bar is the only
+ * way in. Being reachable only from Configure's bar made it look like a setting on the
+ * repository list, and it is the opposite of that: the list is per-workspace, these accounts
+ * belong to the ecosystem and every workspace on it runs out over them. It is also one modal
+ * shallower for it, which is what lets it own the address itself — see `syncConnectionsHash`.
+ *
  * `IntegrationsPane` renders only a detail and publishes its list as a rail level, one
  * deeper than whatever is hosting it, and the "+" that adds an integration is that level's.
  * Inside Configure it was published under the repository list — a level that is NOT selected
@@ -39,9 +46,29 @@ import type { ShiprClient } from '../client';
  * over this one, and the operator arrives here from that wizard as often as from the bar.
  */
 
-/** The forges a deployment pipeline can actually reach. The whole catalog would offer an
- *  operator a Stripe key on a screen about pushing branches. */
-const PROVIDERS = ['github-app', 'vercel', 'railway'] as const;
+/**
+ * The forges a deployment pipeline can actually reach. The whole catalog would offer an
+ * operator a Stripe key on a screen about pushing branches.
+ *
+ * `'railway'` USED TO BE IN THIS LIST AND NAMED NOTHING. The provider catalog has no `railway`
+ * entry, and `providerIds` is intersected with the catalog — so the string was silently dropped
+ * on every render, in both directions: no Railway row could ever list here, and no Railway offer
+ * could ever appear under Add. It looked like support for a forge this console has none of.
+ * Deleting it does not remove a capability; it stops advertising one. Railway credentials reach
+ * a deploy through the environment today, not through an integration.
+ */
+const PROVIDERS = ['github-app', 'vercel'] as const;
+
+/**
+ * The picker opens on the forges rather than on the alphabet.
+ *
+ * `'Code'` is a provider SUBTITLE, which is what the catalog uses for the coarse "what kind of
+ * service is this" bucket — `github-app` is `Code`, `vercel` is `Deployment`. Typed into the
+ * filter box, visible, and clearable: an operator who wants to see everything this dialog offers
+ * deletes four characters. The narrowing that is NOT the operator's to undo is `PROVIDERS`
+ * above, and it is a different mechanism for that reason.
+ */
+const ADD_FILTER = 'Code';
 
 /**
  * THE ONE PIECE OF CONSOLE STATE THAT IS IN THE URL, and the reason is that this dialog is
@@ -134,6 +161,32 @@ export function ConnectionsDialog({
   client,
   onChanged,
 }: ConnectionsDialogProps): React.ReactElement {
+  /* THE ADDRESS IS THIS DIALOG'S OWN, now that nothing wraps it. Configure used to run this
+     effect on the dialog's behalf, because Configure was what the console reopened on the
+     return leg and this was a child of it — so the hash had to be written by whoever was
+     guaranteed to be mounted. It is opened straight from the toolbar now, so the component
+     whose `open` the fragment describes is the one that writes it.
+
+     NOTHING IS WRITTEN UNTIL IT HAS BEEN OPEN ONCE, and that guard is the whole difference
+     between this and its old life inside Configure. Configure mounted this only while it was
+     itself open; the console mounts it always, closed, beside every other dialog. So on the
+     return leg from GitHub the first thing to run was this effect with `open === false`
+     against an address that said `#connections` — child effects run before the parent's —
+     and it dutifully took the fragment back OUT before the console had read it. The operator
+     came back from a successful connect to a bare tree, which is the exact failure the hash
+     exists to prevent. A dialog that has never been open has no opinion about the address. */
+  const everOpened = React.useRef(false);
+  React.useEffect(() => {
+    if (open) everOpened.current = true;
+    if (everOpened.current) syncConnectionsHash(open);
+  }, [open]);
+  /* An unmount is not a close, and the address does not know the difference. The console
+     tears this whole subtree down when it navigates away, and a `#connections` left behind
+     would reopen the dialog on the next load of a URL the operator had already left. */
+  React.useEffect(() => () => {
+    if (everOpened.current) syncConnectionsHash(false);
+  }, []);
+
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="flex h-[80vh] max-w-5xl flex-col gap-4">
@@ -206,6 +259,7 @@ function ConnectionsBody({
       <IntegrationsPane
         ecosystemId={ecosystemId}
         providerIds={PROVIDERS}
+        addFilter={ADD_FILTER}
         levelTitle="Connections"
         onChanged={onChanged}
       />
