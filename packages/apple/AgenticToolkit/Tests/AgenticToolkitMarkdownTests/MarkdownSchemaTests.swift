@@ -49,6 +49,28 @@ struct MarkdownSchemaTests {
         }
     }
 
+    /// `tablesExist` above only proves the listed tables exist — it says
+    /// nothing about a table the DDL creates that `MarkdownSchema.tables`
+    /// forgot to list, which would be invisible to `MarkdownProjection`
+    /// (whose `resources`/`syncResources` now derive from `tables` — round 1
+    /// fix #3) and to `columnListsMatchTheRealSchema`
+    /// (`MarkdownProjectionTests.swift`), which only walks the resources the
+    /// projection already claims. This closes that direction: run
+    /// `createTables(in:)` — the DDL itself, not `migrate`, so there is no
+    /// bookkeeping/outbox table to exclude — into a scratch database and
+    /// diff its actual table list against `tables`.
+    @Test("createTables creates exactly the tables MarkdownSchema.tables lists — no more, no less")
+    func tablesMatchTheDDLExactly() throws {
+        let queue = try DatabaseQueue()
+        try queue.write { conn in
+            try MarkdownSchema.createTables(in: conn)
+        }
+        let actual = try queue.read { conn in
+            try String.fetchAll(conn, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        #expect(Set(actual) == Set(MarkdownSchema.tables))
+    }
+
     @Test("markdown carries adh's column set exactly")
     func markdownColumns() throws {
         try expect("markdown", adds: [

@@ -147,69 +147,116 @@ public struct MarkdownProjection: SyncMirrorProjection {
     /// `UPDATE` leaves an omitted column untouched instead of blanking it —
     /// while a key sent explicitly as `.null` (adh clearing `public_route`,
     /// say) still lands as SQL NULL, because it *is* present.
-    /// A pulled change from `apply(_:advancingTo:)` is adh's whole current
-    /// row; a local mutation staged through `stage(_:)` is a deliberate
-    /// partial patch (see the doc comment above on why only present keys are
-    /// otherwise bound). Both funnel through this one method with no signal
-    /// distinguishing them (`GRDBSyncStore`'s `SyncMirrorProjection` call
-    /// sites hand `upsert` the same four arguments either way), so the
-    /// delete-state columns are the one exception carved into the
-    /// "present-keys-only" rule below: `deleted_at` on every table, plus
-    /// `is_deleted` on `content.markdown`, are always written into the
-    /// `ON CONFLICT` `SET` clause, whether or not `data` supplies them.
     ///
-    /// This closes a real hole a full-row pull would otherwise fall into: a
-    /// server delete-then-restore lands as two upserts (the delete itself
-    /// goes through `markDeleted`, not this method) — sorry, lands as one
-    /// `markDeleted` call for the delete and one `upsert` call for the
-    /// restore — and if adh's wire format omits a key whose new value is
-    /// null (as it does), the restore's payload carries `is_deleted: false`
-    /// (present, not null) but never mentions `deleted_at` at all, since its
-    /// new value on the server is null. Binding only present keys would
-    /// leave `deleted_at` at its stale, still-tombstoned value forever —
-    /// invisible to `rows`/`row` (`WHERE deleted_at IS NULL`) even though
-    /// `document(id:)` (which gates on `is_deleted` alone) would show it
-    /// again. The five taxonomy tables have no `is_deleted` at all, so for
-    /// them an un-forced `deleted_at` would make a restore unrecoverable,
-    /// not just inconsistent.
-    ///
-    /// `excluded.deleted_at`/`excluded.is_deleted` resolve correctly even
-    /// when `data` never supplies them and they are absent from this
-    /// `INSERT`'s own column list: SQLite fills the `excluded` pseudo-row
-    /// with the value the statement *would* have inserted for every table
-    /// column, including one it defaults — `NULL` for `deleted_at` (no
-    /// `DEFAULT`, nullable), `0` for `is_deleted` (`DEFAULT 0`) — so nothing
-    /// needs adding to `bound`/`arguments` for this to work.
-    ///
-    /// This is safe on the local `stage(_:)` path too, for a narrower reason
-    /// than "it happens to work": `content.markdown` and its three marker
-    /// resources are pull-only (`MarkdownStore` queues their edits over REST
-    /// instead — Task 10) and never reach `upsert` through `stage(_:)` at
-    /// all, so `is_deleted` is never force-set there. The five taxonomy
-    /// resources that DO reach `upsert` through `stage(_:)` only ever do so
-    /// immediately after their own fresh `INSERT` in `MarkdownTaxonomy`
-    /// (`createCategory`, `createKeyword`, `addCategoryEdge`, `assignItem`),
-    /// so `deleted_at` is NULL on that row already — forcing it back to NULL
-    /// on conflict is a no-op, not a clobber.
+    /// This is the `isFullRow`-unaware requirement `SyncMirrorProjection`
+    /// declares; it forwards to the `isFullRow`-aware overload below with
+    /// `isFullRow: true`, which is this method's only historical meaning —
+    /// nothing calls this overload directly any more (`GRDBSyncStore`'s two
+    /// call sites both use the overload below), it exists purely to satisfy
+    /// the protocol's still-required original signature.
     public func upsert(
         resource: String, id: String, syncVersion: Int,
         data: [String: JSONValue], in conn: Database
     ) throws {
-        let present = columns(for: resource).filter { data[$0] != nil }
-        let bound = columns(for: resource).filter {
+        try upsert(resource: resource, id: id, syncVersion: syncVersion, data: data, isFullRow: true, in: conn)
+    }
+
+    /// `isFullRow` distinguishes `apply`'s pull path (`true` — adh's whole
+    /// current row) from `stage(_:)`'s local path (`false` — a deliberate
+    /// partial patch, see the doc comment above). Round 1 force-bound
+    /// `deleted_at`/`is_deleted` unconditionally, which fixed the pull path
+    /// but was reachable from `stage(_:)` too — nothing stops a future
+    /// taxonomy write method from staging a partial patch against an
+    /// existing, previously-deleted row, and the force-bind would silently
+    /// resurrect it (clear `deleted_at`) even though the patch never
+    /// mentioned it. `isFullRow` makes the two paths tell `upsert` which one
+    /// they are instead of relying on an audited-but-unenforced invariant
+    /// about every current `stage(_:)` call site staging immediately after
+    /// its own fresh `INSERT`: the delete-state columns are force-bound only
+    /// when `isFullRow` is `true`.
+    ///
+    /// On a full-row pull, forcing `deleted_at` closes the hole a pulled
+    /// delete-then-restore would otherwise fall into: the restore lands as
+    /// one `upsert` call whose payload never mentions `deleted_at` (adh's
+    /// wire format omits a key whose new value is null), so binding only
+    /// present keys would leave it at its stale, still-tombstoned value
+    /// forever — invisible to `rows`/`row`/`liveRow` (`WHERE deleted_at IS
+    /// NULL`) even after `markDeleted`'s earlier tombstone should have been
+    /// cleared. The five taxonomy tables have no `is_deleted` at all, so for
+    /// them an un-forced `deleted_at` would make a restore unrecoverable,
+    /// not just inconsistent.
+    ///
+    /// `is_deleted` (`content.markdown` only) is *not* simply force-bound to
+    /// `excluded.is_deleted` the way `deleted_at` is, because that reopens a
+    /// narrower version of the same inconsistency the wrong way: a payload
+    /// that supplies `deleted_at` (a genuine tombstone) but omits
+    /// `is_deleted` — exactly what `deletedAtColumnIsNormalisedOnIngest`
+    /// already sends, and what any payload builder emitting only the
+    /// columns common to the whole markdown family would produce — would
+    /// let `excluded.is_deleted` fall back to the column's own `DEFAULT 0`,
+    /// setting `is_deleted = 0` while `deleted_at` stays non-null: the two
+    /// flags disagree, `document(id:)` (gates on `is_deleted` alone) shows a
+    /// server-deleted document as live, and `liveRow` (gates on
+    /// `deleted_at`) still hides it. So when `data` supplies `is_deleted`
+    /// explicitly, it wins verbatim (`excluded.is_deleted`); when it does
+    /// not, `is_deleted` is *derived* from whichever `deleted_at` this same
+    /// statement is about to write, not defaulted independently of it.
+    ///
+    /// `excluded.<column>` resolves correctly even when `data` never
+    /// supplies a column and it is absent from this `INSERT`'s own column
+    /// list: SQLite fills the `excluded` pseudo-row with the value the
+    /// statement *would* have inserted for every table column, including
+    /// one it defaults — `NULL` for `deleted_at` (no `DEFAULT`, nullable) —
+    /// so `deleted_at` needs nothing added to `bound`/`arguments`; only
+    /// `assignments` changes. That materialisation only feeds `excluded.*`,
+    /// though, and `excluded.*` only feeds the `ON CONFLICT` branch — a row
+    /// that does not exist yet takes the plain `INSERT` branch instead,
+    /// where an omitted column gets its column `DEFAULT`, full stop. So
+    /// deriving `is_deleted` from `excluded.deleted_at` (an earlier version
+    /// of this method did exactly that) is correct on an update but silently
+    /// wrong on a first insert: `is_deleted` sits outside `bound`, the
+    /// `INSERT` never mentions it, `ON CONFLICT` never fires, and it lands at
+    /// its `DEFAULT 0` regardless of what `deleted_at` just got written —
+    /// exactly the shape `deletedAtColumnIsNormalisedOnIngest` sends for a
+    /// document that has never been pulled before. `is_deleted` must
+    /// therefore be computed in Swift and placed in `bound`/`arguments` like
+    /// any other column, so the same value lands on both the `INSERT` and
+    /// (via `excluded.is_deleted`) the `ON CONFLICT UPDATE` branch.
+    public func upsert(
+        resource: String, id: String, syncVersion: Int,
+        data: [String: JSONValue], isFullRow: Bool, in conn: Database
+    ) throws {
+        let present = Set(columns(for: resource).filter { data[$0] != nil })
+        var bound = columns(for: resource).filter {
             data[$0] != nil || Self.requiredWithNoDefault.contains($0)
         }
-        let alwaysAssigned: Set<String> = resource == "content.markdown"
-            ? ["deleted_at", "is_deleted"] : ["deleted_at"]
-        let assignmentColumns = ["sync_version"] + Array(Set(present).union(alwaysAssigned)).sorted()
+        var assignmentColumns = present
+        if isFullRow {
+            assignmentColumns.insert("deleted_at")
+            if resource == "content.markdown" { assignmentColumns.insert("is_deleted") }
+        }
+        // Only markdown carries `is_deleted`, and only when the payload
+        // itself didn't supply it — a payload that did already has it in
+        // `bound`/`present` via the ordinary path above.
+        let derivesIsDeleted = isFullRow && resource == "content.markdown" && !present.contains("is_deleted")
+        if derivesIsDeleted {
+            bound.append("is_deleted")
+        }
         let names = ["id", "sync_version"] + bound
         let placeholders = names.map { _ in "?" }.joined(separator: ", ")
-        let assignments = assignmentColumns
+        let assignments = (["sync_version"] + assignmentColumns.sorted())
             .map { "\($0) = excluded.\($0)" }
             .joined(separator: ", ")
         var arguments: [(any DatabaseValueConvertible)?] = [id, syncVersion]
-        arguments += bound.map { column in
-            data[column] != nil ? Self.value(data[column], column: column) : MarkdownTimestamp.string(Date())
+        arguments += bound.map { column -> (any DatabaseValueConvertible)? in
+            if column == "is_deleted", derivesIsDeleted {
+                // Whatever this same statement is about to write to
+                // `deleted_at` — present in `data` (including an explicit
+                // `.null` restore) or, absent, the `NULL` `deleted_at`
+                // itself falls back to.
+                return Self.value(data["deleted_at"], column: "deleted_at") == nil ? 0 : 1
+            }
+            return data[column] != nil ? Self.value(data[column], column: column) : MarkdownTimestamp.string(Date())
         }
         try conn.execute(
             sql: """
