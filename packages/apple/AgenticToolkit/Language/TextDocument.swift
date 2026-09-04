@@ -36,9 +36,13 @@ public final class TextDocument {
     /// O(1)) `text.utf16.count` themselves.
     private var utf16Length: Int
 
-    /// Set by the owning `TextDocumentStore` so `apply(_:)` can raise a
-    /// `.changed` event without this type knowing the store exists.
-    var changeHandler: ((Int, [TextDocumentContentChangeEvent]) -> Void)?
+    /// Change observers, keyed by the token that registered them. Public and
+    /// multi-slot so more than one consumer can watch the same document —
+    /// `TextDocumentStore` claims one slot at `open` time to raise its own
+    /// `.changed` event, and `TextDocumentStorage` (in `AgenticToolkitMacOS`)
+    /// claims another to keep an `NSTextStorage` in sync — without either
+    /// knowing about the other, and without this type knowing either exists.
+    private var changeHandlers: [UUID: (Int, [TextDocumentContentChangeEvent]) -> Void] = [:]
 
     public init(uri: DocumentUri, languageId: String, text: String, version: Int = 0) {
         self.uri = uri
@@ -149,12 +153,18 @@ public final class TextDocument {
         lineStarts = index.starts
         utf16Length = index.length
 
-        changeHandler?(version, events)
+        notifyChangeHandlers(version: version, changes: events)
         return events
     }
 
     /// A full-content reload from disk: replaces the text outright, bumps
     /// the version, and clears the dirty flag.
+    ///
+    /// Raises the same change notification as `apply(_:)`, as a single
+    /// full-document `TextDocumentContentChangeEvent` (`range` and
+    /// `rangeLength` both `nil` is LSP's own wire form for "the document is
+    /// now this text") — an observer such as `TextDocumentStorage` must see
+    /// this change the same way it sees any other.
     public func replaceAll(with newText: String) {
         text = newText
         version += 1
@@ -162,11 +172,40 @@ public final class TextDocument {
         lineStarts = index.starts
         utf16Length = index.length
         isDirty = false
+        notifyChangeHandlers(
+            version: version,
+            changes: [TextDocumentContentChangeEvent(range: nil, rangeLength: nil, text: newText)]
+        )
     }
 
     /// Call after a successful save.
     public func markClean() {
         isDirty = false
+    }
+
+    // MARK: - Change observation
+
+    /// Registers `handler` and returns an opaque token that keeps it alive:
+    /// dropping the token removes the handler. Mirrors
+    /// `TextDocumentStore.addObserver`/`TextDocumentStoreObservation` —
+    /// same UUID-keyed-dictionary-plus-token-deinit shape, one level down.
+    public func addChangeHandler(
+        _ handler: @escaping (Int, [TextDocumentContentChangeEvent]) -> Void
+    ) -> TextDocumentObservation {
+        let id = UUID()
+        changeHandlers[id] = handler
+        return TextDocumentObservation(id: id, document: self)
+    }
+
+    /// Called only by `TextDocumentObservation.deinit`.
+    func removeChangeHandler(id: UUID) {
+        changeHandlers.removeValue(forKey: id)
+    }
+
+    private func notifyChangeHandlers(version: Int, changes: [TextDocumentContentChangeEvent]) {
+        for handler in changeHandlers.values {
+            handler(version, changes)
+        }
     }
 
     // MARK: - Private
@@ -241,5 +280,27 @@ public final class TextDocument {
             }
         }
         return (starts, offset)
+    }
+}
+
+/// An opaque handle to one `TextDocument` change observer: hold it for as
+/// long as delivery should continue. Mirrors `TextDocumentStoreObservation`
+/// one level down — its `deinit` unregisters the handler the same way.
+@MainActor
+public final class TextDocumentObservation {
+    private let id: UUID
+    private weak var document: TextDocument?
+
+    fileprivate init(id: UUID, document: TextDocument) {
+        self.id = id
+        self.document = document
+    }
+
+    // Isolated explicitly (SE-0371): a MainActor class's deinit is
+    // nonisolated by default, and `removeChangeHandler` is MainActor-isolated
+    // state on `document`. `isolated deinit` hops to the actor before
+    // running, rather than reaching for `nonisolated(unsafe)`.
+    isolated deinit {
+        document?.removeChangeHandler(id: id)
     }
 }

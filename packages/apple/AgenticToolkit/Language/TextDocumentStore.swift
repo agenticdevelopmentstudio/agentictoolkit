@@ -23,10 +23,12 @@ public final class TextDocumentStore {
     private final class OpenEntry {
         let document: TextDocument
         var openCount: Int
+        let changeObservation: TextDocumentObservation
 
-        init(document: TextDocument, openCount: Int) {
+        init(document: TextDocument, openCount: Int, changeObservation: TextDocumentObservation) {
             self.document = document
             self.openCount = openCount
+            self.changeObservation = changeObservation
         }
     }
 
@@ -48,10 +50,10 @@ public final class TextDocumentStore {
         }
 
         let document = TextDocument(uri: uri, languageId: languageId, text: text)
-        document.changeHandler = { [weak self] version, changes in
+        let changeObservation = document.addChangeHandler { [weak self] version, changes in
             self?.notify(.changed(uri: uri, version: version, changes: changes))
         }
-        documentsByURI[uri] = OpenEntry(document: document, openCount: 1)
+        documentsByURI[uri] = OpenEntry(document: document, openCount: 1, changeObservation: changeObservation)
         notify(.opened(uri: uri, languageId: languageId, version: document.version, text: text))
         return document
     }
