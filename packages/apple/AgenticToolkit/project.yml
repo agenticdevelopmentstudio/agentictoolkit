@@ -307,6 +307,75 @@ targets:
       - package: GRDB
         product: GRDB
 
+  # Two targets, not one `supportedDestinations: [macOS, iOS]` target: this
+  # framework depends on AgenticDeveloperToolkit, which exposes only
+  # platform-specific targets, and a multi-destination target cannot depend on
+  # a single-platform one. Both build the same `Markdown` sources under the
+  # same product name, so consumers see one framework.
+  AgenticToolkitMarkdown-macOS:
+    type: framework
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - Markdown
+    dependencies:
+      - target: AgenticToolkitDatabase
+      - target: AgenticToolkitSync
+      - target: AgenticToolkitSyncGRDB
+      - package: GRDB
+        product: GRDB
+      - sdk: libsqlite3.tbd
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+    settings:
+      base:
+        PRODUCT_NAME: AgenticToolkitMarkdown
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+  AgenticToolkitMarkdown-iOS:
+    type: framework
+    platform: iOS
+    templates:
+      - SwiftLint
+    sources:
+      - Markdown
+    dependencies:
+      - target: AgenticToolkitDatabase
+      - target: AgenticToolkitSync
+      - target: AgenticToolkitSyncGRDB
+      - package: GRDB
+        product: GRDB
+      - sdk: libsqlite3.tbd
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-iOS
+    settings:
+      base:
+        SDKROOT: iphoneos
+        PRODUCT_NAME: AgenticToolkitMarkdown
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  AgenticToolkitMarkdownTests:
+    type: bundle.unit-test
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - Tests/AgenticToolkitMarkdownTests
+    dependencies:
+      - target: AgenticToolkitMarkdown-macOS
+        embed: true
+        codeSign: true
+      # MarkdownSchemaTests imports GRDB and AgenticToolkitDatabase directly
+      # (to drive BoundedDatabase/Row/StatementArguments), so both must be
+      # linked into the test bundle explicitly — a framework dependency's own
+      # dependencies aren't transitively linked. Mirrors
+      # AgenticToolkitSyncGRDBTests below.
+      - target: AgenticToolkitDatabase
+        embed: true
+        codeSign: true
+      - package: GRDB
+        product: GRDB
+
   AgenticToolkitCoreTests:
     type: bundle.unit-test
     platform: macOS
@@ -429,6 +498,7 @@ aggregateTargets:
       - AgenticToolkitDatabase
       - AgenticToolkitSync
       - AgenticToolkitSyncGRDB
+      - AgenticToolkitMarkdown-macOS
 
   AgenticToolkitMacOSTestsAll:
     targets:
@@ -452,6 +522,8 @@ aggregateTargets:
       - AgenticToolkitSyncTests
       - AgenticToolkitSyncGRDB
       - AgenticToolkitSyncGRDBTests
+      - AgenticToolkitMarkdown-macOS
+      - AgenticToolkitMarkdownTests
 
 schemes:
   AgenticToolkitDatabase:
@@ -498,6 +570,23 @@ schemes:
       config: Debug
       targets:
         - AgenticToolkitSyncGRDBTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitMarkdown:
+    build:
+      targets:
+        AgenticToolkitMarkdown-macOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitMarkdownTests
     profile:
       config: Release
     analyze:
