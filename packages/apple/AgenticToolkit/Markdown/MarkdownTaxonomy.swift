@@ -99,8 +99,15 @@ extension MarkdownStore {
     /// The schema's `CHECK (parent_id <> child_id)` catches the one-node case;
     /// everything longer needs the graph, so it is checked here. The walk is
     /// downward from `child`: if `parent` is already reachable from `child`,
-    /// the new edge closes a loop. `ix_category_edges_parent` is what makes it
-    /// cheap.
+    /// the new edge closes a loop. Scoped to `ecosystem_id`, matching every
+    /// uniqueness constraint on this table (a cross-tenant loop is
+    /// unreachable today — ids are UUIDs — but the walk should not rely on
+    /// that). Per `EXPLAIN QUERY PLAN`, the ecosystem scoping lets the setup
+    /// step seek `ix_category_edges_parent` directly on `(ecosystem_id,
+    /// parent_id)`; the recursive step seeks `ix_category_edges_child` on
+    /// `ecosystem_id` alone, which bounds the walk to that tenant's edges but
+    /// is not a per-row indexed lookup — without the `ecosystem_id` predicate
+    /// SQLite instead falls back to a full table scan for the whole walk.
     public func addCategoryEdge(
         parent: String, child: String, sortOrder: Int = 0, now: Date = Date()
     ) throws {
@@ -110,15 +117,15 @@ extension MarkdownStore {
                 sql: """
                     WITH RECURSIVE descendants(id) AS (
                         SELECT child_id FROM category_edges
-                            WHERE parent_id = ? AND deleted_at IS NULL
+                            WHERE ecosystem_id = ? AND parent_id = ? AND deleted_at IS NULL
                         UNION
                         SELECT e.child_id FROM category_edges e
                             JOIN descendants d ON e.parent_id = d.id
-                            WHERE e.deleted_at IS NULL
+                            WHERE e.ecosystem_id = ? AND e.deleted_at IS NULL
                     )
                     SELECT EXISTS(SELECT 1 FROM descendants WHERE id = ?)
                     """,
-                arguments: [child, parent]) ?? false
+                arguments: [ecosystemID, child, ecosystemID, parent]) ?? false
             guard !closesLoop else {
                 throw MarkdownStoreError.categoryCycle(parent: parent, child: child)
             }
@@ -134,6 +141,12 @@ extension MarkdownStore {
                     ON CONFLICT(ecosystem_id, parent_id, child_id) DO NOTHING
                     """,
                 arguments: [id, customerID, ecosystemID, parent, child, sortOrder, stamp, stamp])
+            // `ON CONFLICT DO NOTHING` means this edge already existed — the
+            // first call already staged its mutation, so a duplicate call
+            // must not queue a second one for a row that was never inserted
+            // (it has no local `id` behind it, and adh's own unique
+            // constraint would reject or duplicate the push).
+            guard conn.changesCount > 0 else { return }
             try syncStore.stage(LocalMutation(
                 resource: "content.category_edges", rowId: id, type: .upsert,
                 data: [
@@ -259,6 +272,10 @@ extension MarkdownStore {
                     """,
                 arguments: [id, customerID, ecosystemID, ownerID,
                             Self.documentTargetKind, documentID, sortOrder, stamp, stamp])
+            // `ON CONFLICT DO NOTHING` means this assignment already existed
+            // — the first call already staged its mutation, so a duplicate
+            // must not queue a second one for a row that was never inserted.
+            guard conn.changesCount > 0 else { return }
             try syncStore.stage(LocalMutation(
                 resource: resource, rowId: id, type: .upsert,
                 data: [
