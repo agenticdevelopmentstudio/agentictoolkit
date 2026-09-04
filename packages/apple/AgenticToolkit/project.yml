@@ -94,6 +94,15 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: "7.0.0"
+  JSONRPC:
+    url: https://github.com/ChimeHQ/JSONRPC
+    from: "0.9.2"
+  LanguageServerProtocol:
+    url: https://github.com/ChimeHQ/LanguageServerProtocol
+    from: "0.14.1"
+  LanguageClient:
+    url: https://github.com/ChimeHQ/LanguageClient
+    from: "0.8.2"
 
 targets:
   AIPluginKit:
@@ -119,6 +128,26 @@ targets:
       - package: ModelContextProtocol
         product: MCP
       - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+
+  AgenticToolkitLanguage:
+    type: framework
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - Language
+    dependencies:
+      - target: AgenticToolkitCore
+      - package: JSONRPC
+        product: JSONRPC
+      - package: LanguageServerProtocol
+        product: LanguageServerProtocol
+      - package: LanguageClient
+        product: LanguageClient
+    # Daemon-safe: text documents and language-server plumbing. Foundation plus
+    # the ChimeHQ LSP stack only; no AppKit. The AppKit face of a TextDocument
+    # is TextDocumentStorage in AgenticToolkitMacOS, mirroring the
+    # SemanticPalette / SemanticPalette+NSColor split.
 
   AgenticToolkitCoreUI:
     type: framework
@@ -174,6 +203,7 @@ targets:
       - target: AgenticToolkitPermissions
       - target: AgenticToolkitPermissionsUI
       - target: AIPluginKit
+      - target: AgenticToolkitLanguage
       - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
       - target: AgenticToolkitMarkdown-macOS
       - target: AgenticToolkitDatabase
@@ -237,6 +267,18 @@ targets:
         codeSign: true
       - package: GRDB
         product: GRDB
+
+  AgenticToolkitLanguageTests:
+    type: bundle.unit-test
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - Tests/AgenticToolkitLanguageTests
+    dependencies:
+      - target: AgenticToolkitLanguage
+        embed: true
+        codeSign: true
 
   AgenticToolkitSync:
     type: framework
@@ -518,6 +560,7 @@ aggregateTargets:
       - AgenticToolkitPermissionsUI
       - AgenticToolkitMacOS
       - AgenticToolkitDatabase
+      - AgenticToolkitLanguage
       - AgenticToolkitSync
       - AgenticToolkitSyncGRDB
       - AgenticToolkitMarkdown-macOS
@@ -554,6 +597,8 @@ aggregateTargets:
       - AgenticToolkitMacOSTests
       - AgenticToolkitDatabase
       - AgenticToolkitDatabaseTests
+      - AgenticToolkitLanguage
+      - AgenticToolkitLanguageTests
       - AgenticToolkitSync
       - AgenticToolkitSyncTests
       - AgenticToolkitSyncGRDB
@@ -572,6 +617,23 @@ schemes:
       config: Debug
       targets:
         - AgenticToolkitDatabaseTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitLanguage:
+    build:
+      targets:
+        AgenticToolkitLanguage: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitLanguageTests
     profile:
       config: Release
     analyze:
