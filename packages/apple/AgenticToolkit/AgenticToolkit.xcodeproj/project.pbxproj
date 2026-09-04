@@ -529,6 +529,7 @@
 		9885D121F7F1AE3009282353 /* AgenticDeveloperToolkit-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AA33F0AF418F0DDFE05C6BF /* AgenticDeveloperToolkit-macOS.framework */; };
 		9927C09790691C2374DB2BE1 /* ArtificialAnalysisStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E704045A9988FA8B0269C338 /* ArtificialAnalysisStoreTests.swift */; };
 		99C35A1747F1553A60AF2F7F /* MCPServerConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F902FBE3A0B9FE99A0A4852C /* MCPServerConfigurationTests.swift */; };
+		99D5689AC81E8BEE831E1559 /* TextDocumentSaveScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FBACEE5A2E530591DD48C6 /* TextDocumentSaveScheduler.swift */; };
 		99DAF79CA4C402E9EFB9DF34 /* GeneralSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFDEE9F962B2E16174881932 /* GeneralSettingsTab.swift */; };
 		9A05C9F3A94BE457552214D7 /* FileTypesSettingsPanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1728EF32C9F388F3A2106441 /* FileTypesSettingsPanelViewController.swift */; };
 		9A5F779A347BDB6F15C42139 /* NotesManagerMarkdownStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B4441E5FCF1AE9454254BF /* NotesManagerMarkdownStoreTests.swift */; };
@@ -604,6 +605,7 @@
 		AE31194AB4F130B9098319A4 /* OllamaModelPageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0AA8BC9941D7E782CEFB52 /* OllamaModelPageStore.swift */; };
 		AEA0AA63837BA3ED25ABB413 /* AgenticToolkitPermissions.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BF04ADB42980B9D5DE44BF46 /* AgenticToolkitPermissions.framework */; };
 		AEA4359E46994980DE6256D6 /* LocalChatSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FB8AA1B5100D85B75A9E4A0 /* LocalChatSessionTests.swift */; };
+		AEEFDE94C82F58D3BCF1431F /* TextDocumentSaveSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 460CCD5C4B16038D38406D1E /* TextDocumentSaveSchedulerTests.swift */; };
 		AF06F0FBA7449AB6A5A9A17E /* ReconcileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFDA74414E7A1ACA14DDFC1C /* ReconcileView.swift */; };
 		AF39A227051CA2BE0B3430AE /* FileBrowserRestorationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B323E2C908DA71AE48164BE /* FileBrowserRestorationState.swift */; };
 		AF792A00075269B09E646A98 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97D73AE672A872337EA8DEB2 /* KeychainHelper.swift */; };
@@ -1840,6 +1842,7 @@
 		44D0FA7E378C628556F6CD86 /* SettingsNavigationHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationHistory.swift; sourceTree = "<group>"; };
 		45BDEB8085D50F4871406DB8 /* ClosureMenuItemTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClosureMenuItemTarget.swift; sourceTree = "<group>"; };
 		45DC304A71DDA7A07E76CB75 /* ChatStreamEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStreamEvent.swift; sourceTree = "<group>"; };
+		460CCD5C4B16038D38406D1E /* TextDocumentSaveSchedulerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentSaveSchedulerTests.swift; sourceTree = "<group>"; };
 		48137ECF08BBFD5B4E7C10DF /* ManualTriggerSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualTriggerSource.swift; sourceTree = "<group>"; };
 		4874F102533FD511EBD497B7 /* KnownTerminals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownTerminals.swift; sourceTree = "<group>"; };
 		48E5D2980C6E9BF6A81E12D9 /* CustomHeuristicRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomHeuristicRule.swift; sourceTree = "<group>"; };
@@ -2197,6 +2200,7 @@
 		D11DC671245ACFEC3DFDF0AC /* AISettingsViewPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsViewPanelController.swift; sourceTree = "<group>"; };
 		D18988E65EE5AF1E7F27ABE4 /* GitRepoScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitRepoScannerTests.swift; sourceTree = "<group>"; };
 		D1F9FF57A343BC690CE7EE0C /* ConnectivityTriggerSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityTriggerSource.swift; sourceTree = "<group>"; };
+		D1FBACEE5A2E530591DD48C6 /* TextDocumentSaveScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentSaveScheduler.swift; sourceTree = "<group>"; };
 		D2795916D3AAC90730791C27 /* MockChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockChatSession.swift; sourceTree = "<group>"; };
 		D32DB64D049628A66B23446A /* SessionListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListViewController.swift; sourceTree = "<group>"; };
 		D41A6C44F445E6C29D2525E2 /* MCPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClient.swift; sourceTree = "<group>"; };
@@ -3077,6 +3081,7 @@
 			isa = PBXGroup;
 			children = (
 				F90BFF487FD6A18049057E50 /* TextDocument.swift */,
+				D1FBACEE5A2E530591DD48C6 /* TextDocumentSaveScheduler.swift */,
 				5AF7F75A828C35BB97C877D0 /* TextDocumentStore.swift */,
 			);
 			path = Language;
@@ -3723,6 +3728,7 @@
 		9EBC9D87302A15873C824E7A /* AgenticToolkitLanguageTests */ = {
 			isa = PBXGroup;
 			children = (
+				460CCD5C4B16038D38406D1E /* TextDocumentSaveSchedulerTests.swift */,
 				B4F9763F07304F419E1D5933 /* TextDocumentStoreTests.swift */,
 				AE6B2E59FBA7EEA9553CA0B0 /* TextDocumentTests.swift */,
 			);
@@ -5499,6 +5505,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				177F45379D83B6F56C2B5ACC /* TextDocument.swift in Sources */,
+				99D5689AC81E8BEE831E1559 /* TextDocumentSaveScheduler.swift in Sources */,
 				F071C087E96469D67664553A /* TextDocumentStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -6161,6 +6168,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AEEFDE94C82F58D3BCF1431F /* TextDocumentSaveSchedulerTests.swift in Sources */,
 				B958AE8B5B3E6A34DD9C7EC8 /* TextDocumentStoreTests.swift in Sources */,
 				7A4B32EB0E890D7A1B8AB775 /* TextDocumentTests.swift in Sources */,
 			);
