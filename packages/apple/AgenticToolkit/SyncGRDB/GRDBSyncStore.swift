@@ -28,13 +28,27 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     /// up front with `SyncStoreFailure.pullOnlyResource` (twin of
     /// `InMemorySyncStore.pullOnlyResources`).
     private let pullOnlyResources: Set<String>
+    /// Optional typed storage for a subset of resources. `nil` — the default —
+    /// is the historical all-JSON behaviour.
+    private let mirrorProjection: (any SyncMirrorProjection)?
 
-    public init(database: BoundedDatabase, pullOnlyResources: Set<String> = []) {
+    public init(
+        database: BoundedDatabase,
+        pullOnlyResources: Set<String> = [],
+        projection: (any SyncMirrorProjection)? = nil
+    ) {
         self.boundedDatabase = database
         self.pullOnlyResources = pullOnlyResources
+        self.mirrorProjection = projection
     }
 
     public var database: BoundedDatabase { boundedDatabase }
+
+    /// The projection, but only when it claims this resource.
+    private func projection(for resource: String) -> (any SyncMirrorProjection)? {
+        guard let mirrorProjection, mirrorProjection.resources.contains(resource) else { return nil }
+        return mirrorProjection
+    }
 
     /// Resource strings are interpolated directly into SQL as identifiers
     /// (SQLite has no bind-parameter syntax for identifiers), so this is the
@@ -57,14 +71,18 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     /// `purgeForIdentityChange`) — one place that "empty a mirror table" lives, so
     /// purging an unregistered resource is a no-op in every path (twin parity with
     /// `InMemorySyncStore.purgeResources`, which already no-ops the unknown key).
-    private static func deleteMirrorRows(for resources: [String], in conn: Database) throws {
+    private func deleteMirrorRows(for resources: [String], in conn: Database) throws {
         for resource in resources {
             let isRegistered = try Bool.fetchOne(
                 conn, sql: "SELECT EXISTS(SELECT 1 FROM _sync_resources WHERE resource = ?)",
                 arguments: [resource]
             ) ?? false
             guard isRegistered else { continue }
-            try conn.execute(sql: "DELETE FROM \"\(try Self.mirrorTableName(for: resource))\"")
+            if let projection = projection(for: resource) {
+                try projection.truncate(resources: [resource], in: conn)
+            } else {
+                try conn.execute(sql: "DELETE FROM \"\(try Self.mirrorTableName(for: resource))\"")
+            }
         }
     }
 
@@ -99,28 +117,39 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
         """
 
     public func prepare(resources: [SyncResource]) async throws {
-        let boundedDatabase = self.boundedDatabase
+        let store = self
         try await onQueue {
-            try boundedDatabase.write { conn in
-                try conn.execute(sql: Self.bookkeepingSchema)
-                for resource in resources {
-                    let table = try Self.mirrorTableName(for: resource.resource)
-                    try conn.execute(sql: """
-                        CREATE TABLE IF NOT EXISTS "\(table)" (
-                            id TEXT PRIMARY KEY NOT NULL,
-                            sync_version INTEGER NOT NULL DEFAULT 0,
-                            deleted_at TEXT,
-                            data TEXT NOT NULL DEFAULT '{}');
-                        """)
-                    try conn.execute(
-                        sql: """
-                            INSERT INTO _sync_resources (resource, schema_version) VALUES (?, ?)
-                            ON CONFLICT(resource) DO UPDATE SET schema_version = excluded.schema_version
-                            """,
-                        arguments: [resource.resource, resource.schemaVersion]
-                    )
-                }
+            try store.boundedDatabase.write { conn in
+                try store.prepare(resources: resources, in: conn)
             }
+        }
+    }
+
+    /// The body of `prepare(resources:)`, for a caller that already holds a
+    /// write transaction. Taking the connection rather than opening one is what
+    /// lets a store built on top of this one register its resources and create
+    /// its own tables in a single transaction.
+    public func prepare(resources: [SyncResource], in conn: Database) throws {
+        try conn.execute(sql: Self.bookkeepingSchema)
+        try mirrorProjection?.createTables(in: conn)
+        for resource in resources {
+            if projection(for: resource.resource) == nil {
+                let table = try Self.mirrorTableName(for: resource.resource)
+                try conn.execute(sql: """
+                    CREATE TABLE IF NOT EXISTS "\(table)" (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        sync_version INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
+                        data TEXT NOT NULL DEFAULT '{}');
+                    """)
+            }
+            try conn.execute(
+                sql: """
+                    INSERT INTO _sync_resources (resource, schema_version) VALUES (?, ?)
+                    ON CONFLICT(resource) DO UPDATE SET schema_version = excluded.schema_version
+                    """,
+                arguments: [resource.resource, resource.schemaVersion]
+            )
         }
     }
 
@@ -135,10 +164,10 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     }
 
     public func apply(_ batch: [SyncChange], advancingTo cursor: SyncCursor?) async throws {
-        let boundedDatabase = self.boundedDatabase
+        let store = self
         let encoder = self.encoder
         try await onQueue {
-            try boundedDatabase.write { conn in
+            try store.boundedDatabase.write { conn in
                 for change in batch {
                     let isKnown = try Bool.fetchOne(
                         conn, sql: "SELECT EXISTS(SELECT 1 FROM _sync_resources WHERE resource = ?)",
@@ -147,7 +176,6 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
                     guard isKnown else {
                         throw SyncStoreFailure.unknownResource(change.resource)
                     }
-                    let table = try Self.mirrorTableName(for: change.resource)
                     // Strict: reject an unparseable syncVersion rather than
                     // silently coercing to 0 and corrupting the mirror's version
                     // ordering. Two distinct sources feed this guard, and only one
@@ -164,6 +192,19 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
                     guard let version = Int(change.syncVersion) else {
                         throw SyncStoreFailure.invalidChange("unparseable syncVersion: \(change.syncVersion)")
                     }
+                    if let projection = store.projection(for: change.resource) {
+                        if change.op == .delete {
+                            try projection.markDeleted(
+                                resource: change.resource, id: change.id,
+                                syncVersion: version, in: conn)
+                        } else {
+                            try projection.upsert(
+                                resource: change.resource, id: change.id, syncVersion: version,
+                                data: change.data ?? [:], in: conn)
+                        }
+                        continue
+                    }
+                    let table = try Self.mirrorTableName(for: change.resource)
                     if change.op == .delete {
                         try conn.execute(
                             sql: """
@@ -221,76 +262,99 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
         guard !pullOnlyResources.contains(mutation.resource) else {
             throw SyncStoreFailure.pullOnlyResource(mutation.resource)
         }
-        let boundedDatabase = self.boundedDatabase
-        let encoder = self.encoder
-        let decoder = self.decoder
+        let store = self
         try await onQueue {
-            try boundedDatabase.write { conn in
-                let isKnown = try Bool.fetchOne(
-                    conn, sql: "SELECT EXISTS(SELECT 1 FROM _sync_resources WHERE resource = ?)",
-                    arguments: [mutation.resource]
-                ) ?? false
-                guard isKnown else {
-                    throw SyncStoreFailure.unknownResource(mutation.resource)
-                }
-                let table = try Self.mirrorTableName(for: mutation.resource)
-                let base = try Int.fetchOne(
-                    conn, sql: "SELECT sync_version FROM \"\(table)\" WHERE id = ?", arguments: [mutation.rowId]
-                )
-                if mutation.type == .delete {
-                    try conn.execute(
-                        sql: "UPDATE \"\(table)\" SET deleted_at = datetime('now') WHERE id = ?",
-                        arguments: [mutation.rowId]
-                    )
-                } else {
-                    let payload = String(data: try encoder.encode(mutation.data ?? [:]), encoding: .utf8) ?? "{}"
-                    try conn.execute(
-                        sql: """
-                            INSERT INTO "\(table)" (id, sync_version, deleted_at, data) VALUES (?, ?, NULL, ?)
-                            ON CONFLICT(id) DO UPDATE SET deleted_at = NULL, data = excluded.data
-                            """,
-                        arguments: [mutation.rowId, base ?? 0, payload]
-                    )
-                }
-
-                let existing = try Row.fetchOne(
-                    conn,
-                    sql: """
-                        SELECT op_id, payload FROM _sync_outbox
-                        WHERE resource = ? AND row_id = ? AND status = 'pending' LIMIT 1
-                        """,
-                    arguments: [mutation.resource, mutation.rowId]
-                )
-                if let existing {
-                    let opId: String = existing["op_id"]
-                    let mergedPayload: [String: JSONValue]
-                    switch mutation.type {
-                    case .upsert:
-                        let existingPayload: [String: JSONValue] = try (existing["payload"] as String?)
-                            .flatMap { $0.data(using: .utf8) }
-                            .map { try decoder.decode([String: JSONValue].self, from: $0) } ?? [:]
-                        mergedPayload = existingPayload.merging(mutation.data ?? [:]) { _, new in new }
-                    case .delete:
-                        mergedPayload = [:]
-                    }
-                    let mergedPayloadString = String(data: try encoder.encode(mergedPayload), encoding: .utf8) ?? "{}"
-                    try conn.execute(
-                        sql: "UPDATE _sync_outbox SET type = ?, payload = ? WHERE op_id = ?",
-                        arguments: [mutation.type.rawValue, mergedPayloadString, opId]
-                    )
-                } else {
-                    let opPayload = String(data: try encoder.encode(mutation.data ?? [:]), encoding: .utf8) ?? "{}"
-                    try conn.execute(
-                        sql: """
-                            INSERT INTO _sync_outbox
-                                (op_id, resource, row_id, type, base_version, payload, status, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
-                            """,
-                        arguments: [SyncID.uuidV7(), mutation.resource, mutation.rowId, mutation.type.rawValue,
-                                    base.map(String.init), opPayload]
-                    )
-                }
+            try store.boundedDatabase.write { conn in
+                try store.stage(mutation, in: conn)
             }
+        }
+    }
+
+    /// The body of `stage(_:)`, for a caller that already holds a write
+    /// transaction — the mirror write and the outbox op must land together,
+    /// and `stage(_:)`'s queue hop would lose the caller's transaction and
+    /// deadlock the pool's writer.
+    public func stage(_ mutation: LocalMutation, in conn: Database) throws {
+        guard !pullOnlyResources.contains(mutation.resource) else {
+            throw SyncStoreFailure.pullOnlyResource(mutation.resource)
+        }
+        let isKnown = try Bool.fetchOne(
+            conn, sql: "SELECT EXISTS(SELECT 1 FROM _sync_resources WHERE resource = ?)",
+            arguments: [mutation.resource]
+        ) ?? false
+        guard isKnown else {
+            throw SyncStoreFailure.unknownResource(mutation.resource)
+        }
+
+        let base: Int?
+        if let projection = projection(for: mutation.resource) {
+            base = try projection.syncVersion(resource: mutation.resource, id: mutation.rowId, in: conn)
+            if mutation.type == .delete {
+                try projection.markDeleted(
+                    resource: mutation.resource, id: mutation.rowId, syncVersion: nil, in: conn)
+            } else {
+                try projection.upsert(
+                    resource: mutation.resource, id: mutation.rowId, syncVersion: base ?? 0,
+                    data: mutation.data ?? [:], in: conn)
+            }
+        } else {
+            let table = try Self.mirrorTableName(for: mutation.resource)
+            base = try Int.fetchOne(
+                conn, sql: "SELECT sync_version FROM \"\(table)\" WHERE id = ?", arguments: [mutation.rowId]
+            )
+            if mutation.type == .delete {
+                try conn.execute(
+                    sql: "UPDATE \"\(table)\" SET deleted_at = datetime('now') WHERE id = ?",
+                    arguments: [mutation.rowId]
+                )
+            } else {
+                let payload = String(data: try encoder.encode(mutation.data ?? [:]), encoding: .utf8) ?? "{}"
+                try conn.execute(
+                    sql: """
+                        INSERT INTO "\(table)" (id, sync_version, deleted_at, data) VALUES (?, ?, NULL, ?)
+                        ON CONFLICT(id) DO UPDATE SET deleted_at = NULL, data = excluded.data
+                        """,
+                    arguments: [mutation.rowId, base ?? 0, payload]
+                )
+            }
+        }
+
+        let existing = try Row.fetchOne(
+            conn,
+            sql: """
+                SELECT op_id, payload FROM _sync_outbox
+                WHERE resource = ? AND row_id = ? AND status = 'pending' LIMIT 1
+                """,
+            arguments: [mutation.resource, mutation.rowId]
+        )
+        if let existing {
+            let opId: String = existing["op_id"]
+            let mergedPayload: [String: JSONValue]
+            switch mutation.type {
+            case .upsert:
+                let existingPayload: [String: JSONValue] = try (existing["payload"] as String?)
+                    .flatMap { $0.data(using: .utf8) }
+                    .map { try decoder.decode([String: JSONValue].self, from: $0) } ?? [:]
+                mergedPayload = existingPayload.merging(mutation.data ?? [:]) { _, new in new }
+            case .delete:
+                mergedPayload = [:]
+            }
+            let mergedPayloadString = String(data: try encoder.encode(mergedPayload), encoding: .utf8) ?? "{}"
+            try conn.execute(
+                sql: "UPDATE _sync_outbox SET type = ?, payload = ? WHERE op_id = ?",
+                arguments: [mutation.type.rawValue, mergedPayloadString, opId]
+            )
+        } else {
+            let opPayload = String(data: try encoder.encode(mutation.data ?? [:]), encoding: .utf8) ?? "{}"
+            try conn.execute(
+                sql: """
+                    INSERT INTO _sync_outbox
+                        (op_id, resource, row_id, type, base_version, payload, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
+                    """,
+                arguments: [SyncID.uuidV7(), mutation.resource, mutation.rowId, mutation.type.rawValue,
+                            base.map(String.init), opPayload]
+            )
         }
     }
 
@@ -348,9 +412,9 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     }
 
     public func complete(_ results: [SyncPushResult]) async throws {
-        let boundedDatabase = self.boundedDatabase
+        let store = self
         try await onQueue {
-            try boundedDatabase.write { conn in
+            try store.boundedDatabase.write { conn in
                 for result in results {
                     switch result.status {
                     case .applied, .conflict:
@@ -389,11 +453,16 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
                             // op. So: skip adoption (treat as absent) rather than throw;
                             // the outbox row is still deleted below.
                             if let intVersion = Int(newVersion) {
-                                let table = try Self.mirrorTableName(for: resource)
-                                try conn.execute(
-                                    sql: "UPDATE \"\(table)\" SET sync_version = ? WHERE id = ?",
-                                    arguments: [intVersion, rowId]
-                                )
+                                if let projection = store.projection(for: resource) {
+                                    try projection.setSyncVersion(
+                                        intVersion, resource: resource, id: rowId, in: conn)
+                                } else {
+                                    let table = try Self.mirrorTableName(for: resource)
+                                    try conn.execute(
+                                        sql: "UPDATE \"\(table)\" SET sync_version = ? WHERE id = ?",
+                                        arguments: [intVersion, rowId]
+                                    )
+                                }
                             }
                         }
                         try conn.execute(sql: "DELETE FROM _sync_outbox WHERE op_id = ?", arguments: [result.opId])
@@ -412,11 +481,11 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     }
 
     public func resetForResync() async throws {
-        let boundedDatabase = self.boundedDatabase
+        let store = self
         try await onQueue {
-            try boundedDatabase.write { conn in
+            try store.boundedDatabase.write { conn in
                 let tables = try String.fetchAll(conn, sql: "SELECT resource FROM _sync_resources")
-                try Self.deleteMirrorRows(for: tables, in: conn)
+                try store.deleteMirrorRows(for: tables, in: conn)
                 try conn.execute(sql: "DELETE FROM _sync_state")
             }
         }
@@ -451,14 +520,14 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     /// — it never drops a table or touches the database file.
     public func purgeResources(_ resources: [String]) async throws {
         guard !resources.isEmpty else { return }
-        let boundedDatabase = self.boundedDatabase
+        let store = self
         try await onQueue {
-            try boundedDatabase.write { conn in
+            try store.boundedDatabase.write { conn in
                 // Empty the mirror rows of the registered subset only — an
                 // unregistered resource has no mirror table, so its purge is a
                 // silent no-op (twin of InMemorySyncStore.purgeResources) rather
                 // than a "no such table" throw.
-                try Self.deleteMirrorRows(for: resources, in: conn)
+                try store.deleteMirrorRows(for: resources, in: conn)
                 for resource in resources {
                     try conn.execute(
                         sql: """
@@ -504,11 +573,11 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     /// Like `resetForResync()`, this never touches the database file itself
     /// — only rows within it, in one transaction.
     public func purgeForIdentityChange() async throws {
-        let boundedDatabase = self.boundedDatabase
+        let store = self
         try await onQueue {
-            try boundedDatabase.write { conn in
+            try store.boundedDatabase.write { conn in
                 let tables = try String.fetchAll(conn, sql: "SELECT resource FROM _sync_resources")
-                try Self.deleteMirrorRows(for: tables, in: conn)
+                try store.deleteMirrorRows(for: tables, in: conn)
                 try conn.execute(sql: "DELETE FROM _sync_state")
                 try conn.execute(sql: "DELETE FROM _sync_outbox")
             }
@@ -542,6 +611,9 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
             guard isKnown else {
                 throw SyncStoreFailure.unknownResource(resource)
             }
+            if let projection = self.projection(for: resource) {
+                return try projection.rows(resource: resource, limit: limit, offset: offset, in: conn)
+            }
             let table = try Self.mirrorTableName(for: resource)
             let rows = try Row.fetchAll(
                 conn,
@@ -561,6 +633,9 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
             ) ?? false
             guard isKnown else {
                 throw SyncStoreFailure.unknownResource(resource)
+            }
+            if let projection = self.projection(for: resource) {
+                return try projection.row(resource: resource, id: id, in: conn)
             }
             let table = try Self.mirrorTableName(for: resource)
             return try Row.fetchOne(
