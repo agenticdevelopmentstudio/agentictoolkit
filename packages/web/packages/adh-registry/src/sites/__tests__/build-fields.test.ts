@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { SITE_BUILD, isSiteId } from "../registry.js";
 
 // The three build fields live in `SITE_BUILD`, a side table below the `</gen:sites>`
-// close marker in `registry.ts` — NOT on `SiteDef`/`SITES`. `frontend/tools/scaffold-sites.py`'s
+// close marker in `registry.ts` — NOT on `SiteDef`/`SITES`. `<adh-tools>/sites/scripts/scaffold-sites.py`'s
 // `patch_registry()` regenerates the `<gen:sites>` region wholesale from a fixed template that
 // has no notion of these fields, so a field written on a `SITES` entry inside that region is
 // silently dropped on the next scaffold run. Deriving the flagged sets from `SITE_BUILD` (rather

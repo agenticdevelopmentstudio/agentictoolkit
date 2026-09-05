@@ -63,5 +63,5 @@ the boundary itself. Consumers that want persona vocabulary without wanting
 bitbag import from here, which is why `ViewportShell` lives behind this package
 and not behind a re-export on a specific persona.
 
-`frontend/tools/verify_persona_deps.py` in adh enforces the rule from the
+`<adh-tools>/sites/scripts/verify_persona_deps.py` enforces the rule from the
 consuming side.

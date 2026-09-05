@@ -12,8 +12,8 @@
 # `git add` can never sweep in the ~44 internal .d.ts/.d.ts.map byproducts that no
 # consumer resolves. The cost is that `git add` silently skips NEW dist files — which
 # is exactly how 140 of them went missing in the absorb commit, shipping 15 export
-# subpaths with no build product. The net for that is frontend/tools/
-# verify_dist_completeness.py in adh's CI: it walks the exports map, fails on any
+# subpaths with no build product. The net for that is <adh-tools>/sites/scripts/
+# verify_dist_completeness.py, run from adh's CI: it walks the exports map, fails on any
 # reached-but-untracked file, and names the on-disk path to `git add -f`.
 #
 # So: after rebuilding, run that guard and force-add EXACTLY what it names, one path

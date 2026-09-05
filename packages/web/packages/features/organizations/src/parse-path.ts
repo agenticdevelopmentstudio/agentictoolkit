@@ -19,7 +19,7 @@
  * needing that, because their first segment is an opaque id — only THIS feature addresses its
  * resource by a slug the user chose (`getId={(w) => w.slug}`).
  *
- * `frontend/tools/verify_reserved_route_slugs.py` re-derives this from the source and fails when
+ * `<adh-tools>/sites/scripts/verify_reserved_route_slugs.py` re-derives this from the source and fails when
  * the backend stops refusing it, so the two cannot drift apart.
  */
 const ALL_SEGMENT = "all";

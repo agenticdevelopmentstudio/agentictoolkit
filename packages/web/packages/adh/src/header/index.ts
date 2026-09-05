@@ -82,7 +82,7 @@ export {
 // is listed in tsup's `external`, AND every specifier that reaches this module is
 // written as the full package path. tsup's `external` matches SPECIFIERS, not
 // packages — one surviving './recents' silently defeats it.
-// Enforced by `frontend/tools/verify-bundle-boundaries.py`.
+// Enforced by `<adh-tools>/sites/scripts/verify-bundle-boundaries.py`.
 export {
   RECENTS_CAP,
   clearRecents,

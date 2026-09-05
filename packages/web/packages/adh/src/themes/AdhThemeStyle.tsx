@@ -22,7 +22,7 @@ import { isDevDeploymentEnv } from '@agentic-toolkit/adh-registry/deployment-env
 // never `new Set(...)`: this module is inlined into both dist/server.js and
 // dist/themes/index.js (see AdhThemeStyle's two exports in tsup.config.ts), and a
 // top-level `const X = new Set(...)` is exactly the module-state-fork shape
-// frontend/tools/verify-bundle-boundaries.py's Check B flags.
+// <adh-tools>/sites/scripts/verify-bundle-boundaries.py's Check B flags.
 const switcherEnv = () => isDevDeploymentEnv(process.env.DEPLOYMENT_ENV)
 
 /**

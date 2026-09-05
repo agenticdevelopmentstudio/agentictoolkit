@@ -14,7 +14,7 @@ import {
 //
 // The rdid grammar has two implementations that must agree exactly: this one and adh's
 // backend (`backend/src/adh/src/lib/rdid.ts`). Those two are pinned against each other by
-// `adh/frontend/tools/verify-rdid-parity.py`, which reads BOTH files as TEXT — the backend
+// `<adh-tools>/sites/scripts/verify-rdid-parity.py`, which reads BOTH files as TEXT — the backend
 // module imports hono, so it can never be loaded into a test environment, and this package
 // lives in a submodule that must not reach into adh at all.
 //

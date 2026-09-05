@@ -46,7 +46,7 @@ describe('rdid grammar', () => {
     expect(validateLeaf('-bad')).toMatch(/hyphen|underscore|lowercase/i);
   });
 
-  // The set the backend declares, in the backend's order — `frontend/tools/verify-rdid-parity.py`
+  // The set the backend declares, in the backend's order — `<adh-tools>/sites/scripts/verify-rdid-parity.py`
   // pins the two maps to each other as TEXT, and this pins the exported array to the same list so
   // a type that leaves one side cannot linger in the other. `game` was here until a game stopped
   // being something you address: it is now "the game of ecosystem X", reached through

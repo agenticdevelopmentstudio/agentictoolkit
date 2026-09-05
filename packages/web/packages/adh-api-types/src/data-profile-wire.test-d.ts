@@ -60,7 +60,7 @@ export type Checks = [
   // ── FAIL TO CHECK ───────────────────────────────────────────────────────────────────
   // A mistyped path resolves to `never`, and `never extends anything` is TRUE — so every
   // assertion below would pass while measuring nothing. `any` swallows them the same way.
-  // Both are refused first, for the same reason the Python guards in frontend/tools refuse
+  // Both are refused first, for the same reason the Python guards in adh-tools' sites/scripts refuse
   // an empty scan.
   Expect<Equal<IsNever<WireSocialLink>, false>>,
   Expect<Equal<IsNever<WireAddress>, false>>,

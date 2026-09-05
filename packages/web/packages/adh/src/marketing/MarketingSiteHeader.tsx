@@ -8,7 +8,7 @@ import { makeSmartHeaderAuth } from '@agentic-toolkit/adh/header-auth'
 // `external`, because it holds module-level state (`envOverride`'s listener Set); a
 // relative specifier would inline a private copy of it into THIS entry. Both halves of
 // that remedy are required — see the note atop layout/AppShell.tsx and
-// frontend/tools/verify-bundle-boundaries.py.
+// <adh-tools>/sites/scripts/verify-bundle-boundaries.py.
 import { SiteHeader } from '@agentic-toolkit/adh/header'
 // `NavLink` is a GENERIC header type. It used to have two possible spellings — the
 // toolkit barrel and the app tier's `@adh/chrome/header`, which deliberately did not

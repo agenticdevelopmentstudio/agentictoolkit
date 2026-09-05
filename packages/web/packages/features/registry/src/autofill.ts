@@ -12,7 +12,7 @@
  * It is also what the two public directory sites (`sites/registries`,
  * `sites/consultants`) import for their search boxes: they depend on this
  * package and not on the UI kit either, and had spelled the six attributes out a
- * third and fourth time until this became an export. `frontend/tools/verify_autofill_copies.py`
+ * third and fourth time until this became an export. `<adh-tools>/sites/scripts/verify_autofill_copies.py`
  * is what keeps every copy in step — the prose above used to be the only thing
  * holding them together, and it did not: the chat composer's copy sat one
  * attribute short of this one for as long as it existed.

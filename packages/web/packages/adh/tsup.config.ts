@@ -329,7 +329,7 @@ export default defineConfig({
     // Preserved import ⇒ one copy, resolved by the consumer. BOTH halves are load
     // bearing: this entry, AND every reaching specifier written as the full package
     // path '@agentic-toolkit/adh/header/recents'. One surviving './recents' defeats
-    // it. Enforced by frontend/tools/verify-bundle-boundaries.py.
+    // it. Enforced by <adh-tools>/sites/scripts/verify-bundle-boundaries.py.
     '@agentic-toolkit/adh/header/recents',
     // hub-preferences.ts is recents.ts's twin: module-level mutable state ('snapshot',
     // 'listeners') plus a 'use client' directive. Two entries reach it from opposite ends
@@ -460,7 +460,7 @@ export default defineConfig({
     // dev/vitest/tsc (which take the `development` condition straight to src/) and wrong
     // only in production. Each line below pairs with an `entry:` above and with every
     // reaching module writing the full package path; all three halves are required.
-    // `frontend/tools/verify-bundle-boundaries.py` gates the pairing.
+    // `<adh-tools>/sites/scripts/verify-bundle-boundaries.py` gates the pairing.
     //
     // STATE: the taxonomy assembled at module load, plus the inlined site-config JSON.
     // Reached from graph, details, marketing — four entries that would otherwise each

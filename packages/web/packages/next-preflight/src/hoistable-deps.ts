@@ -69,7 +69,7 @@ function findIsolateScript(dir: string): string | undefined {
  * Vercel isolate step will materialize at the site root.
  *
  * NOT "the site declared it" — adh sites are forbidden to declare the
- * `@agenticdevelopertoolkit/*` scope (frontend/tools/verify_persona_deps.py), and
+ * `@agenticdevelopertoolkit/*` scope (<adh-tools>/sites/scripts/verify_persona_deps.py), and
  * `vercel-isolate-deps.py` materializes it for them. The property that has to hold
  * is that its worklist reaches everything; see the design spec, section 6.1.
  *

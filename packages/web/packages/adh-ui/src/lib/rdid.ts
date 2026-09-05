@@ -2,7 +2,7 @@
 // No React, no Hono. An rdid is `<type>.<scope>.<name>`; <type>+<scope> are fixed/inherited,
 // only the leaf <name> is editable.
 //
-// Kept in lockstep with the backend by adh's `frontend/tools/verify-rdid-parity.py`, which
+// Kept in lockstep with the backend by `<adh-tools>/sites/scripts/verify-rdid-parity.py`, which
 // reads BOTH files as TEXT and pins the prefix map (values AND declaration order), the two
 // regex literals, the length cap, and validateLeaf's messages. It cannot live on either
 // side: the backend module imports hono so it can never be loaded into a test environment,

@@ -325,7 +325,7 @@ export type SiteBuildConfig = {
    * still calls `adhNextConfig()` for the shared dependency gate, headers and env, but
    * layers its own `rewrites`/`redirects`/`env`/`transpilePackages` on top rather than
    * taking the uniform three-line template. Consumed by Task 7 and by
-   * `frontend/testing/probe-auth-fleet.py`'s `applies_bff()` (Task 6b/A4): a site with
+   * `<adh-tools>/sites/scripts/testing/probe-auth-fleet.py`'s `applies_bff()` (Task 6b/A4): a site with
    * `handRolledConfig` is checked by its own config text, not by "has a folder + calls
    * `adhNextConfig()`".
    */
@@ -337,7 +337,7 @@ export type SiteBuildConfig = {
  * `next.config.ts` can stay byte-exact: per-site DATA read by uniform CODE.
  *
  * DELIBERATELY NOT fields on `SiteDef`. Most `SITES` entries live inside the
- * `<gen:sites>` region above, which `frontend/tools/scaffold-sites.py:608`
+ * `<gen:sites>` region above, which `<adh-tools>/sites/scripts/scaffold-sites.py`
  * regenerates wholesale from a fixed template blind to these fields — a field
  * written up there is silently dropped on the next scaffold run, with no error and
  * no failing test. Keeping the data in this table, below the close marker, is what
@@ -770,8 +770,10 @@ export function buildSiteHref(target: SiteDef, currentHostname: string, pathname
 //     to `/<slug>/<segment>` — a ROUTE — instead of hopping to the site's origin. Signed out and
 //     from every other site the menu is still the cross-site navigator {@link siteWorkspaceHref}
 //     describes.
-//   - `frontend/tools/gen-hub-fleet-routes.py`, which writes the hub's route directory per entry
-//     that does not already have one, and `--check`s that the tree and this table agree.
+//   - `tools/gen-hub-fleet-routes.py` in the hub's own repo (agenticdeveloperhubwebsite; it left
+//     adh with the hub in 2026-09, and did NOT go to adh-tools, because it writes that repo's own
+//     route tree), which writes the hub's route directory per entry that does not already have
+//     one, and `--check`s that the tree and this table agree.
 //
 // The DEFAULT is `<site id>: '<site id>'`. Every entry that departs from it says why below, and
 // the departures are all of one kind: the hub already routed that feature under a name of its own

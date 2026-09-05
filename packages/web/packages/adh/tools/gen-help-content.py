@@ -45,7 +45,7 @@ help corpus perfectly well and simply cannot regenerate it: `_mcp_catalog_path()
 that message rather than emitting a module with an unresolved `{{MCP_TOOL_COUNT}}` in it.
 Recorded here because it is a real, if narrow, dependency of this repo on a repo it does not
 contain — the inverse of the direction the rest of the boundary runs (see
-frontend/tools/verify_toolkit_boundary.py in adh, which scans import specifiers in
+<adh-tools>/sites/scripts/verify_toolkit_boundary.py, which scans import specifiers in
 .ts/.tsx/.js and therefore cannot see this file at all).
 """
 

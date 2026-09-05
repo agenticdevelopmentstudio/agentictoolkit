@@ -6,7 +6,7 @@
 // WHY A COPY RATHER THAN A DEPENDENCY. `@agenticdevelopertoolkit/chat` lives in a
 // DIFFERENT submodule. A `link:` from here to a sibling submodule only resolves in a
 // checkout that has both — and this toolkit is consumed by repos that have neither adh
-// nor that submodule (see frontend/tools/verify_toolkit_boundary.py's docstring). Both
+// nor that submodule (see <adh-tools>/sites/scripts/verify_toolkit_boundary.py's docstring). Both
 // uses here (`persona-chat/index.ts`, `visitor-chat/sse.ts`) are TYPE-ONLY, so they
 // erase at build time and a structural copy is exact: any real chat backend passed in
 // by a consumer satisfies these shapes.

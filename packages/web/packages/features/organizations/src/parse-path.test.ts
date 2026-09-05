@@ -16,7 +16,7 @@ describe("parseOrganizationsPath", () => {
   it("spends the literal `all` on the landing — which is why no org may be slugged it", () => {
     // The collision this word creates is closed at the MINT boundary, not here: `all` is in
     // RESERVED_ROUTE_SLUGS (backend/src/adh/src/lib/rdid.ts), and
-    // frontend/tools/verify_reserved_route_slugs.py re-derives it from this file so the two
+    // <adh-tools>/sites/scripts/verify_reserved_route_slugs.py re-derives it from this file so the two
     // cannot drift. Pinned here so the reason survives beside the code that spends the word.
     expect(parseOrganizationsPath(["all"])).toEqual({ all: true, topicPath: [] });
   });

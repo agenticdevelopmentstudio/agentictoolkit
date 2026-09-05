@@ -119,7 +119,7 @@ reaches it through `@agentic-toolkit/persona` or bitbag never names the scope, s
 there is one copy by construction. **adh is there** — all 45 of its sites declared the
 scope; 38 never imported it and were pruned outright, and the other 7 now import
 `@agentic-toolkit/persona`. No adh site manifest names `@agenticdevelopertoolkit/*`
-for persona vocabulary (`frontend/tools/verify_persona_deps.py` asserts it).
+for persona vocabulary (`<adh-tools>/sites/scripts/verify_persona_deps.py` asserts it).
 
 Rule 1 does **not** bound the eight that moved in 2026-08. A site may legitimately
 name `@agenticdevelopertoolkit/ui` or `/themes` at top level while a package from this
@@ -134,7 +134,7 @@ backends' committed `web/vendor/` trees, while everything else resolves this
 submodule. So a drift still ships two versions of `themes` to those backends, and
 `colorMode.tsx` builds its context at module scope — `useColorMode` throws, and the
 error names React rather than the boundary. adh's CI enforces the equality
-(`frontend/tools/verify_submodule_pins.py`), and that guard retires when the backend
+(`<adh-tools>/sites/scripts/verify_submodule_pins.py`), and that guard retires when the backend
 vendoring stops reading adh's copy, not before.
 
 ### Apple framework layout

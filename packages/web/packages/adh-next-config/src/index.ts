@@ -92,7 +92,7 @@ export function adhNextConfig(options: AdhNextConfigOptions = {}): NextConfig {
   const id = currentSiteId(siteDir);
   // Build data comes from `siteBuildConfig`, NOT from the `SiteDef` — the three build
   // fields are deliberately not on that interface (Ruling T4-b). Most `SITES` entries
-  // live inside a `<gen:sites>` region that `frontend/tools/scaffold-sites.py:608`
+  // live inside a `<gen:sites>` region that `<adh-tools>/sites/scripts/scaffold-sites.py`
   // regenerates wholesale from a template blind to them, so a field written there is
   // silently dropped on the next scaffold run. The side table below the close marker is
   // what makes that impossible. `siteBuildConfig` returns `{}` for sites with no build

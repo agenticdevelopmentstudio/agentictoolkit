@@ -10,7 +10,7 @@ import { SITE_TITLE_HELP_ID } from '@agentic-toolkit/adh-ui/help-ids'
 import type { SiteHelp } from '@agenticdevelopertoolkit/ui/components/help-content'
 // Type-only, so nothing crosses at runtime and no `external` pairing is owed — the
 // whole-statement `import type … from` form is erased before the bundler sees it, and
-// frontend/tools/verify-bundle-boundaries.py skips exactly that form (see its comment at
+// <adh-tools>/sites/scripts/verify-bundle-boundaries.py skips exactly that form (see its comment at
 // the top of `_iter_self_specifiers`). The shell's prop type is imported rather than
 // restated so `shell` cannot drift from what <MarketingRootHtml> actually accepts.
 import type { MarketingRootHtmlProps } from '@agentic-toolkit/adh/marketing'
