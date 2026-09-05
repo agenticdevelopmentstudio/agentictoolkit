@@ -55,13 +55,23 @@ function no(reason: string): ButtonState {
   return { enabled: false, reason };
 }
 
-function has(verbs: readonly AccessVerb[], verb: AccessVerb): boolean {
-  return verbs.includes(verb);
+function has(verbs: readonly AccessVerb[] | undefined, verb: AccessVerb): boolean {
+  return verbs !== undefined && verbs.includes(verb);
 }
 
 export interface ToolbarInput {
   selection: Selection;
-  verbs: readonly AccessVerb[];
+  /**
+   * What this operator may do — or `undefined` while that is still being read.
+   *
+   * THE TWO ARE NOT THE SAME and `[]` cannot stand in for the second, which is what it was
+   * doing: a console whose tree read has not landed yet held no verbs, so every gated control
+   * below answered a question nobody had asked with a sentence about permission — "You cannot
+   * register repositories here" — and then silently became false a moment later. An operator
+   * who reads that and stops has been turned away from something they were always allowed to
+   * do, by a refusal that never admits it was wrong.
+   */
+  verbs: readonly AccessVerb[] | undefined;
   /** A run is already in flight from this console. The pipeline buttons stand down rather
    *  than queue a second walk over rows the first one is still moving. */
   busy?: boolean;
@@ -90,8 +100,14 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
   const repos = targets.filter((t) => t.kind === 'repo');
 
   const running = busy ? no('A run is already in flight.') : null;
+  // Pre-empts every verb-gated control below, and none of the ungated ones: Configure and
+  // Integrations are always live precisely because they ask no verb, so there is nothing about
+  // them left to be reading.
+  const pending =
+    verbs === undefined ? no('Still reading what you may do in this workspace.') : null;
   const nothing = targets.length === 0;
   const pipeline = (verb: AccessVerb, need: string): ButtonState =>
+    pending ??
     running ??
     (!has(verbs, verb)
       ? no(need)
@@ -110,7 +126,9 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
     // the folder a deploy is walking before they may stop it is a control that arrives too
     // late to be one. `U` because stopping a run mid-fleet decides which repositories were
     // carried, which is the same authority that started it.
-    cancel: !busy
+    cancel: pending
+      ? pending
+      : !busy
       ? no('Nothing is running.')
       : has(verbs, 'U')
         ? OK
@@ -138,9 +156,13 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
     // field on the row it creates. Nothing needs to be selected for that to be a complete
     // sentence.
     register:
-      running ?? (has(verbs, 'C') ? OK : no('You cannot register repositories here.')),
+      pending ??
+      running ??
+      (has(verbs, 'C') ? OK : no('You cannot register repositories here.')),
 
-    unregister: running
+    unregister: pending
+      ? pending
+      : running
       ? running
       : !has(verbs, 'D')
         ? no('You cannot unregister repositories here.')
@@ -150,9 +172,11 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
 
     // A folder is created INSIDE the folder the rail is listing — which is the only reading
     // that puts the new folder where the operator is looking.
-    newGroup: has(verbs, 'C') ? OK : no('You cannot add folders here.'),
+    newGroup: pending ?? (has(verbs, 'C') ? OK : no('You cannot add folders here.')),
 
-    rename: !has(verbs, 'U')
+    rename: pending
+      ? pending
+      : !has(verbs, 'U')
       ? no('You cannot rename folders here.')
       : groups.length === 1 && repos.length === 0
         ? OK
@@ -164,7 +188,9 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
     // still has contents, and the confirmation says so. A repository is removed by
     // UNREGISTERING it, which is a pipeline operation with a run behind it — so delete
     // stays about folders, and its refusal names the control the other job belongs to.
-    delete: !has(verbs, 'D')
+    delete: pending
+      ? pending
+      : !has(verbs, 'D')
       ? no('You cannot delete folders here.')
       : groups.length === 0
         ? no('Select a folder to delete.')
@@ -172,7 +198,9 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
           ? no('Unregister removes a repository — delete only removes folders.')
           : OK,
 
-    move: !has(verbs, 'U')
+    move: pending
+      ? pending
+      : !has(verbs, 'U')
       ? no('You cannot move things in this workspace.')
       : nothing
         ? no('Select something to move.')

@@ -645,7 +645,15 @@ function StepConnection({
             {refreshError}
           </p>
         ) : null}
-        {repos === null ? (
+        {!connectionId ? (
+          // There is no installation to read FROM, so nothing is being read and saying
+          // otherwise is the same conflation this whole block exists to undo: the field above
+          // has just explained — in one of three different sentences — why there is none, and
+          // a spinner underneath it would contradict every one of them and never resolve.
+          <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
+            Repositories are listed once there is an installation to read them from.
+          </p>
+        ) : repos === null ? (
           <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
             Reading what this installation was granted…
           </p>

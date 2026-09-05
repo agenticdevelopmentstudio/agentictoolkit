@@ -171,6 +171,22 @@ describe('RegisterWizard — why there is no installation', () => {
     expect(await screen.findByText(/isn't installed on any account/)).toBeTruthy();
     expect(screen.getByText(/open Integrations and press Test/)).toBeTruthy();
   });
+
+  it.each([
+    ['the list has not landed', { connections: undefined } as const],
+    ['the read failed', { connections: undefined, connectionsError: 'network is down' } as const],
+    ['there are none', { connections: [] } as const],
+  ])('does not claim to be reading repositories when %s', async (_why, over) => {
+    // All three end with no installation SELECTED, and the repository field sits under a
+    // block that has just explained which one it is. A spinner there contradicts every one of
+    // those sentences and never resolves, because the read it claims to be doing is one no
+    // effect will ever start: there is no connection id to start it with.
+    draw(FALLBACK, over);
+    expect(
+      await screen.findByText(/listed once there is an installation to read them from/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Reading what this installation was granted/)).toBeNull();
+  });
 });
 
 /**

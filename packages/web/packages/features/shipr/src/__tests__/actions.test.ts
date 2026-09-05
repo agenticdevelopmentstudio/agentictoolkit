@@ -190,3 +190,64 @@ describe('scopeOf', () => {
     });
   });
 });
+
+/**
+ * The verbs are not known YET, which is not the same as being denied.
+ *
+ * The console reads its tree — groups, items and verbs together — after it mounts, and for
+ * the length of that read it held `[]`. Every gated control then answered with a sentence
+ * about permission: click Configure and then Add in that window and shipr said "You cannot
+ * register repositories here" to an operator who could, then quietly changed its mind. A
+ * refusal that retracts itself is worse than a wait, because only the wait is true.
+ */
+describe('toolbarState — before the verbs have been read', () => {
+  const PENDING = 'Still reading what you may do in this workspace.';
+
+  it.each([
+    'status',
+    'prepare',
+    'deploy',
+    'cancel',
+    'register',
+    'unregister',
+    'newGroup',
+    'rename',
+    'delete',
+    'move',
+  ] as const)('says %s is still being read, not refused', (id) => {
+    // Every one of these is gated on a verb, so with no verbs to gate on there is nothing
+    // to say about permission. The selection is deliberately full: a reason about the
+    // selection would be just as wrong, and pre-empting it is the point.
+    // NOT through `state()`: its `verbs` parameter has a default, and a default fires on an
+    // explicit `undefined` — so the helper cannot express the very state under test.
+    const s = toolbarState({
+      selection: { ...EMPTY_SELECTION, focus: r('repo-1') },
+      verbs: undefined,
+      hasGroups: true,
+      busy: true,
+    });
+    expect(s[id].enabled).toBe(false);
+    expect(s[id].reason).toBe(PENDING);
+  });
+
+  it('leaves the two ungated controls alone', () => {
+    // Configure and Integrations ask no verb, so there is nothing about them left to read.
+    // Disabling them here would lock an operator out of the one dialog that explains, per
+    // control, why the rest are refused.
+    const s = toolbarState({
+      selection: EMPTY_SELECTION,
+      verbs: undefined,
+      hasGroups: true,
+    });
+    expect(s.configure).toEqual({ enabled: true, reason: '' });
+    expect(s.integrations).toEqual({ enabled: true, reason: '' });
+  });
+
+  it('still says a workspace that granted NOTHING is a refusal', () => {
+    // The distinction only holds if the empty read keeps its own sentence: a viewer with no
+    // `C` is genuinely refused, and telling them to wait for a read that already landed
+    // would leave them waiting forever.
+    const s = state({}, []);
+    expect(s.register.reason).toBe('You cannot register repositories here.');
+  });
+});

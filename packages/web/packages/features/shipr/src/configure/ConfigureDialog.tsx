@@ -100,7 +100,9 @@ export interface ConfigureDialogProps {
   /** The live tree's mirrors. The rows are derived from these, so a register or a remove
    *  that lands while this is open moves the list under the operator. */
   items: readonly RepoItem[];
-  verbs: readonly AccessVerb[];
+  /** `undefined` while the console's tree read is still out — passed through rather than
+   *  defaulted, so this dialog's buttons say "still reading" where the toolbar's do. */
+  verbs: readonly AccessVerb[] | undefined;
   /** A run is in flight from this console. Add and Remove stand down; settings do not — see
    *  `configure` in `toolbarState`. */
   busy?: boolean;

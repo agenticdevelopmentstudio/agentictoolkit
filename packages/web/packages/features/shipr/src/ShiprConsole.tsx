@@ -213,7 +213,11 @@ function Console({
 
   const groups = tree.data?.groups ?? [];
   const items = tree.data?.items ?? [];
-  const verbs = tree.data?.verbs ?? [];
+  // NO `?? []`. An unread tree is not a workspace granting nothing, and collapsing the two
+  // makes every gated control claim a permission refusal for as long as the read is out —
+  // see `ToolbarInput.verbs`. `undefined` travels all the way to `toolbarState`, which is
+  // the one place that knows what to say instead.
+  const verbs = tree.data?.verbs;
 
   const plans = React.useMemo(
     () =>
