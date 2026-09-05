@@ -19,7 +19,7 @@
  * and `/auth/slug-available/:slug` reports a hit there as `reason: 'format'` — so a word that
  * shadows a route is refused whichever way the slug is minted, while the words held back on
  * taste alone (`admin`, `login`, the hub's feature vocabulary) are refused only by the two
- * forms. `frontend/tools/verify_reserved_route_slugs.py` is what keeps the narrow set from
+ * forms. `<adh-tools>/sites/scripts/verify_reserved_route_slugs.py` is what keeps the narrow set from
  * falling behind the route trees, and it checks this list against them too.
  *
  * Adding a name here narrows what the forms will accept; it does not evict a slug already
@@ -69,7 +69,7 @@ export declare const SITE_ROUTE_SEGMENTS: readonly string[];
  * either way, on the same reasoning as SITE_ROUTE_SEGMENTS: a slug is minted once, so the only
  * question a form can answer is "is this free ANYWHERE".
  *
- * `frontend/tools/verify_reserved_route_slugs.py` re-derives these from the parser sources — both
+ * `<adh-tools>/sites/scripts/verify_reserved_route_slugs.py` re-derives these from the parser sources — both
  * the comparison and the named constant one may be spelled as — and fails when a grammar starts
  * matching a word neither list carries, so this cannot silently fall behind.
  */

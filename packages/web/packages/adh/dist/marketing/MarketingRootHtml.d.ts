@@ -35,7 +35,7 @@ export type MarketingRootHtmlProps = {
      * login page. A fully public site turned the probe off to be sure that never happened.
      * `beginSilentLogin` now asks the AS first (`preflightSsoReturn`) and navigates only on a yes,
      * so a public site keeps that guarantee with the probe ON, and no site in the family passes
-     * `false` (frontend/tools/verify-site-uniformity.py fails one that starts).
+     * `false` (<adh-tools>/sites/scripts/verify-site-uniformity.py fails one that starts).
      *
      * Set it only for a surface that must not navigate on load for a reason the preflight does not
      * cover, and say what that reason is. See docs/platform/cross-site-auth.md.
@@ -105,14 +105,14 @@ export type MarketingRootHtmlProps = {
  *    guesses this comment used to describe (a landing-route exemption and a local-hostname
  *    veto); see docs/platform/cross-site-auth.md. `silentSso={false}` opts a site out of
  *    recognition entirely — no site in the family does, and
- *    frontend/tools/verify-site-uniformity.py fails one that starts, so the escape hatch cannot
+ *    <adh-tools>/sites/scripts/verify-site-uniformity.py fails one that starts, so the escape hatch cannot
  *    be taken quietly. See the prop doc above.
  *  • `<AppShell header={header ?? <MarketingSiteHeader siteId/>} footer={…}>` — the shared
  *    chrome with the smart auth widget (avatar / Login+Sign up via SSO returnTo).
  *
  * EVERY site in the family mounts this. A site does not build its own `<html>` — a site that
  * needs something different declares it as a prop here, and if no prop fits, the prop is what
- * gets added. That rule is enforced (`frontend/tools/verify-site-uniformity.py`, check `shell`)
+ * gets added. That rule is enforced (`<adh-tools>/sites/scripts/verify-site-uniformity.py`, check `shell`)
  * and it is not waivable by recording an exception, because the four documents that were once
  * excused are what taught us the cost: each was a copy of this file made to reach ONE slot, and
  * each silently dropped `dir` and the locale seam on the way. The per-site seams are
