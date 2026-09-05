@@ -12,6 +12,21 @@ struct SubprocessChannelTests {
 
     private static let boundedWaitSeconds: TimeInterval = 5
 
+    /// Blocks the calling thread on `semaphore` for up to `seconds`.
+    ///
+    /// Deliberately **not** `async`: `DispatchSemaphore.wait` is marked
+    /// unavailable from async contexts precisely because blocking a
+    /// cooperative thread is normally a bug. Here it is the point — see
+    /// `idleChannelsDoNotParkTheCooperativePool`, whose watchdog has to
+    /// survive a fully parked pool and therefore cannot be an `await`.
+    /// Calling a synchronous function is the sanctioned way to say so.
+    private static func blockUntilSignalled(
+        _ semaphore: DispatchSemaphore,
+        seconds: TimeInterval
+    ) -> DispatchTimeoutResult {
+        semaphore.wait(timeout: .now() + seconds)
+    }
+
     /// Collects frames from `stream` until `count` have arrived, bounded by
     /// `boundedWaitSeconds` so a channel that stops producing fails fast.
     private func collectFrames(
@@ -409,13 +424,99 @@ struct SubprocessChannelTests {
         // before asking whether anything else can still run.
         try await Task.sleep(nanoseconds: 300_000_000)
 
-        let unrelatedTaskRan = try await withWallClockBudget(Self.boundedWaitSeconds) {
-            await Task.detached { true }.value
+        // The watchdog must not itself live on the cooperative pool. Under
+        // the regression this test exists to catch, every cooperative thread
+        // is parked in a blocking `read(2)` — *including* the thread that
+        // would run a `withWallClockBudget` timeout `Task`, and the one that
+        // would resume this test after an `await`. An async watchdog
+        // therefore cannot fire, the test cannot fail, and the whole scheme
+        // hangs until `xcodebuild` kills it without naming a culprit.
+        //
+        // A `DispatchSemaphore` waited on synchronously does not need the
+        // pool to wake up, so a failure stays a failure. Blocking one
+        // cooperative thread here is deliberate: it is the only wait that
+        // survives the scenario under test.
+        let unrelatedTaskRan = DispatchSemaphore(value: 0)
+        Task.detached { unrelatedTaskRan.signal() }
+        let outcome = Self.blockUntilSignalled(unrelatedTaskRan, seconds: Self.boundedWaitSeconds)
+
+        if outcome == .timedOut {
+            print(
+                "STARVATION: an unrelated Task.detached did not run within "
+                    + "\(Self.boundedWaitSeconds)s with \(childCount) idle channels open. "
+                    + "The cooperative pool is parked in blocking reads."
+            )
         }
-        #expect(unrelatedTaskRan)
+        #expect(
+            outcome == .success,
+            "an unrelated Task.detached never ran with \(childCount) idle channels open"
+        )
 
         for channel in channels {
             await channel.terminate()
         }
+    }
+
+    // MARK: - Graceful termination
+
+    @Test("terminate() lets a graceful child run its SIGTERM handler instead of SIGPIPE-ing it")
+    func terminateDoesNotCloseTheChildsReadEndsBeforeSIGTERM() async throws {
+        // The child traps SIGTERM, takes 0.3s to shut down, logs, and exits
+        // with its own code — the shape of every MCP server that writes a
+        // shutdown line, and of any `npx`/`sh -c` wrapper.
+        //
+        // If `terminate()` closes the child's stdout/stderr read ends before
+        // signalling it, the child's next write raises SIGPIPE (the parent's
+        // `F_SETNOSIGPIPE` covers only its own write end of the child's
+        // *stdin*) and it dies with status 13 in about a millisecond — the
+        // handler never reaches its own `exit 7` and the shutdown log is
+        // never written. That nullifies the whole `terminationGraceSeconds`
+        // grace period for precisely the children it exists for.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "trap 'sleep 0.3; echo BYE >&2; exit 7' TERM; "
+                    + "echo UP >&2; while :; do sleep 0.05; done"
+            ]
+        ))
+        try await channel.launch()
+        _ = try await channel.messages()
+        // Let the trap be installed and `UP` be written before signalling.
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        await channel.terminate()
+
+        let status = try await withWallClockBudget(Self.boundedWaitSeconds) {
+            await channel.waitUntilExit()
+        }
+        #expect(status == 7, "expected the child's own exit 7; 13 means it was SIGPIPEd")
+
+        let stderrText = try await standardErrorText(on: channel)
+        #expect(stderrText.contains("UP"))
+        #expect(
+            stderrText.contains("BYE"),
+            "the shutdown log written during the grace period was not captured"
+        )
+    }
+
+    @Test("terminate() still escalates to SIGKILL for a child that ignores SIGTERM")
+    func terminateStillEscalatesForAnIgnoringChild() async throws {
+        // The companion to the test above: making SIGTERM survivable must not
+        // make SIGKILL unreachable.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "trap '' TERM; while :; do sleep 0.05; done"]
+        ))
+        try await channel.launch()
+        _ = try await channel.messages()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        await channel.terminate()
+
+        let status = try await withWallClockBudget(Self.boundedWaitSeconds) {
+            await channel.waitUntilExit()
+        }
+        #expect(status == 9, "a child that ignores SIGTERM must still be SIGKILLed")
     }
 }

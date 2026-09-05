@@ -139,6 +139,11 @@ public actor SubprocessChannel {
     private var standardErrorTask: Task<Void, Never>?
     private var standardErrorBuffer = Data()
     private var isStandardErrorTruncated = false
+    /// Set when `standardErrorText()`'s drain budget lapsed, i.e. the capture
+    /// is a snapshot of a stream still being written rather than everything
+    /// the child had to say. Distinct from `isStandardErrorTruncated`, which
+    /// means the *front* was trimmed at the cap.
+    private var isStandardErrorIncomplete = false
 
     public init(configuration: Configuration) {
         self.configuration = configuration
@@ -278,18 +283,33 @@ public actor SubprocessChannel {
     /// makes the answer complete.
     ///
     /// Capped at the last `maximumStandardErrorBytes`; a truncated capture is
-    /// prefixed with a marker rather than silently missing its start.
+    /// prefixed with a marker rather than silently missing its start. A
+    /// capture cut short by the drain budget instead gets its own, different
+    /// marker: a partial answer must never present itself as a complete one,
+    /// and "the front was trimmed" and "the end hasn't arrived yet" are
+    /// different facts for a caller trying to explain a failure.
     public func standardErrorText() async -> String {
         if let standardErrorTask {
-            _ = try? await withWallClockBudget(Self.standardErrorDrainGraceSeconds) {
+            let drained: Bool? = try? await withWallClockBudget(
+                Self.standardErrorDrainGraceSeconds
+            ) {
                 await standardErrorTask.value
+                return true
             }
+            if drained == nil { isStandardErrorIncomplete = true }
         }
         let text = String(bytes: standardErrorBuffer, encoding: .utf8)
             ?? String(bytes: standardErrorBuffer, encoding: .isoLatin1)
             ?? ""
-        guard isStandardErrorTruncated else { return text }
-        return "[stderr truncated to the last \(Self.maximumStandardErrorBytes) bytes]\n" + text
+        var prefix = ""
+        if isStandardErrorTruncated {
+            prefix += "[stderr truncated to the last \(Self.maximumStandardErrorBytes) bytes]\n"
+        }
+        if isStandardErrorIncomplete {
+            let grace = Self.standardErrorDrainGraceSeconds
+            prefix += "[stderr capture incomplete: the drain did not finish within \(grace)s]\n"
+        }
+        return prefix + text
     }
 
     /// Terminates the child if still running and finishes the message
@@ -297,8 +317,14 @@ public actor SubprocessChannel {
     /// case does not disarm a later `launch()` + `terminate()` on the same
     /// channel.
     ///
-    /// Sends SIGTERM, waits up to `terminationGraceSeconds`, then escalates
-    /// to SIGKILL, then stops the two `DispatchIO` readers unconditionally —
+    /// Order matters, and is: finish the message stream (waking the pump
+    /// without touching a descriptor) → SIGTERM → wait up to
+    /// `terminationGraceSeconds` → SIGKILL → stop the two `DispatchIO`
+    /// readers, which is the only place descriptors are closed. Closing the
+    /// child's stdout/stderr read ends any earlier makes its next write raise
+    /// SIGPIPE, so a child that flushes a shutdown log from its own SIGTERM
+    /// handler dies of a signal with that log unwritten and the grace period
+    /// buys nothing at all. The readers are stopped unconditionally —
     /// not after waiting for the pump/drain tasks to observe EOF on their
     /// own, which a child launched through a shell wrapper (`sh -c …`,
     /// `npx …`) can withhold forever if a grandchild still holds the write
@@ -321,13 +347,26 @@ public actor SubprocessChannel {
         guard !isTerminated else { return }
         isTerminated = true
 
+        // This cancellation runs its `onCancel` body synchronously on this
+        // thread, and that body deliberately only *finishes the chunk
+        // stream* — it does not close the child's stdout read end. Closing it
+        // here would SIGPIPE a child that is about to be asked politely to
+        // exit, which is the one case the grace period below exists for. The
+        // read ends come down in `readerBox.stopAll()`, after SIGKILL.
+        //
+        // The stderr drain is deliberately *not* cancelled yet. A graceful
+        // child writes its shutdown log between SIGTERM and its own `exit`,
+        // and that log is the whole reason stderr is captured; finishing the
+        // drain's stream here would drop those bytes even though the
+        // descriptor stays open. It is cancelled after the escalation
+        // instead, next to `readerBox.stopAll()`.
         pumpTask?.cancel()
-        standardErrorTask?.cancel()
         messageContinuation?.finish()
 
         // Stdin is only ever written from this actor, so closing it here is
-        // safe; the stdout/stderr read ends are handled below, once the
-        // child is confirmed dead or forcibly killed.
+        // safe, and a child blocked reading it needs the EOF to notice it has
+        // been asked to leave. The stdout/stderr read ends are handled below,
+        // once the child is confirmed dead or forcibly killed.
         try? standardInputPipe?.fileHandleForWriting.close()
 
         if let process, process.isRunning {
@@ -343,7 +382,11 @@ public actor SubprocessChannel {
             }
         }
 
+        // The child is dead by here, so closing the read ends can no longer
+        // SIGPIPE anything, and the drain has had the whole grace period to
+        // capture whatever the child said on its way out.
         readerBox.stopAll()
+        standardErrorTask?.cancel()
     }
 
     /// Waits for exit and returns the status. Returns immediately if already
@@ -426,9 +469,17 @@ public actor SubprocessChannel {
                 } onCancel: {
                     // Consuming task cancellation (the consumer went away, or
                     // `terminate()` was called) must tear the child down
-                    // eagerly, and stop the reader so this loop's `await`
-                    // wakes instead of waiting on a silent child forever.
-                    reader.stop()
+                    // eagerly, and wake this loop's `await` so it does not
+                    // park on a silent child forever.
+                    //
+                    // `finishStream()`, never `stop()`: `Task.cancel()` runs
+                    // this body synchronously on the cancelling thread, so
+                    // closing the descriptor here would close the child's
+                    // stdout read end *before* `terminate()` sends SIGTERM
+                    // and kill a graceful child with SIGPIPE. The descriptor
+                    // is released by `terminate()`'s `readerBox.stopAll()`
+                    // after the SIGKILL escalation, or by `deinit`.
+                    reader.finishStream()
                     processBox.terminateIfRunning()
                 }
             } catch {
@@ -469,7 +520,11 @@ public actor SubprocessChannel {
                         await self?.appendStandardError(chunk)
                     }
                 } onCancel: {
-                    reader.stop()
+                    // Wake the loop without closing the child's stderr read
+                    // end — see `DescriptorReader.finishStream()`. Closing it
+                    // here would SIGPIPE the child mid-shutdown, losing
+                    // exactly the diagnostic this drain exists to capture.
+                    reader.finishStream()
                 }
             } catch {
                 // Best-effort: whatever arrived before the read failed (e.g.
@@ -532,7 +587,8 @@ public actor SubprocessChannel {
         private let dispatchChannel: DispatchIO
         private let continuation: AsyncThrowingStream<Data, Error>.Continuation
         private let lock = NSLock()
-        private var hasFinished = false
+        private var hasFinishedStream = false
+        private var hasClosedDescriptor = false
 
         init(handle: FileHandle, label: String) {
             let closer = HandleCloser(handle)
@@ -576,38 +632,64 @@ public actor SubprocessChannel {
                     // from in here; that is an ordinary end of stream, not a
                     // failure to report.
                     if error == ECANCELED {
-                        self.finish(with: nil)
+                        self.finish(with: nil, closingDescriptor: true)
                     } else {
-                        self.finish(with: NSError(domain: NSPOSIXErrorDomain, code: Int(error), userInfo: nil))
+                        self.finish(
+                            with: NSError(domain: NSPOSIXErrorDomain, code: Int(error), userInfo: nil),
+                            closingDescriptor: true
+                        )
                     }
                     return
                 }
                 if done {
-                    self.finish(with: nil)
+                    self.finish(with: nil, closingDescriptor: true)
                 }
             }
         }
 
-        /// Ends the stream and releases the descriptor without waiting for
-        /// EOF. Idempotent, and safe to call while a read is in flight.
-        func stop() {
-            finish(with: nil)
+        /// Wakes the consumer and nothing else: finishes the chunk stream so
+        /// a `for await` parked on a silent child returns, while leaving the
+        /// `DispatchIO` channel and the descriptor open.
+        ///
+        /// This is the half `onCancel` wants, and keeping it separate from
+        /// `stop()` is load-bearing. Closing the read end of the child's
+        /// stdout/stderr makes the child's next write raise SIGPIPE — the
+        /// parent's `F_SETNOSIGPIPE` covers only its own write end of the
+        /// child's *stdin* — so a graceful child that flushes a shutdown log
+        /// from its SIGTERM handler dies of a signal instead, and
+        /// `terminationGraceSeconds` buys nothing. Waking the consumer is a
+        /// fact about the consumer; closing the descriptor is a fact about
+        /// the child. Do not merge these two methods back together.
+        ///
+        /// Chunks the still-live read delivers afterwards are yielded into a
+        /// terminated continuation, which returns `.terminated` and drops
+        /// them. Idempotent.
+        func finishStream() {
+            finish(with: nil, closingDescriptor: false)
         }
 
-        private func finish(with error: Error?) {
+        /// Ends the stream *and* releases the descriptor without waiting for
+        /// EOF. Idempotent, and safe to call while a read is in flight.
+        func stop() {
+            finish(with: nil, closingDescriptor: true)
+        }
+
+        private func finish(with error: Error?, closingDescriptor: Bool) {
             lock.lock()
-            if hasFinished {
-                lock.unlock()
-                return
-            }
-            hasFinished = true
+            let shouldFinishStream = !hasFinishedStream
+            hasFinishedStream = true
+            let shouldClose = closingDescriptor && !hasClosedDescriptor
+            if shouldClose { hasClosedDescriptor = true }
             lock.unlock()
 
-            if let error {
-                continuation.finish(throwing: error)
-            } else {
-                continuation.finish()
+            if shouldFinishStream {
+                if let error {
+                    continuation.finish(throwing: error)
+                } else {
+                    continuation.finish()
+                }
             }
+            guard shouldClose else { return }
             // `.stop` cancels any outstanding read rather than letting it
             // linger; the cleanup handler then closes the descriptor.
             dispatchChannel.close(flags: .stop)
