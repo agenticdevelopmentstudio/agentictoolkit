@@ -542,6 +542,115 @@ struct SubprocessChannelTests {
         #expect(status == 7, "expected the child's own exit 7; 13 means it was SIGPIPEd")
     }
 
+    @Test("terminate() mid-message finishes a .contentLength stream cleanly rather than throwing")
+    func terminateMidMessageFinishesContentLengthStreamCleanly() async throws {
+        // `MessageFramingDecoder.finish()` is an end-of-stream operation, and
+        // a descriptor `terminate()` tore down is not the end of the child's
+        // output. For `.contentLength` — MCP's framing, and LSP's — flushing
+        // the decoder on a half-received body throws `truncatedMessage`, so
+        // an orderly shutdown would end `messages()` with a transport error.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "printf 'Content-Length: 8\\r\\n\\r\\n{\"id\":1}"
+                    + "Content-Length: 100\\r\\n\\r\\n{\"partial\":'; "
+                    + "while :; do sleep 0.05; done"
+            ],
+            framing: .contentLength
+        ))
+        try await channel.launch()
+        let stream = try await channel.messages()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        await channel.terminate()
+
+        let frames = try await drainToEOF(stream)
+        let texts = frames.compactMap { String(bytes: $0, encoding: .utf8) }
+        #expect(texts == ["{\"id\":1}"], "only the complete frame belongs on the stream")
+    }
+
+    @Test("terminate() does not turn a partial line into a frame on a newline-delimited stream")
+    func terminateDoesNotFabricateAFrameFromAPartialLine() async throws {
+        // The `.newlineDelimited` half of the same defect, and the quieter of
+        // the two: flushing the decoder here yields the unterminated
+        // remainder as if it were a whole message. That desynchronises a
+        // JSON-RPC session exactly as permanently as dropping a frame, and
+        // unlike a dropped frame it announces nothing.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf 'DONE\\nPARTIAL-NO-NEWLINE'; while :; do sleep 0.05; done"]
+        ))
+        try await channel.launch()
+        let stream = try await channel.messages()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        await channel.terminate()
+
+        let frames = try await drainToEOF(stream)
+        let texts = frames.compactMap { String(bytes: $0, encoding: .utf8) }
+        // Frames keep their delimiter; `DONE\n` is what a complete one
+        // looks like on this framing.
+        #expect(texts == ["DONE\n"], "the partial line is not a frame; only a real EOF makes it one")
+    }
+
+    @Test("a child that exits on its own still delivers its trailing unterminated line")
+    func naturalEndOfFileStillFlushesTheTrailingRemainder() async throws {
+        // The other side of the two tests above, and what stops the fix from
+        // becoming "never flush the decoder". When the *child* ends its
+        // output, `.newlineDelimited` is defined to hand the trailing
+        // remainder over as a final frame — that is a real message from a
+        // process that has said everything it is going to say. No
+        // `terminate()` here: the stream must reach EOF and finish on its
+        // own.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf 'FIRST\\nTAIL-NO-NEWLINE'"]
+        ))
+        try await channel.launch()
+        let stream = try await channel.messages()
+
+        let frames = try await drainToEOF(stream)
+        let texts = frames.compactMap { String(bytes: $0, encoding: .utf8) }
+        #expect(texts == ["FIRST\n", "TAIL-NO-NEWLINE"])
+    }
+
+    @Test("a concurrent second terminate() waits for the first rather than returning early")
+    func concurrentSecondTerminateWaitsForTheFirst() async throws {
+        // "Idempotent" has to mean every caller gets the finished article,
+        // not just the first one. A flag set before the first suspension
+        // lets a second, concurrent caller return while the child is still
+        // inside its SIGTERM handler — and terminating several channels
+        // concurrently is precisely how a caller with more than one server
+        // shuts down.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "trap 'sleep 0.4; exit 7' TERM; echo UP; while :; do sleep 0.05; done"
+            ]
+        ))
+        try await channel.launch()
+        let stream = try await channel.messages()
+        _ = try await collectFrames(from: stream, count: 1)
+
+        let first = Task { await channel.terminate() }
+        // Long enough for `first` to be parked in its grace-period wait, far
+        // short of the child's 0.4s handler.
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        await channel.terminate()
+
+        // The second caller has returned. The child's exit must already be
+        // observable — if this call returned early, the child is still
+        // sleeping in its handler and this wait expires instead.
+        let status = try await withWallClockBudget(0.2) {
+            await channel.waitUntilExit()
+        }
+        #expect(status == 7, "the second terminate() returned before the child was gone")
+        await first.value
+    }
+
     @Test("terminate() still escalates to SIGKILL for a child that ignores SIGTERM")
     func terminateStillEscalatesForAnIgnoringChild() async throws {
         // The companion to the test above: making SIGTERM survivable must not

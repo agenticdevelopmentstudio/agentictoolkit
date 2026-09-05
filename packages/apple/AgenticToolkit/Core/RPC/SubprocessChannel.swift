@@ -142,7 +142,10 @@ public actor SubprocessChannel {
     private var standardInputPipe: Pipe?
 
     private var hasLaunched = false
-    private var isTerminated = false
+
+    /// The one in-flight termination, so a second concurrent `terminate()`
+    /// awaits it instead of returning before the work it names is done.
+    private var terminationTask: Task<Void, Never>?
     private var hasVendedMessageStream = false
 
     private var messageStream: AsyncThrowingStream<Data, Error>?
@@ -333,7 +336,24 @@ public actor SubprocessChannel {
     /// `terminationGraceSeconds` → SIGKILL → stop the two `DispatchIO`
     /// readers, which is the only place descriptors are closed → wait up to
     /// `messagePumpDrainGraceSeconds` for the pump to flush and finish the
-    /// message stream itself. Neither output stream is touched before the
+    /// message stream itself.
+    ///
+    /// **Worst case this takes `terminationGraceSeconds` +
+    /// `messagePumpDrainGraceSeconds` — 2.5 s as configured — plus however
+    /// long the child's own SIGTERM handler runs**, and a later
+    /// `standardErrorText()` can add `standardErrorDrainGraceSeconds` (0.5 s)
+    /// on top of that. A caller shutting several channels down should do it
+    /// concurrently rather than in sequence; these budgets are per channel
+    /// and do not share.
+    ///
+    /// The message stream finishes here *without* flushing the framing
+    /// decoder: a descriptor this method tore down is not the child ending
+    /// its output, and treating it as one would hand the consumer a partial
+    /// `.newlineDelimited` line as a whole frame, or throw
+    /// `MessageFramingError` out of `.contentLength` for an orderly
+    /// shutdown. See `DescriptorReader.reachedEndOfStreamNaturally`.
+    ///
+    /// Neither output stream is touched before the
     /// child is dead: the pump and the stderr drain both run for the whole
     /// grace period, so a shutdown *frame* on stdout and a shutdown log line
     /// on stderr — the same event on two descriptors, and on a JSON-RPC
@@ -362,8 +382,37 @@ public actor SubprocessChannel {
     /// grandchildren reaped must arrange it in the command they launch.
     public func terminate() async {
         guard hasLaunched else { return }
-        guard !isTerminated else { return }
-        isTerminated = true
+
+        // Idempotent means *every* caller gets the finished article, not just
+        // the first. A flag set before the first suspension would let a
+        // second, concurrent `terminate()` return while the child is still in
+        // its grace period and the message stream is still open — and Task
+        // 2.2 shuts several servers down concurrently, so that is the shape
+        // of call this will actually see. The first caller owns the work; the
+        // rest await the same task.
+        //
+        // `Task.init` inherits this actor's isolation but not the caller's
+        // cancellation, which is what we want: a cancelled caller must not
+        // abandon a half-killed child. `await task.value` releases the actor,
+        // so the stored task runs rather than deadlocking behind us.
+        if let terminationTask {
+            await terminationTask.value
+            return
+        }
+        let task = Task { await self.performTermination() }
+        terminationTask = task
+        await task.value
+    }
+
+    private func performTermination() async {
+        // Before anything is signalled: record that what follows is a
+        // teardown. SIGTERM kills an ordinary child, the kernel closes its
+        // write end, and a genuine EOF arrives on stdout long before
+        // `stopAll()` closes anything — so EOF alone cannot tell the pump
+        // whether the child finished speaking or we shot it mid-sentence.
+        // This is what tells it, and it must be set before the signal that
+        // causes the EOF. Marking touches neither stream nor descriptor.
+        readerBox.markAllTornDown()
 
         // Neither output stream is touched here — not the pump, not the
         // drain. A graceful child writes its last words between SIGTERM and
@@ -399,27 +448,34 @@ public actor SubprocessChannel {
         // to carry whatever the child said on its way out.
         readerBox.stopAll()
 
-        // `stopAll()` finished both chunk streams, so the pump now runs to its
-        // own end: it drains what it has already read, flushes the decoder and
-        // finishes the message stream itself. Waiting for that is what
-        // delivers the child's final frame — cancelling the pump in its place
-        // would trip its `Task.checkCancellation()` and replace that frame
-        // with a `CancellationError`, which is the stdout shape of the bug
-        // this ordering exists to remove.
+        // `stopAll()` closes both channels with `.stop`, which calls each
+        // outstanding read handler with `ECANCELED`; that handler yields
+        // whatever it was holding and then finishes its chunk stream. So each
+        // stream ends a moment later, on its own dispatch queue, with the
+        // last bytes read included rather than dropped — and the pump then
+        // runs to its own end, decoding what arrived and finishing the
+        // message stream itself.
+        //
+        // Waiting for that is what delivers the child's final frame.
+        // Cancelling the pump in its place would trip its
+        // `Task.checkCancellation()` and replace that frame with a
+        // `CancellationError`, which is the stdout shape of the bug this
+        // ordering exists to remove.
         let pumpTask = pumpTask
         _ = try? await withWallClockBudget(Self.messagePumpDrainGraceSeconds) {
             await pumpTask?.value
         }
 
-        // Fallbacks for a pump that did not finish inside that budget. Both
-        // are idempotent, and both are no-ops on the ordinary path where the
-        // pump has already finished the stream itself.
+        // Fallbacks, not teardown. Both tasks are woken by their own finished
+        // chunk streams and end on their own; these cancels exist for one
+        // that somehow outlived the budget above, and on the ordinary path
+        // both are no-ops. The pump gets a wait and the drain does not for
+        // one reason only: this method owns when the *message* stream
+        // finishes, so it has to be here when that happens, whereas the
+        // stderr buffer is this actor's and `standardErrorText()` does its
+        // own bounded wait for whatever is still in flight.
         pumpTask?.cancel()
         messageContinuation?.finish()
-
-        // The drain needs no wait of its own here: it appends to this actor's
-        // buffer as the bytes arrive, and `standardErrorText()` does its own
-        // bounded wait for whatever is still in flight.
         standardErrorTask?.cancel()
     }
 
@@ -496,8 +552,25 @@ public actor SubprocessChannel {
                         }
                     }
                     try Task.checkCancellation()
-                    for frame in try decoder.finish() {
-                        continuation.yield(frame)
+                    // `decoder.finish()` only ever runs at a genuine end of
+                    // the child's output. It is defined as an end-of-stream
+                    // operation: `.newlineDelimited` returns the trailing
+                    // unterminated remainder *as a frame*, and
+                    // `.contentLength` — MCP's framing and LSP's — throws
+                    // `truncatedMessage`/`malformedHeader` on a non-empty
+                    // buffer. Neither is the right answer when the stream
+                    // ended because `terminate()` tore the descriptor down
+                    // mid-message: the first hands the consumer half a
+                    // message dressed as a whole one, which desynchronises a
+                    // JSON-RPC session exactly as permanently as a dropped
+                    // frame and far more quietly; the second ends an orderly
+                    // shutdown with a transport error. So flush the decoder
+                    // when the child ended its own output, and simply finish
+                    // when we ended it.
+                    if reader.reachedEndOfStreamNaturally {
+                        for frame in try decoder.finish() {
+                            continuation.yield(frame)
+                        }
                     }
                     continuation.finish()
                 } onCancel: {
@@ -624,6 +697,49 @@ public actor SubprocessChannel {
         private let lock = NSLock()
         private var hasFinishedStream = false
         private var hasClosedDescriptor = false
+        private var sawEndOfFile = false
+        private var wasTornDown = false
+
+        /// Whether this stream ended because the child finished its output on
+        /// its own terms — a real end of file on a descriptor nobody was
+        /// tearing down.
+        ///
+        /// This is the distinction `MessageFramingDecoder.finish()` needs and
+        /// that the `DispatchIO` handler cannot make by itself. `finish()` is
+        /// defined as an end-of-stream operation: `.newlineDelimited` hands
+        /// back the trailing unterminated remainder *as a frame*, and
+        /// `.contentLength` — MCP's framing and LSP's — throws
+        /// `truncatedMessage` on a partially received body. Both are right
+        /// when the child said everything it had to say, and both are wrong
+        /// when we killed it mid-message: the first fabricates a message out
+        /// of half of one, the second ends an orderly shutdown with a
+        /// transport error.
+        ///
+        /// **EOF is not the signal, and this is the trap.** `terminate()`'s
+        /// SIGTERM kills an ordinary child, the kernel closes its write end,
+        /// and a perfectly genuine EOF arrives — well before `stop()` closes
+        /// anything. Reading it as "the child ended its output" would flush
+        /// the decoder on exactly the shutdown path this exists to protect.
+        /// So the fact recorded is *we are tearing this down*
+        /// (`markTornDown()`, sent to both readers before SIGTERM), and every
+        /// EOF after that point is a consequence of our own kill rather than
+        /// the child's protocol.
+        var reachedEndOfStreamNaturally: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return sawEndOfFile && !wasTornDown
+        }
+
+        /// Records that the teardown has begun, so an EOF caused by it is not
+        /// mistaken for the child ending its own output. Idempotent, and
+        /// deliberately separate from `stop()`: the kill comes first and the
+        /// descriptors are released last, so between those two points a
+        /// genuine-looking EOF is still ours.
+        func markTornDown() {
+            lock.lock()
+            wasTornDown = true
+            lock.unlock()
+        }
 
         init(handle: FileHandle, label: String) {
             let closer = HandleCloser(handle)
@@ -677,9 +793,20 @@ public actor SubprocessChannel {
                     return
                 }
                 if done {
+                    // The one path that means the *child* ended its output:
+                    // a completed read with no error. Only this arms
+                    // `reachedEndOfStreamNaturally`, and so only this lets
+                    // the pump flush the decoder.
+                    self.markEndOfFile()
                     self.finish(with: nil, closingDescriptor: true)
                 }
             }
+        }
+
+        private func markEndOfFile() {
+            lock.lock()
+            sawEndOfFile = true
+            lock.unlock()
         }
 
         /// Wakes the consumer and nothing else: finishes the chunk stream so
@@ -705,8 +832,34 @@ public actor SubprocessChannel {
 
         /// Ends the stream *and* releases the descriptor without waiting for
         /// EOF. Idempotent, and safe to call while a read is in flight.
+        ///
+        /// Closes first and finishes second, and the order is the whole
+        /// point. `finish(with:closingDescriptor:)` finishes the continuation
+        /// before it closes, so bytes the read handler was on the verge of
+        /// yielding land in an already-terminated continuation and are
+        /// dropped — which made `terminate()`'s delivery of a child's last
+        /// frame a lopsided race rather than the ordering guarantee its doc
+        /// comment claims. Closing with `.stop` calls the outstanding read
+        /// handler with `ECANCELED`; that handler yields whatever it is
+        /// holding and *then* finishes the stream, so nothing already read is
+        /// thrown away. There is always exactly one such read outstanding —
+        /// the `length: .max` read this class issues in `init` and never
+        /// reissues — so the handler is always there to be called.
+        ///
+        /// A `stop()` is itself a teardown, so it marks one — `terminate()`
+        /// has already done so before its SIGTERM, but `deinit` reaches this
+        /// directly.
         func stop() {
-            finish(with: nil, closingDescriptor: true)
+            lock.lock()
+            wasTornDown = true
+            let shouldClose = !hasClosedDescriptor
+            if shouldClose { hasClosedDescriptor = true }
+            lock.unlock()
+
+            // Not closing means a terminal path already ran, and every one of
+            // those finishes the stream on its way through.
+            guard shouldClose else { return }
+            dispatchChannel.close(flags: .stop)
         }
 
         private func finish(with error: Error?, closingDescriptor: Bool) {
@@ -769,6 +922,17 @@ public actor SubprocessChannel {
             readers.removeAll()
             lock.unlock()
             for reader in pending { reader.stop() }
+        }
+
+        /// Tells both readers a teardown has begun, without touching their
+        /// streams or descriptors. Sent before SIGTERM so the EOF that kill
+        /// produces is not read as the child ending its own output — see
+        /// `DescriptorReader.reachedEndOfStreamNaturally`.
+        func markAllTornDown() {
+            lock.lock()
+            let pending = readers
+            lock.unlock()
+            for reader in pending { reader.markTornDown() }
         }
     }
 
