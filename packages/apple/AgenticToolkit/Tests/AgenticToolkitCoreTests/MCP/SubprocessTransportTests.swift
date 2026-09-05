@@ -45,6 +45,19 @@ struct SubprocessTransportTests {
         }
     }
 
+    /// Collects everything left in `stream` until it finishes. Used after
+    /// `disconnect()`, where the stream is already closed and the question is
+    /// what was in it.
+    private func drainToEOF(
+        _ stream: AsyncThrowingStream<Data, Error>
+    ) async throws -> [Data] {
+        try await withWallClockBudget(Self.boundedWaitSeconds) {
+            var frames: [Data] = []
+            for try await frame in stream { frames.append(frame) }
+            return frames
+        }
+    }
+
     private func newlineTerminated(_ text: String) -> Data {
         Data(text.utf8) + Data([0x0A])
     }
@@ -174,5 +187,146 @@ struct SubprocessTransportTests {
         try await transport.connect()
         await transport.disconnect()
         await transport.disconnect()
+    }
+
+    /// The transport half of `SubprocessChannel`'s graceful-shutdown
+    /// guarantee. The channel deliberately keeps its pump running through the
+    /// SIGTERM grace period so a server's last protocol message — a shutdown
+    /// notification, on a real MCP session — still reaches the consumer, and
+    /// this asserts that the guarantee survives being republished through
+    /// `receive()`.
+    ///
+    /// What it pins, precisely: that `disconnect()` does not close
+    /// `messageStream` before, or instead of, letting the frame through.
+    /// Finishing the continuation ahead of `await channel.terminate()` fails
+    /// this test outright. What it does **not** pin is the finer ordering
+    /// question — whether `disconnect()` *awaits* the forwarding task before
+    /// its own `finish()`. It cannot: `terminate()` spends up to half a second
+    /// waiting out the channel's pump, and the detached forwarding task is
+    /// scheduled throughout that wait, so by the time `disconnect()` resumes
+    /// the frame is already buffered in `messageStream` and a later `finish()`
+    /// still delivers it. The await is there for the residual case the channel
+    /// cannot rule out — a frame the pump yields in the same instant
+    /// `terminate()` returns — and that case is argued in `disconnect()`, not
+    /// tested here.
+    @Test("disconnect delivers the frame a graceful child writes on its way out")
+    func disconnectDeliversTheChildsFinalFrame() async throws {
+        let transport = makeTransport(
+            executable: "/bin/sh",
+            arguments: [
+                "-c",
+                "trap 'sleep 0.05; echo BYE; exit 0' TERM; "
+                    + "echo UP; while :; do sleep 0.05; done"
+            ]
+        )
+        try await transport.connect()
+        let stream = await transport.receive()
+        // Let the trap be installed and `UP` be written before signalling.
+        try await Task.sleep(for: .milliseconds(500))
+
+        await transport.disconnect()
+
+        let frames = try await drainToEOF(stream)
+        let text = frames.compactMap { String(bytes: $0, encoding: .utf8) }.joined()
+        #expect(text.contains("UP"))
+        #expect(
+            text.contains("BYE"),
+            "the shutdown frame written during the grace period never reached receive()"
+        )
+    }
+
+    /// The connect/disconnect race. `connect()` suspends at
+    /// `await channel.launch()`, which releases this actor: the child is
+    /// spawned during that suspension, but nothing yet records that the
+    /// transport owns one. A `disconnect()` that lands in the window must
+    /// still stop the child.
+    ///
+    /// The probe is **probabilistic by construction**, and the shape of the
+    /// margin is what makes it trustworthy rather than the absence of one.
+    /// `launch()` is synchronous once it reaches the channel actor, so the
+    /// suspension lasts a `posix_spawn` — on the order of a millisecond. The
+    /// steps below that have to fall inside it are actor hops, on the order of
+    /// microseconds. Three orders of magnitude is the whole margin; there is
+    /// no lock that can be taken from outside the actor to make it exact
+    /// without adding a test-only hook to production code.
+    ///
+    /// The child is found with `pgrep -f` on a marker in its `argv` rather
+    /// than by a pid it prints, because with the fix in place it is killed
+    /// before it can print anything. Reaching the assertion at all requires
+    /// `connect()` to have returned without throwing, which is what proves
+    /// there was a real child to leak.
+    @Test("a disconnect during a still-suspended connect stops the child")
+    func disconnectDuringConnectStopsTheChild() async throws {
+        let marker = "SubprocessTransportRaceProbe-\(UUID().uuidString)"
+        let transport = makeTransport(
+            executable: "/bin/sh",
+            arguments: ["-c", "while :; do sleep 0.05; done", marker]
+        )
+
+        let started = StartFlag()
+        let connecting = Task {
+            started.set()
+            try await transport.connect()
+        }
+        // The task body has been entered, so `connect()` is at most a few
+        // instructions from the actor. Yielding rather than sleeping keeps
+        // this from eating the window it is waiting for.
+        while !started.isSet { await Task.yield() }
+
+        // Each hop enters this actor, so each can only run while `connect()`
+        // is suspended — and its only suspension before it claims the
+        // connection is `await channel.launch()`. Several rather than one so a
+        // single scheduling quirk cannot land outside the window unnoticed.
+        for _ in 0..<16 { _ = await transport.receive() }
+
+        await transport.disconnect()
+        try await connecting.value
+
+        var survivors = try Self.processesMatching(marker)
+        for _ in 0..<50 where !survivors.isEmpty {
+            try await Task.sleep(for: .milliseconds(50))
+            survivors = try Self.processesMatching(marker)
+        }
+        // Kill before asserting: a failure here means a real orphan, and
+        // leaving it running would outlive the whole test run.
+        for pid in survivors { kill(pid, SIGKILL) }
+        #expect(
+            survivors.isEmpty,
+            "disconnect() during a suspended connect() left the child running (pids \(survivors))"
+        )
+    }
+
+    /// The pids whose full command line contains `marker`. `pgrep` never
+    /// matches itself, so the marker in its own `argv` is not a false hit.
+    private static func processesMatching(_ marker: String) throws -> [pid_t] {
+        let pgrep = Process()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        pgrep.arguments = ["-f", marker]
+        let output = Pipe()
+        pgrep.standardOutput = output
+        pgrep.standardError = Pipe()
+        try pgrep.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        pgrep.waitUntilExit()
+        return (String(bytes: data, encoding: .utf8) ?? "")
+            .split(separator: "\n")
+            .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    /// A one-way flag shared with a detached task. `NSLock` rather than
+    /// `Mutex` because this package still deploys below macOS 15.
+    private final class StartFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set() {
+            lock.lock()
+            value = true
+            lock.unlock()
+        }
+        var isSet: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
     }
 }

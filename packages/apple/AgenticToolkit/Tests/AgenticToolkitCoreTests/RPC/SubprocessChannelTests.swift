@@ -7,7 +7,14 @@ import Testing
 /// test bounds its wait with `withWallClockBudget` (or a short fixed sleep
 /// before cancelling) so a regression that hangs the channel fails the test
 /// instead of hanging the suite.
-@Suite("SubprocessChannel")
+/// `.serialized` because these tests are process-bound, not CPU-bound: each
+/// one spawns real children and several assert on wall-clock behaviour —
+/// a SIGTERM grace period, a fixed-width cooperative pool with one child per
+/// core, a bounded drain. Run in parallel with each other they compete for
+/// exactly the resources they are measuring, and
+/// `terminateDeliversTheChildsFinalStdoutFrame` was observed failing that way
+/// on a loaded machine while passing every time in isolation.
+@Suite("SubprocessChannel", .serialized)
 struct SubprocessChannelTests {
 
     private static let boundedWaitSeconds: TimeInterval = 5
@@ -452,8 +459,14 @@ struct SubprocessChannelTests {
             "an unrelated Task.detached never ran with \(childCount) idle channels open"
         )
 
-        for channel in channels {
-            await channel.terminate()
+        // Concurrently, not in a loop: `terminate()` is uncancellable and
+        // costs up to `terminationGraceSeconds` plus the pump drain, so a
+        // sequential teardown of one child per core is that cost multiplied by
+        // the core count — minutes on a big machine, for cleanup.
+        await withTaskGroup(of: Void.self) { group in
+            for channel in channels {
+                group.addTask { await channel.terminate() }
+            }
         }
     }
 
@@ -505,7 +518,11 @@ struct SubprocessChannelTests {
         // The stdout half of the test above, and the more load-bearing half:
         // on a JSON-RPC channel a shutdown *frame* is a protocol message, not
         // a log line. The child traps SIGTERM, writes one more complete frame
-        // to stdout 0.3s later, and exits with its own code.
+        // to stdout a moment later, and exits with its own code. That moment
+        // is deliberately short — 0.05s against a 2s grace period: the delay
+        // only has to be long enough that the write lands after the signal,
+        // and a longer one spends the assertion's margin on a loaded machine
+        // without testing anything extra.
         //
         // Winding the pump down at the *start* of `terminate()` — finishing
         // the message stream, or cancelling the pump into its
@@ -517,7 +534,7 @@ struct SubprocessChannelTests {
             executableURL: URL(fileURLWithPath: "/bin/sh"),
             arguments: [
                 "-c",
-                "trap 'sleep 0.3; echo BYE; exit 7' TERM; "
+                "trap 'sleep 0.05; echo BYE; exit 7' TERM; "
                     + "echo UP; while :; do sleep 0.05; done"
             ]
         ))

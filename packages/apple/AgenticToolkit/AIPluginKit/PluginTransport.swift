@@ -185,6 +185,28 @@ public enum PluginTransport {
         } catch {
             // The `defer { process.terminate() }` this replaces, spelled out:
             // `defer` cannot `await`, and terminating the channel is async.
+            //
+            // The cost of this line, stated plainly, because it is paid on the
+            // two paths a caller notices. `terminate()` is deliberately not
+            // cancellable — it runs its SIGTERM grace period, escalates to
+            // SIGKILL, and waits out the message pump's drain — so a cancelled
+            // or timed-out run does not return the instant it is cancelled: it
+            // returns up to `terminationGraceSeconds + messagePumpDrainGrace`
+            // (2.5 s today) later, and `run`'s `.timedOut` mapping above
+            // surfaces after that delay rather than at the budget boundary.
+            //
+            // That is the trade, and it is the right way round. The
+            // alternative is abandoning a half-killed child: a plugin's
+            // subprocess left running with its descriptors held, which for a
+            // menu-bar app that stays resident for days accumulates. Paying a
+            // bounded wait once, on the way out of a run that already failed,
+            // buys the guarantee that no `.command` plugin ever leaks a
+            // process.
+            //
+            // The success path does not pay it. There, `waitUntilExit()` has
+            // already returned, so the child is gone before `terminate()` is
+            // reached and the grace period is never entered — the call
+            // degenerates to closing descriptors.
             await channel.terminate()
             throw error
         }

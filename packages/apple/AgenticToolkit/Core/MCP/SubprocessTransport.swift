@@ -1,6 +1,9 @@
 import Foundation
 import Logging
 import MCP
+// `Errno`, for the `ENOTCONN` that `send()` throws when there is no child.
+// `StdioTransport` reaches for the same type from the same module.
+import System
 
 /// An `MCP.Transport` over `SubprocessChannel`. This is the MCP stdio
 /// transport — newline-delimited JSON over a child process's stdin and
@@ -42,11 +45,30 @@ public actor SubprocessTransport: Transport {
     private let messageStream: AsyncThrowingStream<Data, Swift.Error>
     private let messageContinuation: AsyncThrowingStream<Data, Swift.Error>.Continuation
 
-    private var isConnected = false
+    /// Three states rather than a `Bool`, because there is a window in which
+    /// neither answer is true: `connect()` releases this actor at
+    /// `await channel.launch()`, and from the moment that call returns there
+    /// is a live child that only `terminate()` will ever reap — but
+    /// `connect()` has not resumed to record it. A `Bool` set after the
+    /// suspension makes a `disconnect()` landing in that window a no-op, and
+    /// the child outlives the app.
+    private enum State {
+        /// No child, or the last one has been terminated.
+        case idle
+        /// `connect()` is in flight and has not yet claimed the connection.
+        /// A child may or may not exist yet; `terminate()` is safe either way
+        /// (it guards on the channel's own `hasLaunched`).
+        case connecting
+        /// `connect()` completed: the child is running and the pump is up.
+        case connected
+    }
 
-    /// Republishes the channel's frames onto `messageStream`. Held so the
-    /// actor keeps a reference to it while connected; it ends on its own when
-    /// the channel's frame stream finishes, which `terminate()` guarantees.
+    private var state: State = .idle
+
+    /// Republishes the channel's frames onto `messageStream`. Held so
+    /// `disconnect()` can wait for it to drain: the frames a graceful child
+    /// writes between SIGTERM and its own `exit` arrive through this task, and
+    /// finishing `messageStream` without waiting would throw them away.
     private var forwardingTask: Task<Void, Never>?
 
     public init(configuration: SubprocessChannel.Configuration, logger: Logger? = nil) {
@@ -60,16 +82,43 @@ public actor SubprocessTransport: Transport {
         self.messageContinuation = producedContinuation
     }
 
-    /// Spawns the child and starts republishing its frames. Calling this twice
-    /// is a no-op, matching `StdioTransport`'s `guard !isConnected`.
+    /// Spawns the child and starts republishing its frames.
+    ///
+    /// Calling this twice is a no-op, matching `StdioTransport`'s
+    /// `guard !isConnected` — and a *concurrent* second call, made while the
+    /// first is still in `.connecting`, is the same no-op: it returns
+    /// immediately rather than waiting for the first to finish. That is the
+    /// same contract the sequential case has always had, where the second
+    /// caller likewise learns nothing about the first, and it keeps the guard
+    /// from becoming a place a caller can be parked for the length of a
+    /// process spawn. What it does *not* do any more is spawn a second child.
     public func connect() async throws {
-        guard !isConnected else { return }
-        try await channel.launch()
-        // Recorded the moment the child exists rather than once the pump is
-        // running: anything that fails below this line has already spawned a
-        // process, and `disconnect()` is the only thing that will reap it.
-        isConnected = true
+        guard case .idle = state else { return }
+        // Claimed before the suspension, not after: from here until this
+        // method returns, `disconnect()` must behave as though a child
+        // exists, because for most of that span one does.
+        state = .connecting
+        do {
+            try await channel.launch()
+        } catch {
+            // Nothing was spawned — `launch()` throws only before `run()`
+            // succeeds — so there is nothing to reap, and the transport must
+            // not be left claiming a connection it does not have.
+            state = .idle
+            throw error
+        }
+        // A `disconnect()` that landed while the line above was suspended has
+        // already terminated the channel and finished the message stream.
+        // Starting a pump over a dead child would republish nothing and
+        // reopen a stream the caller was told had closed.
+        guard case .connecting = state else { return }
         let frames = try await channel.messages()
+        // Re-checked for the same reason: `messages()` is a second hop onto
+        // the channel actor, so it is a second window. (A throw from it leaves
+        // the state at `.connecting`, which is correct — the child is alive
+        // and `disconnect()` must still reap it.)
+        guard case .connecting = state else { return }
+        state = .connected
         let continuation = messageContinuation
         forwardingTask = Task.detached {
             do {
@@ -99,11 +148,45 @@ public actor SubprocessTransport: Transport {
     /// tearing down several servers must do so concurrently rather than in a
     /// loop; `MCPServerRegistry` already gives each `disconnect()` its own
     /// `Task`.
+    ///
+    /// `.connecting` is treated exactly as `.connected` and the channel is
+    /// terminated unconditionally: `terminate()` guards on the channel's own
+    /// `hasLaunched`, so it is a no-op if the spawn has not happened yet and a
+    /// real kill if it has — which is the only way to cover a window this
+    /// actor cannot see the far side of.
     public func disconnect() async {
-        guard isConnected else { return }
-        isConnected = false
+        if case .idle = state { return }
+        state = .idle
         await channel.terminate()
+
+        // `terminate()` finishes the channel's frame stream itself — after
+        // waiting out its own pump-drain grace — so this task is already
+        // finishing or done. Waiting for it is what delivers the frames a
+        // graceful child wrote between SIGTERM and `exit`, which is the
+        // entire reason `terminate()` has a grace period at all; finishing
+        // `messageStream` first would discard them.
+        //
+        // This cannot deadlock. The task's only suspension points are reading
+        // the channel's stream — which `terminate()` has already finished —
+        // and `continuation.yield`, and `messageStream` is built with
+        // `AsyncThrowingStream`'s default `.unbounded` buffering policy, where
+        // `yield` returns immediately and never waits for a consumer. Nothing
+        // in the task touches this actor, so it does not queue behind the call
+        // in progress either.
+        if let forwardingTask {
+            await forwardingTask.value
+            // Belt and braces. A finished task ignores this; it costs nothing
+            // and stops a future change that lets the pump outlive the
+            // channel's stream from turning into a hang here.
+            forwardingTask.cancel()
+        }
         forwardingTask = nil
+
+        // Also belt and braces: the loop above ended by calling
+        // `continuation.finish()` itself, which is what actually closed the
+        // stream. This covers the path where `connect()` never got as far as
+        // installing a pump — the race this method exists to handle — and a
+        // second `finish()` is defined to be a no-op.
         messageContinuation.finish()
         logger.debug("Transport disconnected")
     }
@@ -111,7 +194,16 @@ public actor SubprocessTransport: Transport {
     /// Frames `data` and writes it to the child's stdin. The MCP stdio wire
     /// format is newline-delimited JSON, so the delimiter `.newlineDelimited`
     /// appends here is exactly the one the spec requires.
+    ///
+    /// Sending before `connect()` or after `disconnect()` throws `ENOTCONN`,
+    /// which is `StdioTransport`'s answer byte for byte. Without the guard the
+    /// caller would get whatever the channel happened to raise —
+    /// `.notLaunched` before the spawn, `EPIPE` after the teardown — and the
+    /// SDK's error handling is written against the errno.
     public func send(_ data: Data) async throws {
+        guard case .connected = state else {
+            throw MCPError.transportError(Errno(rawValue: ENOTCONN))
+        }
         try await channel.send(data)
     }
 
