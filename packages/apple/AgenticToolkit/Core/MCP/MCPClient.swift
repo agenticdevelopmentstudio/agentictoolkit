@@ -8,7 +8,6 @@
 import Foundation
 import MCP
 import OSLog
-import System
 
 public enum MCPClientState: Sendable, Equatable {
     case disconnected
@@ -50,7 +49,6 @@ public actor MCPClient: MCPClientProtocol {
     private let secrets: [String: String]
     private let client: MCP.Client
     private var transport: (any Transport)?
-    private var process: Process?
     private(set) public var state: State = .disconnected
     private(set) public var cachedTools: [MCP.Tool] = []
 
@@ -73,7 +71,7 @@ public actor MCPClient: MCPClientProtocol {
     public func connect() async throws {
         state = .connecting
         do {
-            let transport = try makeTransport()
+            let transport = makeTransport()
             self.transport = transport
             _ = try await client.connect(transport: transport)
             await registerToolListChangedHandler()
@@ -106,13 +104,24 @@ public actor MCPClient: MCPClientProtocol {
         return (result.content, result.isError ?? false)
     }
 
+    /// Stops the server and releases the transport.
+    ///
+    /// The transport is the *only* owner of the child process — a
+    /// `SubprocessTransport` spawns it in `connect()` and reaps it in
+    /// `disconnect()`. This client keeps no `Process` of its own beside it any
+    /// more; a second owner would double-terminate, and no owner at all would
+    /// leak the server for the life of the app.
+    ///
+    /// `disconnect()` is therefore called *before* the reference is dropped,
+    /// and unconditionally: `MCP.Client.disconnect()` already disconnects the
+    /// transport it holds, but it only holds one once `connect(transport:)`
+    /// has been reached, so a failure between spawning and connecting would
+    /// otherwise leave the child running. A second `disconnect()` awaits the
+    /// first rather than returning early, so calling both is safe.
     private func teardown() async {
         await client.disconnect()
+        await transport?.disconnect()
         transport = nil
-        if let process, process.isRunning {
-            process.terminate()
-        }
-        process = nil
     }
 
     private func registerToolListChangedHandler() async {
@@ -122,10 +131,13 @@ public actor MCPClient: MCPClientProtocol {
         }
     }
 
-    private func makeTransport() throws -> any Transport {
+    private func makeTransport() -> any Transport {
         switch configuration.transport {
         case let .stdio(command, arguments, environment):
-            return try makeStdioTransport(
+            // Secrets override configured environment values, and that
+            // precedence is load-bearing: a server's stored configuration is
+            // edited by hand, its secrets come from the keychain.
+            return makeStdioTransport(
                 command: command,
                 arguments: arguments,
                 environment: environment.merging(secrets) { _, secret in secret }
@@ -135,33 +147,27 @@ public actor MCPClient: MCPClientProtocol {
         }
     }
 
+    /// The child is spawned by the transport's own `connect()`, which
+    /// `MCP.Client.connect(transport:)` calls — so a command that cannot be
+    /// launched still surfaces as a thrown error out of `connect()` and lands
+    /// the client in `.failed`, exactly as it did when this method ran the
+    /// process itself.
     private func makeStdioTransport(
         command: String,
         arguments: [String],
         environment: [String: String]
-    ) throws -> StdioTransport {
-        let stdin = Pipe()
-        let stdout = Pipe()
-        let stderr = Pipe()
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: command)
-        process.arguments = arguments
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stderr
-        if !environment.isEmpty {
-            process.environment = ProcessInfo.processInfo.environment
-                .merging(environment) { _, new in new }
-        }
-
-        try process.run()
-        self.process = process
-
-        let inputFD = FileDescriptor(rawValue: stdout.fileHandleForReading.fileDescriptor)
-        let outputFD = FileDescriptor(rawValue: stdin.fileHandleForWriting.fileDescriptor)
-
-        return StdioTransport(input: inputFD, output: outputFD)
+    ) -> SubprocessTransport {
+        SubprocessTransport(
+            configuration: SubprocessChannel.Configuration(
+                executableURL: URL(fileURLWithPath: command),
+                arguments: arguments,
+                environment: environment,
+                // An MCP server needs `PATH` and `HOME` to launch at all, and
+                // its configuration only ever carries overrides.
+                environmentPolicy: .mergeOverParent,
+                framing: .newlineDelimited
+            )
+        )
     }
 }
 

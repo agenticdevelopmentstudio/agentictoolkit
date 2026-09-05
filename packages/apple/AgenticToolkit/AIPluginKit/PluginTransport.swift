@@ -1,3 +1,4 @@
+import AgenticToolkitCore
 import Foundation
 
 /// Drives one `AIRequestSpec` to completion and streams the decoded
@@ -57,30 +58,18 @@ public enum PluginTransport {
                         }
                     }
                     continuation.finish()
+                } catch let expired as WallClockBudgetExceeded {
+                    // The budget is `AgenticToolkitCore`'s now, but the error
+                    // vocabulary of this module is public: mapping here keeps
+                    // `TransportError.timedOut` the thing callers and tests
+                    // match on, and keeps `WallClockBudgetExceeded` out of
+                    // `AIPluginKit`'s API.
+                    continuation.finish(throwing: TransportError.timedOut(after: expired.seconds))
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    /// Races `operation` against a wall-clock timer: on expiry the transfer (or
-    /// subprocess) is cancelled and `TransportError.timedOut` is thrown.
-    private static func withWallClockBudget(
-        _ seconds: TimeInterval,
-        _ operation: @escaping @Sendable () async throws -> Void
-    ) async throws {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
-                throw TransportError.timedOut(after: seconds)
-            }
-            defer { group.cancelAll() }
-            // The first finisher wins; the loser is cancelled and its outcome
-            // (typically CancellationError) discarded by the group.
-            _ = try await group.next()
         }
     }
 
@@ -122,6 +111,23 @@ public enum PluginTransport {
 
     // MARK: - Command
 
+    /// Runs the child through `SubprocessChannel` and feeds its
+    /// newline-delimited stdout to the plugin's decoder.
+    ///
+    /// The frame sequence the decoder sees is byte-for-byte what the old
+    /// hand-rolled byte pump produced: `.newlineDelimited` frames keep their
+    /// trailing `0x0A`, and a child that writes an unterminated last fragment
+    /// and exits still delivers that fragment as a final frame, because the
+    /// channel flushes its framing decoder at a genuine end of the child's
+    /// output. Losing those newlines is not a subtle regression — a plain-text
+    /// reply arrives as one run-on paragraph.
+    ///
+    /// Cancellation — the consumer went away, or the wall-clock budget
+    /// lapsed — terminates the child eagerly, and the channel owns that: when
+    /// the task iterating the frame stream is cancelled, the stream's
+    /// termination cancels the channel's own pump, whose cancellation handler
+    /// signals the child. There is deliberately no second cancellation handler
+    /// here.
     private static func runCommand(
         executableURL: URL,
         arguments: [String],
@@ -130,57 +136,57 @@ public enum PluginTransport {
         plugin: any AIPlugin,
         into continuation: AsyncThrowingStream<AIStreamEvent, Error>.Continuation
     ) async throws {
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
-        if !environment.isEmpty { process.environment = environment }
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        let stdinPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-        process.standardInput = stdinPipe
-
-        try process.run()
-        // Any thrown error terminates a still-running child.
-        defer { if process.isRunning { process.terminate() } }
-
-        // Feed stdin, then close it so the child sees EOF and can finish.
-        if let stdin { stdinPipe.fileHandleForWriting.write(stdin) }
-        try? stdinPipe.fileHandleForWriting.close()
-
-        // Task cancellation (consumer went away, or the wall-clock budget lapsed)
-        // must terminate the child EAGERLY: the pump's read only observes
-        // cancellation on the next byte, which a silent child never sends —
-        // terminating closes its stdout so the read wakes with EOF.
-        let box = ProcessBox(process)
-        try await withTaskCancellationHandler {
-            try await pump(
-                bytes: stdoutPipe.fileHandleForReading.bytes,
-                through: plugin.makeDecoder(), into: continuation
+        let channel = SubprocessChannel(
+            configuration: SubprocessChannel.Configuration(
+                executableURL: executableURL,
+                arguments: arguments,
+                environment: environment,
+                // `.replace`, not a merge: a non-empty environment becomes the
+                // child's whole environment and an empty one inherits the
+                // parent's, which is exactly what the `Process` code this
+                // replaces did. A plugin handing over a minimal environment is
+                // isolating its child on purpose.
+                environmentPolicy: .replace,
+                framing: .newlineDelimited
             )
+        )
+
+        try await channel.launch()
+        do {
+            // `sendRaw`, not `send`: the prompt is an opaque payload with no
+            // message boundary to declare, and framing it would append a
+            // newline the child never received before. Closing stdin is what
+            // lets the child see EOF and finish.
+            if let stdin { try await channel.sendRaw(stdin) }
+            await channel.closeInput()
+
+            let frames = try await channel.messages()
+            let decoder = plugin.makeDecoder()
+            for try await frame in frames {
+                for event in decoder.consume(frame) { continuation.yield(event) }
+            }
+            // Before `finish()`, not after: a cancelled run produced no answer,
+            // and the old byte pump likewise never reached its `finish()` once
+            // cancellation cut the loop short.
             try Task.checkCancellation()
-        } onCancel: {
-            box.terminateIfRunning()
-        }
+            for event in decoder.finish() { continuation.yield(event) }
 
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let errorBody = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let message = plugin.describeError(status: Int(process.terminationStatus), body: errorBody)
-                ?? "Command exited with status \(process.terminationStatus)"
-            throw TransportError.commandFailed(status: process.terminationStatus, message: message)
-        }
-    }
-
-    /// `Process` isn't `Sendable`; the cancellation handler only touches the
-    /// thread-safe `isRunning`/`terminate`.
-    private final class ProcessBox: @unchecked Sendable {
-        private let process: Process
-        init(_ process: Process) { self.process = process }
-        func terminateIfRunning() {
-            if process.isRunning { process.terminate() }
+            let status = await channel.waitUntilExit()
+            // Releases the descriptors and, for a child whose stderr a
+            // backgrounded grandchild still holds open, ends the drain — so
+            // the capture below is complete rather than a bounded snapshot.
+            await channel.terminate()
+            guard status == 0 else {
+                let errorBody = Data(await channel.standardErrorText().utf8)
+                let message = plugin.describeError(status: Int(status), body: errorBody)
+                    ?? "Command exited with status \(status)"
+                throw TransportError.commandFailed(status: status, message: message)
+            }
+        } catch {
+            // The `defer { process.terminate() }` this replaces, spelled out:
+            // `defer` cannot `await`, and terminating the channel is async.
+            await channel.terminate()
+            throw error
         }
     }
 
@@ -191,6 +197,11 @@ public enum PluginTransport {
     /// formats (SSE, JSONL) decode a frame per newline; the decoder buffers any
     /// partial trailing frame itself, so the final remainder plus `finish()` flush
     /// anything left over.
+    ///
+    /// HTTP only. The command transport frames its child's stdout with
+    /// `SubprocessChannel`'s `MessageFramingDecoder` instead — same frame
+    /// boundaries, same retained trailing `0x0A`, but chunk-at-a-time rather
+    /// than byte-at-a-time.
     private static func pump<Bytes: AsyncSequence>(
         bytes: Bytes,
         through decoder: any AIStreamDecoder,
