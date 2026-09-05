@@ -38,14 +38,26 @@ public final class MarkdownNoteStorage: NoteStorage {
     }
 
     public func insertNote(_ note: Note) throws {
+        // Nothing has ever been written by us yet on a create path, so there
+        // is no key of ours to clear. Only ever *set* a title here — never
+        // call `Frontmatter.setting` to remove one — so a fresh note whose
+        // hand-typed body happens to open with its own `title:` fence isn't
+        // stripped on its very first save.
+        let desiredTitle = Self.storedTitle(for: note)
+        let content = desiredTitle == nil
+            ? note.content
+            : Frontmatter.setting(Self.titleKey, to: desiredTitle, in: note.content)
         var document = try store.createDocument(
-            content: Frontmatter.setting(Self.titleKey, to: Self.storedTitle(for: note), in: note.content),
+            content: content,
             markers: [.note],
             id: note.id.uuidString.lowercased(),
             now: note.modifiedDate)
         // A freshly created document is never pinned, so this is a no-op —
         // and hence a second write — for every note except one inserted
         // already pinned, which the protocol allows but the app never does.
+        // This also never issues a clear (`setPinned(false)` is never
+        // called here), so a user-typed `pinned:` fence is safe on create
+        // for the same reason title is, without needing a matching guard.
         guard note.isPinned else { return }
         document.setPinned(true)
         try store.updateDocument(document, now: note.modifiedDate)

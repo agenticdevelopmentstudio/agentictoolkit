@@ -233,4 +233,39 @@ struct MarkdownNoteStorageTests {
         let stored = try #require(try storage.store.documents(marker: .note).first)
         #expect(stored.content == "---\npinned: true\nauthor: mike\n---\n# Groceries\n\nMilk")
     }
+
+    @Test("a user-typed title-only fence survives a create whose own (blank) title would otherwise clear the key")
+    func userTypedTitleFenceSurvivesCreate() throws {
+        let storage = try storage()
+        let content = "---\ntitle: My Doc\n---\n# Groceries\n\nMilk"
+        try storage.insertNote(note(title: "", content: content))
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == content)
+        let read = try #require(try storage.fetchAllNotes().first)
+        #expect(read.title == "My Doc")
+        #expect(read.content == "# Groceries\n\nMilk")
+    }
+
+    @Test("a user-typed title fence with a foreign key survives a create that would otherwise clear the title")
+    func userTypedTitleFenceWithForeignKeySurvivesCreate() throws {
+        let storage = try storage()
+        let content = "---\ntitle: My Doc\nauthor: mike\n---\n# Groceries\n\nMilk"
+        try storage.insertNote(note(title: "", content: content))
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == content)
+        let read = try #require(try storage.fetchAllNotes().first)
+        #expect(read.title == "My Doc")
+        #expect(read.content == "---\nauthor: mike\n---\n# Groceries\n\nMilk")
+    }
+
+    @Test("the \"pinned\" literal used for the user-typed-key check agrees with MarkdownDocument.isPinned")
+    func pinnedLiteralAgreesWithIsPinned() throws {
+        let storage = try storage()
+        var document = try storage.store.createDocument(content: "# Groceries\n\nMilk", markers: [.note])
+        #expect(Frontmatter.value("pinned", in: document.content) == nil)
+        #expect(document.isPinned == false)
+        document.setPinned(true)
+        #expect(Frontmatter.value("pinned", in: document.content) != nil)
+        #expect(document.isPinned == true)
+    }
 }
