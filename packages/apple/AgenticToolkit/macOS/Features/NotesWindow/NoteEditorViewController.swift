@@ -1,6 +1,7 @@
 import AppKit
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticDeveloperToolkitUI
 
 @MainActor public protocol NoteEditorViewControllerDelegate: AnyObject {
     func noteEditorDidChangeTitle(_ title: String, for noteID: UUID)
@@ -20,19 +21,32 @@ public final class NoteEditorViewController: NSViewController {
         currentNoteID = note?.id
         let hasNote = note != nil
         titleField.isHidden = !hasNote
-        contentScrollView.isHidden = !hasNote
+        editorController.view.isHidden = !hasNote
         pinButton.isHidden = !hasNote
         deleteButton.isHidden = !hasNote
         emptyLabel.isHidden = hasNote
-        guard let note else { return }
+        guard let note else {
+            editorController.content = ""
+            return
+        }
         titleField.stringValue = note.title
-        contentTextView.string = note.content
+        editorController.content = note.content
         updatePinButtonAppearance(isPinned: note.isPinned)
     }
 
     // MARK: - Properties
 
     private var currentNoteID: UUID?
+
+    /// The markdown editor this controller wraps. `public` because the Notes
+    /// window's own tests drive it, and because a host that wants to change
+    /// mode has nowhere else to reach.
+    ///
+    /// `MarkdownEditorController` takes its palette rather than pulling one, so
+    /// the app's current palette is handed over at construction and kept in
+    /// step by `observeTheme` below — the same way every other view in this
+    /// window gets repainted.
+    public let editorController = MarkdownEditorController(palette: ThemeScope.app.palette)
 
     private lazy var titleField: NSTextField = {
         let field = NSTextField()
@@ -53,42 +67,6 @@ public final class NoteEditorViewController: NSViewController {
             }
         }
         return field
-    }()
-
-    private lazy var contentScrollView: NSScrollView = {
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.observeTheme { view, palette in
-            view.backgroundColor = palette.controlBackgroundColor
-        }
-        return scroll
-    }()
-
-    private lazy var contentTextView: NSTextView = {
-        let textView = NSTextView()
-        textView.isEditable = true
-        textView.isSelectable = true
-        textView.isRichText = false
-        textView.textContainerInset = NSSize(width: 8, height: 8)
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.allowsUndo = true
-        textView.delegate = self
-        textView.textContainer?.widthTracksTextView = true
-        textView.autoresizingMask = [.width]
-        textView.observeTheme { view, palette in
-            view.font = palette.font(.body)
-            view.textColor = palette.primaryTextColor
-            view.backgroundColor = palette.controlBackgroundColor
-            view.insertionPointColor = palette.cursorColor
-            view.selectedTextAttributes = [
-                .backgroundColor: palette.selectionColor,
-                .foregroundColor: palette.selectionTextColor
-            ]
-        }
-        return textView
     }()
 
     private lazy var pinButton: NSButton = {
@@ -134,11 +112,12 @@ public final class NoteEditorViewController: NSViewController {
     override public func viewDidLoad() {
         super.viewDidLoad()
 
-        contentScrollView.documentView = contentTextView
+        addChild(editorController)
+        editorController.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(pinButton)
         view.addSubview(deleteButton)
         view.addSubview(titleField)
-        view.addSubview(contentScrollView)
+        view.addSubview(editorController.view)
         view.addSubview(emptyLabel)
 
         NSLayoutConstraint.activate([
@@ -156,14 +135,22 @@ public final class NoteEditorViewController: NSViewController {
             titleField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             titleField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
 
-            contentScrollView.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 8),
-            contentScrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            contentScrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            contentScrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            editorController.view.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 8),
+            editorController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            editorController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            editorController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
             emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
+
+        editorController.onContentChange = { [weak self] content in
+            guard let self, let id = self.currentNoteID else { return }
+            self.delegate?.noteEditorDidChangeContent(content, for: id)
+        }
+        editorController.view.observeTheme { [weak editorController] _, palette in
+            editorController?.palette = palette
+        }
 
         show(note: nil)
     }
@@ -207,14 +194,5 @@ extension NoteEditorViewController: NSTextFieldDelegate {
     public func controlTextDidChange(_ obj: Notification) {
         guard let id = currentNoteID else { return }
         delegate?.noteEditorDidChangeTitle(titleField.stringValue, for: id)
-    }
-}
-
-// MARK: - NSTextViewDelegate
-
-extension NoteEditorViewController: NSTextViewDelegate {
-    public func textDidChange(_ notification: Notification) {
-        guard let id = currentNoteID else { return }
-        delegate?.noteEditorDidChangeContent(contentTextView.string, for: id)
     }
 }
