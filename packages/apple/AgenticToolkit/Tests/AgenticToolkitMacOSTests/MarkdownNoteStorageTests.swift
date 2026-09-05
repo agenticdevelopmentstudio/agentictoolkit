@@ -1,6 +1,5 @@
 import Testing
 import Foundation
-import GRDB
 import AgenticToolkitMarkdown
 @testable import AgenticToolkitMacOS
 
@@ -34,6 +33,22 @@ struct MarkdownNoteStorageTests {
         let document = try #require(try storage.store.documents(marker: .note).first)
         #expect(document.frontmatter.isEmpty)
         #expect(document.content == "# Groceries\n\nMilk")
+    }
+
+    @Test("a note created the way the app creates it carries no frontmatter, even once it has a heading")
+    func appCreatedNoteNeverGetsFrontmatter() throws {
+        let storage = try storage()
+        let note = Note.new(title: "", content: "")
+        #expect(note.title == Note.untitledTitle)
+        try storage.insertNote(note)
+        let afterInsert = try #require(try storage.store.documents(marker: .note).first)
+        #expect(afterInsert.frontmatter.isEmpty)
+
+        var updated = note
+        updated.content = "# Groceries\n\nMilk"
+        try storage.updateNote(updated)
+        let afterEdit = try #require(try storage.store.documents(marker: .note).first)
+        #expect(afterEdit.frontmatter.isEmpty)
     }
 
     @Test("a renamed note stores its title in frontmatter and reads it back")
@@ -139,18 +154,32 @@ struct MarkdownNoteStorageTests {
     @Test("a document with a non-UUID id is skipped rather than crashing the list")
     func serverIdsAreSkipped() throws {
         let storage = try storage()
-        _ = try storage.store.createDocument(content: "from the server", markers: [.note])
-        try storage.store.database.write { conn in
-            // `notes.markdown_id` is `ON UPDATE RESTRICT` against `markdown.id`
-            // (MarkdownSchema.swift) — updating the parent's own key while a
-            // child row still points at the old value trips that RESTRICT
-            // immediately, even mid-transaction. Deferring, exactly as
-            // `MarkdownProjection.truncate` does for the same reason, lets
-            // both statements land before the constraint is checked at commit.
-            try conn.execute(sql: "PRAGMA defer_foreign_keys = ON")
-            try conn.execute(sql: "UPDATE markdown SET id = 'srv_1'")
-            try conn.execute(sql: "UPDATE notes SET markdown_id = 'srv_1'")
-        }
+        // Sync-shaped: a real pull inserts a brand-new row already carrying
+        // the server's id. Nothing in the system ever renames a local
+        // primary key in place, so the fixture shouldn't either.
+        _ = try storage.store.createDocument(content: "from the server", markers: [.note], id: "srv_1")
         #expect(try storage.fetchAllNotes().isEmpty)
+    }
+
+    @Test("a foreign frontmatter key survives a read, alongside our own")
+    func foreignFrontmatterSurvivesRead() throws {
+        let storage = try storage()
+        _ = try storage.store.createDocument(
+            content: "---\ntitle: Custom\nauthor: mike\n---\n# Groceries\n\nMilk",
+            markers: [.note])
+        let note = try #require(try storage.fetchAllNotes().first)
+        #expect(note.title == "Custom")
+        #expect(note.content == "---\nauthor: mike\n---\n# Groceries\n\nMilk")
+    }
+
+    @Test("fetching and re-saving a note with foreign frontmatter, unchanged, is byte-stable")
+    func foreignFrontmatterRoundTripIsByteStable() throws {
+        let storage = try storage()
+        let original = "---\ntitle: Custom\npinned: true\nauthor: mike\n---\n# Groceries\n\nMilk"
+        _ = try storage.store.createDocument(content: original, markers: [.note])
+        let note = try #require(try storage.fetchAllNotes().first)
+        try storage.updateNote(note)
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == original)
     }
 }

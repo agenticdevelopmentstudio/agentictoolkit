@@ -60,7 +60,7 @@ public final class NotesManager {
         guard let idx = notes.firstIndex(where: { $0.id == note.id }) else { return }
         var updated = notes[idx]
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        updated.title = trimmed.isEmpty ? "Untitled Note" : trimmed
+        updated.title = trimmed.isEmpty ? Note.untitledTitle : trimmed
         updated.content = content
         updated.modifiedDate = Date()
         notes[idx] = updated

@@ -593,7 +593,6 @@
 		C6C255A128CA45F0C98C6BDE /* MainActorScriptCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 952C7E3DA7AB65B35021477E /* MainActorScriptCommandTests.swift */; };
 		C6D769EEE3F1E8B3731FF58E /* ComposableTabsActivePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F868954F010209325A6F8A /* ComposableTabsActivePane.swift */; };
 		C73427E9ABB53504DC3B0A0E /* AgenticDeveloperToolkit-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AA33F0AF418F0DDFE05C6BF /* AgenticDeveloperToolkit-macOS.framework */; };
-		C7A890893A4479B28E5C3CBB /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 14F85C6998F7EFA09B8D25E0 /* GRDB */; };
 		C7F03C965556F0C669394526 /* MultiChoiceFilterButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = A87319972A8D5FC214E263BC /* MultiChoiceFilterButton.swift */; };
 		C80DD668F297C9680A16B1B2 /* NotesSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4ED71A3B2B4EAEBE0483F9 /* NotesSplitViewController.swift */; };
 		C931C613454849F55251596B /* LegacyThemePersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF283A265D5ADF577159C01E /* LegacyThemePersistenceTests.swift */; };
@@ -2179,7 +2178,6 @@
 				79D2AEF4B367643D27299F9B /* AgenticDeveloperToolkit-macOS.framework in Frameworks */,
 				1E539429B5706E9C5A315910 /* AgenticDeveloperToolkitUI-macOS.framework in Frameworks */,
 				8DBC5D3194BA4FB5C28C66CA /* AgenticToolkitMarkdown-macOS.framework in Frameworks */,
-				C7A890893A4479B28E5C3CBB /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4459,7 +4457,6 @@
 			);
 			name = AgenticToolkitMacOSTests;
 			packageProductDependencies = (
-				14F85C6998F7EFA09B8D25E0 /* GRDB */,
 			);
 			productName = AgenticToolkitMacOSTests;
 			productReference = B6DD4B195BF0A65AE3DF6DF4 /* AgenticToolkitMacOSTests.xctest */;
@@ -7559,11 +7556,6 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		098AA24D84936809E71B829A /* GRDB */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A69DE775E6F79098F9419D3C /* XCRemoteSwiftPackageReference "GRDB.swift" */;
-			productName = GRDB;
-		};
-		14F85C6998F7EFA09B8D25E0 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A69DE775E6F79098F9419D3C /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;

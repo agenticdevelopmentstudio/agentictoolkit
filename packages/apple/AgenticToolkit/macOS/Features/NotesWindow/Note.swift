@@ -30,12 +30,18 @@ public struct Note: Identifiable, Equatable, Sendable {
         return lhs.modifiedDate > rhs.modifiedDate
     }
 
-    /// Creates a new note with sane defaults. Treats empty/whitespace titles as "Untitled Note".
+    /// The title a note gets when nobody has named it. Every place that
+    /// blanks out a title — here and in `NotesManager.updateNote` — goes
+    /// through this one constant, so a storage layer can recognise "the app
+    /// never named this note" without hardcoding a second copy of the string.
+    public static let untitledTitle = "Untitled Note"
+
+    /// Creates a new note with sane defaults. Treats empty/whitespace titles as `untitledTitle`.
     public static func new(title: String, content: String) -> Note {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         return Note(
             id: UUID(),
-            title: trimmed.isEmpty ? "Untitled Note" : trimmed,
+            title: trimmed.isEmpty ? untitledTitle : trimmed,
             content: content,
             createdDate: Date(),
             modifiedDate: Date(),
