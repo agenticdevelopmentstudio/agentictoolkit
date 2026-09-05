@@ -96,9 +96,13 @@ public struct MessageFramingDecoder {
     private var buffer = Data()
 
     /// Newline framing only: how many leading bytes of `buffer` have already
-    /// been scanned for `0x0A` with no match. Reset to 0 whenever a complete
-    /// frame is removed from the front of `buffer`, since the bytes that
-    /// remain have never been looked at.
+    /// been scanned for `0x0A` with no match. When completed frames are cut
+    /// off the front of `buffer`, this is *shifted* by the number of bytes
+    /// removed (`scanCursor -= consumedThrough`), not reset — the bytes that
+    /// remain behind a frame have already been looked at, and rescanning them
+    /// is exactly the O(n²) behaviour this cursor exists to prevent (114
+    /// seconds to decode a single 256 KB line, measured). Do not "simplify"
+    /// this to `scanCursor = 0`.
     private var scanCursor = 0
 
     /// Content-Length framing only: the body length declared by the header

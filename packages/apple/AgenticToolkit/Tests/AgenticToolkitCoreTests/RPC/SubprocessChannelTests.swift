@@ -38,15 +38,11 @@ struct SubprocessChannelTests {
         }
     }
 
-    /// `standardErrorText()` awaits the drain task's own completion before
-    /// reading the buffer (see R4), so it is deterministic once the child
-    /// has exited — no polling is needed here any more. Bounded anyway, so a
-    /// regression that makes it hang again fails the test instead of the
-    /// suite.
-    private func waitForStandardError(
-        containing substring: String,
-        on channel: SubprocessChannel
-    ) async throws -> String {
+    /// `standardErrorText()` waits for the drain task under its own bounded
+    /// grace period, so it is deterministic once the child has exited — no
+    /// polling is needed here any more. Bounded again from the outside, so a
+    /// regression that makes it hang fails the test instead of the suite.
+    private func standardErrorText(on channel: SubprocessChannel) async throws -> String {
         try await withWallClockBudget(Self.boundedWaitSeconds) {
             await channel.standardErrorText()
         }
@@ -201,7 +197,7 @@ struct SubprocessChannelTests {
         let status = await channel.waitUntilExit()
         #expect(status == 3)
 
-        let stderrText = try await waitForStandardError(containing: "boom", on: channel)
+        let stderrText = try await standardErrorText(on: channel)
         #expect(stderrText.contains("boom"))
     }
 
@@ -333,5 +329,93 @@ struct SubprocessChannelTests {
         #expect(line == "hello:\n")
 
         _ = await channel.waitUntilExit()
+    }
+
+    @Test("stderr past the 1 MiB cap keeps the TAIL and is marked as truncated")
+    func stderrPastTheCapKeepsTheTailAndIsMarkedTruncated() async throws {
+        // 1.2 MB of filler between two markers, comfortably past the 1 MiB
+        // cap. Reverting `appendStandardError` to a bare `append` — dropping
+        // the front-trim and the marker — has to turn this red; the 132 KB
+        // test above is an eighth of the cap and would stay green.
+        let script = "echo HEADMARKER >&2; head -c 1200000 /dev/zero | tr '\\0' x >&2; echo TAILMARKER >&2"
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", script]
+        ))
+        try await channel.launch()
+        let stream = try await channel.messages()
+        _ = try await drainToEOF(stream)
+        _ = await channel.waitUntilExit()
+
+        let stderrText = try await standardErrorText(on: channel)
+        #expect(stderrText.hasPrefix("[stderr truncated to the last "))
+        // The tail survives; the head is what was cut.
+        #expect(stderrText.contains("TAILMARKER"))
+        #expect(!stderrText.contains("HEADMARKER"))
+
+        await channel.terminate()
+    }
+
+    @Test("standardErrorText() answers with buffered bytes when a grandchild holds the stderr write end")
+    func standardErrorTextDoesNotHangWhenGrandchildHoldsStderr() async throws {
+        // The direct child exits immediately but backgrounds a helper that
+        // inherits — and keeps — the stderr write end, so EOF never arrives.
+        // This is the shape of an `npx` MCP launch. An unbounded await on the
+        // drain task never returns here; the bounded one answers with what it
+        // has.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "echo early >&2; (sleep 20 &); exit 0"]
+        ))
+        try await channel.launch()
+        _ = try await channel.messages()
+
+        let status = try await withWallClockBudget(Self.boundedWaitSeconds) {
+            await channel.waitUntilExit()
+        }
+        #expect(status == 0)
+
+        // No terminate() first: terminate() force-closes the descriptors and
+        // would release the drain, hiding the very case under test.
+        let stderrText = try await standardErrorText(on: channel)
+        #expect(stderrText.contains("early"))
+
+        await channel.terminate()
+    }
+
+    // MARK: - Cooperative-pool starvation
+
+    @Test("idle channels do not park the Swift cooperative pool")
+    func idleChannelsDoNotParkTheCooperativePool() async throws {
+        // Swift's cooperative pool is fixed-width at `activeProcessorCount`.
+        // A blocking `read(2)` per descriptor on that pool parks two threads
+        // per live channel, so this many idle children starve every other
+        // async task in the process — the unrelated `Task.detached` below
+        // never runs at all. Reading with `DispatchIO` on its own queue parks
+        // none of them.
+        let childCount = max(2, ProcessInfo.processInfo.activeProcessorCount)
+        var channels: [SubprocessChannel] = []
+        for _ in 0..<childCount {
+            let channel = SubprocessChannel(configuration: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "sleep 30"]
+            ))
+            try await channel.launch()
+            _ = try await channel.messages()
+            channels.append(channel)
+        }
+
+        // Let every reader settle into its "waiting for a silent child" state
+        // before asking whether anything else can still run.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let unrelatedTaskRan = try await withWallClockBudget(Self.boundedWaitSeconds) {
+            await Task.detached { true }.value
+        }
+        #expect(unrelatedTaskRan)
+
+        for channel in channels {
+            await channel.terminate()
+        }
     }
 }

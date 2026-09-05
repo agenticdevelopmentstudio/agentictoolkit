@@ -14,34 +14,82 @@ public struct WallClockBudgetExceeded: Error, LocalizedError, Equatable {
     }
 }
 
-/// Guards a single `CheckedContinuation` so it is resumed exactly once no
-/// matter which of two racing tasks gets there first. `Process`-adjacent code
-/// races a lot of things (a wait against a timer, a `terminate()` grace
-/// period against exit), so this is shared rather than reinvented per call
-/// site — it is `@unchecked Sendable` because the lock, not the compiler, is
-/// what makes the single-resume guarantee hold.
-final class SingleResumeContinuation<T: Sendable>: @unchecked Sendable {
+/// The mutable state of one `withWallClockBudget` call: the single
+/// `CheckedContinuation` the race resumes exactly once, and the two
+/// unstructured tasks racing for it. Kept in one lock-protected object rather
+/// than as three captured locals because the cancellation handler runs
+/// concurrently with the continuation body and has to reach all three — it
+/// must be able to cancel tasks that have not been created yet, and to resume
+/// a continuation that has not been installed yet.
+///
+/// `@unchecked Sendable` because the lock, not the compiler, is what makes the
+/// exactly-once resume and the cancel-before-create ordering hold.
+private final class WallClockBudgetRace<T: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<T, Error>?
+    private var tasks: [Task<Void, Never>] = []
+    private var isCancelled = false
 
-    init(_ continuation: CheckedContinuation<T, Error>) {
-        self.continuation = continuation
-    }
-
-    func resume(returning value: T) {
-        take()?.resume(returning: value)
-    }
-
-    func resume(throwing error: Error) {
-        take()?.resume(throwing: error)
-    }
-
-    private func take() -> CheckedContinuation<T, Error>? {
+    /// Hands the race its continuation. If the enclosing task was already
+    /// cancelled before the continuation body ran, this resumes immediately
+    /// with `CancellationError` rather than storing a continuation that
+    /// nothing would ever resume.
+    func install(_ continuation: CheckedContinuation<T, Error>) {
         lock.lock()
-        defer { lock.unlock() }
+        if isCancelled {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    /// Registers a racer so the winner (or the caller's cancellation) can
+    /// cancel it. A task handed over after the race has already been decided
+    /// is cancelled on the spot instead of being retained.
+    func track(_ task: Task<Void, Never>) {
+        lock.lock()
+        let alreadySettled = isCancelled || continuation == nil
+        if !alreadySettled { tasks.append(task) }
+        lock.unlock()
+        if alreadySettled { task.cancel() }
+    }
+
+    func finish(returning value: T) {
+        settle { $0.resume(returning: value) }
+    }
+
+    func finish(throwing error: Error) {
+        settle { $0.resume(throwing: error) }
+    }
+
+    /// The enclosing task was cancelled. Cancels both racers and resumes the
+    /// continuation with `CancellationError` — `Task.init` does not inherit
+    /// cancellation, so without this the racers would run to completion and
+    /// "cancel me" would silently mean "wait for me".
+    func cancel() {
+        lock.lock()
+        isCancelled = true
+        lock.unlock()
+        settle { $0.resume(throwing: CancellationError()) }
+    }
+
+    /// Resumes the continuation if it is still pending — at most one caller
+    /// ever sees it — and then cancels every racer, winner included. The
+    /// loser is *cancelled, never awaited*: cancellation is a best-effort
+    /// request, and a budget that waited for it to take effect would be
+    /// exactly the bug this function exists to avoid.
+    private func settle(_ resume: (CheckedContinuation<T, Error>) -> Void) {
+        lock.lock()
         let pending = continuation
         continuation = nil
-        return pending
+        let racers = tasks
+        tasks.removeAll()
+        lock.unlock()
+
+        if let pending { resume(pending) }
+        for task in racers { task.cancel() }
     }
 }
 
@@ -54,8 +102,16 @@ final class SingleResumeContinuation<T: Sendable>: @unchecked Sendable {
 /// scope implicitly awaits every child task, including the loser, so the
 /// timeout task's throw is not observable until the slow operation actually
 /// finishes — which is not a timeout at all. Racing two independent
-/// detached tasks against a single `CheckedContinuation`, resumed exactly
+/// unstructured tasks against a single `CheckedContinuation`, resumed exactly
 /// once by whichever finishes first, has no such implicit join.
+///
+/// The price of unstructured tasks is that they do **not** inherit the
+/// caller's cancellation, so the race is wrapped in
+/// `withTaskCancellationHandler`: cancelling the task that awaits a budget
+/// cancels both racers and rethrows `CancellationError` promptly, instead of
+/// waiting out the operation or the full budget. The continuation is resumed
+/// exactly once across all three outcomes — operation wins, budget wins,
+/// caller cancels.
 ///
 /// This is generic over the return value (rather than pinned to `Void`) so an
 /// HTTP call and a subprocess run can both use it, and the timeout error is
@@ -65,33 +121,30 @@ public func withWallClockBudget<T: Sendable>(
     _ seconds: TimeInterval,
     _ operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
-    try await withCheckedThrowingContinuation { rawContinuation in
-        let resumer = SingleResumeContinuation<T>(rawContinuation)
+    let race = WallClockBudgetRace<T>()
 
-        let operationTask = Task<Void, Never> {
-            do {
-                let value = try await operation()
-                resumer.resume(returning: value)
-            } catch {
-                resumer.resume(throwing: error)
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { rawContinuation in
+            race.install(rawContinuation)
+
+            let operationTask = Task<Void, Never> {
+                do {
+                    let value = try await operation()
+                    race.finish(returning: value)
+                } catch {
+                    race.finish(throwing: error)
+                }
             }
-        }
+            race.track(operationTask)
 
-        let timeoutTask = Task<Void, Never> {
-            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            resumer.resume(throwing: WallClockBudgetExceeded(seconds: seconds))
-            // Cancel, but do not await, the loser: cancellation is a
-            // best-effort request, and a budget that waited for it to take
-            // effect would be exactly the bug this function exists to avoid.
-            operationTask.cancel()
+            let timeoutTask = Task<Void, Never> {
+                try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                race.finish(throwing: WallClockBudgetExceeded(seconds: seconds))
+            }
+            race.track(timeoutTask)
         }
-
-        // If `operation` wins the race, the timer becomes the loser and is
-        // cancelled here rather than left to fire uselessly later.
-        Task {
-            _ = await operationTask.value
-            timeoutTask.cancel()
-        }
+    } onCancel: {
+        race.cancel()
     }
 }

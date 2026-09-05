@@ -1,4 +1,5 @@
 import Darwin
+import Dispatch
 import Foundation
 
 /// Spawns a child process and exposes its stdout as a stream of framed
@@ -82,17 +83,26 @@ public actor SubprocessChannel {
         }
     }
 
-    /// Bytes read per `FileHandle.read(upToCount:)` call, for both the
-    /// stdout pump and the stderr drain. Feeding `MessageFramingDecoder`
-    /// chunks this size, rather than one byte at a time via `FileHandle
-    /// .bytes`, is half of what makes decoding linear instead of quadratic —
-    /// the other half is the decoder's own scan cursor.
+    /// The largest chunk either reader hands over at once — the `DispatchIO`
+    /// high-water mark for both the stdout pump and the stderr drain. Feeding
+    /// `MessageFramingDecoder` chunks this size, rather than one byte at a
+    /// time via `FileHandle.bytes`, is half of what makes decoding linear
+    /// instead of quadratic — the other half is the decoder's own scan cursor.
     private static let readChunkSize = 64 * 1024
 
     /// SIGTERM grace period before `terminate()` escalates to SIGKILL. A
     /// child that traps or ignores SIGTERM must not be able to hang
     /// `terminate()`, or leak the process and its descriptors, forever.
     private static let terminationGraceSeconds: TimeInterval = 2.0
+
+    /// How long `standardErrorText()` will wait for the stderr drain to reach
+    /// EOF before answering with whatever it has buffered so far. EOF on
+    /// stderr needs *every* holder of the write end to close it, and a child
+    /// that backgrounds a helper (`npx`, any `sh -c "… &"` wrapper) can leave
+    /// that end open long after it has exited itself — an unbounded wait there
+    /// is a permanent hang. Half a second is generous for the ordinary case,
+    /// where the drain has already finished before this is ever called.
+    private static let standardErrorDrainGraceSeconds: TimeInterval = 0.5
 
     /// How much of the child's stderr this actor retains. Frames already
     /// have a 16 MB cap (`MessageFramingDecoder.maximumFrameBytes`); stderr
@@ -109,10 +119,15 @@ public actor SubprocessChannel {
     /// never hold this actor.
     private nonisolated let exitWaiterBox = ExitWaiterBox()
 
+    /// The two `DispatchIO` readers, held where `deinit` can reach them.
+    /// A channel dropped without `terminate()` — its child still alive and
+    /// silent — must still give its descriptors and its dispatch queues back;
+    /// `deinit` is nonisolated, so the readers cannot live in actor-isolated
+    /// storage if it is to stop them.
+    private nonisolated let readerBox = DescriptorReaderBox()
+
     private var process: Process?
     private var standardInputPipe: Pipe?
-    private var standardOutputPipe: Pipe?
-    private var standardErrorPipe: Pipe?
 
     private var hasLaunched = false
     private var isTerminated = false
@@ -127,6 +142,13 @@ public actor SubprocessChannel {
 
     public init(configuration: Configuration) {
         self.configuration = configuration
+    }
+
+    deinit {
+        // Stops the `DispatchIO` channels and closes the read descriptors
+        // they own. Safe from `deinit` because `readerBox` is a `nonisolated
+        // let` guarded by its own lock, not actor-isolated state.
+        readerBox.stopAll()
     }
 
     /// Spawns the process and starts the read pump. Throws `.alreadyLaunched`
@@ -151,11 +173,27 @@ public actor SubprocessChannel {
         // write after the child has exited becomes a thrown `EPIPE` Swift
         // error (from `FileHandle`'s throwing `write(contentsOf:)`) instead
         // of a fatal signal.
-        _ = fcntl(standardInputPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        //
+        // The return value is checked rather than discarded: a silently
+        // un-armed guard is precisely the failure this exists to remove, and
+        // its consequence — the *host* process dying on signal 13 on some
+        // later `send()` — is unbounded. Nothing has launched yet at this
+        // point, so failing here leaves no child behind.
+        guard fcntl(standardInputPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
+            throw ChannelError.launchFailed(
+                "could not disable SIGPIPE on the child's stdin (errno \(errno))"
+            )
+        }
 
         process.standardInput = standardInputPipe
         process.standardOutput = standardOutputPipe
         process.standardError = standardErrorPipe
+
+        // Installed *before* `run()`, so there is no window in which the
+        // child can exit before anything is listening. The `isRunning`
+        // fallback below still covers the case where Foundation has already
+        // reaped an immediately-exiting child by the time `run()` returns.
+        let exitWaiter = ExitWaiter(process: process)
 
         do {
             try process.run()
@@ -164,16 +202,25 @@ public actor SubprocessChannel {
             throw ChannelError.launchFailed("\(error)")
         }
 
-        exitWaiterBox.set(ExitWaiter(process: process))
+        exitWaiter.resolveIfAlreadyExited(process)
+        exitWaiterBox.set(exitWaiter)
+
+        let standardOutputReader = DescriptorReader(
+            handle: standardOutputPipe.fileHandleForReading,
+            label: "com.agentictoolkit.subprocess-channel.stdout"
+        )
+        let standardErrorReader = DescriptorReader(
+            handle: standardErrorPipe.fileHandleForReading,
+            label: "com.agentictoolkit.subprocess-channel.stderr"
+        )
+        readerBox.set(standardOutput: standardOutputReader, standardError: standardErrorReader)
 
         self.process = process
         self.standardInputPipe = standardInputPipe
-        self.standardOutputPipe = standardOutputPipe
-        self.standardErrorPipe = standardErrorPipe
         hasLaunched = true
 
-        startMessagePump(process: process, standardOutputPipe: standardOutputPipe)
-        startStandardErrorDrain(standardErrorPipe: standardErrorPipe)
+        startMessagePump(process: process, reader: standardOutputReader)
+        startStandardErrorDrain(reader: standardErrorReader)
     }
 
     /// Framed messages from the child's stdout. Finishes on EOF; throws on a
@@ -215,16 +262,29 @@ public actor SubprocessChannel {
     /// A truncation cut, or a child that simply doesn't write UTF-8, can
     /// leave bytes that don't decode as UTF-8; those fall back to Latin-1
     /// (which accepts every byte) rather than losing the whole capture to an
-    /// empty string. Awaits the drain task's completion first, so this is
-    /// deterministic: it never returns a partial capture racing the child's
-    /// own exit. That means calling this while the child is still running
-    /// blocks until it exits — by design, this is meant to be read after
-    /// `terminate()` or normal exit, not mid-run.
+    /// empty string.
+    ///
+    /// Waits up to `standardErrorDrainGraceSeconds` for the drain task to
+    /// finish, so the ordinary case is deterministic rather than racing the
+    /// child's last write — but the wait is **bounded**, and expiry is not an
+    /// error: whatever is buffered at that point is returned. The case that
+    /// makes the bound necessary is not a child still running, it is a child
+    /// that has *already exited* while a grandchild it backgrounded still
+    /// holds the stderr write end open (`npx` wrappers, `sh -c "… &"`). EOF
+    /// needs every holder to close, so an unbounded wait there never returns
+    /// at all. A diagnostic string is a best-effort artefact; failing to
+    /// produce one must never fail the operation that was trying to explain
+    /// itself. Calling `terminate()` first forces the descriptors closed and
+    /// makes the answer complete.
     ///
     /// Capped at the last `maximumStandardErrorBytes`; a truncated capture is
     /// prefixed with a marker rather than silently missing its start.
     public func standardErrorText() async -> String {
-        _ = await standardErrorTask?.value
+        if let standardErrorTask {
+            _ = try? await withWallClockBudget(Self.standardErrorDrainGraceSeconds) {
+                await standardErrorTask.value
+            }
+        }
         let text = String(bytes: standardErrorBuffer, encoding: .utf8)
             ?? String(bytes: standardErrorBuffer, encoding: .isoLatin1)
             ?? ""
@@ -238,14 +298,24 @@ public actor SubprocessChannel {
     /// channel.
     ///
     /// Sends SIGTERM, waits up to `terminationGraceSeconds`, then escalates
-    /// to SIGKILL, then closes the stdout/stderr read descriptors
-    /// unconditionally — not after waiting for the pump/drain tasks to
-    /// observe EOF on their own, which a child launched through a shell
-    /// wrapper (`sh -c …`, `npx …`) can withhold forever if a grandchild
-    /// still holds the write end. `FileHandle.read(upToCount:)` (unlike the
-    /// exception-raising `.bytes` this pump no longer uses) reports a
-    /// concurrent close as a catchable Swift error, so forcing the close
-    /// here is safe rather than a crash risk.
+    /// to SIGKILL, then stops the two `DispatchIO` readers unconditionally —
+    /// not after waiting for the pump/drain tasks to observe EOF on their
+    /// own, which a child launched through a shell wrapper (`sh -c …`,
+    /// `npx …`) can withhold forever if a grandchild still holds the write
+    /// end. Stopping a `DispatchIO` channel has a defined interaction with a
+    /// read in flight (the outstanding handler is called with `ECANCELED`,
+    /// then the cleanup handler closes the descriptor), so forcing it here is
+    /// safe rather than a crash risk.
+    ///
+    /// **Termination reaches the direct child only.** Both the SIGTERM and
+    /// the SIGKILL escalation signal a single pid, never a process group, so
+    /// a child that backgrounds helpers of its own (again: `npx`, `sh -c "… &"`)
+    /// leaves those helpers orphaned and running. Killing the group instead
+    /// would require spawning with `POSIX_SPAWN_SETPGROUP`, which `Process`
+    /// does not expose — and signalling the *inherited* group would signal
+    /// this host process too. That is a change to how this channel spawns,
+    /// not something `terminate()` can do; until then, callers that need
+    /// grandchildren reaped must arrange it in the command they launch.
     public func terminate() async {
         guard hasLaunched else { return }
         guard !isTerminated else { return }
@@ -273,8 +343,7 @@ public actor SubprocessChannel {
             }
         }
 
-        try? standardOutputPipe?.fileHandleForReading.close()
-        try? standardErrorPipe?.fileHandleForReading.close()
+        readerBox.stopAll()
     }
 
     /// Waits for exit and returns the status. Returns immediately if already
@@ -307,10 +376,15 @@ public actor SubprocessChannel {
 
     // MARK: - Pumping
 
-    /// Reads the child's stdout, decodes it into frames, and drives
-    /// `messageStream`. Runs detached from the actor so `waitUntilExit()`
-    /// and `terminate()` never wait behind it.
-    private func startMessagePump(process: Process, standardOutputPipe: Pipe) {
+    /// Decodes the chunks `reader` produces into frames and drives
+    /// `messageStream`. The task only ever *awaits* chunks — the descriptor
+    /// itself is read by `DispatchIO` on its own queue — so this parks no
+    /// thread of Swift's fixed-width cooperative pool while the child is
+    /// silent. That distinction is the whole point: a blocking `read(2)` on a
+    /// pool thread, two per live channel, starves every other async task in
+    /// the host process once roughly `activeProcessorCount / 2` channels are
+    /// open.
+    private func startMessagePump(process: Process, reader: DescriptorReader) {
         let processBox = ProcessBox(process)
         let framing = configuration.framing
 
@@ -336,14 +410,10 @@ public actor SubprocessChannel {
 
         let pumpTask = Task.detached {
             var decoder = MessageFramingDecoder(framing: framing)
-            let handle = standardOutputPipe.fileHandleForReading
             do {
                 try await withTaskCancellationHandler {
-                    while true {
+                    for try await chunk in reader.chunks {
                         try Task.checkCancellation()
-                        guard let chunk = try handle.read(upToCount: Self.readChunkSize), !chunk.isEmpty else {
-                            break
-                        }
                         for frame in try decoder.consume(chunk) {
                             continuation.yield(frame)
                         }
@@ -356,10 +426,9 @@ public actor SubprocessChannel {
                 } onCancel: {
                     // Consuming task cancellation (the consumer went away, or
                     // `terminate()` was called) must tear the child down
-                    // eagerly: this loop only observes cancellation between
-                    // reads, which a silent child never prompts — terminating
-                    // closes its stdout so the read wakes with EOF (or a
-                    // thrown error) instead of hanging forever.
+                    // eagerly, and stop the reader so this loop's `await`
+                    // wakes instead of waiting on a silent child forever.
+                    reader.stop()
                     processBox.terminateIfRunning()
                 }
             } catch {
@@ -386,27 +455,26 @@ public actor SubprocessChannel {
     /// continuously, on a task that never needs the actor mid-stream, is a
     /// genuine improvement over what this replaces.
     ///
-    /// Captures `self` weakly: a read that never returns (the same
+    /// Captures `self` weakly: a drain that never sees EOF (the same
     /// grandchild-holds-the-pipe case `terminate()`'s doc comment describes)
     /// must not keep this actor alive forever just because this task hasn't
     /// noticed yet. If every external reference to the channel is dropped,
     /// this task's `self?.appendStandardError` calls become harmless no-ops
-    /// instead of a retain cycle.
-    private func startStandardErrorDrain(standardErrorPipe: Pipe) {
+    /// instead of a retain cycle, and the actor's `deinit` stops the reader.
+    private func startStandardErrorDrain(reader: DescriptorReader) {
         standardErrorTask = Task.detached { [weak self] in
-            let handle = standardErrorPipe.fileHandleForReading
-            while true {
-                let chunk: Data?
-                do {
-                    chunk = try handle.read(upToCount: Self.readChunkSize)
-                } catch {
-                    // Best-effort: whatever arrived before the read failed
-                    // (e.g. the pipe was closed out from under it by
-                    // `terminate()`'s bounded close) is still reported.
-                    break
+            do {
+                try await withTaskCancellationHandler {
+                    for try await chunk in reader.chunks {
+                        await self?.appendStandardError(chunk)
+                    }
+                } onCancel: {
+                    reader.stop()
                 }
-                guard let chunk, !chunk.isEmpty else { break }
-                await self?.appendStandardError(chunk)
+            } catch {
+                // Best-effort: whatever arrived before the read failed (e.g.
+                // the descriptor was stopped out from under it by
+                // `terminate()`) is still reported.
             }
         }
     }
@@ -433,6 +501,160 @@ public actor SubprocessChannel {
         }
     }
 
+    /// Reads one descriptor with `DispatchIO` on a serial queue of its own and
+    /// vends the bytes as an `AsyncThrowingStream` of chunks.
+    ///
+    /// `DispatchIO` rather than a blocking read on a `Task.detached`: the
+    /// latter parks a thread of Swift's fixed-width cooperative pool for as
+    /// long as the child is silent, two per live channel, which starves every
+    /// other async task in the host process once enough channels are open.
+    /// `DispatchIO` rather than `FileHandle.readabilityHandler`: both stay off
+    /// the cooperative pool, but `terminate()` force-closes descriptors while
+    /// a read may be in flight, and `readabilityHandler` against a closed
+    /// descriptor raises an Objective-C exception Swift cannot catch, whereas
+    /// `DispatchIO.close(flags: .stop)` has a defined interaction with exactly
+    /// that path.
+    ///
+    /// The queue is **serial**, so chunks are yielded in the order they were
+    /// read; the stream is unbounded, so none is dropped. A reordered or lost
+    /// chunk would desynchronise a JSON-RPC session permanently, which is the
+    /// same reasoning that keeps the message stream unbounded.
+    ///
+    /// `@unchecked Sendable` because the lock, not the compiler, is what makes
+    /// the finish-exactly-once guarantee hold across the dispatch queue, the
+    /// consuming task and `terminate()`.
+    private final class DescriptorReader: @unchecked Sendable {
+        /// Chunks in arrival order; finishes on EOF or on `stop()`, and
+        /// throws if the read itself fails.
+        let chunks: AsyncThrowingStream<Data, Error>
+
+        private let closer: HandleCloser
+        private let dispatchChannel: DispatchIO
+        private let continuation: AsyncThrowingStream<Data, Error>.Continuation
+        private let lock = NSLock()
+        private var hasFinished = false
+
+        init(handle: FileHandle, label: String) {
+            let closer = HandleCloser(handle)
+            self.closer = closer
+            let queue = DispatchQueue(label: label)
+            var producedContinuation: AsyncThrowingStream<Data, Error>.Continuation!
+            chunks = AsyncThrowingStream<Data, Error>(bufferingPolicy: .unbounded) {
+                producedContinuation = $0
+            }
+            continuation = producedContinuation
+
+            // The `DispatchIO` channel owns the descriptor from here: its
+            // cleanup handler is the single place it is closed, which is what
+            // makes closing it safe while a read is outstanding. `FileHandle`
+            // records the close, so its own `deinit` does not repeat it.
+            dispatchChannel = DispatchIO(
+                type: .stream,
+                fileDescriptor: handle.fileDescriptor,
+                queue: queue,
+                cleanupHandler: { _ in closer.close() }
+            )
+            // Deliver as soon as a single byte is available (a JSON-RPC reply
+            // must not wait for a full buffer), but never more than one chunk
+            // at a time.
+            dispatchChannel.setLimit(lowWater: 1)
+            dispatchChannel.setLimit(highWater: SubprocessChannel.readChunkSize)
+
+            // `length: .max` means "until EOF": the handler is invoked
+            // repeatedly with successive chunks, then once with `done`.
+            // `self` is captured strongly on purpose — the handler is the
+            // only thing that will finish the stream and release the
+            // descriptor, so it must outlive every other reference. The cycle
+            // it forms is broken by `finish(with:)`, which every terminal path
+            // (EOF, error, `stop()`) goes through.
+            dispatchChannel.read(offset: 0, length: Int.max, queue: queue) { done, data, error in
+                if let data, !data.isEmpty {
+                    self.continuation.yield(Self.makeData(from: data))
+                }
+                if error != 0 {
+                    // `ECANCELED` is what a deliberate `stop()` looks like
+                    // from in here; that is an ordinary end of stream, not a
+                    // failure to report.
+                    if error == ECANCELED {
+                        self.finish(with: nil)
+                    } else {
+                        self.finish(with: NSError(domain: NSPOSIXErrorDomain, code: Int(error), userInfo: nil))
+                    }
+                    return
+                }
+                if done {
+                    self.finish(with: nil)
+                }
+            }
+        }
+
+        /// Ends the stream and releases the descriptor without waiting for
+        /// EOF. Idempotent, and safe to call while a read is in flight.
+        func stop() {
+            finish(with: nil)
+        }
+
+        private func finish(with error: Error?) {
+            lock.lock()
+            if hasFinished {
+                lock.unlock()
+                return
+            }
+            hasFinished = true
+            lock.unlock()
+
+            if let error {
+                continuation.finish(throwing: error)
+            } else {
+                continuation.finish()
+            }
+            // `.stop` cancels any outstanding read rather than letting it
+            // linger; the cleanup handler then closes the descriptor.
+            dispatchChannel.close(flags: .stop)
+        }
+
+        /// Owns the read end and closes it exactly once, from the
+        /// `DispatchIO` cleanup handler. A separate object rather than a bare
+        /// `FileHandle` capture so what the `@Sendable` cleanup closure holds
+        /// is itself `Sendable`, and so the descriptor has one owner: the
+        /// channel that reads it.
+        private final class HandleCloser: @unchecked Sendable {
+            private let handle: FileHandle
+            init(_ handle: FileHandle) { self.handle = handle }
+            func close() { try? handle.close() }
+        }
+
+        private static func makeData(from dispatchData: DispatchData) -> Data {
+            var result = Data()
+            result.reserveCapacity(dispatchData.count)
+            dispatchData.enumerateBytes { buffer, _, _ in
+                result.append(buffer)
+            }
+            return result
+        }
+    }
+
+    /// A lock-protected box so `deinit` — which is nonisolated — can stop the
+    /// readers `launch()` created.
+    private final class DescriptorReaderBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var readers: [DescriptorReader] = []
+
+        func set(standardOutput: DescriptorReader, standardError: DescriptorReader) {
+            lock.lock()
+            readers = [standardOutput, standardError]
+            lock.unlock()
+        }
+
+        func stopAll() {
+            lock.lock()
+            let pending = readers
+            readers.removeAll()
+            lock.unlock()
+            for reader in pending { reader.stop() }
+        }
+    }
+
     /// Bridges `Process.terminationHandler` — a single closure Foundation
     /// fires once — to any number of independent async `wait()` callers.
     /// `@unchecked Sendable` because the lock, not the compiler, is what
@@ -443,15 +665,19 @@ public actor SubprocessChannel {
         private var status: Int32?
         private var waiters: [CheckedContinuation<Int32, Never>] = []
 
+        /// Installs the handler. Call this *before* `process.run()` so there
+        /// is no window in which an immediately-exiting child can finish
+        /// unobserved.
         init(process: Process) {
             process.terminationHandler = { [weak self] finishedProcess in
                 self?.resolve(status: finishedProcess.terminationStatus)
             }
-            // The process may already have exited before this handler was
-            // installed (an immediately-failing child). `terminationHandler`
-            // is documented to still fire for an already-terminated process,
-            // but this covers the race explicitly rather than relying on
-            // that timing.
+        }
+
+        /// Covers the remaining race explicitly: Foundation may already have
+        /// reaped a very short-lived child by the time `run()` returns.
+        /// Resolving twice is harmless — `resolve` keeps the first status.
+        func resolveIfAlreadyExited(_ process: Process) {
             if !process.isRunning {
                 resolve(status: process.terminationStatus)
             }
