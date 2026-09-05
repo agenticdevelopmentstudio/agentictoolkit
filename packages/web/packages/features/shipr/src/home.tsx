@@ -51,9 +51,19 @@ export function ShiprHome({
     [fetcher, workspaceSlug],
   );
 
-  // Left undefined — none exist, or the read failed — the wizard says so and offers the way to
-  // fix it rather than pretending the choice is not there.
+  // Left undefined until the first read LANDS, so the wizard can tell a list it is still
+  // waiting for from one it has and that is empty. Those are different sentences.
   const [connections, setConnections] = React.useState<ForgeConnection[]>();
+  /**
+   * Why there is no list, when the reason is a failure rather than an absence.
+   *
+   * Held rather than dropped. A swallowed error left the wizard three situations — not read
+   * yet, read and empty, could not be read — wearing one sentence, "No GitHub App
+   * installation", which is a guess in two of the three cases and wrong in one. Nothing here
+   * throws and nothing blocks on it: a credential list that cannot be read must still not
+   * stand between the operator and a status run.
+   */
+  const [connectionsError, setConnectionsError] = React.useState<string | null>(null);
 
   // RE-READABLE, because the console can change this list. Connecting a GitHub account happens
   // in the Configure dialog's Connections dialog, two dialogs away from the wizard that consumes
@@ -65,11 +75,15 @@ export function ShiprHome({
     client
       .connections()
       .then((res) => {
-        if (live) setConnections(res.connections);
+        if (!live) return;
+        setConnections(res.connections);
+        setConnectionsError(null);
       })
-      .catch(() => {
-        // Nothing to show and nothing to say. A failed credential list must not stand between
-        // the operator and a status run.
+      .catch((e: Error) => {
+        // `connections` is deliberately left alone: a refresh that fails after a good read
+        // should leave the good list on screen with a note beside it, not replace it with an
+        // empty box. The wizard reads the error first only when it has nothing to show.
+        if (live) setConnectionsError(e.message);
       });
     return () => {
       live = false;
@@ -82,6 +96,7 @@ export function ShiprHome({
     <ShiprConsole
       client={client}
       connections={connections}
+      connectionsError={connectionsError}
       onConnectionsChanged={refreshConnections}
       rootLabel={rootLabel}
       className={className}

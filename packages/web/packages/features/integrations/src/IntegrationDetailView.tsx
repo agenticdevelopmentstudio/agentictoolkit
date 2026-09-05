@@ -65,15 +65,21 @@ export type IntegrationDetailViewProps = {
  *  instance label). Same wording as the toolkit service editor's, so the platform says one thing. */
 const NAME_REQUIRED_MESSAGE = "A name is required.";
 
-// Auth methods that connect real accounts (everything except ecosystem-only api_key),
-// so a saved instance shows the connected-accounts manager below its cards. github_app is
-// here for the same reason as oauth: one installation of the app is one connected account.
+// Auth methods that connect real accounts (everything except ecosystem-only api_key), so a
+// saved instance shows the connected-accounts manager below its cards.
+//
+// GITHUB_APP IS DELIBERATELY ABSENT, and its absence is the whole of that section's story here.
+// The manager exists to let a person add and remove accounts — which for every method above is
+// a real choice, made at the provider. A GitHub App has no such choice left: the account was
+// picked on github.com at install time, and the app id and private key are enough for the
+// backend to read the answer back. So the section had nothing to offer but a list the operator
+// cannot act on, and every state it could show was a restatement of what the Test button below
+// says about the same credentials. Adding "github_app" back here re-creates that duplicate.
 const CONNECTION_METHODS: readonly ProviderAuthMethod[] = [
   "oauth",
   "oauth_instance",
   "plaid_link",
   "app_password",
-  "github_app",
 ];
 
 /** A one-sentence, plain-language summary of what enabling this provider does. */
@@ -254,6 +260,143 @@ function FieldsForMethod({
 
 
 /**
+ * Ask GitHub which accounts this app is installed on, and take the ones it can have.
+ *
+ * ONE CALL, TWO CALLERS, and the only difference between them is who is listening. It signs a JWT
+ * with the saved app id and private key, lists the installations, and records each one — which is
+ * what makes the repository picker open on a populated list instead of on an empty box.
+ *
+ * It is also, unavoidably, the credentials test: an installation list cannot be fetched without a
+ * JWT GitHub accepts, so a wrong app id or an unimportable private key fails exactly here.
+ */
+async function adoptInstallations(
+  providerId: string,
+  ecosystemId: string,
+  providerConfigId: string,
+): Promise<string> {
+  const { connected, skipped } = await integrationsApi.adoptInstallations(providerId, {
+    ecosystemId,
+    providerConfigId,
+  });
+  const name = (r: { accountLogin: string; installationId: string }) =>
+    r.accountLogin || `installation ${r.installationId}`;
+  // A skip carrying a connectionId is one this ecosystem ALREADY holds — re-testing a working
+  // integration is a no-op, not a failure. One without is a refusal, and has to be voiced.
+  const held = skipped.filter((s) => s.connectionId);
+  const blocked = skipped.filter((s) => !s.connectionId);
+  const said: string[] = [];
+  if (connected.length > 0) said.push(`Connected ${connected.map(name).join(", ")}.`);
+  if (held.length > 0) said.push(`${held.map(name).join(", ")} was already connected.`);
+  for (const b of blocked) said.push(`${name(b)}: ${b.skipped}`);
+  // A `warning` is NOT a skip and is never counted as one — the connection stands, and only
+  // the repository download behind it did not finish. It is said out loud anyway, because
+  // this is the Test button: the next thing that happens is somebody opening a picker, and
+  // finding out there why it is empty is finding out too late. It rides on a connected row
+  // or on a held one, so both are read for it.
+  for (const w of [...connected, ...held]) {
+    if (w.warning) said.push(`${name(w)} is connected, but its repository list could not be downloaded: ${w.warning}`);
+  }
+  if (said.length > 0) return said.join(" ");
+  // Credentials GitHub accepted, and nothing installed anywhere. A true answer with its own fix,
+  // so it is a result rather than an error.
+  return (
+    "These credentials work, but the app isn't installed on any account yet. Install it on " +
+    "GitHub — on your own account or an organization — then test again."
+  );
+}
+
+/**
+ * The same call, fired by a SAVE, with nobody listening.
+ *
+ * Saving saves. It does not test, it does not report, and it does not wait — but the moment a
+ * GitHub App's credentials land there is exactly one useful thing to do with them, and doing it
+ * now is the difference between a repository picker that opens full and one that opens empty. So
+ * the download rides along and its outcome goes nowhere: it worked, and the lists are already
+ * there when someone asks for them; it did not, and they find out when they press Test, or when
+ * the picker tells them why it has nothing to show.
+ *
+ * NOT AWAITED, and that is the point — a save that blocked on a round-trip to github.com would be
+ * a test with the reporting removed, which is the worse half of both.
+ */
+function prefetchInstallations(
+  provider: ProviderCatalogEntry,
+  ecosystemId: string,
+  providerConfigId: string,
+): void {
+  if (provider.authMethod !== "github_app") return;
+  void adoptInstallations(provider.providerId, ecosystemId, providerConfigId).catch(() => {
+    // Deliberately empty. Test is where this question gets asked out loud.
+  });
+}
+
+/** The Test half — the same download as the save's, with its mouth open. */
+export interface IntegrationTest {
+  /** Whether there is anything here to test. */
+  available: boolean;
+  /** Why the button is disabled, or null. */
+  blockedReason: string | null;
+  /** Never throws — a failure lands on `error`. */
+  run: () => Promise<void>;
+  busy: boolean;
+  /** What GitHub answered, when it answered. */
+  result: string | null;
+  error: string | null;
+}
+
+/**
+ * Reach the provider with the credentials as they are STORED, and say what came back.
+ *
+ * Separate from `useIntegrationSubmit` because it is a separate responsibility: that one writes
+ * fields, this one asks a question of a third party. One button doing both would mean neither
+ * could be done alone — no way to re-read the installations after installing the app on a second
+ * organization without re-saving a form nothing had changed in, and no way to save a half-typed
+ * key without being told off by github.com.
+ *
+ * It tests what is SAVED, not what is typed, which is why an edited form disables it: testing a
+ * key the backend has never seen would report on credentials that do not exist, and nothing on
+ * screen would say which of the two the answer was about.
+ */
+export function useIntegrationTest({
+  provider,
+  ecosystemId,
+  config,
+  dirty,
+}: {
+  provider: ProviderCatalogEntry;
+  ecosystemId: string;
+  config: MaskedProviderConfig | null;
+  dirty: boolean;
+}): IntegrationTest {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const configId = config?.id ?? null;
+
+  const run = async () => {
+    if (!configId || busy) return;
+    setBusy(true);
+    setResult(null);
+    setError(null);
+    try {
+      setResult(await adoptInstallations(provider.providerId, ecosystemId, configId));
+    } catch (e) {
+      setError(errMsg(e, "GitHub could not be reached with these credentials."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return {
+    available: provider.authMethod === "github_app" && configId !== null,
+    blockedReason: dirty ? "Save your changes before testing them." : null,
+    run,
+    busy,
+    result,
+    error,
+  };
+}
+
+/**
  * THE CREATE/SAVE HALF, hoisted out of the component that draws it.
  *
  * A hook rather than a method on the view, because the button does not always live inside the
@@ -276,12 +419,8 @@ export interface IntegrationSubmit {
   blockedReason: string | null;
   /** Whether the operator has typed enough for `blockedReason` to be worth voicing. */
   touched: boolean;
-  /**
-   * What the save ALSO did, when saving does more than store fields — today, the GitHub App
-   * auto-connect's account list. Not an error and not a substitute for one: `error` says the
-   * save or the connect failed, `notice` says what succeeded.
-   */
-  notice: string | null;
+  /** Different from what is stored — false in `'add'` mode, which has no stored anything. */
+  dirty: boolean;
   /** What the button says, idle and mid-flight. */
   label: string;
   busyLabel: string;
@@ -307,12 +446,6 @@ export function useIntegrationSubmit({
   const [busy, setBusy] = useState(false);
   const [added, setAdded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  // A row a previous attempt CREATED and then failed to connect. Held so pressing OK again
-  // corrects that row instead of adding a second one: an operator who pastes a private key
-  // GitHub refuses, fixes it, and submits again must not end up with two integrations, one of
-  // which never worked. Cleared the moment a save completes end to end.
-  const [created, setCreated] = useState<MaskedProviderConfig | null>(null);
   // The loaded baseline for a 'saved' instance, captured once (this component is remounted
   // per row via `key={cfg.rdid}` in IntegrationsPane) and re-set after our own successful save
   // — so Save stays enabled the instant something changes but goes back to disabled right after
@@ -340,96 +473,21 @@ export function useIntegrationSubmit({
   const touched =
     mode === "add" ? intDiffers(draft, intBlank(provider.providerId), { includeName: true }) : dirty;
 
-  /**
-   * CONNECTING IS PART OF SAVING, for a GitHub App.
-   *
-   * Every other auth method redirects to the provider because a PERSON has to choose an account
-   * there. A GitHub App has no such question left: the choice was made on github.com when the
-   * app was installed, and the backend can read the answer from the app id and private key
-   * alone. So there is no "Connect account" step to take — the save takes it.
-   *
-   * It is also the credentials TEST. The only way to list installations is to sign a JWT GitHub
-   * accepts, so a wrong app id or a key that will not import fails HERE, while the operator is
-   * still looking at the fields they typed, instead of silently at the first sync.
-   *
-   * `ok` is false when nothing ended up connected — valid credentials for an app installed
-   * nowhere. Throws with the provider's own words when the credentials themselves are refused.
-   */
-  const autoConnect = async (
-    row: MaskedProviderConfig,
-  ): Promise<{ ok: boolean; message: string }> => {
-    const { connected, skipped } = await integrationsApi.adoptInstallations(provider.providerId, {
-      ecosystemId,
-      providerConfigId: row.id,
-    });
-    const name = (r: { accountLogin: string; installationId: string }) =>
-      r.accountLogin || `installation ${r.installationId}`;
-    // A skip carrying a connectionId is one THIS ecosystem already holds — re-saving a working
-    // integration is a no-op, not a failure. One without is a refusal that has to be voiced.
-    const held = skipped.filter((s) => s.connectionId);
-    const blocked = skipped.filter((s) => !s.connectionId);
-    const parts: string[] = [];
-    if (connected.length > 0) parts.push(`Connected ${connected.map(name).join(", ")}.`);
-    if (held.length > 0) parts.push(`${held.map(name).join(", ")} was already connected.`);
-    for (const b of blocked) parts.push(`${name(b)}: ${b.skipped}`);
-    if (connected.length + held.length === 0) {
-      return {
-        ok: false,
-        message:
-          parts.join(" ") ||
-          "These credentials work, but the app isn't installed on any account yet. Install it " +
-            "on GitHub — on your own account or an organization — then press OK again.",
-      };
-    }
-    return { ok: true, message: parts.join(" ") };
-  };
-
   const run = async () => {
     // The guard is HERE and not only on the button, because Enter reaches this through a form
     // submit as well now — and a keystroke must not be able to post a draft a click could not.
     if (!canSubmit || busy) return;
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
       if (mode === "add") {
         setAdded(false);
-        // `created` is non-null only after an attempt that saved the row and then could not
-        // connect it, so this is the CORRECTION path, not a second integration.
-        const row = created
-          ? await integrationsApi.updateProviderConfig(ecosystemId, created.id, {
-              name: draft.name.trim(),
-              ...intToBody(draft, provider),
-            })
-          : await integrationsApi.createProviderConfig(
-              ecosystemId,
-              intToCreateBody(draft, provider),
-            );
-        setCreated(row);
-        if (provider.authMethod === "github_app") {
-          let outcome: { ok: boolean; message: string };
-          try {
-            outcome = await autoConnect(row);
-          } catch (e) {
-            // The integration IS saved — it is the credentials inside it GitHub refused. Say
-            // both: "couldn't add the integration" would send the operator hunting for a row
-            // that is already there, and hide the one sentence that says what to fix.
-            setError(
-              `Saved, but GitHub refused these credentials: ${errMsg(
-                e,
-                "the installations could not be read.",
-              )}`,
-            );
-            return;
-          }
-          setNotice(outcome.message);
-          // Nothing connected. The row is saved and its credentials are good, so this is not an
-          // error — but closing now would land the operator on an empty connections list with
-          // no explanation, which is the exact dead end this whole path exists to remove.
-          if (!outcome.ok) return;
-        }
+        const row = await integrationsApi.createProviderConfig(
+          ecosystemId,
+          intToCreateBody(draft, provider),
+        );
+        prefetchInstallations(provider, ecosystemId, row.id);
         setAdded(true);
-        setCreated(null);
         // Clear the form but stay open so another instance can be added.
         onChange({ ...intBlank(provider.providerId), name: "" });
         onSaved?.(row);
@@ -440,22 +498,7 @@ export function useIntegrationSubmit({
           ...intToBody(draft, provider),
         });
         setBaseline(intToInput(row, provider));
-        // Re-saving a GitHub App re-runs the connect, which is what makes a corrected key take
-        // effect without a second UI. Already-held installations come back as skips, so this is
-        // idempotent; a failure here is reported without pretending the save failed too.
-        if (provider.authMethod === "github_app") {
-          try {
-            setNotice((await autoConnect(row)).message);
-          } catch (e) {
-            setError(
-              `Saved, but GitHub refused these credentials: ${errMsg(
-                e,
-                "the installations could not be read.",
-              )}`,
-            );
-            return;
-          }
-        }
+        prefetchInstallations(provider, ecosystemId, row.id);
         onSaved?.(row);
       }
     } catch (e) {
@@ -475,7 +518,7 @@ export function useIntegrationSubmit({
     busy,
     added,
     error,
-    notice,
+    dirty: mode === "saved" && dirty,
     canSubmit,
     blockedReason,
     touched,
@@ -510,6 +553,15 @@ export function IntegrationDetailBody({
   submit,
   hideSubmit = false,
 }: IntegrationDetailBodyProps) {
+  // Not lifted the way `submit` is, because Test has no second home: the Add dialog's footer
+  // draws OK and Cancel, and a button that reaches credentials the operator has not saved yet
+  // would have nothing to reach. It lives beside Save, in the card that owns the fields it tests.
+  const test = useIntegrationTest({
+    provider,
+    ecosystemId,
+    config: config ?? null,
+    dirty: submit.dirty,
+  });
   const showConnections = mode === "saved" && CONNECTION_METHODS.includes(provider.authMethod);
   // Synced-row browsing (reddit / google-calendar today) belongs to a SAVED instance — there is
   // nothing to browse while adding one. Empty for every other provider, which renders no section.
@@ -585,28 +637,49 @@ export function IntegrationDetailBody({
           />
 
           <div className="flex flex-col gap-2">
-            {!hideSubmit && (
-              <div>
-                <Button
-                  type="button"
-                  variant="default"
-                  disabled={!submit.canSubmit || submit.busy}
-                  onClick={() => void submit.run()}
-                >
-                  {submit.busy ? submit.busyLabel : submit.label}
-                </Button>
+            {(!hideSubmit || test.available) && (
+              <div className="flex flex-wrap items-center gap-2">
+                {!hideSubmit && (
+                  <Button
+                    type="button"
+                    variant="default"
+                    disabled={!submit.canSubmit || submit.busy}
+                    onClick={() => void submit.run()}
+                  >
+                    {submit.busy ? submit.busyLabel : submit.label}
+                  </Button>
+                )}
+                {/* Save writes the fields; Test asks GitHub about them. Two buttons because they
+                    are two questions, and an operator who has installed the app on a new
+                    organization needs to ask the second one without re-answering the first. */}
+                {test.available && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={test.busy || test.blockedReason !== null}
+                    onClick={() => void test.run()}
+                  >
+                    {test.busy ? "Testing…" : "Test"}
+                  </Button>
+                )}
               </div>
             )}
             {!hideSubmit && submit.added && (
               <p className="text-sm text-apt-green">integration added</p>
             )}
             <ErrorText error={submit.error} />
-            {/* Ungated by `hideSubmit` for the same reason the error line is: this is the
-                outcome of the save, and the Add dialog — which draws its own OK in a footer two
-                scroll regions away — is exactly where it must not go missing. */}
-            {submit.notice && !submit.error && (
+            {/* The test's own answer, kept separate from the save's: they are replies to two
+                different questions, and merging them is what made a save look like it had
+                reached GitHub when it had not. */}
+            <ErrorText error={test.error} />
+            {test.result && !test.error && (
               <p className="text-sm text-apt-text" role="status">
-                {submit.notice}
+                {test.result}
+              </p>
+            )}
+            {test.available && test.blockedReason && (
+              <p className="text-sm text-apt-text-muted" role="status">
+                {test.blockedReason}
               </p>
             )}
             {!submit.error && submit.blockedReason && submit.touched && (

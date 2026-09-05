@@ -43,18 +43,36 @@ const DECLARED: DeclarationResponse = {
   fallbackSlug: 'acme/site-deployment',
 };
 
+/** A moment ago, in the shape the wire uses. The exact value never matters to a test — what
+ *  matters is that both reads carry one, because the stored list announcing its age is the
+ *  whole reason showing a stored list is honest rather than a guess. */
+const READ_AT = '2026-09-01T12:00:00.000Z';
+
 function draw(
   declaration: DeclarationResponse,
   over: {
     registeredSlugs?: string[];
     onSubmit?: (b: RegisterRequest) => Promise<void>;
     repositories?: typeof REPOSITORIES;
+    /** What the refresh answers, when the test cares. Defaults to the stored list, which is
+     *  the ordinary case: nothing changed on GitHub between the two calls. */
+    refreshed?: typeof REPOSITORIES;
+    /** The refresh REFUSES. The stored list must survive it. */
+    refreshError?: string;
+    connections?: ForgeConnection[];
+    connectionsError?: string;
   } = {},
 ) {
+  const stored = over.repositories ?? REPOSITORIES;
   const client = {
     connectionRepositories: vi
       .fn()
-      .mockResolvedValue({ repositories: over.repositories ?? REPOSITORIES }),
+      .mockResolvedValue({ repositories: stored, readAt: READ_AT }),
+    refreshConnectionRepositories: over.refreshError
+      ? vi.fn().mockRejectedValue(new Error(over.refreshError))
+      : vi
+          .fn()
+          .mockResolvedValue({ repositories: over.refreshed ?? stored, readAt: READ_AT }),
     connectionDeclaration: vi.fn().mockResolvedValue(declaration),
   };
   const onSubmit = over.onSubmit ?? vi.fn().mockResolvedValue(undefined);
@@ -64,7 +82,10 @@ function draw(
       onClose={vi.fn()}
       client={client}
       groups={[]}
-      connections={CONNECTIONS}
+      // `in`, not `??`: `undefined` is one of the three states under test — the read that has
+      // not landed — so a default that swallows it would test the opposite of what it says.
+      connections={'connections' in over ? over.connections : CONNECTIONS}
+      connectionsError={over.connectionsError}
       registeredSlugs={over.registeredSlugs}
       onSubmit={onSubmit}
     />,
@@ -115,6 +136,73 @@ describe('RegisterWizard — step 1', () => {
       'c2',
     );
     expect(client.connectionRepositories).toHaveBeenLastCalledWith('c2');
+  });
+});
+
+/**
+ * The three situations an absent installation list can be in.
+ *
+ * They share a shape — no list — and share nothing else, and for a while they shared one
+ * sentence too: "No GitHub App installation". That sentence is a guess in two of the three
+ * cases and flatly wrong in one, and the wrong one is the expensive one: it sends an operator
+ * to GitHub to install an app they have already installed, over a read that simply failed.
+ */
+describe('RegisterWizard — why there is no installation', () => {
+  it('says it is still reading while the list has not landed', async () => {
+    draw(FALLBACK, { connections: undefined });
+    expect(
+      await screen.findByText(/Reading your GitHub App installations/),
+    ).toBeTruthy();
+  });
+
+  it('says the read failed, and why, rather than naming an absence', async () => {
+    draw(FALLBACK, { connections: undefined, connectionsError: 'network is down' });
+    expect(await screen.findByText(/could not be read: network is down/)).toBeTruthy();
+    // The one sentence that must NOT appear: it prescribes installing an app that may well
+    // already be installed.
+    expect(screen.queryByText(/isn’t installed on any account/)).toBeNull();
+  });
+
+  it('sends a read-and-empty list to the Test button for the second cause', async () => {
+    // Nothing installed, or credentials GitHub refuses — and only the Test button can tell
+    // those apart, because only it asks GitHub out loud. Diagnosing it a second time here
+    // would be two places answering one question.
+    draw(FALLBACK, { connections: [] });
+    expect(await screen.findByText(/isn't installed on any account/)).toBeTruthy();
+    expect(screen.getByText(/open Integrations and press Test/)).toBeTruthy();
+  });
+});
+
+/**
+ * The stored list, and the refresh behind it.
+ *
+ * The picker used to be built out of a live forge call on every open, so it opened on a
+ * spinner and — whenever GitHub was slow, rate-limiting or briefly down — resolved to an empty
+ * box indistinguishable from an installation that was granted nothing.
+ */
+describe('RegisterWizard — the stored list', () => {
+  it('draws the browser from what was written down, and asks GitHub behind it', async () => {
+    const { client } = draw(FALLBACK);
+    expect(await screen.findByRole('button', { name: /acme\/site\b/ })).toBeTruthy();
+    expect(client.connectionRepositories).toHaveBeenCalledWith('c1');
+    expect(client.refreshConnectionRepositories).toHaveBeenCalledWith('c1');
+  });
+
+  it('swaps in what the refresh returned', async () => {
+    draw(FALLBACK, {
+      refreshed: [{ slug: 'acme/newly-granted', defaultBranch: 'main', private: false }],
+    });
+    expect(
+      await screen.findByRole('button', { name: /acme\/newly-granted/ }),
+    ).toBeTruthy();
+  });
+
+  it('leaves the stored list standing when the refresh fails, with the reason beside it', async () => {
+    // A list read an hour ago is a list you can pick from. An empty box is not, and replacing
+    // one with the other is the trade the cache exists to stop making.
+    draw(FALLBACK, { refreshError: 'installation suspended' });
+    expect(await screen.findByText(/installation suspended/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /acme\/site\b/ })).toBeTruthy();
   });
 });
 

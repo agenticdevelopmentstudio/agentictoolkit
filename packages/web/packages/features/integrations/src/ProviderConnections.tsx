@@ -432,55 +432,6 @@ export function ProviderConnections({
   // as `fetchError`.
   const refresh = useCallback(() => reload().catch(() => {}), [reload]);
 
-  /**
-   * A GITHUB APP CONNECTS ITSELF, and that is why there is no Connect-account button beside it.
-   *
-   * The button, and the "Continue to GitHub" dialog behind it, exist to let a person choose an
-   * account at the provider. A GitHub App has no such question left to ask: the choice was made
-   * on github.com when the app was installed, and the backend can read it back from the saved
-   * app id and private key alone. So this section takes the step itself, on the way in, rather
-   * than drawing a button whose only job is to ask for permission to do the obvious.
-   *
-   * It runs once per saved config (the ref), and it is the mechanism that picks up an app newly
-   * installed on a SECOND organization — the save-time connect only sees what existed then.
-   * Adopting is idempotent: an installation already held comes back as a skip, so the repeat is
-   * free and the refresh below only happens when something actually appeared.
-   */
-  const adoptConfigId = provider.authMethod === "github_app" ? providerConfig?.id ?? null : null;
-  const [adopting, setAdopting] = useState(false);
-  const [adoptError, setAdoptError] = useState<string | null>(null);
-  const adoptedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!adoptConfigId || adoptedFor.current === adoptConfigId) return;
-    adoptedFor.current = adoptConfigId;
-    let cancelled = false;
-    setAdopting(true);
-    setAdoptError(null);
-    integrationsApi
-      .adoptInstallations(providerId, { ecosystemId, providerConfigId: adoptConfigId })
-      .then((result) => {
-        if (!cancelled && result.connected.length > 0) {
-          onConnectionsChanged?.();
-          return refresh();
-        }
-        return undefined;
-      })
-      .catch((err) => {
-        // The credentials are what failed, and GitHub's own words are the only useful thing to
-        // say about them — this is the same sentence the Add dialog shows at save time.
-        if (!cancelled) setAdoptError(errMsg(err, "Couldn't read this app's installations."));
-      })
-      .finally(() => {
-        if (!cancelled) setAdopting(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // `onConnectionsChanged` is deliberately out: the pane passes a fresh closure each render,
-    // and re-running this on every render would re-POST the adopt in a loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adoptConfigId, providerId, ecosystemId, refresh]);
-
   async function onSync(id: string) {
     setSyncingId(id);
     setSyncNotes((n) => {
@@ -526,38 +477,23 @@ export function ProviderConnections({
     }
   }
 
-  // No button for a GitHub App — see the auto-connect above. Everything else still has a real
-  // question to ask the operator (which account? which credentials?), so it keeps the dialog.
-  const connectAction =
-    provider.authMethod === "github_app" ? null : (
-      <Button size="sm" onClick={() => setDialogOpen(true)}>
-        <Plug data-icon="inline-start" />
-        Connect account
-      </Button>
-    );
+  const connectAction = (
+    <Button size="sm" onClick={() => setDialogOpen(true)}>
+      <Plug data-icon="inline-start" />
+      Connect account
+    </Button>
+  );
 
   return (
-    <DetailSection title="Connected accounts" action={connectAction ?? undefined}>
+    <DetailSection title="Connected accounts" action={connectAction}>
       <ErrorText error={loadError} />
-      <ErrorText error={adoptError} />
 
       {/* A failed read leaves the rows null, where the pre-cache code substituted an empty array —
           so the error is what suppresses "Loading…" here, or a failure would spin forever. */}
       {connections === null ? (
         !fetchError && <p className="text-sm text-apt-text-muted">Loading…</p>
       ) : connections.length === 0 ? (
-        // A GitHub App with nothing connected is never "you haven't pressed Connect yet" — there
-        // is no such button — so say the one thing that is actually true and actionable.
-        adoptConfigId ? (
-          <p className="text-sm text-apt-text-muted">
-            {adopting
-              ? "Checking GitHub for installations…"
-              : "This app isn't installed on any account yet. Install it on GitHub — on your own " +
-                "account or an organization — and it will appear here."}
-          </p>
-        ) : (
-          <p className="text-sm text-apt-text-muted">No account connected.</p>
-        )
+        <p className="text-sm text-apt-text-muted">No account connected.</p>
       ) : (
         <List>
           {connections.map((c) => {
@@ -605,22 +541,17 @@ export function ProviderConnections({
         </List>
       )}
 
-      {/* Not mounted for a GitHub App: with no button to open it, the dialog is unreachable —
-          and a redirect flow that can still be reached some other way is a second, divergent
-          way to connect the same thing. */}
-      {connectAction !== null && (
-        <ConnectAccountDialog
-          provider={provider}
-          ecosystemId={ecosystemId}
-          providerConfig={providerConfig}
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          onConnected={() => {
-            void refresh();
-            onConnectionsChanged?.();
-          }}
-        />
-      )}
+      <ConnectAccountDialog
+        provider={provider}
+        ecosystemId={ecosystemId}
+        providerConfig={providerConfig}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onConnected={() => {
+          void refresh();
+          onConnectionsChanged?.();
+        }}
+      />
 
       <AlertModal
         open={disconnectTarget != null}

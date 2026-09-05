@@ -107,6 +107,9 @@ export interface ConfigureDialogProps {
   /** The forge accounts the wizard and the importer may register AGAINST. Read-only here —
    *  this dialog no longer manages them; see {@link onManageConnections}. */
   connections?: readonly ForgeConnection[];
+  /** Why {@link connections} could not be read. Handed straight to the wizard — this dialog has
+   *  no empty state of its own to spend it on. */
+  connectionsError?: string | null;
   /** Leave for the Integrations dialog, because the operator has just found that
    *  {@link connections} is empty or missing the account they want. The host is expected to
    *  CLOSE this dialog and open that one — they are siblings on the console, not nested, so
@@ -156,6 +159,7 @@ function ConfigureBody({
   verbs,
   busy = false,
   connections,
+  connectionsError = null,
   onManageConnections,
   onRegister,
   onRemove,
@@ -341,6 +345,7 @@ function ConfigureBody({
         client={client}
         groups={groups}
         connections={connections}
+        connectionsError={connectionsError}
         registeredSlugs={rows.map((r) => r.devRepo.slug)}
         /* Closes the wizard on the way out. The console is about to swap this whole dialog
            for Integrations, so leaving the wizard open would leave it mounted behind a

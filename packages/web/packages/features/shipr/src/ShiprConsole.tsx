@@ -82,6 +82,10 @@ export interface ShiprConsoleProps {
   /** The caller's forge connections, for the register wizard. The console does not read
    *  them itself: they live behind `/integrations`, which is the host's concern. */
   connections?: readonly ConnectionOption[];
+  /** Why {@link connections} could not be read, when that is the reason it is missing. Passed
+   *  through to the register wizard, which is the one surface where an operator is looking for
+   *  an installation and needs to know whether "none" means none or means we could not ask. */
+  connectionsError?: string | null;
   /** Re-read {@link connections}. Called when the Integrations dialog reports a write —
    *  connecting an account there is exactly what adds an installation to that list, and
    *  without this seam the wizard opened next would still be offering the installations from
@@ -114,6 +118,7 @@ export function ShiprConsole(props: ShiprConsoleProps): React.ReactElement {
 function Console({
   client,
   connections,
+  connectionsError = null,
   onConnectionsChanged,
   rootLabel = 'Repositories',
   className,
@@ -890,6 +895,7 @@ function Console({
         verbs={verbs}
         busy={busy}
         connections={connections}
+        connectionsError={connectionsError}
         // The wizard's way out to the accounts it registers against. Swapping the modal
         // rather than nesting one: they are siblings, and two stacked dialogs over a console
         // is a stack an operator has to unwind twice to get back to the tree.

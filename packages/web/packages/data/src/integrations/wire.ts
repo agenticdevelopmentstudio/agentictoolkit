@@ -265,6 +265,16 @@ export interface AdoptedInstallationRow {
   connectionId?: string;
   /** Why it was not connected. Absent on success. */
   skipped?: string;
+  /**
+   * The connection stands, and the prefetch that rides along behind it — caching what this
+   * installation was granted — did not finish.
+   *
+   * NOT a skip, and a caller that renders it as one is wrong: everything that needs a
+   * connection works, and only the repository picker opening instantly does not. It rides on
+   * a `connected` row, or on a `skipped` row that carries a `connectionId` (one this
+   * ecosystem already held).
+   */
+  warning?: string;
 }
 
 /** `{ connected, skipped }` from adopt-installations. */

@@ -40,9 +40,9 @@ import { errMsg } from "@agentic-toolkit/data";
  * person has to answer something at the provider — which account, which credentials. A GitHub
  * App has already been answered: the account was chosen on github.com at install time, and the
  * backend reads it back from the saved app id and private key. So it connects at SAVE time
- * (`useIntegrationSubmit`) and again when its connections are listed (`ProviderConnections`),
- * and never opens a dialog. Adding a `github_app` case back here would restore the
- * "Connect account → Continue to GitHub" detour those two paths exist to remove.
+ * (`useIntegrationSubmit`'s silent prefetch) and on demand from the Test button beside it
+ * (`useIntegrationTest`), and never opens a dialog. Adding a `github_app` case back here would
+ * restore the "Connect account → Continue to GitHub" detour those two paths exist to remove.
  */
 export function ConnectAccountDialog({
   provider,

@@ -75,11 +75,25 @@ export interface RegisterWizardProps {
   onClose: () => void;
   /** Only the two reads the wizard makes. Narrower than the whole client so a test can drive it
    *  with two functions, and so this file cannot quietly grow a third call. */
-  client: Pick<ShiprClient, 'connectionRepositories' | 'connectionDeclaration'>;
+  client: Pick<
+    ShiprClient,
+    | 'connectionRepositories'
+    | 'refreshConnectionRepositories'
+    | 'connectionDeclaration'
+  >;
   groups: readonly Group[];
   /** Where the new row is filed. The rail's own folder when the dialog was opened from one. */
   defaultGroupId?: string | null;
   connections?: readonly ForgeConnection[];
+  /**
+   * Why {@link connections} could not be read, when that is why it is missing.
+   *
+   * Undefined `connections` means the read has not landed; `[]` means it landed and there is
+   * nothing installed; this means it failed. Three situations that share a shape and share
+   * nothing else — and the empty box the operator is looking at is the same in all three, so
+   * the sentence under it is the only thing that can tell them apart.
+   */
+  connectionsError?: string | null;
   /**
    * Dev repo slugs this workspace already has.
    *
@@ -101,6 +115,7 @@ export function RegisterWizard({
   groups,
   defaultGroupId = null,
   connections,
+  connectionsError = null,
   registeredSlugs,
   onManageConnections,
   onSubmit,
@@ -118,6 +133,10 @@ export function RegisterWizard({
    *  nothing and is the case with its own empty state. */
   const [repos, setRepos] = React.useState<ForgeRepository[] | null>(null);
   const [listError, setListError] = React.useState<string | null>(null);
+  /** Why the list on screen is the STORED one. Set only when a refresh failed on top of a read
+   *  that succeeded, which is the one case where there is something to show and a reason it
+   *  might be out of date — both facts, and neither is worth suppressing for the other. */
+  const [refreshError, setRefreshError] = React.useState<string | null>(null);
 
   const [decl, setDecl] = React.useState<DeclarationResponse | null>(null);
   const [reading, setReading] = React.useState(false);
@@ -141,9 +160,21 @@ export function RegisterWizard({
     setReadError(null);
   }, [open, firstConnectionId, defaultGroupId]);
 
-  // The installation's repositories. Re-read per connection, and discarded when a later
-  // connection is chosen while this one is still out — `stale` is the whole reason this is not
-  // a bare `.then(setRepos)`.
+  // The installation's repositories: what was written down, and then what GitHub says now.
+  //
+  // TWO CALLS, IN THAT ORDER, because they answer different questions and the operator needs
+  // the first answer immediately. The stored list is a database read that cannot fail on
+  // GitHub's account, so the browser is on screen without waiting on a forge round trip; the
+  // refresh replaces it behind them. When the refresh fails the stored list STAYS, with a note
+  // beside it — a list read an hour ago is a list you can pick from, and an empty box is not.
+  //
+  // The first open after an integration is saved pays for two forge calls, because the stored
+  // read had nothing to draw on and went and asked itself. Deciding that from `readAt` would
+  // mean comparing the server's clock against the browser's to save one request, which is a
+  // worse trade than the request.
+  //
+  // `stale` discards every half of this when a later connection is chosen while an earlier
+  // one is still out, and is the whole reason this is not a bare `.then(setRepos)`.
   React.useEffect(() => {
     if (!open || !connectionId) {
       setRepos(null);
@@ -152,11 +183,26 @@ export function RegisterWizard({
     let stale = false;
     setRepos(null);
     setListError(null);
+    setRefreshError(null);
     void client.connectionRepositories(connectionId).then(
       ({ repositories }) => {
-        if (!stale) setRepos(repositories);
+        if (stale) return;
+        setRepos(repositories);
+        return client.refreshConnectionRepositories(connectionId).then(
+          (fresh) => {
+            if (!stale) setRepos(fresh.repositories);
+          },
+          (e: Error) => {
+            // Deliberately not `setRepos`: what is on screen is a real answer GitHub gave,
+            // and replacing it with nothing because we could not ask again is the trade this
+            // whole cache exists to stop making.
+            if (!stale) setRefreshError(e.message);
+          },
+        );
       },
       (e: Error) => {
+        // The stored read failed, so there is nothing to leave standing and nothing to
+        // refresh. The empty state is all that is left, and it carries the reason.
         if (stale) return;
         setRepos([]);
         setListError(e.message);
@@ -281,10 +327,12 @@ export function RegisterWizard({
           {step === 1 ? (
             <StepConnection
               connections={connections}
+              connectionsError={connectionsError}
               connectionId={connectionId}
               onConnection={setConnectionId}
               repos={repos}
               listError={listError}
+              refreshError={refreshError}
               registered={registered}
               slug={slug}
               onPick={onPickRepo}
@@ -502,10 +550,12 @@ function RepoBrowser({
 
 function StepConnection({
   connections,
+  connectionsError,
   connectionId,
   onConnection,
   repos,
   listError,
+  refreshError,
   registered,
   slug,
   onPick,
@@ -519,10 +569,12 @@ function StepConnection({
   onPreparedBranch,
 }: {
   connections?: readonly ForgeConnection[];
+  connectionsError: string | null;
   connectionId: string;
   onConnection: (id: string) => void;
   repos: ForgeRepository[] | null;
   listError: string | null;
+  refreshError: string | null;
   registered: ReadonlySet<string>;
   slug: string;
   onPick: (repo: ForgeRepository) => void;
@@ -551,13 +603,32 @@ function StepConnection({
               </option>
             ))}
           </Select>
-        ) : (
-          // NOT a hidden picker. An installation is what makes every step after this one
-          // possible — the repository list, the deployment repository, the pushes — so its
-          // absence is stated where the list would have been rather than discovered at the
-          // first run.
+        ) : connectionsError ? (
+          // The read FAILED. Its own sentence, because "we could not ask" and "we asked and
+          // there are none" prescribe opposite next moves, and the one thing that must never
+          // happen here is telling an operator to go install an app they have already
+          // installed.
           <Missing
-            text="No GitHub App installation. Install the app on the account that holds the repository, and its repositories will be listed here."
+            text={`Your GitHub App installations could not be read: ${connectionsError}`}
+            onManageConnections={onManageConnections}
+          />
+        ) : connections === undefined ? (
+          <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
+            Reading your GitHub App installations…
+          </p>
+        ) : (
+          // Read, and empty. NOT a hidden picker: an installation is what makes every step
+          // after this one possible — the repository list, the deployment repository, the
+          // pushes — so its absence is stated where the list would have been rather than
+          // discovered at the first run.
+          //
+          // The second sentence exists because this state has two causes and only one of them
+          // is visible from here. Nothing is installed, or the credentials the backend holds
+          // are not credentials GitHub accepts — and that second question belongs to the Test
+          // button on the integration, which asks GitHub out loud and reports what it says.
+          // Answering it a second time here would be two places diagnosing one thing.
+          <Missing
+            text="This app isn't installed on any account. Install it on GitHub — on your own account or an organization — and its repositories will be listed here. If you have already installed it, open Integrations and press Test: that says what GitHub is refusing."
             onManageConnections={onManageConnections}
           />
         )}
@@ -565,6 +636,15 @@ function StepConnection({
 
       <div className="flex flex-col gap-1.5">
         <Label>Repository</Label>
+        {/* Above the list rather than inside it, because it qualifies whichever of the three
+            things below is showing — including the empty one, where "granted nothing" and
+            "granted nothing as of the last time we could ask" are the same screen otherwise. */}
+        {refreshError && repos !== null ? (
+          <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
+            Showing the last list GitHub gave us — it could not be re-read just now:{' '}
+            {refreshError}
+          </p>
+        ) : null}
         {repos === null ? (
           <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
             Reading what this installation was granted…

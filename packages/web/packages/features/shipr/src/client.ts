@@ -168,15 +168,31 @@ export function createShiprClient(fetcher: Fetcher, workspace?: string) {
      * The repositories one connection was granted — the wizard's first question.
      *
      * No workspace, for `connections`' reason: the answer is a property of the installation.
-     * There is no org-and-repo browser beside this, and there should not be: the forge's own
-     * installation page is that browser, and it is the only one whose answer is guaranteed
-     * reachable — a picker of ours would offer repositories the installation holds no token
-     * for, and the operator would find out minutes later at the first push.
+     *
+     * READS WHAT WAS WRITTEN DOWN. The backend answers this from the row the last successful
+     * read stored, and reaches GitHub only when there is no row yet — so the picker opens on
+     * a list instead of on a spinner, and a slow or unreachable forge shows a stale list
+     * rather than an empty one. `readAt` is what stops that being a lie: the wizard says how
+     * old the list is, and {@link refreshConnectionRepositories} is how it stops being old.
      */
     connectionRepositories: (id: string) =>
-      send<{ repositories: ForgeRepository[] }>(
+      send<{ repositories: ForgeRepository[]; readAt: string }>(
         `${BASE}/connections/${seg(id)}/repositories`,
         'GET',
+      ),
+
+    /**
+     * Ask GitHub again, and store what it says.
+     *
+     * A POST because it writes. Separate from the read for the reason the backend keeps them
+     * separate: the read cannot fail in a way worth reporting and this one can — a revoked
+     * installation, a suspended app, a forge that is down — and a caller needs to be able to
+     * tell "here is the list" from "here is the list, and it is the one from before".
+     */
+    refreshConnectionRepositories: (id: string) =>
+      send<{ repositories: ForgeRepository[]; readAt: string }>(
+        `${BASE}/connections/${seg(id)}/repositories/refresh`,
+        'POST',
       ),
 
     /**
