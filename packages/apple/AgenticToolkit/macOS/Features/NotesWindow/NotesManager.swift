@@ -29,6 +29,18 @@ public final class NotesManager {
     public static let notesDidChangeNotification = Notification.Name(
         "AgenticToolkit.NotesManager.notesDidChange")
 
+    /// Posted when a read or write against storage fails, right after
+    /// `storageFailure` is set. Same shape and same reasoning as
+    /// `notesDidChangeNotification`: no payload, `object` is the manager, and
+    /// delivery is already on the main queue because this class is
+    /// `@MainActor` and `NotificationCenter` delivers synchronously.
+    ///
+    /// A notification rather than a delegate because the manager has more than
+    /// one host — a notes window, a notes pane, Quick Note — and a failure
+    /// belongs to the manager, not to whichever of them happened to trigger it.
+    public static let storageDidFailNotification = Notification.Name(
+        "AgenticToolkit.NotesManager.storageDidFail")
+
     private func postNotesDidChange() {
         NotificationCenter.default.post(name: Self.notesDidChangeNotification, object: self)
     }
@@ -37,6 +49,36 @@ public final class NotesManager {
 
     public private(set) var notes: [Note] = []
     public private(set) var isLoaded: Bool = false
+
+    /// The last read or write that failed, or `nil` if none has since it was
+    /// last cleared.
+    ///
+    /// It exists because the alternative was worse than no error handling: the
+    /// UI went on asserting a write had succeeded. A failed insert left a note
+    /// in `notes` and in the sidebar, every keystroke after it scheduled a save
+    /// that threw `.notFound`, and the whole session's writing was gone at the
+    /// next launch with nothing having said a word. Logging is not a user
+    /// interface.
+    ///
+    /// Deliberately one value, not a queue: a failing database fails every
+    /// operation, and the second alert would say the same thing as the first.
+    /// Deliberately not an error-reporting framework either — this is the
+    /// smallest thing that makes a failed write visible.
+    public private(set) var storageFailure: NotesStorageFailure?
+
+    /// Called by whichever host showed the failure, so a second host does not
+    /// show it again.
+    public func clearStorageFailure() {
+        storageFailure = nil
+    }
+
+    private func record(_ operation: NotesStorageFailure.Operation, _ error: any Error) {
+        logger.error(
+            "\(operation.rawValue, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        storageFailure = NotesStorageFailure(
+            operation: operation, message: error.localizedDescription)
+        NotificationCenter.default.post(name: Self.storageDidFailNotification, object: self)
+    }
 
     // MARK: - Dependencies
 
@@ -63,25 +105,32 @@ public final class NotesManager {
             logger.info("Loaded \(loaded.count) notes")
         } catch {
             isLoaded = true
-            logger.error("Failed to load notes: \(error.localizedDescription, privacy: .public)")
+            record(.load, error)
         }
     }
 
     // MARK: - CRUD
 
+    /// `nil` when the note could not be persisted — and in that case the note
+    /// is not in `notes` either.
+    ///
+    /// A note that exists only in an array is not a note. Keeping it visible
+    /// was the whole defect: the user typed into it all session, every save
+    /// threw `.notFound` because nothing was ever inserted, and it was gone at
+    /// the next launch. Removing it costs the user the text they had typed so
+    /// far, which is at most a title on a brand-new note, and it is the only
+    /// answer that leaves the screen telling the truth.
     @discardableResult
-    public func createNote(title: String, content: String) async -> UUID {
+    public func createNote(title: String, content: String) async -> UUID? {
         let note = Note.new(title: title, content: content)
-        notes.append(note)
-        notes.sort(by: Note.defaultSort)
         do {
             try storage.insertNote(note)
         } catch {
-            logger.error("Failed to persist new note: \(error.localizedDescription, privacy: .public)")
+            record(.create, error)
+            return nil
         }
-        // Posted whether or not the write succeeded: `notes` already holds the
-        // new note either way, and an observer showing the manager's array
-        // must match it even when the note is only in memory.
+        notes.append(note)
+        notes.sort(by: Note.defaultSort)
         postNotesDidChange()
         return note.id
     }
@@ -110,7 +159,7 @@ public final class NotesManager {
         do {
             try storage.updateNote(updated)
         } catch {
-            logger.error("Failed to toggle pin: \(error.localizedDescription, privacy: .public)")
+            record(.save, error)
         }
         postNotesDidChange()
     }
@@ -120,7 +169,7 @@ public final class NotesManager {
         do {
             try storage.deleteNote(id: id)
         } catch {
-            logger.error("Failed to delete note: \(error.localizedDescription, privacy: .public)")
+            record(.delete, error)
         }
         postNotesDidChange()
     }
@@ -140,7 +189,7 @@ public final class NotesManager {
             do {
                 try self.storage.updateNote(current)
             } catch {
-                self.logger.error("Auto-save failed: \(error.localizedDescription, privacy: .public)")
+                self.record(.save, error)
             }
         }
     }
@@ -165,7 +214,7 @@ public final class NotesManager {
             do {
                 try storage.updateNote(note)
             } catch {
-                logger.error("Flush save failed: \(error.localizedDescription, privacy: .public)")
+                record(.save, error)
             }
         }
     }
@@ -173,4 +222,51 @@ public final class NotesManager {
 
 extension NotesManager: Loggable {
     public static nonisolated let logger = makeLogger()
+}
+
+/// A storage read or write that failed, in the terms the user needs to hear it
+/// in: which of their actions did not happen, and what the system said.
+public struct NotesStorageFailure: Equatable, Sendable {
+
+    public enum Operation: String, Sendable {
+        case load
+        case create
+        case save
+        case delete
+
+        /// The sentence the alert leads with. Phrased as the user's action
+        /// rather than the API's — "Couldn't Save Note", not "updateNote
+        /// threw" — because that is the part they can act on.
+        public var title: String {
+            switch self {
+            case .load: return "Couldn't Load Notes"
+            case .create: return "Couldn't Create Note"
+            case .save: return "Couldn't Save Note"
+            case .delete: return "Couldn't Delete Note"
+            }
+        }
+
+        /// What the failure means for what is on screen. `create` is the one
+        /// that removed something, so it is the one that has to say so.
+        public var consequence: String {
+            switch self {
+            case .load: return "Your notes could not be read from disk."
+            case .create: return "The new note was not saved and has been removed."
+            case .save: return "Your most recent changes are not saved to disk yet."
+            case .delete: return "The note may reappear the next time Whippet starts."
+            }
+        }
+    }
+
+    public let operation: Operation
+
+    /// `localizedDescription` of the underlying error, shown verbatim. A
+    /// paraphrase would drop exactly the detail that distinguishes a full disk
+    /// from a locked database.
+    public let message: String
+
+    public init(operation: Operation, message: String) {
+        self.operation = operation
+        self.message = message
+    }
 }

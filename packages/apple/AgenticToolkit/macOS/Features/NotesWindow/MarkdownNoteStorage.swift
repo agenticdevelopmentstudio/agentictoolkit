@@ -14,74 +14,112 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// `NoteStorage` methods deliberately do not.
     public let store: MarkdownStore
 
-    /// The one frontmatter key this class owns. `pinned` is already
-    /// `MarkdownDocument.isPinned`/`setPinned(_:)` in ADT — reused below
-    /// rather than redefined. `title` has no ADT equivalent: adh derives it
-    /// from the content and rejects a caller's, and there is no per-client
-    /// metadata column at all, so an explicit rename lives in this key
-    /// instead. The cost is real and worth naming: pinning edits `content`,
-    /// so once a remote writer exists, pinning appends a version on the
-    /// server. A local-only column would avoid that and then vanish on the
-    /// first sync, which is worse.
+    /// The two frontmatter keys this class writes.
+    ///
+    /// `title` has no ADT equivalent: adh derives it from the content and
+    /// rejects a caller's, and there is no per-client metadata column at all,
+    /// so an explicit rename lives in this key instead. `pinned` is
+    /// `MarkdownDocument.isPinned`/`setPinned(_:)` in ADT and is named here as
+    /// well because ownership below is keyed by name and needs the string.
+    ///
+    /// The cost is real and worth naming: pinning edits `content`, so once a
+    /// remote writer exists, pinning appends a version on the server. A
+    /// local-only column would avoid that and then vanish on the first sync,
+    /// which is worse.
     private static let titleKey = "title"
+    private static let pinnedKey = "pinned"
 
     public init(store: MarkdownStore) {
         self.store = store
     }
 
+    // MARK: - Ownership
+    //
+    // Everything below turns on one fact that the document itself cannot
+    // carry: for each of these two keys, did *this app* write it, or did the
+    // user type it?
+    //
+    // Nothing in `title: Groceries` distinguishes the two. Three separate
+    // defects came from three separate attempts to guess: a save overwrote a
+    // hand-typed `title:` because the app assumed any title it did not
+    // recognise was stale; an unpin refused to clear `pinned:` because the app
+    // could not tell its own pin from a pasted one; and a foreign `pinned:
+    // true` in a Hugo document silently pinned the note. Each was patched with
+    // its own ad-hoc guard reading the *value*, and the guards disagreed with
+    // each other, which is how the file reached the state this replaces.
+    //
+    // So the fact is recorded instead of inferred.
+    // `MarkdownStore.ownedFrontmatterKeys` is written in the same transaction
+    // as the document, and the three rules fall out of it with no special
+    // cases left:
+    //
+    //   * a key we own is ours to rewrite, to clear, and to hide from the
+    //     editor;
+    //   * a key we do not own is the user's, and is never touched or acted on;
+    //   * ownership is *claimed* only when we write a key that was absent (or
+    //     that already reads exactly as what we were about to write, which is
+    //     a claim that changes no bytes), and *released* the moment we clear
+    //     it or the user edits the text it lived in.
+
+    /// Whether this class may write `key` — either because it already owns it,
+    /// or because writing would take nothing from the user: the key is absent,
+    /// or it already says precisely what we would say.
+    private static func mayWrite(
+        _ key: String, as desired: String?, in content: String, owned: Set<String>
+    ) -> Bool {
+        if owned.contains(key) { return true }
+        let current = Frontmatter.value(key, in: content)
+        return current == nil || current == desired
+    }
+
     // MARK: - NoteStorage
 
     public func fetchAllNotes() throws -> [Note] {
-        try store.documents(marker: .note)
-            .compactMap(Self.note(from:))
+        // One query for every document's owned keys rather than one per
+        // document: the list is the hot path, and the ownership record is
+        // small enough to read whole.
+        let owned = try store.ownedFrontmatterKeysByDocument()
+        return try store.documents(marker: .note)
+            .compactMap { Self.note(from: $0, owned: owned[$0.id] ?? []) }
             .sorted(by: Note.defaultSort)
     }
 
     public func insertNote(_ note: Note) throws {
-        // Nothing has ever been written by us yet on a create path, so there
-        // is no key of ours to clear. Only ever *set* a title here — never
-        // call `Frontmatter.setting` to remove one — so a fresh note whose
-        // hand-typed body happens to open with its own `title:` fence isn't
-        // stripped on its very first save.
-        let desiredTitle = Self.storedTitle(for: note)
-        let content = desiredTitle == nil
-            ? note.content
-            : Frontmatter.setting(Self.titleKey, to: desiredTitle, in: note.content)
-        var document = try store.createDocument(
+        // A create claims a key only when the note's own text does not already
+        // have one, so a fresh note whose hand-typed body opens with its own
+        // `title:` or `pinned:` fence keeps it, unclaimed and untouched.
+        var content = note.content
+        var owned: Set<String> = []
+        if let desiredTitle = Self.storedTitle(for: note),
+           Frontmatter.value(Self.titleKey, in: content) == nil {
+            content = Frontmatter.setting(Self.titleKey, to: .string(desiredTitle), in: content)
+            owned.insert(Self.titleKey)
+        }
+        // Only ever true for a note inserted already pinned, which the protocol
+        // allows and the app never does — but it now costs one statement
+        // instead of the create-then-update pair it used to take, because the
+        // content and the ownership are both settled before the insert.
+        if note.isPinned, Frontmatter.value(Self.pinnedKey, in: content) == nil {
+            content = Frontmatter.setting(Self.pinnedKey, to: .bool(true), in: content)
+            owned.insert(Self.pinnedKey)
+        }
+        _ = try store.createDocument(
             content: content,
             markers: [.note],
             id: note.id.uuidString.lowercased(),
-            now: note.modifiedDate)
-        // A freshly created document is never pinned, so this is a no-op —
-        // and hence a second write — for every note except one inserted
-        // already pinned, which the protocol allows but the app never does.
-        // This also never issues a clear (`setPinned(false)` is never
-        // called here), so a user-typed `pinned:` fence is safe on create
-        // for the same reason title is, without needing a matching guard.
-        guard note.isPinned else { return }
-        document.setPinned(true)
-        try store.updateDocument(document, now: note.modifiedDate)
+            now: note.modifiedDate,
+            ownedFrontmatterKeys: owned)
     }
 
-    /// Rewrites `title`/`pinned` in place when the caller's `content` is
-    /// exactly what the last read handed back — preserving whatever position
+    /// Rewrites the keys this class owns in place, preserving whatever position
     /// and whatever foreign keys the stored frontmatter already has, so an
-    /// unmodified fetch-then-save round-trips byte for byte. Only when the
-    /// caller actually edited that text does this fall back to rebuilding
-    /// the block from scratch, which cannot promise the same key order.
+    /// unmodified fetch-then-save round-trips byte for byte.
     ///
-    /// `note(from:)` strips both owned keys before a caller ever sees
-    /// `content`, so an owned key present in `note.content` here was typed by
-    /// hand this session, not something we wrote. When that is the case this
-    /// method leaves the key entirely alone — it neither clears it nor
-    /// overwrites its value. That is stronger than the rule it replaces
-    /// (which withheld only the *clear*), and adh's derivation is why:
-    /// frontmatter `title` is now the first thing `MarkdownText.deriveTitle`
-    /// consults, so a hand-typed fence *is* the document's title as far as
-    /// both ends of the wire are concerned. `note.title` at that moment is
-    /// the list's older idea of the title, and writing it back would both
-    /// destroy text the user just typed and disagree with the title adh will
-    /// derive on its next pull.
+    /// When the caller's `content` differs from what the last read handed back,
+    /// the user edited the text — and the text is then wholly theirs. Ownership
+    /// is dropped in that same step: a key that survives into the new content
+    /// survives because the user kept it there, and re-claiming it would be the
+    /// same guess this class stopped making.
     ///
     /// This is single-writer by assumption, not by enforcement: it reads the
     /// stored document, merges the caller's fields into it, and writes the
@@ -98,23 +136,37 @@ public final class MarkdownNoteStorage: NoteStorage {
         guard var document = try store.document(id: id) else {
             throw MarkdownStoreError.notFound(id)
         }
-        if note.content != Self.strippedContent(of: document) {
+        var owned = try store.ownedFrontmatterKeys(forDocument: id)
+        if note.content != Self.strippedContent(of: document, owned: owned) {
             document.content = note.content
+            owned = []
         }
-        let userTypedTitle = Frontmatter.value(Self.titleKey, in: note.content) != nil
-        if !userTypedTitle {
+
+        let desiredTitle = Self.storedTitle(for: note)
+        if Self.mayWrite(Self.titleKey, as: desiredTitle, in: document.content, owned: owned) {
             document.content = Frontmatter.setting(
-                Self.titleKey, to: Self.storedTitle(for: note), in: document.content)
+                Self.titleKey, to: desiredTitle.map { .string($0) }, in: document.content)
+            Self.claim(Self.titleKey, wrote: desiredTitle != nil, in: &owned)
         }
-        // "pinned" is a literal, not `Self.titleKey`-style constant, because
-        // ADT itself never names it as one (`MarkdownDocument.isPinned`/
-        // `setPinned(_:)` both hardcode it inline) — matching that rather
-        // than inventing a constant ADT doesn't have.
-        let userTypedPinned = Frontmatter.value("pinned", in: note.content) != nil
-        if note.isPinned || !userTypedPinned {
-            document.setPinned(note.isPinned)
+
+        let desiredPin = note.isPinned ? "true" : nil
+        if Self.mayWrite(Self.pinnedKey, as: desiredPin, in: document.content, owned: owned) {
+            document.content = Frontmatter.setting(
+                Self.pinnedKey, to: note.isPinned ? .bool(true) : nil, in: document.content)
+            Self.claim(Self.pinnedKey, wrote: note.isPinned, in: &owned)
         }
-        try store.updateDocument(document, now: note.modifiedDate)
+
+        try store.updateDocument(document, ownedFrontmatterKeys: owned, now: note.modifiedDate)
+    }
+
+    /// Ownership follows the write that just happened: we own what we wrote,
+    /// and a key we cleared is a key we no longer have any claim on.
+    private static func claim(_ key: String, wrote: Bool, in owned: inout Set<String>) {
+        if wrote {
+            owned.insert(key)
+        } else {
+            owned.remove(key)
+        }
     }
 
     public func deleteNote(id: UUID) throws {
@@ -127,27 +179,36 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// is keyed by `UUID` throughout. Skipping it keeps the list working
     /// instead of trapping on a force-unwrap; when a server-authored note needs
     /// to appear here, `Note.id` is what has to widen.
-    private static func note(from document: MarkdownDocument) -> Note? {
+    private static func note(from document: MarkdownDocument, owned: Set<String>) -> Note? {
         guard let id = UUID(uuidString: document.id) else { return nil }
         return Note(
             id: id,
+            // Frontmatter first whoever wrote it, because that is the order
+            // `MarkdownText.deriveTitle` uses and therefore the title adh will
+            // derive on its next pull — the list must not disagree with it.
             title: document.frontmatter[titleKey] ?? document.title,
-            content: strippedContent(of: document),
+            content: strippedContent(of: document, owned: owned),
             createdDate: document.createdAt,
             modifiedDate: document.updatedAt,
-            isPinned: document.isPinned)
+            // A `pinned: true` we did not write is somebody else's key that
+            // happens to share our name — a Hugo or Jekyll document pasted into
+            // a note — and must not silently pin it. Ours does pin it, which is
+            // the whole point of recording the difference.
+            isPinned: owned.contains(pinnedKey) && document.isPinned)
     }
 
-    /// `document.content` with only `title`/`pinned` removed — every other
-    /// line, including a body the user typed that itself opens with a
-    /// `---`-fenced block of its own, survives untouched, in its original
-    /// order. This is both what `Note.content` shows the app, and (via the
-    /// equality check in `updateNote`) how a save tells "nothing changed"
-    /// apart from "the user edited the body."
-    private static func strippedContent(of document: MarkdownDocument) -> String {
-        var withoutPin = document
-        withoutPin.setPinned(false)
-        return Frontmatter.setting(titleKey, to: nil, in: withoutPin.content)
+    /// `document.content` with the keys *we* wrote removed, and nothing else
+    /// touched — a `title:` or `pinned:` the user typed stays visible in the
+    /// editor, where it belongs, along with every other line in its original
+    /// order.
+    ///
+    /// This is both what `Note.content` shows the app and (via the equality
+    /// check in `updateNote`) how a save tells "nothing changed" apart from
+    /// "the user edited the body".
+    private static func strippedContent(of document: MarkdownDocument, owned: Set<String>) -> String {
+        owned.sorted().reduce(document.content) { content, key in
+            Frontmatter.setting(key, to: nil, in: content)
+        }
     }
 
     /// `nil` when `note.title` is what the content would derive on its own —
@@ -155,17 +216,6 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// untitled sentinel, which is the same thing before the note has any
     /// heading to derive from. Only an actual rename is worth a frontmatter
     /// key and the server version it costs.
-    ///
-    /// Returning `nil` makes `updateNote` clear a key that may already be
-    /// absent, and that redundant clear is accepted knowingly. `Frontmatter
-    /// .setting(_:to: nil,in:)` on content with no such key returns the same
-    /// string, so the local write is a no-op and `MarkdownDocument`'s
-    /// content-hash is unchanged; the cost would only ever be a wasted `PUT`
-    /// once a remote writer exists, and adh dedups on `content_hash` and vends
-    /// no version for an identical resave. The alternative — asking whether
-    /// the key is there before clearing it — buys a branch here in exchange
-    /// for two ways of expressing "no title", which is the more expensive
-    /// trade the first time the two disagree.
     private static func storedTitle(for note: Note) -> String? {
         let derived = MarkdownText.deriveTitle(note.content)
         let isUnnamed = note.title == derived || note.title == Note.untitledTitle || note.title.isEmpty

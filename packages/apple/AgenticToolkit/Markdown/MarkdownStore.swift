@@ -66,6 +66,16 @@ public enum MarkdownStoreError: Error, Equatable {
     /// means corruption; defaulting to `Date()` would silently reorder a
     /// queue whose whole point is that a `create` precedes its `update`.
     case unreadableOutboxTimestamp(opID: String)
+    /// A `markdown` row's `created_at` or `updated_at` does not parse, even
+    /// after `MarkdownTimestamp`'s repair pass. Unlike the outbox this column
+    /// has a second writer — a pulled row whose stamp `MarkdownProjection`
+    /// could not normalise is stored verbatim — so this is reachable from a
+    /// server payload, not only from corruption.
+    case unreadableTimestamp(id: String, column: String)
+    /// `createKeyword` was asked for a label that already exists and is live.
+    /// adh's `UNIQUE (customer_id, ecosystem_id, label)` is unconditional, so
+    /// this is what the server would answer too.
+    case duplicateKeyword(label: String)
 }
 
 /// The nine mirrored tables, plus the local REST queue, over one GRDB database.
@@ -140,11 +150,16 @@ public final class MarkdownStore: @unchecked Sendable {
 
     // MARK: - Documents
 
+    /// `ownedFrontmatterKeys` records, in the same transaction as the insert,
+    /// which frontmatter keys in `content` this client wrote rather than the
+    /// author. See `MarkdownSchema.frontmatterOwnerDDL`; the default is the
+    /// honest answer for every caller that did not write any.
     public func createDocument(
         content: String,
         markers: [MarkdownMarker],
         id: String = UUID().uuidString.lowercased(),
-        now: Date = Date()
+        now: Date = Date(),
+        ownedFrontmatterKeys: Set<String> = []
     ) throws -> MarkdownDocument {
         // `now` is normalized to string-round-trip precision *before* it goes
         // into `MarkdownDocument.new` — `MarkdownTimestamp.string` truncates to
@@ -170,8 +185,49 @@ public final class MarkdownStore: @unchecked Sendable {
                 payload[flag] = .bool(true)
             }
             try enqueue(.create, for: document.id, payload: payload, at: now, in: conn)
+            try Self.writeOwnedFrontmatterKeys(ownedFrontmatterKeys, for: document.id, in: conn)
         }
         return document
+    }
+
+    // MARK: - Frontmatter provenance
+
+    /// The frontmatter keys this client wrote into `documentID`.
+    public func ownedFrontmatterKeys(forDocument documentID: String) throws -> Set<String> {
+        try database.read { conn in
+            Set(try String.fetchAll(
+                conn,
+                sql: "SELECT key FROM _markdown_frontmatter_owner WHERE document_id = ?",
+                arguments: [documentID]))
+        }
+    }
+
+    /// The same, for every document at once — one read instead of one per row
+    /// for a caller listing a whole marker.
+    public func ownedFrontmatterKeysByDocument() throws -> [String: Set<String>] {
+        try database.read { conn in
+            var owned: [String: Set<String>] = [:]
+            for row in try Row.fetchAll(
+                conn, sql: "SELECT document_id, key FROM _markdown_frontmatter_owner") {
+                owned[row["document_id"], default: []].insert(row["key"])
+            }
+            return owned
+        }
+    }
+
+    private static func writeOwnedFrontmatterKeys(
+        _ keys: Set<String>, for documentID: String, in conn: Database
+    ) throws {
+        // Replaced wholesale rather than diffed: the caller states the whole
+        // set it now owns, and a key it stopped owning has to disappear.
+        try conn.execute(
+            sql: "DELETE FROM _markdown_frontmatter_owner WHERE document_id = ?",
+            arguments: [documentID])
+        for key in keys.sorted() {
+            try conn.execute(
+                sql: "INSERT INTO _markdown_frontmatter_owner (document_id, key) VALUES (?, ?)",
+                arguments: [documentID, key])
+        }
     }
 
     public func document(id: String) throws -> MarkdownDocument? {
@@ -180,7 +236,7 @@ public final class MarkdownStore: @unchecked Sendable {
                 conn,
                 sql: "SELECT * FROM markdown WHERE id = ? AND is_deleted = 0",
                 arguments: [id]
-            ).flatMap(Self.document(from:))
+            ).map(Self.document(from:))
         }
     }
 
@@ -194,7 +250,7 @@ public final class MarkdownStore: @unchecked Sendable {
                     WHERE m.is_deleted = 0
                     ORDER BY m.updated_at DESC
                     """
-            ).compactMap(Self.document(from:))
+            ).map(Self.document(from:))
         }
     }
 
@@ -223,7 +279,16 @@ public final class MarkdownStore: @unchecked Sendable {
     /// `useDedicatedIntent` naming the field rather than writing a local row
     /// that adh will never agree with (and that the next pull would silently
     /// revert).
-    public func updateDocument(_ document: MarkdownDocument, now: Date = Date()) throws {
+    ///
+    /// `ownedFrontmatterKeys` is `nil` for a caller that has nothing to say
+    /// about provenance, which leaves the record as it is; a non-nil set
+    /// replaces it, in this same transaction, so the document and the record of
+    /// who wrote its frontmatter can never be written apart.
+    public func updateDocument(
+        _ document: MarkdownDocument,
+        ownedFrontmatterKeys: Set<String>? = nil,
+        now: Date = Date()
+    ) throws {
         let now = Self.normalizedTimestamp(now)
         try database.write { conn in
             guard let stored = try Row.fetchOne(
@@ -239,6 +304,9 @@ public final class MarkdownStore: @unchecked Sendable {
             try enqueue(.update, for: document.id, payload: [
                 "content": .string(document.content)
             ], at: now, in: conn)
+            if let ownedFrontmatterKeys {
+                try Self.writeOwnedFrontmatterKeys(ownedFrontmatterKeys, for: document.id, in: conn)
+            }
         }
     }
 
@@ -373,6 +441,7 @@ public final class MarkdownStore: @unchecked Sendable {
             if !hasPendingCreate {
                 try enqueue(.delete, for: id, payload: [:], at: now, in: conn)
             }
+            try Self.writeOwnedFrontmatterKeys([], for: id, in: conn)
         }
     }
 
@@ -509,18 +578,31 @@ public final class MarkdownStore: @unchecked Sendable {
 
     // MARK: - Row mapping
 
-    /// `nil` for a row whose `created_at`/`updated_at` will not parse.
+    /// Throws `unreadableTimestamp` for a row whose `created_at`/`updated_at`
+    /// will not parse.
     ///
-    /// Failable rather than substituting `Date()`, which is what it used to
-    /// do: a fabricated "now" reads as a real timestamp everywhere downstream
-    /// — it sorts to the top of a notes list, it is what `updateDocument`
-    /// would then write back over the unreadable value, and nothing
-    /// distinguishes it from a document genuinely touched this second. A row
-    /// that cannot say when it was written is better left out of the answer
-    /// than described wrongly, so both callers `compactMap` it away.
-    private static func document(from row: Row) -> MarkdownDocument? {
-        guard let createdAt = MarkdownTimestamp.date(row["created_at"]),
-              let updatedAt = MarkdownTimestamp.date(row["updated_at"]) else { return nil }
+    /// Three answers were available and two of them lie. Substituting `Date()`
+    /// (what this used to do) invents data: a fabricated "now" is
+    /// indistinguishable from a document genuinely touched this second, it
+    /// sorts to the top of the notes list, it differs on every read so the list
+    /// re-sorts under the user, and it is what the next `updateDocument` writes
+    /// back over the real value. Returning `nil` and `compactMap`-ing it away
+    /// (what it did next) is quieter but still lies: the note simply is not
+    /// there, with nothing anywhere saying why, and the user concludes their
+    /// work was lost. Throwing is the only answer that is true, it names the
+    /// row and the column, and it follows the precedent already set two screens
+    /// up — `unreadableOutboxTimestamp` refuses to guess about exactly the same
+    /// kind of value. `MarkdownTimestamp.date` now accepts adh's
+    /// space-separated Postgres form, so the realistic wire value that used to
+    /// land here parses instead of throwing.
+    private static func document(from row: Row) throws -> MarkdownDocument {
+        let id: String = row["id"]
+        guard let createdAt = MarkdownTimestamp.date(row["created_at"]) else {
+            throw MarkdownStoreError.unreadableTimestamp(id: id, column: "created_at")
+        }
+        guard let updatedAt = MarkdownTimestamp.date(row["updated_at"]) else {
+            throw MarkdownStoreError.unreadableTimestamp(id: id, column: "updated_at")
+        }
         return MarkdownDocument(
             id: row["id"],
             content: row["content"],

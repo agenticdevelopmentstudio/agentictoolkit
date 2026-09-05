@@ -241,5 +241,38 @@ struct MarkdownTimestampTests {
     @Test("refuses text that is not a timestamp")
     func refusesGarbage() {
         #expect(MarkdownTimestamp.date("yesterday") == nil)
+        #expect(MarkdownTimestamp.date("") == nil)
+        // A date with no time is not an instant, and inventing midnight for it
+        // would be the same guess this parser exists to avoid.
+        #expect(MarkdownTimestamp.date("2026-04-13") == nil)
+    }
+
+    /// adh's columns are Postgres `timestamp` and its OpenAPI declares them as
+    /// unformatted strings, so a pulled row can legitimately carry any of
+    /// these — a space where ISO-8601 wants `T`, a two-digit offset where it
+    /// wants four, a fraction of any length, or no offset at all.
+    /// `ISO8601DateFormatter` rejects every one, and a value it rejects is
+    /// stored verbatim and then sorts before every normalised stamp.
+    @Test("every Postgres spelling adh can send normalises to the same instant")
+    func postgresFormsNormalise() throws {
+        let equivalents = [
+            "2026-04-13 16:18:07.798+00",
+            "2026-04-13T16:18:07.798+00:00",
+            "2026-04-13 16:18:07.798000",
+            "2026-04-13 16:18:07.798Z",
+            "2026-04-13 16:18:07.798"
+        ]
+        for text in equivalents {
+            let date = try #require(MarkdownTimestamp.date(text), "\(text) did not parse")
+            #expect(MarkdownTimestamp.string(date) == "2026-04-13T16:18:07.798Z", "\(text)")
+        }
+    }
+
+    /// A missing offset is read as UTC, but a present one is honoured — the
+    /// repair must not flatten a real zone into `Z`.
+    @Test("a non-zero offset is honoured, not assumed to be UTC")
+    func offsetIsHonoured() throws {
+        let date = try #require(MarkdownTimestamp.date("2026-04-13 12:18:07.798-04"))
+        #expect(MarkdownTimestamp.string(date) == "2026-04-13T16:18:07.798Z")
     }
 }

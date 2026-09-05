@@ -247,29 +247,35 @@ public struct MarkdownProjection: SyncMirrorProjection {
             assignmentColumns.insert("deleted_at")
             if resource == "content.markdown" { assignmentColumns.insert("is_deleted") }
         }
-        // Only markdown carries `is_deleted`, and only when the payload
-        // itself didn't supply it — a payload that did already has it in
-        // `bound`/`present` via the ordinary path above.
-        let derivesIsDeleted = isFullRow && resource == "content.markdown" && !present.contains("is_deleted")
-        if derivesIsDeleted {
-            bound.append("is_deleted")
-        }
-        // The mirror image of `derivesIsDeleted`: a full-row pull that supplies
-        // `is_deleted` truthy but no non-null `deleted_at` must not let
-        // `deleted_at` fall back to NULL (its column default) — that would leave
-        // `document(id:)`/`documentExists` (gate on `is_deleted`) hiding the row
-        // while `liveRow`/`rows` (gate on `deleted_at`) still show it as live, the
-        // same two-flags-disagree corruption the other way round. Computed here
-        // in Swift and placed in `bound`/`arguments` for the same reason
-        // `is_deleted` is above: `ON CONFLICT ... SET` fires only on the UPDATE
-        // branch, so a value derived there alone would be wrong on a first insert.
-        let isDeletedTruthy = present.contains("is_deleted")
-            && Self.isTruthy(Self.value(data["is_deleted"], column: "is_deleted"))
-        let deletedAtSuppliedNonNull = Self.value(data["deleted_at"], column: "deleted_at") != nil
-        let derivesDeletedAt = isFullRow && resource == "content.markdown"
-            && isDeletedTruthy && !deletedAtSuppliedNonNull
-        if derivesDeletedAt, !present.contains("deleted_at") {
-            bound.append("deleted_at")
+        // `deleted_at` and `is_deleted` are one fact — "has this document been
+        // deleted?" — recorded in two columns because adh records it in two,
+        // and the corruption this closes is the two of them disagreeing.
+        //
+        // Deriving them separately, each under its own condition, is what let
+        // them disagree: a pull supplying `deleted_at` non-null *and*
+        // `is_deleted` explicitly falsy satisfied neither condition and wrote
+        // both values through untouched. So on a full-row markdown pull the
+        // fact is decided once, here, and *both* columns are then bound from
+        // it — there is no path through this method that writes one without
+        // the other. `document(id:)` gates on `is_deleted` and `liveRow` gates
+        // on `deleted_at`; a row they disagree about is a note the user can
+        // open and edit after the server deleted it.
+        //
+        // Non-null `deleted_at` wins over a falsy `is_deleted` because it is
+        // the stronger claim: it carries *when*, which a bare flag cannot, and
+        // adh only ever stamps it on a real delete. Both are bound in Swift
+        // rather than left to `excluded.*` because `ON CONFLICT ... SET` fires
+        // only on the UPDATE branch — a value derived there alone is right on
+        // an update and silently wrong on a first insert, where an unmentioned
+        // column takes its column `DEFAULT` instead.
+        let normalisesDeleteState = isFullRow && resource == "content.markdown"
+        let suppliedDeletedAt = Self.value(data["deleted_at"], column: "deleted_at")
+        let isDeleted = suppliedDeletedAt != nil
+            || (present.contains("is_deleted")
+                && Self.isTruthy(Self.value(data["is_deleted"], column: "is_deleted")))
+        if normalisesDeleteState {
+            if !bound.contains("is_deleted") { bound.append("is_deleted") }
+            if !bound.contains("deleted_at") { bound.append("deleted_at") }
         }
         let names = ["id", "sync_version"] + bound
         let placeholders = names.map { _ in "?" }.joined(separator: ", ")
@@ -278,19 +284,14 @@ public struct MarkdownProjection: SyncMirrorProjection {
             .joined(separator: ", ")
         var arguments: [(any DatabaseValueConvertible)?] = [id, syncVersion]
         arguments += bound.map { column -> (any DatabaseValueConvertible)? in
-            if column == "is_deleted", derivesIsDeleted {
-                // Whatever this same statement is about to write to
-                // `deleted_at` — present in `data` (including an explicit
-                // `.null` restore) or, absent, the `NULL` `deleted_at`
-                // itself falls back to.
-                return Self.value(data["deleted_at"], column: "deleted_at") == nil ? 0 : 1
-            }
-            if column == "deleted_at", derivesDeletedAt {
-                // `is_deleted` came in truthy with no non-null `deleted_at` to
-                // match it — stamp one now rather than let it fall back to NULL
-                // (or clobber an explicit `.null` restore attempt that contradicts
-                // the very `is_deleted: true` in the same payload).
-                return MarkdownTimestamp.string(Date())
+            // The two halves of the one delete fact, written together. A
+            // deleted row with no stamp of its own is stamped now rather than
+            // left NULL; a live row clears both, which is what a pulled
+            // restore looks like (adh omits a key whose new value is null).
+            if normalisesDeleteState, column == "is_deleted" { return isDeleted ? 1 : 0 }
+            if normalisesDeleteState, column == "deleted_at" {
+                guard isDeleted else { return nil }
+                return suppliedDeletedAt ?? MarkdownTimestamp.string(Date())
             }
             return data[column] != nil ? Self.value(data[column], column: column) : MarkdownTimestamp.string(Date())
         }
@@ -433,13 +434,25 @@ public struct MarkdownProjection: SyncMirrorProjection {
         }
         switch json {
         case .string(let text): return text
-        // `Int(number)` traps on a non-finite value (`number == number.rounded()`
-        // is true for both `+infinity` and `-infinity`), so `isFinite` must be
-        // checked first. Unreachable from `JSONDecoder` today — JSON has no
-        // literal for infinity or NaN — but this guard is one comparison and
-        // removes the trap as a live possibility for any future `JSONValue`
-        // producer.
-        case .number(let number): return number.isFinite && number == number.rounded() ? Int(number) : number
+        // `Int(number)` traps on anything `Int` cannot hold, and there are two
+        // such ranges, not one. `isFinite` covers only NaN and the infinities
+        // (`number == number.rounded()` is true for both). Magnitude is the
+        // other, and it is the reachable one: `JSONValue` decodes every JSON
+        // number as `Double`, so a server row carrying `1e19` — finite,
+        // integral, and larger than `Double(Int64.max)` — used to trap here,
+        // inside `GRDBSyncStore`'s single batch transaction, leaving the cursor
+        // unadvanced so the same batch re-pulled and re-crashed on every
+        // launch. Out-of-range values stay `Double`: SQLite stores them as
+        // REAL, which is lossy past 2^53 but is what the wire already handed us.
+        //
+        // `-Double(Int64.min)` is exactly 2^63 and the bound is exclusive,
+        // because `Double(Int64.max)` rounds *up* to 2^63 and is not
+        // representable as an `Int64`. `Double(Int64.min)` is exactly -2^63, so
+        // that bound is inclusive.
+        case .number(let number):
+            guard number.isFinite, number == number.rounded(),
+                  number >= Double(Int64.min), number < -Double(Int64.min) else { return number }
+            return Int(number)
         case .bool(let flag): return flag ? 1 : 0
         case .null, .none: return nil
         case .array, .object:
@@ -456,14 +469,24 @@ public struct MarkdownProjection: SyncMirrorProjection {
     }
 
     /// Whether a value already bound through `value(_:column:)` reads as
-    /// truthy — the two shapes `is_deleted` can take once decoded: a
+    /// truthy — the three shapes `is_deleted` can take once decoded: a
     /// non-zero `Int` (`value(_:column:)` maps both a JSON number and a JSON
-    /// bool to one) or a non-zero `Double`. Anything else, `nil` included,
-    /// is not truthy.
+    /// bool to one), a non-zero `Double`, or a string.
+    ///
+    /// The string case is not hypothetical: adh's column is a Postgres
+    /// `boolean` and JSON is not the only serialiser that has ever crossed
+    /// that wire — `"1"`, `"true"` and `"t"` (Postgres's own text output for
+    /// `true`) all mean deleted, and reading them as falsy is the same
+    /// two-flags-disagree corruption `upsert` closes, arriving from the other
+    /// direction. Anything else, `nil` included, is not truthy.
     private static func isTruthy(_ boundValue: (any DatabaseValueConvertible)?) -> Bool {
         switch boundValue {
         case let intValue as Int: return intValue != 0
         case let doubleValue as Double: return doubleValue != 0
+        case let text as String:
+            let lowered = text.trimmingCharacters(in: .whitespaces).lowercased()
+            if let number = Double(lowered) { return number != 0 }
+            return ["true", "t", "yes", "y"].contains(lowered)
         default: return false
         }
     }

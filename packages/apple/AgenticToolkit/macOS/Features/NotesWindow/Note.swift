@@ -1,4 +1,5 @@
 import Foundation
+import AgenticToolkitMarkdown
 
 public struct Note: Identifiable, Equatable, Sendable {
     public let id: UUID
@@ -30,11 +31,19 @@ public struct Note: Identifiable, Equatable, Sendable {
         return lhs.modifiedDate > rhs.modifiedDate
     }
 
-    /// The title a note gets when nobody has named it. Every place that
-    /// blanks out a title — here and in `NotesManager.updateNote` — goes
-    /// through this one constant, so a storage layer can recognise "the app
-    /// never named this note" without hardcoding a second copy of the string.
-    public static let untitledTitle = "Untitled Note"
+    /// The title a note gets when nobody has named it.
+    ///
+    /// It *is* `MarkdownText.untitled`, not a second string that means the same
+    /// thing. Two spellings of "unnamed" is one spelling too many, and the two
+    /// met: `MarkdownText.deriveTitle` answers `"Untitled"` for a document with
+    /// no heading, `MarkdownNoteStorage.storedTitle(for:)` asks whether a note
+    /// is still unnamed by comparing against both that derivation and this
+    /// constant, and while the two differed a note titled `"Untitled"` — which
+    /// is exactly what a never-named note reads back as, since `note(from:)`
+    /// takes its title from the document — was not recognised as unnamed and
+    /// got a frontmatter `title: Untitled` written into it for nothing.
+    /// One constant, so that comparison cannot be wrong again.
+    public static let untitledTitle = MarkdownText.untitled
 
     /// Creates a new note with sane defaults. Treats empty/whitespace titles as `untitledTitle`.
     public static func new(title: String, content: String) -> Note {

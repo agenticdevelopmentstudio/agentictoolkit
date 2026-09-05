@@ -62,6 +62,33 @@ public final class NotesSplitViewController: ThemedSplitViewController {
 
         listVC.delegate = self
         editorVC.delegate = self
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(storageDidFail),
+            name: NotesManager.storageDidFailNotification, object: notesManager)
+    }
+
+    /// Shows the failure the manager just recorded, as a sheet on this pane's
+    /// window.
+    ///
+    /// Claimed before it is shown: every host of this manager observes the same
+    /// notification, and `clearStorageFailure()` is what stops three windows
+    /// from stacking three sheets saying the same thing. A pane with no window
+    /// — off screen, or in a tab that is not selected — leaves the failure
+    /// unclaimed for a host that can actually show it.
+    ///
+    /// `beginSheetModal` and not `runModal`: this is the idiom the delete
+    /// confirmation two files over already uses, and a modal run loop here
+    /// would block the main thread inside a notification delivery.
+    @objc private func storageDidFail() {
+        guard let failure = notesManager.storageFailure, let window = view.window else { return }
+        notesManager.clearStorageFailure()
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = failure.operation.title
+        alert.informativeText = failure.operation.consequence + "\n\n" + failure.message
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window, completionHandler: nil)
     }
 
     override public func viewWillAppear() {
@@ -142,7 +169,9 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
 
     public func notesListDidRequestNewNote() {
         Task { @MainActor in
-            let newID = await notesManager.createNote(title: "", content: "")
+            // No id means the insert failed and the note was discarded; the
+            // sheet is already on its way, and selecting nothing is right.
+            guard let newID = await notesManager.createNote(title: "", content: "") else { return }
             let newNote = notesManager.notes.first(where: { $0.id == newID })
             listVC.reload(notes: notesManager.notes, keepingSelectedID: newID)
             editorVC.show(note: newNote)

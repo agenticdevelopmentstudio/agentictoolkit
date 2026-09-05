@@ -186,31 +186,79 @@ extension MarkdownStore {
 
     // MARK: - Keywords
 
+    /// Throws `MarkdownStoreError.duplicateKeyword` when a *live* keyword
+    /// already carries `label`; **revives** the existing row when the clash is
+    /// with a tombstone, and returns it under its original id.
+    ///
+    /// The tombstone half is the interesting half, and reviving is the answer
+    /// because of what adh's own constraint is. `UNIQUE (customer_id,
+    /// ecosystem_id, label)` there is unconditional, not partial — a
+    /// soft-deleted row keeps occupying its label. So minting a second row for
+    /// the same label would produce a local state the server would reject on
+    /// push, which is the one thing a mirror must never do; and refusing
+    /// outright would leave the user permanently unable to re-add a keyword
+    /// they once deleted, with no UI anywhere to explain why. Revive is the
+    /// only option that is both pushable and honest, and it is also what the
+    /// user means: "make this keyword exist again". Keeping the original id is
+    /// not a detail — `keyword_items` rows point at it, so a revived keyword
+    /// comes back already attached to whatever it was attached to, which is
+    /// again what an undelete should mean.
+    ///
+    /// The conflict clause and the typed error match the siblings
+    /// (`addCategoryEdge`, `assignItem`): the bare `INSERT` this replaces threw
+    /// a raw `SQLITE_CONSTRAINT`, indistinguishable at the call site from a
+    /// disk error.
     public func createKeyword(
         label: String, color: String = "", description: String = "", now: Date = Date()
     ) throws -> MarkdownKeyword {
-        let keyword = MarkdownKeyword(
-            id: UUID().uuidString.lowercased(), label: label,
-            color: color, description: description)
+        let newID = UUID().uuidString.lowercased()
         let stamp = MarkdownTimestamp.string(now)
-        try database.write { conn in
+        let id = try database.write { conn -> String in
             try conn.execute(
                 sql: """
                     INSERT INTO keywords
                         (id, customer_id, ecosystem_id, label, color, description,
                          created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (customer_id, ecosystem_id, label) DO UPDATE SET
+                        deleted_at = NULL,
+                        color = excluded.color,
+                        description = excluded.description,
+                        updated_at = excluded.updated_at
+                    WHERE keywords.deleted_at IS NOT NULL
                     """,
-                arguments: [keyword.id, customerID, ecosystemID, label, color,
+                arguments: [newID, customerID, ecosystemID, label, color,
                             description, stamp, stamp])
+            // The `WHERE` makes the UPDATE branch a no-op for a live row, and a
+            // no-op `DO UPDATE` changes nothing — so zero here means precisely
+            // "the label is taken by a keyword that still exists".
+            guard conn.changesCount > 0 else {
+                throw MarkdownStoreError.duplicateKeyword(label: label)
+            }
+            // A revive keeps the tombstone's id, so the id that survived — not
+            // the one just minted — is what the caller and the staged mutation
+            // must both use.
+            let id = try String.fetchOne(
+                conn,
+                sql: """
+                    SELECT id FROM keywords
+                    WHERE customer_id = ? AND ecosystem_id = ? AND label = ?
+                    """,
+                arguments: [customerID, ecosystemID, label]) ?? newID
+            var data: [String: JSONValue] = [
+                "label": .string(label), "color": .string(color),
+                "description": .string(description)
+            ]
+            // Only on a revive, and only then: a plain create has no `deleted_at`
+            // to clear, and a partial upsert that named the column anyway would
+            // push a write the server has no reason to receive.
+            if id != newID { data["deleted_at"] = .null }
             try syncStore.stage(LocalMutation(
-                resource: "content.keywords", rowId: keyword.id, type: .upsert,
-                data: [
-                    "label": .string(label), "color": .string(color),
-                    "description": .string(description)
-                ]), in: conn)
+                resource: "content.keywords", rowId: id, type: .upsert,
+                data: data), in: conn)
+            return id
         }
-        return keyword
+        return MarkdownKeyword(id: id, label: label, color: color, description: description)
     }
 
     public func keywords() throws -> [MarkdownKeyword] {

@@ -169,8 +169,13 @@ struct MarkdownNoteStorageTests {
             content: "---\ntitle: Custom\nauthor: mike\n---\n# Groceries\n\nMilk",
             markers: [.note])
         let note = try #require(try storage.fetchAllNotes().first)
+        // The title still reads out of the frontmatter, because that is where
+        // `MarkdownText.deriveTitle` — and therefore adh — reads it from.
         #expect(note.title == "Custom")
-        #expect(note.content == "---\nauthor: mike\n---\n# Groceries\n\nMilk")
+        // But the fence stays in the editor. Stripping `title:` here used to be
+        // unconditional, which meant a key the user typed vanished from view
+        // and reappeared in a diff they never made.
+        #expect(note.content == "---\ntitle: Custom\nauthor: mike\n---\n# Groceries\n\nMilk")
     }
 
     @Test("fetching and re-saving a note with foreign frontmatter, unchanged, is byte-stable")
@@ -244,7 +249,8 @@ struct MarkdownNoteStorageTests {
         #expect(stored.content == content)
         let read = try #require(try storage.fetchAllNotes().first)
         #expect(read.title == "My Doc")
-        #expect(read.content == "# Groceries\n\nMilk")
+        // Unclaimed on the way in, so unstripped on the way out.
+        #expect(read.content == content)
     }
 
     @Test("a user-typed title fence with a foreign key survives a create that would otherwise clear the title")
@@ -256,7 +262,98 @@ struct MarkdownNoteStorageTests {
         #expect(stored.content == content)
         let read = try #require(try storage.fetchAllNotes().first)
         #expect(read.title == "My Doc")
-        #expect(read.content == "---\nauthor: mike\n---\n# Groceries\n\nMilk")
+        #expect(read.content == content)
+    }
+
+    // MARK: - Ownership is what tells our key from the user's
+
+    /// The item-3 regression, through the path the app actually takes: the UI
+    /// re-reads the list after every write, so an unpin operates on a note that
+    /// came back out of storage, not on the one that went in. While provenance
+    /// was guessed from the value, the round-tripped `pinned: true` looked
+    /// user-typed on the way back in and the unpin refused to clear it — the
+    /// note stayed pinned forever, and no amount of clicking changed it.
+    @Test("a pin set through storage can be cleared again after a reload")
+    func unpinSurvivesAReload() throws {
+        let storage = try storage()
+        try storage.insertNote(note(title: "Groceries", content: "# Groceries\n\nMilk"))
+
+        var pinned = try #require(try storage.fetchAllNotes().first)
+        pinned.isPinned = true
+        try storage.updateNote(pinned)
+
+        var unpinned = try #require(try storage.fetchAllNotes().first)
+        #expect(unpinned.isPinned)
+        unpinned.isPinned = false
+        try storage.updateNote(unpinned)
+
+        let reloaded = try #require(try storage.fetchAllNotes().first)
+        #expect(reloaded.isPinned == false)
+        #expect(reloaded.content == "# Groceries\n\nMilk")
+        #expect(try storage.store.documents(marker: .note).first?.frontmatter.isEmpty == true)
+    }
+
+    /// `pinned` is Hugo's and Jekyll's key as much as it is ours. A document
+    /// pasted in from one of them is not a note the user pinned in this app,
+    /// and must not jump to the top of their list.
+    @Test("a pinned: true nobody here wrote does not pin the note")
+    func foreignPinDoesNotPin() throws {
+        let storage = try storage()
+        _ = try storage.store.createDocument(
+            content: "---\npinned: true\nlayout: post\n---\n# Groceries\n\nMilk",
+            markers: [.note])
+        let note = try #require(try storage.fetchAllNotes().first)
+        #expect(note.isPinned == false)
+        // And it is still on screen, unchanged, because it is the user's line.
+        #expect(note.content.contains("pinned: true"))
+    }
+
+    /// Editing the body hands the whole text back to the user, ownership
+    /// included: the app cannot claim to have written a key inside content it
+    /// did not produce. What survives the edit survives because the user kept
+    /// it there.
+    @Test("editing the text releases every claim on the frontmatter in it")
+    func editingTheTextReleasesOwnership() throws {
+        let storage = try storage()
+        try storage.insertNote(note(title: "Shopping", content: "# Groceries\n\nMilk"))
+        #expect(try storage.store.documents(marker: .note).first?.frontmatter["title"] == "Shopping")
+
+        // The user pastes over the whole document, keeping our key by hand.
+        var edited = try #require(try storage.fetchAllNotes().first)
+        edited.content = "---\ntitle: Shopping\n---\n# Groceries\n\nMilk\nBread"
+        try storage.updateNote(edited)
+
+        // Now a rename must leave that line alone rather than rewrite it.
+        var renamed = try #require(try storage.fetchAllNotes().first)
+        #expect(renamed.content == "---\ntitle: Shopping\n---\n# Groceries\n\nMilk\nBread")
+        renamed.title = "Errands"
+        try storage.updateNote(renamed)
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == "---\ntitle: Shopping\n---\n# Groceries\n\nMilk\nBread")
+    }
+
+    /// Item 2, end to end: a note nobody ever named, reloaded and then edited,
+    /// still carries no frontmatter. While `Note.untitledTitle` and
+    /// `MarkdownText.untitled` were two different strings, the reloaded note's
+    /// title ("Untitled", from the document) matched neither test in
+    /// `storedTitle(for:)`, so the app wrote `title: Untitled` into a document
+    /// whose title was already exactly that.
+    @Test("a never-named note stays frontmatter-free across a reload and an edit")
+    func neverNamedNoteStaysClean() throws {
+        let storage = try storage()
+        try storage.insertNote(Note.new(title: "", content: ""))
+        var reloaded = try #require(try storage.fetchAllNotes().first)
+        #expect(reloaded.title == Note.untitledTitle)
+        reloaded.content = "Milk"
+        try storage.updateNote(reloaded)
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.frontmatter.isEmpty)
+        #expect(stored.content == "Milk")
+    }
+
+    @Test("the app's untitled sentinel and the markdown layer's are the same string")
+    func untitledSentinelIsShared() {
+        #expect(Note.untitledTitle == MarkdownText.untitled)
     }
 
     @Test("the \"pinned\" literal used for the user-typed-key check agrees with MarkdownDocument.isPinned")

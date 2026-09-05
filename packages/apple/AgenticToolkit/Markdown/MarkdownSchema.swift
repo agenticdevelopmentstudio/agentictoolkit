@@ -99,6 +99,10 @@ public enum MarkdownSchema {
         migrator.registerMigration("markdown-v2-outbox-order") { conn in
             try conn.execute(sql: outboxOrderDDL)
         }
+        migrator.registerMigration("markdown-v3-frontmatter-owner") { conn in
+            try conn.execute(sql: frontmatterOwnerDDL)
+            try backfillFrontmatterOwners(in: conn)
+        }
         return migrator
     }
 
@@ -293,6 +297,56 @@ public enum MarkdownSchema {
     /// fact no other client needs and adh has no column for. Backfilling
     /// existing rows from `rowid` keeps the ops already queued on a
     /// pre-migration install in the order they were enqueued.
+    /// Claims every `title`/`pinned` already on disk for the app.
+    ///
+    /// Before this table existed the app was the only *intentional* writer of
+    /// those two keys and read every one of them as its own — a `pinned: true`
+    /// pinned the note whoever typed it. Backfilling therefore reproduces
+    /// exactly what the user sees today; leaving the table empty instead would
+    /// unpin every pinned note and un-rename every renamed one on first launch
+    /// after the upgrade, which is data loss dressed up as a stricter rule. The
+    /// new rule applies to everything written from here on, where the answer is
+    /// known rather than assumed.
+    private static func backfillFrontmatterOwners(in conn: Database) throws {
+        for row in try Row.fetchAll(conn, sql: "SELECT id, content FROM markdown") {
+            let content: String = row["content"]
+            let id: String = row["id"]
+            for key in ["title", "pinned"] where Frontmatter.value(key, in: content) != nil {
+                try conn.execute(
+                    sql: """
+                        INSERT OR IGNORE INTO _markdown_frontmatter_owner (document_id, key)
+                        VALUES (?, ?)
+                        """,
+                    arguments: [id, key])
+            }
+        }
+    }
+
+    /// `markdown-v3-frontmatter-owner`: which frontmatter keys *this client*
+    /// wrote into a document.
+    ///
+    /// Local-only, like the outbox and `_markdown_remote_id`, and for the same
+    /// reason: it is a fact about who authored a line, and adh has no column
+    /// for it. It exists because a frontmatter key is only ever bytes — nothing
+    /// in `title: Groceries` says whether the app derived it from a rename or
+    /// the user typed it — and every rule that matters turns on the difference.
+    /// A key the app owns is the app's to rewrite, to clear, and to hide from
+    /// the editor; a key the user typed is theirs, and is never touched.
+    /// Guessing from the value instead is what let a save overwrite a
+    /// hand-typed `title:` and an unpin fail to persist.
+    ///
+    /// A row per `(document, key)` rather than a list column, so a key can be
+    /// claimed and released on its own. Rows are deleted with their document;
+    /// an orphan would be harmless anyway, since ids are UUIDs and are never
+    /// reused.
+    private static let frontmatterOwnerDDL = """
+        CREATE TABLE IF NOT EXISTS _markdown_frontmatter_owner (
+            document_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            PRIMARY KEY (document_id, key)
+        );
+        """
+
     private static let outboxOrderDDL = """
         ALTER TABLE _markdown_outbox ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
         UPDATE _markdown_outbox SET seq = rowid;

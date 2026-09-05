@@ -229,4 +229,51 @@ struct MarkdownTaxonomyTests {
         #expect(itemRows == 1)
         #expect(itemOps == 1)
     }
+
+    // MARK: - Keyword uniqueness
+
+    /// adh's `UNIQUE (customer_id, ecosystem_id, label)` is unconditional, so
+    /// a live label is taken. The bare `INSERT` this replaces threw a raw
+    /// `SQLITE_CONSTRAINT`, which the call site could not tell from a disk
+    /// error.
+    @Test("a second keyword with a live label throws a typed duplicate error")
+    func duplicateKeywordThrows() throws {
+        let store = try store()
+        _ = try store.createKeyword(label: "swift")
+        #expect(throws: MarkdownStoreError.duplicateKeyword(label: "swift")) {
+            try store.createKeyword(label: "swift")
+        }
+        #expect(try store.keywords().count == 1)
+    }
+
+    /// The tombstone half, ruled explicitly: reviving, because adh's constraint
+    /// is not partial — a soft-deleted row keeps occupying its label there, so
+    /// a second row would be a local state the server rejects on push, and
+    /// refusing would leave the user unable ever to re-add a keyword they once
+    /// deleted. The original id comes back with it, so whatever the keyword was
+    /// attached to is still attached.
+    @Test("recreating a tombstoned label revives the original row, id and all")
+    func tombstonedKeywordIsRevived() throws {
+        let store = try store()
+        let original = try store.createKeyword(label: "swift", color: "red")
+        try store.database.write { conn in
+            try conn.execute(
+                sql: "UPDATE keywords SET deleted_at = '2026-01-01T00:00:00.000Z' WHERE id = ?",
+                arguments: [original.id])
+        }
+        #expect(try store.keywords().isEmpty)
+
+        let revived = try store.createKeyword(label: "swift", color: "blue")
+        #expect(revived.id == original.id)
+        #expect(revived.color == "blue")
+        #expect(try store.keywords() == [revived])
+        // And the revive is pushed: the server has to be told the tombstone is
+        // gone, or its next pull puts it back.
+        let payload = try store.database.read { conn in
+            try String.fetchOne(
+                conn, sql: "SELECT payload FROM _sync_outbox WHERE row_id = ?",
+                arguments: [revived.id])
+        }
+        #expect(payload?.contains("deleted_at") == true)
+    }
 }

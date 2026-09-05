@@ -451,6 +451,95 @@ struct MarkdownProjectionTests {
         #expect(try store.syncStore.liveRow(resource: "content.markdown", id: "m1") == nil)
     }
 
+    /// `JSONValue` decodes every JSON number as `Double`, and `Int(_:)` traps
+    /// on anything outside `Int64` — so a single oversized number in a pulled
+    /// row used to crash the app inside `GRDBSyncStore`'s batch transaction,
+    /// leaving the cursor unadvanced so the next launch re-pulled the same
+    /// batch and crashed again. `isFinite` alone never covered this: `1e19` is
+    /// perfectly finite.
+    @Test("an out-of-Int64-range number in a payload is stored, not trapped on")
+    func oversizedNumbersDoNotTrap() async throws {
+        let store = try store()
+        let extremes: [(String, Double)] = [
+            ("m1", 1e19), ("m2", -1e19),
+            // The exact boundary that makes `<=` wrong: `Double(Int64.max)`
+            // rounds up to 2^63, which is not representable as an `Int64`.
+            ("m3", Double(Int64.max)), ("m4", Double(Int64.min)),
+            ("m5", .infinity)
+        ]
+        for (id, value) in extremes {
+            try await store.syncStore.apply([
+                SyncChange(resource: "content.markdown", id: id, op: .upsert, syncVersion: "1",
+                           data: ["title": .string("t"), "content": .string("c"),
+                                  "size_bytes": .number(value),
+                                  "created_at": .string("2026-01-01T00:00:00Z"),
+                                  "updated_at": .string("2026-01-01T00:00:00Z")])
+            ], advancingTo: nil)
+        }
+        let (stored, minimum) = try store.database.read { conn in
+            (try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM markdown"),
+             try Int64.fetchOne(conn, sql: "SELECT size_bytes FROM markdown WHERE id = 'm4'"))
+        }
+        #expect(stored == extremes.count)
+        // `Double(Int64.min)` is exactly -2^63 and *is* representable, so it is
+        // the one extreme that still lands as an integer.
+        #expect(minimum == Int64.min)
+    }
+
+    /// The disagreement the old two-condition derivation could not see: a
+    /// full-row pull supplying a real tombstone *and* an explicit falsy
+    /// `is_deleted` matched neither condition, so both values were written
+    /// through untouched and the row was deleted to one visibility gate and
+    /// live to the other.
+    @Test("a falsy is_deleted beside a real deleted_at does not un-delete the row")
+    func falsyIsDeletedBesideATombstoneStaysDeleted() async throws {
+        let store = try store()
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.markdown", id: "m1", op: .upsert, syncVersion: "1",
+                       data: ["title": .string("t"), "content": .string("c"),
+                              "created_at": .string("2026-01-01T00:00:00Z"),
+                              "updated_at": .string("2026-01-01T00:00:00Z"),
+                              "deleted_at": .string("2026-01-02T00:00:00Z"),
+                              "is_deleted": .bool(false)])
+        ], advancingTo: nil)
+        #expect(try store.document(id: "m1") == nil)
+        #expect(try store.syncStore.liveRow(resource: "content.markdown", id: "m1") == nil)
+        let isDeleted = try store.database.read { conn in
+            try Int.fetchOne(conn, sql: "SELECT is_deleted FROM markdown WHERE id = 'm1'")
+        }
+        #expect(isDeleted == 1)
+    }
+
+    /// adh's `is_deleted` is a Postgres `boolean`, and JSON is not the only
+    /// serialiser that has ever crossed that wire: `"t"` is Postgres's own text
+    /// spelling of `true`. Reading it as falsy hides a delete from one gate and
+    /// not the other, which is the same corruption from the other direction.
+    @Test("a string is_deleted is read as the boolean it spells")
+    func stringIsDeletedIsTruthy() async throws {
+        let store = try store()
+        for (id, flag) in [("m1", "t"), ("m2", "true"), ("m3", "1")] {
+            try await store.syncStore.apply([
+                SyncChange(resource: "content.markdown", id: id, op: .upsert, syncVersion: "1",
+                           data: ["title": .string("t"), "content": .string("c"),
+                                  "created_at": .string("2026-01-01T00:00:00Z"),
+                                  "updated_at": .string("2026-01-01T00:00:00Z"),
+                                  "is_deleted": .string(flag)])
+            ], advancingTo: nil)
+            #expect(try store.document(id: id) == nil, "\(flag)")
+            // Deleted with no stamp of its own: one is written now rather than
+            // left NULL, so both gates agree.
+            #expect(try store.syncStore.liveRow(resource: "content.markdown", id: id) == nil, "\(flag)")
+        }
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.markdown", id: "m4", op: .upsert, syncVersion: "1",
+                       data: ["title": .string("t"), "content": .string("c"),
+                              "created_at": .string("2026-01-01T00:00:00Z"),
+                              "updated_at": .string("2026-01-01T00:00:00Z"),
+                              "is_deleted": .string("f")])
+        ], advancingTo: nil)
+        #expect(try store.document(id: "m4") != nil)
+    }
+
     /// The fix for concern B (round 2): `upsert`'s `isFullRow` parameter is
     /// what stops a local `stage(_:)` partial patch from force-clearing a
     /// tombstone the way a full-row pull is allowed to. This pins the

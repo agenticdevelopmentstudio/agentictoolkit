@@ -373,17 +373,79 @@ struct MarkdownStoreTests {
         }
     }
 
-    @Test("a document row with an unreadable timestamp is skipped, not given today's date")
-    func unreadableDocumentTimestampIsSkipped() throws {
+    /// Was "…is skipped". Skipping is a lie the user cannot see through: the
+    /// note is simply absent from the list, nothing anywhere says why, and the
+    /// conclusion available to them is that their work was lost. Throwing names
+    /// the row and the column, and matches what `pendingRemoteOps` already does
+    /// with exactly the same kind of corrupt value one test up.
+    @Test("a document row with an unreadable timestamp throws, naming the row and column")
+    func unreadableDocumentTimestampThrows() throws {
         let store = try store()
-        let good = try store.createDocument(content: "good", markers: [.note])
+        _ = try store.createDocument(content: "good", markers: [.note])
         let bad = try store.createDocument(content: "bad", markers: [.note])
         try store.database.write { conn in
             try conn.execute(
                 sql: "UPDATE markdown SET updated_at = 'garbage' WHERE id = ?", arguments: [bad.id])
         }
-        #expect(try store.document(id: bad.id) == nil)
-        #expect(try store.documents(marker: .note).map(\.id) == [good.id])
+        #expect(throws: MarkdownStoreError.unreadableTimestamp(id: bad.id, column: "updated_at")) {
+            try store.document(id: bad.id)
+        }
+        #expect(throws: MarkdownStoreError.unreadableTimestamp(id: bad.id, column: "updated_at")) {
+            try store.documents(marker: .note)
+        }
+    }
+
+    /// adh's columns are Postgres `timestamp` and its OpenAPI declares them as
+    /// unformatted strings, so this is the shape a pulled row can genuinely
+    /// arrive in — and `MarkdownProjection` stores verbatim whatever it cannot
+    /// parse. Before the repair pass this row read as unparseable.
+    @Test("a Postgres-shaped timestamp on disk is read, not rejected")
+    func postgresTimestampIsReadable() throws {
+        let store = try store()
+        let doc = try store.createDocument(content: "x", markers: [.note])
+        try store.database.write { conn in
+            try conn.execute(
+                sql: "UPDATE markdown SET updated_at = ? WHERE id = ?",
+                arguments: ["2026-04-13 16:18:07.798+00", doc.id])
+        }
+        let loaded = try #require(try store.document(id: doc.id))
+        #expect(MarkdownTimestamp.string(loaded.updatedAt) == "2026-04-13T16:18:07.798Z")
+    }
+
+    // MARK: - Frontmatter provenance
+
+    @Test("owned frontmatter keys are written with the document and read back per document")
+    func ownedFrontmatterKeysRoundTrip() throws {
+        let store = try store()
+        let mine = try store.createDocument(
+            content: "---\ntitle: T\n---\nbody", markers: [.note],
+            ownedFrontmatterKeys: ["title"])
+        let theirs = try store.createDocument(content: "plain", markers: [.note])
+        #expect(try store.ownedFrontmatterKeys(forDocument: mine.id) == ["title"])
+        #expect(try store.ownedFrontmatterKeys(forDocument: theirs.id) == [])
+        #expect(try store.ownedFrontmatterKeysByDocument() == [mine.id: ["title"]])
+    }
+
+    @Test("updating with a new set replaces it; updating without one leaves it alone")
+    func ownedFrontmatterKeysReplaceOrPersist() throws {
+        let store = try store()
+        let doc = try store.createDocument(
+            content: "x", markers: [.note], ownedFrontmatterKeys: ["title", "pinned"])
+        try store.updateDocument(doc)
+        #expect(try store.ownedFrontmatterKeys(forDocument: doc.id) == ["title", "pinned"])
+        try store.updateDocument(doc, ownedFrontmatterKeys: ["pinned"])
+        #expect(try store.ownedFrontmatterKeys(forDocument: doc.id) == ["pinned"])
+        try store.updateDocument(doc, ownedFrontmatterKeys: [])
+        #expect(try store.ownedFrontmatterKeys(forDocument: doc.id) == [])
+    }
+
+    @Test("deleting a document takes its ownership record with it")
+    func deletingClearsOwnedFrontmatterKeys() throws {
+        let store = try store()
+        let doc = try store.createDocument(
+            content: "x", markers: [.note], ownedFrontmatterKeys: ["title"])
+        try store.deleteDocument(id: doc.id)
+        #expect(try store.ownedFrontmatterKeys(forDocument: doc.id) == [])
     }
 
     @Test("deleting a document whose create never drained drops the pair instead of queueing a delete")
