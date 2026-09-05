@@ -44,12 +44,13 @@ public enum MessageFraming: Sendable {
 }
 
 /// Errors thrown while decoding a framed byte stream. `.newlineDelimited`
-/// never throws — every case here originates from `.contentLength` parsing
-/// or from the shared unbounded-buffer guard.
+/// only ever throws the unbounded-buffer guard; every other case here
+/// originates from `.contentLength` parsing.
 public enum MessageFramingError: Error, LocalizedError, Equatable {
     case malformedHeader(String)
     case missingContentLength
     case truncatedMessage(expected: Int, received: Int)
+    case frameSizeExceeded(limit: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -59,6 +60,8 @@ public enum MessageFramingError: Error, LocalizedError, Equatable {
             return "Frame header is missing a Content-Length field."
         case .truncatedMessage(let expected, let received):
             return "Truncated message: expected \(expected) body bytes, received \(received)."
+        case .frameSizeExceeded(let limit):
+            return "Frame exceeds the \(limit)-byte cap."
         }
     }
 }
@@ -68,6 +71,17 @@ public enum MessageFramingError: Error, LocalizedError, Equatable {
 /// Fed arbitrary chunks of bytes — never aligned to message boundaries —
 /// `consume(_:)` returns every frame the buffer now completes, in order,
 /// and never returns a partial frame.
+///
+/// Every byte handed to this type is examined at most once, whether it
+/// arrives as one chunk or is split across many `consume(_:)` calls. A
+/// newline search resumes from a cursor rather than rescanning the buffer's
+/// unconsumed tail from the start, and a `Content-Length` header is parsed
+/// exactly once — the moment its terminator is seen — never re-parsed while
+/// the body is still arriving. Feeding this decoder one byte at a time
+/// defeats none of that, but it does turn every `consume(_:)` call into
+/// mostly-wasted overhead; callers should feed it real chunks (see
+/// `SubprocessChannel`'s pump, which reads with `read(upToCount:)` rather
+/// than iterating `FileHandle.bytes` one byte at a time).
 public struct MessageFramingDecoder {
 
     /// The largest buffer this decoder will accumulate before a frame
@@ -81,6 +95,27 @@ public struct MessageFramingDecoder {
     private let framing: MessageFraming
     private var buffer = Data()
 
+    /// Newline framing only: how many leading bytes of `buffer` have already
+    /// been scanned for `0x0A` with no match. Reset to 0 whenever a complete
+    /// frame is removed from the front of `buffer`, since the bytes that
+    /// remain have never been looked at.
+    private var scanCursor = 0
+
+    /// Content-Length framing only: the body length declared by the header
+    /// already consumed from the front of `buffer`, once a header has been
+    /// seen and stripped. `nil` means `buffer` currently starts with an
+    /// unparsed (possibly incomplete) header rather than pending body bytes.
+    /// Caching this is what makes the header parse-once rather than
+    /// re-running on every call while a large body trickles in.
+    private var pendingBodyLength: Int?
+
+    /// A cap violation detected while a call also had complete frames ready
+    /// to return. `consume(_:)` and `finish()` return those frames first and
+    /// throw this on the very next opportunity, so a chunk holding several
+    /// good frames followed by the start of an oversized one does not lose
+    /// the good frames to the same throw that reports the bad one.
+    private var pendingCapViolation: MessageFramingError?
+
     public init(framing: MessageFraming) {
         self.framing = framing
     }
@@ -88,6 +123,10 @@ public struct MessageFramingDecoder {
     /// Appends `chunk` to the internal buffer and returns every frame the
     /// buffer now completes, in order. Never returns a partial frame.
     public mutating func consume(_ chunk: Data) throws -> [Data] {
+        if let violation = pendingCapViolation {
+            pendingCapViolation = nil
+            throw violation
+        }
         buffer.append(chunk)
         switch framing {
         case .newlineDelimited:
@@ -105,29 +144,36 @@ public struct MessageFramingDecoder {
     /// - `.contentLength` never returns a frame here: a non-empty buffer at
     ///   end-of-stream is a truncated message, not a frame, so this throws.
     public mutating func finish() throws -> [Data] {
+        if let violation = pendingCapViolation {
+            pendingCapViolation = nil
+            throw violation
+        }
         switch framing {
         case .newlineDelimited:
             guard !buffer.isEmpty else { return [] }
             let remainder = buffer
             buffer.removeAll()
+            scanCursor = 0
             return [remainder]
 
         case .contentLength:
-            guard !buffer.isEmpty else { return [] }
-            defer { buffer.removeAll() }
-            guard let headerRange = buffer.firstRange(of: Self.headerTerminator) else {
-                // The stream ended before a complete header ever arrived —
-                // there is no declared length to report a shortfall against,
-                // so this is a malformed (incomplete) header rather than a
-                // truncated body.
-                throw MessageFramingError.malformedHeader(
-                    "stream ended before the header was complete"
-                )
+            guard !buffer.isEmpty || pendingBodyLength != nil else { return [] }
+            defer {
+                buffer.removeAll()
+                pendingBodyLength = nil
             }
-            let headerData = Data(buffer[buffer.startIndex..<headerRange.lowerBound])
-            let expected = try parseContentLength(from: headerData)
-            let received = buffer.distance(from: headerRange.upperBound, to: buffer.endIndex)
-            throw MessageFramingError.truncatedMessage(expected: expected, received: received)
+            if let expected = pendingBodyLength {
+                // The header was already parsed and stripped, so whatever is
+                // left in `buffer` is exactly the body bytes that arrived.
+                throw MessageFramingError.truncatedMessage(expected: expected, received: buffer.count)
+            }
+            // The stream ended before a complete header ever arrived —
+            // there is no declared length to report a shortfall against,
+            // so this is a malformed (incomplete) header rather than a
+            // truncated body.
+            throw MessageFramingError.malformedHeader(
+                "stream ended before the header was complete"
+            )
         }
     }
 
@@ -135,15 +181,39 @@ public struct MessageFramingDecoder {
 
     private mutating func consumeNewlineDelimited() throws -> [Data] {
         var frames: [Data] = []
-        while let newlineIndex = buffer.firstIndex(of: 0x0A) {
-            let frameEnd = buffer.index(after: newlineIndex)
-            frames.append(Data(buffer[buffer.startIndex..<frameEnd]))
-            buffer.removeSubrange(buffer.startIndex..<frameEnd)
+        var consumedThrough = 0
+
+        while true {
+            let searchStart = buffer.index(buffer.startIndex, offsetBy: max(scanCursor, consumedThrough))
+            guard let newlineIndex = buffer[searchStart...].firstIndex(of: 0x0A) else {
+                scanCursor = buffer.count
+                break
+            }
+            let frameEndOffset = buffer.distance(from: buffer.startIndex, to: newlineIndex) + 1
+            let frameStart = buffer.index(buffer.startIndex, offsetBy: consumedThrough)
+            let frameEnd = buffer.index(buffer.startIndex, offsetBy: frameEndOffset)
+            frames.append(Data(buffer[frameStart..<frameEnd]))
+            consumedThrough = frameEndOffset
+            scanCursor = frameEndOffset
         }
+
+        if consumedThrough > 0 {
+            let cut = buffer.index(buffer.startIndex, offsetBy: consumedThrough)
+            buffer.removeSubrange(buffer.startIndex..<cut)
+            scanCursor -= consumedThrough
+        }
+
+        // A chunk holding several complete frames followed by the start of an
+        // oversized, still-unterminated one should not lose the complete
+        // frames to the same throw that reports the overflow — return them
+        // now and report the violation the next time this decoder is asked
+        // for more (see `pendingCapViolation`).
         if buffer.count > Self.maximumFrameBytes {
-            throw MessageFramingError.malformedHeader(
-                "frame exceeds \(Self.maximumFrameBytes) bytes"
-            )
+            let violation = MessageFramingError.frameSizeExceeded(limit: Self.maximumFrameBytes)
+            if frames.isEmpty {
+                throw violation
+            }
+            pendingCapViolation = violation
         }
         return frames
     }
@@ -152,32 +222,50 @@ public struct MessageFramingDecoder {
 
     private mutating func consumeContentLength() throws -> [Data] {
         var frames: [Data] = []
+
         while true {
-            guard let headerRange = buffer.firstRange(of: Self.headerTerminator) else {
-                if buffer.count > Self.maximumFrameBytes {
-                    throw MessageFramingError.malformedHeader(
-                        "frame exceeds \(Self.maximumFrameBytes) bytes"
-                    )
+            if pendingBodyLength == nil {
+                guard let headerRange = buffer.firstRange(of: Self.headerTerminator) else {
+                    if buffer.count > Self.maximumFrameBytes {
+                        let violation = MessageFramingError.frameSizeExceeded(limit: Self.maximumFrameBytes)
+                        if frames.isEmpty {
+                            throw violation
+                        }
+                        pendingCapViolation = violation
+                    }
+                    return frames
                 }
-                return frames
+
+                let headerData = Data(buffer[buffer.startIndex..<headerRange.lowerBound])
+                let bodyLength = try parseContentLength(from: headerData)
+                // The header itself is consumed here, once, regardless of
+                // how much of the body has arrived — nothing re-parses it.
+                buffer.removeSubrange(buffer.startIndex..<headerRange.upperBound)
+
+                if bodyLength > Self.maximumFrameBytes {
+                    let violation = MessageFramingError.frameSizeExceeded(limit: Self.maximumFrameBytes)
+                    if frames.isEmpty {
+                        throw violation
+                    }
+                    pendingCapViolation = violation
+                    return frames
+                }
+                pendingBodyLength = bodyLength
             }
 
-            let headerData = Data(buffer[buffer.startIndex..<headerRange.lowerBound])
-            let bodyLength = try parseContentLength(from: headerData)
-            if bodyLength > Self.maximumFrameBytes {
-                throw MessageFramingError.malformedHeader(
-                    "frame exceeds \(Self.maximumFrameBytes) bytes"
-                )
-            }
-
-            let bodyStart = headerRange.upperBound
-            guard buffer.distance(from: bodyStart, to: buffer.endIndex) >= bodyLength else {
-                // Body has not fully arrived yet.
+            guard let bodyLength = pendingBodyLength else {
+                // Unreachable: the branch above always sets this before
+                // falling through, except when it already returned.
                 return frames
             }
-            let bodyEnd = buffer.index(bodyStart, offsetBy: bodyLength)
-            frames.append(Data(buffer[bodyStart..<bodyEnd]))
+            guard buffer.count >= bodyLength else {
+                // Body has not fully arrived yet; nothing left to parse.
+                return frames
+            }
+            let bodyEnd = buffer.index(buffer.startIndex, offsetBy: bodyLength)
+            frames.append(Data(buffer[buffer.startIndex..<bodyEnd]))
             buffer.removeSubrange(buffer.startIndex..<bodyEnd)
+            pendingBodyLength = nil
         }
     }
 
