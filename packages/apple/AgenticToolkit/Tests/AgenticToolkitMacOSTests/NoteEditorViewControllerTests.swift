@@ -11,7 +11,6 @@ struct NoteEditorViewControllerTests {
     private func loaded() -> NoteEditorViewController {
         let controller = NoteEditorViewController()
         _ = controller.view
-        controller.viewDidLoad()
         return controller
     }
 
@@ -66,6 +65,19 @@ struct NoteEditorViewControllerTests {
         _ = controller.window
         #expect(controller.editorController.isPreviewAvailable == false)
         #expect(controller.editorController.mode == .edit)
+    }
+
+    @Test("quick note opens at its intended size, not the container's collapsed one")
+    func quickNoteOpensAtIntendedSize() {
+        let controller = QuickNoteWindowController(onSave: { _, _ in })
+        controller.showNearStatusItem(buttonFrame: NSRect(x: 100, y: 100, width: 20, height: 20))
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        let contentSize = controller.window?.contentView?.frame.size
+        #expect(contentSize == NSSize(width: 360, height: 260))
+        // Well above the toolbar's own 32pt: a collapsed container leaves the
+        // editor's whole view exactly toolbar-height, with zero room left
+        // for the text pane.
+        #expect(controller.editorController.view.frame.height > 100)
     }
 }
 
