@@ -7,7 +7,7 @@ import { createApp } from '../src/app';
 import type { Db } from '../src/libsql/client';
 import { sessionHeaders } from './helpers/auth';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 // /deploy-projects and /integrations fan out live provider calls per request
 // with no dampening — unlike /telemetry, which grew a 30s cache + single-flight
@@ -18,7 +18,7 @@ async function boot(): Promise<{ app: ReturnType<typeof createApp>; db: Db; auth
   const db = drizzle(createClient({ url: ':memory:' }), { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
   const auth = await sessionHeaders(db, 'viewer');
-  return { app: createApp({ db, config: testConfig() }), db, auth };
+  return { app: createApp(testDeps(db)), db, auth };
 }
 
 describe('/deploy-projects caching', () => {

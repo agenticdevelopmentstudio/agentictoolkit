@@ -22,7 +22,8 @@ import {
   deployIntegrations,
 } from '../src/libsql/schema';
 import { runCycle } from '../src/monitor/sync';
-import { listEndpoints, listSites } from '../src/storage/config-store';
+import { createLibsqlStorage } from '../src/libsql';
+import type { Storage } from '../src/storage/ports';
 import { flushAlerts, _resetAlerts, type IssueAlert } from '../src/monitor/alerts';
 import { freshDb, type Db } from './helpers/db';
 import { testConfig } from './helpers/config';
@@ -64,6 +65,7 @@ interface Fleet {
 }
 
 let db: Db;
+let storage: Storage;
 let alerts: IssueAlert[];
 let logs: string[];
 
@@ -179,8 +181,8 @@ const configure = (platform: string, tokenEnvVar: string, config: Record<string,
 
 const configureVercel = () => configure('vercel', 'TEST_VERCEL_TOKEN', { teamId: 'team_test' });
 
-const urls = async () => (await listEndpoints(db)).map((e) => e.url).sort();
-const siteSlugs = async () => (await listSites(db)).map((s) => s.slug).sort();
+const urls = async () => (await storage.config.listEndpoints()).map((e) => e.url).sort();
+const siteSlugs = async () => (await storage.config.listSites()).map((s) => s.slug).sort();
 const openIssues = () => db.select().from(issues).where(isNull(issues.resolvedAt));
 const withheld = () => logs.filter((l) => l.includes('not removing monitors'));
 
@@ -191,6 +193,7 @@ const ageIssue = (target: string, ageMs: number) =>
 
 beforeEach(async () => {
   db = await freshDb();
+  storage = createLibsqlStorage(db);
   alerts = [];
   logs = [];
   _resetAlerts();
@@ -223,7 +226,7 @@ describe('runCycle removes monitors the platform inventory no longer accounts fo
 
     // ONE cycle. There is no clock to age and nothing to click: the first pass that can
     // see the absence acts on it.
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://live.example.test']);
     // …and it left nothing behind for anyone to tidy up.
@@ -252,7 +255,7 @@ describe('runCycle removes monitors the platform inventory no longer accounts fo
     serve({ projects: { 'unwired-served': ['canonical.example.test', 'alias.example.test'] } });
     await seed([{ host: 'alias.example.test' }, { host: 'orphan.example.test' }]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://alias.example.test']);
     expect(await siteSlugs()).toEqual(['alias']);
@@ -266,7 +269,7 @@ describe('runCycle removes monitors the platform inventory no longer accounts fo
     serve({ projects: { 'veto-live': ['vl.example.test'] }, serving: ['serving.example.test'] });
     await seed([{ host: 'vl.example.test' }, { host: 'serving.example.test' }, { host: 'dead.example.test' }]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://serving.example.test', 'https://vl.example.test']);
   });
@@ -282,9 +285,9 @@ describe('runCycle refuses to remove anything on a degraded or ambiguous pass', 
     serve({ projects: { 'api-production': ['api.example.test'] } });
     const ids = await seed([{ host: 'api.example.test', project: 'api-production', path: '/docs' }]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
     await ageIssue(ids['api.example.test']!, 365 * 24 * 60 * 60 * 1000);
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://api.example.test/docs']);
     expect((await openIssues()).map((i) => i.target)).toEqual([ids['api.example.test']]);
@@ -302,7 +305,7 @@ describe('runCycle refuses to remove anything on a degraded or ambiguous pass', 
     });
     await seed([{ host: 'a.example.test' }, { host: 'orphan.example.test' }]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://a.example.test', 'https://orphan.example.test']);
     expect(withheld().join('\n')).toContain('domain lists not complete for vercel');
@@ -323,7 +326,7 @@ describe('runCycle refuses to remove anything on a degraded or ambiguous pass', 
       { host: 'ru.example.test' },
     ]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://rl.example.test', 'https://ru.example.test']);
     expect(withheld().join('\n')).toContain('domain lists not complete for railway');
@@ -336,7 +339,7 @@ describe('runCycle refuses to remove anything on a degraded or ambiguous pass', 
     serve({ projects: { 'somebody-elses': ['other.example.test'] } });
     await seed([{ host: 'mine.example.test' }, { host: 'mine2.example.test' }]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://mine.example.test', 'https://mine2.example.test']);
     expect(withheld().join('\n')).toContain('claim none of the 2 monitored hosts');
@@ -352,7 +355,7 @@ describe('runCycle refuses to remove anything on a degraded or ambiguous pass', 
       { host: 'mgb.example.test', project: 'mass-gone-b' },
     ]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://mga.example.test', 'https://mgb.example.test', 'https://ml.example.test']);
     expect(withheld().join('\n')).toContain('ALL 2 wired monitors');
@@ -364,7 +367,7 @@ describe('runCycle refuses to remove anything on a degraded or ambiguous pass', 
     serve({ projects: {} });
     await seed([{ host: 'na.example.test' }, { host: 'nb.example.test' }]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual(['https://na.example.test', 'https://nb.example.test']);
     expect(withheld().join('\n')).toContain('no deploy platform is configured');
@@ -382,7 +385,7 @@ describe('runCycle refuses to remove anything on a degraded or ambiguous pass', 
       { host: 'ignored.example.test', ignore: true },
     ]);
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     expect(await urls()).toEqual([
       'https://ignored.example.test',

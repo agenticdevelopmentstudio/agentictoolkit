@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import { sessionHeaders } from './helpers/auth';
 import { freshDb as bootDb, type Db as TestDb } from './helpers/db';
 import { testConfig } from './helpers/config';
@@ -40,7 +41,7 @@ describe('GET /deployments/:id/log', () => {
   beforeAll(async () => {
     db = await bootDb();
     viewAuth = await sessionHeaders(db, 'viewer');
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
     await seedDeploy(db);
     // The route reads its token the way the monitor does — the active integration
     // row names an env var, the env holds the secret.

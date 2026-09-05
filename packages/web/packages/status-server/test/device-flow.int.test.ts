@@ -4,7 +4,7 @@ import { sessionHeaders } from './helpers/auth';
 import { freshDb } from './helpers/db';
 import { deviceAuthorizations } from '../src/libsql/schema';
 import type { Db } from '../src/libsql/client';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 type App = ReturnType<typeof createApp>;
 
@@ -36,7 +36,7 @@ async function approve(app: App, cookie: string, userCode: string): Promise<Resp
 
 async function setup(): Promise<{ app: App; db: Db; viewer: string; admin: string }> {
   const db = await freshDb();
-  const app = createApp({ db, config: testConfig() });
+  const app = createApp(testDeps(db));
   const viewer = (await sessionHeaders(db, 'viewer')).Cookie;
   const admin = (await sessionHeaders(db, 'admin')).Cookie;
   return { app, db, viewer, admin };
@@ -129,7 +129,7 @@ describe('device flow — RFC 8628-shaped CLI authorization', () => {
   it('approval requires a signed-in user: an AUTH_DISABLED principal is 403', async () => {
     process.env.AUTH_DISABLED = '1';
     const db = await freshDb();
-    const app = createApp({ db, config: testConfig() });
+    const app = createApp(testDeps(db));
     const grant = await request(app);
     // No cookie → AUTH_DISABLED admits the request but c.get('user') is null.
     const res = await app.request('/auth/device/approve', { method: 'POST', ...json({ user_code: grant.user_code }) });

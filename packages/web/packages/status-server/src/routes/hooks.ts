@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
+import type { Storage } from '../storage/ports';
 import { verifyVercelSignature, verifySharedSecret } from '../monitor/webhook-verify';
 import { mapVercelDeployEvent, mapRailwayDeployEvent } from '../monitor/webhook-events';
 import { pushDeployEvent } from '../monitor/live-buffer';
@@ -74,9 +75,9 @@ async function ownedBySite(db: Db, row: DeployIdentity): Promise<Ownership> {
  * Fail-soft: a derivation failure must never 500 a webhook (the provider would
  * just retry-storm) — the next cycle re-derives it from the row we already wrote.
  */
-async function runReconcile(db: Db, config: StatusConfig): Promise<void> {
+async function runReconcile(db: Db, storage: Storage, config: StatusConfig): Promise<void> {
   try {
-    await reconcileBoardLedger(db, config, { skipOnEmptyRoster: true });
+    await reconcileBoardLedger(db, storage, config, { skipOnEmptyRoster: true });
     await flushAlerts(config.alertWebhookUrl);
   } catch (err) {
     console.error('[hooks] issue derivation failed — the next cycle will re-derive it:', err);
@@ -104,7 +105,7 @@ async function runReconcile(db: Db, config: StatusConfig): Promise<void> {
  * State lives per `hooksRoutes` call rather than at module scope, so it is scoped to the
  * same `db` the routes close over.
  */
-function reconcileGate(db: Db, config: StatusConfig): () => Promise<void> {
+function reconcileGate(db: Db, storage: Storage, config: StatusConfig): () => Promise<void> {
   let running: Promise<void> | null = null;
   let queued = false;
 
@@ -118,7 +119,7 @@ function reconcileGate(db: Db, config: StatusConfig): () => Promise<void> {
         do {
           // Cleared BEFORE the pass, so an arrival during it always wins another one.
           queued = false;
-          await runReconcile(db, config);
+          await runReconcile(db, storage, config);
         } while (queued);
       } finally {
         running = null;
@@ -133,9 +134,9 @@ function reconcileGate(db: Db, config: StatusConfig): () => Promise<void> {
  * shared secret rather than the app-wide view/admin token, so they MUST be
  * mounted before the requireAuth seam.
  */
-export function hooksRoutes(db: Db, config: StatusConfig): Hono {
+export function hooksRoutes(db: Db, storage: Storage, config: StatusConfig): Hono {
   const app = new Hono();
-  const deriveIssuesAndAlert = reconcileGate(db, config);
+  const deriveIssuesAndAlert = reconcileGate(db, storage, config);
 
   // POST /hooks/vercel — HMAC-SHA1 signature in x-vercel-signature header.
   // Must read the RAW body text before parsing so the digest covers the exact bytes.
@@ -177,7 +178,7 @@ export function hooksRoutes(db: Db, config: StatusConfig): Hono {
     pushDeployEvent(row);
     // Derive the issue (and page on-call) NOW, not on the next cycle.
     await deriveIssuesAndAlert();
-    emitLiveUpdate(db, config); // a webhook merges into /live — push it to open streams now
+    emitLiveUpdate(db, storage, config); // a webhook merges into /live — push it to open streams now
     return c.json({ ok: true, id: row.id });
   });
 
@@ -218,7 +219,7 @@ export function hooksRoutes(db: Db, config: StatusConfig): Hono {
     pushDeployEvent(row);
     // Derive the issue (and page on-call) NOW, not on the next cycle.
     await deriveIssuesAndAlert();
-    emitLiveUpdate(db, config); // a webhook merges into /live — push it to open streams now
+    emitLiveUpdate(db, storage, config); // a webhook merges into /live — push it to open streams now
     return c.json({ ok: true, id: row.id });
   });
 

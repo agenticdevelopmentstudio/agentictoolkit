@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import type { Db } from '../src/libsql/client';
 import { sessionHeaders } from './helpers/auth';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
@@ -17,7 +18,7 @@ describe('/status/badge.svg', () => {
     const db: Db = drizzle(createClient({ url: ':memory:' }), { schema });
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
     viewAuth = await sessionHeaders(db, 'viewer');
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   it('401 without a token (gated)', async () => {

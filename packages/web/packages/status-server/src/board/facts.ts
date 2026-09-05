@@ -14,8 +14,7 @@ import type { BuildPhase, DeployPhase } from "../monitor/deploy-status";
 import { deployIsBad, deployIsResolving } from "../monitor/issue-sources";
 import type { IssueSource } from "../monitor/issue-sources";
 import { liveVercelProjectNames } from "../monitor/refresh-project-meta";
-import { badRunOnsetBySlugSql, latestCheckBySlugSql } from "../storage/health-store";
-import type { BadRunOnsetRow, LatestCheckRow } from "../storage/health-store";
+import type { Storage } from "../storage/ports";
 import { deriveActivity, pageActivity } from "./derive-activity";
 import { monitoredTargets } from "./derive-problems";
 import { rosterDeployProjects } from "./ownership";
@@ -241,7 +240,7 @@ export async function readRoster(db: Db): Promise<RosterEntry[]> {
  * Read every fact the board needs, and nothing else. THE ONLY FILE IN src/board/ THAT
  * TOUCHES DRIZZLE — keeping the fold pure is what makes the regression suite cheap.
  */
-export async function readBoardFacts(db: Db, nowMs: number, config: StatusConfig): Promise<BoardFacts> {
+export async function readBoardFacts(db: Db, storage: Storage, nowMs: number, config: StatusConfig): Promise<BoardFacts> {
   const roster = await readRoster(db);
 
   // The latest CONCLUDED row, and separately the latest IN-FLIGHT row, per deploy
@@ -463,7 +462,7 @@ export async function readBoardFacts(db: Db, nowMs: number, config: StatusConfig
     // `endpointProblems`' verdict gate, and narrowing the FACTS by it would also hide
     // the endpoint's observation timestamp from anything that measures freshness.
     endpoints: await readEndpointFacts(
-      db,
+      storage,
       roster.filter((e) => e.isActive).map((e) => e.endpointId),
     ),
     platforms,
@@ -523,6 +522,7 @@ async function readSourcePage<T>(spec: {
  */
 export async function readActivityPage(
   db: Db,
+  storage: Storage,
   nowMs: number,
   config: StatusConfig,
   opts: { cursor: ActivityCursor | null; limit: number; base?: BoardFacts },
@@ -532,7 +532,7 @@ export async function readActivityPage(
   // `createActivityPageReader`, which is how the route calls this. Without it, a reader
   // scrolling back pays the full `readBoardFacts` (two unbounded GROUP BY scans among it)
   // once per page, and the client fires up to five back-to-back on its own.
-  const base = opts.base ?? (await readBoardFacts(db, nowMs, config));
+  const base = opts.base ?? (await readBoardFacts(db, storage, nowMs, config));
 
   // `<=`, not `<`: the cursor is a (time, id) PAIR, and a row sharing the cursor's
   // timestamp may still sort before it. SQL narrows by time only and `pageActivity`
@@ -666,10 +666,11 @@ const ACTIVITY_BASE_FACTS_CACHE_MS = 5_000;
  */
 export function createActivityPageReader(
   db: Db,
+  storage: Storage,
   config: StatusConfig,
 ): (nowMs: number, opts: { cursor: ActivityCursor | null; limit: number }) => Promise<ActivityPage> {
-  const cachedBase = cachedSingleFlight(ACTIVITY_BASE_FACTS_CACHE_MS, () => readBoardFacts(db, Date.now(), config));
-  return async (nowMs, opts) => readActivityPage(db, nowMs, config, { ...opts, base: await cachedBase() });
+  const cachedBase = cachedSingleFlight(ACTIVITY_BASE_FACTS_CACHE_MS, () => readBoardFacts(db, storage, Date.now(), config));
+  return async (nowMs, opts) => readActivityPage(db, storage, nowMs, config, { ...opts, base: await cachedBase() });
 }
 
 /**
@@ -690,11 +691,11 @@ export function createActivityPageReader(
  *    second let `/live` and the board pick different rows and publish different verdicts
  *    for one endpoint in one request. One statement, one `checked_at desc, id desc`.
  */
-async function readEndpointFacts(db: Db, slugs: string[]): Promise<EndpointFact[]> {
+async function readEndpointFacts(storage: Storage, slugs: string[]): Promise<EndpointFact[]> {
   // `serviceSlug` IS the endpoint id — sync.ts:296 writes `serviceSlug: r.slug` and
   // config-store.ts:162 deletes these rows by endpoint id. There is no endpointId column.
   if (slugs.length === 0) return [];
-  const latest = await db.all<LatestCheckRow>(latestCheckBySlugSql(slugs));
+  const latest = await storage.health.latestChecks(slugs);
 
   const isBad = (status: string) => status === "down" || status === "degraded";
   // ONE onset query for every bad endpoint at once. This used to be a sequentially-awaited
@@ -704,7 +705,7 @@ async function readEndpointFacts(db: Db, slugs: string[]): Promise<EndpointFact[
   const badSlugs = latest.filter((h) => isBad(h.status)).map((h) => h.service_slug);
   const onsetSec = new Map<string, number>();
   if (badSlugs.length > 0) {
-    for (const r of await db.all<BadRunOnsetRow>(badRunOnsetBySlugSql(badSlugs))) {
+    for (const r of await storage.health.badRunOnsets(badSlugs)) {
       if (r.since != null) onsetSec.set(r.service_slug, Number(r.since));
     }
   }

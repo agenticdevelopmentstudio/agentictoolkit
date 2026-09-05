@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as schema from '../src/libsql/schema';
 import { buildLiveSnapshot } from '../src/routes/reads';
 import { clearDeployEvents, pushDeployEvent } from '../src/monitor/live-buffer';
+import { createLibsqlStorage } from '../src/libsql';
+import type { Storage } from '../src/storage/ports';
 import { freshDb, type Db } from './helpers/db';
 import { testConfig } from './helpers/config';
 
@@ -65,9 +67,11 @@ const projectsOf = (snap: { deployments: { projectName: string }[] }) =>
 
 describe('buildLiveSnapshot deploy-target narrowing', () => {
   let db: Db;
+  let storage: Storage;
 
   beforeEach(async () => {
     db = await freshDb();
+    storage = createLibsqlStorage(db);
     clearDeployEvents();
   });
 
@@ -80,7 +84,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
     await seedLiveVercelProjects(db, 'docs-production');
     await seedFailedDeploy(db, 'vercel', 'docs-production');
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(projectsOf(snap)).toEqual(['docs-production']);
   });
@@ -96,7 +100,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
     await seedFailedDeploy(db, 'vercel', 'docs-production');
     await seedFailedDeploy(db, 'vercel', 'studio-production');
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(projectsOf(snap)).toEqual(['docs-production']);
   });
@@ -110,7 +114,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
     await seedFailedDeploy(db, 'vercel', 'docs-production');
     await seedFailedDeploy(db, 'vercel', 'deleted-site');
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(projectsOf(snap)).toEqual(['docs-production']);
   });
@@ -125,7 +129,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
     await seedLiveVercelProjects(db, 'infra-production');
     await seedFailedDeploy(db, 'vercel', 'infra-production');
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(snap.deployments).toEqual([]);
   });
@@ -138,7 +142,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
     await seedWiredEndpoint(db, { slug: 'docs', platform: 'vercel', deployProject: 'docs-production' });
     await seedFailedDeploy(db, 'vercel', 'docs-production');
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(projectsOf(snap)).toEqual(['docs-production']);
   });
@@ -162,7 +166,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
     pushDeployEvent({ ...base, id: 'vc_live', platform: 'vercel', projectName: 'docs-production' });
     pushDeployEvent({ ...base, id: 'vc_dead', platform: 'vercel', projectName: 'studio-production' });
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(projectsOf(snap)).toEqual(['docs-production']);
   });
@@ -175,7 +179,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
     await seedFailedDeploy(db, 'railway', 'api-svc');
     await seedFailedDeploy(db, 'cloudflare-pages', 'edge-worker');
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(projectsOf(snap)).toEqual(['api-svc', 'edge-worker']);
   });
@@ -183,7 +187,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
   it('always serves crunchy builds — its targets are not site-bound', async () => {
     await seedFailedDeploy(db, 'crunchy', 'primary-cluster');
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(projectsOf(snap)).toEqual(['primary-cluster']);
   });
@@ -232,7 +236,7 @@ describe('buildLiveSnapshot deploy-target narrowing', () => {
       })),
     );
 
-    const snap = await buildLiveSnapshot(db, testConfig());
+    const snap = await buildLiveSnapshot(db, storage, testConfig());
 
     expect(snap.deployments.map((d) => d.id).sort()).toEqual(['d_owned_fail', 'd_owned_ok']);
   });

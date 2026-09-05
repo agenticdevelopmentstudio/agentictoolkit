@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
 import { testConfig } from './helpers/config';
 
@@ -11,7 +12,7 @@ async function bootApp() {
   const client = createClient({ url: ':memory:' });
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-  return createApp({ db, config: testConfig() });
+  return createApp(testDeps(db));
 }
 
 describe('public allowlist', () => {

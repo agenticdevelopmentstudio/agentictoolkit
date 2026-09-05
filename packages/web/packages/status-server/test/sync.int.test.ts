@@ -7,6 +7,7 @@ import * as schema from '../src/libsql/schema';
 import { runCycle, runMaintenance, upsertDeployments } from '../src/monitor/sync';
 import type { ProviderDeploy } from '../src/monitor/provider-deploy';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
+import { createLibsqlStorage } from '../src/libsql';
 import { testConfig } from './helpers/config';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -31,10 +32,11 @@ async function seedOneEndpoint(
 describe('runCycle', () => {
   it('records a health check for an active endpoint and does not throw without provider tokens', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await seedOneEndpoint(db, 'https://example.com');
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await runCycle(db, testConfig()); // must not throw even though no VERCEL/RAILWAY/CLOUDFLARE tokens are set
+    await runCycle(db, storage, testConfig()); // must not throw even though no VERCEL/RAILWAY/CLOUDFLARE tokens are set
 
     const checks = await db.select().from(schema.healthChecks);
     expect(checks.length).toBeGreaterThanOrEqual(1);
@@ -50,6 +52,7 @@ describe('runCycle', () => {
     // does run the bounded in-flight reconcile, but this row is terminal and long outside
     // its 14-day window, so it is not a candidate and nothing re-fetches it.)
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await seedOneEndpoint(db, 'https://example.com');
     await db
       .insert(schema.deployIntegrations)
@@ -76,12 +79,12 @@ describe('runCycle', () => {
 
     try {
       // skipDeploys → poll + prune never run → aged row survives, probe still recorded.
-      await runCycle(db, testConfig(), { skipDeploys: true });
+      await runCycle(db, storage, testConfig(), { skipDeploys: true });
       expect((await db.select().from(schema.deployments)).map((d) => d.id)).toContain('old');
       expect((await db.select().from(schema.healthChecks)).length).toBeGreaterThanOrEqual(1);
 
       // Full cycle → Railway ok:true → step 7 prune deletes the aged row.
-      await runCycle(db, testConfig());
+      await runCycle(db, storage, testConfig());
       expect((await db.select().from(schema.deployments)).map((d) => d.id)).not.toContain('old');
     } finally {
       delete process.env.TEST_RAILWAY_TOKEN;
@@ -90,11 +93,12 @@ describe('runCycle', () => {
 
   it('rolls up metrics_hourly and is idempotent across reruns (one row per service/hour)', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     const slug = await seedOneEndpoint(db, 'https://example.com');
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await runCycle(db, testConfig());
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
+    await runCycle(db, storage, testConfig());
 
     const metrics = await db.select().from(schema.metricsHourly);
     expect(metrics).toHaveLength(1); // two cycles, same hour → upserted, not duplicated
@@ -105,11 +109,12 @@ describe('runCycle', () => {
 
   it('opens an HTTP issue for a down endpoint and resolves it when it recovers', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await seedOneEndpoint(db, 'https://example.com');
 
     // Down: a 500 is not the expected 200.
     vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
     let open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open).toHaveLength(1);
     expect(open[0]!.source).toBe('http');
@@ -117,20 +122,22 @@ describe('runCycle', () => {
     vi.unstubAllGlobals();
     // Recovered.
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
     open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open).toHaveLength(0); // the open issue was resolved
   });
 
   it('completes with no configured endpoints', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await expect(runCycle(db, testConfig())).resolves.toBeUndefined();
+    await expect(runCycle(db, storage, testConfig())).resolves.toBeUndefined();
     expect(await db.select().from(schema.healthChecks)).toHaveLength(0);
   });
 
   it('prunes a dangling endpoint (and resolves its issue) so a phantom DNS failure self-heals', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     // Reproduce the no-FK-cascade (Turso/HTTP) mode the reconcile defends: with FK
     // enforcement OFF, deleting a site does NOT cascade its endpoints, so a dangling
     // endpoint can survive — the structural ghost reconcileOrphanedEndpoints prunes.
@@ -145,7 +152,7 @@ describe('runCycle', () => {
     await db.delete(schema.monitoredSites).where(eq(schema.monitoredSites.id, s2!.id)); // strand the ghost endpoint
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     // The ghost endpoint row is gone (only the live one remains)…
     const eps = await db.select().from(schema.monitoredEndpoints);
@@ -157,6 +164,7 @@ describe('runCycle', () => {
 
   it('uses the LATEST deploy per target (SQL max-per-group), not an arbitrary row', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     // A site that OWNS the vercel project, so applyDeployIssues evaluates its target.
     const g = (await db.insert(schema.siteGroups).values({ slug: 'g', name: 'G' }).returning())[0];
     const s = (await db.insert(schema.monitoredSites).values({ siteGroupId: g!.id, slug: 's', name: 'S' }).returning())[0];
@@ -174,7 +182,7 @@ describe('runCycle', () => {
     ]);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open.filter((i) => i.target === 'vercel|web-prod|')).toHaveLength(0);
@@ -182,6 +190,7 @@ describe('runCycle', () => {
 
   it('a CANCELED skip on top of a fixed build RESOLVES the open issue (ignore-build-step wedge)', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     const g = (await db.insert(schema.siteGroups).values({ slug: 'g', name: 'G' }).returning())[0];
     const s = (await db.insert(schema.monitoredSites).values({ siteGroupId: g!.id, slug: 's', name: 'S' }).returning())[0];
     await db.insert(schema.monitoredEndpoints).values({
@@ -202,7 +211,7 @@ describe('runCycle', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open.filter((i) => i.target === 'vercel|web-prod|')).toHaveLength(0);
@@ -210,6 +219,7 @@ describe('runCycle', () => {
 
   it('a CANCELED skip on top of a STILL-FAILING build keeps the issue open (skip carries no news)', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     const g = (await db.insert(schema.siteGroups).values({ slug: 'g', name: 'G' }).returning())[0];
     const s = (await db.insert(schema.monitoredSites).values({ siteGroupId: g!.id, slug: 's', name: 'S' }).returning())[0];
     await db.insert(schema.monitoredEndpoints).values({
@@ -223,7 +233,7 @@ describe('runCycle', () => {
     ]);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open.filter((i) => i.target === 'vercel|web-prod|')).toHaveLength(1);
@@ -231,6 +241,7 @@ describe('runCycle', () => {
 
   it('an expired `unknown` DEPLOY on top of a failed build does NOT mask the failure (CONCLUSIVE excludes deploy-unknown)', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     const g = (await db.insert(schema.siteGroups).values({ slug: 'g', name: 'G' }).returning())[0];
     const s = (await db.insert(schema.monitoredSites).values({ siteGroupId: g!.id, slug: 's', name: 'S' }).returning())[0];
     await db.insert(schema.monitoredEndpoints).values({
@@ -246,7 +257,7 @@ describe('runCycle', () => {
     ]);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open.filter((i) => i.target === 'vercel|web-prod|')).toHaveLength(1);
@@ -254,6 +265,7 @@ describe('runCycle', () => {
 
   it('does NOT wipe an open deploy issue when the endpoint list is empty (empty != "all sites gone")', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     // A recent failed deploy + its open deploy issue exist, but there are ZERO endpoints
     // and zero integrations. With an empty endpoint list every owned set is empty; without
     // the guard, applyDeployIssues would treat the deploy as owned-by-no-site and resolve
@@ -275,7 +287,7 @@ describe('runCycle', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open).toHaveLength(1); // survived — the empty-endpoints guard held
@@ -284,6 +296,7 @@ describe('runCycle', () => {
 
   it('fail-soft: a provider poll that THROWS does not abort the cycle', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await seedOneEndpoint(db, 'https://example.com');
     // An active vercel integration with a token whose env var is set → the cycle
     // will call fetch for the provider; make EVERY fetch throw. The endpoint probe
@@ -305,7 +318,7 @@ describe('runCycle', () => {
     );
     try {
       // First cycle must not throw despite every provider fetch throwing.
-      await expect(runCycle(db, testConfig())).resolves.toBeUndefined();
+      await expect(runCycle(db, storage, testConfig())).resolves.toBeUndefined();
       // The endpoint was still probed + recorded (as down, since fetch threw).
       const checks = await db.select().from(schema.healthChecks);
       expect(checks.length).toBeGreaterThanOrEqual(1);
@@ -316,7 +329,7 @@ describe('runCycle', () => {
 
       // Second consecutive failed poll crosses the debounce threshold → the
       // platform-health issue opens for the unreachable vercel provider.
-      await expect(runCycle(db, testConfig())).resolves.toBeUndefined();
+      await expect(runCycle(db, storage, testConfig())).resolves.toBeUndefined();
       const platformIssues = await db
         .select()
         .from(schema.issues)

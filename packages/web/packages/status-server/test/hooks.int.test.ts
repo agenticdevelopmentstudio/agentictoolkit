@@ -7,7 +7,7 @@ import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
 import { clearDeployEvents } from '../src/monitor/live-buffer';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 const VERCEL_SECRET = 's3cr3t';
 const RAILWAY_SECRET = 'ry_s3cr3t';
@@ -60,7 +60,7 @@ async function bootApp() {
     { siteId: s.id, url: 'https://my-project.example.com', platform: 'vercel', deployProject: 'my-project' },
     { siteId: s.id, url: 'https://my-railway-project.example.com', platform: 'railway', deployProject: 'my-railway-project' },
   ]);
-  return createApp({ db, config: testConfig() });
+  return createApp(testDeps(db));
 }
 
 /** A Vercel deployment.succeeded body for an arbitrary project name (re-signed per test). */
@@ -177,7 +177,7 @@ describe('/hooks/vercel issue derivation', () => {
       { siteId: s.id, url: 'https://ghost-project.example.com', platform: 'vercel', deployProject: 'ghost-project' },
     ]);
     await db.insert(schema.deployProjectMeta).values({ platform: 'vercel', projectName: 'live-project' });
-    return { app: createApp({ db, config: testConfig() }), db };
+    return { app: createApp(testDeps(db)), db };
   }
 
   /** A FAILED production deploy webhook for `projectName`. */

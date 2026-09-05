@@ -3,10 +3,9 @@ import { HTTPException } from 'hono/http-exception';
 import type { Context, MiddlewareHandler } from 'hono';
 import { timingSafeEqual } from 'node:crypto';
 import type { StatusConfig } from '../config/port';
-import type { Db } from '../libsql/client';
-import { resolveSession, type AuthUser } from '../storage/auth-store';
+import type { AuthUser, Storage, TokenPrincipal } from '../storage/ports';
+import { TOKEN_PREFIX } from '../storage/ports';
 import { readSessionCookie } from '../auth/cookie';
-import { TOKEN_PREFIX, validateApiToken, type TokenPrincipal } from '../storage/token-store';
 
 export type Tier = 'view' | 'admin';
 
@@ -37,7 +36,7 @@ export function bearer(c: Context): string | undefined {
  *  dashboard request resolves via its cookie and never pays a dead token lookup.
  *  `pending` users and everyone else get 401 — they have no dashboard access until
  *  an admin approves them. The old human VIEW_TOKEN/ADMIN_TOKEN paths are gone. */
-export function requireAuth(db: Db, config: StatusConfig): MiddlewareHandler<{ Variables: AuthVars }> {
+export function requireAuth(storage: Storage, config: StatusConfig): MiddlewareHandler<{ Variables: AuthVars }> {
   return createMiddleware<{ Variables: AuthVars }>(async (c, next) => {
     if (config.authDisabled) {
       c.set('tier', 'admin');
@@ -46,7 +45,7 @@ export function requireAuth(db: Db, config: StatusConfig): MiddlewareHandler<{ V
       return next();
     }
 
-    const user = await resolveSession(db, readSessionCookie(c));
+    const user = await storage.auth.resolveSession(readSessionCookie(c));
     if (user && (user.role === 'admin' || user.role === 'viewer')) {
       c.set('tier', user.role === 'admin' ? 'admin' : 'view');
       c.set('user', user);
@@ -61,7 +60,7 @@ export function requireAuth(db: Db, config: StatusConfig): MiddlewareHandler<{ V
     // through to the peer check.
     const raw = bearer(c);
     if (raw?.startsWith(TOKEN_PREFIX)) {
-      const token = await validateApiToken(db, raw);
+      const token = await storage.tokens.validateApiToken(raw);
       if (!token) throw new HTTPException(401, { message: 'Unauthorized' });
       c.set('tier', token.role === 'admin' ? 'admin' : 'view');
       c.set('user', null);

@@ -1,9 +1,8 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
-import type { Db } from '../libsql/client';
 import { requireAdmin, type AuthVars } from '../middleware/auth';
-import { listUsers, setUserRoleGuarded, deleteUserGuarded } from '../storage/auth-store';
+import type { Storage } from '../storage/ports';
 
 export const roleBody = z.object({ role: z.enum(['pending', 'viewer', 'admin']) });
 
@@ -12,11 +11,11 @@ export const roleBody = z.object({ role: z.enum(['pending', 'viewer', 'admin']) 
  * seam and gated to admins. The last-admin guard makes it impossible to lock the
  * instance out of administration (you can't demote or delete the only admin).
  */
-export function usersRoutes(db: Db): Hono<{ Variables: AuthVars }> {
+export function usersRoutes(storage: Storage): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
   app.use('*', requireAdmin);
 
-  app.get('/users', async (c) => c.json(await listUsers(db)));
+  app.get('/users', async (c) => c.json(await storage.auth.listUsers()));
 
   app.patch('/users/:id', async (c) => {
     const id = c.req.param('id');
@@ -30,7 +29,7 @@ export function usersRoutes(db: Db): Hono<{ Variables: AuthVars }> {
     // The guard is INSIDE the write statement (see setUserRoleGuarded): a
     // read-then-write pair here let two concurrent demotes of two different
     // admins both pass and leave zero admins — a permanent lockout.
-    const updated = await setUserRoleGuarded(db, id, role);
+    const updated = await storage.auth.setUserRoleGuarded(id, role);
     if (updated === undefined) throw new HTTPException(404, { message: 'User not found' });
     if (updated === 'blocked') throw new HTTPException(409, { message: 'Cannot demote the last admin' });
     return c.json(updated);
@@ -38,7 +37,7 @@ export function usersRoutes(db: Db): Hono<{ Variables: AuthVars }> {
 
   app.delete('/users/:id', async (c) => {
     const id = c.req.param('id');
-    const deleted = await deleteUserGuarded(db, id);
+    const deleted = await storage.auth.deleteUserGuarded(id);
     if (deleted === false) throw new HTTPException(404, { message: 'User not found' });
     if (deleted === 'blocked') throw new HTTPException(409, { message: 'Cannot delete the last admin' });
     return c.json({ ok: true });

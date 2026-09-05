@@ -1,5 +1,6 @@
 import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
+import type { Storage } from '../storage/ports';
 import type { LiveSnapshot } from '../monitor/live-types';
 import { buildLiveSnapshot } from '../routes/reads';
 
@@ -12,7 +13,7 @@ import { buildLiveSnapshot } from '../routes/reads';
  * event raised on instance B — but the client's polling fallback re-reads the DB,
  * so a missed push only adds latency, never loses truth.
  *
- * The producer (a finished cycle, or a webhook) calls `emitLiveUpdate(db, config)`; we
+ * The producer (a finished cycle, or a webhook) calls `emitLiveUpdate(db, storage, config)`; we
  * build ONE snapshot and hand the SAME object to every subscriber, so N open
  * streams cost one DB read, not N. Bursts coalesce into a single trailing build.
  *
@@ -71,12 +72,12 @@ let pending: ReturnType<typeof setTimeout> | null = null;
  *  of calls within COALESCE_MS folds into one build+fan-out. Fail-soft — a failed
  *  build is logged and dropped (the next cycle/poll recovers), never thrown into
  *  the cycle/webhook that called us. */
-export function emitLiveUpdate(db: Db, config: StatusConfig): void {
+export function emitLiveUpdate(db: Db, storage: Storage, config: StatusConfig): void {
   if (subscribers.size === 0) return; // nobody listening — skip the DB read entirely
   if (pending) return; // a build is already scheduled; this call folds into it
   pending = setTimeout(() => {
     pending = null;
-    buildLiveSnapshot(db, config)
+    buildLiveSnapshot(db, storage, config)
       .then(publishSnapshot)
       .catch((err) => console.error('[live-events] emit build failed:', err));
   }, COALESCE_MS);

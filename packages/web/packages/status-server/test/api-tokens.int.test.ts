@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import { sessionHeaders } from './helpers/auth';
 import { freshDb } from './helpers/db';
-import { TOKEN_PREFIX } from '../src/storage/token-store';
+import { TOKEN_PREFIX } from '../src/storage/ports';
 import { testConfig } from './helpers/config';
 
 type App = ReturnType<typeof createApp>;
@@ -15,7 +16,7 @@ function bearer(raw: string): { Authorization: string } {
  *  allowed to mint). */
 async function setup(): Promise<{ app: App; admin: string; db: Awaited<ReturnType<typeof freshDb>> }> {
   const db = await freshDb();
-  const app = createApp({ db, config: testConfig() });
+  const app = createApp(testDeps(db));
   const admin = (await sessionHeaders(db, 'admin')).Cookie;
   return { app, admin, db };
 }
@@ -149,7 +150,7 @@ describe('api_tokens — sts_ bearer tokens on the tier seam', () => {
   it('minting under AUTH_DISABLED is 403 — a non-session principal has no honest created_by', async () => {
     process.env.AUTH_DISABLED = '1';
     const db = await freshDb();
-    const app = createApp({ db, config: testConfig() });
+    const app = createApp(testDeps(db));
     const res = await app.request('/tokens', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

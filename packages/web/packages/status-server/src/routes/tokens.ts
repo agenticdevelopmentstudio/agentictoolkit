@@ -1,9 +1,8 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
-import type { Db } from '../libsql/client';
 import { requireAdmin, type AuthVars } from '../middleware/auth';
-import { mintApiToken, listApiTokens, revokeApiToken } from '../storage/token-store';
+import type { Storage } from '../storage/ports';
 import { readValidatedBody } from './read-body';
 
 export const createSchema = z.object({
@@ -19,7 +18,7 @@ export const createSchema = z.object({
  * honest `created_by`), so under AUTH_DISABLED (no session user) and for a token
  * principal alike, POST is 403. A token may, however, revoke ITSELF.
  */
-export function tokensRoutes(db: Db): Hono<{ Variables: AuthVars }> {
+export function tokensRoutes(storage: Storage): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
 
   app.post('/tokens', requireAdmin, async (c) => {
@@ -31,7 +30,7 @@ export function tokensRoutes(db: Db): Hono<{ Variables: AuthVars }> {
       throw new HTTPException(403, { message: 'Minting a token requires a signed-in admin user' });
     }
     const { name, role, expiresAt } = await readValidatedBody(c, createSchema);
-    const { meta, raw } = await mintApiToken(db, {
+    const { meta, raw } = await storage.tokens.mintApiToken({
       name,
       role,
       createdBy: user.id,
@@ -43,7 +42,7 @@ export function tokensRoutes(db: Db): Hono<{ Variables: AuthVars }> {
   });
 
   app.get('/tokens', requireAdmin, async (c) => {
-    const tokens = await listApiTokens(db);
+    const tokens = await storage.tokens.listApiTokens();
     // Credential metadata (ids, prefixes) — keep it out of shared caches.
     c.header('Cache-Control', 'no-store');
     return c.json(tokens);
@@ -56,7 +55,7 @@ export function tokensRoutes(db: Db): Hono<{ Variables: AuthVars }> {
     const isAdmin = c.get('tier') === 'admin';
     const isSelf = c.get('token')?.id === id;
     if (!isAdmin && !isSelf) throw new HTTPException(403, { message: 'Admin required' });
-    const ok = await revokeApiToken(db, id);
+    const ok = await storage.tokens.revokeApiToken(id);
     if (!ok) throw new HTTPException(404, { message: 'token not found' });
     return c.body(null, 204);
   });

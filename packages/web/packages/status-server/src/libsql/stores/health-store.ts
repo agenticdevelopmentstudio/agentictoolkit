@@ -1,14 +1,19 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
+import type { Db } from "../client";
+import type { BadRunOnsetRow, HealthStore, LatestCheckRow } from "../../storage/ports";
+
+// ---------------------------------------------------------------------------
+// The libSQL implementation of `HealthStore`. Bodies moved verbatim from the
+// pre-port `src/storage/health-store.ts`; the raw SQL and its sargability /
+// tiebreak rationale are unchanged, only wrapped as methods over a `db` closure
+// instead of exported SQL-builder functions a caller had to `db.all(...)` itself.
+// ---------------------------------------------------------------------------
 
 /**
- * The latest-check-per-slug read, as SQL. THE ONLY WAY anything reads "the current
+ * The latest-check-per-slug read. THE ONLY WAY anything reads "the current
  * health of these endpoints" — the board fold (`readEndpointFacts`) and every route
  * read (`latestCheckBySlug` in `routes/reads.ts`) both go through this one statement,
- * so `/live` and the board can never disagree about which probe is the newest. It lives
- * here, in storage, rather than in either caller, precisely so neither owns it.
- *
- * Exported so the test can EXPLAIN the REAL statement (see latest-check.int.test.ts)
- * rather than a copy that could drift.
+ * so `/live` and the board can never disagree about which probe is the newest.
  *
  * This must stay O(slugs · log rows): ONE backward covering seek per requested slug
  * on `idx_health_service_checked` — `id` is the rowid tail of that index, so the
@@ -28,7 +33,7 @@ import { sql, type SQL } from "drizzle-orm";
  * rows — so `/live` could say `healthy` while the board derived `down` from the other
  * row of the same pair. One statement, one tiebreak: the later INSERT wins, everywhere.
  */
-export function latestCheckBySlugSql(slugs: string[]): SQL {
+export function latestCheckBySlugSql(slugs: string[]) {
   return sql`
     select hc.service_slug, hc.status, hc.response_time_ms, hc.status_code, hc.error, hc.checked_at, hc.dns_ok
     from json_each(${JSON.stringify(slugs)}) as slug_list
@@ -56,7 +61,7 @@ export function latestCheckBySlugSql(slugs: string[]): SQL {
  * starts at its first check. A slug whose rows are all healthy contributes no row at all,
  * and the caller falls back to the check's own timestamp.
  */
-export function badRunOnsetBySlugSql(slugs: string[]): SQL {
+function badRunOnsetBySlugSql(slugs: string[]) {
   return sql`
     select hc.service_slug as service_slug, min(hc.checked_at) as since
     from json_each(${JSON.stringify(slugs)}) as slug_list
@@ -69,21 +74,15 @@ export function badRunOnsetBySlugSql(slugs: string[]): SQL {
   `;
 }
 
-/** One row per slug that has a current bad run, `since` in epoch SECONDS. */
-export interface BadRunOnsetRow {
-  service_slug: string;
-  since: number | null;
-}
+/** Build the `HealthStore` port over one connection. */
+export function createHealthStore(db: Db): HealthStore {
+  return {
+    latestChecks(slugs: string[]): Promise<LatestCheckRow[]> {
+      return db.all<LatestCheckRow>(latestCheckBySlugSql(slugs));
+    },
 
-/** The raw shape `latestCheckBySlugSql` returns — snake_case columns straight from
- *  SQLite, with `checked_at` in epoch SECONDS (drizzle's timestamp mode) and `dns_ok`
- *  as 0/1. Both callers map it into their own richer type. */
-export interface LatestCheckRow {
-  service_slug: string;
-  status: string;
-  response_time_ms: number | null;
-  status_code: number | null;
-  error: string | null;
-  checked_at: number;
-  dns_ok: number;
+    badRunOnsets(slugs: string[]): Promise<BadRunOnsetRow[]> {
+      return db.all<BadRunOnsetRow>(badRunOnsetBySlugSql(slugs));
+    },
+  };
 }

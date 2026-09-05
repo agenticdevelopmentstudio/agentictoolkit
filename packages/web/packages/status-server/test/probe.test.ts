@@ -10,7 +10,7 @@ const { resolve4, resolve6, resolveCname } = vi.hoisted(() => ({
 vi.mock('node:dns', () => ({ promises: { resolve4, resolve6, resolveCname } }));
 
 import { probe } from '../src/monitor/probe';
-import type { ConfiguredEndpoint } from '../src/storage/config-store';
+import type { ConfiguredEndpoint } from '../src/storage/ports';
 
 // Base endpoint shape — fields required by ConfiguredEndpoint.
 const base: ConfiguredEndpoint = {

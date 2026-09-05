@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
+import type { Storage } from '../storage/ports';
 import type { AuthVars } from '../middleware/auth';
 import type { Scheduler } from '../scheduler';
 import type { LiveSnapshot } from '../monitor/live-types';
@@ -49,7 +50,7 @@ function scheduleFrame(scheduler: Scheduler | undefined): string {
   return `event: schedule\ndata: ${JSON.stringify({ nextCheckAt: next })}\n\n`;
 }
 
-export function streamRoutes(db: Db, scheduler: Scheduler | undefined, config: StatusConfig): Hono<{ Variables: AuthVars }> {
+export function streamRoutes(db: Db, storage: Storage, scheduler: Scheduler | undefined, config: StatusConfig): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
 
   app.get('/live/stream', async (c) => {
@@ -61,7 +62,7 @@ export function streamRoutes(db: Db, scheduler: Scheduler | undefined, config: S
     let initial: LiveSnapshot | null = recentSnapshot(OPENING_CACHE_MS);
     if (!initial) {
       try {
-        initial = await buildLiveSnapshot(db, config);
+        initial = await buildLiveSnapshot(db, storage, config);
       } catch (err) {
         console.error('[live/stream] opening snapshot failed:', err);
         initial = null;

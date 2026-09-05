@@ -8,7 +8,7 @@ import { createApp } from '../src/app';
 import { clearDeployEvents } from '../src/monitor/live-buffer';
 import { _resetAlerts } from '../src/monitor/alerts';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 // A webhook is the FASTEST signal the monitor gets — a provider telling us a
 // deploy failed, seconds after it did. Persisting it and pushing it to the
@@ -41,7 +41,7 @@ async function bootApp() {
     platform: 'vercel',
     deployProject: 'my-project',
   });
-  return { app: createApp({ db, config: testConfig() }), db };
+  return { app: createApp(testDeps(db)), db };
 }
 
 let sent: { text: string }[];

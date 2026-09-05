@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import type { Db } from '../src/libsql/client';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
 import { testConfig } from './helpers/config';
@@ -20,7 +21,7 @@ describe('request body limit (app-wide)', () => {
     // the auth seam — without a global cap, an anonymous POST could buffer an
     // arbitrarily large body into memory before the signature rejects it.
     const db = await bootDb();
-    const app = createApp({ db, config: testConfig() });
+    const app = createApp(testDeps(db));
     const res = await app.request('/hooks/vercel', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -31,7 +32,7 @@ describe('request body limit (app-wide)', () => {
 
   it('passes normal-sized bodies through to the route untouched', async () => {
     const db = await bootDb();
-    const app = createApp({ db, config: testConfig() });
+    const app = createApp(testDeps(db));
     // No webhook secret configured → the handler itself answers 503; reaching it
     // proves the limit middleware let the small body pass.
     const res = await app.request('/hooks/vercel', {
@@ -44,7 +45,7 @@ describe('request body limit (app-wide)', () => {
 
   it('does not interfere with auth routes', async () => {
     const db = await bootDb();
-    const app = createApp({ db, config: testConfig() });
+    const app = createApp(testDeps(db));
     const res = await app.request('/auth/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

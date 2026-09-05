@@ -9,7 +9,7 @@ import {
   siteGroups,
   vercelProdState,
 } from '../src/libsql/schema';
-import { createIntegration, deleteIntegration } from '../src/storage/config-store';
+import { createLibsqlStorage } from '../src/libsql';
 import { applyBoardToLedger, openByTarget } from '../src/monitor/issues';
 import { notifyIssueAlert } from '../src/monitor/alerts';
 
@@ -240,7 +240,7 @@ describe('the orphan sweep is now membership in monitoredTargets', () => {
     for (let i = 0; i < PLATFORM_UNREACHABLE_POLLS; i++) {
       await recordPlatformObservations(db, [{ source: 'vercel', configured: true, reachable: false }]);
     }
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect((await openRows(db)).map((r) => r.target)).toEqual(['platform-health|vercel']);
   });
 
@@ -255,7 +255,7 @@ describe('the orphan sweep is now membership in monitoredTargets', () => {
       id: 'cr_1', platform: 'crunchy', projectName: 'adh-testing', environment: 'testing',
       buildPhase: 'failed', deployPhase: 'none', createdAt: new Date(),
     });
-    await reconcileBoardLedger(db, testConfig()); // no sites at all
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig()); // no sites at all
     expect((await openRows(db)).map((r) => r.target)).toEqual([target]); // survives, not resolved
   });
 
@@ -357,14 +357,14 @@ describe('Vercel production staleness — the mirror is the fact, and a null lin
     const db = await freshDb();
     await seedVercelSite(db);
     await recordVercelProdStates(db, [stale()]);
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect((await openRows(db)).map((r) => r.target)).toEqual(['vercel|web-prod|']);
 
     // The next read does not mention the project at all. The old [#8] sweep resolved on
     // absence → it flapped open/resolved every cycle. An empty read now deletes nothing
     // from the mirror, the fold still reads a stale row, and the ledger row stays open.
     await recordVercelProdStates(db, []);
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect((await openRows(db)).map((r) => r.target)).toEqual(['vercel|web-prod|']);
   });
 
@@ -372,11 +372,11 @@ describe('Vercel production staleness — the mirror is the fact, and a null lin
     const db = await freshDb();
     await seedVercelSite(db);
     await recordVercelProdStates(db, [stale()]);
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect(await openRows(db)).toHaveLength(1);
 
     await recordVercelProdStates(db, [stale({ stale: false, detail: null })]);
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect(await openRows(db)).toHaveLength(0);
     // Still WATCHED — the site is wired, it just stopped being stale. That is a recovery.
     expect((await db.select().from(issues))[0]!.resolvedReason).toBe('recovered');
@@ -442,7 +442,7 @@ describe('a retry in flight must not close the failure it is retrying', () => {
     await db.insert(deployments).values(
       row({ id: 'dpl_bad', buildPhase: 'failed', createdAt: new Date(NOW - 10 * 60_000) }),
     );
-    await reconcileBoardLedger(db, testConfig(), { nowMs: NOW });
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig(), { nowMs: NOW });
     const [opened] = await openRows(db);
     expect(opened!.target).toBe('vercel|web-prod|');
 
@@ -454,7 +454,7 @@ describe('a retry in flight must not close the failure it is retrying', () => {
     await db.insert(deployments).values(
       row({ id: 'dpl_fix', buildPhase: 'building', createdAt: new Date(NOW - 2 * 60_000) }),
     );
-    await reconcileBoardLedger(db, testConfig(), { nowMs: NOW });
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig(), { nowMs: NOW });
 
     const all = await db.select().from(issues);
     expect(all).toHaveLength(1);
@@ -467,7 +467,7 @@ describe('a retry in flight must not close the failure it is retrying', () => {
     await db.update(deployments)
       .set({ buildPhase: 'built', deployPhase: 'deployed', createdAt: new Date(NOW - 60_000) })
       .where(eq(deployments.id, 'dpl_fix'));
-    await reconcileBoardLedger(db, testConfig(), { nowMs: NOW });
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig(), { nowMs: NOW });
     const after = await db.select().from(issues);
     expect(after[0]!.resolvedAt).not.toBeNull();
     expect(after[0]!.resolvedReason).toBe('recovered');
@@ -485,14 +485,14 @@ describe('platform-unreachable debounce', () => {
     for (let i = 0; i < PLATFORM_UNREACHABLE_POLLS; i++) {
       await recordPlatformObservations(db, [{ source: 'vercel', configured: true, reachable: false }]);
     }
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect(await openRows(db)).toHaveLength(1);
 
     // The operator pulls the token: not configured. Nothing recovered — we simply
     // stopped looking, and the provider may still be down. Only "recovered" closes may
     // become an Activity "[state] resolved" row, so this MUST persist as "unmonitored".
     await recordPlatformObservations(db, [{ source: 'vercel', configured: false, reachable: false }]);
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
 
     const all = await db.select().from(issues);
     expect(all).toHaveLength(1);
@@ -505,9 +505,9 @@ describe('platform-unreachable debounce', () => {
     for (let i = 0; i < PLATFORM_UNREACHABLE_POLLS; i++) {
       await recordPlatformObservations(db, [{ source: 'vercel', configured: true, reachable: false }]);
     }
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     await recordPlatformObservations(db, [{ source: 'vercel', configured: true, reachable: true }]);
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
 
     const all = await db.select().from(issues);
     expect(all).toHaveLength(1);
@@ -520,7 +520,7 @@ describe('platform-unreachable debounce', () => {
    * health, the way it already holds for the endpoint switches.
    *
    * Three call sites (`DELETE /config/integrations/:id`, the `delete_platform` MCP tool)
-   * follow `deleteIntegration` with `reconcileBoardLedger(db, testConfig())` and document it as retiring
+   * follow `storage.config.deleteIntegration` with `reconcileBoardLedger(db, storage, config)` and document it as retiring
    * rows that "can no longer be re-derived". That was false while the delete touched only
    * `deploy_integrations`: `platformProblems` reads `platform_health_state.configured`,
    * which nothing outside a monitor cycle rewrote, so the Problem re-derived unchanged and
@@ -529,24 +529,24 @@ describe('platform-unreachable debounce', () => {
    */
   it('deleting the integration un-configures the platform, so the reconcile closes its row as unmonitored', async () => {
     const db = await freshDb();
-    const integration = await createIntegration(db, { platform: 'cloudflare', label: 'Cloudflare' });
+    const integration = await createLibsqlStorage(db).config.createIntegration({ platform: 'cloudflare', label: 'Cloudflare' });
     for (let i = 0; i < PLATFORM_UNREACHABLE_POLLS; i++) {
       await recordPlatformObservations(db, [{ source: 'cloudflare-pages', configured: true, reachable: false }]);
     }
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect(await openRows(db)).toHaveLength(1);
 
     // Cloudflare deliberately: the integration row spells it `cloudflare` and the health
     // row spells it `cloudflare-pages`, so a cast between the two vocabularies would pass
     // every other platform and silently skip this one.
-    await deleteIntegration(db, integration.id);
+    await createLibsqlStorage(db).config.deleteIntegration(integration.id);
     const [health] = await db.select().from(platformHealthState);
     expect(health!.configured).toBe(false);
     // The monitor's heartbeat is NOT restamped by a config mutation — that column feeds
     // `Board.dataAsOfMs`, and a write that is not a cycle must never refresh it.
     expect(health!.updatedAt.getTime()).toBeLessThanOrEqual(Date.now());
 
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     const all = await db.select().from(issues);
     expect(all).toHaveLength(1);
     expect(all[0]!.resolvedAt).not.toBeNull();
@@ -556,38 +556,38 @@ describe('platform-unreachable debounce', () => {
 
   it('leaves the platform configured while ANOTHER active integration still speaks for it', async () => {
     const db = await freshDb();
-    const first = await createIntegration(db, { platform: 'vercel', label: 'Vercel (team A)' });
-    await createIntegration(db, { platform: 'vercel', label: 'Vercel (team B)' });
+    const first = await createLibsqlStorage(db).config.createIntegration({ platform: 'vercel', label: 'Vercel (team A)' });
+    await createLibsqlStorage(db).config.createIntegration({ platform: 'vercel', label: 'Vercel (team B)' });
     for (let i = 0; i < PLATFORM_UNREACHABLE_POLLS; i++) {
       await recordPlatformObservations(db, [{ source: 'vercel', configured: true, reachable: false }]);
     }
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect(await openRows(db)).toHaveLength(1);
 
     // Un-configuring here would silence a platform we ARE still polling — an absence of
     // data reported as health, in the direction that hides a real outage.
-    await deleteIntegration(db, first.id);
+    await createLibsqlStorage(db).config.deleteIntegration(first.id);
     const [health] = await db.select().from(platformHealthState);
     expect(health!.configured).toBe(true);
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect(await openRows(db)).toHaveLength(1);
   });
 
   it('an INACTIVE leftover integration does not keep the platform configured', async () => {
     const db = await freshDb();
-    const live = await createIntegration(db, { platform: 'vercel', label: 'Vercel' });
-    await createIntegration(db, { platform: 'vercel', label: 'Vercel (retired)', isActive: false });
+    const live = await createLibsqlStorage(db).config.createIntegration({ platform: 'vercel', label: 'Vercel' });
+    await createLibsqlStorage(db).config.createIntegration({ platform: 'vercel', label: 'Vercel (retired)', isActive: false });
     for (let i = 0; i < PLATFORM_UNREACHABLE_POLLS; i++) {
       await recordPlatformObservations(db, [{ source: 'vercel', configured: true, reachable: false }]);
     }
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
 
     // `providerConnFromConfig` reads ACTIVE rows only, so an inactive one polls nothing
     // and cannot be the reason we still call the platform configured.
-    await deleteIntegration(db, live.id);
+    await createLibsqlStorage(db).config.deleteIntegration(live.id);
     const [health] = await db.select().from(platformHealthState);
     expect(health!.configured).toBe(false);
-    await reconcileBoardLedger(db, testConfig());
+    await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     const all = await db.select().from(issues);
     expect(all[0]!.resolvedReason).toBe('unmonitored');
   });
@@ -773,7 +773,7 @@ describe("reconcileBoardLedger — empty-roster policy", () => {
       target: "vercel|a|", source: "vercel", name: "a",
       severity: "major", state: "failed", openedAt: new Date(),
     });
-    const r = await reconcileBoardLedger(db, testConfig(), { skipOnEmptyRoster: true });
+    const r = await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig(), { skipOnEmptyRoster: true });
     expect(r).toMatchObject({ resolved: 0, skipped: true });
     expect((await db.select().from(issues))[0]!.resolvedAt).toBeNull();
   });
@@ -784,7 +784,7 @@ describe("reconcileBoardLedger — empty-roster policy", () => {
       target: "vercel|a|", source: "vercel", name: "a",
       severity: "major", state: "failed", openedAt: new Date(),
     });
-    const r = await reconcileBoardLedger(db, testConfig());
+    const r = await reconcileBoardLedger(db, createLibsqlStorage(db), testConfig());
     expect(r).toMatchObject({ resolved: 1, skipped: false });
     expect((await db.select().from(issues))[0]!.resolvedAt).not.toBeNull();
   });

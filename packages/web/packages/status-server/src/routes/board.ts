@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
+import type { Storage } from '../storage/ports';
 import { requireAdmin } from '../middleware/auth';
 import { deriveBoard, readBoardFacts, reconcileBoardLedger } from '../board';
 
-export function boardRoutes(db: Db, config: StatusConfig) {
+export function boardRoutes(db: Db, storage: Storage, config: StatusConfig) {
   const app = new Hono();
 
   /**
@@ -13,7 +14,7 @@ export function boardRoutes(db: Db, config: StatusConfig) {
    */
   app.get('/board', async (c) => {
     const nowMs = Date.now();
-    return c.json(deriveBoard(await readBoardFacts(db, nowMs, config), nowMs));
+    return c.json(deriveBoard(await readBoardFacts(db, storage, nowMs, config), nowMs));
   });
 
   /**
@@ -46,7 +47,7 @@ export function boardRoutes(db: Db, config: StatusConfig) {
     // `skipOnEmptyRoster` because this route only OBSERVES: it cannot tell "every site was
     // deleted" from "the read blipped", and its own docstring invites running it on a loop.
     // The five config mutations pass no flag — they caused the emptiness, so they sweep.
-    const { board, opened, updated, resolved, resolvedTargets, skipped } = await reconcileBoardLedger(db, config, {
+    const { board, opened, updated, resolved, resolvedTargets, skipped } = await reconcileBoardLedger(db, storage, config, {
       skipOnEmptyRoster: true,
     });
     return c.json({ opened, updated, resolved, targets: resolvedTargets, checkedAt: board.generatedAt, skipped });

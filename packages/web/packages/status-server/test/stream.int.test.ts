@@ -11,6 +11,7 @@ import { sessionHeaders } from './helpers/auth';
 import { liveSnapshot } from './helpers/snapshot';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
 import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -32,7 +33,7 @@ async function bootApp(runNowDetached: () => boolean): Promise<{ app: ReturnType
   const client = createClient({ url: ':memory:' });
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-  const app = createApp({ db, scheduler: fakeScheduler(runNowDetached), config: testConfig() });
+  const app = createApp({ ...testDeps(db), scheduler: fakeScheduler(runNowDetached) });
   return { app, db };
 }
 
@@ -161,7 +162,7 @@ describe('POST /live/check', () => {
     const client = createClient({ url: ':memory:' });
     const db = drizzle(client, { schema });
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-    const app = createApp({ db, scheduler, config: testConfig() });
+    const app = createApp({ ...testDeps(db), scheduler });
     const cookie = await sessionHeaders(db, 'viewer');
 
     try {

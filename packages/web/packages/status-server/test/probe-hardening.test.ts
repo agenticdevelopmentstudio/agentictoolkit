@@ -12,7 +12,7 @@ const { resolve4, resolve6, resolveCname } = vi.hoisted(() => ({
 vi.mock('node:dns', () => ({ promises: { resolve4, resolve6, resolveCname } }));
 
 import { probe, PROBE_BODY_MAX_BYTES } from '../src/monitor/probe';
-import type { ConfiguredEndpoint } from '../src/storage/config-store';
+import type { ConfiguredEndpoint } from '../src/storage/ports';
 
 // These tests exercise the REAL fetch against a real local server: the failure
 // modes under test (a body that never finishes, an endless body, an unread

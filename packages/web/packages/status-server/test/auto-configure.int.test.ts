@@ -18,11 +18,13 @@ import { createApp } from '../src/app';
 import { deployProjectMeta, monitoredEndpoints } from '../src/libsql/schema';
 import { statusAdapter } from '../src/routes/auto-configure';
 import { runAutoConfigure } from '@agentic-toolkit/deploy-platform/engine';
-import { listSites, listEndpoints } from '../src/storage/config-store';
+import { createLibsqlStorage } from '../src/libsql';
+import type { Storage } from '../src/storage/ports';
 import { runCycle } from '../src/monitor/sync';
 import { sessionHeaders } from './helpers/auth';
 import { freshDb, type Db } from './helpers/db';
 import { stubVercelAccount, type FakeVercelAccount } from './helpers/vercel-account';
+import { testDeps } from './helpers/storage';
 import { testConfig } from './helpers/config';
 
 // The server-side Auto Configure engine, run against a FAKE VERCEL ACCOUNT (a seeded
@@ -35,14 +37,16 @@ import { testConfig } from './helpers/config';
 describe('server-side auto-configure', () => {
   let app: ReturnType<typeof createApp>;
   let db: Db;
+  let storage: Storage;
   let adminAuth: { Cookie: string };
   let vercel: FakeVercelAccount;
 
   beforeEach(async () => {
     db = await freshDb();
+    storage = createLibsqlStorage(db);
     adminAuth = await sessionHeaders(db, 'admin');
     vercel = await stubVercelAccount(db);
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   afterEach(() => {
@@ -95,9 +99,9 @@ describe('server-side auto-configure', () => {
     expect(await res.json()).toMatchObject({ added: 0, created: 1 });
 
     // A fresh endpoint monitoring the project's domain now exists, wired + filed under the group.
-    const sites = await listSites(db);
+    const sites = await storage.config.listSites();
     expect(sites).toHaveLength(1);
-    const endpoints = await listEndpoints(db);
+    const endpoints = await storage.config.listEndpoints();
     expect(endpoints).toHaveLength(1);
     expect(endpoints[0]).toMatchObject({
       url: 'https://new.example.test',
@@ -123,8 +127,8 @@ describe('server-side auto-configure', () => {
     expect(await res.json()).toMatchObject({ added: 0, created: 1, skipped: 0 });
 
     // The staging monitor joined the EXISTING site — no duplicate site was created.
-    expect((await listSites(db)).map((s) => s.id)).toEqual([site.id]);
-    const endpoints = await listEndpoints(db);
+    expect((await storage.config.listSites()).map((s) => s.id)).toEqual([site.id]);
+    const endpoints = await storage.config.listEndpoints();
     expect(endpoints.map((e) => e.url).sort()).toEqual([
       'https://staging.stenographer.example.test',
       'https://www.stenographer.example.test',
@@ -152,11 +156,11 @@ describe('server-side auto-configure', () => {
     expect(await res.json()).toMatchObject({ added: 0, created: 1, skipped: 0 });
 
     // A second site exists, under a slug the constraint accepts, and it carries the monitor.
-    const sites = await listSites(db);
+    const sites = await storage.config.listSites();
     expect(sites).toHaveLength(2);
     const created = sites.find((s) => s.id !== squatter.id)!;
     expect(created.slug).toBe('lonely-example-test');
-    expect(await listEndpoints(db)).toMatchObject([
+    expect(await storage.config.listEndpoints()).toMatchObject([
       { url: 'https://lonely.example.test', platform: 'vercel', deployProject: 'lonely-production', siteId: created.id },
     ]);
   });
@@ -207,7 +211,7 @@ describe('server-side auto-configure', () => {
     expect(body.created).toBe(1);
 
     // It landed with the family, NOT in the group the operator picked…
-    const created = (await listSites(db)).find((s) => s.id !== hub.id)!;
+    const created = (await storage.config.listSites()).find((s) => s.id !== hub.id)!;
     expect(created.siteGroupId).toBe(adh.id);
     // …and the response says so, naming the family that decided it.
     expect(body.notes).toHaveLength(1);
@@ -229,7 +233,7 @@ describe('server-side auto-configure', () => {
     const body = (await res.json()) as { created: number; notes: unknown[] };
     expect(body.created).toBe(1);
 
-    const created = (await listSites(db)).find((s) => s.id !== hub.id)!;
+    const created = (await storage.config.listSites()).find((s) => s.id !== hub.id)!;
     expect(created.siteGroupId).toBe(other.id);
     expect(body.notes).toEqual([]); // nothing was overridden, so there is nothing to report
   });
@@ -259,7 +263,7 @@ describe('server-side auto-configure', () => {
     expect(body.skippedDetail[0]!.reason).toContain('production');
     expect(body.skippedDetail[0]!.reason).toContain('already wired to x');
     // Still exactly one monitor on that site.
-    expect(await listEndpoints(db)).toHaveLength(1);
+    expect(await storage.config.listEndpoints()).toHaveLength(1);
   });
 
   it('rolls back the just-created site when its endpoint fails to create (no orphan)', async () => {
@@ -267,7 +271,7 @@ describe('server-side auto-configure', () => {
     // monitored_endpoints has no unique/NOT-NULL an Add can trip, so a createEndpoint
     // failure can't be provoked through a DB constraint — inject it to exercise the
     // rollback wire (real createSite runs, real purging deleteSite must undo it).
-    const api = { ...statusAdapter(db), createEndpoint: () => Promise.reject(new Error('boom')) };
+    const api = { ...statusAdapter(storage), createEndpoint: () => Promise.reject(new Error('boom')) };
     const project = { platform: 'vercel', projectName: 'lonely', domain: 'lonely.example.test', environment: null };
 
     const res = await runAutoConfigure([project], { api, create: { groupId: group.id } });
@@ -275,8 +279,8 @@ describe('server-side auto-configure', () => {
     expect(res.skipped).toHaveLength(1);
 
     // The site the engine created was rolled back — nothing orphaned.
-    expect(await listSites(db)).toHaveLength(0);
-    expect(await listEndpoints(db)).toHaveLength(0);
+    expect(await storage.config.listSites()).toHaveLength(0);
+    expect(await storage.config.listEndpoints()).toHaveLength(0);
   });
 
   it('GET /deploy-projects/unconfigured returns an unmatched project as addable; viewer POST is 403', async () => {
@@ -333,13 +337,13 @@ describe('server-side auto-configure', () => {
     vercel.remove('docs-old');
     vercel.failHost('docs.example.test');
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
     // The dead monitor is GONE — and so is the site it was the last monitor of, so nothing
     // is left on the board describing a project that no longer exists. Nothing surfaces it
     // for review first; there is nothing to decide.
-    expect((await listEndpoints(db)).map((e) => e.url)).toEqual(['https://web.example.test']);
-    expect((await listSites(db)).map((s) => s.id)).toEqual([keptSite.id]);
+    expect((await storage.config.listEndpoints()).map((e) => e.url)).toEqual(['https://web.example.test']);
+    expect((await storage.config.listSites()).map((s) => s.id)).toEqual([keptSite.id]);
   });
 
   it('removes NOTHING when the Vercel account cannot be read (a broken poll is not a deletion)', async () => {
@@ -353,10 +357,10 @@ describe('server-side auto-configure', () => {
 
     vercel.setBroken(true);
     vercel.failHost('docs.example.test'); // down as well as unreadable — still not deletable
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
-    expect(await listEndpoints(db)).toHaveLength(1);
-    expect(await listSites(db)).toHaveLength(1);
+    expect(await storage.config.listEndpoints()).toHaveLength(1);
+    expect(await storage.config.listSites()).toHaveLength(1);
   });
 
   it('removes NOTHING when the account reads back EMPTY — zero projects is not zero deletions', async () => {
@@ -376,10 +380,10 @@ describe('server-side auto-configure', () => {
     vercel.remove('docs-old');
     vercel.failHost('docs.example.test');
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
-    expect(await listEndpoints(db)).toHaveLength(1);
-    expect(await listSites(db)).toHaveLength(1);
+    expect(await storage.config.listEndpoints()).toHaveLength(1);
+    expect(await storage.config.listSites()).toHaveLength(1);
   });
 
   it('removes NOTHING when EVERY wired project is missing from a non-empty read', async () => {
@@ -397,10 +401,10 @@ describe('server-side auto-configure', () => {
     vercel.failHost('docs.example.test'); // dark, so only the guard can be what saves it
     seedProject('someone-elses', 'elsewhere.example.test'); // a full, healthy read of the WRONG scope
 
-    await runCycle(db, testConfig());
+    await runCycle(db, storage, testConfig());
 
-    expect(await listEndpoints(db)).toHaveLength(1);
-    expect(await listSites(db)).toHaveLength(1);
+    expect(await storage.config.listEndpoints()).toHaveLength(1);
+    expect(await storage.config.listSites()).toHaveLength(1);
   });
 
   it('REPAIRS a monitor still wired to a project RENAMED at Vercel, and reports the takeover', async () => {
@@ -425,10 +429,10 @@ describe('server-side auto-configure', () => {
     const body = (await res.json()) as { added: number; created: number; skipped: number; notes: { project: string; note: string }[] };
     expect(body).toMatchObject({ added: 1, created: 0, skipped: 0 });
     // Re-pointed IN PLACE — no second site, no second monitor for the same deployment.
-    const eps = await listEndpoints(db);
+    const eps = await storage.config.listEndpoints();
     expect(eps).toHaveLength(1);
     expect(eps[0]!.deployProject).toBe('new-name');
-    expect(await listSites(db)).toHaveLength(1);
+    expect(await storage.config.listSites()).toHaveLength(1);
     // …and the run SAYS it rewrote existing wiring, naming what it took over from.
     expect(body.notes).toHaveLength(1);
     expect(body.notes[0]!.project).toBe('new-name');
@@ -452,7 +456,7 @@ describe('server-side auto-configure', () => {
     const res = await postJson('/auto-configure', {}, adminAuth);
     const body = (await res.json()) as { added: number; notes: unknown[]; skippedDetail: { project: string; reason: string }[] };
     expect(body.notes).toEqual([]);
-    expect((await listEndpoints(db))[0]!.deployProject).toBe('incumbent'); // untouched
+    expect((await storage.config.listEndpoints())[0]!.deployProject).toBe('incumbent'); // untouched
     expect(body.skippedDetail.find((d) => d.project === 'claimant')!.reason).toContain('incumbent');
   });
 
@@ -475,7 +479,7 @@ describe('server-side auto-configure', () => {
     const body = (await res.json()) as { added: number; notes: unknown[]; skippedDetail: { project: string; reason: string }[] };
     expect(body.added).toBe(0);
     expect(body.notes).toEqual([]);
-    expect((await listEndpoints(db))[0]!.deployProject).toBe('legacy'); // untouched
+    expect((await storage.config.listEndpoints())[0]!.deployProject).toBe('legacy'); // untouched
     expect(body.skippedDetail.find((d) => d.project === 'claimant')!.reason).toContain('legacy');
   });
 
@@ -495,7 +499,7 @@ describe('server-side auto-configure', () => {
     // `vercelSkipped` is HOW MANY went unexamined: without a count the banner can only say
     // "some", which reads the same whether one project or the whole fleet was skipped.
     expect(await res.json()).toMatchObject({ added: 0, created: 0, vercelUnverified: true, vercelSkipped: 1 });
-    expect(await listSites(db)).toHaveLength(0);
+    expect(await storage.config.listSites()).toHaveLength(0);
     // The row SURVIVES: a failed read is not evidence of deletion, it's just not usable.
     expect(await metaNames()).toEqual(['new-app']);
   });
@@ -512,7 +516,7 @@ describe('auto-configure with NO Vercel integration', () => {
     // No integration row, no token — and a fetch that fails loudly, so an unconfigured
     // platform provably costs zero provider calls.
     vi.stubGlobal('fetch', vi.fn(async (url: string | URL) => { throw new Error(`unexpected fetch ${String(url)}`); }));
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   afterEach(() => {
@@ -543,14 +547,16 @@ describe('auto-configure with NO Vercel integration', () => {
 describe('auto-configure across a platform migration', () => {
   let app: ReturnType<typeof createApp>;
   let db: Db;
+  let storage: Storage;
   let adminAuth: { Cookie: string };
   let accounts: FakeVercelAccount;
 
   beforeEach(async () => {
     db = await freshDb();
+    storage = createLibsqlStorage(db);
     adminAuth = await sessionHeaders(db, 'admin');
     accounts = await stubVercelAccount(db, { railway: true });
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   afterEach(() => {
@@ -581,11 +587,11 @@ describe('auto-configure across a platform migration', () => {
 
     // Re-pointed IN PLACE, onto the new PLATFORM as well as the new name — the monitor
     // now polls the deployment that actually serves the host.
-    const eps = await listEndpoints(db);
+    const eps = await storage.config.listEndpoints();
     expect(eps).toHaveLength(1);
     expect(eps[0]!.platform).toBe('railway');
     expect(eps[0]!.deployProject).toBe('adh-status');
-    expect(await listSites(db)).toHaveLength(1);
+    expect(await storage.config.listSites()).toHaveLength(1);
     expect(body.notes[0]!.note).toContain('adh-status-monitoring-site');
   });
 
@@ -609,7 +615,7 @@ describe('auto-configure across a platform migration', () => {
     const body = (await res.json()) as { added: number; notes: unknown[]; skippedDetail: { project: string; reason: string }[] };
     expect(body.added).toBe(0);
     expect(body.notes).toEqual([]);
-    const eps = await listEndpoints(db);
+    const eps = await storage.config.listEndpoints();
     expect(eps[0]!.platform).toBe('vercel');
     expect(eps[0]!.deployProject).toBe('adh-status-monitoring-site'); // untouched
     expect(body.skippedDetail.find((d) => d.project === 'adh-status')!.reason).toContain('adh-status-monitoring-site');

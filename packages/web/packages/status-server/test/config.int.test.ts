@@ -3,7 +3,7 @@ import { createApp } from '../src/app';
 import type { SeedRoster } from '../src/config/seed';
 import { sessionHeaders } from './helpers/auth';
 import { freshDb as bootDb } from './helpers/db';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 describe('/config CRUD', () => {
   let app: ReturnType<typeof createApp>;
@@ -14,7 +14,7 @@ describe('/config CRUD', () => {
     const db = await bootDb();
     viewAuth = await sessionHeaders(db, 'viewer');
     adminAuth = await sessionHeaders(db, 'admin');
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   it('view token cannot create a site-group (403)', async () => {
@@ -253,7 +253,7 @@ describe('/config CRUD', () => {
     // Use a fresh DB so seed counts are deterministic
     const db2 = await bootDb();
     const adminAuth2 = await sessionHeaders(db2, 'admin');
-    const app2 = createApp({ db: db2, config: testConfig(), seed: FIXTURE_SEED });
+    const app2 = createApp({ ...testDeps(db2), seed: FIXTURE_SEED });
 
     const res = await app2.request('/config/seed', {
       method: 'POST',
@@ -281,7 +281,7 @@ describe('/config CRUD', () => {
   it('POST /config/seed with no host roster creates no groups, sites or endpoints', async () => {
     const db3 = await bootDb();
     const adminAuth3 = await sessionHeaders(db3, 'admin');
-    const app3 = createApp({ db: db3, config: testConfig() });
+    const app3 = createApp(testDeps(db3));
 
     const res = await app3.request('/config/seed', { method: 'POST', headers: adminAuth3 });
     expect(res.status).toBe(200);

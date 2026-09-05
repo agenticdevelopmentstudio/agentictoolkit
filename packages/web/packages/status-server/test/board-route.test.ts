@@ -7,6 +7,7 @@ import { deriveBoard, readBoardFacts, type Board, type Problem } from "../src/bo
 import type { Tier } from "../src/middleware/auth";
 import type { LiveSnapshot } from "../src/monitor/live-types";
 import { ALL_TOOLS } from "../src/mcp/tools";
+import { createLibsqlStorage } from "../src/libsql";
 import {
   deployProjectMeta, deployments, healthChecks, issues, monitoredEndpoints, monitoredSites,
   platformHealthState, siteGroups, vercelProdState,
@@ -39,21 +40,23 @@ async function appWithSeed(tier: Tier = "admin") {
     id: "ep-1", siteId: "site-1", url: "https://testing.help.example.com",
     platform: "vercel", deployProject: "hub-help-testing", environment: "production", isActive: true,
   });
+  const storage = createLibsqlStorage(db);
   const app = new Hono<{ Variables: { tier: Tier } }>();
   app.use("*", async (c, next) => { c.set("tier", tier); return next(); });
-  app.route("/", boardRoutes(db, testConfig()));
-  app.route("/", readsRoutes(db, testConfig()));
-  return { db, app };
+  app.route("/", boardRoutes(db, storage, testConfig()));
+  app.route("/", readsRoutes(db, storage, testConfig()));
+  return { db, storage, app };
 }
 
 // A roster-less DB: no group, no site, no endpoint. `appWithSeed`'s fleet is what makes
 // the sweep safe, so its absence is what the fail-closed guard is about.
 async function appWithoutRoster() {
   const db = await freshDb();
+  const storage = createLibsqlStorage(db);
   const app = new Hono<{ Variables: { tier: Tier } }>();
   app.use("*", async (c, next) => { c.set("tier", "admin"); return next(); });
-  app.route("/", boardRoutes(db, testConfig()));
-  return { db, app };
+  app.route("/", boardRoutes(db, storage, testConfig()));
+  return { db, storage, app };
 }
 
 describe("GET /board", () => {
@@ -174,13 +177,13 @@ describe("GET /board", () => {
   // no second derivation. A route that quietly narrowed the board would recreate the
   // exact defect this design removes, one layer up.
   it("serves EXACTLY deriveBoard of the same facts", async () => {
-    const { db, app } = await appWithSeed();
+    const { db, storage, app } = await appWithSeed();
     await db.insert(deployments).values({
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(),
     });
     const nowMs = Date.now();
-    const expected = deriveBoard(await readBoardFacts(db, nowMs, testConfig()), nowMs);
+    const expected = deriveBoard(await readBoardFacts(db, storage, nowMs, testConfig()), nowMs);
     const body = (await (await app.request("/board")).json()) as Board;
     // The two CLOCK-DERIVED fields are the only ones that legitimately differ — two clock
     // reads, ms apart. `activityFromMs` is `nowMs` minus a constant, so it carries the same
@@ -457,23 +460,23 @@ describe("MCP get_problems/get_issue read the SAME board GET /board does", () =>
   };
 
   it("get_problems returns exactly GET /board's problem targets, for the same seeded db", async () => {
-    const { db, app } = await appWithSeed();
+    const { db, storage, app } = await appWithSeed();
     await db.insert(deployments).values({
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(),
     });
     const board = (await (await app.request("/board")).json()) as Board;
-    const out = (await tool("get_problems").execute(db, {}, testConfig())) as Problem[];
+    const out = (await tool("get_problems").execute(db, storage, {}, testConfig())) as Problem[];
     expect(out.map((p) => p.target).sort()).toEqual(board.problems.map((p) => p.target).sort());
   });
 
   it("get_issue returns the Problem the board derives for a target it recognizes", async () => {
-    const { db } = await appWithSeed();
+    const { db, storage } = await appWithSeed();
     await db.insert(deployments).values({
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(),
     });
-    const out = (await tool("get_issue").execute(db, { target: "vercel|hub-help-testing|" }, testConfig())) as Problem | null;
+    const out = (await tool("get_issue").execute(db, storage, { target: "vercel|hub-help-testing|" }, testConfig())) as Problem | null;
     expect(out?.target).toBe("vercel|hub-help-testing|");
   });
 
@@ -481,12 +484,12 @@ describe("MCP get_problems/get_issue read the SAME board GET /board does", () =>
   // to read the ledger table directly (openByTarget), so a stale row the board no longer
   // derives still answered non-null, forever, for a target nothing monitors any more.
   it("get_issue returns null for a target only a stale LEDGER row carries", async () => {
-    const { db } = await appWithSeed();
+    const { db, storage } = await appWithSeed();
     await db.insert(issues).values({
       target: "vercel|long-deleted-site|", source: "vercel", name: "long-deleted-site",
       severity: "major", state: "failed", openedAt: new Date(),
     });
-    const out = await tool("get_issue").execute(db, { target: "vercel|long-deleted-site|" }, testConfig());
+    const out = await tool("get_issue").execute(db, storage, { target: "vercel|long-deleted-site|" }, testConfig());
     expect(out).toBeNull();
   });
 });

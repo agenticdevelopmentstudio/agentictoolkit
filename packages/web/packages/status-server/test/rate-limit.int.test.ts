@@ -6,7 +6,7 @@ import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
 import type { Db } from '../src/libsql/client';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 // /auth/login and /auth/signup are unauthenticated and each attempt burns a
 // bcrypt verification on the API thread — with no per-IP ceiling, credential
@@ -15,7 +15,7 @@ import { testConfig } from './helpers/config';
 async function boot(): Promise<{ app: ReturnType<typeof createApp>; db: Db }> {
   const db = drizzle(createClient({ url: ':memory:' }), { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-  return { app: createApp({ db, config: testConfig() }), db };
+  return { app: createApp(testDeps(db)), db };
 }
 
 const attempt = (app: ReturnType<typeof createApp>, path: string, ip: string, body: unknown) =>

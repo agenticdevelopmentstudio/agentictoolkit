@@ -2,6 +2,7 @@ import type { Db } from "../libsql/client";
 import { flushAlerts } from "../monitor/alerts";
 import { applyBoardToLedger } from "../monitor/issues";
 import type { StatusConfig } from "../config/port";
+import type { Storage } from "../storage/ports";
 import { deriveBoard } from "./derive";
 import { readBoardFacts } from "./facts";
 import type { Board } from "./types";
@@ -48,11 +49,12 @@ import type { Board } from "./types";
  */
 export async function reconcileBoardLedger(
   db: Db,
+  storage: Storage,
   config: StatusConfig,
   opts: { nowMs?: number; skipOnEmptyRoster?: boolean } = {},
 ): Promise<{ board: Board; opened: number; updated: number; resolved: number; resolvedTargets: string[]; skipped: boolean }> {
   const nowMs = opts.nowMs ?? Date.now();
-  const facts = await readBoardFacts(db, nowMs, config);
+  const facts = await readBoardFacts(db, storage, nowMs, config);
   const board = deriveBoard(facts, nowMs);
   if (opts.skipOnEmptyRoster && facts.roster.length === 0) {
     return { board, opened: 0, updated: 0, resolved: 0, resolvedTargets: [], skipped: true };

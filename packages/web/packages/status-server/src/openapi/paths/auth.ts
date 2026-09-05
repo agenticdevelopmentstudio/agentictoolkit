@@ -18,7 +18,7 @@ const redirect = (description: string) => ({
 });
 
 export const authSchemas: Schemas = {
-  // AuthUser (storage/auth-store.ts): the public shape of a status account.
+  // AuthUser (storage/ports.ts): the public shape of a status account.
   StatusUser: {
     type: 'object',
     required: ['id', 'email', 'displayName', 'role'],

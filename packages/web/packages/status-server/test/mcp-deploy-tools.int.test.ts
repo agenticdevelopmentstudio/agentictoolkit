@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { deployProjectMeta } from '../src/libsql/schema';
 import { ALL_TOOLS } from '../src/mcp/tools';
+import { createLibsqlStorage } from '../src/libsql';
 import { freshDb, type Db } from './helpers/db';
 import { stubVercelAccount, type FakeVercelAccount } from './helpers/vercel-account';
 import { testConfig } from './helpers/config';
@@ -21,8 +22,11 @@ describe('MCP deploy-project tools re-verify the project mirror', () => {
   let db: Db;
   let account: FakeVercelAccount;
 
+  let storage: ReturnType<typeof createLibsqlStorage>;
+
   beforeEach(async () => {
     db = await freshDb();
+    storage = createLibsqlStorage(db);
     account = await stubVercelAccount(db);
   });
 
@@ -35,7 +39,7 @@ describe('MCP deploy-project tools re-verify the project mirror', () => {
     account.add('mcp-live');
     await db.insert(deployProjectMeta).values({ platform: 'vercel', projectName: 'mcp-ghost', domain: 'ghost.example.test' });
 
-    const out = (await tool('list_platform_projects').execute(db, {}, testConfig())) as { projectName: string }[];
+    const out = (await tool('list_platform_projects').execute(db, storage, {}, testConfig())) as { projectName: string }[];
 
     expect(out.map((p) => p.projectName)).toEqual(['mcp-live']);
     // The refresh corrected the mirror itself, exactly as the REST read does.
@@ -46,7 +50,7 @@ describe('MCP deploy-project tools re-verify the project mirror', () => {
     account.add('mcp-live');
     await db.insert(deployProjectMeta).values({ platform: 'vercel', projectName: 'mcp-ghost', domain: 'ghost.example.test' });
 
-    const out = (await tool('find_unconfigured_sites').execute(db, {}, testConfig())) as {
+    const out = (await tool('find_unconfigured_sites').execute(db, storage, {}, testConfig())) as {
       pending: { projectName: string }[];
       addable: { projectName: string }[];
     };

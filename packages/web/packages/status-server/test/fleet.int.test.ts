@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import type { Db } from '../src/libsql/client';
 import { sessionHeaders } from './helpers/auth';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
@@ -28,7 +29,7 @@ describe('/fleet', () => {
         .returning()
     )[0];
     await db.insert(schema.peerSnapshots).values({ peerId: off!.id, overall: 'ok', reachable: true, payload: { overall: 'ok' } });
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   it('returns self + peer members', async () => {

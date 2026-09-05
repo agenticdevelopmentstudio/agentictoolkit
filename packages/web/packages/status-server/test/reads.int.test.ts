@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import type { Db } from '../src/libsql/client';
 import { _resetCfAccountCache } from '@agentic-toolkit/deploy-platform/providers';
 import { rollupMetricsSql } from '../src/monitor/sync';
@@ -29,7 +30,7 @@ describe('/live', () => {
   beforeAll(async () => {
     const db = await bootDb();
     viewAuth = await sessionHeaders(db, 'viewer');
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   it('401 without a token', async () => {
@@ -81,7 +82,7 @@ describe('reads with seeded data', () => {
     db = await bootDb();
     viewAuth = await sessionHeaders(db, 'viewer');
     slug = await seedOneEndpoint(db, 'https://example.com');
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   afterEach(() => {
@@ -467,7 +468,7 @@ describe('/deploy-projects re-verifies the project mirror', () => {
     db = await bootDb();
     viewAuth = await sessionHeaders(db, 'viewer');
     account = await stubVercelAccount(db);
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   afterEach(() => {

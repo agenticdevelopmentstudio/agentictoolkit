@@ -4,13 +4,7 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '../src/libsql/schema';
 import type { Db } from '../src/libsql/client';
-import {
-  createUser,
-  createSession,
-  countAdmins,
-  setUserRoleGuarded,
-  deleteUserGuarded,
-} from '../src/storage/auth-store';
+import { createLibsqlStorage } from '../src/libsql';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
 
 // The last-admin guard used to be a separate countAdmins() read before the
@@ -28,58 +22,60 @@ async function freshDb(): Promise<Db> {
 
 describe('atomic last-admin guard (store)', () => {
   let db: Db;
+  let auth: ReturnType<typeof createLibsqlStorage>['auth'];
   beforeEach(async () => {
     db = await freshDb();
+    auth = createLibsqlStorage(db).auth;
   });
 
-  const admin = (email: string) => createUser(db, { email, displayName: email, role: 'admin' });
+  const admin = (email: string) => auth.createUser({ email, displayName: email, role: 'admin' });
 
   it('blocks demoting the last admin, in the statement itself', async () => {
     const a = await admin('a@x.com');
-    expect(await setUserRoleGuarded(db, a.id, 'viewer')).toBe('blocked');
-    expect(await countAdmins(db)).toBe(1);
+    expect(await auth.setUserRoleGuarded(a.id, 'viewer')).toBe('blocked');
+    expect(await auth.countAdmins()).toBe(1);
   });
 
   it('two demote attempts can never remove both admins', async () => {
     const a = await admin('a@x.com');
     const b = await admin('b@x.com');
-    const first = await setUserRoleGuarded(db, a.id, 'viewer');
-    const second = await setUserRoleGuarded(db, b.id, 'viewer');
+    const first = await auth.setUserRoleGuarded(a.id, 'viewer');
+    const second = await auth.setUserRoleGuarded(b.id, 'viewer');
     expect(first).not.toBe('blocked');
     expect(second).toBe('blocked');
-    expect(await countAdmins(db)).toBe(1);
+    expect(await auth.countAdmins()).toBe(1);
   });
 
   it('admin→admin and non-admin changes pass the guard untouched', async () => {
     const a = await admin('a@x.com');
-    const v = await createUser(db, { email: 'v@x.com', displayName: 'v', role: 'viewer' });
-    expect(await setUserRoleGuarded(db, a.id, 'admin')).toMatchObject({ role: 'admin' });
-    expect(await setUserRoleGuarded(db, v.id, 'pending')).toMatchObject({ role: 'pending' });
-    expect(await setUserRoleGuarded(db, 'missing-id', 'viewer')).toBeUndefined();
+    const v = await auth.createUser({ email: 'v@x.com', displayName: 'v', role: 'viewer' });
+    expect(await auth.setUserRoleGuarded(a.id, 'admin')).toMatchObject({ role: 'admin' });
+    expect(await auth.setUserRoleGuarded(v.id, 'pending')).toMatchObject({ role: 'pending' });
+    expect(await auth.setUserRoleGuarded('missing-id', 'viewer')).toBeUndefined();
   });
 
   it('blocks deleting the last admin and keeps their sessions', async () => {
     const a = await admin('a@x.com');
-    await createSession(db, a.id);
-    expect(await deleteUserGuarded(db, a.id)).toBe('blocked');
-    expect(await countAdmins(db)).toBe(1);
+    await auth.createSession(a.id);
+    expect(await auth.deleteUserGuarded(a.id)).toBe('blocked');
+    expect(await auth.countAdmins()).toBe(1);
     expect((await db.select().from(schema.sessions)).length).toBe(1); // blocked delete must not strip sessions
   });
 
   it('two delete attempts can never remove both admins', async () => {
     const a = await admin('a@x.com');
     const b = await admin('b@x.com');
-    expect(await deleteUserGuarded(db, a.id)).toBe(true);
-    expect(await deleteUserGuarded(db, b.id)).toBe('blocked');
-    expect(await countAdmins(db)).toBe(1);
+    expect(await auth.deleteUserGuarded(a.id)).toBe(true);
+    expect(await auth.deleteUserGuarded(b.id)).toBe('blocked');
+    expect(await auth.countAdmins()).toBe(1);
   });
 
   it('deletes a non-admin (and their sessions) normally', async () => {
     await admin('a@x.com');
-    const v = await createUser(db, { email: 'v@x.com', displayName: 'v', role: 'viewer' });
-    await createSession(db, v.id);
-    expect(await deleteUserGuarded(db, v.id)).toBe(true);
+    const v = await auth.createUser({ email: 'v@x.com', displayName: 'v', role: 'viewer' });
+    await auth.createSession(v.id);
+    expect(await auth.deleteUserGuarded(v.id)).toBe(true);
     expect((await db.select().from(schema.sessions)).length).toBe(0);
-    expect(await deleteUserGuarded(db, 'missing-id')).toBe(false);
+    expect(await auth.deleteUserGuarded('missing-id')).toBe(false);
   });
 });

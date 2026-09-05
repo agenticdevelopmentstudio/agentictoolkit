@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
 import type { Tier } from '../middleware/auth';
+import type { Storage } from '../storage/ports';
+import { redactPeer } from '../storage/ports';
 import {
   buildSnapshot,
   buildUptime,
@@ -24,27 +26,6 @@ import {
 import { DUPLICATE_PEER_MESSAGE, isDuplicatePeerError, isSelfPeerUrl } from '../peers/base-url';
 import { autoConfigureBody, performAutoConfigure } from '../routes/auto-configure';
 import { roleBody } from '../routes/users';
-import {
-  listSites,
-  listSiteGroups,
-  listEndpoints,
-  listActiveEndpoints,
-  listIntegrations,
-  listPeers,
-  createGroup,
-  updateGroup,
-  deleteGroup,
-  createSite,
-  updateSite,
-  deleteSite,
-  createIntegration,
-  updateIntegration,
-  deleteIntegration,
-  createPeer,
-  deletePeer,
-  redactPeer,
-} from '../storage/config-store';
-import { listUsers, setUserRoleGuarded } from '../storage/auth-store';
 import { reconcileBoardLedger } from '../board';
 import { siteLinks } from '../lib/links';
 import { collectTelemetry, errorsStore, analyticsStore } from '../telemetry/server';
@@ -78,7 +59,7 @@ export interface McpTool {
    *  platform config, peer topology). Writes are admin-gated by `!readOnly` already. */
   adminOnly?: boolean;
   inputSchema: z.ZodRawShape;
-  execute(db: Db, args: Record<string, unknown>, config: StatusConfig): Promise<unknown>;
+  execute(db: Db, storage: Storage, args: Record<string, unknown>, config: StatusConfig): Promise<unknown>;
 }
 
 /** A tool the view tier may NOT use: any write, or a read whose REST route is admin-only.
@@ -106,36 +87,36 @@ const READ_TOOLS: McpTool[] = [
     description: 'Overall status rollup plus per-service statuses and the open-issue list (the /snapshot payload).',
     readOnly: true,
     inputSchema: {},
-    execute: (db, _args, config) => buildSnapshot(db, config),
+    execute: (db, storage, _args, config) => buildSnapshot(db, storage, config),
   },
   {
     name: 'get_problems',
     description: 'Every currently-open issue (health, deploy, stale-prod, platform), newest-first.',
     readOnly: true,
     inputSchema: {},
-    execute: async (db, _args, config) => boardProblems(db, config),
+    execute: async (db, storage, _args, config) => boardProblems(db, storage, config),
   },
   {
     name: 'get_issue',
     description: 'The single open issue for a target key (endpoint slug or deploy target), or null if none is open.',
     readOnly: true,
     inputSchema: { target: z.string() },
-    execute: async (db, args, config) =>
-      (await boardProblems(db, config)).find((p) => p.target === (args.target as string)) ?? null,
+    execute: async (db, storage, args, config) =>
+      (await boardProblems(db, storage, config)).find((p) => p.target === (args.target as string)) ?? null,
   },
   {
     name: 'get_uptime',
     description: 'Per-endpoint daily uptime over the last N days (default 90, clamped 1-365).',
     readOnly: true,
     inputSchema: { days: z.number().int().optional() },
-    execute: (db, args) => buildUptime(db, clampInt((args.days as number | undefined) ?? 90, 1, 365)),
+    execute: (db, storage, args) => buildUptime(db, storage, clampInt((args.days as number | undefined) ?? 90, 1, 365)),
   },
   {
     name: 'query_history',
     description: "One endpoint's health-check samples over the last N hours (default 24, clamped 1-168).",
     readOnly: true,
     inputSchema: { slug: z.string(), hours: z.number().int().optional() },
-    execute: (db, args) => queryHistory(db, args.slug as string, clampInt((args.hours as number | undefined) ?? 24, 1, 168)),
+    execute: (db, _storage, args) => queryHistory(db, args.slug as string, clampInt((args.hours as number | undefined) ?? 24, 1, 168)),
   },
   {
     name: 'get_telemetry_summary',
@@ -163,8 +144,8 @@ const READ_TOOLS: McpTool[] = [
     description: "This monitor's compact snapshot plus the latest stored snapshot per configured peer, annotated with freshness.",
     readOnly: true,
     inputSchema: {},
-    execute: async (db, _args, config) => {
-      const snap = await buildSnapshot(db, config);
+    execute: async (db, storage, _args, config) => {
+      const snap = await buildSnapshot(db, storage, config);
       return assembleFleet(db, { label: config.monitorLabel, snapshot: snap, overall: snap.overall });
     },
   },
@@ -174,7 +155,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // Only REST twin is GET /config/sites (admin) — raw SiteRow config, not the /status DTO.
     inputSchema: {},
-    execute: (db) => listSites(db),
+    execute: (_db, storage) => storage.config.listSites(),
   },
   {
     name: 'get_site',
@@ -182,11 +163,11 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // Only REST twins are GET /config/sites + /config/endpoints (admin) — raw Site/EndpointRow.
     inputSchema: { id: z.string() },
-    execute: async (db, args) => {
+    execute: async (_db, storage, args) => {
       const id = args.id as string;
-      const site = (await listSites(db)).find((s) => s.id === id);
+      const site = (await storage.config.listSites()).find((s) => s.id === id);
       if (!site) throw new Error('site not found');
-      return { site, endpoints: await listEndpoints(db, id) };
+      return { site, endpoints: await storage.config.listEndpoints(id) };
     },
   },
   {
@@ -195,7 +176,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // Only REST twin is GET /config/site-groups (admin) — raw GroupRow (retention, empty groups).
     inputSchema: {},
-    execute: (db) => listSiteGroups(db),
+    execute: (_db, storage) => storage.config.listSiteGroups(),
   },
   {
     name: 'list_platforms',
@@ -203,7 +184,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // REST /config/integrations is admin-only — infra config, not viewer-visible.
     inputSchema: {},
-    execute: (db) => listIntegrations(db),
+    execute: (_db, storage) => storage.config.listIntegrations(),
   },
   {
     name: 'list_platform_projects',
@@ -213,14 +194,14 @@ const READ_TOOLS: McpTool[] = [
     // Same read as GET /deploy-projects: re-verify the Vercel project table, THEN enumerate.
     // Uncached (a tool call is rare and always deliberate), but the same function, so the
     // twins can't report different project sets.
-    execute: async (db) => buildDeployProjects(db, (await refreshAndEnumerateDeployProjects(db)).enumerated),
+    execute: async (db, storage) => buildDeployProjects(storage, (await refreshAndEnumerateDeployProjects(db)).enumerated),
   },
   {
     name: 'find_unconfigured_sites',
     description: 'The configuration gaps: pending/addable deploy projects and monitored endpoints not wired to a project.',
     readOnly: true,
     inputSchema: {},
-    execute: async (db) => findUnconfiguredSites(db, (await refreshAndEnumerateDeployProjects(db)).enumerated),
+    execute: async (db, storage) => findUnconfiguredSites(db, storage, (await refreshAndEnumerateDeployProjects(db)).enumerated),
   },
   {
     name: 'list_users',
@@ -228,15 +209,15 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // REST /users is admin-only — roster PII, not viewer-visible.
     inputSchema: {},
-    execute: (db) => listUsers(db),
+    execute: (_db, storage) => storage.auth.listUsers(),
   },
   {
     name: 'get_links',
     description: 'Per active endpoint: its live URL and deploy-platform dashboard link.',
     readOnly: true,
     inputSchema: {},
-    execute: async (db, _args, config) => {
-      const eps = await listActiveEndpoints(db);
+    execute: async (_db, storage, _args, config) => {
+      const eps = await storage.config.listActiveEndpoints();
       const platformMeta = platformMetaFromConfig(config);
       return eps.map((e) => ({
         slug: e.slug,
@@ -254,7 +235,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // REST /config/peers is admin-only — peer topology, not viewer-visible.
     inputSchema: {},
-    execute: async (db) => (await listPeers(db)).map(redactPeer),
+    execute: async (_db, storage) => (await storage.config.listPeers()).map(redactPeer),
   },
 ];
 
@@ -264,16 +245,16 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Create a monitored site under a group.',
     readOnly: false,
     inputSchema: monitoredSiteInsert.shape,
-    execute: (db, args) => createSite(db, monitoredSiteInsert.parse(args)),
+    execute: (_db, storage, args) => storage.config.createSite(monitoredSiteInsert.parse(args)),
   },
   {
     name: 'update_site',
     description: 'Update a monitored site by id.',
     readOnly: false,
     inputSchema: siteUpdateArgs.shape,
-    execute: async (db, args) => {
+    execute: async (_db, storage, args) => {
       const { id, ...patch } = siteUpdateArgs.parse(args);
-      const row = await updateSite(db, id, patch);
+      const row = await storage.config.updateSite(id, patch);
       if (!row) throw new Error('site not found');
       return row;
     },
@@ -283,9 +264,9 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Delete a monitored site (purges its endpoints, history, and issues).',
     readOnly: false,
     inputSchema: idArgs.shape,
-    execute: async (db, args, config) => {
-      await deleteSite(db, idArgs.parse(args).id);
-      await reconcileBoardLedger(db, config);
+    execute: async (db, storage, args, config) => {
+      await storage.config.deleteSite(idArgs.parse(args).id);
+      await reconcileBoardLedger(db, storage, config);
       return { ok: true };
     },
   },
@@ -294,16 +275,16 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Create a site group.',
     readOnly: false,
     inputSchema: siteGroupInsert.shape,
-    execute: (db, args) => createGroup(db, siteGroupInsert.parse(args)),
+    execute: (_db, storage, args) => storage.config.createGroup(siteGroupInsert.parse(args)),
   },
   {
     name: 'update_group',
     description: 'Update a site group by id.',
     readOnly: false,
     inputSchema: groupUpdateArgs.shape,
-    execute: async (db, args) => {
+    execute: async (_db, storage, args) => {
       const { id, ...patch } = groupUpdateArgs.parse(args);
-      const row = await updateGroup(db, id, patch);
+      const row = await storage.config.updateGroup(id, patch);
       if (!row) throw new Error('group not found');
       return row;
     },
@@ -313,9 +294,9 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Delete a site group (cascades to its sites/endpoints and purges their history + issues).',
     readOnly: false,
     inputSchema: idArgs.shape,
-    execute: async (db, args, config) => {
-      await deleteGroup(db, idArgs.parse(args).id);
-      await reconcileBoardLedger(db, config);
+    execute: async (db, storage, args, config) => {
+      await storage.config.deleteGroup(idArgs.parse(args).id);
+      await reconcileBoardLedger(db, storage, config);
       return { ok: true };
     },
   },
@@ -324,16 +305,16 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Create a deploy-platform integration.',
     readOnly: false,
     inputSchema: deployIntegrationInsert.shape,
-    execute: (db, args) => createIntegration(db, deployIntegrationInsert.parse(args)),
+    execute: (_db, storage, args) => storage.config.createIntegration(deployIntegrationInsert.parse(args)),
   },
   {
     name: 'update_platform',
     description: 'Update a deploy-platform integration by id.',
     readOnly: false,
     inputSchema: platformUpdateArgs.shape,
-    execute: async (db, args) => {
+    execute: async (_db, storage, args) => {
       const { id, ...patch } = platformUpdateArgs.parse(args);
-      const row = await updateIntegration(db, id, patch);
+      const row = await storage.config.updateIntegration(id, patch);
       if (!row) throw new Error('integration not found');
       return row;
     },
@@ -343,15 +324,15 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Delete a deploy-platform integration by id.',
     readOnly: false,
     inputSchema: idArgs.shape,
-    execute: async (db, args, config) => {
+    execute: async (db, storage, args, config) => {
       // `deleteIntegration` clears `platform_health_state.configured` for the platform it
       // was the last active integration for, in the same transaction — that is what makes
       // the sweep below true rather than decorative (`platformProblems` reads that column).
-      await deleteIntegration(db, idArgs.parse(args).id);
+      await storage.config.deleteIntegration(idArgs.parse(args).id);
       // Same inline sweep as delete_site / delete_group and DELETE /config/integrations/:id:
       // the platform is no longer configured, so its open ledger rows can no longer be
       // re-derived and would otherwise sit open (and alert-deduped) until the next cycle.
-      await reconcileBoardLedger(db, config);
+      await reconcileBoardLedger(db, storage, config);
       return { ok: true };
     },
   },
@@ -360,14 +341,14 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Run the server-side Auto Configure pass (enumerate → classify → match/create → wire). Optionally ignore projects and create missing sites in a group.',
     readOnly: false,
     inputSchema: autoConfigureBody.shape,
-    execute: (db, args) => performAutoConfigure(db, autoConfigureBody.parse(args)),
+    execute: (db, storage, args) => performAutoConfigure(db, storage, autoConfigureBody.parse(args)),
   },
   {
     name: 'configure_telemetry',
     description: 'Trigger a telemetry-collection pass (poll the configured error/analytics providers and persist their latest summaries), then return the fresh summary.',
     readOnly: false,
     inputSchema: {},
-    execute: async (db, _args, config) => {
+    execute: async (db, _storage, _args, config) => {
       await collectTelemetry(db, config);
       return { collected: true, errors: await errorsStore.load(db), analytics: await analyticsStore.load(db) };
     },
@@ -377,9 +358,9 @@ const WRITE_TOOLS: McpTool[] = [
     description: "Set a user's role (pending/viewer/admin). Refuses to demote the last admin.",
     readOnly: false,
     inputSchema: userUpdateArgs.shape,
-    execute: async (db, args) => {
+    execute: async (_db, storage, args) => {
       const { id, role } = userUpdateArgs.parse(args);
-      const updated = await setUserRoleGuarded(db, id, role);
+      const updated = await storage.auth.setUserRoleGuarded(id, role);
       if (updated === undefined) throw new Error('user not found');
       if (updated === 'blocked') throw new Error('cannot demote the last admin');
       return updated;
@@ -392,13 +373,13 @@ const WRITE_TOOLS: McpTool[] = [
     inputSchema: peerInsert.shape,
     // The same duplicate → readable sentence the HTTP POST maps to a 409. An agent
     // that hits `uniq_peer_base_url` should read why, not a driver's constraint text.
-    execute: async (db, args, config) => {
+    execute: async (_db, storage, args, config) => {
       const data = peerInsert.parse(args);
       if (isSelfPeerUrl(data.baseUrl, config)) {
         throw new Error('baseUrl is this monitor’s own URL — a monitor is already in its own fleet view');
       }
       try {
-        return redactPeer(await createPeer(db, data));
+        return redactPeer(await storage.config.createPeer(data));
       } catch (err) {
         if (isDuplicatePeerError(err)) throw new Error(DUPLICATE_PEER_MESSAGE);
         throw err;
@@ -410,8 +391,8 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Remove a fleet peer by id.',
     readOnly: false,
     inputSchema: idArgs.shape,
-    execute: async (db, args) => {
-      await deletePeer(db, idArgs.parse(args).id);
+    execute: async (_db, storage, args) => {
+      await storage.config.deletePeer(idArgs.parse(args).id);
       return { ok: true };
     },
   },

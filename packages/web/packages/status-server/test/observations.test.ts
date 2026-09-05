@@ -5,6 +5,7 @@ import type { PlatformObservation } from "../src/monitor/observations";
 import { recordVercelProdStates } from "../src/monitor/observations";
 import { deriveBoard, readBoardFacts } from "../src/board";
 import { platformHealthState, vercelProdState } from "../src/libsql/schema";
+import { createLibsqlStorage } from "../src/libsql";
 import { testConfig } from "./helpers/config";
 
 // `recordPlatformObservations` is now the SINGLE writer of `consecutive_failures`: the
@@ -17,7 +18,7 @@ import { testConfig } from "./helpers/config";
 // asserted through the fold, which reads `platform_health_state` as a fact.
 async function problemsFrom(db: Awaited<ReturnType<typeof freshDb>>) {
   const nowMs = Date.now();
-  return deriveBoard(await readBoardFacts(db, nowMs, testConfig()), nowMs).problems;
+  return deriveBoard(await readBoardFacts(db, createLibsqlStorage(db), nowMs, testConfig()), nowMs).problems;
 }
 
 describe("recordPlatformObservations", () => {

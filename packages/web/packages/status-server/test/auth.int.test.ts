@@ -2,13 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Hono } from 'hono';
 import type { Db } from '../src/libsql/client';
 import { requireAuth, requireAdmin, type AuthVars } from '../src/middleware/auth';
-import { createUser, createSession, type UserRole } from '../src/storage/auth-store';
+import { createLibsqlStorage } from '../src/libsql';
+import type { UserRole } from '../src/storage/ports';
 import { freshDb } from './helpers/db';
 import { testConfig } from './helpers/config';
 
 function appWith(db: Db) {
   const app = new Hono<{ Variables: AuthVars }>();
-  app.use('*', requireAuth(db, testConfig()));
+  app.use('*', requireAuth(createLibsqlStorage(db), testConfig()));
   app.get('/read', (c) => c.json({ ok: true }));
   app.post('/write', requireAdmin, (c) => c.json({ ok: true }));
   app.get('/snapshot', (c) => c.json({ ok: true }));
@@ -17,8 +18,9 @@ function appWith(db: Db) {
 
 /** A session cookie for a freshly-created user of the given role. */
 async function cookieFor(db: Db, role: UserRole): Promise<string> {
-  const u = await createUser(db, { email: `${role}@x.com`, displayName: role, role });
-  const token = await createSession(db, u.id);
+  const auth = createLibsqlStorage(db).auth;
+  const u = await auth.createUser({ email: `${role}@x.com`, displayName: role, role });
+  const token = await auth.createSession(u.id);
   return `status_auth=${token}`;
 }
 

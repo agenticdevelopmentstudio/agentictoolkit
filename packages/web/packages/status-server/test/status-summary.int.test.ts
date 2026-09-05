@@ -3,7 +3,7 @@ import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
 import type { Db } from '../src/libsql/client';
 import { freshDb as bootDb } from './helpers/db';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 /** One active group → site → endpoint; returns the probe slug (endpoint id). */
 async function seedEndpoint(db: Db): Promise<string> {
@@ -31,7 +31,7 @@ describe('/public/status-summary (public, no auth)', () => {
     const db = await bootDb();
     const slug = await seedEndpoint(db);
     await db.insert(schema.healthChecks).values({ serviceSlug: slug, status: 'healthy', statusCode: 200 });
-    const res = await createApp({ db, config: testConfig() }).request('/public/status-summary');
+    const res = await createApp(testDeps(db)).request('/public/status-summary');
     expect(res.status).toBe(200);
     const body = (await res.json()) as Summary;
     expect(body.operational).toBe(true);
@@ -44,7 +44,7 @@ describe('/public/status-summary (public, no auth)', () => {
   it('reports `unknown` (never green) when no service has been probed yet', async () => {
     const db = await bootDb();
     await seedEndpoint(db); // configured endpoint, but NO health check inserted
-    const body = (await (await createApp({ db, config: testConfig() }).request('/public/status-summary')).json()) as Summary;
+    const body = (await (await createApp(testDeps(db)).request('/public/status-summary')).json()) as Summary;
     expect(body.operational).toBe(false);
     expect(body.status).toBe('unknown');
     expect(body.counts).toEqual({ total: 1, healthy: 0, degraded: 0, down: 0, unknown: 1 });
@@ -56,7 +56,7 @@ describe('/public/status-summary (public, no auth)', () => {
     const slug = await seedEndpoint(db);
     await db.insert(schema.healthChecks).values({ serviceSlug: slug, status: 'down', statusCode: 503 });
     await db.insert(schema.issues).values({ target: slug, source: 'http', name: 'App', severity: 'major', state: 'down' });
-    const body = (await (await createApp({ db, config: testConfig() }).request('/public/status-summary')).json()) as Summary;
+    const body = (await (await createApp(testDeps(db)).request('/public/status-summary')).json()) as Summary;
     expect(body.operational).toBe(false);
     expect(body.status).toBe('down');
     expect(body.counts).toEqual({ total: 1, healthy: 0, degraded: 0, down: 1, unknown: 0 });
@@ -86,7 +86,7 @@ describe('/public/status-summary (public, no auth)', () => {
       deployPhase: 'none',
       createdAt: new Date(),
     });
-    const body = (await (await createApp({ db, config: testConfig() }).request('/public/status-summary')).json()) as Summary;
+    const body = (await (await createApp(testDeps(db)).request('/public/status-summary')).json()) as Summary;
     expect(body.operational).toBe(false);
     expect(body.status).toBe('degraded');
     expect(body.counts).toEqual({ total: 1, healthy: 1, degraded: 0, down: 0, unknown: 0 });
@@ -114,7 +114,7 @@ describe('/public/status-summary (public, no auth)', () => {
       deployPhase: 'none',
       createdAt: new Date(),
     });
-    const body = (await (await createApp({ db, config: testConfig() }).request('/public/status-summary')).json()) as Summary;
+    const body = (await (await createApp(testDeps(db)).request('/public/status-summary')).json()) as Summary;
     expect(body.operational).toBe(false);
     expect(body.status).toBe('down');
     expect(body.downSites).toHaveLength(2);
@@ -128,7 +128,7 @@ describe('/public/status-summary (public, no auth)', () => {
     const db = await bootDb();
     const slug = await seedEndpoint(db);
     await db.insert(schema.healthChecks).values({ serviceSlug: slug, status: 'degraded', statusCode: 200 });
-    const body = (await (await createApp({ db, config: testConfig() }).request('/public/status-summary')).json()) as Summary;
+    const body = (await (await createApp(testDeps(db)).request('/public/status-summary')).json()) as Summary;
     expect(body.operational).toBe(false);
     expect(body.status).toBe('degraded');
     expect(body.counts).toEqual({ total: 1, healthy: 0, degraded: 1, down: 0, unknown: 0 });
@@ -144,7 +144,7 @@ describe('/public/status-summary caching (unauthenticated route must not re-quer
       const db = await bootDb();
       const slug = await seedEndpoint(db);
       await db.insert(schema.healthChecks).values({ serviceSlug: slug, status: 'healthy', statusCode: 200 });
-      const app = createApp({ db, config: testConfig() });
+      const app = createApp(testDeps(db));
 
       const first = (await (await app.request('/public/status-summary')).json()) as Summary;
       expect(first.status).toBe('healthy');
@@ -171,7 +171,7 @@ describe('/public/status-summary CORS (open to any origin)', () => {
   it('reflects an arbitrary Origin on the public summary', async () => {
     const db = await bootDb();
     await seedEndpoint(db);
-    const res = await createApp({ db, config: testConfig() }).request('/public/status-summary', {
+    const res = await createApp(testDeps(db)).request('/public/status-summary', {
       headers: { Origin: 'https://status.agenticdeveloperhub.com' },
     });
     expect(res.headers.get('access-control-allow-origin')).toBe('https://status.agenticdeveloperhub.com');
@@ -179,7 +179,7 @@ describe('/public/status-summary CORS (open to any origin)', () => {
 
   it('does NOT open CORS for a foreign origin on an authed route', async () => {
     const db = await bootDb();
-    const res = await createApp({ db, config: testConfig() }).request('/live', {
+    const res = await createApp(testDeps(db)).request('/live', {
       headers: { Origin: 'https://evil.example.com' },
     });
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
@@ -200,7 +200,7 @@ describe('/public/status-summary stampede guard', () => {
         return Reflect.get(target, prop, receiver) as unknown;
       },
     }) as typeof db;
-    await run(createApp({ db: counting, config: testConfig() }));
+    await run(createApp(testDeps(counting)));
     return reads;
   }
 

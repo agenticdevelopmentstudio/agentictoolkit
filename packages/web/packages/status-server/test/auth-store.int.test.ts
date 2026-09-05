@@ -1,21 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import {
-  createUser,
-  findUserByEmail,
-  getUserById,
-  listUsers,
-  setUserRoleGuarded,
-  deleteUserGuarded,
-  countAdmins,
-  roleForEmail,
-  createSession,
-  resolveSession,
-  revokeSession,
-} from '../src/storage/auth-store';
+import { createLibsqlStorage } from '../src/libsql';
+import { roleForEmail } from '../src/storage/ports';
 import { hashPassword, verifyPassword } from '../src/auth/password';
 import * as schema from '../src/libsql/schema';
 import { freshDb } from './helpers/db';
 import { testConfig } from './helpers/config';
+
+const authOf = async () => createLibsqlStorage(await freshDb()).auth;
 
 describe('auth-store', () => {
   beforeAll(() => {
@@ -30,11 +21,11 @@ describe('auth-store', () => {
   });
 
   it('creates and finds users with lower-cased email', async () => {
-    const db = await freshDb();
-    const u = await createUser(db, { email: 'A@B.com', displayName: 'A', role: 'pending' });
+    const auth = await authOf();
+    const u = await auth.createUser({ email: 'A@B.com', displayName: 'A', role: 'pending' });
     expect(u.email).toBe('a@b.com');
-    expect((await findUserByEmail(db, 'a@b.com'))?.id).toBe(u.id);
-    expect((await getUserById(db, u.id))?.email).toBe('a@b.com');
+    expect((await auth.findUserByEmail('a@b.com'))?.id).toBe(u.id);
+    expect((await auth.getUserById(u.id))?.email).toBe('a@b.com');
   });
 
   it('roleForEmail honors ADMIN_EMAILS', () => {
@@ -43,33 +34,34 @@ describe('auth-store', () => {
   });
 
   it('sessions resolve to the user; garbage/revoked/expired tokens are null', async () => {
-    const db = await freshDb();
-    const u = await createUser(db, { email: 'x@y.com', displayName: 'X', role: 'viewer' });
-    const token = await createSession(db, u.id);
-    expect((await resolveSession(db, token))?.id).toBe(u.id);
-    expect(await resolveSession(db, 'garbage')).toBeNull();
-    expect(await resolveSession(db, undefined)).toBeNull();
-    await revokeSession(db, token);
-    expect(await resolveSession(db, token)).toBeNull();
-    const expired = await createSession(db, u.id, -1000);
-    expect(await resolveSession(db, expired)).toBeNull();
+    const auth = await authOf();
+    const u = await auth.createUser({ email: 'x@y.com', displayName: 'X', role: 'viewer' });
+    const token = await auth.createSession(u.id);
+    expect((await auth.resolveSession(token))?.id).toBe(u.id);
+    expect(await auth.resolveSession('garbage')).toBeNull();
+    expect(await auth.resolveSession(undefined)).toBeNull();
+    await auth.revokeSession(token);
+    expect(await auth.resolveSession(token)).toBeNull();
+    const expired = await auth.createSession(u.id, -1000);
+    expect(await auth.resolveSession(expired)).toBeNull();
   });
 
   it('lists, re-roles, counts admins, and deletes (cascading sessions)', async () => {
     const db = await freshDb();
-    const a = await createUser(db, { email: 'a@a.com', displayName: 'A', role: 'admin' });
-    const b = await createUser(db, { email: 'b@b.com', displayName: 'B', role: 'pending' });
-    await createSession(db, a.id);
-    expect((await listUsers(db)).length).toBe(2);
-    expect(await countAdmins(db)).toBe(1);
-    await setUserRoleGuarded(db, b.id, 'viewer');
-    expect((await getUserById(db, b.id))?.role).toBe('viewer');
+    const auth = createLibsqlStorage(db).auth;
+    const a = await auth.createUser({ email: 'a@a.com', displayName: 'A', role: 'admin' });
+    const b = await auth.createUser({ email: 'b@b.com', displayName: 'B', role: 'pending' });
+    await auth.createSession(a.id);
+    expect((await auth.listUsers()).length).toBe(2);
+    expect(await auth.countAdmins()).toBe(1);
+    await auth.setUserRoleGuarded(b.id, 'viewer');
+    expect((await auth.getUserById(b.id))?.role).toBe('viewer');
     // The store itself refuses to remove the last admin (see last-admin-guard tests).
-    expect(await deleteUserGuarded(db, a.id)).toBe('blocked');
-    await setUserRoleGuarded(db, b.id, 'admin');
-    expect(await deleteUserGuarded(db, a.id)).toBe(true); // b now covers admin; a's sessions cascade
+    expect(await auth.deleteUserGuarded(a.id)).toBe('blocked');
+    await auth.setUserRoleGuarded(b.id, 'admin');
+    expect(await auth.deleteUserGuarded(a.id)).toBe(true); // b now covers admin; a's sessions cascade
     expect((await db.select().from(schema.sessions)).length).toBe(0);
-    expect(await countAdmins(db)).toBe(1);
-    expect(await deleteUserGuarded(db, 'missing-id')).toBe(false);
+    expect(await auth.countAdmins()).toBe(1);
+    expect(await auth.deleteUserGuarded('missing-id')).toBe(false);
   });
 });

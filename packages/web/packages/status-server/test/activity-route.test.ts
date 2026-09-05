@@ -6,6 +6,7 @@ import { activityRoutes } from "../src/routes/activity";
 import { boardRoutes } from "../src/routes/board";
 import type { ActivityPage, Board } from "../src/board";
 import { deployments, monitoredEndpoints, monitoredSites, siteGroups } from "../src/libsql/schema";
+import { createLibsqlStorage } from "../src/libsql";
 import { testConfig } from "./helpers/config";
 
 /**
@@ -45,8 +46,9 @@ async function seedApp() {
     const isHttp = err instanceof HTTPException;
     return c.json({ error: { message: isHttp ? err.message : "Internal Server Error" } }, isHttp ? err.status : 500);
   });
-  app.route("/", activityRoutes(db, testConfig()));
-  app.route("/", boardRoutes(db, testConfig()));
+  const storage = createLibsqlStorage(db);
+  app.route("/", activityRoutes(db, storage, testConfig()));
+  app.route("/", boardRoutes(db, storage, testConfig()));
   return { app, db, nowMs };
 }
 

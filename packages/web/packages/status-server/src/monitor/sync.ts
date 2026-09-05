@@ -2,12 +2,7 @@ import { sql, eq, and, inArray, isNull, type SQL } from "drizzle-orm";
 import { checkpointWal, type Db, type LibsqlConnection } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
 import { deployments, healthChecks, siteGroups, issues, monitoredEndpoints } from "../libsql/schema";
-import {
-  listActiveEndpoints,
-  reconcileOrphanedEndpoints,
-  retireEndpoint,
-  type ConfiguredEndpoint,
-} from "../storage/config-store";
+import type { ConfiguredEndpoint, Storage } from "../storage/ports";
 import { probeEndpoints } from "./probe";
 import { matchRosterEntry, readRoster, reconcileBoardLedger, rosterTargets } from "../board";
 import { recordPlatformObservations, recordVercelProdStates, type PlatformObservation } from "./observations";
@@ -78,7 +73,7 @@ const PROVIDER_POLL_TIMEOUT_MS = 20_000;
  * close doesn't masquerade as a recovery (see alerts.ts).
  */
 async function retireMonitors(
-  db: Db,
+  storage: Storage,
   endpoints: ConfiguredEndpoint[],
   doomed: readonly ConfiguredEndpoint[],
   why: (ep: ConfiguredEndpoint) => string,
@@ -88,7 +83,7 @@ async function retireMonitors(
   for (const ep of doomed) {
     const reason = why(ep);
     try {
-      await retireEndpoint(db, ep.slug);
+      await storage.config.retireEndpoint(ep.slug);
       retired.add(ep.slug);
       console.log(`[sync] removed monitor ${ep.name} (${ep.url}) — ${reason}`);
       notifyIssueAlert({
@@ -134,7 +129,7 @@ async function retireMonitors(
  *    verdict from a healthy fleet are opposite facts and must never look alike in the log.
  */
 async function retireUnclaimedMonitors(
-  db: Db,
+  storage: Storage,
   endpoints: ConfiguredEndpoint[],
   projects: readonly { platform: string; projectName: string; domains: string[] }[],
   evidence: { configuredPlatforms: string[]; verifiedPlatforms: string[]; verifiedDomains: string[] },
@@ -143,7 +138,7 @@ async function retireUnclaimedMonitors(
   const { doomed, withheld } = endpointsClaimedByNothing(endpoints, projects, evidence);
   for (const reason of withheld) console.log(`[sync] not removing monitors — ${reason}`);
   return retireMonitors(
-    db,
+    storage,
     endpoints,
     doomed.filter((ep) => !stillServing.has(ep.slug)),
     (ep) =>
@@ -246,7 +241,12 @@ function cfg(conn: ProviderConn): {
  * only thing keeping an in-flight row honest between polls; it is by-id, capped, and a
  * no-op when nothing is in flight.
  */
-export async function runCycle(db: Db, config: StatusConfig, opts?: { skipDeploys?: boolean }): Promise<void> {
+export async function runCycle(
+  db: Db,
+  storage: Storage,
+  config: StatusConfig,
+  opts?: { skipDeploys?: boolean },
+): Promise<void> {
   // --- 0. config integrity -------------------------------------------------
   // The structural half of the ownership reconcile: prune any endpoint or site no
   // longer owned by a configured site (group→site→endpoint chain intact) BEFORE
@@ -254,7 +254,7 @@ export async function runCycle(db: Db, config: StatusConfig, opts?: { skipDeploy
   // write below (reconcileBoardLedger) — operates on owned config only. Its own guard
   // skips an empty/transient config; it never deletes a live endpoint whose domain
   // merely went down.
-  const pruned = await reconcileOrphanedEndpoints(db);
+  const pruned = await storage.config.reconcileOrphanedEndpoints();
   if (pruned.prunedEndpointIds.length > 0) {
     // Resolve the pruned endpoints' open issues here and now. The ledger write below
     // passes `skipOnEmptyRoster: true`; if this prune emptied the roster that call skips,
@@ -272,7 +272,7 @@ export async function runCycle(db: Db, config: StatusConfig, opts?: { skipDeploy
   }
 
   // --- 1. config -----------------------------------------------------------
-  const endpoints = await listActiveEndpoints(db);
+  const endpoints = await storage.config.listActiveEndpoints();
 
   // The endpoints that still describe something real. Narrowed as the cycle learns what has
   // disappeared — hosts here in step 5, deploy projects in step 8 — so every step downstream
@@ -328,7 +328,7 @@ export async function runCycle(db: Db, config: StatusConfig, opts?: { skipDeploy
     // probe-to-alert at the probe interval instead of the 5-minute full-sync cadence.
     // Folding the WHOLE board on a probe-only tick is correct and cheap: it reads
     // persisted deploy rows, so it re-derives the same deploy verdicts and writes nothing.
-    await reconcileBoardLedger(db, config, { skipOnEmptyRoster: true });
+    await reconcileBoardLedger(db, storage, config, { skipOnEmptyRoster: true });
     return;
   }
 
@@ -475,7 +475,7 @@ export async function runCycle(db: Db, config: StatusConfig, opts?: { skipDeploy
     // were fanned out over, so the domain set is intersected with the project set.
     const verifiedPlatforms = [...enumerated.verifiedPlatforms, ...(liveVercelProjects ? ["vercel"] : [])];
     live = await retireUnclaimedMonitors(
-      db,
+      storage,
       live,
       enumerated.projects,
       {
@@ -524,7 +524,7 @@ export async function runCycle(db: Db, config: StatusConfig, opts?: { skipDeploy
   // filters on `isActive`. Deactivating every endpoint therefore empties `endpoints` but
   // not `roster` — under the old guard that would freeze every open issue forever. Under
   // the flag it sweeps and Problems empties, which is what switching monitoring off means.
-  await reconcileBoardLedger(db, config, { skipOnEmptyRoster: true });
+  await reconcileBoardLedger(db, storage, config, { skipOnEmptyRoster: true });
 }
 
 /**

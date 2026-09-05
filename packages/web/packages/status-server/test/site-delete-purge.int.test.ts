@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import { deployments, healthChecks, issues, metricsHourly } from '../src/libsql/schema';
 import { sessionHeaders } from './helpers/auth';
 import { freshDb, type Db } from './helpers/db';
@@ -25,7 +26,7 @@ describe('config delete purge', () => {
   beforeEach(async () => {
     db = await freshDb();
     adminAuth = await sessionHeaders(db, 'admin');
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   const postJson = (path: string, body: unknown) =>

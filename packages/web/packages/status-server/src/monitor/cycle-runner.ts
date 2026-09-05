@@ -1,5 +1,6 @@
 import type { Db, LibsqlConnection } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
+import type { Storage } from "../storage/ports";
 import { runCycle, runMaintenance } from "./sync";
 import { fetchPeers } from "../peers/fetch";
 import { collectTelemetry } from "../telemetry/server";
@@ -21,11 +22,12 @@ import { maybeSnapshotDb } from "./db-snapshot";
  */
 export async function runMonitorCycle(
   db: Db,
+  storage: Storage,
   opts: { fullSync: boolean; config: StatusConfig; conn: LibsqlConnection },
 ): Promise<void> {
   const { config, conn } = opts;
   try {
-    await runCycle(db, config, { skipDeploys: !opts.fullSync });
+    await runCycle(db, storage, config, { skipDeploys: !opts.fullSync });
   } finally {
     // Deliver whatever the recorders queued even when a later phase of the
     // cycle throws — an outage alert must not be lost to an unrelated failure.

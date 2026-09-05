@@ -1,22 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { siteGroups, monitoredSites, monitoredEndpoints, issues } from '../src/libsql/schema';
-import {
-  createEndpoint, purgeEndpointHistory, reconcileOrphanedEndpoints, retireEndpoint,
-} from '../src/storage/config-store';
+import { createLibsqlStorage } from '../src/libsql';
+import type { ConfigStore } from '../src/storage/ports';
 import { freshDb as baseDb, type Db } from './helpers/db';
 
 // reconcileOrphanedEndpoints defends the no-FK-enforcement deployment mode (libSQL
-// over HTTP / Turso, where ON DELETE CASCADE is NOT enforced — see config-store.ts).
-// The embedded test DB enforces FKs (a cascade would auto-clean before the reconcile
-// runs, and a bad-FK insert would be rejected), so we turn them OFF to reproduce the
-// exact condition orphans can actually arise in.
+// over HTTP / Turso, where ON DELETE CASCADE is NOT enforced — see
+// src/libsql/stores/config-store.ts). The embedded test DB enforces FKs (a cascade
+// would auto-clean before the reconcile runs, and a bad-FK insert would be
+// rejected), so we turn them OFF to reproduce the exact condition orphans can
+// actually arise in.
 async function freshDb(): Promise<Db> {
   const db = await baseDb();
   await db.run(sql`PRAGMA foreign_keys = OFF`);
   return db;
 }
 type DB = Awaited<ReturnType<typeof freshDb>>;
+const configOf = (db: DB): ConfigStore => createLibsqlStorage(db).config;
 
 /** A full group→site→endpoint chain. Returns the ids. */
 async function chain(db: DB, tag: string) {
@@ -38,7 +39,7 @@ describe('reconcileOrphanedEndpoints (every endpoint/site must be owned by a con
     // its endpoint dangling (site_id points at a now-missing site).
     await db.delete(monitoredSites).where(eq(monitoredSites.id, ghost.siteId));
 
-    const res = await reconcileOrphanedEndpoints(db);
+    const res = await configOf(db).reconcileOrphanedEndpoints();
 
     expect(res.endpoints).toBe(1);
     expect(res.prunedEndpointIds).toEqual([ghost.endpointId]);
@@ -53,7 +54,7 @@ describe('reconcileOrphanedEndpoints (every endpoint/site must be owned by a con
     // and the endpoint under it is not owned by a configured site.
     await db.delete(siteGroups).where(eq(siteGroups.id, ghost.groupId));
 
-    const res = await reconcileOrphanedEndpoints(db);
+    const res = await configOf(db).reconcileOrphanedEndpoints();
 
     expect(res).toMatchObject({ endpoints: 1, sites: 1 });
     expect(res.prunedEndpointIds).toEqual([ghost.endpointId]);
@@ -66,7 +67,7 @@ describe('reconcileOrphanedEndpoints (every endpoint/site must be owned by a con
     await chain(db, 'a');
     await chain(db, 'b');
 
-    const res = await reconcileOrphanedEndpoints(db);
+    const res = await configOf(db).reconcileOrphanedEndpoints();
 
     expect(res).toMatchObject({ endpoints: 0, sites: 0 });
     expect(await endpointIds(db)).toHaveLength(2);
@@ -80,7 +81,7 @@ describe('reconcileOrphanedEndpoints (every endpoint/site must be owned by a con
     // transient, and wiping everything on it would be catastrophic.
     await db.insert(monitoredEndpoints).values({ siteId: 'no-such-site', url: 'https://orphan.example.com' });
 
-    const res = await reconcileOrphanedEndpoints(db);
+    const res = await configOf(db).reconcileOrphanedEndpoints();
 
     expect(res).toMatchObject({ endpoints: 0, sites: 0 });
     expect(await endpointIds(db)).toHaveLength(1); // left intact, not mass-deleted
@@ -92,7 +93,7 @@ describe('retireEndpoint (delete endpoint + atomically drop a now-empty site)', 
     const db = await freshDb();
     const c = await chain(db, 'a');
 
-    const res = await retireEndpoint(db, c.endpointId);
+    const res = await configOf(db).retireEndpoint(c.endpointId);
 
     expect(res).toEqual({ endpointDeleted: true, siteDeleted: true });
     expect(await endpointIds(db)).toHaveLength(0);
@@ -104,7 +105,7 @@ describe('retireEndpoint (delete endpoint + atomically drop a now-empty site)', 
     const c = await chain(db, 'a');
     const e2 = (await db.insert(monitoredEndpoints).values({ siteId: c.siteId, url: 'https://b.example.com' }).returning())[0]!;
 
-    const res = await retireEndpoint(db, c.endpointId);
+    const res = await configOf(db).retireEndpoint(c.endpointId);
 
     expect(res).toEqual({ endpointDeleted: true, siteDeleted: false });
     expect((await endpointIds(db)).map((r) => r.id)).toEqual([e2.id]);
@@ -115,7 +116,7 @@ describe('retireEndpoint (delete endpoint + atomically drop a now-empty site)', 
     const db = await freshDb();
     const c = await chain(db, 'a');
 
-    const res = await retireEndpoint(db, 'no-such-endpoint');
+    const res = await configOf(db).retireEndpoint('no-such-endpoint');
 
     expect(res).toEqual({ endpointDeleted: false, siteDeleted: false });
     expect(await endpointIds(db)).toHaveLength(1); // untouched
@@ -141,7 +142,7 @@ describe('purgeEndpointHistory (why an issue closed is never left unknown)', () 
     const db = await freshDb();
     await openIssue(db, 'ep-purged', new Date(Date.now() - 3600_000));
 
-    await purgeEndpointHistory(db, ['ep-purged']);
+    await configOf(db).purgeEndpointHistory(['ep-purged']);
 
     expect(await issueRows(db)).toMatchObject([{ target: 'ep-purged', resolvedReason: 'unmonitored' }]);
   });
@@ -157,7 +158,7 @@ describe('purgeEndpointHistory (why an issue closed is never left unknown)', () 
       openedAt: new Date(Date.now() - 2 * 86_400_000), resolvedAt: closedAt, resolvedReason: 'recovered',
     });
 
-    await purgeEndpointHistory(db, ['ep-purged']);
+    await configOf(db).purgeEndpointHistory(['ep-purged']);
 
     expect(await issueRows(db)).toEqual([
       { target: 'ep-purged', resolvedAt: closedAt, resolvedReason: 'recovered' },
@@ -169,7 +170,7 @@ describe('purgeEndpointHistory (why an issue closed is never left unknown)', () 
     await openIssue(db, 'ep-purged', new Date(Date.now() - 3600_000));
     await openIssue(db, 'ep-kept', new Date(Date.now() - 3600_000));
 
-    await purgeEndpointHistory(db, ['ep-purged']);
+    await configOf(db).purgeEndpointHistory(['ep-purged']);
 
     const kept = (await issueRows(db)).find((r) => r.target === 'ep-kept');
     expect(kept).toMatchObject({ resolvedAt: null, resolvedReason: null });
@@ -181,7 +182,7 @@ describe('createEndpoint (monitoring switch fields)', () => {
     const db = await freshDb();
     const c = await chain(db, 'a');
 
-    const ep = await createEndpoint(db, {
+    const ep = await configOf(db).createEndpoint({
       siteId: c.siteId,
       url: 'https://test.example.com',
       monitorHttp: false,
@@ -196,7 +197,7 @@ describe('createEndpoint (monitoring switch fields)', () => {
     const db = await freshDb();
     const c = await chain(db, 'a');
 
-    const ep = await createEndpoint(db, {
+    const ep = await configOf(db).createEndpoint({
       siteId: c.siteId,
       url: 'https://test.example.com',
     });
@@ -209,7 +210,7 @@ describe('createEndpoint (monitoring switch fields)', () => {
     const db = await freshDb();
     const c = await chain(db, 'a');
 
-    const ep = await createEndpoint(db, {
+    const ep = await configOf(db).createEndpoint({
       siteId: c.siteId,
       url: 'https://test.example.com',
       deployProjectId: 'prj_abc',

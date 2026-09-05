@@ -1,25 +1,15 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
-import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
 import type { AuthVars } from '../middleware/auth';
-import {
-  findUserByEmail,
-  createUser,
-  createSession,
-  revokeSession,
-  resolveSession,
-  roleForEmail,
-  toAuthUser,
-  isUniqueViolation,
-} from '../storage/auth-store';
+import type { Storage } from '../storage/ports';
+import { roleForEmail, toAuthUser, isUniqueViolation, TOKEN_PREFIX } from '../storage/ports';
 import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from '../auth/password';
 import { setSessionCookie, clearSessionCookie, readSessionCookie } from '../auth/cookie';
 import { githubRoutes } from '../auth/github';
 import { rateLimit } from '../middleware/rate-limit';
 import { bearer } from '../middleware/auth';
-import { TOKEN_PREFIX, validateApiToken, revokeApiToken } from '../storage/token-store';
 
 export const signupBody = z.object({
   email: z.string().email(),
@@ -52,7 +42,7 @@ function parse<T>(result: { success: true; data: T } | { success: false }): T {
  * cookie; the browser reaches these through the Next BFF, which forwards both the
  * cookie and 302 Location verbatim.
  */
-export function authRoutes(db: Db, config: StatusConfig): Hono<{ Variables: AuthVars }> {
+export function authRoutes(storage: Storage, config: StatusConfig): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
 
   // Per-IP ceilings on the two credential routes: unauthenticated, and each
@@ -64,13 +54,13 @@ export function authRoutes(db: Db, config: StatusConfig): Hono<{ Variables: Auth
   app.post('/auth/signup', async (c) => {
     const { email, password, displayName } = parse(signupBody.safeParse(await readJson(c)));
     const normalized = email.toLowerCase();
-    if (await findUserByEmail(db, normalized)) {
+    if (await storage.auth.findUserByEmail(normalized)) {
       throw new HTTPException(409, { message: 'An account with this email already exists' });
     }
     const passwordHash = await hashPassword(password);
     let user;
     try {
-      user = await createUser(db, {
+      user = await storage.auth.createUser({
         email: normalized,
         displayName: displayName?.trim() || normalized,
         role: roleForEmail(normalized, config),
@@ -82,20 +72,20 @@ export function authRoutes(db: Db, config: StatusConfig): Hono<{ Variables: Auth
       if (isUniqueViolation(err)) throw new HTTPException(409, { message: 'An account with this email already exists' });
       throw err;
     }
-    setSessionCookie(c, await createSession(db, user.id), config);
+    setSessionCookie(c, await storage.auth.createSession(user.id), config);
     return c.json({ user: toAuthUser(user) }, 201);
   });
 
   app.post('/auth/login', async (c) => {
     const { email, password } = parse(loginBody.safeParse(await readJson(c)));
-    const user = await findUserByEmail(db, email);
+    const user = await storage.auth.findUserByEmail(email);
     // Always run bcrypt (against a dummy hash when there's no real one) so the
     // response time can't distinguish "unknown email" from "wrong password".
     const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
     if (!user || !user.passwordHash || !ok) {
       throw new HTTPException(401, { message: 'Invalid email or password' });
     }
-    setSessionCookie(c, await createSession(db, user.id), config);
+    setSessionCookie(c, await storage.auth.createSession(user.id), config);
     return c.json({ user: toAuthUser(user) });
   });
 
@@ -104,10 +94,10 @@ export function authRoutes(db: Db, config: StatusConfig): Hono<{ Variables: Auth
     // to clear). Cookie logout is unchanged — always revoke + clear the session.
     const raw = bearer(c);
     if (raw?.startsWith(TOKEN_PREFIX)) {
-      const token = await validateApiToken(db, raw);
-      if (token) await revokeApiToken(db, token.id);
+      const token = await storage.tokens.validateApiToken(raw);
+      if (token) await storage.tokens.revokeApiToken(token.id);
     }
-    await revokeSession(db, readSessionCookie(c));
+    await storage.auth.revokeSession(readSessionCookie(c));
     clearSessionCookie(c);
     return c.json({ ok: true });
   });
@@ -116,11 +106,11 @@ export function authRoutes(db: Db, config: StatusConfig): Hono<{ Variables: Auth
   // This route sits BEFORE the requireAuth seam, so a bearer token isn't yet
   // resolved on the context — validate it inline to answer for a token principal.
   app.get('/auth/me', async (c) => {
-    const user = await resolveSession(db, readSessionCookie(c));
+    const user = await storage.auth.resolveSession(readSessionCookie(c));
     if (!user) {
       const raw = bearer(c);
       if (raw?.startsWith(TOKEN_PREFIX)) {
-        const token = await validateApiToken(db, raw);
+        const token = await storage.tokens.validateApiToken(raw);
         if (token) {
           return c.json({
             principal: { kind: 'token' as const, role: token.role, name: token.name, expiresAt: token.expiresAt },
@@ -132,7 +122,7 @@ export function authRoutes(db: Db, config: StatusConfig): Hono<{ Variables: Auth
   });
 
   // GitHub OAuth start + callback (also public).
-  app.route('/', githubRoutes(db, config));
+  app.route('/', githubRoutes(storage, config));
 
   return app;
 }

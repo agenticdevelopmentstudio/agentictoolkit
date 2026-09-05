@@ -2,19 +2,10 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { randomBytes } from 'node:crypto';
-import type { Db } from '../libsql/client';
 import type { AuthVars } from '../middleware/auth';
 import type { StatusConfig } from '../config/port';
-import {
-  findUserByGithubId,
-  findUserByEmail,
-  attachGithubId,
-  createUser,
-  createSession,
-  roleForEmail,
-  isUniqueViolation,
-} from '../storage/auth-store';
-import type { User } from '../libsql/schema';
+import type { Storage, UserRecord } from '../storage/ports';
+import { roleForEmail, isUniqueViolation } from '../storage/ports';
 import { setSessionCookie } from './cookie';
 
 const STATE_COOKIE = 'gh_oauth_state';
@@ -97,7 +88,7 @@ async function exchangeCode(code: string, config: StatusConfig): Promise<GithubP
   };
 }
 
-export function githubRoutes(db: Db, config: StatusConfig): Hono<{ Variables: AuthVars }> {
+export function githubRoutes(storage: Storage, config: StatusConfig): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
 
   app.get('/auth/github/start', (c) => {
@@ -122,14 +113,14 @@ export function githubRoutes(db: Db, config: StatusConfig): Hono<{ Variables: Au
     }
 
     const profile = await exchangeCode(code, config);
-    let user: User | undefined = await findUserByGithubId(db, profile.githubId);
+    let user: UserRecord | undefined = await storage.auth.findUserByGithubId(profile.githubId);
     if (!user) {
-      const existing = profile.email ? await findUserByEmail(db, profile.email) : undefined;
+      const existing = profile.email ? await storage.auth.findUserByEmail(profile.email) : undefined;
       try {
         if (existing) {
-          user = (await attachGithubId(db, existing.id, profile.githubId)) ?? existing;
+          user = (await storage.auth.attachGithubId(existing.id, profile.githubId)) ?? existing;
         } else {
-          user = await createUser(db, {
+          user = await storage.auth.createUser({
             email: profile.email ?? `gh_${profile.githubId}@users.noreply.github.com`,
             displayName: profile.displayName,
             role: profile.email ? roleForEmail(profile.email, config) : 'pending',
@@ -142,13 +133,13 @@ export function githubRoutes(db: Db, config: StatusConfig): Hono<{ Variables: Au
         // throwing the raw unique violation to the generic 500 handler.
         if (!isUniqueViolation(err)) throw err;
         user =
-          (await findUserByGithubId(db, profile.githubId)) ??
-          (profile.email ? await findUserByEmail(db, profile.email) : undefined);
+          (await storage.auth.findUserByGithubId(profile.githubId)) ??
+          (profile.email ? await storage.auth.findUserByEmail(profile.email) : undefined);
         if (!user) throw err;
       }
     }
 
-    setSessionCookie(c, await createSession(db, user.id), config);
+    setSessionCookie(c, await storage.auth.createSession(user.id), config);
     return c.redirect('/home');
   });
 

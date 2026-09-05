@@ -22,32 +22,7 @@ import {
 } from '../peers/base-url';
 import { requireAdmin } from '../middleware/auth';
 import type { Tier } from '../middleware/auth';
-import {
-  listSiteGroups,
-  createGroup,
-  updateGroup,
-  deleteGroup,
-  listSites,
-  createSite,
-  updateSite,
-  deleteSite,
-  listEndpoints,
-  createEndpoint,
-  updateEndpoint,
-  retireEndpoint,
-  listIntegrations,
-  createIntegration,
-  updateIntegration,
-  deleteIntegration,
-  listIgnoredProjects,
-  addIgnoredProject,
-  removeIgnoredProject,
-  listPeers,
-  createPeer,
-  updatePeer,
-  deletePeer,
-  redactPeer,
-} from '../storage/config-store';
+import { redactPeer, type Storage } from '../storage/ports';
 
 // ---------------------------------------------------------------------------
 // Zod insert schemas (server-managed cols omitted via .omit)
@@ -135,7 +110,7 @@ function envHost(host: string, env: SeedEnvironment): string {
 }
 
 async function runSeed(
-  db: Db,
+  storage: Storage,
   config: StatusConfig,
   roster: SeedRoster,
 ): Promise<{ groups: number; sites: number; endpoints: number; integrations: number }> {
@@ -146,7 +121,7 @@ async function runSeed(
   const groupMap = new Map<string, string>(); // name → id
   for (const name of groupNames) {
     const slug = name.toLowerCase().replace(/\s+/g, '-');
-    const row = await createGroup(db, { name, slug });
+    const row = await storage.config.createGroup({ name, slug });
     groupMap.set(name, row.id);
   }
 
@@ -165,7 +140,7 @@ async function runSeed(
   const siteMap = new Map<string, string>(); // `${group}|${name}` → id
   for (const { group, name, baseSlug } of siteKeys) {
     const siteGroupId = groupMap.get(group)!;
-    const row = await createSite(db, { name, slug: baseSlug, siteGroupId });
+    const row = await storage.config.createSite({ name, slug: baseSlug, siteGroupId });
     siteMap.set(`${group}|${name}`, row.id);
   }
 
@@ -175,7 +150,7 @@ async function runSeed(
     for (const env of svc.envs) {
       const host = envHost(svc.host, env);
       const url = `https://${host}${svc.path ?? ''}`;
-      await createEndpoint(db, {
+      await storage.config.createEndpoint({
         siteId,
         url,
         kind: svc.kind,
@@ -196,12 +171,12 @@ async function runSeed(
     { platform: 'crunchy', label: 'Crunchy Bridge', tokenEnvVar: 'CRUNCHY_API_TOKEN', config: {} },
     { platform: 'cloudflare', label: 'Cloudflare', tokenEnvVar: 'CLOUDFLARE_API_TOKEN', config: config.credentials.CLOUDFLARE_ACCOUNT_ID ? { accountId: config.credentials.CLOUDFLARE_ACCOUNT_ID } : {} },
   ];
-  const existingIntegrations = await listIntegrations(db);
+  const existingIntegrations = await storage.config.listIntegrations();
   let integrations = 0;
   for (const p of providerSeeds) {
     if (!config.credentials[p.tokenEnvVar]) continue;
     if (existingIntegrations.some((i) => i.platform === p.platform)) continue;
-    await createIntegration(db, { platform: p.platform, label: p.label, tokenEnvVar: p.tokenEnvVar, config: p.config });
+    await storage.config.createIntegration({ platform: p.platform, label: p.label, tokenEnvVar: p.tokenEnvVar, config: p.config });
     integrations++;
   }
 
@@ -212,7 +187,7 @@ async function runSeed(
 // Router factory
 // ---------------------------------------------------------------------------
 
-export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Hono<{ Variables: { tier: Tier } }> {
+export function configRoutes(db: Db, storage: Storage, config: StatusConfig, seed: SeedRoster): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
 
   // All /config/* is admin-gated (requireAuth already applied app-wide)
@@ -221,7 +196,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
   // --- site-groups -----------------------------------------------------------
 
   app.get('/site-groups', async (c) => {
-    const rows = await listSiteGroups(db);
+    const rows = await storage.config.listSiteGroups();
     return c.json(rows);
   });
 
@@ -230,7 +205,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(siteGroupInsert.safeParse(body));
-    const row = await createGroup(db, data);
+    const row = await storage.config.createGroup(data);
     return c.json(row, 201);
   });
 
@@ -240,24 +215,24 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(siteGroupPatch.safeParse(body));
-    const row = await updateGroup(db, id, data);
+    const row = await storage.config.updateGroup(id, data);
     if (!row) throw new HTTPException(404, { message: 'Not found' });
     return c.json(row);
   });
 
   app.delete('/site-groups/:id', async (c) => {
     const id = c.req.param('id');
-    await deleteGroup(db, id);
+    await storage.config.deleteGroup(id);
     // Same inline sweep as DELETE /sites/:id — clear deploy-target issues the deleted
     // group's endpoints owned so Problems empties in this request, not next cycle.
-    await reconcileBoardLedger(db, config);
+    await reconcileBoardLedger(db, storage, config);
     return c.json({ ok: true });
   });
 
   // --- sites ----------------------------------------------------------------
 
   app.get('/sites', async (c) => {
-    const rows = await listSites(db);
+    const rows = await storage.config.listSites();
     return c.json(rows);
   });
 
@@ -266,7 +241,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(monitoredSiteInsert.safeParse(body));
-    const row = await createSite(db, data);
+    const row = await storage.config.createSite(data);
     return c.json(row, 201);
   });
 
@@ -276,17 +251,17 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(monitoredSitePatch.safeParse(body));
-    const row = await updateSite(db, id, data);
+    const row = await storage.config.updateSite(id, data);
     if (!row) throw new HTTPException(404, { message: 'Not found' });
     return c.json(row);
   });
 
   app.delete('/sites/:id', async (c) => {
     const id = c.req.param('id');
-    await deleteSite(db, id);
+    await storage.config.deleteSite(id);
     // Clear deploy-target issues that only this site owned — same sweep the monitor
     // cycle runs, done inline so Problems empties in this request, not next cycle.
-    await reconcileBoardLedger(db, config);
+    await reconcileBoardLedger(db, storage, config);
     return c.json({ ok: true });
   });
 
@@ -294,7 +269,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
 
   app.get('/endpoints', async (c) => {
     const siteId = c.req.query('siteId');
-    const rows = await listEndpoints(db, siteId);
+    const rows = await storage.config.listEndpoints(siteId);
     return c.json(rows);
   });
 
@@ -303,7 +278,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(monitoredEndpointInsert.safeParse(body));
-    const row = await createEndpoint(db, data);
+    const row = await storage.config.createEndpoint(data);
     return c.json(row, 201);
   });
 
@@ -313,7 +288,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(monitoredEndpointPatch.safeParse(body));
-    const row = await updateEndpoint(db, id, data);
+    const row = await storage.config.updateEndpoint(id, data);
     if (!row) throw new HTTPException(404, { message: 'Not found' });
     // A PATCH can flip isActive / monitorHttp / monitorDeploys, which is Requirement A:
     // turning a switch off must remove the endpoint's targets from Problems. The BOARD
@@ -321,7 +296,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
     // LEDGER row and its alert-dedup state would lag a whole cycle — long enough for a
     // recovery on a monitor the operator just disabled to page on-call. Same inline
     // sweep the delete paths run.
-    await reconcileBoardLedger(db, config);
+    await reconcileBoardLedger(db, storage, config);
     return c.json(row);
   });
 
@@ -331,17 +306,17 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
     // atomically server-side (1:1 site→endpoint is the norm). Both the editor and the
     // "retire stale monitor" surface route here, so neither has to (mis)compute it from
     // a possibly-stale client endpoint list.
-    const result = await retireEndpoint(db, id);
+    const result = await storage.config.retireEndpoint(id);
     // Same inline sweep as DELETE /sites/:id — resolve deploy-target issues the retired
     // endpoint owned so Problems empties in this request, not next cycle.
-    await reconcileBoardLedger(db, config);
+    await reconcileBoardLedger(db, storage, config);
     return c.json({ ok: true, ...result });
   });
 
   // --- integrations ---------------------------------------------------------
 
   app.get('/integrations', async (c) => {
-    const rows = await listIntegrations(db);
+    const rows = await storage.config.listIntegrations();
     return c.json(rows);
   });
 
@@ -350,7 +325,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(deployIntegrationInsert.safeParse(body));
-    const row = await createIntegration(db, data);
+    const row = await storage.config.createIntegration(data);
     return c.json(row, 201);
   });
 
@@ -360,7 +335,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(deployIntegrationPatch.safeParse(body));
-    const row = await updateIntegration(db, id, data);
+    const row = await storage.config.updateIntegration(id, data);
     if (!row) throw new HTTPException(404, { message: 'Not found' });
     return c.json(row);
   });
@@ -371,18 +346,18 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
     // this was the last active integration for — WITHOUT that half, the sweep below is
     // decorative: `platformProblems` reads that column, so the Problem would still derive
     // and its ledger row would still stay open until the next full cycle rewrote it.
-    await deleteIntegration(db, id);
+    await storage.config.deleteIntegration(id);
     // Un-configured platform ⇒ every platform-health problem it raised (and every deploy
     // problem for projects only it could poll) stops being derivable. Sweep now, or those
     // rows sit open — and alert-deduped — until the next cycle.
-    await reconcileBoardLedger(db, config);
+    await reconcileBoardLedger(db, storage, config);
     return c.json({ ok: true });
   });
 
   // --- ignored-projects -----------------------------------------------------
 
   app.get('/ignored-projects', async (c) => {
-    const rows = await listIgnoredProjects(db);
+    const rows = await storage.config.listIgnoredProjects();
     return c.json(rows);
   });
 
@@ -391,7 +366,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
       throw new HTTPException(400, { message: 'Invalid JSON' });
     });
     const data = parseBody(ignoredProjectInsert.safeParse(body));
-    await addIgnoredProject(db, data.platform, data.projectName);
+    await storage.config.addIgnoredProject(data.platform, data.projectName);
     return c.json({ ok: true }, 201);
   });
 
@@ -404,7 +379,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
     if (!platform || !projectName) {
       throw new HTTPException(400, { message: 'id must be platform|projectName' });
     }
-    await removeIgnoredProject(db, platform, projectName);
+    await storage.config.removeIgnoredProject(platform, projectName);
     return c.json({ ok: true });
   });
 
@@ -415,7 +390,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
   // accepted on write (POST/PATCH bodies) — it just never comes back out; responses
   // carry `hasToken` in its place so the config UI can show whether one is set.
   app.get('/peers', async (c) => {
-    const rows = await listPeers(db);
+    const rows = await storage.config.listPeers();
     return c.json(rows.map(redactPeer));
   });
 
@@ -425,7 +400,7 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
     });
     const data = parseBody(peerInsert.safeParse(body));
     assertNotSelfPeerUrl(data.baseUrl, config);
-    const row = await peerWrite(() => createPeer(db, data));
+    const row = await peerWrite(() => storage.config.createPeer(data));
     return c.json(redactPeer(row), 201);
   });
 
@@ -436,21 +411,21 @@ export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Ho
     });
     const data = parseBody(peerPatch.safeParse(body));
     if (data.baseUrl !== undefined) assertNotSelfPeerUrl(data.baseUrl, config);
-    const row = await peerWrite(() => updatePeer(db, id, data));
+    const row = await peerWrite(() => storage.config.updatePeer(id, data));
     if (!row) throw new HTTPException(404, { message: 'Not found' });
     return c.json(redactPeer(row));
   });
 
   app.delete('/peers/:id', async (c) => {
     const id = c.req.param('id');
-    await deletePeer(db, id);
+    await storage.config.deletePeer(id);
     return c.json({ ok: true });
   });
 
   // --- seed -----------------------------------------------------------------
 
   app.post('/seed', async (c) => {
-    const counts = await runSeed(db, config, seed);
+    const counts = await runSeed(storage, config, seed);
     return c.json({ ok: true, ...counts });
   });
 

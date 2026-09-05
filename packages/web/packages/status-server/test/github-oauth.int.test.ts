@@ -5,12 +5,12 @@ import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 async function boot() {
   const db = drizzle(createClient({ url: ':memory:' }), { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-  return createApp({ db, config: testConfig() });
+  return createApp(testDeps(db));
 }
 
 function cookieVal(res: Response, name: string): string {

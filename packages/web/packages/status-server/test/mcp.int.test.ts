@@ -3,9 +3,10 @@ import { serve, type ServerType } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApp } from '../src/app';
+import { testDeps } from './helpers/storage';
 import { freshDb, type Db } from './helpers/db';
 import { sessionHeaders } from './helpers/auth';
-import { listSiteGroups } from '../src/storage/config-store';
+import { createLibsqlStorage } from '../src/libsql';
 import { ALL_TOOLS, selectTools } from '../src/mcp/tools';
 import { testConfig } from './helpers/config';
 
@@ -53,7 +54,7 @@ beforeAll(async () => {
   delete process.env.PEER_TOKEN;
 
   db = await freshDb();
-  const app = createApp({ db, config: testConfig() });
+  const app = createApp(testDeps(db));
   await new Promise<void>((resolve) => {
     server = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' }, (info) => {
       baseUrl = `http://127.0.0.1:${info.port}`;
@@ -146,7 +147,7 @@ describe('status /mcp over Streamable HTTP', () => {
       expect(env.data).toMatchObject({ slug: 'mcp-grp', name: 'MCP Group' });
 
       // The write went through the SAME store the REST route uses — the row exists.
-      const groups = await listSiteGroups(db);
+      const groups = await createLibsqlStorage(db).config.listSiteGroups();
       expect(groups.some((g) => g.slug === 'mcp-grp')).toBe(true);
     } finally {
       await admin.close();
@@ -175,7 +176,7 @@ describe('status /mcp over Streamable HTTP', () => {
       const result = await view.callTool({ name: 'create_group', arguments: { name: 'nope', slug: 'nope' } });
       expect(result.isError).toBe(true);
       // And the store was never touched.
-      const groups = await listSiteGroups(db);
+      const groups = await createLibsqlStorage(db).config.listSiteGroups();
       expect(groups.some((g) => g.slug === 'nope')).toBe(false);
     } finally {
       await view.close();

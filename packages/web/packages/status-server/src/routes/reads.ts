@@ -12,13 +12,7 @@ import {
   readBoardFacts, readRoster, rosterDeployProjects, rosterTargets,
   type DeployIdentity, type Problem,
 } from '../board';
-import {
-  listActiveEndpoints,
-  listEndpoints,
-  listIgnoredProjects,
-  type ConfiguredEndpoint,
-} from '../storage/config-store';
-import { latestCheckBySlugSql, type LatestCheckRow } from '../storage/health-store';
+import type { ConfiguredEndpoint, Storage } from '../storage/ports';
 import { computeOverall, publicOverall, type OverallStatus } from '../monitor/overall';
 import type { HealthStatus } from '../monitor/health';
 import type { BuildPhase, DeployPhase } from '../monitor/deploy-status';
@@ -78,15 +72,15 @@ const RESPONSE_BUCKETS = 60;
  *  `dnsOk` rides along unused by most callers — `buildLiveSnapshot` is the one that
  *  reads it, as the fallback for an endpoint the Problem fold has no opinion about.
  *
- *  The statement itself lives in `storage/health-store.ts` because the BOARD reads the
+ *  The statement itself lives in `libsql/stores/health-store.ts` because the BOARD reads the
  *  same thing (`readEndpointFacts`); two spellings of "the newest probe" is how `/live`
  *  came to disagree with the board about a same-second tie. */
 async function latestCheckBySlug(
-  db: Db,
+  storage: Storage,
   slugs: string[],
 ): Promise<Map<string, { status: HealthStatus | 'unknown'; responseTimeMs: number | null; statusCode: number | null; error: string | null; checkedAt: Date; dnsOk: boolean }>> {
   if (slugs.length === 0) return new Map();
-  const rows = await db.all<LatestCheckRow>(latestCheckBySlugSql(slugs));
+  const rows = await storage.health.latestChecks(slugs);
   const map = new Map<
     string,
     { status: HealthStatus | 'unknown'; responseTimeMs: number | null; statusCode: number | null; error: string | null; checkedAt: Date; dnsOk: boolean }
@@ -227,9 +221,9 @@ function deploymentDtos(
  * shrug at), the deploy reads are grouped over the retention window, and the ledger reads
  * are bounded. So the fold's cost grows with the SIZE OF THE ROSTER, not with history.
  */
-export async function boardProblems(db: Db, config: StatusConfig): Promise<Problem[]> {
+export async function boardProblems(db: Db, storage: Storage, config: StatusConfig): Promise<Problem[]> {
   const nowMs = Date.now();
-  return deriveBoard(await readBoardFacts(db, nowMs, config), nowMs).problems;
+  return deriveBoard(await readBoardFacts(db, storage, nowMs, config), nowMs).problems;
 }
 
 /**
@@ -292,9 +286,9 @@ export function platformMetaFromConfig(config: StatusConfig): PlatformMeta {
 }
 
 /** Build the full LiveSnapshot from the persisted last-cycle state. */
-export async function buildLiveSnapshot(db: Db, config: StatusConfig): Promise<LiveSnapshot> {
+export async function buildLiveSnapshot(db: Db, storage: Storage, config: StatusConfig): Promise<LiveSnapshot> {
   const [endpoints, roster, liveVercel] = await Promise.all([
-    listActiveEndpoints(db),
+    storage.config.listActiveEndpoints(),
     readRoster(db),
     liveVercelProjectNames(db),
   ]);
@@ -330,14 +324,14 @@ export async function buildLiveSnapshot(db: Db, config: StatusConfig): Promise<L
   // wedged cannot blank the clock into "fresh". Null only when nothing has EVER
   // been probed (a brand-new monitor → no false alarm).
   const [latest, deployRows, problems, lastCheckAt] = await Promise.all([
-    latestCheckBySlug(db, endpoints.map((ep) => ep.slug)),
+    latestCheckBySlug(storage, endpoints.map((ep) => ep.slug)),
     db
       .select()
       .from(deploymentsTable)
       .where(ownedDeploysWhere(projects))
       .orderBy(desc(deploymentsTable.createdAt))
       .limit(MAX_DEPLOYS),
-    boardProblems(db, config),
+    boardProblems(db, storage, config),
     newestCheckAt(db),
   ]);
 
@@ -424,11 +418,11 @@ export interface CompactSnapshot {
 /** The compact per-monitor unit a fleet aggregator consumes — overall rollup +
  *  the per-service statuses + the open-issue list. SINGLE source of truth for the
  *  /snapshot payload (the /fleet route reuses this in a later task). */
-export async function buildSnapshot(db: Db, config: StatusConfig): Promise<CompactSnapshot> {
-  const endpoints = await listActiveEndpoints(db);
+export async function buildSnapshot(db: Db, storage: Storage, config: StatusConfig): Promise<CompactSnapshot> {
+  const endpoints = await storage.config.listActiveEndpoints();
   const [latest, allProblems] = await Promise.all([
-    latestCheckBySlug(db, endpoints.map((ep) => ep.slug)),
-    boardProblems(db, config),
+    latestCheckBySlug(storage, endpoints.map((ep) => ep.slug)),
+    boardProblems(db, storage, config),
   ]);
   const services = serviceDtos(endpoints, latest);
 
@@ -651,8 +645,8 @@ export async function queryHistory(
 }
 
 /** Per-endpoint daily uptime over the last `days`. */
-export async function buildUptime(db: Db, days: number): Promise<UptimeResponse> {
-  const endpoints = await listActiveEndpoints(db);
+export async function buildUptime(db: Db, storage: Storage, days: number): Promise<UptimeResponse> {
+  const endpoints = await storage.config.listActiveEndpoints();
   const services: UptimeService[] = await Promise.all(
     endpoints.map(async (svc): Promise<UptimeService> => {
       const rows = await uptimeDaily(db, svc.slug, days);
@@ -677,8 +671,8 @@ export async function buildUptime(db: Db, days: number): Promise<UptimeResponse>
 
 /** The configuration-gap partition: pending/addable deploy projects + endpoints that
  *  aren't wired to one. Takes the already-enumerated list (the caller owns cache-vs-fresh). */
-export async function findUnconfiguredSites(db: Db, enumerated: EnumeratedProject[]) {
-  const projects = await buildDeployProjects(db, enumerated);
+export async function findUnconfiguredSites(db: Db, storage: Storage, enumerated: EnumeratedProject[]) {
+  const projects = await buildDeployProjects(storage, enumerated);
   const { pending, addable } = partitionPending(projects);
   const noDomain = pending.filter((p) => !p.domain);
   // The other configuration gap: endpoints that should be wired to a deploy project but
@@ -688,7 +682,7 @@ export async function findUnconfiguredSites(db: Db, enumerated: EnumeratedProjec
   // web's `endpointConfigStatus` applies via `isActive`), so it is never reported as a
   // site to fix. Note the OTHER axis above reads every endpoint — a paused monitor still
   // CLAIMS its deploy project; it just isn't nagged about its own missing wiring.
-  const endpoints = await listActiveEndpoints(db);
+  const endpoints = await storage.config.listActiveEndpoints();
   const unconfiguredSites = endpoints.filter(endpointUnconfigured).map((e) => ({ id: e.slug, name: e.name }));
   // The INVERSE gap — a monitor wired to a project deleted upstream — is deliberately NOT
   // reported here. It is not a configuration gap the operator has to close: the monitor
@@ -732,7 +726,7 @@ export async function refreshAndEnumerateDeployProjects(
   return { vercel, enumerated: projects, verifiedPlatforms: vercel.ok ? [...verifiedPlatforms, 'vercel'] : verifiedPlatforms };
 }
 
-export function readsRoutes(db: Db, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
+export function readsRoutes(db: Db, storage: Storage, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
   // Only the PROVIDER-facing halves are cached; the DB reads (wired/ignored
   // flags) stay live so a config edit shows immediately.
@@ -743,11 +737,11 @@ export function readsRoutes(db: Db, config: StatusConfig): Hono<{ Variables: { t
   const cachedIntegrations = cachedSingleFlight(PROVIDER_READ_CACHE_MS, () => runIntegrationsCheck(db, config));
   const platformMeta = platformMetaFromConfig(config);
 
-  app.get('/live', async (c) => c.json(await buildLiveSnapshot(db, config)));
+  app.get('/live', async (c) => c.json(await buildLiveSnapshot(db, storage, config)));
 
   app.get('/status', async (c) => {
-    const endpoints = await listActiveEndpoints(db);
-    const latest = await latestCheckBySlug(db, endpoints.map((ep) => ep.slug));
+    const endpoints = await storage.config.listActiveEndpoints();
+    const latest = await latestCheckBySlug(storage, endpoints.map((ep) => ep.slug));
     // Each /status entry is one endpoint: `links.live` is its own URL; `links.platform`
     // is the deploy-platform dashboard for its (platform, deployProject) pair (null when
     // one can't be built). Additive — the existing fields are untouched.
@@ -765,7 +759,7 @@ export function readsRoutes(db: Db, config: StatusConfig): Hono<{ Variables: { t
     return c.json({ overall, services, checkedAt: new Date().toISOString() });
   });
 
-  app.get('/snapshot', async (c) => c.json(await buildSnapshot(db, config)));
+  app.get('/snapshot', async (c) => c.json(await buildSnapshot(db, storage, config)));
 
   app.get('/history', async (c) => {
     // The source param was `service`; the standalone backend uses `slug` (also
@@ -780,7 +774,7 @@ export function readsRoutes(db: Db, config: StatusConfig): Hono<{ Variables: { t
 
   app.get('/uptime', async (c) => {
     const days = clamp(intParam(c.req.query('days'), 90), 1, 365);
-    return c.json(await buildUptime(db, days));
+    return c.json(await buildUptime(db, storage, days));
   });
 
   app.get('/response-history', async (c) => {
@@ -792,7 +786,7 @@ export function readsRoutes(db: Db, config: StatusConfig): Hono<{ Variables: { t
 
   app.get('/deploy-projects', async (c) => {
     const { enumerated, verifiedPlatforms } = await cachedEnumerate(c.req.query('fresh') === '1');
-    const built = await buildDeployProjects(db, enumerated);
+    const built = await buildDeployProjects(storage, enumerated);
     // Each project entry gains canonical `links`: `live` is its primary domain
     // (falling back to the first of `domains`), `platform` its deploy dashboard.
     // Additive — every existing field is preserved.
@@ -820,7 +814,7 @@ export function readsRoutes(db: Db, config: StatusConfig): Hono<{ Variables: { t
   // TTL, identical semantics to /deploy-projects?fresh=1. View tier — sits with the reads.
   app.get('/deploy-projects/unconfigured', async (c) => {
     const { enumerated } = await cachedEnumerate(c.req.query('fresh') === '1');
-    return c.json(await findUnconfiguredSites(db, enumerated));
+    return c.json(await findUnconfiguredSites(db, storage, enumerated));
   });
 
   app.get('/integrations', async (c) => c.json(await cachedIntegrations(c.req.query('fresh') === '1')));
@@ -844,8 +838,11 @@ export type { EnumeratedProject } from '@agentic-toolkit/deploy-platform/enumera
  * ones included — see `listEndpointsForWiring`) + the ignored table. The returned shape is
  * the web's `DeployProject`.
  */
-export async function buildDeployProjects(db: Db, enumerated: EnumeratedProject[]) {
-  const [eps, ignoredRows] = await Promise.all([listEndpointsForWiring(db), listIgnoredProjects(db)]);
+export async function buildDeployProjects(storage: Storage, enumerated: EnumeratedProject[]) {
+  const [eps, ignoredRows] = await Promise.all([
+    listEndpointsForWiring(storage),
+    storage.config.listIgnoredProjects(),
+  ]);
   return correlateDeployProjects(enumerated, eps, ignoredRows);
 }
 
@@ -943,8 +940,8 @@ export function correlateDeployProjects(
  * a URL that already has one. Pause state belongs to the probe list (`listActiveEndpoints`,
  * which the sync and the board still use), not to this one.
  */
-async function listEndpointsForWiring(db: Db): Promise<EndpointWiring[]> {
-  const eps = await listEndpoints(db);
+async function listEndpointsForWiring(storage: Storage): Promise<EndpointWiring[]> {
+  const eps = await storage.config.listEndpoints();
   return eps.map((e) => ({ platform: e.platform, deployProject: e.deployProject, environment: e.environment, url: e.url }));
 }
 

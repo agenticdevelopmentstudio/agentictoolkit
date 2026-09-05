@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import type { Db } from './libsql/client';
 import type { StatusConfig } from './config/port';
+import type { Storage } from './storage/ports';
 import { buildOpenApiSpec } from './openapi/build';
 import { requireAuth, type AuthVars } from './middleware/auth';
 import { cachedSingleFlight } from '@agentic-toolkit/deploy-platform/util';
@@ -60,14 +61,14 @@ export const MAX_BODY_BYTES = 1_048_576; // 1MB
  *  build and the route's declared response schema share one shape (the cache used
  *  to hold `unknown` and cast it back with `any`, which put the cache-hit path
  *  outside the type check the fresh path still passed). */
-async function buildStatusSummary(db: Db, config: StatusConfig): Promise<{
+async function buildStatusSummary(db: Db, storage: Storage, config: StatusConfig): Promise<{
   operational: boolean;
   status: 'healthy' | 'degraded' | 'down' | 'unknown';
   generatedAt: string;
   counts: { total: number; healthy: number; degraded: number; down: number; unknown: number };
   downSites: { name: string; status: 'down' | 'degraded'; since?: string }[];
 }> {
-  const snap = await buildSnapshot(db, config);
+  const snap = await buildSnapshot(db, storage, config);
 
   // One pass over services; every status is one of these four buckets, so
   // total === healthy + degraded + down + unknown by construction.
@@ -119,6 +120,7 @@ async function buildStatusSummary(db: Db, config: StatusConfig): Promise<{
  *  one field it needs) rather than reading a module-level singleton. */
 export interface AppDeps {
   db: Db;
+  storage: Storage;
   scheduler?: Scheduler;
   config: StatusConfig;
   /** The host's seed roster — what `POST /config/seed` creates in an empty configuration
@@ -129,7 +131,7 @@ export interface AppDeps {
 export function createApp(opts: AppDeps): OpenAPIHono<{ Variables: AuthVars }> {
   const app = new OpenAPIHono<{ Variables: AuthVars }>();
   const allowed = opts.config.corsAllowedHosts;
-  const cachedSummary = cachedSingleFlight(STATUS_SUMMARY_CACHE_MS, () => buildStatusSummary(opts.db, opts.config));
+  const cachedSummary = cachedSingleFlight(STATUS_SUMMARY_CACHE_MS, () => buildStatusSummary(opts.db, opts.storage, opts.config));
 
   app.use(
     '*',
@@ -272,49 +274,49 @@ export function createApp(opts: AppDeps): OpenAPIHono<{ Variables: AuthVars }> {
 
   // Public auth routes mint the very session the seam below checks, so they sit
   // before it. Webhooks authenticate via provider signature — also pre-seam.
-  app.route('/', authRoutes(opts.db, opts.config));
-  app.route('/', hooksRoutes(opts.db, opts.config));
+  app.route('/', authRoutes(opts.storage, opts.config));
+  app.route('/', hooksRoutes(opts.db, opts.storage, opts.config));
   // The device-flow REQUEST + POLL are reached by an unauthenticated CLI, so they
   // sit pre-seam beside the auth routes (both per-IP rate-limited inside). The
   // APPROVAL trio is a signed-in action and lives POST-seam below.
   app.route('/', devicePublicRoutes(opts.db));
 
   // Everything below requires auth; /health + /version + /public/* + /auth/* + /hooks/* above are public.
-  app.use('*', requireAuth(opts.db, opts.config));
+  app.use('*', requireAuth(opts.storage, opts.config));
   // MCP transport (GET/POST/DELETE /mcp) — the tier the seam resolved selects the tool
   // set (view → read-only, admin → all). Mounted FIRST post-seam, well before usersRoutes'
   // blanket `use('*', requireAdmin)`, so a view-tier caller reaches its read-only tools.
-  mountMcp(app, opts.db, opts.config);
-  app.route('/', readsRoutes(opts.db, opts.config));
+  mountMcp(app, opts.db, opts.storage, opts.config);
+  app.route('/', readsRoutes(opts.db, opts.storage, opts.config));
   // GET /deployments/:id/log — view tier, beside the reads it completes. Kept in its
   // own module because, unlike every route in reads.ts, it calls the provider.
   app.route('/', deployLogRoutes(opts.db));
-  app.route('/', boardRoutes(opts.db, opts.config));
-  app.route('/', activityRoutes(opts.db, opts.config));
+  app.route('/', boardRoutes(opts.db, opts.storage, opts.config));
+  app.route('/', activityRoutes(opts.db, opts.storage, opts.config));
   // Server-side Auto Configure (POST /auto-configure) — admin-gated inside the sub-app,
   // sits beside the reads it complements (GET /deploy-projects/unconfigured lives in reads).
-  app.route('/', autoConfigureRoutes(opts.db));
+  app.route('/', autoConfigureRoutes(opts.db, opts.storage));
   // Live push (SSE) + manual check — view tier; the SSE route needs the scheduler
   // for the cadence frame, /live/check to trigger a cycle.
-  app.route('/', streamRoutes(opts.db, opts.scheduler, opts.config));
-  app.route('/', badgeRoutes(opts.db, opts.config));
-  app.route('/config', configRoutes(opts.db, opts.config, opts.seed ?? []));
+  app.route('/', streamRoutes(opts.db, opts.storage, opts.scheduler, opts.config));
+  app.route('/', badgeRoutes(opts.db, opts.storage, opts.config));
+  app.route('/config', configRoutes(opts.db, opts.storage, opts.config, opts.seed ?? []));
   if (opts.scheduler) app.route('/', cronRoutes(opts.db, opts.scheduler));
-  app.route('/', fleetRoutes(opts.db, opts.config));
+  app.route('/', fleetRoutes(opts.db, opts.storage, opts.config));
   app.route('/', telemetryRoutes(opts.db, opts.config));
   // API bearer tokens (mint/list/revoke) — admin-gated, EXCEPT a token may revoke
   // itself (view tier). It MUST mount before usersRoutes: usersRoutes does
   // `use('*', requireAdmin)` at '/', which in Hono leaks onto every route
   // registered after it — mounting tokens after users would block the view-tier
   // self-revoke DELETE before it reaches this router.
-  app.route('/', tokensRoutes(opts.db));
+  app.route('/', tokensRoutes(opts.storage));
   // Device-approval trio (GET /auth/device/pending, POST /auth/device/approve,
   // /auth/device/deny) — any signed-in viewer/admin, NOT admin-only. Like
   // tokensRoutes it MUST mount before usersRoutes, whose `use('*', requireAdmin)`
   // at '/' leaks onto every route registered after it and would 403 a viewer
   // approving a device.
-  app.route('/', deviceApprovalRoutes(opts.db));
-  app.route('/', usersRoutes(opts.db));
+  app.route('/', deviceApprovalRoutes(opts.db, opts.storage));
+  app.route('/', usersRoutes(opts.storage));
 
   app.get('/doc', (c) => c.json(buildOpenApiSpec(app, opts.config.appVersion)));
   return app;

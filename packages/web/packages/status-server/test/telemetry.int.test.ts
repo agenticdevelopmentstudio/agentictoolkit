@@ -7,6 +7,7 @@ import type { Fetcher } from '../src/telemetry/ports';
 import type { ErrorDTO, AnalyticsMetricDTO } from '../src/telemetry/types';
 import { sessionHeaders } from './helpers/auth';
 import { freshDb as bootDb } from './helpers/db';
+import { testDeps } from './helpers/storage';
 import { testConfig } from './helpers/config';
 
 async function parse(res: Response): Promise<Record<string, any>> {
@@ -29,7 +30,7 @@ describe('telemetry read API', () => {
     delete process.env.POSTHOG_PROJECT_ID;
     db = await bootDb();
     viewAuth = await sessionHeaders(db, 'viewer');
-    app = createApp({ db, config: testConfig() });
+    app = createApp(testDeps(db));
   });
 
   it('/errors is gated — 401 without a token', async () => {

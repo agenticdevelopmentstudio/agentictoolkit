@@ -6,9 +6,8 @@ import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { and, eq, lt } from 'drizzle-orm';
 import type { Db } from '../libsql/client';
 import type { AuthVars } from '../middleware/auth';
-import type { AuthUser } from '../storage/auth-store';
+import type { AuthUser, Storage } from '../storage/ports';
 import { deviceAuthorizations, apiTokens } from '../libsql/schema';
-import { mintApiToken, deleteApiToken } from '../storage/token-store';
 import { rateLimit } from '../middleware/rate-limit';
 import { readValidatedBody } from './read-body';
 
@@ -188,7 +187,7 @@ function requireSessionUser(c: Context<{ Variables: AuthVars }>): AuthUser {
  * BEFORE usersRoutes so that router's `use('*', requireAdmin)` never leaks onto
  * these (a viewer must be able to approve a `user`-role token). NOT admin-gated.
  */
-export function deviceApprovalRoutes(db: Db): Hono<{ Variables: AuthVars }> {
+export function deviceApprovalRoutes(db: Db, storage: Storage): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
 
   // Look up a still-valid grant by its user_code, reaping it if expired. Returns
@@ -235,7 +234,7 @@ export function deviceApprovalRoutes(db: Db): Hono<{ Variables: AuthVars }> {
     if (row.status !== 'pending') throw new HTTPException(409, { message: 'This request has already been handled' });
 
     const role = c.get('tier') === 'admin' ? ('admin' as const) : ('user' as const);
-    const { meta, raw } = await mintApiToken(db, {
+    const { meta, raw } = await storage.tokens.mintApiToken({
       name: row.cliLabel || 'device',
       role,
       kind: 'device',
@@ -253,7 +252,7 @@ export function deviceApprovalRoutes(db: Db): Hono<{ Variables: AuthVars }> {
       // Lost the race: the just-minted token was never disclosed (this update's
       // stash never landed), so it's dead on arrival — delete it rather than
       // leave an orphaned api_tokens row behind.
-      await deleteApiToken(db, meta.id);
+      await storage.tokens.deleteApiToken(meta.id);
       throw new HTTPException(409, { message: 'This request has already been handled' });
     }
     return c.json({ status: 'approved' as const });

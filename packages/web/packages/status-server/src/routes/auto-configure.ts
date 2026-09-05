@@ -4,16 +4,7 @@ import { z } from 'zod';
 import type { Db } from '../libsql/client';
 import type { Tier } from '../middleware/auth';
 import { requireAdmin } from '../middleware/auth';
-import {
-  listEndpoints as storeListEndpoints,
-  listSites as storeListSites,
-  updateEndpoint as storeUpdateEndpoint,
-  createSite as storeCreateSite,
-  createEndpoint as storeCreateEndpoint,
-  deleteSite as storeDeleteSite,
-  addIgnoredProjects,
-  type EndpointRow,
-} from '../storage/config-store';
+import type { EndpointRow, Storage } from '../storage/ports';
 import {
   runAutoConfigure,
   wireMatchingEndpoints,
@@ -78,28 +69,28 @@ function str(v: unknown): string | null | undefined {
 }
 
 /**
- * The engine's StatusAddApi backed by DIRECT `storage/config-store` calls — the
+ * The engine's StatusAddApi backed by DIRECT `storage.config` calls — the
  * in-process replacement for the web client that used to hit /config/*. The delete
  * path MUST use the purging `deleteSite` (it drops the rolled-back site's history +
  * issues), and `createEndpoint` returns the created row mapped to `EndpointLite` with
  * its real server id so intra-run chaining wires against the actual endpoint.
  */
-export function statusAdapter(db: Db): StatusAddApi {
+export function statusAdapter(storage: Storage): StatusAddApi {
   return {
     async listAllEndpoints() {
       // ALL endpoints (active + inactive), same set the web client's listAllEndpoints
       // (GET /config/endpoints) returned — so the planner sees every existing monitor.
-      const rows = await storeListEndpoints(db);
+      const rows = await storage.config.listEndpoints();
       return rows.map(toLite);
     },
     async listSites() {
       // Slug + group only: the create path uses them to disambiguate a taken slug and to
       // file a new site with its domain family's group.
-      const rows = await storeListSites(db);
+      const rows = await storage.config.listSites();
       return rows.map((s) => ({ id: s.id, slug: s.slug, groupId: s.siteGroupId }));
     },
     updateEndpoint(id, body) {
-      return storeUpdateEndpoint(db, id, {
+      return storage.config.updateEndpoint(id, {
         platform: str(body.platform),
         deployProject: str(body.deployProject),
         // wireMatchingEndpoints omits environment; undefined is dropped from the SET
@@ -108,11 +99,11 @@ export function statusAdapter(db: Db): StatusAddApi {
       });
     },
     async createSite(body) {
-      const row = await storeCreateSite(db, { name: body.name, slug: body.slug, siteGroupId: body.groupId });
+      const row = await storage.config.createSite({ name: body.name, slug: body.slug, siteGroupId: body.groupId });
       return { id: row.id };
     },
     async createEndpoint(siteId, body) {
-      const row = await storeCreateEndpoint(db, {
+      const row = await storage.config.createEndpoint({
         siteId,
         url: String(body.url),
         environment: str(body.environment),
@@ -122,7 +113,7 @@ export function statusAdapter(db: Db): StatusAddApi {
       return toLite(row);
     },
     async deleteSite(id) {
-      await storeDeleteSite(db, id);
+      await storage.config.deleteSite(id);
     },
   };
 }
@@ -169,10 +160,10 @@ export type AutoConfigureInput = z.infer<typeof autoConfigureBody>;
  * POST /auto-configure AND the run_auto_configure MCP tool, so both drive the engine
  * identically and can never diverge.
  */
-export async function performAutoConfigure(db: Db, { ignore, create }: AutoConfigureInput) {
+export async function performAutoConfigure(db: Db, storage: Storage, { ignore, create }: AutoConfigureInput) {
   // 1. Persist the operator's ignores BEFORE enumerating so the fresh classify treats
   //    them as ignored (dropping them from the addable set the project axis acts on).
-  if (ignore.length) await addIgnoredProjects(db, ignore);
+  if (ignore.length) await storage.config.addIgnoredProjects(ignore);
 
   // 2. Re-verify Vercel and enumerate, in that order and as one unit (the shared reader —
   //    never the routes' 30s cache; a write run always looks). The enumeration derives
@@ -185,11 +176,11 @@ export async function performAutoConfigure(db: Db, { ignore, create }: AutoConfi
 
   // 3. Enrich with wired/ignored flags, then classify — the SAME model /deploy-projects and
   //    the banner derive from.
-  const all = await buildDeployProjects(db, enumerated);
+  const all = await buildDeployProjects(storage, enumerated);
   const projects = vercel.ok ? all : all.filter((p) => platformCanon(p.platform) !== 'vercel');
   const { addable, noDomain } = partitionPending(projects);
 
-  const api = statusAdapter(db);
+  const api = statusAdapter(storage);
   // 4. Project axis: match each addable project to the site that monitors its domain,
   //    or CREATE one (in create.groupId) when nothing monitors it yet.
   //
@@ -254,7 +245,7 @@ export async function performAutoConfigure(db: Db, { ignore, create }: AutoConfi
   };
 }
 
-export function autoConfigureRoutes(db: Db): Hono<{ Variables: { tier: Tier } }> {
+export function autoConfigureRoutes(db: Db, storage: Storage): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
 
   // requireAdmin is applied PER-ROUTE (not blanket `use('*')`): this sub-app mounts at the
@@ -267,7 +258,7 @@ export function autoConfigureRoutes(db: Db): Hono<{ Variables: { tier: Tier } }>
     });
     const parsed = autoConfigureBody.safeParse(raw);
     if (!parsed.success) throw new HTTPException(400, { message: `Invalid request body: ${String(parsed.error)}` });
-    return c.json(await performAutoConfigure(db, parsed.data));
+    return c.json(await performAutoConfigure(db, storage, parsed.data));
   });
 
   return app;

@@ -7,7 +7,7 @@ import { createApp } from '../src/app';
 import type { Db } from '../src/libsql/client';
 import { sessionHeaders } from './helpers/auth';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
-import { testConfig } from './helpers/config';
+import { testDeps } from './helpers/storage';
 
 async function bootDb(): Promise<Db> {
   const db = drizzle(createClient({ url: ':memory:' }), { schema });
@@ -35,7 +35,7 @@ describe('/response-history', () => {
       { serviceSlug: 'a', status: 'degraded', responseTimeMs: 300, statusCode: 200, checkedAt: secAgo(2_100) },
     ]);
 
-    const res = await createApp({ db, config: testConfig() }).request('/response-history?hours=1&buckets=6', { headers: auth });
+    const res = await createApp(testDeps(db)).request('/response-history?hours=1&buckets=6', { headers: auth });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { hours: number; points: (number | null)[] };
     expect(body.points).toEqual([null, null, 300, null, null, 150]);
@@ -64,7 +64,7 @@ describe('/response-history', () => {
       checkedAt: secAgo(3_600),
     });
 
-    const res = await createApp({ db, config: testConfig() }).request('/response-history?hours=2160&buckets=60', { headers: auth });
+    const res = await createApp(testDeps(db)).request('/response-history?hours=2160&buckets=60', { headers: auth });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { points: (number | null)[] };
     expect(body.points).toHaveLength(60);

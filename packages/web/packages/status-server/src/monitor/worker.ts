@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { openLibsql, tuneDbForConcurrency } from "../libsql/client";
 import { attachCooldownState } from "@agentic-toolkit/deploy-platform/cooldown";
+import { createLibsqlStorage } from "../libsql";
 import { runMonitorCycle } from "./cycle-runner";
 import type { CycleRequest, CycleReply, MonitorWorkerData } from "./worker-client";
 
@@ -31,11 +32,12 @@ attachCooldownState(cooldowns);
 // Migrations already ran on the main thread before this worker was spawned.
 const db = openLibsql(conn);
 await tuneDbForConcurrency(db, conn);
+const storage = createLibsqlStorage(db);
 
 port.on("message", (msg: CycleRequest) => {
   void (async (): Promise<void> => {
     try {
-      await runMonitorCycle(db, { fullSync: msg.fullSync, config, conn });
+      await runMonitorCycle(db, storage, { fullSync: msg.fullSync, config, conn });
       port.postMessage({ seq: msg.seq, ok: true } satisfies CycleReply);
     } catch (err) {
       port.postMessage({

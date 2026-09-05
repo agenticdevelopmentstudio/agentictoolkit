@@ -1,7 +1,7 @@
 import { promises as dnsp } from "node:dns";
 import { classify, HEALTH_CHECK_TIMEOUT_MS, type HealthStatus } from "./health";
 import { mapLimit } from "@agentic-toolkit/deploy-platform/util";
-import type { ConfiguredEndpoint } from "../storage/config-store";
+import type { ConfiguredEndpoint } from "../storage/ports";
 
 // The live HTTP/DNS probe — the single source of truth for "is this endpoint up
 // right now". Used by the health sync (which persists the results, see sync.ts)

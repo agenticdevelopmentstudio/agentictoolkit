@@ -10,7 +10,7 @@ import { createSchema } from '../../routes/tokens';
 const tag = 'tokens';
 
 export const tokensSchemas: Schemas = {
-  // ApiTokenMeta (storage/token-store.ts) — never includes the secret value.
+  // ApiTokenMeta (storage/ports.ts) — never includes the secret value.
   ApiTokenMeta: {
     type: 'object',
     required: ['id', 'name', 'role', 'kind', 'prefix', 'createdBy', 'createdAt', 'lastUsedAt', 'expiresAt', 'revokedAt'],
