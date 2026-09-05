@@ -2,6 +2,7 @@ import AppKit
 import os
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticDeveloperToolkitUI
 
 /// A small floating window for quickly capturing a note.
 /// Positions itself near a given screen rect (typically a status bar item).
@@ -33,39 +34,12 @@ public final class QuickNoteWindowController: NSWindowController {
         return field
     }()
 
-    private lazy var contentScrollView: NSScrollView = {
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.borderType = .bezelBorder
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.observeTheme { view, palette in
-            view.backgroundColor = palette.controlBackgroundColor
-        }
-        return scroll
-    }()
+    /// The window's content view controller, so the editor below has a real
+    /// parent. Without one, `MarkdownEditorController.viewDidLayout` never
+    /// fires and the editor stops responding to resizes.
+    private let containerController = NSViewController()
 
-    private lazy var contentTextView: NSTextView = {
-        let textView = NSTextView()
-        textView.isEditable = true
-        textView.isSelectable = true
-        textView.isRichText = false
-        textView.textContainerInset = NSSize(width: 6, height: 6)
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.allowsUndo = true
-        textView.observeTheme { view, palette in
-            view.font = palette.font(.body)
-            view.textColor = palette.primaryTextColor
-            view.backgroundColor = palette.controlBackgroundColor
-            view.insertionPointColor = palette.cursorColor
-            view.selectedTextAttributes = [
-                .backgroundColor: palette.selectionColor,
-                .foregroundColor: palette.selectionTextColor
-            ]
-        }
-        return textView
-    }()
+    public let editorController = MarkdownEditorController(palette: ThemeScope.app.palette)
 
     private lazy var saveButton: NSButton = {
         let btn = ThemedButton(title: "Save", target: self, action: #selector(saveAction))
@@ -106,6 +80,10 @@ public final class QuickNoteWindowController: NSWindowController {
 
         super.init(window: window)
 
+        containerController.view = NSView()
+        window.contentViewController = containerController
+        containerController.addChild(editorController)
+
         setupContentView()
     }
 
@@ -115,23 +93,24 @@ public final class QuickNoteWindowController: NSWindowController {
     // MARK: - Layout
 
     private func setupContentView() {
-        guard let contentView = window?.contentView else { return }
-        contentScrollView.documentView = contentTextView
+        let contentView = containerController.view
 
         contentView.addSubview(titleField)
-        contentView.addSubview(contentScrollView)
+        contentView.addSubview(editorController.view)
         contentView.addSubview(cancelButton)
         contentView.addSubview(saveButton)
+
+        editorController.view.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
             titleField.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
             titleField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             titleField.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
 
-            contentScrollView.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 8),
-            contentScrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            contentScrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            contentScrollView.bottomAnchor.constraint(equalTo: cancelButton.topAnchor, constant: -12),
+            editorController.view.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 8),
+            editorController.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            editorController.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            editorController.view.bottomAnchor.constraint(equalTo: cancelButton.topAnchor, constant: -12),
 
             cancelButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
             cancelButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -8),
@@ -145,6 +124,14 @@ public final class QuickNoteWindowController: NSWindowController {
             saveButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             saveButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 60)
         ])
+
+        editorController.view.observeTheme { [weak editorController] _, palette in
+            editorController?.palette = palette
+        }
+        // One small panel for capturing a thought. A three-way mode switcher
+        // here would be three controls competing for a window sized for one.
+        editorController.isPreviewAvailable = false
+        editorController.mode = .edit
     }
 
     // MARK: - Show
@@ -152,7 +139,7 @@ public final class QuickNoteWindowController: NSWindowController {
     /// Positions near the menu bar status item button and shows the window.
     public func showNearStatusItem(buttonFrame: NSRect) {
         titleField.stringValue = ""
-        contentTextView.string = ""
+        editorController.content = ""
 
         guard let window else { return }
         let wSize = window.frame.size
@@ -183,7 +170,7 @@ public final class QuickNoteWindowController: NSWindowController {
 
     @objc private func saveAction() {
         let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let content = contentTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = editorController.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty || !content.isEmpty else {
             close()
             return
