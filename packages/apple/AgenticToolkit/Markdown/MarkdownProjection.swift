@@ -158,6 +158,9 @@ public struct MarkdownProjection: SyncMirrorProjection {
         resource: String, id: String, syncVersion: Int,
         data: [String: JSONValue], in conn: Database
     ) throws {
+        // `true` is the full-row assumption; a partial-patch caller must use the
+        // 6-parameter `isFullRow:` overload below, or this reintroduces tombstone
+        // resurrection with no compile-time signal.
         try upsert(resource: resource, id: id, syncVersion: syncVersion, data: data, isFullRow: true, in: conn)
     }
 
@@ -242,6 +245,23 @@ public struct MarkdownProjection: SyncMirrorProjection {
         if derivesIsDeleted {
             bound.append("is_deleted")
         }
+        // The mirror image of `derivesIsDeleted`: a full-row pull that supplies
+        // `is_deleted` truthy but no non-null `deleted_at` must not let
+        // `deleted_at` fall back to NULL (its column default) — that would leave
+        // `document(id:)`/`documentExists` (gate on `is_deleted`) hiding the row
+        // while `liveRow`/`rows` (gate on `deleted_at`) still show it as live, the
+        // same two-flags-disagree corruption the other way round. Computed here
+        // in Swift and placed in `bound`/`arguments` for the same reason
+        // `is_deleted` is above: `ON CONFLICT ... SET` fires only on the UPDATE
+        // branch, so a value derived there alone would be wrong on a first insert.
+        let isDeletedTruthy = present.contains("is_deleted")
+            && Self.isTruthy(Self.value(data["is_deleted"], column: "is_deleted"))
+        let deletedAtSuppliedNonNull = Self.value(data["deleted_at"], column: "deleted_at") != nil
+        let derivesDeletedAt = isFullRow && resource == "content.markdown"
+            && isDeletedTruthy && !deletedAtSuppliedNonNull
+        if derivesDeletedAt, !present.contains("deleted_at") {
+            bound.append("deleted_at")
+        }
         let names = ["id", "sync_version"] + bound
         let placeholders = names.map { _ in "?" }.joined(separator: ", ")
         let assignments = (["sync_version"] + assignmentColumns.sorted())
@@ -255,6 +275,13 @@ public struct MarkdownProjection: SyncMirrorProjection {
                 // `.null` restore) or, absent, the `NULL` `deleted_at`
                 // itself falls back to.
                 return Self.value(data["deleted_at"], column: "deleted_at") == nil ? 0 : 1
+            }
+            if column == "deleted_at", derivesDeletedAt {
+                // `is_deleted` came in truthy with no non-null `deleted_at` to
+                // match it — stamp one now rather than let it fall back to NULL
+                // (or clobber an explicit `.null` restore attempt that contradicts
+                // the very `is_deleted: true` in the same payload).
+                return MarkdownTimestamp.string(Date())
             }
             return data[column] != nil ? Self.value(data[column], column: column) : MarkdownTimestamp.string(Date())
         }
@@ -391,6 +418,19 @@ public struct MarkdownProjection: SyncMirrorProjection {
 
     private static func normalizedTimestamp(_ text: String) -> String {
         MarkdownTimestamp.date(text).map(MarkdownTimestamp.string) ?? text
+    }
+
+    /// Whether a value already bound through `value(_:column:)` reads as
+    /// truthy — the two shapes `is_deleted` can take once decoded: a
+    /// non-zero `Int` (`value(_:column:)` maps both a JSON number and a JSON
+    /// bool to one) or a non-zero `Double`. Anything else, `nil` included,
+    /// is not truthy.
+    private static func isTruthy(_ boundValue: (any DatabaseValueConvertible)?) -> Bool {
+        switch boundValue {
+        case let intValue as Int: return intValue != 0
+        case let doubleValue as Double: return doubleValue != 0
+        default: return false
+        }
     }
 
     private func materialize(_ row: Row, resource: String) -> [String: JSONValue] {

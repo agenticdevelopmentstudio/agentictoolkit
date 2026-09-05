@@ -446,4 +446,78 @@ struct MarkdownProjectionTests {
             #expect(deletedAt != nil)
         }
     }
+
+    /// The mirror image of `deletedAtColumnIsNormalisedOnIngest`: a full-row
+    /// pull that supplies `is_deleted` truthy but omits `deleted_at`
+    /// entirely. Before this round's fix, `deleted_at` was force-bound from
+    /// `excluded.deleted_at`, which — with `deleted_at` absent from `data` —
+    /// resolves to NULL on both the plain `INSERT` (no `DEFAULT`, nullable)
+    /// and the `ON CONFLICT` branch: `is_deleted = 1` while `deleted_at` is
+    /// still NULL, the two flags disagreeing the other way round from
+    /// `deletedAtColumnIsNormalisedOnIngest`. This is the INSERT-branch half
+    /// of the regression: the row has never existed locally before, so the
+    /// plain `INSERT` list (not `ON CONFLICT ... SET`) is what has to carry
+    /// the derived `deleted_at`.
+    @Test("is_deleted without deleted_at stamps deleted_at on first insert")
+    func isDeletedWithoutDeletedAtStampsDeletedAtOnInsert() async throws {
+        let store = try store()
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.markdown", id: "m1", op: .upsert, syncVersion: "1",
+                       data: ["title": .string("t"), "content": .string("c"),
+                              "created_at": .string("2026-01-01T00:00:00Z"),
+                              "updated_at": .string("2026-01-01T00:00:00Z"),
+                              "is_deleted": .number(1)])
+        ], advancingTo: nil)
+
+        try store.database.read { conn in
+            let isDeleted = try Int.fetchOne(
+                conn, sql: "SELECT is_deleted FROM markdown WHERE id = 'm1'")
+            let deletedAt = try String.fetchOne(
+                conn, sql: "SELECT deleted_at FROM markdown WHERE id = 'm1'")
+            #expect(isDeleted == 1)
+            #expect(deletedAt != nil)
+        }
+        #expect(try store.document(id: "m1") == nil)
+        #expect(try store.syncStore.liveRow(resource: "content.markdown", id: "m1") == nil)
+    }
+
+    /// Same regression, the UPDATE-branch half: the row is pulled live first
+    /// (so `document(id:)` can be seen to return it), then a second full-row
+    /// pull lands `is_deleted` truthy with no `deleted_at`, this time hitting
+    /// `ON CONFLICT ... SET` on an existing row rather than the plain
+    /// `INSERT`. Both branches take different SQL paths — `bound`/`arguments`
+    /// feed the `INSERT` list, `assignmentColumns` feeds `ON CONFLICT ...
+    /// SET` — so a fix that only closes one leaves the other silently
+    /// corrupting rows that already existed locally.
+    @Test("is_deleted without deleted_at stamps deleted_at on an existing row")
+    func isDeletedWithoutDeletedAtStampsDeletedAtOnUpdate() async throws {
+        let store = try store()
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.markdown", id: "m1", op: .upsert, syncVersion: "1",
+                       data: ["title": .string("t"), "content": .string("c"),
+                              "created_at": .string("2026-01-01T00:00:00Z"),
+                              "updated_at": .string("2026-01-01T00:00:00Z")])
+        ], advancingTo: nil)
+        let live = try #require(try store.document(id: "m1"))
+        #expect(live.isDeleted == false)
+
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.markdown", id: "m1", op: .upsert, syncVersion: "2",
+                       data: ["title": .string("t"), "content": .string("c"),
+                              "created_at": .string("2026-01-01T00:00:00Z"),
+                              "updated_at": .string("2026-01-02T00:00:00Z"),
+                              "is_deleted": .number(1)])
+        ], advancingTo: nil)
+
+        try store.database.read { conn in
+            let isDeleted = try Int.fetchOne(
+                conn, sql: "SELECT is_deleted FROM markdown WHERE id = 'm1'")
+            let deletedAt = try String.fetchOne(
+                conn, sql: "SELECT deleted_at FROM markdown WHERE id = 'm1'")
+            #expect(isDeleted == 1)
+            #expect(deletedAt != nil)
+        }
+        #expect(try store.document(id: "m1") == nil)
+        #expect(try store.syncStore.liveRow(resource: "content.markdown", id: "m1") == nil)
+    }
 }
