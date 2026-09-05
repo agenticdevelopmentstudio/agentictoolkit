@@ -157,6 +157,61 @@ struct MarkdownTaxonomyTests {
         }
     }
 
+    @Test("assigning a category to a document that is not there is refused")
+    func assignCategoryRefusesAMissingDocument() throws {
+        let store = try store()
+        let category = try store.createCategory(name: "Recipes")
+        #expect(throws: MarkdownStoreError.notFound("ghost")) {
+            try store.assignCategory(category.id, toDocument: "ghost")
+        }
+        let itemRows = try store.database.read { conn in
+            try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM category_items")
+        }
+        #expect(itemRows == 0)
+    }
+
+    @Test("assigning a category that does not exist is refused")
+    func assignCategoryRefusesAMissingCategory() throws {
+        let store = try store()
+        let document = try store.createDocument(content: "hello", markers: [])
+        #expect(throws: MarkdownStoreError.notFound("ghost")) {
+            try store.assignCategory("ghost", toDocument: document.id)
+        }
+    }
+
+    @Test("assigning a category to a deleted document is refused")
+    func assignCategoryRefusesADeletedDocument() throws {
+        let store = try store()
+        let document = try store.createDocument(content: "hello", markers: [])
+        let category = try store.createCategory(name: "Recipes")
+        try store.deleteDocument(id: document.id)
+        #expect(throws: MarkdownStoreError.notFound(document.id)) {
+            try store.assignCategory(category.id, toDocument: document.id)
+        }
+    }
+
+    @Test("assigning a keyword to a document that is not there is refused")
+    func assignKeywordRefusesAMissingDocument() throws {
+        let store = try store()
+        let keyword = try store.createKeyword(label: "swift")
+        #expect(throws: MarkdownStoreError.notFound("ghost")) {
+            try store.assignKeyword(keyword.id, toDocument: "ghost")
+        }
+        let itemRows = try store.database.read { conn in
+            try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM keyword_items")
+        }
+        #expect(itemRows == 0)
+    }
+
+    @Test("assigning a keyword that does not exist is refused")
+    func assignKeywordRefusesAMissingKeyword() throws {
+        let store = try store()
+        let document = try store.createDocument(content: "hello", markers: [])
+        #expect(throws: MarkdownStoreError.notFound("ghost")) {
+            try store.assignKeyword("ghost", toDocument: document.id)
+        }
+    }
+
     @Test("assigning the same keyword twice does not stage a phantom mutation")
     func duplicateKeywordAssignmentDoesNotStagePhantomMutation() throws {
         let store = try store()

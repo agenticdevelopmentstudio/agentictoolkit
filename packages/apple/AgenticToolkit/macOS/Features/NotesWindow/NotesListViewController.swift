@@ -13,6 +13,24 @@ public final class NotesListViewController: NSViewController {
 
     public weak var delegate: NotesListViewControllerDelegate?
 
+    /// The manager this list mirrors, when it has one.
+    ///
+    /// Optional because the list is perfectly usable as a dumb view driven by
+    /// `reload(notes:keepingSelectedID:)` — that is how it worked before, and
+    /// how a preview or a test can still drive it. Supplying a manager adds
+    /// one thing: the list also refreshes itself when *anything else* changes
+    /// that manager's notes, which is what a host cannot arrange by
+    /// remembering to call `reload` after its own actions.
+    private weak var notesManager: NotesManager?
+
+    public init(notesManager: NotesManager? = nil) {
+        self.notesManager = notesManager
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError() }
+
     /// Reload the displayed notes. Call on main thread after notes array changes.
     public func reload(notes: [Note], keepingSelectedID: UUID?) {
         allNotes = notes
@@ -128,6 +146,36 @@ public final class NotesListViewController: NSViewController {
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+
+        if let notesManager {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(notesDidChange),
+                name: NotesManager.notesDidChangeNotification, object: notesManager)
+            reload(notes: notesManager.notes, keepingSelectedID: selectedNoteID)
+        }
+    }
+
+    /// Mirrors the manager's notes into the table, and touches nothing else.
+    ///
+    /// Deliberately narrower than `NotesSplitViewController.reload()`, which
+    /// also pushes the selected note back into the editor: this fires on
+    /// *every* mutation, including the ones the editor itself is making as
+    /// the user types, and re-showing a note mid-edit would reset the text
+    /// view under the cursor. The list is safe to refresh at any moment; the
+    /// editor is not, and it already has the text.
+    ///
+    /// The early return is the second half of that guarantee. The split view
+    /// controller still reloads the list explicitly after each of its own
+    /// actions, so this notification usually arrives to find the table
+    /// already showing exactly these notes — and re-selecting a row that is
+    /// already selected is not free: `selectRowIndexes` scrolls, and a table
+    /// reload drops the search field's first responder ordering on the floor.
+    /// Doing nothing when nothing changed leaves the redundant case
+    /// genuinely inert, so the only reloads a user can perceive are the ones
+    /// carrying news.
+    @objc private func notesDidChange(_ notification: Notification) {
+        guard let notesManager, notesManager.notes != allNotes else { return }
+        reload(notes: notesManager.notes, keepingSelectedID: selectedNoteID)
     }
 
     // MARK: - Actions

@@ -72,17 +72,29 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     /// purging an unregistered resource is a no-op in every path (twin parity with
     /// `InMemorySyncStore.purgeResources`, which already no-ops the unknown key).
     private func deleteMirrorRows(for resources: [String], in conn: Database) throws {
+        var registered: [String] = []
         for resource in resources {
             let isRegistered = try Bool.fetchOne(
                 conn, sql: "SELECT EXISTS(SELECT 1 FROM _sync_resources WHERE resource = ?)",
                 arguments: [resource]
             ) ?? false
-            guard isRegistered else { continue }
-            if let projection = projection(for: resource) {
-                try projection.truncate(resources: [resource], in: conn)
-            } else {
-                try conn.execute(sql: "DELETE FROM \"\(try Self.mirrorTableName(for: resource))\"")
-            }
+            if isRegistered { registered.append(resource) }
+        }
+
+        // The projection is handed every one of its resources in this purge in
+        // ONE call, not one call per resource. A projection whose tables have
+        // foreign keys between *each other* can only distinguish a whole-family
+        // purge (legal — the children go too) from a partial one that would
+        // orphan rows (not legal) by seeing the whole batch; called a singleton
+        // at a time it would see what looks like a partial purge every time,
+        // including during `resetForResync`, where the rest of the family is
+        // emptied by the very next call.
+        let projected = registered.filter { projection(for: $0) != nil }
+        if let mirrorProjection, !projected.isEmpty {
+            try mirrorProjection.truncate(resources: projected, in: conn)
+        }
+        for resource in registered where projection(for: resource) == nil {
+            try conn.execute(sql: "DELETE FROM \"\(try Self.mirrorTableName(for: resource))\"")
         }
     }
 

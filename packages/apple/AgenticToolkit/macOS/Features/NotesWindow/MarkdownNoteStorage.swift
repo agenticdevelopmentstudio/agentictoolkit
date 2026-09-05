@@ -72,11 +72,27 @@ public final class MarkdownNoteStorage: NoteStorage {
     ///
     /// `note(from:)` strips both owned keys before a caller ever sees
     /// `content`, so an owned key present in `note.content` here was typed by
-    /// hand this session, not something we wrote. Clearing the key is safe —
-    /// it only ever removes a key we ourselves last wrote — so a rename or a
-    /// pin toggle still overwrites in place same as always; only a *clear*
-    /// (the key going away) is withheld when the caller's own content still
-    /// has it, so a user-authored fence never gets silently deleted.
+    /// hand this session, not something we wrote. When that is the case this
+    /// method leaves the key entirely alone — it neither clears it nor
+    /// overwrites its value. That is stronger than the rule it replaces
+    /// (which withheld only the *clear*), and adh's derivation is why:
+    /// frontmatter `title` is now the first thing `MarkdownText.deriveTitle`
+    /// consults, so a hand-typed fence *is* the document's title as far as
+    /// both ends of the wire are concerned. `note.title` at that moment is
+    /// the list's older idea of the title, and writing it back would both
+    /// destroy text the user just typed and disagree with the title adh will
+    /// derive on its next pull.
+    ///
+    /// This is single-writer by assumption, not by enforcement: it reads the
+    /// stored document, merges the caller's fields into it, and writes the
+    /// whole row back, so a second writer that changed the same document
+    /// between the read and the write loses its change with no error. That
+    /// holds today because `NotesManager` is `@MainActor` and is the only
+    /// caller in either app — but the store underneath is thread-safe and
+    /// takes writes from anywhere, so this class is the layer where that
+    /// assumption lives and the layer that would need a compare-and-swap
+    /// (adh has no concurrency token either — its head is last-writer-wins)
+    /// if a background sync or a second window ever became a writer.
     public func updateNote(_ note: Note) throws {
         let id = note.id.uuidString.lowercased()
         guard var document = try store.document(id: id) else {
@@ -86,9 +102,9 @@ public final class MarkdownNoteStorage: NoteStorage {
             document.content = note.content
         }
         let userTypedTitle = Frontmatter.value(Self.titleKey, in: note.content) != nil
-        let desiredTitle = Self.storedTitle(for: note)
-        if desiredTitle != nil || !userTypedTitle {
-            document.content = Frontmatter.setting(Self.titleKey, to: desiredTitle, in: document.content)
+        if !userTypedTitle {
+            document.content = Frontmatter.setting(
+                Self.titleKey, to: Self.storedTitle(for: note), in: document.content)
         }
         // "pinned" is a literal, not `Self.titleKey`-style constant, because
         // ADT itself never names it as one (`MarkdownDocument.isPinned`/
@@ -139,6 +155,17 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// untitled sentinel, which is the same thing before the note has any
     /// heading to derive from. Only an actual rename is worth a frontmatter
     /// key and the server version it costs.
+    ///
+    /// Returning `nil` makes `updateNote` clear a key that may already be
+    /// absent, and that redundant clear is accepted knowingly. `Frontmatter
+    /// .setting(_:to: nil,in:)` on content with no such key returns the same
+    /// string, so the local write is a no-op and `MarkdownDocument`'s
+    /// content-hash is unchanged; the cost would only ever be a wasted `PUT`
+    /// once a remote writer exists, and adh dedups on `content_hash` and vends
+    /// no version for an identical resave. The alternative — asking whether
+    /// the key is there before clearing it — buys a branch here in exchange
+    /// for two ways of expressing "no title", which is the more expensive
+    /// trade the first time the two disagree.
     private static func storedTitle(for note: Note) -> String? {
         let derived = MarkdownText.deriveTitle(note.content)
         let isUnnamed = note.title == derived || note.title == Note.untitledTitle || note.title.isEmpty

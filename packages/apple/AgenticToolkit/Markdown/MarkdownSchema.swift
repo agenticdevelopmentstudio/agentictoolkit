@@ -96,13 +96,22 @@ public enum MarkdownSchema {
             try conn.execute(sql: taxonomyDDL)
             try conn.execute(sql: outboxDDL)
         }
+        migrator.registerMigration("markdown-v2-outbox-order") { conn in
+            try conn.execute(sql: outboxOrderDDL)
+        }
         return migrator
     }
 
     /// Runs the migration against a `BoundedDatabase`, turning foreign keys on
-    /// first. SQLite defaults `foreign_keys` to *off* — a schema full of
-    /// `REFERENCES` clauses that enforce nothing is worse than no clauses at
-    /// all, because it reads as if it were safe (`explicit-over-implicit`).
+    /// first. SQLite itself defaults `foreign_keys` to *off*, but GRDB does not
+    /// leave it there: `Configuration.foreignKeysEnabled` defaults to `true`
+    /// and GRDB issues the pragma on every connection it opens, so this
+    /// statement is confirming the state rather than establishing it. It stays
+    /// because it is cheap, because it is the only line in this file that says
+    /// out loud that the `REFERENCES` clauses below are enforced, and because a
+    /// host that ever hands `BoundedDatabase` a configuration with
+    /// `foreignKeysEnabled = false` would otherwise get a schema full of
+    /// constraints that quietly enforce nothing (`explicit-over-implicit`).
     ///
     /// `PRAGMA foreign_keys` is a no-op inside a transaction, so it runs via
     /// `writeWithoutTransaction`, not `write`. `DatabaseMigrator` has no
@@ -248,6 +257,11 @@ public enum MarkdownSchema {
     /// it has no adh counterpart. `content.markdown` is pull-only in
     /// `ADHSyncCatalog`, so a local edit cannot ride the sync outbox; it queues
     /// here instead and drains over REST once a writer exists (Task 10).
+    /// Frozen at its `markdown-v1` shape on purpose. `DatabaseMigrator` replays
+    /// v1 verbatim on a brand-new database before it runs v2, so editing this
+    /// string to include v2's columns would make v2's `ALTER TABLE` fail with
+    /// "duplicate column name" on exactly the fresh installs it is meant to
+    /// leave alone. Later shape changes go in a new migration, not here.
     private static let outboxDDL = """
         CREATE TABLE IF NOT EXISTS _markdown_outbox (
             op_id TEXT PRIMARY KEY NOT NULL,
@@ -258,5 +272,36 @@ public enum MarkdownSchema {
         );
         CREATE INDEX IF NOT EXISTS ix_markdown_outbox_document
             ON _markdown_outbox(document_id, intent);
+        """
+
+    /// `markdown-v2-outbox-order`: a strict send order for the queue, and a
+    /// place to record the id adh minted for a locally-created document.
+    ///
+    /// `seq` exists because `ORDER BY created_at, op_id` is not an order at
+    /// all when two ops share a millisecond — `created_at` is truncated to
+    /// milliseconds and `op_id` is a UUIDv7 whose tie-break is its own random
+    /// tail — so a `create` and the `update` that followed it could come back
+    /// in either order, and sending the update first pushes a write for a
+    /// document adh has never seen. `MarkdownStore` assigns `MAX(seq) + 1`
+    /// rather than using `AUTOINCREMENT`, which SQLite allows only on an
+    /// `INTEGER PRIMARY KEY` and therefore cannot be added by `ALTER TABLE`;
+    /// reuse after a drain is harmless because every row that could have held
+    /// a reused value is gone by then.
+    ///
+    /// `_markdown_remote_id` is local-only for the same reason the outbox is:
+    /// it records that *this* client once created *that* document upstream, a
+    /// fact no other client needs and adh has no column for. Backfilling
+    /// existing rows from `rowid` keeps the ops already queued on a
+    /// pre-migration install in the order they were enqueued.
+    private static let outboxOrderDDL = """
+        ALTER TABLE _markdown_outbox ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
+        UPDATE _markdown_outbox SET seq = rowid;
+        CREATE INDEX IF NOT EXISTS ix_markdown_outbox_seq ON _markdown_outbox(seq);
+
+        CREATE TABLE IF NOT EXISTS _markdown_remote_id (
+            local_id TEXT PRIMARY KEY NOT NULL,
+            remote_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         """
 }

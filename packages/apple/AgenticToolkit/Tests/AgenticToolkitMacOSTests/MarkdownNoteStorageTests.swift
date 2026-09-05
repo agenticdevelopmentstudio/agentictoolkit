@@ -7,7 +7,8 @@ import AgenticToolkitMarkdown
 struct MarkdownNoteStorageTests {
 
     private func storage() throws -> MarkdownNoteStorage {
-        MarkdownNoteStorage(store: try MarkdownStore(path: ":memory:", customerID: "cust-1"))
+        MarkdownNoteStorage(
+            store: try MarkdownStore(path: ":memory:", customerID: "cust-1", ecosystemID: "eco-1"))
     }
 
     private func note(title: String, content: String, isPinned: Bool = false) -> Note {

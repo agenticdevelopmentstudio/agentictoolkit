@@ -18,6 +18,15 @@ import AgenticToolkitSyncGRDB
 /// regression test `MarkdownProjectionTests.columnListsMatchTheRealSchema`
 /// cross-checks every resource's known columns against `PRAGMA
 /// table_info(...)` at runtime to catch that drift instead.
+public enum MarkdownProjectionError: Error, Equatable {
+    /// A purge named a resource whose mirror table is a foreign-key parent of
+    /// another resource's, and left that other resource out. Emptying the
+    /// parent alone would leave `rows` rows in `referencedBy` pointing at
+    /// nothing — which SQLite would catch, but only at `COMMIT`, naming
+    /// neither table.
+    case purgeWouldOrphanRows(resource: String, referencedBy: String, rows: Int)
+}
+
 public struct MarkdownProjection: SyncMirrorProjection {
 
     /// The columns every mirrored table carries, minus `id` and `sync_version`,
@@ -326,33 +335,59 @@ public struct MarkdownProjection: SyncMirrorProjection {
             arguments: [id])
     }
 
-    /// `GRDBSyncStore.deleteMirrorRows(for:in:)` calls this once per
-    /// resource, with a **singleton** `resources` array each time — never the
-    /// full batch — so no ordering this method imposes on its own `resources`
-    /// argument can sequence "children before parents" across separate
-    /// calls. `resetForResync`/`purgeForIdentityChange` nonetheless issue
-    /// every one of those calls inside a single `boundedDatabase.write`
-    /// transaction (see `GRDBSyncStore.resetForResync`), so deferring
-    /// foreign-key enforcement to the end of that transaction — rather than
-    /// per-statement — lets `DELETE FROM markdown` run before its `notes`/
-    /// `docs`/`papers` children are deleted in a later call, as long as every
-    /// referencing row is gone by commit. `PRAGMA defer_foreign_keys` is
-    /// connection-scoped and resets itself to `OFF` when the transaction
-    /// ends, so setting it on every call is idempotent and never leaks past
-    /// this write.
+    /// `GRDBSyncStore.deleteMirrorRows(for:in:)` hands this every one of the
+    /// projection's resources in a purge in a single call, so `resources` is
+    /// the whole batch and this method can reason about it as a set. Within
+    /// that batch the deletes still run in arbitrary order, which
+    /// `PRAGMA defer_foreign_keys` makes safe: enforcement moves to the end of
+    /// the enclosing transaction, so `DELETE FROM markdown` may precede the
+    /// deletion of its `notes`/`docs`/`papers` children as long as every
+    /// referencing row is gone by commit. That pragma is connection-scoped and
+    /// resets itself to `OFF` when the transaction ends, so setting it on
+    /// every call is idempotent and never leaks past this write.
     ///
-    /// This does not weaken the constraint for a genuinely partial purge:
-    /// `purgeResources(["content.markdown"])` alone, without also purging its
-    /// three marker resources in the same call, still fails at commit — the
-    /// orphaned `notes`/`docs`/`papers` rows are never deleted, so the
-    /// deferred check still trips. Nothing in this toolkit purges a subset of
-    /// the markdown family today (`SyncEngine`'s `plan.disabled`/`plan.bumped`
-    /// are driven by resource enrollment, not this schema's dependency
-    /// shape), so that failure mode is latent rather than exercised.
+    /// A purge that is *missing* a family member is a different matter, and it
+    /// is refused up front rather than left to fail at `COMMIT`. SQLite's
+    /// deferred-constraint failure names neither the resource that was purged
+    /// nor the one still pointing at it, arrives from a statement the caller
+    /// did not issue, and rolls back the whole transaction — so
+    /// `purgeResources(["content.markdown"])` used to report an opaque
+    /// `FOREIGN KEY constraint failed` for a mistake that is entirely knowable
+    /// beforehand.
     public func truncate(resources: [String], in conn: Database) throws {
+        try refusePartialFamilyPurge(resources, in: conn)
         try conn.execute(sql: "PRAGMA defer_foreign_keys = ON")
         for resource in resources {
             try conn.execute(sql: "DELETE FROM \(table(for: resource))")
+        }
+    }
+
+    /// Which of this projection's resources hold rows referencing each
+    /// foreign-key parent among them. `category_items`/`keyword_items` name
+    /// their *target* polymorphically (`target_kind`, `target_id`) with no
+    /// foreign key at all, so they are dependents of `content.categories` and
+    /// `content.keywords` — their owner column — and not of
+    /// `content.markdown`.
+    private static let dependentResources: [String: [String]] = [
+        "content.markdown": ["content.notes", "content.docs", "content.papers"],
+        "content.categories": ["content.category_edges", "content.category_items"],
+        "content.keywords": ["content.keyword_items"]
+    ]
+
+    private func refusePartialFamilyPurge(_ resources: [String], in conn: Database) throws {
+        let purging = Set(resources)
+        for parent in resources {
+            for dependent in Self.dependentResources[parent] ?? [] where !purging.contains(dependent) {
+                // Every row in a dependent table references *some* parent row,
+                // and the parent table is about to be emptied — so any row at
+                // all in the dependent is a row that would be orphaned.
+                let orphans = try Int.fetchOne(
+                    conn, sql: "SELECT COUNT(*) FROM \(table(for: dependent))") ?? 0
+                guard orphans == 0 else {
+                    throw MarkdownProjectionError.purgeWouldOrphanRows(
+                        resource: parent, referencedBy: dependent, rows: orphans)
+                }
+            }
         }
     }
 

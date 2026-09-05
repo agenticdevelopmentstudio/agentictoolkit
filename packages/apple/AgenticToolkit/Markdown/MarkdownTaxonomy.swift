@@ -255,13 +255,36 @@ extension MarkdownStore {
 
     // MARK: - The two join tables, which differ only in their name
 
+    /// Both link tables address their target polymorphically — `(target_kind,
+    /// target_id)`, with no foreign key, because `target_id` may name a row in
+    /// any of several tables. That is what makes the two existence checks
+    /// below necessary rather than redundant: nothing in the schema stops a
+    /// row filing a nonexistent document under a nonexistent category, and
+    /// once written it is invisible (every read joins through
+    /// `categories`/`keywords` and filters on `target_id`) yet still pushes
+    /// itself to adh, where the same insert fails against real foreign keys.
+    /// The owner side *is* foreign-keyed, but its violation would surface as
+    /// an opaque SQLite constraint error rather than a `notFound` naming the
+    /// id, so it is checked here too.
     private func assignItem(
         table: String, resource: String, column: String, ownerID: String,
         documentID: String, sortOrder: Int, now: Date
     ) throws {
+        let ownerTable = column == "category_id" ? "categories" : "keywords"
         let id = UUID().uuidString.lowercased()
         let stamp = MarkdownTimestamp.string(now)
         try database.write { conn in
+            let documentExists = try Bool.fetchOne(
+                conn, sql: "SELECT EXISTS(SELECT 1 FROM markdown WHERE id = ? AND is_deleted = 0)",
+                arguments: [documentID]) ?? false
+            guard documentExists else { throw MarkdownStoreError.notFound(documentID) }
+
+            let ownerExists = try Bool.fetchOne(
+                conn,
+                sql: "SELECT EXISTS(SELECT 1 FROM \(ownerTable) WHERE id = ? AND deleted_at IS NULL)",
+                arguments: [ownerID]) ?? false
+            guard ownerExists else { throw MarkdownStoreError.notFound(ownerID) }
+
             try conn.execute(
                 sql: """
                     INSERT INTO \(table)

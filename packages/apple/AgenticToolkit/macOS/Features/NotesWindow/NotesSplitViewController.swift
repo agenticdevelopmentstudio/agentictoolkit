@@ -14,7 +14,7 @@ public final class NotesSplitViewController: ThemedSplitViewController {
 
     // MARK: - Child VCs
 
-    private let listVC = NotesListViewController()
+    private let listVC: NotesListViewController
     private let editorVC = NoteEditorViewController()
 
     // MARK: - Initialization
@@ -22,6 +22,12 @@ public final class NotesSplitViewController: ThemedSplitViewController {
     public init(notesManager: NotesManager, autosaveName: String = "notes-split") {
         self.notesManager = notesManager
         self.splitAutosaveName = autosaveName
+        // The list watches the manager itself, so a note created anywhere else
+        // — Quick Note, a scripting command, a second window — reaches this
+        // pane without the mutating code having to know the pane exists. The
+        // explicit `reload()` calls below stay: they also refresh the editor
+        // and move the selection, which the notification deliberately does not.
+        self.listVC = NotesListViewController(notesManager: notesManager)
         super.init(nibName: nil, bundle: nil)
     }
 

@@ -140,53 +140,135 @@ struct MarkdownStoreTests {
         #expect(try store.pendingRemoteOps(limit: 10)[0].payload["title"] == nil)
     }
 
-    @Test("an update queues visibility, stage and route alongside content")
-    func updatePayloadCarriesAuthoredFields() throws {
+    @Test("an update queues content alone — the PUT body has no other key this store fills")
+    func updatePayloadCarriesContentOnly() throws {
         let store = try store()
         var document = try store.createDocument(content: "first", markers: [])
         try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
-        document.visibility = .public
+        document.content = "second"
         try store.updateDocument(document)
         let queued = try store.pendingRemoteOps(limit: 10)
         #expect(queued.count == 1)
-        #expect(queued[0].payload["content"] == .string("first"))
-        #expect(queued[0].payload["visibility"] == .string("public"))
-        #expect(queued[0].payload["stage"] == .string("draft"))
-        #expect(queued[0].payload["public_route"] == .null)
+        #expect(queued[0].intent == .update)
+        #expect(queued[0].payload == ["content": .string("second")])
     }
 
-    @Test("clearing a public route queues an explicit null, not an omitted key")
-    func clearingRouteQueuesExplicitNull() throws {
+    @Test("moving visibility through an update is refused — publish is its own route")
+    func updateRefusesVisibilityDrift() throws {
+        let store = try store()
+        var document = try store.createDocument(content: "first", markers: [])
+        document.visibility = .public
+        #expect(throws: MarkdownStoreError.useDedicatedIntent(
+            field: "visibility",
+            method: "publishDocument(id:route:) / unpublishDocument(id:)")) {
+            try store.updateDocument(document)
+        }
+    }
+
+    @Test("moving a public route through an update is refused")
+    func updateRefusesRouteDrift() throws {
         let store = try store()
         var document = try store.createDocument(content: "first", markers: [])
         document.publicRoute = "/first"
-        try store.updateDocument(document)
-        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
-
-        document.publicRoute = nil
-        try store.updateDocument(document)
-        let queued = try store.pendingRemoteOps(limit: 10)
-        #expect(queued.count == 1)
-        #expect(queued[0].payload["public_route"] == .null)
-        #expect(queued[0].payload.keys.contains("public_route"))
+        #expect(throws: MarkdownStoreError.useDedicatedIntent(
+            field: "public_route",
+            method: "publishDocument(id:route:) / unpublishDocument(id:)")) {
+            try store.updateDocument(document)
+        }
     }
 
-    @Test("a merge does not drop a field an earlier queued update already set")
-    func mergePreservesEarlierAuthoredFields() throws {
+    @Test("moving stage through an update is refused — finalize is its own route")
+    func updateRefusesStageDrift() throws {
         let store = try store()
         var document = try store.createDocument(content: "first", markers: [])
-        // The `create` is still pending, so both updates below coalesce into it
-        // rather than into a fresh `update` row — this exercises the same
-        // field-wise merge branch either way.
-        document.visibility = .public
-        try store.updateDocument(document)
+        document.stage = .final
+        #expect(throws: MarkdownStoreError.useDedicatedIntent(
+            field: "stage", method: "finalizeDocument(id:) / definalizeDocument(id:)")) {
+            try store.updateDocument(document)
+        }
+    }
+
+    @Test("publish moves visibility and route together and queues the publish route")
+    func publishSetsBothHalvesOfTheInvariant() throws {
+        let store = try store()
+        let created = try store.createDocument(content: "first", markers: [])
+        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
+        try store.publishDocument(id: created.id, route: "/first")
+
+        let loaded = try #require(try store.document(id: created.id))
+        #expect(loaded.visibility == .public)
+        #expect(loaded.publicRoute == "/first")
+        let queued = try store.pendingRemoteOps(limit: 10)
+        #expect(queued.count == 1)
+        #expect(queued[0].intent == .publish)
+        #expect(queued[0].payload == ["route": .string("/first")])
+    }
+
+    @Test("publishing with a blank route is refused rather than half-applied")
+    func publishRefusesABlankRoute() throws {
+        let store = try store()
+        let created = try store.createDocument(content: "first", markers: [])
+        #expect(throws: MarkdownStoreError.inconsistentPublicationState(id: created.id)) {
+            try store.publishDocument(id: created.id, route: "   ")
+        }
+        let loaded = try #require(try store.document(id: created.id))
+        #expect(loaded.visibility == .private)
+        #expect(loaded.publicRoute == nil)
+    }
+
+    @Test("unpublish clears the route and goes private in one move")
+    func unpublishClearsBothHalves() throws {
+        let store = try store()
+        let created = try store.createDocument(content: "first", markers: [])
+        try store.publishDocument(id: created.id, route: "/first")
+        try store.unpublishDocument(id: created.id)
+
+        let loaded = try #require(try store.document(id: created.id))
+        #expect(loaded.visibility == .private)
+        #expect(loaded.publicRoute == nil)
+        let intents = try store.pendingRemoteOps(limit: 10).map(\.intent)
+        #expect(intents.contains(.unpublish))
+    }
+
+    @Test("finalize and definalize move stage and queue their own intents")
+    func finalizeAndDefinalizeMoveStage() throws {
+        let store = try store()
+        let created = try store.createDocument(content: "first", markers: [])
+        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
+
+        try store.finalizeDocument(id: created.id)
+        #expect(try #require(try store.document(id: created.id)).stage == .final)
+        #expect(try store.pendingRemoteOps(limit: 10).map(\.intent) == [.finalize])
+
+        try store.definalizeDocument(id: created.id)
+        #expect(try #require(try store.document(id: created.id)).stage == .draft)
+        #expect(try store.pendingRemoteOps(limit: 10).map(\.intent) == [.finalize, .definalize])
+    }
+
+    @Test("a lifecycle call for a document that is not there says so")
+    func lifecycleOfMissingDocumentThrows() throws {
+        let store = try store()
+        #expect(throws: MarkdownStoreError.notFound("ghost")) {
+            try store.finalizeDocument(id: "ghost")
+        }
+        #expect(throws: MarkdownStoreError.notFound("ghost")) {
+            try store.unpublishDocument(id: "ghost")
+        }
+    }
+
+    @Test("a merge does not drop a key an earlier queued op already set")
+    func mergePreservesEarlierPayloadKeys() throws {
+        let store = try store()
+        var document = try store.createDocument(content: "first", markers: [.note])
+        // The `create` is still pending, so the update below coalesces into it
+        // rather than into a fresh `update` row.
         document.content = "second"
         try store.updateDocument(document)
 
         let queued = try store.pendingRemoteOps(limit: 10)
         #expect(queued.count == 1)
         #expect(queued[0].intent == .create)
-        #expect(queued[0].payload["visibility"] == .string("public"))
+        #expect(queued[0].payload["note"] == .bool(true))   // set by the create
         #expect(queued[0].payload["content"] == .string("second"))
     }
 
@@ -278,6 +360,94 @@ struct MarkdownStoreTests {
         #expect(try store.pendingRemoteOps(limit: 10).count == 1)
     }
 
+    @Test("an outbox row with an unreadable created_at throws rather than inventing a send time")
+    func pendingRemoteOpsThrowsOnUnreadableTimestamp() throws {
+        let store = try store()
+        _ = try store.createDocument(content: "x", markers: [])
+        let opID = try store.pendingRemoteOps(limit: 1)[0].opID
+        try store.database.write { conn in
+            try conn.execute(sql: "UPDATE _markdown_outbox SET created_at = 'not a date'")
+        }
+        #expect(throws: MarkdownStoreError.unreadableOutboxTimestamp(opID: opID)) {
+            try store.pendingRemoteOps(limit: 10)
+        }
+    }
+
+    @Test("a document row with an unreadable timestamp is skipped, not given today's date")
+    func unreadableDocumentTimestampIsSkipped() throws {
+        let store = try store()
+        let good = try store.createDocument(content: "good", markers: [.note])
+        let bad = try store.createDocument(content: "bad", markers: [.note])
+        try store.database.write { conn in
+            try conn.execute(
+                sql: "UPDATE markdown SET updated_at = 'garbage' WHERE id = ?", arguments: [bad.id])
+        }
+        #expect(try store.document(id: bad.id) == nil)
+        #expect(try store.documents(marker: .note).map(\.id) == [good.id])
+    }
+
+    @Test("deleting a document whose create never drained drops the pair instead of queueing a delete")
+    func deleteCancelsAPendingCreate() throws {
+        let store = try store()
+        let created = try store.createDocument(content: "never sent", markers: [.note])
+        try store.deleteDocument(id: created.id)
+        #expect(try store.pendingRemoteOps(limit: 10).isEmpty)
+    }
+
+    @Test("deleting a document adh already has queues a delete and nothing else")
+    func deleteQueuesADeleteOnceTheCreateHasDrained() throws {
+        let store = try store()
+        let created = try store.createDocument(content: "sent", markers: [.note])
+        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
+        try store.publishDocument(id: created.id, route: "/sent")
+        try store.deleteDocument(id: created.id)
+
+        let queued = try store.pendingRemoteOps(limit: 10)
+        #expect(queued.map(\.intent) == [.delete])   // the pending publish is moot and was dropped
+    }
+
+    @Test("the queue comes back in enqueue order even when every op shares a timestamp")
+    func queueIsOrderedBySequenceNotTimestamp() throws {
+        let store = try store()
+        // One `now` for all three writes: `created_at` is truncated to
+        // milliseconds, so ordering on it would tie and fall back to the
+        // random UUIDv7 tie-break.
+        let now = Date()
+        let first = try store.createDocument(content: "first", markers: [], now: now)
+        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
+        try store.finalizeDocument(id: first.id, now: now)
+        try store.definalizeDocument(id: first.id, now: now)
+        try store.publishDocument(id: first.id, route: "/first", now: now)
+
+        let queued = try store.pendingRemoteOps(limit: 10)
+        #expect(queued.map(\.intent) == [.finalize, .definalize, .publish])
+        #expect(Set(queued.map(\.createdAt)).count == 1)
+    }
+
+    @Test("a create's response id is recorded and reaches every later op for the document")
+    func drainAdoptsTheServerMintedID() async throws {
+        let store = try store()
+        var document = try store.createDocument(content: "one", markers: [])
+        let writer = RecordingWriter(minting: "adh-42")
+        try await store.drainRemoteQueue(into: writer, limit: 10)
+        #expect(try store.remoteID(forDocument: document.id) == "adh-42")
+
+        document.content = "two"
+        try store.updateDocument(document)
+        try await store.drainRemoteQueue(into: writer, limit: 10)
+        #expect(await writer.sentIntents == [.create, .update])
+        // The create had no remote id yet; the update addresses `/adh-42`.
+        #expect(await writer.sentRemoteIDs == [nil, "adh-42"])
+    }
+
+    @Test("a writer that reports no id leaves the document without one")
+    func drainToleratesAWriterThatMintsNothing() async throws {
+        let store = try store()
+        let created = try store.createDocument(content: "one", markers: [])
+        try await store.drainRemoteQueue(into: RecordingWriter(), limit: 10)
+        #expect(try store.remoteID(forDocument: created.id) == nil)
+    }
+
     @Test("defaultPath puts the database beside Whippet's, not inside it")
     func defaultPathIsItsOwnFile() {
         let home = URL(fileURLWithPath: "/Users/example")
@@ -285,12 +455,23 @@ struct MarkdownStoreTests {
     }
 }
 
+/// Records what it was handed, and answers a `create` with the id adh would
+/// have minted — which is what lets a test observe the reconciliation.
 private actor RecordingWriter: MarkdownRemoteWriter {
     private(set) var sentIntents: [MarkdownRemoteIntent] = []
-    func send(_ remoteOp: MarkdownRemoteOp) async throws { sentIntents.append(remoteOp.intent) }
+    private(set) var sentRemoteIDs: [String?] = []
+    private let mintedID: String?
+
+    init(minting mintedID: String? = nil) { self.mintedID = mintedID }
+
+    func send(_ remoteOp: MarkdownRemoteOp) async throws -> String? {
+        sentIntents.append(remoteOp.intent)
+        sentRemoteIDs.append(remoteOp.remoteID)
+        return remoteOp.intent == .create ? mintedID : nil
+    }
 }
 
 private struct FailingWriter: MarkdownRemoteWriter {
     struct Offline: Error {}
-    func send(_ remoteOp: MarkdownRemoteOp) async throws { throw Offline() }
+    func send(_ remoteOp: MarkdownRemoteOp) async throws -> String? { throw Offline() }
 }

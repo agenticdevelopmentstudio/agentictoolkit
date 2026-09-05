@@ -229,6 +229,48 @@ struct MarkdownProjectionTests {
         }
     }
 
+    @Test("purging a parent resource without its children is refused up front, naming both")
+    func partialFamilyPurgeIsRefused() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "local", markers: [.note])
+        await #expect(throws: MarkdownProjectionError.purgeWouldOrphanRows(
+            resource: "content.markdown", referencedBy: "content.notes", rows: 1)) {
+            try await store.syncStore.purgeResources(["content.markdown"])
+        }
+        // The refusal happens before any DELETE, so nothing was lost.
+        try store.database.read { conn in
+            let markdownCount = try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM markdown")
+            let notesCount = try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM notes")
+            #expect(markdownCount == 1)
+            #expect(notesCount == 1)
+        }
+    }
+
+    @Test("purging a whole family succeeds, in whatever order the deletes run")
+    func wholeFamilyPurgeSucceeds() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "local", markers: [.note])
+        try await store.syncStore.purgeResources(
+            ["content.markdown", "content.notes", "content.docs", "content.papers"])
+        try store.database.read { conn in
+            let markdownCount = try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM markdown")
+            let notesCount = try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM notes")
+            #expect(markdownCount == 0)
+            #expect(notesCount == 0)
+        }
+    }
+
+    @Test("purging a parent with no dependent rows left is allowed")
+    func partialPurgeWithNoDependentRowsIsAllowed() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "local", markers: [])   // no marker row
+        try await store.syncStore.purgeResources(["content.markdown"])
+        try store.database.read { conn in
+            let markdownCount = try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM markdown")
+            #expect(markdownCount == 0)
+        }
+    }
+
     /// `defer_foreign_keys` is connection-scoped and resets itself to `OFF`
     /// when the transaction that set it ends (see `truncate`'s doc comment).
     /// This pins that it really does not leak onto the pooled connection

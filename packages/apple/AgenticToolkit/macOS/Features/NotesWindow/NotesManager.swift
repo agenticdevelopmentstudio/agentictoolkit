@@ -7,6 +7,32 @@ import AgenticToolkitCore
 @MainActor
 public final class NotesManager {
 
+    // MARK: - Observation
+
+    /// Posted after `notes` changes — a create, an edit, a pin toggle, a
+    /// delete, or a load. The manager is the sole owner of that array and had
+    /// no way to say it had changed, so every view holding one asked its own
+    /// caller to remember to call `reload()`: the split view controller does
+    /// it after each of its own actions, and anything that mutated notes from
+    /// somewhere else (Quick Note's save, a scripting command, a second
+    /// window) left every other view stale until it was reopened.
+    ///
+    /// The notification carries no payload. `object` is the posting manager,
+    /// so a host with more than one can tell them apart, and observers read
+    /// `notes` from it — a snapshot in `userInfo` would be a second source of
+    /// truth that is already stale by the time it is read.
+    ///
+    /// Posted on the main queue, always, because both the poster and every
+    /// observer are `@MainActor`: `NotificationCenter` delivers synchronously
+    /// on the posting thread, and this class is main-actor-isolated, so a post
+    /// from here is already a main-queue delivery.
+    public static let notesDidChangeNotification = Notification.Name(
+        "AgenticToolkit.NotesManager.notesDidChange")
+
+    private func postNotesDidChange() {
+        NotificationCenter.default.post(name: Self.notesDidChangeNotification, object: self)
+    }
+
     // MARK: - State
 
     public private(set) var notes: [Note] = []
@@ -33,6 +59,7 @@ public final class NotesManager {
             let loaded = try storage.fetchAllNotes()
             notes = loaded.sorted(by: Note.defaultSort)
             isLoaded = true
+            postNotesDidChange()
             logger.info("Loaded \(loaded.count) notes")
         } catch {
             isLoaded = true
@@ -52,6 +79,10 @@ public final class NotesManager {
         } catch {
             logger.error("Failed to persist new note: \(error.localizedDescription, privacy: .public)")
         }
+        // Posted whether or not the write succeeded: `notes` already holds the
+        // new note either way, and an observer showing the manager's array
+        // must match it even when the note is only in memory.
+        postNotesDidChange()
         return note.id
     }
 
@@ -65,6 +96,7 @@ public final class NotesManager {
         updated.modifiedDate = Date()
         notes[idx] = updated
         notes.sort(by: Note.defaultSort)
+        postNotesDidChange()
         scheduleSave(updated)
     }
 
@@ -80,6 +112,7 @@ public final class NotesManager {
         } catch {
             logger.error("Failed to toggle pin: \(error.localizedDescription, privacy: .public)")
         }
+        postNotesDidChange()
     }
 
     public func deleteNote(id: UUID) async {
@@ -89,6 +122,7 @@ public final class NotesManager {
         } catch {
             logger.error("Failed to delete note: \(error.localizedDescription, privacy: .public)")
         }
+        postNotesDidChange()
     }
 
     // MARK: - Debounced Save
