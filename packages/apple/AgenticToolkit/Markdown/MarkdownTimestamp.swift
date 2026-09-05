@@ -15,8 +15,7 @@ public enum MarkdownTimestamp {
     /// `ISO8601DateFormatter` isn't `Sendable`, but a formatter that is
     /// configured once at init and only ever read from (`string(from:)`,
     /// `date(from:)`) afterward has no mutable state a concurrent caller can
-    /// race on — the house pattern for this is `NotesDatabaseManager`'s
-    /// `iso8601`/`iso8601Fractional`.
+    /// race on.
     nonisolated(unsafe) private static let writer: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

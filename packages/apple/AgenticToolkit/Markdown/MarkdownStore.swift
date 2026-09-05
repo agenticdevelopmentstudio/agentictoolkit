@@ -117,6 +117,7 @@ public final class MarkdownStore: @unchecked Sendable {
     public func createDocument(
         content: String,
         markers: [MarkdownMarker],
+        id: String = UUID().uuidString.lowercased(),
         now: Date = Date()
     ) throws -> MarkdownDocument {
         // `now` is normalized to string-round-trip precision *before* it goes
@@ -128,7 +129,7 @@ public final class MarkdownStore: @unchecked Sendable {
         // bit-for-bit what a caller gets back from `document(id:)` afterward.
         let now = Self.normalizedTimestamp(now)
         let document = MarkdownDocument.new(
-            id: UUID().uuidString.lowercased(),
+            id: id,
             content: content,
             ownerKind: .customer,
             ownerID: customerID,
