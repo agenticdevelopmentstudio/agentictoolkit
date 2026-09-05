@@ -104,6 +104,18 @@ public actor SubprocessChannel {
     /// where the drain has already finished before this is ever called.
     private static let standardErrorDrainGraceSeconds: TimeInterval = 0.5
 
+    /// How long `terminate()` waits — after the child is dead and the chunk
+    /// streams have been stopped — for the message pump to flush what it has
+    /// already read and finish the message stream itself. That wait is what
+    /// delivers a shutdown *frame* the child wrote between SIGTERM and its own
+    /// `exit`; cancelling the pump in its place would trip the pump's
+    /// `Task.checkCancellation()` and hand the consumer a `CancellationError`
+    /// where its last protocol message should be. Bounded for the same reason
+    /// as the stderr grace above: a pump that has not finished once its
+    /// descriptor is closed is not going to, and an unbounded wait inside
+    /// `terminate()` is a hang.
+    private static let messagePumpDrainGraceSeconds: TimeInterval = 0.5
+
     /// How much of the child's stderr this actor retains. Frames already
     /// have a 16 MB cap (`MessageFramingDecoder.maximumFrameBytes`); stderr
     /// had no equivalent, and a verbose long-lived child would otherwise
@@ -317,10 +329,16 @@ public actor SubprocessChannel {
     /// case does not disarm a later `launch()` + `terminate()` on the same
     /// channel.
     ///
-    /// Order matters, and is: finish the message stream (waking the pump
-    /// without touching a descriptor) → SIGTERM → wait up to
+    /// Order matters, and is: close the child's stdin → SIGTERM → wait up to
     /// `terminationGraceSeconds` → SIGKILL → stop the two `DispatchIO`
-    /// readers, which is the only place descriptors are closed. Closing the
+    /// readers, which is the only place descriptors are closed → wait up to
+    /// `messagePumpDrainGraceSeconds` for the pump to flush and finish the
+    /// message stream itself. Neither output stream is touched before the
+    /// child is dead: the pump and the stderr drain both run for the whole
+    /// grace period, so a shutdown *frame* on stdout and a shutdown log line
+    /// on stderr — the same event on two descriptors, and on a JSON-RPC
+    /// channel the stdout one is a protocol message rather than a log —
+    /// both reach their consumer. Closing the
     /// child's stdout/stderr read ends any earlier makes its next write raise
     /// SIGPIPE, so a child that flushes a shutdown log from its own SIGTERM
     /// handler dies of a signal with that log unwritten and the grace period
@@ -347,22 +365,16 @@ public actor SubprocessChannel {
         guard !isTerminated else { return }
         isTerminated = true
 
-        // This cancellation runs its `onCancel` body synchronously on this
-        // thread, and that body deliberately only *finishes the chunk
-        // stream* — it does not close the child's stdout read end. Closing it
-        // here would SIGPIPE a child that is about to be asked politely to
-        // exit, which is the one case the grace period below exists for. The
-        // read ends come down in `readerBox.stopAll()`, after SIGKILL.
+        // Neither output stream is touched here — not the pump, not the
+        // drain. A graceful child writes its last words between SIGTERM and
+        // its own `exit`: a shutdown frame on stdout and a shutdown log line
+        // on stderr are the same event on two descriptors, and both are the
+        // whole reason the grace period below exists. Finishing either stream
+        // now would drop those bytes even though the descriptor stays open,
+        // and closing either read end now would SIGPIPE the child before it
+        // could write them at all. Both are wound down after the escalation,
+        // next to `readerBox.stopAll()`.
         //
-        // The stderr drain is deliberately *not* cancelled yet. A graceful
-        // child writes its shutdown log between SIGTERM and its own `exit`,
-        // and that log is the whole reason stderr is captured; finishing the
-        // drain's stream here would drop those bytes even though the
-        // descriptor stays open. It is cancelled after the escalation
-        // instead, next to `readerBox.stopAll()`.
-        pumpTask?.cancel()
-        messageContinuation?.finish()
-
         // Stdin is only ever written from this actor, so closing it here is
         // safe, and a child blocked reading it needs the EOF to notice it has
         // been asked to leave. The stdout/stderr read ends are handled below,
@@ -383,9 +395,31 @@ public actor SubprocessChannel {
         }
 
         // The child is dead by here, so closing the read ends can no longer
-        // SIGPIPE anything, and the drain has had the whole grace period to
-        // capture whatever the child said on its way out.
+        // SIGPIPE anything, and both readers have had the whole grace period
+        // to carry whatever the child said on its way out.
         readerBox.stopAll()
+
+        // `stopAll()` finished both chunk streams, so the pump now runs to its
+        // own end: it drains what it has already read, flushes the decoder and
+        // finishes the message stream itself. Waiting for that is what
+        // delivers the child's final frame — cancelling the pump in its place
+        // would trip its `Task.checkCancellation()` and replace that frame
+        // with a `CancellationError`, which is the stdout shape of the bug
+        // this ordering exists to remove.
+        let pumpTask = pumpTask
+        _ = try? await withWallClockBudget(Self.messagePumpDrainGraceSeconds) {
+            await pumpTask?.value
+        }
+
+        // Fallbacks for a pump that did not finish inside that budget. Both
+        // are idempotent, and both are no-ops on the ordinary path where the
+        // pump has already finished the stream itself.
+        pumpTask?.cancel()
+        messageContinuation?.finish()
+
+        // The drain needs no wait of its own here: it appends to this actor's
+        // buffer as the bytes arrive, and `standardErrorText()` does its own
+        // bounded wait for whatever is still in flight.
         standardErrorTask?.cancel()
     }
 
@@ -467,10 +501,11 @@ public actor SubprocessChannel {
                     }
                     continuation.finish()
                 } onCancel: {
-                    // Consuming task cancellation (the consumer went away, or
-                    // `terminate()` was called) must tear the child down
-                    // eagerly, and wake this loop's `await` so it does not
-                    // park on a silent child forever.
+                    // Consuming task cancellation — the consumer went away —
+                    // must tear the child down eagerly, and wake this loop's
+                    // `await` so it does not park on a silent child forever.
+                    // `terminate()` reaches this only as a fallback, after the
+                    // escalation, for a pump that outlived its drain budget.
                     //
                     // `finishStream()`, never `stop()`: `Task.cancel()` runs
                     // this body synchronously on the cancelling thread, so

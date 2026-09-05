@@ -500,6 +500,48 @@ struct SubprocessChannelTests {
         )
     }
 
+    @Test("terminate() delivers the frame a graceful child writes on stdout on its way out")
+    func terminateDeliversTheChildsFinalStdoutFrame() async throws {
+        // The stdout half of the test above, and the more load-bearing half:
+        // on a JSON-RPC channel a shutdown *frame* is a protocol message, not
+        // a log line. The child traps SIGTERM, writes one more complete frame
+        // to stdout 0.3s later, and exits with its own code.
+        //
+        // Winding the pump down at the *start* of `terminate()` — finishing
+        // the message stream, or cancelling the pump into its
+        // `Task.checkCancellation()` — drops that frame even though the
+        // descriptor stays open, exactly as finishing the stderr drain early
+        // dropped the shutdown log. The pump is instead left running for the
+        // whole grace period and waited for afterwards.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "trap 'sleep 0.3; echo BYE; exit 7' TERM; "
+                    + "echo UP; while :; do sleep 0.05; done"
+            ]
+        ))
+        try await channel.launch()
+        let stream = try await channel.messages()
+        // Let the trap be installed and `UP` be written before signalling.
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        await channel.terminate()
+
+        let frames = try await drainToEOF(stream)
+        let text = frames.compactMap { String(bytes: $0, encoding: .utf8) }.joined()
+        #expect(text.contains("UP"))
+        #expect(
+            text.contains("BYE"),
+            "the shutdown frame written during the grace period never reached messages()"
+        )
+
+        let status = try await withWallClockBudget(Self.boundedWaitSeconds) {
+            await channel.waitUntilExit()
+        }
+        #expect(status == 7, "expected the child's own exit 7; 13 means it was SIGPIPEd")
+    }
+
     @Test("terminate() still escalates to SIGKILL for a child that ignores SIGTERM")
     func terminateStillEscalatesForAnIgnoringChild() async throws {
         // The companion to the test above: making SIGTERM survivable must not
