@@ -1,0 +1,82 @@
+[
+  {
+    "tag": "0000_blushing_shocker",
+    "when": 1781365526458,
+    "sha256": "569c7ab74984a43a598e431223f74c2867495295fb5a879210cdf8505eddbf6a"
+  },
+  {
+    "tag": "0001_round_famine",
+    "when": 1781481026318,
+    "sha256": "e06ea99a9169d8cf6828ce5296c2083227325c7a53e270c5754dfe1b45babd4a"
+  },
+  {
+    "tag": "0002_medical_wasp",
+    "when": 1782065392180,
+    "sha256": "fcf5b61ae39721ab684dae289e4892645e073a10702813ebd8e2602dad2b7564"
+  },
+  {
+    "tag": "0003_pink_spectrum",
+    "when": 1782416321563,
+    "sha256": "732b8edbe3ab57b5c686d39d89e13a29caf943a80f212b7cb1a4ad829959e9f7"
+  },
+  {
+    "tag": "0004_nasty_karnak",
+    "when": 1783644169140,
+    "sha256": "41e6ecac0cde695b6e151437ff33c310eb7a46be3f53d4f01e66f4ba5864e132"
+  },
+  {
+    "tag": "0005_abandoned_deathbird",
+    "when": 1783802226634,
+    "sha256": "cbb220193ed3dbf14d30b57a3a5874c12b87521659a5fa67697f47e961f76481"
+  },
+  {
+    "tag": "0006_worthless_black_cat",
+    "when": 1783870849096,
+    "sha256": "a37923323ea29cfd8baa3b69991b6fb3d71383ce0bd6d0b48620257f2e483cbe"
+  },
+  {
+    "tag": "0007_previous_kid_colt",
+    "when": 1784224161606,
+    "sha256": "351279136581170dbefec65eec641d14ec29b31ab1e4e5ae2b02fcb4856aabcc"
+  },
+  {
+    "tag": "0008_oval_justin_hammer",
+    "when": 1784767307208,
+    "sha256": "9e9084101be7fe5e4d96002696c7cd4932b971475156ab6c3e326ff1011f638d"
+  },
+  {
+    "tag": "0009_old_talos",
+    "when": 1784769472421,
+    "sha256": "45059c6373510f126edd406a06e6917794db50142901b5223c62a6ad06bdf250"
+  },
+  {
+    "tag": "0010_careless_norman_osborn",
+    "when": 1785104130431,
+    "sha256": "822b0dfb322e038832b251dd3f2cca67cb1a023f24b01298bd5be3463ce44e28"
+  },
+  {
+    "tag": "0011_breezy_elektra",
+    "when": 1785371679238,
+    "sha256": "c8a19ca1c4ecf353a7c3693fe636126f6f5927639fa1110bff03ab1fd84142b0"
+  },
+  {
+    "tag": "0012_mushy_cerebro",
+    "when": 1785718405412,
+    "sha256": "6df0844d0731dbfaf02bfaa17ceffc7e1a9f9d7be50755f706b648eb98cdeefd"
+  },
+  {
+    "tag": "0013_tidy_warlock",
+    "when": 1785722180634,
+    "sha256": "1e6a10b260f4926e71296d3704187da1e836c724b3e3682f0551b289dddd9551"
+  },
+  {
+    "tag": "0014_happy_spot",
+    "when": 1785723684385,
+    "sha256": "6efc3ac09797458aef9fdace284a78df3e26a8f5d5345904df61f8df4b366947"
+  },
+  {
+    "tag": "0015_aromatic_vengeance",
+    "when": 1786984834065,
+    "sha256": "c88392271f32cae22f44831c80e98f959d32b4b4050d0875f6e37d74d32f3f14"
+  }
+]

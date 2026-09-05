@@ -1,0 +1,1 @@
+ALTER TABLE `monitored_endpoints` ADD `dns_failing_since` integer;

@@ -1,0 +1,1 @@
+CREATE INDEX `idx_deploy_inflight` ON `deployments` (`fetched_at`) WHERE (build_phase IN ('building', 'queued') OR deploy_phase = 'deploying');

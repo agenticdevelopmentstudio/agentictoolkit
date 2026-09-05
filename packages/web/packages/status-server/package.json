@@ -1,0 +1,121 @@
+{
+  "name": "@agentic-toolkit/status-server",
+  "version": "0.1.0",
+  "description": "The ADH status monitor's server: Hono app factory, monitor cycle, board, routes, OpenAPI, MCP, peers, telemetry, storage and the libSQL implementation. No React, no Next, no DOM \u2014 a backend host depends on this package alone.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./config": {
+      "types": "./dist/config/index.d.ts",
+      "development": "./src/config/index.ts",
+      "import": "./dist/config/index.js",
+      "default": "./dist/config/index.js"
+    },
+    "./libsql": {
+      "types": "./dist/libsql/index.d.ts",
+      "development": "./src/libsql/index.ts",
+      "import": "./dist/libsql/index.js",
+      "default": "./dist/libsql/index.js"
+    },
+    "./worker": {
+      "types": "./dist/monitor/worker.d.ts",
+      "development": "./src/monitor/worker.ts",
+      "import": "./dist/monitor/worker.js",
+      "default": "./dist/monitor/worker.js"
+    },
+    "./board": {
+      "types": "./dist/board/index.d.ts",
+      "development": "./src/board/index.ts",
+      "import": "./dist/board/index.js",
+      "default": "./dist/board/index.js"
+    },
+    "./activity": {
+      "types": "./dist/board/derive-activity.d.ts",
+      "development": "./src/board/derive-activity.ts",
+      "import": "./dist/board/derive-activity.js",
+      "default": "./dist/board/derive-activity.js"
+    },
+    "./deploy-status": {
+      "types": "./dist/monitor/deploy-status.d.ts",
+      "development": "./src/monitor/deploy-status.ts",
+      "import": "./dist/monitor/deploy-status.js",
+      "default": "./dist/monitor/deploy-status.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "development": "./src/types.ts",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "test",
+    "openapi.json"
+  ],
+  "scripts": {
+    "build": "tsup && pnpm run build:types",
+    "build:types": "tsc --emitDeclarationOnly -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --exclude '**/*.int.test.ts'",
+    "test:int": "vitest run .int.test",
+    "openapi:dump": "tsx tools/dump-openapi.ts",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@agentic-toolkit/deploy-platform": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "bcryptjs": "^2.4.3",
+    "drizzle-zod": "^0.8.3"
+  },
+  "peerDependencies": {
+    "@hono/zod-openapi": "^1.4.0",
+    "@libsql/client": "^0.14.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.23",
+    "zod": "^4.4.3"
+  },
+  "comment:peers": "Every peer is OPTIONAL for the same reason deploy-platform's drizzle-orm peer is: a backend host (websites/main) declares hono, @hono/zod-openapi, drizzle-orm, @libsql/client and zod itself, while the dashboard host vendors this package only for status-web's type-only import and the two board/deploy-status parity tests, which reach the pure ./activity and ./deploy-status subpaths. A required peer would make pnpm's auto-install-peers drag the ORM and the native libsql driver into a browser install that never imports them.",
+  "peerDependenciesMeta": {
+    "@hono/zod-openapi": {
+      "optional": true
+    },
+    "@libsql/client": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.0.4",
+    "@hono/zod-openapi": "1.4.0",
+    "@libsql/client": "^0.14.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^24.0.0",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "hono": "4.12.25",
+    "tsup": "^8.3.5",
+    "tsx": "^4.22.3",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.4",
+    "zod": "4.4.3"
+  },
+  "comment:devPins": "hono, @hono/zod-openapi and zod are pinned EXACTLY in devDependencies (the peer ranges stay caret): openapi.json is a function of the JSON-schema emitter in those three, and the committed document must reproduce byte-for-byte in this workspace AND in websites/main, which locks these same versions. Bump all three together with the host lockfile and re-run openapi:dump."
+}

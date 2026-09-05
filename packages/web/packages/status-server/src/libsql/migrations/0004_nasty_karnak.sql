@@ -1,0 +1,1 @@
+ALTER TABLE `deployments` ADD `error_text` text;

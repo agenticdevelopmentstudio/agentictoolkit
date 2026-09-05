@@ -1,0 +1,1 @@
+CREATE INDEX `idx_health_checked` ON `health_checks` (`checked_at`);

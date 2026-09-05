@@ -1,0 +1,1 @@
+CREATE INDEX `idx_issue_opened` ON `issues` (`opened_at`);

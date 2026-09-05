@@ -1,0 +1,1 @@
+ALTER TABLE `monitored_endpoints` DROP COLUMN `dns_failing_since`;

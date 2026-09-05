@@ -1,0 +1,77 @@
+{
+  "name": "@agentic-toolkit/status-web",
+  "version": "0.1.0",
+  "description": "The ADH status monitor's operator dashboard: React panels, hooks and the browser-side API client. A Next host mounts these in its own pages, providers and proxy.",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./header-auth": {
+      "types": "./dist/header-auth.d.ts",
+      "development": "./src/header-auth.ts",
+      "import": "./dist/header-auth.js",
+      "default": "./dist/header-auth.js"
+    },
+    "./components/*": {
+      "types": "./dist/components/*.d.ts",
+      "development": "./src/components/*.tsx",
+      "import": "./dist/components/*.js",
+      "default": "./dist/components/*.js"
+    },
+    "./lib/*": {
+      "types": "./dist/lib/*.d.ts",
+      "development": "./src/lib/*.ts",
+      "import": "./dist/lib/*.js",
+      "default": "./dist/lib/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsup && pnpm run build:types",
+    "build:types": "tsc --emitDeclarationOnly -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentic-toolkit/adh": "workspace:*",
+    "@agentic-toolkit/deploy-platform": "workspace:*",
+    "@agentic-toolkit/themes": "workspace:*",
+    "@agentic-toolkit/ui": "workspace:*",
+    "lucide-react": "^1.16.0"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.62.0",
+    "next": ">=15",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@agentic-toolkit/status-server": "workspace:*",
+    "@tanstack/react-query": "^5.62.0",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "19.2.16",
+    "@types/react-dom": "19.2.3",
+    "esbuild-plugin-preserve-directives": "^0.0.11",
+    "jsdom": "^29.0.0",
+    "next": "^16.2.9",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.4"
+  }
+}

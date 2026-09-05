@@ -12,6 +12,8 @@ packages:
   - './packages/adh-api-types'
   - './packages/adh-ui'
   - './packages/deploy-platform'
+  - './packages/status-server'
+  - './packages/status-web'
   - './packages/next-preflight'
   - './packages/next-headers'
   - './packages/next-env'
