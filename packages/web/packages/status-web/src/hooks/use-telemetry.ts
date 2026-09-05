@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useStatusApi } from "../api/client";
 import { cache, source } from "../telemetry/client";
 import { emptySnapshot, type TelemetrySnapshot } from "../telemetry/types";
 
@@ -13,6 +14,7 @@ export const TELEMETRY_POLL_MS = 60_000;
 // GlitchTip/PostHog/Turso — so swapping the backend (telemetry/client.ts) leaves
 // it untouched.
 export function useTelemetry(): TelemetrySnapshot {
+  const api = useStatusApi();
   const [cached, setCached] = useState<TelemetrySnapshot | null>(null);
   useEffect(() => {
     setCached(cache.load());
@@ -20,7 +22,7 @@ export function useTelemetry(): TelemetrySnapshot {
 
   const query = useQuery<TelemetrySnapshot>({
     queryKey: ["telemetry"],
-    queryFn: () => source.get(),
+    queryFn: () => source.get(api),
     refetchInterval: TELEMETRY_POLL_MS,
     refetchOnWindowFocus: true,
     retry: 1,

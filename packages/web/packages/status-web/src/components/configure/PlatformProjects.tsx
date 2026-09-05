@@ -2,6 +2,7 @@
 import { type ReactElement, useRef, useState } from "react";
 import { Button } from "@agentic-toolkit/ui/components/button";
 import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { useStatusApi } from "../../api/client";
 import * as api from "../../api/monitored-sites";
 import { useDeployProjects, type DeployProject } from "../../hooks/use-deploy-projects";
 import { platformCanon } from "../../lib/deploy-view";
@@ -61,6 +62,7 @@ function ProjectStatusFilter({ selected, onToggle, onSetAll }: { selected: Set<P
 
 /** The per-platform project list shown under the platform config: wired ✓, or Match / Ignore. */
 export function PlatformProjects({ platform, onChanged }: { platform: string; onChanged: () => Promise<void> }): ReactElement {
+  const apiClient = useStatusApi();
   const { data, refetch } = useDeployProjects();
   const [busy, setBusy] = useState<string | null>(null); // projectName / "__all__" / null
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +123,7 @@ export function PlatformProjects({ platform, onChanged }: { platform: string; on
     setBusy(rowKey(p)); setError(null); setNotice(null);
     try {
       // Same shared runner as "Match all" / the banner — one project's batch.
-      const { skipped, notes } = await runMatch([p], { liveProjects });
+      const { skipped, notes } = await runMatch([p], { client: apiClient, liveProjects });
       const first = skipped[0];
       if (first) setError(`${first.project}: ${first.reason}`);
       setNotice(noticeLine(notes));
@@ -140,6 +142,7 @@ export function PlatformProjects({ platform, onChanged }: { platform: string; on
       // The shared runner is what the banner's "Auto Configure" also uses, so the
       // two entry points match projects identically.
       const { added, skipped, notes } = await runMatch(addableAll, {
+        client: apiClient,
         liveProjects,
         onProgress: (done, total) => setProgress({ done, total }),
       });
@@ -159,12 +162,12 @@ export function PlatformProjects({ platform, onChanged }: { platform: string; on
   // Railway project's env rows ignores the whole project — its sibling rows flip together.
   async function ignore(p: DeployProject): Promise<void> {
     setBusy(rowKey(p)); setError(null);
-    try { await api.ignoreProject(platformCanon(p.platform), p.projectName); await settle(); }
+    try { await api.ignoreProject(apiClient, platformCanon(p.platform), p.projectName); await settle(); }
     catch (e) { setError(`Ignore failed — ${msg(e)}`); } finally { setBusy(null); }
   }
   async function unignore(p: DeployProject): Promise<void> {
     setBusy(rowKey(p)); setError(null);
-    try { await api.unignoreProject(platformCanon(p.platform), p.projectName); await settle(); }
+    try { await api.unignoreProject(apiClient, platformCanon(p.platform), p.projectName); await settle(); }
     catch (e) { setError(`Un-ignore failed — ${msg(e)}`); } finally { setBusy(null); }
   }
   // Bulk-dismiss every unconfigured project on this platform (one request). Collapsed to
@@ -174,7 +177,7 @@ export function PlatformProjects({ platform, onChanged }: { platform: string; on
     if (pending.length === 0) return;
     setBusy("__ignore_all__"); setError(null);
     try {
-      await api.ignoreProjects(uniqueByProject(pending).map((p) => ({ platform: platformCanon(p.platform), projectName: p.projectName })));
+      await api.ignoreProjects(apiClient, uniqueByProject(pending).map((p) => ({ platform: platformCanon(p.platform), projectName: p.projectName })));
       await settle();
     } catch (e) { setError(`Ignore all failed — ${msg(e)}`); } finally { setBusy(null); }
   }

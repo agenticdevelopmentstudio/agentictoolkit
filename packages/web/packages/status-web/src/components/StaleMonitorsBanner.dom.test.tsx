@@ -79,7 +79,7 @@ describe("StaleMonitorsBanner", () => {
     // The modal's own Retire button (the row's is the other one).
     const buttons = screen.getAllByRole("button", { name: "Retire" });
     fireEvent.click(buttons[buttons.length - 1]!);
-    await waitFor(() => expect(deleteEndpoint).toHaveBeenCalledWith("ep-1"));
+    await waitFor(() => expect(deleteEndpoint).toHaveBeenCalledWith(expect.anything(), "ep-1"));
   });
 
   it("Cancel closes the confirm without deleting", async () => {

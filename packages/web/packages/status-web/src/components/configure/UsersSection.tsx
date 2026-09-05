@@ -5,6 +5,7 @@ import { CircleUser } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Field, type TopicLevel } from "@agentic-toolkit/ui/blocks";
 import { Select } from "@agentic-toolkit/ui/components/select";
+import { useStatusApi } from "../../api/client";
 import { useSettingsEntityLevel } from "../settings-level";
 import { useEditorMutations } from "./use-editor-mutations";
 import { useDraftForSelection } from "./use-draft-for-selection";
@@ -34,12 +35,13 @@ export function UsersSection({
   selectedId: string | null;
   onNavigate: (id: string | null) => void;
 }): ReactElement {
+  const api = useStatusApi();
   const queryClient = useQueryClient();
   const { busy, error, setError, run } = useEditorMutations();
 
   const { data, error: queryError } = useQuery<UserRow[]>({
     queryKey: ["status-users"],
-    queryFn: () => fetch("/api/users").then((r) => r.json()) as Promise<UserRow[]>,
+    queryFn: () => api.fetch("/users").then((r) => r.json()) as Promise<UserRow[]>,
   });
   const users = data ?? NO_USERS;
 
@@ -59,7 +61,7 @@ export function UsersSection({
 
   // Throws on !ok so useEditorMutations surfaces the server's message (409 etc).
   async function request(method: "PATCH" | "DELETE", id: string, body?: unknown): Promise<void> {
-    const res = await fetch(`/api/users/${id}`, {
+    const res = await api.fetch(`/users/${id}`, {
       method,
       ...(body !== undefined
         ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }

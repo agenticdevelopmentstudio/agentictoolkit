@@ -1,3 +1,4 @@
+import type { StatusApiClient } from "../api/client";
 import type { TelemetrySnapshot } from "./types";
 
 // The PORTS of the telemetry subsystem. Every concrete piece — a GlitchTip
@@ -36,7 +37,8 @@ export interface SnapshotCache {
 }
 
 /** Where the CLIENT reads a snapshot from — an HTTP boundary hides the server
- *  store. `live` → /api/telemetry; `turso` → /api/errors + /api/analytics. */
+ *  store. `live` → /telemetry; `turso` → /errors + /analytics, both resolved
+ *  through the caller's `StatusApiClient`. */
 export interface TelemetrySource {
-  get(): Promise<TelemetrySnapshot>;
+  get(api: StatusApiClient): Promise<TelemetrySnapshot>;
 }

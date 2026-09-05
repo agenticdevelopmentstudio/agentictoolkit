@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useMemo } from "react";
 import { useQuery, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
-import * as api from "../api/monitored-sites";
+import { useStatusApi, type StatusApiClient } from "../api/client";
+import * as monitoredSites from "../api/monitored-sites";
 import type { SiteGroupView, SiteView, IntegrationView, EndpointView } from "../api/monitored-sites";
 import { fetchUnconfigured, type DeployProject, type UnconfiguredResponse } from "./use-deploy-projects";
 import type { ConfigStatus } from "@agentic-toolkit/deploy-platform/engine";
@@ -47,16 +48,16 @@ export interface ConfigureData {
  *  rendered empty while the rows sat perfectly readable in SQLite. The rosters must not be
  *  hostage to a third party being up; the classification is its own query below, and
  *  `useConfigStatus` still reports ITS failure so a dead scan is never read as "all clear". */
-function useConfigureData(enabled: boolean): UseQueryResult<ConfigureData> {
+function useConfigureData(api: StatusApiClient, enabled: boolean): UseQueryResult<ConfigureData> {
   return useQuery<ConfigureData>({
     queryKey: CONFIGURE_DATA_KEY,
     enabled,
     queryFn: async () => {
       const [groups, sites, integrations, endpoints] = await Promise.all([
-        api.listGroups(),
-        api.listSites(),
-        api.listIntegrations(),
-        api.listAllEndpoints(),
+        monitoredSites.listGroups(api),
+        monitoredSites.listSites(api),
+        monitoredSites.listIntegrations(api),
+        monitoredSites.listAllEndpoints(api),
       ]);
       return { groups, sites, integrations, endpoints };
     },
@@ -69,11 +70,11 @@ function useConfigureData(enabled: boolean): UseQueryResult<ConfigureData> {
  *  modal is what forces a fresh one, via `fetchUnconfigured({ fresh: true })`). Carries no
  *  `refetchInterval`, and the app QueryClient sets no default one, so it runs on mount +
  *  the shared 60s refresh + explicit invalidation. */
-function useUnconfigured(enabled: boolean): UseQueryResult<UnconfiguredResponse> {
+function useUnconfigured(api: StatusApiClient, enabled: boolean): UseQueryResult<UnconfiguredResponse> {
   return useQuery<UnconfiguredResponse>({
     queryKey: CONFIGURE_CLASSIFICATION_KEY,
     enabled,
-    queryFn: () => fetchUnconfigured(),
+    queryFn: () => fetchUnconfigured(api),
   });
 }
 
@@ -151,8 +152,9 @@ function buildStatus(
  * any enabled consumer elsewhere still drives the shared query.
  */
 export function useConfigStatus({ enabled = true }: { enabled?: boolean } = {}): UseConfigStatus {
-  const configure = useConfigureData(enabled);
-  const unconfigured = useUnconfigured(enabled);
+  const api = useStatusApi();
+  const configure = useConfigureData(api, enabled);
+  const unconfigured = useUnconfigured(api, enabled);
   const status = useMemo(() => buildStatus(configure.data, unconfigured.data), [configure.data, unconfigured.data]);
   const refetch = useCallback(
     () => Promise.all([configure.refetch(), unconfigured.refetch()]),

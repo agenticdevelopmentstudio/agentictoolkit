@@ -10,6 +10,7 @@ import { Select } from "@agentic-toolkit/ui/components/select";
 import { CopyButton } from "@agentic-toolkit/ui/components/copy-button";
 import { AlertModal } from "@agentic-toolkit/ui/components/alert-modal";
 import { ButtonBar, Field, type TopicLevel } from "@agentic-toolkit/ui/blocks";
+import { useStatusApi } from "../../api/client";
 import { useSettingsEntityLevel } from "../settings-level";
 import { useEditorMutations } from "./use-editor-mutations";
 import { EntityEditorShell, SectionErrorText, SectionPlaceholder } from "./section-chrome";
@@ -83,6 +84,7 @@ export function TokensSection({
   selectedId: string | null;
   onNavigate: (id: string | null) => void;
 }): ReactElement {
+  const api = useStatusApi();
   const queryClient = useQueryClient();
   const { busy, error, setError, run } = useEditorMutations();
 
@@ -99,7 +101,7 @@ export function TokensSection({
     // Throw on a non-OK response so react-query lands in its error branch — a
     // 401/500 body must never become "rows" for the roster level.
     queryFn: async (): Promise<TokenRow[]> => {
-      const res = await fetch("/api/tokens");
+      const res = await api.fetch("/tokens");
       if (!res.ok) throw new Error(await readErr(res, `Request failed (${res.status})`));
       return (await res.json()) as TokenRow[];
     },
@@ -115,7 +117,7 @@ export function TokensSection({
         days !== null && Number.isFinite(days) && days > 0
           ? new Date(Date.now() + days * 86_400_000).toISOString()
           : null;
-      const res = await fetch("/api/tokens", {
+      const res = await api.fetch("/tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: draft.name.trim(), role: draft.role, expiresAt }),
@@ -135,7 +137,7 @@ export function TokensSection({
     if (!current) return;
     const id = current.id;
     void run(async () => {
-      const res = await fetch(`/api/tokens/${id}`, { method: "DELETE" });
+      const res = await api.fetch(`/tokens/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(await readErr(res, `Request failed (${res.status})`));
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       // Stay on the row — the list keeps revoked tokens, so it now reads "revoked".

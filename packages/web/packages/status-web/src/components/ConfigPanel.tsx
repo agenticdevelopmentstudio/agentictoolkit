@@ -13,6 +13,7 @@ import { Switch } from "@agentic-toolkit/ui/components/switch";
 import { Label } from "@agentic-toolkit/ui/components/label";
 import { Badge } from "@agentic-toolkit/ui/components/badge";
 import { Field, ListHeader, type TopicLevel } from "@agentic-toolkit/ui/blocks";
+import { useStatusApi } from "../api/client";
 import * as api from "../api/monitored-sites";
 import { PLATFORMS, type SiteGroupView, type SiteView, type IntegrationView, type EndpointView } from "../api/monitored-sites";
 import { slugify } from "../lib/slug";
@@ -74,6 +75,7 @@ function GroupsSection({
   selectedId: string | null;
   onNavigate: (id: string | null) => void;
 }): ReactElement {
+  const apiClient = useStatusApi();
   const [creating, setCreating] = useState(false);
   const { busy, error, setError, run } = useEditorMutations();
   const queryClient = useQueryClient();
@@ -96,12 +98,12 @@ function GroupsSection({
     const body = { name: draft.name.trim(), slug: draft.slug.trim() || slugify(draft.name), retentionDays: draft.retentionDays };
     void run(async () => {
       if (creating) {
-        const g = await api.createGroup(body);
+        const g = await api.createGroup(apiClient, body);
         await onChanged();
         setCreating(false);
         onNavigate(g.id);
       } else if (current) {
-        await api.updateGroup(current.id, body);
+        await api.updateGroup(apiClient, current.id, body);
         await onChanged();
       }
     });
@@ -109,7 +111,7 @@ function GroupsSection({
   function del(): void {
     if (!current) return;
     void run(async () => {
-      await api.deleteGroup(current.id);
+      await api.deleteGroup(apiClient, current.id);
       await onChanged();
       // The backend purged every deleted-group endpoint's history/issues in-request; the
       // board's ["live"] cache still holds them — refetch so Activity/Problems drop the
@@ -216,6 +218,7 @@ function PlatformsSection({
   selectedId: string | null;
   onNavigate: (id: string | null) => void;
 }): ReactElement {
+  const apiClient = useStatusApi();
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [rosterFilter, setRosterFilter] = useState("");
@@ -288,12 +291,12 @@ function PlatformsSection({
     const body = { platform: draft.platform, label: draft.label.trim(), config: buildConfig(), tokenEnvVar: draft.tokenEnvVar || null, isActive: draft.isActive };
     void run(async () => {
       if (creating) {
-        const i = await api.createIntegration(body);
+        const i = await api.createIntegration(apiClient, body);
         await onChanged();
         setCreating(false);
         onNavigate(i.id);
       } else if (current) {
-        await api.updateIntegration(current.id, body);
+        await api.updateIntegration(apiClient, current.id, body);
         await onChanged();
       }
     });
@@ -301,7 +304,7 @@ function PlatformsSection({
   function del(): void {
     if (!current) return;
     void run(async () => {
-      await api.deleteIntegration(current.id);
+      await api.deleteIntegration(apiClient, current.id);
       await onChanged();
       onNavigate(null);
     });

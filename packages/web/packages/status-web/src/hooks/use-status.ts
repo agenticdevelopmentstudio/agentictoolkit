@@ -1,12 +1,14 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
+import { useStatusApi } from "../api/client";
 import type { StatusResponse } from "../types";
 
 export function useStatus() {
+  const api = useStatusApi();
   return useQuery<StatusResponse>({
     queryKey: ["status"],
     queryFn: async () => {
-      const r = await fetch("/api/status");
+      const r = await api.fetch("/status");
       if (!r.ok) {
         // The route returns `{ error }` with the real reason (e.g. a DB outage);
         // surface that as the thrown message so the UI shows WHY, not "status 503".

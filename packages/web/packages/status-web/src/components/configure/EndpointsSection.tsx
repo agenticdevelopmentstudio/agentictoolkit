@@ -10,6 +10,7 @@ import { Checkbox } from "@agentic-toolkit/ui/components/checkbox";
 import { Label } from "@agentic-toolkit/ui/components/label";
 import { Field, FieldGroup, type TopicLevel } from "@agentic-toolkit/ui/blocks";
 import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { useStatusApi } from "../../api/client";
 import * as api from "../../api/monitored-sites";
 import { type SiteGroupView, type SiteView, type EndpointView } from "../../api/monitored-sites";
 import type { EndpointConfigStatus } from "@agentic-toolkit/deploy-platform/engine";
@@ -202,6 +203,7 @@ export function EndpointsSection({
   );
   const setAllPlatforms = useCallback((all: boolean): void => setPlatformFilter(all ? allPlatformKeys() : new Set()), []);
   const setAllStatuses = useCallback((all: boolean): void => setStatusFilter(all ? allStatuses() : new Set()), []);
+  const apiClient = useStatusApi();
   const { busy, error, setError, run } = useEditorMutations();
   const { data: deployData } = useDeployProjects();
   const queryClient = useQueryClient();
@@ -395,8 +397,8 @@ export function EndpointsSection({
       if (creating) {
         // Each monitored site is 1:1 with its URL — create its backing site row from
         // the host (its DNS name), then the endpoint under it.
-        const site = await api.createSite({ name: host, slug: slugify(host), groupId: draft.groupId });
-        const created = await api.createEndpoint(site.id, { url, ...writeFields(env, KIND) });
+        const site = await api.createSite(apiClient, { name: host, slug: slugify(host), groupId: draft.groupId });
+        const created = await api.createEndpoint(apiClient, site.id, { url, ...writeFields(env, KIND) });
         await onChanged();
         // Navigating to the created id hydrates the draft from the REAL created
         // row (its resolved ids) via the render-phase load, NOT the stale props.
@@ -413,8 +415,8 @@ export function EndpointsSection({
           sitePatch.name = host;
           sitePatch.slug = slugify(host);
         }
-        if (Object.keys(sitePatch).length > 0) await api.updateSite(current.siteId, sitePatch);
-        await api.updateEndpoint(current.id, { url, ...writeFields(env, current.kind) });
+        if (Object.keys(sitePatch).length > 0) await api.updateSite(apiClient, current.siteId, sitePatch);
+        await api.updateEndpoint(apiClient, current.id, { url, ...writeFields(env, current.kind) });
         await onChanged();
       }
     });
@@ -427,7 +429,7 @@ export function EndpointsSection({
       // the site empty (1:1 site→endpoint is the norm; multi-endpoint sites keep their
       // remaining endpoints). Decided server-side from fresh state, so a stale client
       // endpoint list can't cascade-delete a healthy sibling.
-      await api.deleteEndpoint(current.id);
+      await api.deleteEndpoint(apiClient, current.id);
       await onChanged();
       // The backend purged the retired endpoint's history/issues in-request, but the
       // board's ["live"] cache still holds them — refetch the live snapshot so

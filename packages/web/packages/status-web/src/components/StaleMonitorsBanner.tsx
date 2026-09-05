@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useStatusApi } from "../api/client";
 import { deleteEndpoint } from "../api/monitored-sites";
 import { useLiveSnapshot } from "../hooks/use-live-snapshot";
 import { useNow } from "../hooks/use-now";
@@ -46,6 +47,7 @@ interface Row {
  * Mirrors {@link UnconfiguredProjectsBanner}.
  */
 export function StaleMonitorsBanner(): ReactElement | null {
+  const apiClient = useStatusApi();
   const store = useLiveSnapshot();
   const nowMs = useNow();
   const queryClient = useQueryClient();
@@ -95,7 +97,7 @@ export function StaleMonitorsBanner(): ReactElement | null {
     setBusy(row.id);
     try {
       // The backend deletes the endpoint and, atomically, its site if that leaves it empty.
-      await deleteEndpoint(row.id);
+      await deleteEndpoint(apiClient, row.id);
       // Keep the rest of the app (Configure page, banners) consistent, then force a RE-READ
       // of /api/live so the cleared monitor also leaves Problems and this banner. (Not
       // store.refresh() — that asks the backend to run a fresh CHECK, which is debounce-able

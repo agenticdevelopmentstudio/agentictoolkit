@@ -10,6 +10,7 @@ import { Switch } from "@agentic-toolkit/ui/components/switch";
 import { Field, type TopicLevel } from "@agentic-toolkit/ui/blocks";
 import * as api from "../../api/peers";
 import type { PeerView, PeerWrite } from "../../api/peers";
+import { useStatusApi } from "../../api/client";
 import { isValidPeerBaseUrl, normalizePeerBaseUrl } from "../../lib/peer-url";
 import { useSettingsEntityLevel } from "../settings-level";
 import { useEditorMutations } from "./use-editor-mutations";
@@ -52,13 +53,14 @@ export function PeersSection({
   selectedId: string | null;
   onNavigate: (id: string | null) => void;
 }): ReactElement {
+  const apiClient = useStatusApi();
   const queryClient = useQueryClient();
   const { busy, error, setError, run } = useEditorMutations();
   const [creating, setCreating] = useState(false);
 
   const { data, error: queryError } = useQuery<PeerView[]>({
     queryKey: PEERS_QUERY_KEY,
-    queryFn: api.listPeers,
+    queryFn: () => api.listPeers(apiClient),
   });
   const peers = data ?? NO_PEERS;
 
@@ -113,12 +115,12 @@ export function PeersSection({
     void run(async () => {
       if (creating) {
         const body: PeerWrite = { label: trimmedLabel, baseUrl: trimmedUrl, isActive: draft.isActive, ...tokenField() };
-        const created = await api.createPeer(body);
+        const created = await api.createPeer(apiClient, body);
         await refresh();
         setCreating(false);
         onNavigate(created.id);
       } else if (current) {
-        await api.updatePeer(current.id, {
+        await api.updatePeer(apiClient, current.id, {
           label: trimmedLabel,
           baseUrl: trimmedUrl,
           isActive: draft.isActive,
@@ -135,7 +137,7 @@ export function PeersSection({
     if (!current) return;
     const id = current.id;
     void run(async () => {
-      await api.deletePeer(id);
+      await api.deletePeer(apiClient, id);
       await refresh();
       onNavigate(null);
     });

@@ -1,5 +1,6 @@
 "use client";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useStatusApi, type StatusApiClient } from "../api/client";
 
 export interface DeployProject {
   platform: string; // as recorded on deploys: vercel | railway | cloudflare-pages
@@ -44,9 +45,9 @@ export interface DeployProjectsResponse {
   verifiedPlatforms?: string[];
 }
 
-export async function fetchDeployProjects(opts: { fresh?: boolean } = {}): Promise<DeployProjectsResponse> {
-  const url = opts.fresh ? "/api/deploy-projects?fresh=1" : "/api/deploy-projects";
-  const r = await fetch(url, { cache: "no-store" });
+export async function fetchDeployProjects(api: StatusApiClient, opts: { fresh?: boolean } = {}): Promise<DeployProjectsResponse> {
+  const path = opts.fresh ? "/deploy-projects?fresh=1" : "/deploy-projects";
+  const r = await api.fetch(path, { cache: "no-store" });
   if (!r.ok) throw new Error(`deploy-projects ${r.status}`);
   return r.json() as Promise<DeployProjectsResponse>;
 }
@@ -68,9 +69,9 @@ export interface UnconfiguredResponse {
  *  per tab per minute. `fresh: true` (sent when a user opens the Auto Configure modal) appends
  *  `?fresh=1` to bypass the TTL. `no-store` keeps the browser HTTP cache from masking either.
  *  Shared by the review and the badges so they can't drift on URL / shape. */
-export async function fetchUnconfigured(opts: { fresh?: boolean } = {}): Promise<UnconfiguredResponse> {
-  const url = opts.fresh ? "/api/deploy-projects/unconfigured?fresh=1" : "/api/deploy-projects/unconfigured";
-  const r = await fetch(url, { cache: "no-store" });
+export async function fetchUnconfigured(api: StatusApiClient, opts: { fresh?: boolean } = {}): Promise<UnconfiguredResponse> {
+  const path = opts.fresh ? "/deploy-projects/unconfigured?fresh=1" : "/deploy-projects/unconfigured";
+  const r = await api.fetch(path, { cache: "no-store" });
   if (!r.ok) throw new Error(`deploy-projects/unconfigured ${r.status}`);
   return r.json() as Promise<UnconfiguredResponse>;
 }
@@ -89,12 +90,13 @@ export function armFreshDeployProjectsFetch(): void {
 
 /** All deploy projects seen in the deployments table — to browse when wiring an endpoint. */
 export function useDeployProjects({ enabled = true }: { enabled?: boolean } = {}): UseQueryResult<DeployProjectsResponse> {
+  const api = useStatusApi();
   return useQuery<DeployProjectsResponse>({
     queryKey: ["deploy-projects"],
     enabled,
     queryFn: async () => {
       const fresh = nextFetchIsFresh;
-      const result = await fetchDeployProjects({ fresh });
+      const result = await fetchDeployProjects(api, { fresh });
       nextFetchIsFresh = false;
       return result;
     },

@@ -2,6 +2,7 @@
 import { type ReactElement } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { useStatusApi } from "../api/client";
 import { StatusDot } from "./StatusDot";
 import { timeAgo } from "../lib/time-ago";
 import { useNow } from "../hooks/use-now";
@@ -33,10 +34,11 @@ interface FleetMember {
 // ---------------------------------------------------------------------------
 
 function useFleet() {
+  const api = useStatusApi();
   return useQuery<FleetMember[]>({
     queryKey: ["fleet"],
     queryFn: async () => {
-      const r = await fetch("/api/fleet");
+      const r = await api.fetch("/fleet");
       if (!r.ok) {
         const detail = await r
           .json()

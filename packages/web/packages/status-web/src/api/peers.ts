@@ -1,14 +1,16 @@
 // Fleet-peer client. Talks to the status BACKEND's admin CRUD via the same
-// `/api/[...path]` proxy as the rest of the config surface: `/api/config/peers` →
+// `/[...path]` proxy as the rest of the config surface: `/config/peers` →
 // `BACKEND_URL/config/peers` (admin-gated there, so this is an admin-only surface).
+// The base path itself is the caller's `StatusApiClient` — this module never
+// names `/api`.
 //
 // A peer is another status monitor this one polls: the fleet is exactly the set of
 // rows here plus this monitor itself. This is the ONLY place the fleet is configured —
 // the public wallboard has no config surface at all.
 
-import { req } from "./req";
+import type { StatusApiClient } from "./client";
 
-const PEERS = "/api/config/peers";
+const PEERS = "/config/peers";
 
 /**
  * A peer as the backend returns it. The `token` column is a fleet shared secret and is
@@ -34,18 +36,18 @@ export interface PeerWrite {
   isActive: boolean;
 }
 
-export function listPeers(): Promise<PeerView[]> {
-  return req<PeerView[]>(PEERS);
+export function listPeers(api: StatusApiClient): Promise<PeerView[]> {
+  return api.json<PeerView[]>(PEERS);
 }
 
-export function createPeer(body: PeerWrite): Promise<PeerView> {
-  return req<PeerView>(PEERS, { method: "POST", body: JSON.stringify(body) });
+export function createPeer(api: StatusApiClient, body: PeerWrite): Promise<PeerView> {
+  return api.json<PeerView>(PEERS, { method: "POST", body: JSON.stringify(body) });
 }
 
-export function updatePeer(id: string, body: Partial<PeerWrite>): Promise<PeerView> {
-  return req<PeerView>(`${PEERS}/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+export function updatePeer(api: StatusApiClient, id: string, body: Partial<PeerWrite>): Promise<PeerView> {
+  return api.json<PeerView>(`${PEERS}/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
-export function deletePeer(id: string): Promise<void> {
-  return req<void>(`${PEERS}/${id}`, { method: "DELETE" });
+export function deletePeer(api: StatusApiClient, id: string): Promise<void> {
+  return api.json<void>(`${PEERS}/${id}`, { method: "DELETE" });
 }

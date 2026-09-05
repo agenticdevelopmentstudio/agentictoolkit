@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useStatusApi, type StatusApiClient } from "../api/client";
 import type { Board } from "../lib/board-types";
 import { subscribeLiveFrames } from "./use-live-snapshot";
 import { useNow } from "./use-now";
@@ -7,8 +8,8 @@ import { BOARD_POLL_INTERVAL_MS, isBoardStale, boardDataFreshness } from "../lib
 
 export { BOARD_POLL_INTERVAL_MS };
 
-async function fetchBoard(): Promise<Board> {
-  const res = await fetch("/api/board", { headers: { accept: "application/json" } });
+async function fetchBoard(api: StatusApiClient): Promise<Board> {
+  const res = await api.fetch("/board", { headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`board fetch failed: ${res.status}`);
   return res.json();
 }
@@ -67,9 +68,10 @@ export interface UseBoardResult {
  * A problem that stops being derived server-side is simply absent from the next read.
  */
 export function useBoard(): UseBoardResult {
+  const api = useStatusApi();
   const q = useQuery<Board>({
     queryKey: ["board"],
-    queryFn: fetchBoard,
+    queryFn: () => fetchBoard(api),
     refetchInterval: BOARD_POLL_INTERVAL_MS,
     // Fix Round 2 item 5: matches useLiveSnapshot's own `retry: 1` (use-live-snapshot.ts),
     // the sibling feed that gates the SAME OverviewTab loading screen. Board and live

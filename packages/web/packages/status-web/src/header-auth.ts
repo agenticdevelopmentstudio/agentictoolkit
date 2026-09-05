@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useStatusApi, type StatusApiClient } from "./api/client";
 
 /**
  * What the host's header needs from the status session. Declared HERE, not imported
@@ -35,16 +36,17 @@ export interface StatusUser {
 export const STATUS_AUTH_QUERY_KEY = ["status-auth-me"] as const;
 
 /**
- * Fetch the current session from `GET /api/auth/me`. The backend NEVER answers that
+ * Fetch the current session from `GET {base}/auth/me`. The backend NEVER answers that
  * route with a 401 — signed-out is a definitive 200 `{ user: null }` — so any non-OK
  * response here is infrastructure trouble (the in-container proxy 500ing because the
  * backend hiccuped, a deploy restart, a network blip), NOT a sign-out. Those THROW,
  * so React Query keeps the last-known session and retries, instead of flashing the
  * signed-out header/board at a logged-in user mid-blip (the "visited the site and I
- * was suddenly logged out" bug). Exported for tests.
+ * was suddenly logged out" bug). `fetchImpl` stays injectable for tests; the URL
+ * itself is always resolved through the caller's `StatusApiClient`. Exported for tests.
  */
-export async function fetchStatusUser(fetchImpl: typeof fetch = fetch): Promise<StatusUser | null> {
-  const res = await fetchImpl("/api/auth/me");
+export async function fetchStatusUser(api: StatusApiClient, fetchImpl: typeof fetch = fetch): Promise<StatusUser | null> {
+  const res = await fetchImpl(api.url("/auth/me"));
   if (!res.ok) throw new Error(`auth/me unavailable (HTTP ${res.status})`);
   const body = (await res.json()) as { user: StatusUser | null };
   return body.user ?? null;
@@ -60,9 +62,10 @@ export async function fetchStatusUser(fetchImpl: typeof fetch = fetch): Promise<
  * the first load is in flight (distinct from a resolved signed-out `null`).
  */
 export function useStatusUser(): { user: StatusUser | null; isPending: boolean } {
+  const api = useStatusApi();
   const { data, isPending } = useQuery({
     queryKey: STATUS_AUTH_QUERY_KEY,
-    queryFn: () => fetchStatusUser(),
+    queryFn: () => fetchStatusUser(api),
     staleTime: 60_000,
     // Transient failures retry (default backoff) and, because a query error never
     // clears already-cached data, the header keeps showing the signed-in user
@@ -82,17 +85,18 @@ export function useStatusUser(): { user: StatusUser | null; isPending: boolean }
  * for a non-adh session).
  */
 export const useStatusHeaderAuth: StatusHeaderAuthSource = (): StatusHeaderAuthState => {
+  const api = useStatusApi();
   const { user, isPending } = useStatusUser();
 
   if (!user) {
-    // While the first /api/auth/me load is in flight, show the header spinner
+    // While the first auth/me load is in flight, show the header spinner
     // rather than flashing login/signup links that may vanish a tick later.
     return { user: null, authLoading: isPending, loginHref: "/login", signupHref: "/signup" };
   }
   return {
     user: { name: user.displayName || user.email },
     onLogout: () => {
-      void fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+      void api.fetch("/auth/logout", { method: "POST" }).finally(() => {
         window.location.href = "/";
       });
     },

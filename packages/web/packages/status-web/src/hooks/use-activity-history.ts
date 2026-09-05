@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useStatusApi } from "../api/client";
 import type { ActivityCursor, ActivityPage, ActivityRow } from "../lib/board-types";
 
 /**
@@ -113,6 +114,12 @@ export function useActivityHistory(opts: {
 }): UseActivityHistoryResult {
   const { enabled, live } = opts;
   const oldest = live[0] ?? null;
+  // Same ref-not-state reasoning as `enabledRef`/`oldestRef` below: `loadOlder` must keep
+  // one stable identity for the hook's lifetime, so the client it fetches through is read
+  // through a ref rather than closed over directly.
+  const api = useStatusApi();
+  const apiRef = useRef(api);
+  apiRef.current = api;
   const [rows, setRows] = useState<ActivityRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [exhausted, setExhausted] = useState(false);
@@ -281,7 +288,7 @@ export function useActivityHistory(opts: {
     const timer = setTimeout(() => controller.abort(), PAGE_TIMEOUT_MS);
     void (async () => {
       try {
-        const res = await fetch(`/api/activity?${q}`, {
+        const res = await apiRef.current.fetch(`/activity?${q}`, {
           headers: { accept: "application/json" },
           signal: controller.signal,
         });

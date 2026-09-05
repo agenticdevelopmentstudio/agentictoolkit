@@ -15,3 +15,4 @@ export * from "./components/board-views";
 export * from "./lib/colors";
 export * from "./lib/retired-storage";
 export * from "./header-auth";
+export { StatusApiProvider, useStatusApi, createStatusApiClient, DEFAULT_API_BASE, type StatusApiClient } from "./api/client";

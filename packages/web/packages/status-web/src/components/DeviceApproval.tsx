@@ -2,6 +2,7 @@
 
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 import { Button } from "@agentic-toolkit/ui/components/button";
+import { useStatusApi } from "../api/client";
 
 const mono = "var(--mono,ui-monospace,monospace)";
 
@@ -33,6 +34,7 @@ function expiryHint(iso: string): string {
  * is being approved, then POSTs Approve/Deny through the `/api` BFF.
  */
 export function DeviceApproval({ initialCode }: { initialCode: string }): ReactElement {
+  const api = useStatusApi();
   const [code, setCode] = useState(initialCode);
   const [phase, setPhase] = useState<Phase>(initialCode ? "loading" : "prompt");
   const [request, setRequest] = useState<Pending | null>(null);
@@ -45,7 +47,7 @@ export function DeviceApproval({ initialCode }: { initialCode: string }): ReactE
     setPhase("loading");
     setError("");
     try {
-      const res = await fetch(`/api/auth/device/pending?user_code=${encodeURIComponent(trimmed)}`);
+      const res = await api.fetch(`/auth/device/pending?user_code=${encodeURIComponent(trimmed)}`);
       if (res.status === 404) {
         setPhase("notfound");
         return;
@@ -66,7 +68,7 @@ export function DeviceApproval({ initialCode }: { initialCode: string }): ReactE
       setError("Could not reach the server.");
       setPhase("error");
     }
-  }, []);
+  }, [api]);
 
   // Auto-look up a code arriving in the URL (the CLI's deep link).
   useEffect(() => {
@@ -78,7 +80,7 @@ export function DeviceApproval({ initialCode }: { initialCode: string }): ReactE
       setBusy(true);
       setError("");
       try {
-        const res = await fetch(`/api/auth/device/${decision}`, {
+        const res = await api.fetch(`/auth/device/${decision}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ user_code: code.trim() }),
@@ -96,7 +98,7 @@ export function DeviceApproval({ initialCode }: { initialCode: string }): ReactE
         setBusy(false);
       }
     },
-    [code],
+    [api, code],
   );
 
   return (

@@ -3,13 +3,16 @@ import { preserveDirectivesPlugin } from "esbuild-plugin-preserve-directives";
 
 // Entries are GLOBBED so that every subpath the `exports` map promises
 // (`./components/*`, `./lib/*`, `./header-auth`) exists in dist without anyone
-// editing this file — the same shape as @agentic-toolkit/ui. Hooks, api, config
-// and telemetry modules are not public subpaths; they become shared chunks.
+// editing this file — the same shape as @agentic-toolkit/ui. Hooks, config and
+// telemetry modules are not public subpaths; they become shared chunks.
+// `src/api/client.ts` is the one `api/*` module that IS a public subpath — the
+// host's composition root imports it to mount `StatusApiProvider`.
 // Tests and fixtures are source, not surface.
 export default defineConfig({
   entry: [
     "src/index.ts",
     "src/header-auth.ts",
+    "src/api/client.ts",
     "src/components/*.tsx",
     "src/components/*.ts",
     "src/lib/*.ts",

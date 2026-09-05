@@ -5,6 +5,7 @@ import { type DeployProject, fetchUnconfigured } from "../hooks/use-deploy-proje
 import { summarizeAutoConfigure } from "@agentic-toolkit/deploy-platform/engine";
 import { skipDetail, noteDetail } from "../lib/auto-configure";
 import { listGroups } from "../api/monitored-sites";
+import { useStatusApi, type StatusApiClient } from "../api/client";
 import { projectKeyOf, uniqueByProject } from "../lib/project-key";
 import { plural } from "../lib/format";
 import { msg } from "../lib/err";
@@ -54,11 +55,14 @@ interface AutoConfigureRunResult {
   notes?: { project: string; note: string }[];
 }
 
-async function postAutoConfigure(body: {
-  ignore: { platform: string; projectName: string }[];
-  create: { groupId: string; forceGroup?: boolean } | null;
-}): Promise<AutoConfigureRunResult> {
-  const r = await fetch("/api/auto-configure", {
+async function postAutoConfigure(
+  api: StatusApiClient,
+  body: {
+    ignore: { platform: string; projectName: string }[];
+    create: { groupId: string; forceGroup?: boolean } | null;
+  },
+): Promise<AutoConfigureRunResult> {
+  const r = await api.fetch("/auto-configure", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -82,6 +86,7 @@ async function postAutoConfigure(body: {
  * asks the server to wire stragglers.
  */
 export function AutoConfigureProvider({ children }: { children: ReactNode }): ReactElement {
+  const apiClient = useStatusApi();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewState | null>(null);
@@ -101,7 +106,7 @@ export function AutoConfigureProvider({ children }: { children: ReactNode }): Re
         platform: p.platform,
         projectName: p.projectName,
       }));
-      const result = await postAutoConfigure({ ignore, create: newSiteGroupId ? { groupId: newSiteGroupId, forceGroup } : null });
+      const result = await postAutoConfigure(apiClient, { ignore, create: newSiteGroupId ? { groupId: newSiteGroupId, forceGroup } : null });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["deploy-projects"] }),
         invalidateConfigQueries(queryClient),
@@ -120,7 +125,7 @@ export function AutoConfigureProvider({ children }: { children: ReactNode }): Re
         : "";
       return summarizeAutoConfigure(result) + skippedVercel + noteDetail(result.notes) + skipDetail(result.skippedDetail);
     },
-    [queryClient],
+    [queryClient, apiClient],
   );
 
   const run = useCallback(async (): Promise<void> => {
@@ -130,14 +135,14 @@ export function AutoConfigureProvider({ children }: { children: ReactNode }): Re
     try {
       // A user clicked Auto Configure — ask the providers NOW (bypass the 30s enumeration
       // cache). The badges' 60s loop stays cache-served (fetchUnconfigured() without fresh).
-      const { pending } = await fetchUnconfigured({ fresh: true });
+      const { pending } = await fetchUnconfigured(apiClient, { fresh: true });
       if (pending.length === 0) {
         // Nothing new to review — still ask the server to wire any straggler endpoints
         // (no ignores, no creation).
         setMessage(await configure([], new Set<string>(), ""));
         return;
       }
-      const groups = (await listGroups()).map((g) => ({ id: g.id, name: g.name }));
+      const groups = (await listGroups(apiClient)).map((g) => ({ id: g.id, name: g.name }));
       // Hand off to the modal; the work runs when the operator applies.
       setReview({ pending, groups });
     } catch (err) {
@@ -146,7 +151,7 @@ export function AutoConfigureProvider({ children }: { children: ReactNode }): Re
       running.current = false;
       setBusy(false);
     }
-  }, [review, configure]);
+  }, [review, configure, apiClient]);
 
   const applyReview = useCallback(
     async (ignoreKeys: Set<string>, newSiteGroupId: string, forceGroup: boolean): Promise<void> => {

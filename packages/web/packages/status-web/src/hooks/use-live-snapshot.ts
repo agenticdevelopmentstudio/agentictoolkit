@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createStatusApiClient, useStatusApi, type StatusApiClient } from "../api/client";
 import type { LiveSnapshot } from "../lib/live-types";
 
 export const POLL_INTERVAL_MS = 60_000;
@@ -64,6 +65,14 @@ interface StoreView {
 const freshView = (): StoreView => ({
   snapshot: null, streamConnected: false, nextCheckAt: null, awaitingCheck: false, liveError: null,
 });
+
+// The store's transport functions (openStream, fetchLive, refresh) run at module scope,
+// outside any component render, so they can't call `useStatusApi()` themselves. Each
+// `useLiveSnapshot()` call resolves the host's client and assigns it here BEFORE
+// `useSyncExternalStore` runs, so the transport always talks through the host's port
+// rather than naming `/api` itself. Defaults to the same-origin client for the sliver of
+// module-load time before any component has mounted.
+let apiClient: StatusApiClient = createStatusApiClient();
 
 let view: StoreView = freshView();
 const SERVER_VIEW: StoreView = view; // stable ref for SSR — first client paint matches
@@ -166,7 +175,7 @@ let reopenTimer: ReturnType<typeof setTimeout> | null = null;
 
 function openStream(): void {
   if (es || typeof window === "undefined" || typeof EventSource === "undefined") return;
-  const source = new EventSource("/api/live/stream");
+  const source = apiClient.eventSource("/live/stream");
   es = source;
   source.addEventListener("open", () => patch({ streamConnected: true }));
   source.addEventListener("snapshot", (e) => onSnapshotFrame((e as MessageEvent).data));
@@ -254,7 +263,7 @@ async function fetchLive(): Promise<LiveSnapshot> {
   // Every outcome is recorded in `liveError` — this is the single place the read
   // happens, so it is the honest place to say whether the backend is answering.
   try {
-    const r = await fetch("/api/live");
+    const r = await apiClient.fetch("/live");
     if (!r.ok) throw new Error(`live ${r.status}`);
     const snapshot = (await r.json()) as LiveSnapshot;
     patch({ liveError: null });
@@ -297,6 +306,10 @@ export interface LiveSnapshotStore {
 }
 
 export function useLiveSnapshot(): LiveSnapshotStore {
+  // Resolve the host's client before the store's transport can touch the network —
+  // `subscribe` (called synchronously by useSyncExternalStore below) may open the SSE
+  // stream on this same tick.
+  apiClient = useStatusApi();
   const queryClient = useQueryClient();
   const { snapshot, streamConnected, nextCheckAt, awaitingCheck, liveError } = useSyncExternalStore(
     subscribe,
@@ -338,7 +351,7 @@ export function useLiveSnapshot(): LiveSnapshotStore {
     void (async () => {
       let ran = false;
       try {
-        const r = await fetch("/api/live/check", { method: "POST" });
+        const r = await apiClient.fetch("/live/check", { method: "POST" });
         if (r.ok) {
           const body = (await r.json().catch(() => null)) as { ran?: boolean } | null;
           ran = body?.ran !== false; // explicit ran:false = debounced/coalesced

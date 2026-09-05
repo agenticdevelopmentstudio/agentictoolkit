@@ -19,6 +19,12 @@
       "import": "./dist/header-auth.js",
       "default": "./dist/header-auth.js"
     },
+    "./api/client": {
+      "types": "./dist/api/client.d.ts",
+      "development": "./src/api/client.ts",
+      "import": "./dist/api/client.js",
+      "default": "./dist/api/client.js"
+    },
     "./components/*": {
       "types": "./dist/components/*.d.ts",
       "development": "./src/components/*.tsx",

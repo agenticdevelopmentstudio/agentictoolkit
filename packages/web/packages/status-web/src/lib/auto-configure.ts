@@ -17,6 +17,7 @@
 // site under the group that already owns its domain family and disambiguate a taken slug.
 // Neither is answerable from a browser.
 // ---------------------------------------------------------------------------
+import type { StatusApiClient } from "../api/client";
 import * as defaultApi from "../api/monitored-sites";
 import type { EndpointView, SiteView } from "../api/monitored-sites";
 import { autoConfigureOptedOut } from "./config-status";
@@ -36,7 +37,7 @@ import {
  *  The create methods are wired even though `runMatch` never reaches them — they exist on
  *  the client, and an adapter that threw for half its port would be a trap for the next
  *  caller. What keeps this match-only is the absent `create` option, not a crippled API. */
-export function statusApi(api: typeof defaultApi = defaultApi): StatusAddApi {
+export function statusApi(client: StatusApiClient, api: typeof defaultApi = defaultApi): StatusAddApi {
   // The probe/monitoring fields are this board's and mean nothing to the planner, so they
   // stop here — all but the opt-out, which the engine's own `endpointUnconfigured` reads.
   // It carries the FOLD of both of this board's ways to say "leave this alone", the same
@@ -54,12 +55,12 @@ export function statusApi(api: typeof defaultApi = defaultApi): StatusAddApi {
   });
   const toSiteLite = (s: SiteView): { id: string; slug: string; groupId: string } => ({ id: s.id, slug: s.slug, groupId: s.groupId });
   return {
-    listAllEndpoints: async () => (await api.listAllEndpoints()).map(toLite),
-    listSites: async () => (await api.listSites()).map(toSiteLite),
-    updateEndpoint: (id, body) => api.updateEndpoint(id, body as Parameters<typeof api.updateEndpoint>[1]),
-    createSite: async (body) => ({ id: (await api.createSite({ name: body.name, slug: body.slug, groupId: body.groupId })).id }),
-    createEndpoint: async (siteId, body) => toLite(await api.createEndpoint(siteId, body as Parameters<typeof api.createEndpoint>[1])),
-    deleteSite: (id) => api.deleteSite(id),
+    listAllEndpoints: async () => (await api.listAllEndpoints(client)).map(toLite),
+    listSites: async () => (await api.listSites(client)).map(toSiteLite),
+    updateEndpoint: (id, body) => api.updateEndpoint(client, id, body as Parameters<typeof api.updateEndpoint>[2]),
+    createSite: async (body) => ({ id: (await api.createSite(client, { name: body.name, slug: body.slug, groupId: body.groupId })).id }),
+    createEndpoint: async (siteId, body) => toLite(await api.createEndpoint(client, siteId, body as Parameters<typeof api.createEndpoint>[2])),
+    deleteSite: (id) => api.deleteSite(client, id),
   };
 }
 
@@ -94,12 +95,19 @@ export interface MatchRun {
  * No `create`: the engine's `created` list is empty by construction here, so `added` is the
  * whole of what this run changed.
  */
+/** `opts.client` is required unless `opts.api` is supplied directly (tests inject a fake
+ *  port instead) — there is no hidden default network client to fall back on silently. */
+function requireClient(client: StatusApiClient | undefined): StatusApiClient {
+  if (!client) throw new Error("runMatch: opts.client is required when opts.api is not supplied");
+  return client;
+}
+
 export async function runMatch(
   addable: ProjectLite[],
-  opts: { api?: StatusAddApi; liveProjects?: PlanOpts["liveProjects"]; onProgress?: (done: number, total: number) => void } = {},
+  opts: { api?: StatusAddApi; client?: StatusApiClient; liveProjects?: PlanOpts["liveProjects"]; onProgress?: (done: number, total: number) => void },
 ): Promise<MatchRun> {
   const { added, skipped, notes } = await runAutoConfigure(addable, {
-    api: opts.api ?? statusApi(),
+    api: opts.api ?? statusApi(requireClient(opts.client)),
     liveProjects: opts.liveProjects,
     onProgress: opts.onProgress,
   });

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { createStatusApiClient } from "../api/client";
 import { noteDetail, runMatch, skipDetail, statusApi, SKIP_DETAIL_LINES } from "./auto-configure";
 import type { EndpointView, SiteView } from "../api/monitored-sites";
+
+// statusApi's own client param is never reached by any of these mocked monitored-sites
+// functions (each call site below stubs the whole module), so one shared placeholder
+// stands in for it everywhere.
+const client = createStatusApiClient();
 
 // The MATCHING is the engine's and is tested there (engine/run.test.ts). What is tested
 // here is this module's whole job: the adapter that maps this app's client onto the
@@ -26,7 +32,7 @@ const epView = (o: Partial<EndpointView> & { id: string; siteId: string; url: st
 describe("statusApi — the monitored-sites client as the engine's port", () => {
   it("maps an EndpointView down to the lite view the engine plans against", async () => {
     const view = epView({ id: "e1", siteId: "s1", url: "https://a.com", kind: "frontend", environment: "production", platform: "vercel", deployProject: "p" });
-    const api = statusApi({ listAllEndpoints: async () => [view] } as unknown as typeof import("../api/monitored-sites"));
+    const api = statusApi(client, { listAllEndpoints: async () => [view] } as unknown as typeof import("../api/monitored-sites"));
 
     // Exactly the engine's EndpointLite — the probe/monitoring fields are this board's and
     // mean nothing to the planner, so they must not ride along into it.
@@ -40,7 +46,7 @@ describe("statusApi — the monitored-sites client as the engine's port", () => 
     // flag; a port that dropped it read every opted-out monitor as undecided and wired it
     // anyway. Both of this board's opt-outs have to arrive as that flag, or pausing a site
     // means something different depending on which side of the wire you ask.
-    const api = statusApi({
+    const api = statusApi(client, {
       listAllEndpoints: async () => [
         epView({ id: "ignored", siteId: "s1", url: "https://a.com", ignoreProjectWarning: true }),
         epView({ id: "paused", siteId: "s1", url: "https://b.com", isActive: false }),
@@ -57,7 +63,7 @@ describe("statusApi — the monitored-sites client as the engine's port", () => 
 
   it("maps a SiteView down to {id, slug, groupId} — the three fields the create path reads", async () => {
     const site = { id: "s1", slug: "alpha", groupId: "g1", name: "Alpha", extra: "ignored" } as unknown as SiteView;
-    const api = statusApi({ listSites: async () => [site] } as unknown as typeof import("../api/monitored-sites"));
+    const api = statusApi(client, { listSites: async () => [site] } as unknown as typeof import("../api/monitored-sites"));
 
     expect(await api.listSites()).toEqual([{ id: "s1", slug: "alpha", groupId: "g1" }]);
   });
@@ -72,7 +78,7 @@ describe("runMatch", () => {
     const createEndpoint = vi.fn(async () => {
       throw new Error("createEndpoint must not be reached");
     });
-    const api = statusApi({ listAllEndpoints, listSites: async () => [], createSite, createEndpoint } as unknown as typeof import("../api/monitored-sites"));
+    const api = statusApi(client, { listAllEndpoints, listSites: async () => [], createSite, createEndpoint } as unknown as typeof import("../api/monitored-sites"));
 
     const res = await runMatch([{ platform: "vercel", projectName: "help-production", domain: "agenticdeveloperhelp.com" }], { api });
 
@@ -86,7 +92,7 @@ describe("runMatch", () => {
     // The engine hands back the PROJECT objects (it is generic over them); the dialogs and
     // the inline error line render a count and a name.
     const view = epView({ id: "e1", siteId: "s1", url: "https://a.com", kind: "frontend", environment: "production" });
-    const api = statusApi({
+    const api = statusApi(client, {
       listAllEndpoints: async () => [view],
       listSites: async () => [{ id: "s1", slug: "a", groupId: "g1" } as unknown as SiteView],
       updateEndpoint: async () => view,
