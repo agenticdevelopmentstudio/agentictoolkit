@@ -175,6 +175,7 @@ targets:
       - target: AgenticToolkitPermissionsUI
       - target: AIPluginKit
       - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
+      - target: AgenticToolkitMarkdown-macOS
       - package: SwiftTerm
       - package: CodeEditSourceEditor
       - package: CodeEditLanguages
@@ -498,6 +499,15 @@ targets:
       - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
         embed: true
         codeSign: true
+      # MarkdownNoteStorageTests imports AgenticToolkitMarkdown directly (to
+      # drive MarkdownStore/MarkdownText) and GRDB directly (to drive a raw
+      # connection in one test), same transitive-linking reason as
+      # AgenticToolkitMarkdownTests above.
+      - target: AgenticToolkitMarkdown-macOS
+        embed: true
+        codeSign: true
+      - package: GRDB
+        product: GRDB
 
 aggregateTargets:
   AgenticToolkitMacOSAll:

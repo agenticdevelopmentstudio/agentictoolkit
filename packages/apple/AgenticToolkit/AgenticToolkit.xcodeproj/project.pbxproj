@@ -67,6 +67,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		0034802278356D8ACEA55475 /* AgenticToolkitMarkdown-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9BE5AA37E98B6801FE1D1948 /* AgenticToolkitMarkdown-macOS.framework */; };
 		005D33E8BEDCDD9EF8506865 /* SettingsLabels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 648BC67413C7979A2DE2FB0C /* SettingsLabels.swift */; };
 		00D18DF46FCAF355B0DEB859 /* MCPServersPanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF39C026522BC346B944957 /* MCPServersPanelViewController.swift */; };
 		0127F148F7AB5D65F71A2FB1 /* AgenticToolkitDatabase.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 4BB62E3D95DA86CAF132B225 /* AgenticToolkitDatabase.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -221,6 +222,7 @@
 		3CBCD0A41F04581E70F5932C /* AIRequestBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD7610008818461A7BFD0669 /* AIRequestBuilderTests.swift */; };
 		3CC93775A0519CD6A75E67E2 /* KeychainSecureSettingsStorageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F852968686967ACD65E1B5 /* KeychainSecureSettingsStorageProvider.swift */; };
 		3D38B1E9199B53A685D7BECA /* TextEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426B8225A1D8E3C1C86F547B /* TextEditView.swift */; };
+		3D5B00395BC8BD7111699DA9 /* MarkdownNoteStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4368290C759EB450171D51 /* MarkdownNoteStorageTests.swift */; };
 		3D6D242273D6BEDD8B16AE6B /* ThemeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00B9D963DAE74394A2EFB02D /* ThemeEnvironment.swift */; };
 		3D888ED3B2394DB186243C7F /* MarkdownTaxonomyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6CE4270FD855B12EA44D5C /* MarkdownTaxonomyTests.swift */; };
 		3D8FDE69F0862424CB6065B5 /* ModelUseFacet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D68CD35D9ECBEB6AC5B40C8 /* ModelUseFacet.swift */; };
@@ -255,7 +257,6 @@
 		4703F5AE9FA929546D0BBCC7 /* MarkdownStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FC6C409507D1337FE6D7438 /* MarkdownStoreTests.swift */; };
 		477B5FD2EE2B6565DA1A3F0F /* ADHSyncCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB253B518D12219E03CC47A3 /* ADHSyncCatalogTests.swift */; };
 		4781C485582AF5E50D6BC4EF /* ThemeReExports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 535C29391D95F9C3C2E4D2CC /* ThemeReExports.swift */; };
-		47A0704972B3B67A4F31EEC4 /* NotesDatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD91D0FD8F8302157763BFFE /* NotesDatabaseManager.swift */; };
 		47DC629B2F8EB9F16BC0BF7A /* AIStreamEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0702A9914B6DAC7910A7B156 /* AIStreamEvent.swift */; };
 		47F25205E7B64A45EC24FA8C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 206C41AEF3C66C803C96D6EC /* GRDB */; };
 		482EC90CFFDC674400B64822 /* ChatBackendSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB59C8B677241F9293892283 /* ChatBackendSession.swift */; };
@@ -446,6 +447,7 @@
 		8C3D3E6807319411A808ABB5 /* QuickLookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0B2A22C81E94C0BA99434A7 /* QuickLookPreview.swift */; };
 		8C9C0178B17C177BBF9B6B07 /* SystemWindowDiscoveryWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5DC328EE579D93F8F566A10 /* SystemWindowDiscoveryWindowController.swift */; };
 		8CBCF3512946894FCE5C1A5B /* DaemonAIChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E80B41DFA14413F6CD071CF /* DaemonAIChat.swift */; };
+		8DBC5D3194BA4FB5C28C66CA /* AgenticToolkitMarkdown-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9BE5AA37E98B6801FE1D1948 /* AgenticToolkitMarkdown-macOS.framework */; };
 		8DDA76AD7B03F18D151615C8 /* AgenticToolkitCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FF857DF2BB3D2BE006BBA101 /* AgenticToolkitCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DDF301745E291E1261F2EF5 /* SemanticPalette+EditorTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1302FC853711BD157199061C /* SemanticPalette+EditorTheme.swift */; };
 		8E0117AC5CA0DC3EF4279011 /* ComposableSettingsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B4163D316F49BFD85860157 /* ComposableSettingsPanel.swift */; };
@@ -470,6 +472,7 @@
 		9608E169F7BF2D69DF3141FD /* ButtonViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7107EEE6C4A62A28A42C7FEE /* ButtonViewModel.swift */; };
 		96541B499E4F6C8328CEC8C7 /* MultiTabbedViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AEFF464DC5C557DEB876AC /* MultiTabbedViewController.swift */; };
 		96E3BC363F0D5D31AD6FD940 /* LogProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0E71540AA3ACF6A4B46F74 /* LogProvider.swift */; };
+		97369AE07858C9D1A5BAEB8A /* MarkdownNoteStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8EBD7DE07EAE6D4F575B42 /* MarkdownNoteStorage.swift */; };
 		97573BE4BA06E0BA559482F0 /* SettingsWindowCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7384AD8B1E1C9D20C362EFAA /* SettingsWindowCommands.swift */; };
 		9885D121F7F1AE3009282353 /* AgenticDeveloperToolkit-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AA33F0AF418F0DDFE05C6BF /* AgenticDeveloperToolkit-macOS.framework */; };
 		9927C09790691C2374DB2BE1 /* ArtificialAnalysisStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E704045A9988FA8B0269C338 /* ArtificialAnalysisStoreTests.swift */; };
@@ -590,6 +593,7 @@
 		C6C255A128CA45F0C98C6BDE /* MainActorScriptCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 952C7E3DA7AB65B35021477E /* MainActorScriptCommandTests.swift */; };
 		C6D769EEE3F1E8B3731FF58E /* ComposableTabsActivePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F868954F010209325A6F8A /* ComposableTabsActivePane.swift */; };
 		C73427E9ABB53504DC3B0A0E /* AgenticDeveloperToolkit-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AA33F0AF418F0DDFE05C6BF /* AgenticDeveloperToolkit-macOS.framework */; };
+		C7A890893A4479B28E5C3CBB /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 14F85C6998F7EFA09B8D25E0 /* GRDB */; };
 		C7F03C965556F0C669394526 /* MultiChoiceFilterButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = A87319972A8D5FC214E263BC /* MultiChoiceFilterButton.swift */; };
 		C80DD668F297C9680A16B1B2 /* NotesSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4ED71A3B2B4EAEBE0483F9 /* NotesSplitViewController.swift */; };
 		C931C613454849F55251596B /* LegacyThemePersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF283A265D5ADF577159C01E /* LegacyThemePersistenceTests.swift */; };
@@ -695,6 +699,7 @@
 		EEB3DFD90EBCCAB8E6C80E8A /* ScriptableTerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30AD3EAE92B62896687121A9 /* ScriptableTerminalSession.swift */; };
 		EEF997E6E95D4F75736DCC4F /* LocalModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C768913C2E67B08FB03FB83 /* LocalModelCatalog.swift */; };
 		F00153AB50EE5ADB0B591D8B /* WindowPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71116A9F950E75D198E453E1 /* WindowPosition.swift */; };
+		F0073F9C41A4ECAF86AC72E9 /* AgenticToolkitMarkdown-macOS.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9BE5AA37E98B6801FE1D1948 /* AgenticToolkitMarkdown-macOS.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F0226D5E7FF105FF52499BA1 /* PeriodicTriggerSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FFD6F006E798B5A1BA44C22 /* PeriodicTriggerSource.swift */; };
 		F0619763C8A2EC2168010B87 /* SystemWindowMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B799587637B5B9D60F9F14 /* SystemWindowMatcherTests.swift */; };
 		F0B354E228D2FE75FB27EF8A /* MarkdownTimestamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D35D009455F93E27AC012F2 /* MarkdownTimestamp.swift */; };
@@ -826,6 +831,13 @@
 			remoteGlobalIDString = AC88CFADE46A8B4C98268076;
 			remoteInfo = AgenticToolkitCoreUI;
 		};
+		2C65206D68931D2670D58CCA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B452E553B9BD748458B4BFA3;
+			remoteInfo = "AgenticToolkitMarkdown-macOS";
+		};
 		2F497B4D0B6E1CEA0B833DD0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
@@ -883,6 +895,13 @@
 			remoteInfo = AgenticToolkitMacOS;
 		};
 		4F789D4553D5BA6E5485A97C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B452E553B9BD748458B4BFA3;
+			remoteInfo = "AgenticToolkitMarkdown-macOS";
+		};
+		505F5D22C44F71B798FDAF0B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
 			proxyType = 1;
@@ -1391,6 +1410,7 @@
 				45EAA5980E86BE9C855B3245 /* AgenticToolkitCore.framework in Embed Frameworks */,
 				68BBF6474EA1AAC19A090CFD /* AgenticDeveloperToolkit-macOS.framework in Embed Frameworks */,
 				A613C5F2D328BBE242EAF7CA /* AgenticDeveloperToolkitUI-macOS.framework in Embed Frameworks */,
+				F0073F9C41A4ECAF86AC72E9 /* AgenticToolkitMarkdown-macOS.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1913,13 +1933,13 @@
 		B9F802CE87AAB4F3411BE1A5 /* LocalInferenceGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalInferenceGuard.swift; sourceTree = "<group>"; };
 		BA6F980C469F477A1897B613 /* TerminalSessionListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionListViewController.swift; sourceTree = "<group>"; };
 		BA88DA3490B30D9417464679 /* FileBrowserViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserViewController.swift; sourceTree = "<group>"; };
+		BB4368290C759EB450171D51 /* MarkdownNoteStorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownNoteStorageTests.swift; sourceTree = "<group>"; };
 		BB56D1093442AA257F42961A /* ActivationTestLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivationTestLog.swift; sourceTree = "<group>"; };
 		BB59C8B677241F9293892283 /* ChatBackendSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBackendSession.swift; sourceTree = "<group>"; };
 		BBFE6A254091C292617E372F /* ButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonView.swift; sourceTree = "<group>"; };
 		BC4ADCA6FB8E027F279BB653 /* ModelChooserContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelChooserContent.swift; sourceTree = "<group>"; };
 		BC58C4EE50EF5727B339BD2D /* ThemeColorsTopicPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeColorsTopicPanel.swift; sourceTree = "<group>"; };
 		BCD4ADABC33A32ACE6641188 /* FrameCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameCalculator.swift; sourceTree = "<group>"; };
-		BD91D0FD8F8302157763BFFE /* NotesDatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesDatabaseManager.swift; sourceTree = "<group>"; };
 		BDDC303AC0DFFF3C4C7BB3BC /* TerminalSessionSummarizationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionSummarizationCoordinator.swift; sourceTree = "<group>"; };
 		BDF8FD8C2E5D494F6A2E0A36 /* TestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport.swift; sourceTree = "<group>"; };
 		BE67D8C1FDFC85BC43E0103B /* AIPluginKitTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPluginKitTestSupport.swift; sourceTree = "<group>"; };
@@ -1984,6 +2004,7 @@
 		D8C2D2F51BD87927C2D3FAD4 /* ModelCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCapability.swift; sourceTree = "<group>"; };
 		D8F3EAE6ED87E957C4150D19 /* FrameCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameCalculatorTests.swift; sourceTree = "<group>"; };
 		D9880737F7060E9B047C7A98 /* LogLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogLine.swift; sourceTree = "<group>"; };
+		DA8EBD7DE07EAE6D4F575B42 /* MarkdownNoteStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownNoteStorage.swift; sourceTree = "<group>"; };
 		DB253B518D12219E03CC47A3 /* ADHSyncCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ADHSyncCatalogTests.swift; sourceTree = "<group>"; };
 		DBEB58A49782766E3929EC3C /* SettingsPanelSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelSplitViewController.swift; sourceTree = "<group>"; };
 		DBF568C4E57FFEE3670544C8 /* FileTypesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypesSettingsView.swift; sourceTree = "<group>"; };
@@ -2103,6 +2124,7 @@
 				450F94C2448538A9F7EDA245 /* AgenticToolkitPermissionsUI.framework in Frameworks */,
 				FBB563CDF99857D4FC81B924 /* AIPluginKit.framework in Frameworks */,
 				4D3E95FD69B51DEB256162DE /* AgenticDeveloperToolkitUI-macOS.framework in Frameworks */,
+				0034802278356D8ACEA55475 /* AgenticToolkitMarkdown-macOS.framework in Frameworks */,
 				7AA7DD4D1A43A9B02FDE0EB8 /* SwiftTerm in Frameworks */,
 				61F0B29C25C9B4905A355938 /* CodeEditSourceEditor in Frameworks */,
 				D9A144BC2DCD94266E5386E4 /* CodeEditLanguages in Frameworks */,
@@ -2156,6 +2178,8 @@
 				EA95597BAA2E246EBAB3D5C8 /* AgenticToolkitCore.framework in Frameworks */,
 				79D2AEF4B367643D27299F9B /* AgenticDeveloperToolkit-macOS.framework in Frameworks */,
 				1E539429B5706E9C5A315910 /* AgenticDeveloperToolkitUI-macOS.framework in Frameworks */,
+				8DBC5D3194BA4FB5C28C66CA /* AgenticToolkitMarkdown-macOS.framework in Frameworks */,
+				C7A890893A4479B28E5C3CBB /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -3144,10 +3168,10 @@
 			isa = PBXGroup;
 			children = (
 				03E28DC872317B68D70001C3 /* Scripting */,
+				DA8EBD7DE07EAE6D4F575B42 /* MarkdownNoteStorage.swift */,
 				393984FCABF1CA97436BAAB3 /* Note.swift */,
 				75CA772A1D37DA43E38524AA /* NoteEditorViewController.swift */,
 				4F8BF5ECB3A67AF18E4AB7A1 /* NotesCoordinator.swift */,
-				BD91D0FD8F8302157763BFFE /* NotesDatabaseManager.swift */,
 				36B79F54E44FA17A32F10648 /* NotesListViewController.swift */,
 				0BEECDBE30F93A0D0C750E3B /* NotesManager.swift */,
 				DD4ED71A3B2B4EAEBE0483F9 /* NotesSplitViewController.swift */,
@@ -3188,6 +3212,7 @@
 				AA36F186ADD8645242D0487E /* Theme */,
 				2CB2A8087467B698A91E85F9 /* UI */,
 				68F983574EBDA8EAE4D3FC62 /* WindowDiscovery */,
+				BB4368290C759EB450171D51 /* MarkdownNoteStorageTests.swift */,
 			);
 			name = AgenticToolkitMacOSTests;
 			path = Tests/AgenticToolkitMacOSTests;
@@ -4030,6 +4055,7 @@
 				6DFF36181C40B5C9E8710191 /* PBXTargetDependency */,
 				1E2BE6AB78948632AC554885 /* PBXTargetDependency */,
 				FDAAB70C572BFE4921F2A1AC /* PBXTargetDependency */,
+				66BC6204E666E65CF3E66A11 /* PBXTargetDependency */,
 			);
 			name = AgenticToolkitMacOS;
 			packageProductDependencies = (
@@ -4429,9 +4455,11 @@
 				CBABE418AD9501582B55226D /* PBXTargetDependency */,
 				27E10167372F9A9F95B7C8AA /* PBXTargetDependency */,
 				9D1436B5D12D2E1F94AABF31 /* PBXTargetDependency */,
+				44FA12470C06A8D550A0D463 /* PBXTargetDependency */,
 			);
 			name = AgenticToolkitMacOSTests;
 			packageProductDependencies = (
+				14F85C6998F7EFA09B8D25E0 /* GRDB */,
 			);
 			productName = AgenticToolkitMacOSTests;
 			productReference = B6DD4B195BF0A65AE3DF6DF4 /* AgenticToolkitMacOSTests.xctest */;
@@ -5164,6 +5192,7 @@
 				917169E897A3FAD6DA99028A /* MCPChipsBarView.swift in Sources */,
 				00D18DF46FCAF355B0DEB859 /* MCPServersPanelViewController.swift in Sources */,
 				D5D46A51F6A59D4F968051F2 /* MainActorScriptCommand.swift in Sources */,
+				97369AE07858C9D1A5BAEB8A /* MarkdownNoteStorage.swift in Sources */,
 				B59602DDBDB81AC8822E9707 /* MenuContribution.swift in Sources */,
 				CE5267C7925E07FA262DEB56 /* ModelChooserContent.swift in Sources */,
 				6764183D53E272C742AB5FE6 /* ModelChooserViewController.swift in Sources */,
@@ -5179,7 +5208,6 @@
 				9EDD58AF14F05041A6650422 /* NoteStorage.swift in Sources */,
 				2264E445C9A1259625CD7185 /* NotesCommands.swift in Sources */,
 				45EDE783960402B880C0EC15 /* NotesCoordinator.swift in Sources */,
-				47A0704972B3B67A4F31EEC4 /* NotesDatabaseManager.swift in Sources */,
 				018BAA3BEC7E81B1EC6A6B06 /* NotesListViewController.swift in Sources */,
 				92E87614166B5D8131A29749 /* NotesManager.swift in Sources */,
 				C80DD668F297C9680A16B1B2 /* NotesSplitViewController.swift in Sources */,
@@ -5573,6 +5601,7 @@
 				C20BD3D986D567A2EBF0B6D5 /* LogBufferTests.swift in Sources */,
 				8FC6058DE13D71FBE42DCF61 /* LogViewTests.swift in Sources */,
 				C6C255A128CA45F0C98C6BDE /* MainActorScriptCommandTests.swift in Sources */,
+				3D5B00395BC8BD7111699DA9 /* MarkdownNoteStorageTests.swift in Sources */,
 				FE81ACB84A253707AC826A57 /* MockScreen.swift in Sources */,
 				B603C69C4E1A61D03BBE5A57 /* MockScreenProvider.swift in Sources */,
 				67CE8AA8890DE018AE6023B8 /* MockScreenSetStorage.swift in Sources */,
@@ -5875,6 +5904,11 @@
 			target = AC88CFADE46A8B4C98268076 /* AgenticToolkitCoreUI */;
 			targetProxy = C1EE7A59084843A50B59FD2C /* PBXContainerItemProxy */;
 		};
+		44FA12470C06A8D550A0D463 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B452E553B9BD748458B4BFA3 /* AgenticToolkitMarkdown-macOS */;
+			targetProxy = 2C65206D68931D2670D58CCA /* PBXContainerItemProxy */;
+		};
 		4760CC213679FEBE8D40AB24 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 1E3A144560D2664472251EE8 /* AgenticToolkitCoreMacOS */;
@@ -5924,6 +5958,11 @@
 			isa = PBXTargetDependency;
 			target = D16F6F7043E42BA04AC3D772 /* AgenticToolkitSync */;
 			targetProxy = 3CDD4CB70A9B3A43BB4DE331 /* PBXContainerItemProxy */;
+		};
+		66BC6204E666E65CF3E66A11 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B452E553B9BD748458B4BFA3 /* AgenticToolkitMarkdown-macOS */;
+			targetProxy = 505F5D22C44F71B798FDAF0B /* PBXContainerItemProxy */;
 		};
 		6A3BF8CB7DA70815DC8E9E15 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -7520,6 +7559,11 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		098AA24D84936809E71B829A /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A69DE775E6F79098F9419D3C /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
+		};
+		14F85C6998F7EFA09B8D25E0 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A69DE775E6F79098F9419D3C /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
