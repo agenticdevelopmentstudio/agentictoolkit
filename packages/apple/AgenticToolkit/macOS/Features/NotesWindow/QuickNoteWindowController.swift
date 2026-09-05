@@ -34,9 +34,11 @@ public final class QuickNoteWindowController: NSWindowController {
         return field
     }()
 
-    /// The window's content view controller, so the editor below has a real
-    /// parent. Without one, `MarkdownEditorController.viewDidLayout` never
-    /// fires and the editor stops responding to resizes.
+    /// The window's content view controller, so the editor below is a genuine
+    /// child in the view-controller hierarchy rather than an orphan whose
+    /// view happens to be a subview. That gives it a working responder chain
+    /// and a proper host for `presentSyntaxHelp(from:)`, which the editor's
+    /// toolbar uses to present its syntax-help sheet.
     private let containerController = NSViewController()
 
     public let editorController = MarkdownEditorController(palette: ThemeScope.app.palette)
@@ -67,8 +69,9 @@ public final class QuickNoteWindowController: NSWindowController {
     public init(onSave: @escaping (String, String) -> Void) {
         self.onSave = onSave
 
+        let contentRect = NSRect(x: 0, y: 0, width: 360, height: 260)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 260),
+            contentRect: contentRect,
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -80,7 +83,11 @@ public final class QuickNoteWindowController: NSWindowController {
 
         super.init(window: window)
 
-        containerController.view = NSView()
+        // Framed with the same rect as the window itself: a zero-frame
+        // container view collapses the window to Auto Layout's intrinsic
+        // minimum the moment it becomes `contentViewController`, discarding
+        // the 360x260 set above.
+        containerController.view = NSView(frame: contentRect)
         window.contentViewController = containerController
         containerController.addChild(editorController)
 
