@@ -182,4 +182,55 @@ struct MarkdownNoteStorageTests {
         let stored = try #require(try storage.store.documents(marker: .note).first)
         #expect(stored.content == original)
     }
+
+    // MARK: - A user-typed owned key must never be silently deleted
+
+    @Test("a user-typed title-only fence survives an update whose own title would otherwise clear the key")
+    func userTypedTitleFenceSurvivesSave() throws {
+        let storage = try storage()
+        try storage.insertNote(note(title: "Groceries", content: "# Groceries\n\nMilk"))
+        var updated = try #require(try storage.fetchAllNotes().first)
+        // The app's title still matches the derived title, so storedTitle(for:)
+        // wants to clear the key — but the user just hand-typed this fence, so
+        // it must survive untouched.
+        updated.content = "---\ntitle: My Doc\n---\n# Groceries\n\nMilk"
+        try storage.updateNote(updated)
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == "---\ntitle: My Doc\n---\n# Groceries\n\nMilk")
+    }
+
+    @Test("a user-typed title fence with a foreign key survives an update that would otherwise clear the title")
+    func userTypedTitleFenceWithForeignKeySurvivesSave() throws {
+        let storage = try storage()
+        try storage.insertNote(note(title: "Groceries", content: "# Groceries\n\nMilk"))
+        var updated = try #require(try storage.fetchAllNotes().first)
+        updated.content = "---\ntitle: My Doc\nauthor: mike\n---\n# Groceries\n\nMilk"
+        try storage.updateNote(updated)
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == "---\ntitle: My Doc\nauthor: mike\n---\n# Groceries\n\nMilk")
+    }
+
+    @Test("a user-typed pinned-only fence survives an update whose own state would otherwise clear the key")
+    func userTypedPinnedFenceSurvivesSave() throws {
+        let storage = try storage()
+        try storage.insertNote(note(title: "Groceries", content: "# Groceries\n\nMilk"))
+        var updated = try #require(try storage.fetchAllNotes().first)
+        // The app's own pin state stays false, so it would normally clear a
+        // "pinned" key — but the user just hand-typed this one.
+        updated.content = "---\npinned: true\n---\n# Groceries\n\nMilk"
+        try storage.updateNote(updated)
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == "---\npinned: true\n---\n# Groceries\n\nMilk")
+    }
+
+    @Test("a user-typed pinned fence with a foreign key survives an update that would otherwise clear it")
+    func userTypedPinnedFenceWithForeignKeySurvivesSave() throws {
+        let storage = try storage()
+        try storage.insertNote(note(title: "Groceries", content: "# Groceries\n\nMilk"))
+        var updated = try #require(try storage.fetchAllNotes().first)
+        updated.content = "---\npinned: true\nauthor: mike\n---\n# Groceries\n\nMilk"
+        try storage.updateNote(updated)
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == "---\npinned: true\nauthor: mike\n---\n# Groceries\n\nMilk")
+    }
 }

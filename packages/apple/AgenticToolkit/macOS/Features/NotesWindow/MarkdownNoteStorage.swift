@@ -57,6 +57,14 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// unmodified fetch-then-save round-trips byte for byte. Only when the
     /// caller actually edited that text does this fall back to rebuilding
     /// the block from scratch, which cannot promise the same key order.
+    ///
+    /// `note(from:)` strips both owned keys before a caller ever sees
+    /// `content`, so an owned key present in `note.content` here was typed by
+    /// hand this session, not something we wrote. Clearing the key is safe —
+    /// it only ever removes a key we ourselves last wrote — so a rename or a
+    /// pin toggle still overwrites in place same as always; only a *clear*
+    /// (the key going away) is withheld when the caller's own content still
+    /// has it, so a user-authored fence never gets silently deleted.
     public func updateNote(_ note: Note) throws {
         let id = note.id.uuidString.lowercased()
         guard var document = try store.document(id: id) else {
@@ -65,8 +73,19 @@ public final class MarkdownNoteStorage: NoteStorage {
         if note.content != Self.strippedContent(of: document) {
             document.content = note.content
         }
-        document.content = Frontmatter.setting(Self.titleKey, to: Self.storedTitle(for: note), in: document.content)
-        document.setPinned(note.isPinned)
+        let userTypedTitle = Frontmatter.value(Self.titleKey, in: note.content) != nil
+        let desiredTitle = Self.storedTitle(for: note)
+        if desiredTitle != nil || !userTypedTitle {
+            document.content = Frontmatter.setting(Self.titleKey, to: desiredTitle, in: document.content)
+        }
+        // "pinned" is a literal, not `Self.titleKey`-style constant, because
+        // ADT itself never names it as one (`MarkdownDocument.isPinned`/
+        // `setPinned(_:)` both hardcode it inline) — matching that rather
+        // than inventing a constant ADT doesn't have.
+        let userTypedPinned = Frontmatter.value("pinned", in: note.content) != nil
+        if note.isPinned || !userTypedPinned {
+            document.setPinned(note.isPinned)
+        }
         try store.updateDocument(document, now: note.modifiedDate)
     }
 
