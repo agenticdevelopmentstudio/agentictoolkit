@@ -7,6 +7,7 @@ import type { StatusConfig } from './config/port';
 import type { Storage } from './storage/ports';
 import { buildOpenApiSpec } from './openapi/build';
 import { requireAuth, type AuthVars } from './middleware/auth';
+import type { AuthGate } from './auth/port';
 import { cachedSingleFlight } from '@agentic-toolkit/deploy-platform/util';
 import { authRoutes } from './routes/auth';
 import { usersRoutes } from './routes/users';
@@ -123,6 +124,8 @@ export interface AppDeps {
   storage: Storage;
   scheduler?: Scheduler;
   config: StatusConfig;
+  /** The host's auth port (./auth/port) — the default adapter lives on `./auth`. */
+  auth: AuthGate;
   /** The host's seed roster — what `POST /config/seed` creates in an empty configuration
    *  (./config/seed.ts). Omitted or empty: seed creates only the provider connections. */
   seed?: SeedRoster;
@@ -282,7 +285,7 @@ export function createApp(opts: AppDeps): OpenAPIHono<{ Variables: AuthVars }> {
   app.route('/', devicePublicRoutes(opts.db));
 
   // Everything below requires auth; /health + /version + /public/* + /auth/* + /hooks/* above are public.
-  app.use('*', requireAuth(opts.storage, opts.config));
+  app.use('*', requireAuth(opts.auth));
   // MCP transport (GET/POST/DELETE /mcp) — the tier the seam resolved selects the tool
   // set (view → read-only, admin → all). Mounted FIRST post-seam, well before usersRoutes'
   // blanket `use('*', requireAdmin)`, so a view-tier caller reaches its read-only tools.

@@ -3,13 +3,14 @@ import { Hono } from 'hono';
 import type { Db } from '../src/libsql/client';
 import { requireAuth, requireAdmin, type AuthVars } from '../src/middleware/auth';
 import { createLibsqlStorage } from '../src/libsql';
+import { createDefaultAuthGate } from '../src/auth';
 import type { UserRole } from '../src/storage/ports';
 import { freshDb } from './helpers/db';
 import { testConfig } from './helpers/config';
 
 function appWith(db: Db) {
   const app = new Hono<{ Variables: AuthVars }>();
-  app.use('*', requireAuth(createLibsqlStorage(db), testConfig()));
+  app.use('*', requireAuth(createDefaultAuthGate(createLibsqlStorage(db), testConfig())));
   app.get('/read', (c) => c.json({ ok: true }));
   app.post('/write', requireAdmin, (c) => c.json({ ok: true }));
   app.get('/snapshot', (c) => c.json({ ok: true }));

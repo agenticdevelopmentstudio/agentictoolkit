@@ -2,9 +2,11 @@
 // status monitor: the Hono app factory, the scheduler and monitor cadence, the
 // worker-thread client, live-update fan-out, the OpenAPI builder and the
 // configuration port. Storage comes from `./libsql` (or, later, another
-// implementation); the host opens the database, applies migrations and hands
-// the Db in — this package never reads the environment or opens a connection itself.
+// implementation); auth comes from `./auth` (the default adapter) or the host's own
+// `AuthGate`; the host opens the database, applies migrations and hands the Db in —
+// this package never reads the environment or opens a connection itself.
 export { createApp, MAX_BODY_BYTES, type AppDeps } from "./app";
+export type { AuthGate, AuthRequest, AuthVars, Tier } from "./auth/port";
 export { createScheduler, type Scheduler } from "./scheduler";
 export { createDeployCadence, FIRST_FULL_SYNC_DELAY_MS, type DeployCadence } from "./monitor/cadence";
 export { MonitorWorkerClient, type CycleRequest, type CycleReply, type MonitorWorkerData } from "./monitor/worker-client";

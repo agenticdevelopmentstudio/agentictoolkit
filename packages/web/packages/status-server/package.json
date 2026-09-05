@@ -24,6 +24,12 @@
       "import": "./dist/libsql/index.js",
       "default": "./dist/libsql/index.js"
     },
+    "./auth": {
+      "types": "./dist/auth/index.d.ts",
+      "development": "./src/auth/index.ts",
+      "import": "./dist/auth/index.js",
+      "default": "./dist/auth/index.js"
+    },
     "./worker": {
       "types": "./dist/monitor/worker.d.ts",
       "development": "./src/monitor/worker.ts",

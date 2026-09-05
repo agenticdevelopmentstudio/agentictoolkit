@@ -9,6 +9,7 @@ export default defineConfig({
     "src/index.ts",
     "src/config/index.ts",
     "src/libsql/index.ts",
+    "src/auth/index.ts",
     "src/monitor/worker.ts",
     "src/board/index.ts",
     "src/board/derive-activity.ts",
