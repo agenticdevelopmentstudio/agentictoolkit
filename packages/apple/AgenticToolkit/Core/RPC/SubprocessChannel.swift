@@ -339,16 +339,27 @@ public actor SubprocessChannel {
     /// message stream itself.
     ///
     /// **Worst case this takes `terminationGraceSeconds` +
-    /// `messagePumpDrainGraceSeconds` — 2.5 s as configured — plus however
-    /// long the child's own SIGTERM handler runs**, and a later
-    /// `standardErrorText()` can add `standardErrorDrainGraceSeconds` (0.5 s)
-    /// on top of that. A caller shutting several channels down should do it
-    /// concurrently rather than in sequence; these budgets are per channel
-    /// and do not share.
+    /// `messagePumpDrainGraceSeconds` — 2.5 s as configured — flat**, and a
+    /// later `standardErrorText()` can add `standardErrorDrainGraceSeconds`
+    /// (0.5 s) on top of that. The child's own SIGTERM handler runs *inside*
+    /// the first budget rather than after it: `withWallClockBudget` resumes at
+    /// expiry and never awaits the loser, and everything following that wait —
+    /// the `isRunning` re-check, `SIGKILL`, `stopAll()` — is non-blocking. So
+    /// a slow handler cannot push this past 2.5 s; it can only use up more of
+    /// the 2 s it already has.
     ///
-    /// The message stream finishes here *without* flushing the framing
-    /// decoder: a descriptor this method tore down is not the child ending
-    /// its output, and treating it as one would hand the consumer a partial
+    /// **This is not cancellable.** The work runs in an unstructured `Task`
+    /// that deliberately does not inherit the caller's cancellation (a
+    /// cancelled caller must not abandon a half-killed child), and
+    /// `await task.value` on a non-throwing task is not a cancellation point
+    /// either. A caller under a deadline cannot shorten any single channel's
+    /// 2.5 s — so shut several channels down *concurrently* rather than in
+    /// sequence; these budgets are per channel and do not share.
+    ///
+    /// When this method is what ends the child's output, the message stream
+    /// finishes *without* flushing the framing decoder: a descriptor this
+    /// method tore down is not the child ending its output, and treating it
+    /// as one would hand the consumer a partial
     /// `.newlineDelimited` line as a whole frame, or throw
     /// `MessageFramingError` out of `.contentLength` for an orderly
     /// shutdown. See `DescriptorReader.reachedEndOfStreamNaturally`.
@@ -405,15 +416,6 @@ public actor SubprocessChannel {
     }
 
     private func performTermination() async {
-        // Before anything is signalled: record that what follows is a
-        // teardown. SIGTERM kills an ordinary child, the kernel closes its
-        // write end, and a genuine EOF arrives on stdout long before
-        // `stopAll()` closes anything — so EOF alone cannot tell the pump
-        // whether the child finished speaking or we shot it mid-sentence.
-        // This is what tells it, and it must be set before the signal that
-        // causes the EOF. Marking touches neither stream nor descriptor.
-        readerBox.markAllTornDown()
-
         // Neither output stream is touched here — not the pump, not the
         // drain. A graceful child writes its last words between SIGTERM and
         // its own `exit`: a shutdown frame on stdout and a shutdown log line
@@ -431,6 +433,26 @@ public actor SubprocessChannel {
         try? standardInputPipe?.fileHandleForWriting.close()
 
         if let process, process.isRunning {
+            // Record that what follows is a teardown, and record it here
+            // rather than at the top of this method. SIGTERM kills an
+            // ordinary child, the kernel closes its write end, and a genuine
+            // EOF arrives on stdout long before `stopAll()` closes anything —
+            // so EOF alone cannot tell the pump whether the child finished
+            // speaking or we shot it mid-sentence. This is what tells it, and
+            // it must be set before the signal that causes the EOF.
+            //
+            // The flag means "we are about to signal a live child", not
+            // "`terminate()` was entered". A caller that tears down in a
+            // `defer` reaches this method routinely with a child that already
+            // exited on its own terms; marking unconditionally would
+            // retroactively reclassify that child's own EOF, and whether the
+            // consumer got its last frame — or, on `.contentLength`, the
+            // `truncatedMessage` that says the server died mid-body — would
+            // come down to whether the detached pump read the flag before the
+            // mark landed. Inside this branch there is a live child and the
+            // kill is real. Marking touches neither stream nor descriptor.
+            readerBox.markAllTornDown()
+
             process.terminate() // SIGTERM
 
             let exitWaiterBox = exitWaiterBox
@@ -467,13 +489,20 @@ public actor SubprocessChannel {
         }
 
         // Fallbacks, not teardown. Both tasks are woken by their own finished
-        // chunk streams and end on their own; these cancels exist for one
-        // that somehow outlived the budget above, and on the ordinary path
-        // both are no-ops. The pump gets a wait and the drain does not for
-        // one reason only: this method owns when the *message* stream
-        // finishes, so it has to be here when that happens, whereas the
-        // stderr buffer is this actor's and `standardErrorText()` does its
-        // own bounded wait for whatever is still in flight.
+        // chunk streams and end on their own, and on the ordinary path both
+        // cancels are no-ops.
+        //
+        // The two are not symmetric, and the asymmetry is worth stating
+        // exactly. The pump gets the bounded wait above because this method
+        // owns when the *message* stream finishes, so it has to still be here
+        // when that happens; its cancel is the fallback for a pump that
+        // outlived that budget. The drain gets no budget here at all — its
+        // cancel fires as soon as the pump's wait returns, milliseconds after
+        // `stopAll()` on the ordinary path. That is deliberate rather than an
+        // oversight: the stderr buffer belongs to this actor and outlives the
+        // drain task, and `standardErrorText()` does its own bounded wait for
+        // whatever is still in flight, so the grace stderr gets is spent
+        // there, by the caller who actually wants the text.
         pumpTask?.cancel()
         messageContinuation?.finish()
         standardErrorTask?.cancel()
@@ -846,14 +875,20 @@ public actor SubprocessChannel {
         /// the `length: .max` read this class issues in `init` and never
         /// reissues — so the handler is always there to be called.
         ///
-        /// A `stop()` is itself a teardown, so it marks one — `terminate()`
-        /// has already done so before its SIGTERM, but `deinit` reaches this
-        /// directly.
+        /// A `stop()` that actually pre-empts an open descriptor is itself a
+        /// teardown, so it marks one — `terminate()` has already done so
+        /// before its SIGTERM, but `deinit` reaches this directly. A `stop()`
+        /// that finds the descriptor already closed marks *nothing*: some
+        /// terminal path ran first, and if that path was the child's own EOF,
+        /// recording a teardown here would retroactively unmake it and cost
+        /// the consumer its last frame.
         func stop() {
             lock.lock()
-            wasTornDown = true
             let shouldClose = !hasClosedDescriptor
-            if shouldClose { hasClosedDescriptor = true }
+            if shouldClose {
+                hasClosedDescriptor = true
+                wasTornDown = true
+            }
             lock.unlock()
 
             // Not closing means a terminal path already ran, and every one of

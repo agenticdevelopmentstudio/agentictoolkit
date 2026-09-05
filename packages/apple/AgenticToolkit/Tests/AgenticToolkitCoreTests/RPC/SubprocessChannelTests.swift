@@ -615,6 +615,38 @@ struct SubprocessChannelTests {
         #expect(texts == ["FIRST\n", "TAIL-NO-NEWLINE"])
     }
 
+    @Test("terminate() after the child has already exited still delivers its last frame")
+    func terminateAfterAGenuineExitStillFlushesTheRemainder() async throws {
+        // The `defer { await channel.terminate() }` shape, which is what an
+        // orderly shutdown actually looks like: the child said everything it
+        // had to say and exited on its own, and only then does cleanup run.
+        // Nothing was torn down — the kill never happened, because there was
+        // nothing left to kill — so the child's own EOF must keep its meaning
+        // and the trailing unterminated line must still arrive.
+        //
+        // This pins the flag to "we are about to signal a live child" rather
+        // than "terminate() was entered". Under the latter reading the same
+        // child yields its tail or drops it depending purely on whether the
+        // detached pump read the flag before the mark landed.
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf 'FIRST\\nTAIL-NO-NEWLINE'"]
+        ))
+        try await channel.launch()
+        let stream = try await channel.messages()
+
+        let status = await channel.waitUntilExit()
+        #expect(status == 0)
+        // Let the read handler observe the EOF the child's exit produced, so
+        // this asserts the post-exit `terminate()` and not a race with it.
+        try await Task.sleep(nanoseconds: 300_000_000)
+        await channel.terminate()
+
+        let frames = try await drainToEOF(stream)
+        let texts = frames.compactMap { String(bytes: $0, encoding: .utf8) }
+        #expect(texts == ["FIRST\n", "TAIL-NO-NEWLINE"])
+    }
+
     @Test("a concurrent second terminate() waits for the first rather than returning early")
     func concurrentSecondTerminateWaitsForTheFirst() async throws {
         // "Idempotent" has to mean every caller gets the finished article,
@@ -627,7 +659,7 @@ struct SubprocessChannelTests {
             executableURL: URL(fileURLWithPath: "/bin/sh"),
             arguments: [
                 "-c",
-                "trap 'sleep 0.4; exit 7' TERM; echo UP; while :; do sleep 0.05; done"
+                "trap 'sleep 1.0; exit 7' TERM; echo UP; while :; do sleep 0.05; done"
             ]
         ))
         try await channel.launch()
@@ -636,7 +668,11 @@ struct SubprocessChannelTests {
 
         let first = Task { await channel.terminate() }
         // Long enough for `first` to be parked in its grace-period wait, far
-        // short of the child's 0.4s handler.
+        // short of the child's 1.0s handler. The handler is deliberately much
+        // longer than the 0.2s budget below: against the defect this test
+        // exists to catch, the second `terminate()` returns at ~0.1s and the
+        // budget expires at ~0.3s, a full 0.7s before the child could exit —
+        // so the negative control stays decisive even on a loaded machine.
         try await Task.sleep(nanoseconds: 100_000_000)
 
         await channel.terminate()
