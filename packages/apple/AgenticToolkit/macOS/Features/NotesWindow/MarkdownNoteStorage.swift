@@ -14,15 +14,16 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// `NoteStorage` methods deliberately do not.
     public let store: MarkdownStore
 
-    /// The frontmatter keys this class owns. adh derives `title` from the
-    /// content and rejects a caller's, and there is no per-client metadata
-    /// column at all — so a note's two pieces of app-level state live in the
-    /// document's own text. The cost is real and worth naming: pinning edits
-    /// `content`, so once a remote writer exists, pinning appends a version on
-    /// the server. A local-only column would avoid that and then vanish on the
+    /// The one frontmatter key this class owns. `pinned` is already
+    /// `MarkdownDocument.isPinned`/`setPinned(_:)` in ADT — reused below
+    /// rather than redefined. `title` has no ADT equivalent: adh derives it
+    /// from the content and rejects a caller's, and there is no per-client
+    /// metadata column at all, so an explicit rename lives in this key
+    /// instead. The cost is real and worth naming: pinning edits `content`,
+    /// so once a remote writer exists, pinning appends a version on the
+    /// server. A local-only column would avoid that and then vanish on the
     /// first sync, which is worse.
     private static let titleKey = "title"
-    private static let pinnedKey = "pinned"
 
     public init(store: MarkdownStore) {
         self.store = store
@@ -37,19 +38,35 @@ public final class MarkdownNoteStorage: NoteStorage {
     }
 
     public func insertNote(_ note: Note) throws {
-        _ = try store.createDocument(
-            content: Self.content(for: note),
+        var document = try store.createDocument(
+            content: Frontmatter.setting(Self.titleKey, to: Self.storedTitle(for: note), in: note.content),
             markers: [.note],
             id: note.id.uuidString.lowercased(),
             now: note.modifiedDate)
+        // A freshly created document is never pinned, so this is a no-op —
+        // and hence a second write — for every note except one inserted
+        // already pinned, which the protocol allows but the app never does.
+        guard note.isPinned else { return }
+        document.setPinned(true)
+        try store.updateDocument(document, now: note.modifiedDate)
     }
 
+    /// Rewrites `title`/`pinned` in place when the caller's `content` is
+    /// exactly what the last read handed back — preserving whatever position
+    /// and whatever foreign keys the stored frontmatter already has, so an
+    /// unmodified fetch-then-save round-trips byte for byte. Only when the
+    /// caller actually edited that text does this fall back to rebuilding
+    /// the block from scratch, which cannot promise the same key order.
     public func updateNote(_ note: Note) throws {
         let id = note.id.uuidString.lowercased()
         guard var document = try store.document(id: id) else {
             throw MarkdownStoreError.notFound(id)
         }
-        document.content = Self.content(for: note)
+        if note.content != Self.strippedContent(of: document) {
+            document.content = note.content
+        }
+        document.content = Frontmatter.setting(Self.titleKey, to: Self.storedTitle(for: note), in: document.content)
+        document.setPinned(note.isPinned)
         try store.updateDocument(document, now: note.modifiedDate)
     }
 
@@ -63,31 +80,37 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// is keyed by `UUID` throughout. Skipping it keeps the list working
     /// instead of trapping on a force-unwrap; when a server-authored note needs
     /// to appear here, `Note.id` is what has to widen.
-    ///
-    /// `Note.content` is the document's body with its frontmatter fence
-    /// stripped — the app only ever typed the body, so a round trip through
-    /// this class must hand it back exactly that, never the `title`/`pinned`
-    /// block `content(for:)` wrapped it in on write.
     private static func note(from document: MarkdownDocument) -> Note? {
         guard let id = UUID(uuidString: document.id) else { return nil }
-        let frontmatter = document.frontmatter
         return Note(
             id: id,
-            title: frontmatter[titleKey] ?? document.title,
-            content: Frontmatter.split(document.content).body,
+            title: document.frontmatter[titleKey] ?? document.title,
+            content: strippedContent(of: document),
             createdDate: document.createdAt,
             modifiedDate: document.updatedAt,
-            isPinned: frontmatter[pinnedKey] == "true")
+            isPinned: document.isPinned)
     }
 
-    /// Writes `title:` only when the user has actually renamed the note. An
-    /// ordinary note — one whose title is what its first heading says — carries
-    /// no frontmatter at all, so the stored text is exactly what was typed.
-    private static func content(for note: Note) -> String {
-        var content = note.content
-        let derived = MarkdownText.deriveTitle(content)
-        let storedTitle = (note.title == derived || note.title.isEmpty) ? nil : note.title
-        content = Frontmatter.setting(titleKey, to: storedTitle, in: content)
-        return Frontmatter.setting(pinnedKey, to: note.isPinned ? "true" : nil, in: content)
+    /// `document.content` with only `title`/`pinned` removed — every other
+    /// line, including a body the user typed that itself opens with a
+    /// `---`-fenced block of its own, survives untouched, in its original
+    /// order. This is both what `Note.content` shows the app, and (via the
+    /// equality check in `updateNote`) how a save tells "nothing changed"
+    /// apart from "the user edited the body."
+    private static func strippedContent(of document: MarkdownDocument) -> String {
+        var withoutPin = document
+        withoutPin.setPinned(false)
+        return Frontmatter.setting(titleKey, to: nil, in: withoutPin.content)
+    }
+
+    /// `nil` when `note.title` is what the content would derive on its own —
+    /// an ordinary, never-renamed note — or when it's still the app's
+    /// untitled sentinel, which is the same thing before the note has any
+    /// heading to derive from. Only an actual rename is worth a frontmatter
+    /// key and the server version it costs.
+    private static func storedTitle(for note: Note) -> String? {
+        let derived = MarkdownText.deriveTitle(note.content)
+        let isUnnamed = note.title == derived || note.title == Note.untitledTitle || note.title.isEmpty
+        return isUnnamed ? nil : note.title
     }
 }

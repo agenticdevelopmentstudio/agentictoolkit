@@ -490,15 +490,12 @@ targets:
       # lives a layer down in the developer toolkit alongside the popover that
       # drives it.
       - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
-      # MarkdownNoteStorageTests imports AgenticToolkitMarkdown directly (to
-      # drive MarkdownStore/MarkdownText) and GRDB directly (to drive a raw
-      # connection in one test), same transitive-linking reason as
+      # MarkdownNoteStorageTests imports AgenticToolkitMarkdown directly to
+      # drive MarkdownStore/MarkdownText, same transitive-linking reason as
       # AgenticToolkitMarkdownTests above.
       - target: AgenticToolkitMarkdown-macOS
         embed: true
         codeSign: true
-      - package: GRDB
-        product: GRDB
 
 aggregateTargets:
   AgenticToolkitMacOSAll:
