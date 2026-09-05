@@ -89,6 +89,28 @@ struct SubprocessTransportTests {
         await transport.disconnect()
     }
 
+    /// A blank stdout line must never reach the SDK. `StdioTransport` stripped
+    /// the delimiter and then dropped whatever was left empty; `.newlineDelimited`
+    /// keeps the delimiter, so without the filter in `connect()` a blank line
+    /// arrives as a `"\n"` frame — not valid JSON, and one "Unexpected message
+    /// received by client" warning per blank line. Servers that print one are
+    /// not hypothetical, and this is the subsystem the on-screen acceptance
+    /// check covers.
+    @Test("a blank stdout line is dropped rather than yielded as a bare newline")
+    func blankLinesAreNotForwarded() async throws {
+        let transport = makeTransport(
+            executable: "/bin/sh",
+            arguments: ["-c", #"printf '{"id":1}\n\n{"id":2}\n'"#]
+        )
+        try await transport.connect()
+        let stream = await transport.receive()
+
+        let frames = try await collectFrames(from: stream, count: 2)
+        #expect(frames == [newlineTerminated(#"{"id":1}"#), newlineTerminated(#"{"id":2}"#)])
+
+        await transport.disconnect()
+    }
+
     /// `disconnect()` is the only owner of the child: `MCPClient` no longer
     /// keeps a `Process` of its own beside the transport, so if this leaks the
     /// server survives for the life of the app.

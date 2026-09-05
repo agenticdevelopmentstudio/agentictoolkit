@@ -19,8 +19,18 @@ import MCP
 /// that stops it and there is no second owner to fall out of step with.
 ///
 /// Frames reach `receive()` byte-exact, trailing `0x0A` included — see
-/// `MessageFraming.newlineDelimited`. JSON tolerates trailing whitespace, so
-/// the SDK's decoder is unaffected.
+/// `MessageFraming.newlineDelimited`. `JSONDecoder` tolerates trailing
+/// whitespace, so a real message decodes unchanged and stripping the delimiter
+/// would buy a copy per frame and nothing observable.
+///
+/// A **blank** line is the one case where that byte matters, and this
+/// transport filters those out (see `connect()`). `StdioTransport` stripped the
+/// delimiter and then dropped any frame that was left empty, so blank stdout
+/// lines never reached the SDK. Forwarding them as `"\n"` would not: `"\n"` is
+/// not valid JSON, so every one would surface as a "Unexpected message received
+/// by client" warning. That filtering belongs here rather than in
+/// `MessageFraming`, because a blank line is meaningful in a newline-delimited
+/// stream generally — it is MCP specifically that has no use for one.
 public actor SubprocessTransport: Transport {
 
     /// Defaults to a no-op handler, matching `StdioTransport`'s own default.
@@ -64,6 +74,13 @@ public actor SubprocessTransport: Transport {
         forwardingTask = Task.detached {
             do {
                 for try await frame in frames {
+                    // A frame that is empty once its delimiter is disregarded
+                    // is a blank stdout line. `StdioTransport` dropped those;
+                    // yielding one as `"\n"` would make the SDK log an
+                    // "Unexpected message" warning for every blank line a
+                    // server prints. The delimiter is *not* stripped from real
+                    // frames — only used to recognise this case.
+                    guard frame.contains(where: { $0 != 0x0A }) else { continue }
                     continuation.yield(frame)
                 }
                 continuation.finish()
