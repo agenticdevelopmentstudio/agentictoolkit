@@ -44,6 +44,19 @@ public final class TextDocument {
     /// knowing about the other, and without this type knowing either exists.
     private var changeHandlers: [UUID: (Int, [TextDocumentContentChangeEvent]) -> Void] = [:]
 
+    /// Dirty-state observers, keyed the same way as `changeHandlers` and torn
+    /// down by the same `TextDocumentObservation` token.
+    ///
+    /// A separate channel because `isDirty` moves on its own schedule: it goes
+    /// `true` with an edit (which is also a content change) but back to `false`
+    /// at `markClean()`, when a save lands and *nothing about the text has
+    /// changed*. Folding that into `changeHandlers` would either lie to a
+    /// content observer such as `TextDocumentStorage` — handing it an empty
+    /// edit list and a version it has already seen — or leave "the file is
+    /// saved now" unobservable, which is what left a dirty indicator stuck on
+    /// screen forever.
+    private var dirtyStateHandlers: [UUID: (Bool) -> Void] = [:]
+
     public init(uri: DocumentUri, languageId: String, text: String, version: Int = 0) {
         self.uri = uri
         self.languageId = languageId
@@ -148,11 +161,11 @@ public final class TextDocument {
         }
 
         version += 1
-        isDirty = true
         let index = TextDocument.computeLineIndex(text)
         lineStarts = index.starts
         utf16Length = index.length
 
+        setDirty(true)
         notifyChangeHandlers(version: version, changes: events)
         return events
     }
@@ -171,7 +184,7 @@ public final class TextDocument {
         let index = TextDocument.computeLineIndex(newText)
         lineStarts = index.starts
         utf16Length = index.length
-        isDirty = false
+        setDirty(false)
         notifyChangeHandlers(
             version: version,
             changes: [TextDocumentContentChangeEvent(range: nil, rangeLength: nil, text: newText)]
@@ -179,8 +192,15 @@ public final class TextDocument {
     }
 
     /// Call after a successful save.
+    ///
+    /// Notifies dirty-state observers, which is the *only* signal that a
+    /// document stopped being dirty: nothing about the text changed here, so
+    /// no content-change notification is raised and a content observer would
+    /// never hear about it. Without this the file browser's dirty dot had no
+    /// event to clear itself on and stayed lit until some unrelated subsystem
+    /// happened to redraw the row.
     public func markClean() {
-        isDirty = false
+        setDirty(false)
     }
 
     // MARK: - Change observation
@@ -197,14 +217,40 @@ public final class TextDocument {
         return TextDocumentObservation(id: id, document: self)
     }
 
-    /// Called only by `TextDocumentObservation.deinit`.
-    func removeChangeHandler(id: UUID) {
+    /// Registers `handler` to be called whenever `isDirty` *changes* value,
+    /// with the new value. Same token lifetime as `addChangeHandler`.
+    ///
+    /// Only transitions are delivered: setting `isDirty` to the value it
+    /// already has notifies nobody, so a second save of an already-clean
+    /// document does not repaint anything.
+    public func addDirtyStateHandler(
+        _ handler: @escaping (Bool) -> Void
+    ) -> TextDocumentObservation {
+        let id = UUID()
+        dirtyStateHandlers[id] = handler
+        return TextDocumentObservation(id: id, document: self)
+    }
+
+    /// Called only by `TextDocumentObservation.deinit`. One token can only
+    /// ever have registered one handler, and the UUIDs are drawn from the same
+    /// space, so removing from both maps is unambiguous — it is exactly the
+    /// one handler that token registered.
+    func removeHandler(id: UUID) {
         changeHandlers.removeValue(forKey: id)
+        dirtyStateHandlers.removeValue(forKey: id)
     }
 
     private func notifyChangeHandlers(version: Int, changes: [TextDocumentContentChangeEvent]) {
         for handler in changeHandlers.values {
             handler(version, changes)
+        }
+    }
+
+    private func setDirty(_ newValue: Bool) {
+        guard isDirty != newValue else { return }
+        isDirty = newValue
+        for handler in dirtyStateHandlers.values {
+            handler(newValue)
         }
     }
 
@@ -295,8 +341,9 @@ public final class TextDocument {
     }
 }
 
-/// An opaque handle to one `TextDocument` change observer: hold it for as
-/// long as delivery should continue. Mirrors `TextDocumentStoreObservation`
+/// An opaque handle to one `TextDocument` observer — a content-change handler
+/// or a dirty-state handler: hold it for as long as delivery should continue.
+/// Mirrors `TextDocumentStoreObservation`
 /// one level down — its `deinit` unregisters the handler the same way.
 @MainActor
 public final class TextDocumentObservation {
@@ -309,10 +356,10 @@ public final class TextDocumentObservation {
     }
 
     // Isolated explicitly (SE-0371): a MainActor class's deinit is
-    // nonisolated by default, and `removeChangeHandler` is MainActor-isolated
+    // nonisolated by default, and `removeHandler` is MainActor-isolated
     // state on `document`. `isolated deinit` hops to the actor before
     // running, rather than reaching for `nonisolated(unsafe)`.
     isolated deinit {
-        document?.removeChangeHandler(id: id)
+        document?.removeHandler(id: id)
     }
 }

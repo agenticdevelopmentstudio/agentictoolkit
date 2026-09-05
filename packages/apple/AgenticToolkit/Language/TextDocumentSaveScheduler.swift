@@ -58,6 +58,32 @@ public final class TextDocumentSaveScheduler {
         pendingDocuments.removeValue(forKey: uri)
     }
 
+    /// Immediately persists the pending debounced save for `uri` alone,
+    /// leaving every other pending save armed and still debouncing.
+    ///
+    /// This, not `flushPendingSaves()`, is what a file switch calls. The store
+    /// and this scheduler are one instance for the whole app, so a
+    /// whole-scheduler flush on every click would perform a synchronous
+    /// main-actor write for every dirty document in every other window —
+    /// defeating their debounce and hitching the click that triggered it.
+    /// `flushPendingSaves()` stays for termination, the case it was written
+    /// for, where writing everything is exactly the point.
+    ///
+    /// Same cancel-then-await-then-write ordering as `flushPendingSaves()`,
+    /// for the same reason: the pending task must be seen to have observed
+    /// its cancellation before this performs the write, or the two race and
+    /// the document is written twice.
+    public func flushPendingSave(uri: DocumentUri) async {
+        let task = pendingTasks.removeValue(forKey: uri)
+        let document = pendingDocuments.removeValue(forKey: uri)
+
+        task?.cancel()
+        await task?.value
+
+        guard let document else { return }
+        performWrite(document)
+    }
+
     /// Immediately persists every pending debounced save.
     ///
     /// Follows `NotesManager.flushPendingSaves()` exactly: snapshot the

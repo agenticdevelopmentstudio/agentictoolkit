@@ -5,6 +5,10 @@ import LanguageServerProtocol
 public enum TextDocumentEvent: Sendable {
     case opened(uri: DocumentUri, languageId: String, version: Int, text: String)
     case changed(uri: DocumentUri, version: Int, changes: [TextDocumentContentChangeEvent])
+    /// The document's unsaved-changes flag flipped. Raised separately from
+    /// `.changed` because a save clearing the flag changes no content at all
+    /// — see `TextDocument.markClean()`. Only transitions are reported.
+    case dirtyStateChanged(uri: DocumentUri, isDirty: Bool)
     case closed(uri: DocumentUri)
 }
 
@@ -24,11 +28,18 @@ public final class TextDocumentStore {
         let document: TextDocument
         var openCount: Int
         let changeObservation: TextDocumentObservation
+        let dirtyStateObservation: TextDocumentObservation
 
-        init(document: TextDocument, openCount: Int, changeObservation: TextDocumentObservation) {
+        init(
+            document: TextDocument,
+            openCount: Int,
+            changeObservation: TextDocumentObservation,
+            dirtyStateObservation: TextDocumentObservation
+        ) {
             self.document = document
             self.openCount = openCount
             self.changeObservation = changeObservation
+            self.dirtyStateObservation = dirtyStateObservation
         }
     }
 
@@ -53,7 +64,15 @@ public final class TextDocumentStore {
         let changeObservation = document.addChangeHandler { [weak self] version, changes in
             self?.notify(.changed(uri: uri, version: version, changes: changes))
         }
-        documentsByURI[uri] = OpenEntry(document: document, openCount: 1, changeObservation: changeObservation)
+        let dirtyStateObservation = document.addDirtyStateHandler { [weak self] isDirty in
+            self?.notify(.dirtyStateChanged(uri: uri, isDirty: isDirty))
+        }
+        documentsByURI[uri] = OpenEntry(
+            document: document,
+            openCount: 1,
+            changeObservation: changeObservation,
+            dirtyStateObservation: dirtyStateObservation
+        )
         notify(.opened(uri: uri, languageId: languageId, version: document.version, text: text))
         return document
     }

@@ -85,4 +85,32 @@ struct TextDocumentStoreTests {
         store.open(uri: "file:///e.swift", languageId: "swift", text: "y")
         #expect(events.count == 1) // no event delivered after the token was dropped
     }
+
+    @Test("a save clearing isDirty raises .dirtyStateChanged, the only signal a dirty marker can clear on")
+    func markCleanRaisesDirtyStateChanged() {
+        let store = TextDocumentStore()
+        var dirtyStates: [(uri: DocumentUri, isDirty: Bool)] = []
+        let token = store.addObserver { event in
+            guard case .dirtyStateChanged(let uri, let isDirty) = event else { return }
+            dirtyStates.append((uri, isDirty))
+        }
+
+        let document = store.open(uri: "file:///dirty-event.swift", languageId: "swift", text: "abc")
+        #expect(dirtyStates.isEmpty)
+
+        document.apply([TextEdit(
+            range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 1)),
+            newText: "X"
+        )])
+        #expect(dirtyStates.count == 1)
+        #expect(dirtyStates.first?.uri == "file:///dirty-event.swift")
+        #expect(dirtyStates.first?.isDirty == true)
+
+        document.markClean()
+
+        #expect(dirtyStates.count == 2)
+        #expect(dirtyStates.last?.uri == "file:///dirty-event.swift")
+        #expect(dirtyStates.last?.isDirty == false)
+        _ = token
+    }
 }

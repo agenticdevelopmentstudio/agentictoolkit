@@ -158,6 +158,96 @@ struct TextDocumentTests {
         #expect(document.isDirty == false)
     }
 
+    // MARK: - Dirty-state observation
+    //
+    // `markClean()` changes no text, so a content-change observer never hears
+    // about a save landing. Without its own channel the file browser's dirty
+    // dot had no event to clear itself on and stayed lit indefinitely.
+
+    @Test("markClean notifies dirty-state observers even though no content changed")
+    func markCleanNotifiesDirtyStateObservers() {
+        let document = TextDocument(uri: "file:///clean-event.txt", languageId: "plaintext", text: "abc")
+        var dirtyStates: [Bool] = []
+        var contentChangeCount = 0
+        let dirtyToken = document.addDirtyStateHandler { dirtyStates.append($0) }
+        let changeToken = document.addChangeHandler { _, _ in contentChangeCount += 1 }
+
+        document.apply([TextEdit(
+            range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 1)),
+            newText: "X"
+        )])
+        #expect(dirtyStates == [true])
+        #expect(contentChangeCount == 1)
+
+        document.markClean()
+
+        #expect(dirtyStates == [true, false])
+        // The save changed nothing about the text, and says so.
+        #expect(contentChangeCount == 1)
+        _ = dirtyToken
+        _ = changeToken
+    }
+
+    @Test("only transitions are reported: a second markClean and a second edit notify nobody")
+    func onlyDirtyStateTransitionsAreReported() {
+        let document = TextDocument(uri: "file:///transitions.txt", languageId: "plaintext", text: "abc")
+        var dirtyStates: [Bool] = []
+        let token = document.addDirtyStateHandler { dirtyStates.append($0) }
+
+        document.markClean() // already clean
+        #expect(dirtyStates.isEmpty)
+
+        for character in ["X", "Y", "Z"] {
+            document.apply([TextEdit(
+                range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 1)),
+                newText: character
+            )])
+        }
+        #expect(dirtyStates == [true]) // three keystrokes, one transition
+
+        document.markClean()
+        document.markClean()
+        #expect(dirtyStates == [true, false])
+        _ = token
+    }
+
+    @Test("replaceAll reports the clean transition to dirty-state observers")
+    func replaceAllReportsCleanTransition() {
+        let document = TextDocument(uri: "file:///reload.txt", languageId: "plaintext", text: "abc")
+        var dirtyStates: [Bool] = []
+        let token = document.addDirtyStateHandler { dirtyStates.append($0) }
+
+        document.apply([TextEdit(
+            range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 1)),
+            newText: "X"
+        )])
+        document.replaceAll(with: "fresh from disk")
+
+        #expect(dirtyStates == [true, false])
+        _ = token
+    }
+
+    @Test("dropping a dirty-state token stops delivery without touching change handlers")
+    func droppingDirtyStateTokenStopsOnlyThatDelivery() {
+        let document = TextDocument(uri: "file:///two-tokens.txt", languageId: "plaintext", text: "abc")
+        var dirtyStates: [Bool] = []
+        var contentChangeCount = 0
+        var dirtyToken: TextDocumentObservation? = document.addDirtyStateHandler { dirtyStates.append($0) }
+        let changeToken = document.addChangeHandler { _, _ in contentChangeCount += 1 }
+        #expect(dirtyToken != nil)
+
+        dirtyToken = nil
+
+        document.apply([TextEdit(
+            range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 1)),
+            newText: "X"
+        )])
+
+        #expect(dirtyStates.isEmpty)
+        #expect(contentChangeCount == 1)
+        _ = changeToken
+    }
+
     // MARK: - Part 0 carried-over fixes
 
     @Test("apply reports the range it actually mutated, not the caller's out-of-range request")

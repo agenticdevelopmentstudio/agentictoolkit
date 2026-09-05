@@ -141,4 +141,57 @@ struct TextDocumentSaveSchedulerTests {
 
         #expect(writer.writtenURIs.isEmpty)
     }
+
+    // MARK: - Per-URI flush
+    //
+    // The scheduler is one instance for the whole app, so a file switch must
+    // be able to write out the file being switched away from *without*
+    // writing every other window's dirty documents at the same time.
+
+    @Test("flushPendingSave writes only the named document and leaves the rest pending")
+    func perURIFlushWritesOnlyThatDocument() async {
+        let writer = RecordingWriter()
+        let scheduler = TextDocumentSaveScheduler(debounce: Self.testDebounce, write: writer.write)
+        let outgoing = makeDirtyDocument(uri: "file:///outgoing.txt")
+        let otherWindow = makeDirtyDocument(uri: "file:///other-window.txt")
+        let alsoOther = makeDirtyDocument(uri: "file:///also-other.txt")
+
+        scheduler.schedule(outgoing)
+        scheduler.schedule(otherWindow)
+        scheduler.schedule(alsoOther)
+
+        await scheduler.flushPendingSave(uri: "file:///outgoing.txt")
+
+        #expect(writer.writtenURIs == ["file:///outgoing.txt"])
+        #expect(outgoing.isDirty == false)
+        #expect(otherWindow.isDirty)
+        #expect(alsoOther.isDirty)
+        #expect(Set(scheduler.pendingURIs) == ["file:///other-window.txt", "file:///also-other.txt"])
+    }
+
+    @Test("flushPendingSave then the elapsed debounce still writes only once")
+    func perURIFlushDoesNotRaceItsOwnPendingTask() async throws {
+        let writer = RecordingWriter()
+        let scheduler = TextDocumentSaveScheduler(debounce: Self.testDebounce, write: writer.write)
+        let document = makeDirtyDocument(uri: "file:///flush-once.txt")
+
+        scheduler.schedule(document)
+        await scheduler.flushPendingSave(uri: "file:///flush-once.txt")
+        try await Task.sleep(for: Self.settleDelay)
+
+        #expect(writer.writtenURIs == ["file:///flush-once.txt"])
+    }
+
+    @Test("flushPendingSave for a uri with nothing pending writes nothing")
+    func perURIFlushOfUnknownURIWritesNothing() async {
+        let writer = RecordingWriter()
+        let scheduler = TextDocumentSaveScheduler(debounce: Self.testDebounce, write: writer.write)
+        let document = makeDirtyDocument(uri: "file:///still-typing.txt")
+        scheduler.schedule(document)
+
+        await scheduler.flushPendingSave(uri: "file:///never-scheduled.txt")
+
+        #expect(writer.writtenURIs.isEmpty)
+        #expect(scheduler.pendingURIs == ["file:///still-typing.txt"])
+    }
 }

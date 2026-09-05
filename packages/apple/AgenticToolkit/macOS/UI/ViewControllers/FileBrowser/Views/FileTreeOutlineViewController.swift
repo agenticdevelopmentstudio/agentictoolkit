@@ -85,6 +85,17 @@ final class FileTreeOutlineViewController: NSViewController {
     /// re-open a root the user has deliberately collapsed.
     private var hasAppliedDefaultExpansion = false
 
+    /// Path -> row index for the rows currently drawn, built lazily and
+    /// dropped whenever rows can have moved (a reload, an expand, a collapse).
+    ///
+    /// `row(forPath:)` used to walk every row and compare a path string on
+    /// each call, and this controller is a `TextDocumentStore` observer — so
+    /// *every keystroke in any window* cost an O(rows) scan in *every* open
+    /// file browser, whether or not the edited file was one of its own. The
+    /// tree does not change while the user types, so the first lookup after a
+    /// structural change pays for the scan and the rest are dictionary hits.
+    private var rowIndexByPath: [String: Int]?
+
     init(
         roots: FileBrowserRootsModel,
         directories: FileBrowserDirectories,
@@ -177,20 +188,48 @@ final class FileTreeOutlineViewController: NSViewController {
         }
     }
 
-    /// Redraws the row for `uri`'s file, if the tree currently has one drawn —
-    /// a document event for a file that is not on screen (a collapsed folder,
-    /// a root removed since) has nothing to redraw.
+    /// Repaints the dirty marker on the row for `uri`'s file, if the tree
+    /// currently has one drawn — a document event for a file that is not on
+    /// screen (a collapsed folder, a root removed since) has nothing to
+    /// redraw.
+    ///
+    /// A `.changed` event arrives on every keystroke, in every open file
+    /// browser, for documents that may belong to another window's pane
+    /// entirely — so this has to be cheap and it has to be harmless. The
+    /// lookup is a dictionary hit (see `rowIndexByPath`), and the repaint
+    /// mutates the already-built row view in place instead of reloading the
+    /// row: `reloadItem(_:)` on a view-based outline updates the existing
+    /// view's `objectValue` and is not documented to rebuild the view, and
+    /// `FileTreeNodeRowView` reads nothing from `objectValue` — so a reload
+    /// would very likely have shown nothing at all, while still costing the
+    /// selection drop that every other reload in this file guards against.
     private func handleDocumentEvent(_ event: TextDocumentEvent) {
         let uri: DocumentUri
         switch event {
         case .opened(let eventURI, _, _, _): uri = eventURI
         case .changed(let eventURI, _, _): uri = eventURI
+        case .dirtyStateChanged(let eventURI, _): uri = eventURI
         case .closed(let eventURI): uri = eventURI
         }
         guard let url = URL(string: uri) else { return }
         let row = self.row(forPath: url.path)
-        guard row >= 0, let item = outline.item(atRow: row) else { return }
+        guard row >= 0 else { return }
+
+        let isDirty = documentStore.document(for: uri)?.isDirty ?? false
+        if let rowView = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileTreeNodeRowView {
+            rowView.setDirty(isDirty)
+            return
+        }
+
+        // The row is drawn but its view has been recycled away — rare, and a
+        // reload is then the only way back. Guarded the way every other reload
+        // in this file is: reloading rows drops the outline's selection, and
+        // an unguarded drop reads as the user deselecting the file they are
+        // reading, which mid-keystroke would blank the editor under them.
+        guard let item = outline.item(atRow: row) else { return }
+        isSyncingSelection = true
         outline.reloadItem(item)
+        isSyncingSelection = false
     }
 
     // MARK: - Model observation
@@ -230,6 +269,7 @@ final class FileTreeOutlineViewController: NSViewController {
                 self.isSyncingSelection = true
                 self.outline.reloadItem(node, reloadChildren: true)
                 if wasExpanded { self.outline.expandItem(node) }
+                self.invalidateRowIndex()
                 self.reselect(selected)
                 self.isSyncingSelection = false
                 // The rows that just arrived may be the ones a stored path was
@@ -265,6 +305,7 @@ final class FileTreeOutlineViewController: NSViewController {
                 outline.expandItem(only)
             }
         }
+        invalidateRowIndex()
         reselect(selected)
         isSyncingSelection = false
         restoreDisclosure()
@@ -292,6 +333,7 @@ final class FileTreeOutlineViewController: NSViewController {
             row += 1
         }
         isSyncingExpansion = false
+        invalidateRowIndex()
 
         guard let wanted = pendingSelectionPath else { return }
         for row in 0..<outline.numberOfRows {
@@ -364,12 +406,38 @@ final class FileTreeOutlineViewController: NSViewController {
     }
 
     /// The row currently drawing `path`, or `-1`.
+    ///
+    /// Answered from `rowIndexByPath`, rebuilt on demand. The cached answer is
+    /// verified against the row it names before it is returned: every way the
+    /// rows can move invalidates the map, but a stale hit would silently
+    /// redraw or reselect the *wrong* file, so this rescans rather than trust
+    /// a mismatch (`fail-fast` without the crash).
     private func row(forPath path: String) -> Int {
-        for row in 0..<outline.numberOfRows {
-            guard let item = outline.item(atRow: row), self.path(of: item) == path else { continue }
-            return row
+        if let cached = rowIndexByPath?[path] {
+            if cached < outline.numberOfRows,
+               let item = outline.item(atRow: cached),
+               self.path(of: item) == path {
+                return cached
+            }
+            rowIndexByPath = nil
+        } else if rowIndexByPath != nil {
+            return -1
         }
-        return -1
+
+        var index: [String: Int] = [:]
+        for row in 0..<outline.numberOfRows {
+            guard let item = outline.item(atRow: row), let rowPath = self.path(of: item) else { continue }
+            // First wins: a path can only be drawn once, and if it somehow is
+            // not, the topmost row is the one the user is looking at.
+            if index[rowPath] == nil { index[rowPath] = row }
+        }
+        rowIndexByPath = index
+        return index[path] ?? -1
+    }
+
+    /// Called wherever rows may have been inserted, removed or moved.
+    private func invalidateRowIndex() {
+        rowIndexByPath = nil
     }
 
     /// Puts the outline on `node`, for a selection that was set from outside —
@@ -490,6 +558,8 @@ extension FileTreeOutlineViewController: NSOutlineViewDataSource, NSOutlineViewD
     /// it is recorded here rather than at each of the several places that can
     /// cause one — a click, a double-click, an arrow key, a restore.
     func outlineViewItemDidExpand(_ notification: Notification) {
+        // Rows moved, whoever caused it — the cached path->row map is stale.
+        invalidateRowIndex()
         guard !isSyncingExpansion,
               let item = notification.userInfo?["NSObject"],
               let path = path(of: item) else { return }
@@ -497,6 +567,7 @@ extension FileTreeOutlineViewController: NSOutlineViewDataSource, NSOutlineViewD
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
+        invalidateRowIndex()
         guard let item = notification.userInfo?["NSObject"],
               let path = path(of: item) else { return }
         // A closed folder draws no rows, so nothing needs redrawing when its
@@ -585,9 +656,16 @@ private class FileTreeRowView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-/// One file or directory: an icon, the name, and the git status character.
+/// One file or directory: an icon, the name, the unsaved-changes dot, and the
+/// git status character.
 @MainActor
 private final class FileTreeNodeRowView: FileTreeRowView {
+
+    /// Always built, never conditionally added: a row view is constructed once
+    /// and reused, so a marker that only exists when the file happened to be
+    /// dirty at construction time could never appear later. `setDirty(_:)`
+    /// shows and hides the one that is always there.
+    private let dirtyMarker: NSImageView
 
     init(node: FileTreeNode, palette: SemanticPalette, isDirty: Bool = false) {
         let icon = NSImageView(image: NSImage(
@@ -615,16 +693,16 @@ private final class FileTreeNodeRowView: FileTreeRowView {
         // changes — so it takes its color from the theme rather than a fixed
         // one, the same way everything else in this row that is not git's own
         // signal does.
-        if isDirty {
-            let dot = NSImageView(image: NSImage(
-                systemSymbolName: "circle.fill",
-                accessibilityDescription: "Unsaved changes"
-            )?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular)) ?? NSImage())
-            dot.contentTintColor = palette.nsColor(.warning)
-            dot.setContentHuggingPriority(.required, for: .horizontal)
-            dot.accessibilityID("whippet.filebrowser.dirty-indicator")
-            views.append(dot)
-        }
+        let dot = NSImageView(image: NSImage(
+            systemSymbolName: "circle.fill",
+            accessibilityDescription: "Unsaved changes"
+        )?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular)) ?? NSImage())
+        dot.contentTintColor = palette.nsColor(.warning)
+        dot.setContentHuggingPriority(.required, for: .horizontal)
+        dot.accessibilityID("whippet.filebrowser.dirty-indicator")
+        dot.isHidden = !isDirty
+        self.dirtyMarker = dot
+        views.append(dot)
 
         if let status = node.gitStatus {
             let badge = ThemedLabel(string: status.displayCharacter, role: .primaryText, textRole: .code)
@@ -648,6 +726,13 @@ private final class FileTreeNodeRowView: FileTreeRowView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Shows or hides the unsaved-changes dot on a row that is already on
+    /// screen. `NSStackView` drops a hidden arranged subview from its layout,
+    /// so the row re-lays out as if the marker were not there.
+    func setDirty(_ isDirty: Bool) {
+        dirtyMarker.isHidden = !isDirty
+    }
 
     /// The palette has no per-language "brand color" role, so these map onto the
     /// nearest status role the same way `SwiftUIPalette.color(named:)` does.
