@@ -63,13 +63,31 @@ public final class MarkdownNoteStorage: NoteStorage {
 
     /// Whether this class may write `key` — either because it already owns it,
     /// or because writing would take nothing from the user: the key is absent,
-    /// or it already says precisely what we would say.
+    /// or writing it would change no bytes.
+    ///
+    /// "Changes no bytes" is asked literally, by performing the write and
+    /// comparing, rather than by comparing values. `Frontmatter.value`
+    /// *unquotes*, so a user's `pinned: "true"` — a YAML string, and not what
+    /// this class emits — compared equal to the desired `"true"`, and the app
+    /// then rewrote the line as an unquoted boolean and claimed a key it had
+    /// just taken from the user. The same held for `title: "Groceries"` and
+    /// for any value whose quoting, spacing or scalar style differed from what
+    /// `Frontmatter.setting` produces. Comparing the rendered result catches
+    /// every one of those without enumerating them.
+    ///
+    /// `desired` is the `FrontmatterValue` the caller is about to hand
+    /// `Frontmatter.setting`, not a string, so the comparison is against the
+    /// bytes that will actually be written — a `.bool(true)` and a
+    /// `.string("true")` are different writes and must answer differently.
     private static func mayWrite(
-        _ key: String, as desired: String?, in content: String, owned: Set<String>
+        _ key: String, as desired: FrontmatterValue?, in content: String, owned: Set<String>
     ) -> Bool {
         if owned.contains(key) { return true }
-        let current = Frontmatter.value(key, in: content)
-        return current == nil || current == desired
+        // Absent is the other allowed case, and it is not a byte comparison:
+        // adding a key the document does not have changes bytes by definition,
+        // and takes nothing from anyone.
+        guard Frontmatter.value(key, in: content) != nil else { return true }
+        return Frontmatter.setting(key, to: desired, in: content) == content
     }
 
     // MARK: - NoteStorage
@@ -142,17 +160,18 @@ public final class MarkdownNoteStorage: NoteStorage {
             owned = []
         }
 
-        let desiredTitle = Self.storedTitle(for: note)
+        // Each desired value is built once and used twice — asked about by
+        // `mayWrite` and then written by `Frontmatter.setting` — so the write
+        // that is permitted is provably the write that happens.
+        let desiredTitle: FrontmatterValue? = Self.storedTitle(for: note).map { .string($0) }
         if Self.mayWrite(Self.titleKey, as: desiredTitle, in: document.content, owned: owned) {
-            document.content = Frontmatter.setting(
-                Self.titleKey, to: desiredTitle.map { .string($0) }, in: document.content)
+            document.content = Frontmatter.setting(Self.titleKey, to: desiredTitle, in: document.content)
             Self.claim(Self.titleKey, wrote: desiredTitle != nil, in: &owned)
         }
 
-        let desiredPin = note.isPinned ? "true" : nil
+        let desiredPin: FrontmatterValue? = note.isPinned ? .bool(true) : nil
         if Self.mayWrite(Self.pinnedKey, as: desiredPin, in: document.content, owned: owned) {
-            document.content = Frontmatter.setting(
-                Self.pinnedKey, to: note.isPinned ? .bool(true) : nil, in: document.content)
+            document.content = Frontmatter.setting(Self.pinnedKey, to: desiredPin, in: document.content)
             Self.claim(Self.pinnedKey, wrote: note.isPinned, in: &owned)
         }
 
@@ -183,10 +202,21 @@ public final class MarkdownNoteStorage: NoteStorage {
         guard let id = UUID(uuidString: document.id) else { return nil }
         return Note(
             id: id,
-            // Frontmatter first whoever wrote it, because that is the order
-            // `MarkdownText.deriveTitle` uses and therefore the title adh will
-            // derive on its next pull — the list must not disagree with it.
-            title: document.frontmatter[titleKey] ?? document.title,
+            // `document.title` *is* `MarkdownText.deriveTitle`, and that is the
+            // point: the list must show the same string adh will recompute on
+            // its next write, whoever wrote the frontmatter.
+            //
+            // Reading `document.frontmatter[titleKey]` first — which this used
+            // to do — looks like the same order and is not. `frontmatter` comes
+            // from `Frontmatter.parse` and is every YAML value as raw,
+            // untrimmed text, whereas `deriveTitle` goes through
+            // `Frontmatter.stringValue`, which takes a key only when YAML would
+            // type it as a string. So `title: 42`, `title: [a, b]` and
+            // `title: ""` each showed here verbatim (or blank) while adh fell
+            // through to `name` or to the first body line, and the list
+            // disagreed with the column on exactly the documents where it
+            // mattered.
+            title: document.title,
             content: strippedContent(of: document, owned: owned),
             createdDate: document.createdAt,
             modifiedDate: document.updatedAt,

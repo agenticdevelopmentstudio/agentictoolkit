@@ -25,6 +25,13 @@ public enum MarkdownProjectionError: Error, Equatable {
     /// nothing — which SQLite would catch, but only at `COMMIT`, naming
     /// neither table.
     case purgeWouldOrphanRows(resource: String, referencedBy: String, rows: Int)
+
+    /// A staged local mutation (`isFullRow: false`) named both `deleted_at`
+    /// and `is_deleted` and gave them opposite senses. `upsert` normalises the
+    /// pair only on a full-row pull, where the whole row is present to
+    /// normalise; a partial patch that contradicts itself has no half to
+    /// prefer, so it is refused rather than half-written.
+    case partialPatchDeleteStateDisagrees(resource: String, id: String)
 }
 
 public struct MarkdownProjection: SyncMirrorProjection {
@@ -198,47 +205,59 @@ public struct MarkdownProjection: SyncMirrorProjection {
     /// them an un-forced `deleted_at` would make a restore unrecoverable,
     /// not just inconsistent.
     ///
-    /// `is_deleted` (`content.markdown` only) is *not* simply force-bound to
-    /// `excluded.is_deleted` the way `deleted_at` is, because that reopens a
-    /// narrower version of the same inconsistency the wrong way: a payload
-    /// that supplies `deleted_at` (a genuine tombstone) but omits
-    /// `is_deleted` — exactly what `deletedAtColumnIsNormalisedOnIngest`
-    /// already sends, and what any payload builder emitting only the
-    /// columns common to the whole markdown family would produce — would
-    /// let `excluded.is_deleted` fall back to the column's own `DEFAULT 0`,
-    /// setting `is_deleted = 0` while `deleted_at` stays non-null: the two
-    /// flags disagree, `document(id:)` (gates on `is_deleted` alone) shows a
-    /// server-deleted document as live, and `liveRow` (gates on
-    /// `deleted_at`) still hides it. So when `data` supplies `is_deleted`
-    /// explicitly, it wins verbatim (`excluded.is_deleted`); when it does
-    /// not, `is_deleted` is *derived* from whichever `deleted_at` this same
-    /// statement is about to write, not defaulted independently of it.
+    /// `deleted_at` and `is_deleted` (the latter on `content.markdown` alone)
+    /// are two records of one fact, and neither is passed through from `data`
+    /// on a full-row markdown pull. Both are *derived together* in Swift from
+    /// a single decision — see the block comment inside the method — and both
+    /// are appended to `bound` so the same pair of values lands on the
+    /// `INSERT` and, via `excluded.*`, on the `ON CONFLICT UPDATE`.
     ///
-    /// `excluded.<column>` resolves correctly even when `data` never
-    /// supplies a column and it is absent from this `INSERT`'s own column
-    /// list: SQLite fills the `excluded` pseudo-row with the value the
-    /// statement *would* have inserted for every table column, including
-    /// one it defaults — `NULL` for `deleted_at` (no `DEFAULT`, nullable) —
-    /// so `deleted_at` needs nothing added to `bound`/`arguments`; only
-    /// `assignments` changes. That materialisation only feeds `excluded.*`,
-    /// though, and `excluded.*` only feeds the `ON CONFLICT` branch — a row
-    /// that does not exist yet takes the plain `INSERT` branch instead,
-    /// where an omitted column gets its column `DEFAULT`, full stop. So
-    /// deriving `is_deleted` from `excluded.deleted_at` (an earlier version
-    /// of this method did exactly that) is correct on an update but silently
-    /// wrong on a first insert: `is_deleted` sits outside `bound`, the
-    /// `INSERT` never mentions it, `ON CONFLICT` never fires, and it lands at
-    /// its `DEFAULT 0` regardless of what `deleted_at` just got written —
-    /// exactly the shape `deletedAtColumnIsNormalisedOnIngest` sends for a
-    /// document that has never been pulled before. `is_deleted` must
-    /// therefore be computed in Swift and placed in `bound`/`arguments` like
-    /// any other column, so the same value lands on both the `INSERT` and
-    /// (via `excluded.is_deleted`) the `ON CONFLICT UPDATE` branch.
+    /// Deriving them separately is what let them disagree, and passing either
+    /// one through verbatim is a form of deriving them separately: a payload
+    /// supplying `deleted_at` but omitting `is_deleted` — exactly what
+    /// `deletedAtColumnIsNormalisedOnIngest` sends, and what any payload
+    /// builder emitting only the columns common to the whole markdown family
+    /// would produce — would leave `is_deleted` at its `DEFAULT 0` while
+    /// `deleted_at` stayed non-null, so `document(id:)` (gates on
+    /// `is_deleted`) would show a server-deleted document as live while
+    /// `liveRow` (gates on `deleted_at`) still hid it. Symmetrically, a
+    /// payload supplying `is_deleted: 0` alongside a genuine `deleted_at`
+    /// must not be taken at its word. Non-null `deleted_at` therefore wins
+    /// over a falsy `is_deleted`, and a truthy `is_deleted` with no stamp of
+    /// its own is stamped now rather than left NULL.
+    ///
+    /// Neither column can be left to `excluded.*` alone. `excluded.<column>`
+    /// does resolve even for a column `data` never supplies and this
+    /// `INSERT`'s column list never mentions — SQLite materialises the whole
+    /// row the statement *would* have inserted, defaults included — but that
+    /// materialisation only feeds `excluded.*`, and `excluded.*` only feeds
+    /// the `ON CONFLICT` branch. A row that does not exist yet takes the
+    /// plain `INSERT` branch, where an omitted column gets its column
+    /// `DEFAULT`, full stop. An earlier version derived `is_deleted` from
+    /// `excluded.deleted_at` and was correct on an update and silently wrong
+    /// on a first insert — `is_deleted` sat outside `bound`, `ON CONFLICT`
+    /// never fired, and it landed at `DEFAULT 0` regardless of the
+    /// `deleted_at` just written, which is exactly the shape
+    /// `deletedAtColumnIsNormalisedOnIngest` sends for a document that has
+    /// never been pulled before. Hence: computed in Swift, bound like any
+    /// other column.
+    ///
+    /// A full-row `content.markdown` pull also releases the local frontmatter
+    /// claims the incoming content invalidates, before it overwrites
+    /// `content` — see `releaseFrontmatterClaimsInvalidated(by:)`.
     public func upsert(
         resource: String, id: String, syncVersion: Int,
         data: [String: JSONValue], isFullRow: Bool, in conn: Database
     ) throws {
         let present = Set(columns(for: resource).filter { data[$0] != nil })
+        try Self.rejectPartialDeleteStateDisagreement(
+            resource: resource, id: id, data: data, present: present, isFullRow: isFullRow)
+        // A pull replaces `content` wholesale, and `_markdown_frontmatter_owner`
+        // is a claim *about those bytes*. Released here, at the write, rather
+        // than second-guessed later at the read.
+        if isFullRow, resource == "content.markdown", case .string(let incoming) = data["content"] {
+            try Self.releaseFrontmatterClaimsInvalidated(by: incoming, documentID: id, in: conn)
+        }
         var bound = columns(for: resource).filter {
             data[$0] != nil || Self.requiredWithNoDefault.contains($0)
         }
@@ -268,6 +287,25 @@ public struct MarkdownProjection: SyncMirrorProjection {
         // only on the UPDATE branch — a value derived there alone is right on
         // an update and silently wrong on a first insert, where an unmentioned
         // column takes its column `DEFAULT` instead.
+        //
+        // A partial patch (`isFullRow: false`) is deliberately *not* normalised
+        // here, and this is the seam where that limit lives. A patch that names
+        // only one of the two columns cannot have the other derived from it:
+        // deriving `is_deleted` from a `deleted_at` the patch did name would
+        // write a column the caller never mentioned, which is the force-bind
+        // that used to resurrect a tombstoned row through `stage(_:)`; and
+        // deriving `deleted_at` from a bare `is_deleted: 1` would have to
+        // invent a *when* that nothing in the patch supplies. Reading the
+        // stored row for the missing half does not rescue it either — the
+        // stored half is precisely what the patch is silent about, so
+        // "agreeing" with it is a guess dressed as a lookup.
+        //
+        // The one case that is not unknown is closed instead of tolerated: a
+        // patch that names *both* columns and contradicts itself is rejected
+        // above by `rejectPartialDeleteStateDisagreement`, because there is
+        // nothing to infer there — the caller stated two facts that cannot
+        // both be true, and writing either of them would be picking a winner
+        // on the caller's behalf.
         let normalisesDeleteState = isFullRow && resource == "content.markdown"
         let suppliedDeletedAt = Self.value(data["deleted_at"], column: "deleted_at")
         let isDeleted = suppliedDeletedAt != nil
@@ -302,6 +340,87 @@ public struct MarkdownProjection: SyncMirrorProjection {
                 ON CONFLICT(id) DO UPDATE SET \(assignments)
                 """,
             arguments: StatementArguments(arguments))
+    }
+
+    /// Refuses a partial patch whose two delete columns contradict each other.
+    ///
+    /// Only `content.markdown` has both columns, and only a partial patch
+    /// reaches this — a full-row pull decides the pair itself in `upsert` and
+    /// never asks. See the block comment at `normalisesDeleteState` for why
+    /// this is a rejection rather than a normalisation.
+    ///
+    /// Nothing can reach it *today*: `content.markdown` is in
+    /// `pullOnlyResources`, so `GRDBSyncStore.stage(_:in:)` refuses it before
+    /// the projection is consulted, and the taxonomy resources that do stage
+    /// have no `is_deleted` column at all. This is a backstop against the
+    /// combination becoming reachable, which is why it is a guard here rather
+    /// than a note in the doc comment above.
+    private static func rejectPartialDeleteStateDisagreement(
+        resource: String, id: String, data: [String: JSONValue],
+        present: Set<String>, isFullRow: Bool
+    ) throws {
+        guard !isFullRow, resource == "content.markdown",
+              present.contains("deleted_at"), present.contains("is_deleted") else { return }
+        // A key present as JSON `null` is a deliberate clear, not an omission —
+        // that is why `present` is membership rather than non-nullness.
+        let tombstoned = Self.value(data["deleted_at"], column: "deleted_at") != nil
+        let flagged = Self.isTruthy(Self.value(data["is_deleted"], column: "is_deleted"))
+        guard tombstoned != flagged else { return }
+        throw MarkdownProjectionError.partialPatchDeleteStateDisagrees(resource: resource, id: id)
+    }
+
+    /// Drops this client's ownership of any frontmatter key whose value the
+    /// incoming content changes.
+    ///
+    /// `_markdown_frontmatter_owner` records that *this app* wrote a given
+    /// frontmatter key into a given document — the fact `MarkdownNoteStorage`
+    /// stopped guessing from the value. A pull replaces `content` outright, so
+    /// a claim about the bytes that were there is a claim about bytes that no
+    /// longer exist; leaving it standing lets `strippedContent` hide a
+    /// `title:` a human typed on the web and lets the next save rewrite it.
+    ///
+    /// **Only the claims whose key changed value are released, not all of
+    /// them.** `content.markdown` is pull-only in `ADHSyncCatalog`: every local
+    /// edit leaves through the REST outbox and comes *back* down this same
+    /// path, so the overwhelmingly common pull is an echo of the app's own
+    /// push. Releasing every claim on any pull would therefore disown the
+    /// app's own `title:`/`pinned:` at the first round trip, after which
+    /// `mayWrite` — which refuses to touch an unowned key whose value differs
+    /// — would make the next rename or unpin a silent no-op. That is the wave
+    /// 4 defect reintroduced by a blunter rule.
+    ///
+    /// Comparing the two contents is not the value-guessing the ownership
+    /// table replaced. The guess was *authorship* — inferring from
+    /// `title: Groceries` whether the app or a human typed it. This asks a
+    /// question with an actual answer: are the bytes this claim was made about
+    /// still there? If they are, the claim is still true and nothing about who
+    /// wrote them has been inferred; if they are not, the claim is false
+    /// whoever wrote the replacement.
+    private static func releaseFrontmatterClaimsInvalidated(
+        by incoming: String, documentID: String, in conn: Database
+    ) throws {
+        // Local-only and created by migration `markdown-v3-frontmatter-owner`,
+        // not by `MarkdownSchema.createTables(in:)` — a host that builds a bare
+        // `GRDBSyncStore` on this projection has the mirror tables and no
+        // ownership table at all, and a pull must not fail for it.
+        guard try conn.tableExists("_markdown_frontmatter_owner") else { return }
+        let claimed = try String.fetchAll(
+            conn,
+            sql: "SELECT key FROM _markdown_frontmatter_owner WHERE document_id = ?",
+            arguments: [documentID])
+        guard !claimed.isEmpty else { return }
+        // No stored row yet means no bytes this claim could have been about;
+        // the rows are keyed by document id, so another document's claims are
+        // untouched either way.
+        guard let stored = try String.fetchOne(
+            conn, sql: "SELECT content FROM markdown WHERE id = ?", arguments: [documentID])
+        else { return }
+        for key in claimed
+        where Frontmatter.value(key, in: stored) != Frontmatter.value(key, in: incoming) {
+            try conn.execute(
+                sql: "DELETE FROM _markdown_frontmatter_owner WHERE document_id = ? AND key = ?",
+                arguments: [documentID, key])
+        }
     }
 
     public func markDeleted(

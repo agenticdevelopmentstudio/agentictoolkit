@@ -99,6 +99,25 @@ public enum MarkdownSchema {
         migrator.registerMigration("markdown-v2-outbox-order") { conn in
             try conn.execute(sql: outboxOrderDDL)
         }
+        // `markdown-v3-frontmatter-owner`: records which frontmatter keys *this
+        // client* wrote into a document.
+        //
+        // Local-only, like the outbox and `_markdown_remote_id`, and for the
+        // same reason: it is a fact about who authored a line, and adh has no
+        // column for it. It exists because a frontmatter key is only ever bytes
+        // — nothing in `title: Groceries` says whether the app derived it from
+        // a rename or the user typed it — and every rule that matters turns on
+        // the difference. A key the app owns is the app's to rewrite, to clear,
+        // and to hide from the editor; a key the user typed is theirs, and is
+        // never touched. Guessing from the value instead is what let a save
+        // overwrite a hand-typed `title:` and an unpin fail to persist.
+        //
+        // A row per `(document, key)` rather than a list column, so a key can
+        // be claimed and released on its own — which is what lets a pull
+        // release only the claims its content actually invalidated
+        // (`MarkdownProjection.releaseFrontmatterClaimsInvalidated(by:...)`).
+        // Rows are deleted with their document; an orphan would be harmless
+        // anyway, since ids are UUIDs and are never reused.
         migrator.registerMigration("markdown-v3-frontmatter-owner") { conn in
             try conn.execute(sql: frontmatterOwnerDDL)
             try backfillFrontmatterOwners(in: conn)
@@ -278,25 +297,6 @@ public enum MarkdownSchema {
             ON _markdown_outbox(document_id, intent);
         """
 
-    /// `markdown-v2-outbox-order`: a strict send order for the queue, and a
-    /// place to record the id adh minted for a locally-created document.
-    ///
-    /// `seq` exists because `ORDER BY created_at, op_id` is not an order at
-    /// all when two ops share a millisecond — `created_at` is truncated to
-    /// milliseconds and `op_id` is a UUIDv7 whose tie-break is its own random
-    /// tail — so a `create` and the `update` that followed it could come back
-    /// in either order, and sending the update first pushes a write for a
-    /// document adh has never seen. `MarkdownStore` assigns `MAX(seq) + 1`
-    /// rather than using `AUTOINCREMENT`, which SQLite allows only on an
-    /// `INTEGER PRIMARY KEY` and therefore cannot be added by `ALTER TABLE`;
-    /// reuse after a drain is harmless because every row that could have held
-    /// a reused value is gone by then.
-    ///
-    /// `_markdown_remote_id` is local-only for the same reason the outbox is:
-    /// it records that *this* client once created *that* document upstream, a
-    /// fact no other client needs and adh has no column for. Backfilling
-    /// existing rows from `rowid` keeps the ops already queued on a
-    /// pre-migration install in the order they were enqueued.
     /// Claims every `title`/`pinned` already on disk for the app.
     ///
     /// Before this table existed the app was the only *intentional* writer of
@@ -322,23 +322,6 @@ public enum MarkdownSchema {
         }
     }
 
-    /// `markdown-v3-frontmatter-owner`: which frontmatter keys *this client*
-    /// wrote into a document.
-    ///
-    /// Local-only, like the outbox and `_markdown_remote_id`, and for the same
-    /// reason: it is a fact about who authored a line, and adh has no column
-    /// for it. It exists because a frontmatter key is only ever bytes — nothing
-    /// in `title: Groceries` says whether the app derived it from a rename or
-    /// the user typed it — and every rule that matters turns on the difference.
-    /// A key the app owns is the app's to rewrite, to clear, and to hide from
-    /// the editor; a key the user typed is theirs, and is never touched.
-    /// Guessing from the value instead is what let a save overwrite a
-    /// hand-typed `title:` and an unpin fail to persist.
-    ///
-    /// A row per `(document, key)` rather than a list column, so a key can be
-    /// claimed and released on its own. Rows are deleted with their document;
-    /// an orphan would be harmless anyway, since ids are UUIDs and are never
-    /// reused.
     private static let frontmatterOwnerDDL = """
         CREATE TABLE IF NOT EXISTS _markdown_frontmatter_owner (
             document_id TEXT NOT NULL,
@@ -347,6 +330,25 @@ public enum MarkdownSchema {
         );
         """
 
+    /// A strict send order for the queue, and a place to record the id adh
+    /// minted for a locally-created document. Run by `markdown-v2-outbox-order`.
+    ///
+    /// `seq` exists because `ORDER BY created_at, op_id` is not an order at
+    /// all when two ops share a millisecond — `created_at` is truncated to
+    /// milliseconds and `op_id` is a UUIDv7 whose tie-break is its own random
+    /// tail — so a `create` and the `update` that followed it could come back
+    /// in either order, and sending the update first pushes a write for a
+    /// document adh has never seen. `MarkdownStore` assigns `MAX(seq) + 1`
+    /// rather than using `AUTOINCREMENT`, which SQLite allows only on an
+    /// `INTEGER PRIMARY KEY` and therefore cannot be added by `ALTER TABLE`;
+    /// reuse after a drain is harmless because every row that could have held
+    /// a reused value is gone by then.
+    ///
+    /// `_markdown_remote_id` is local-only for the same reason the outbox is:
+    /// it records that *this* client once created *that* document upstream, a
+    /// fact no other client needs and adh has no column for. Backfilling
+    /// existing rows from `rowid` keeps the ops already queued on a
+    /// pre-migration install in the order they were enqueued.
     private static let outboxOrderDDL = """
         ALTER TABLE _markdown_outbox ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
         UPDATE _markdown_outbox SET seq = rowid;

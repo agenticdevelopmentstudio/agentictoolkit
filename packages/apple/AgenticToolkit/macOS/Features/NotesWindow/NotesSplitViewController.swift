@@ -68,19 +68,34 @@ public final class NotesSplitViewController: ThemedSplitViewController {
             name: NotesManager.storageDidFailNotification, object: notesManager)
     }
 
-    /// Shows the failure the manager just recorded, as a sheet on this pane's
-    /// window.
+    @objc private func storageDidFail() {
+        presentStorageFailureIfPossible()
+    }
+
+    /// Shows whatever failure the manager is still holding, as a sheet on this
+    /// pane's window, and does nothing if there is none or if there is no
+    /// window yet.
     ///
     /// Claimed before it is shown: every host of this manager observes the same
     /// notification, and `clearStorageFailure()` is what stops three windows
     /// from stacking three sheets saying the same thing. A pane with no window
-    /// — off screen, or in a tab that is not selected — leaves the failure
-    /// unclaimed for a host that can actually show it.
+    /// — off screen, in a tab that is not selected, or not yet built — leaves
+    /// the failure unclaimed, which is why `storageFailure` is read and only
+    /// then cleared.
+    ///
+    /// Called from two places, and it has to be both. A notification alone
+    /// misses every failure that happens before this pane has a window:
+    /// `NotesCoordinator.start()` loads notes at launch, and Quick Note creates
+    /// one from a window that has already closed by the time the write lands —
+    /// in each case the notification is posted to a pane that cannot show it,
+    /// and nothing ever asked again. So the pane also asks on the way in, when
+    /// a window exists by definition. A failure therefore survives in the
+    /// manager until some host can actually put it on screen.
     ///
     /// `beginSheetModal` and not `runModal`: this is the idiom the delete
     /// confirmation two files over already uses, and a modal run loop here
     /// would block the main thread inside a notification delivery.
-    @objc private func storageDidFail() {
+    private func presentStorageFailureIfPossible() {
         guard let failure = notesManager.storageFailure, let window = view.window else { return }
         notesManager.clearStorageFailure()
         let alert = NSAlert()
@@ -89,6 +104,14 @@ public final class NotesSplitViewController: ThemedSplitViewController {
         alert.informativeText = failure.operation.consequence + "\n\n" + failure.message
         alert.addButton(withTitle: "OK")
         alert.beginSheetModal(for: window, completionHandler: nil)
+    }
+
+    override public func viewDidAppear() {
+        super.viewDidAppear()
+        // `viewWillAppear` is too early for this: `view.window` is already set
+        // there, but the window is not yet on screen and `beginSheetModal`
+        // against it is a sheet nobody sees.
+        presentStorageFailureIfPossible()
     }
 
     override public func viewWillAppear() {

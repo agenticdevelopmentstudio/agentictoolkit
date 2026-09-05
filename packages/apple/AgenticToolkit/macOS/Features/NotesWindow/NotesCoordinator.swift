@@ -55,6 +55,16 @@ public final class NotesCoordinator: AppFeature {
     // MARK: - AppFeature
 
     /// Load persisted notes on launch.
+    ///
+    /// This runs before any notes window or pane exists, so a failure here has
+    /// no window to be a sheet on. That is deliberately *not* handled by
+    /// building one: `NotesManager` keeps `storageFailure` set until a host
+    /// claims it, and `NotesSplitViewController` asks on `viewDidAppear` as
+    /// well as on the notification, so a launch failure is shown by whichever
+    /// notes pane or window the user opens first rather than being dropped on
+    /// the floor. The Quick Note save path has the same shape from the other
+    /// end — its window closes before the async create completes — and is
+    /// covered by the same mechanism.
     public override func start() throws {
         Task { [weak self] in await self?.loadNotes() }
     }

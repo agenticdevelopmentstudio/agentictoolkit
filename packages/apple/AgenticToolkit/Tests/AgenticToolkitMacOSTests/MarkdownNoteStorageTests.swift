@@ -366,4 +366,94 @@ struct MarkdownNoteStorageTests {
         #expect(Frontmatter.value("pinned", in: document.content) != nil)
         #expect(document.isPinned == true)
     }
+
+    // MARK: - The list title follows adh's typing rule
+
+    /// A document written straight to the store, so its frontmatter is
+    /// whatever the test says rather than whatever `insertNote` would emit.
+    private func storedNote(_ storage: MarkdownNoteStorage, content: String) throws -> Note {
+        _ = try storage.store.createDocument(content: content, markers: [.note])
+        return try #require(try storage.fetchAllNotes().first)
+    }
+
+    /// `Frontmatter.parse` returns every YAML value as raw, untrimmed text;
+    /// `MarkdownText.deriveTitle` goes through `Frontmatter.stringValue`,
+    /// which takes a key only when YAML would type it as a string. Reading
+    /// the parsed map directly — which the list used to do — showed `42` where
+    /// adh falls through to the body, and the column adh recomputes on the next
+    /// write then disagreed with the row on screen.
+    @Test("a numeric frontmatter title falls through to the body, as adh's does")
+    func numericFrontmatterTitleFallsThrough() throws {
+        let storage = try storage()
+        let content = "---\ntitle: 42\n---\n# Groceries\n\nMilk"
+        let note = try storedNote(storage, content: content)
+        #expect(note.title == "Groceries")
+        #expect(note.title == MarkdownText.deriveTitle(content))
+    }
+
+    @Test("a flow-sequence frontmatter title falls through to the body, as adh's does")
+    func flowSequenceFrontmatterTitleFallsThrough() throws {
+        let storage = try storage()
+        let content = "---\ntitle: [a, b]\n---\n# Groceries\n\nMilk"
+        let note = try storedNote(storage, content: content)
+        #expect(note.title == "Groceries")
+        #expect(note.title == MarkdownText.deriveTitle(content))
+    }
+
+    @Test("an empty frontmatter title falls through to the body, as adh's does")
+    func emptyFrontmatterTitleFallsThrough() throws {
+        let storage = try storage()
+        let content = "---\ntitle: \"\"\n---\n# Groceries\n\nMilk"
+        let note = try storedNote(storage, content: content)
+        #expect(note.title == "Groceries")
+        #expect(note.title == MarkdownText.deriveTitle(content))
+    }
+
+    @Test("a whitespace-only frontmatter title falls through to the body, as adh's does")
+    func whitespaceFrontmatterTitleFallsThrough() throws {
+        let storage = try storage()
+        let content = "---\ntitle: \"   \"\n---\n# Groceries\n\nMilk"
+        let note = try storedNote(storage, content: content)
+        #expect(note.title == "Groceries")
+        #expect(note.title == MarkdownText.deriveTitle(content))
+    }
+
+    // MARK: - A claim may not change the user's bytes
+
+    /// `Frontmatter.value` unquotes, so a user's `pinned: "true"` — a YAML
+    /// *string*, which is not what this class emits — compared equal to the
+    /// desired `"true"`, and the app rewrote the line as an unquoted boolean
+    /// and claimed a key it had just taken from its author.
+    @Test("a quoted pinned value the app would rewrite is neither rewritten nor claimed")
+    func quotedPinnedValueIsLeftAlone() throws {
+        let storage = try storage()
+        let content = "---\npinned: \"true\"\n---\n# Groceries\n\nMilk"
+        var note = try storedNote(storage, content: content)
+        #expect(note.isPinned == false, "a pin we did not write is not ours to act on")
+
+        note.isPinned = true
+        try storage.updateNote(note)
+
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == content)
+        #expect(try storage.store.ownedFrontmatterKeys(forDocument: stored.id).isEmpty)
+    }
+
+    /// The other half of the same rule: a key that already reads *exactly* as
+    /// what this class would write is claimed, because the claim costs the
+    /// document no bytes.
+    @Test("a byte-identical pinned value is claimed without modification")
+    func byteIdenticalPinnedValueIsClaimed() throws {
+        let storage = try storage()
+        let content = "---\npinned: true\n---\n# Groceries\n\nMilk"
+        var note = try storedNote(storage, content: content)
+
+        note.isPinned = true
+        try storage.updateNote(note)
+
+        let stored = try #require(try storage.store.documents(marker: .note).first)
+        #expect(stored.content == content)
+        #expect(try storage.store.ownedFrontmatterKeys(forDocument: stored.id) == ["pinned"])
+        #expect(try storage.fetchAllNotes().first?.isPinned == true)
+    }
 }

@@ -651,4 +651,155 @@ struct MarkdownProjectionTests {
         #expect(try store.document(id: "m1") == nil)
         #expect(try store.syncStore.liveRow(resource: "content.markdown", id: "m1") == nil)
     }
+
+    // MARK: - Frontmatter claims and the pull path
+
+    /// A document whose frontmatter carries both keys `MarkdownNoteStorage`
+    /// ever claims, so a test can change one and leave the other alone.
+    private func claimedFrontmatter(title: String, body: String = "Milk\n") -> String {
+        "---\ntitle: \(title)\npinned: true\n---\n\(body)"
+    }
+
+    private func seedClaimed(
+        _ store: MarkdownStore, id: String, content: String, keys: Set<String>
+    ) throws {
+        _ = try store.createDocument(
+            content: content, markers: [.note], id: id, ownedFrontmatterKeys: keys)
+    }
+
+    /// A full-row pull of `content.markdown` — what `GRDBSyncStore.apply`
+    /// sends, and the only path that replaces `content` from the server.
+    private func pullMarkdown(
+        _ store: MarkdownStore, id: String, content: String, syncVersion: String
+    ) async throws {
+        try await store.syncStore.apply([
+            SyncChange(resource: "content.markdown", id: id, op: .upsert, syncVersion: syncVersion,
+                       data: ["title": .string("t"), "content": .string(content),
+                              "created_at": .string("2026-01-01T00:00:00Z"),
+                              "updated_at": .string("2026-01-02T00:00:00Z")])
+        ], advancingTo: nil)
+    }
+
+    /// The app renamed the note, claiming `title:`; someone then edited the
+    /// document on the web and typed their own. The claim is a statement about
+    /// bytes that no longer exist, and leaving it standing is what let
+    /// `strippedContent` hide a human's `title:` from the editor and the next
+    /// save overwrite it.
+    @Test("a pull that changes a claimed key's value releases that claim")
+    func pullReleasesTheClaimOnAChangedKey() async throws {
+        let store = try store()
+        try seedClaimed(
+            store, id: "m1", content: claimedFrontmatter(title: "Groceries"),
+            keys: ["title", "pinned"])
+
+        try await pullMarkdown(
+            store, id: "m1", content: claimedFrontmatter(title: "Shopping"), syncVersion: "2")
+
+        #expect(try store.ownedFrontmatterKeys(forDocument: "m1") == ["pinned"])
+    }
+
+    /// The chosen rule, asserted directly: only the claims whose key changed
+    /// value are released. `content.markdown` is pull-only, so every local
+    /// edit leaves through the REST outbox and comes back down this same path
+    /// — the common pull is the app's own push echoed back, and releasing
+    /// every claim on any pull would disown the app's own `title:`/`pinned:`
+    /// at the first round trip. `mayWrite` refuses to touch an unowned key
+    /// whose value differs, so the next rename would then be a silent no-op.
+    @Test("a pull that leaves claimed keys byte-identical keeps those claims")
+    func pullKeepsTheClaimOnAnUnchangedKey() async throws {
+        let store = try store()
+        try seedClaimed(
+            store, id: "m1", content: claimedFrontmatter(title: "Groceries"),
+            keys: ["title", "pinned"])
+
+        // The body changes; neither claimed key does.
+        try await pullMarkdown(
+            store, id: "m1",
+            content: claimedFrontmatter(title: "Groceries", body: "Milk\nEggs\n"),
+            syncVersion: "2")
+
+        #expect(try store.ownedFrontmatterKeys(forDocument: "m1") == ["pinned", "title"])
+    }
+
+    /// Claims are keyed by document, and the release reads and deletes by that
+    /// id alone — a busy pull batch must not cost an untouched note its
+    /// frontmatter.
+    @Test("a pull only disturbs the claims of the document it names")
+    func pullLeavesAnotherDocumentsClaimsAlone() async throws {
+        let store = try store()
+        try seedClaimed(
+            store, id: "m1", content: claimedFrontmatter(title: "Groceries"),
+            keys: ["title", "pinned"])
+        try seedClaimed(
+            store, id: "m2", content: claimedFrontmatter(title: "Recipes"), keys: ["title"])
+
+        try await pullMarkdown(
+            store, id: "m2", content: claimedFrontmatter(title: "Dinner"), syncVersion: "2")
+
+        #expect(try store.ownedFrontmatterKeys(forDocument: "m2").isEmpty)
+        #expect(try store.ownedFrontmatterKeys(forDocument: "m1") == ["pinned", "title"])
+    }
+
+    // MARK: - Partial patches and the two delete columns
+
+    /// The half of the partial path that *is* knowable: a patch that names
+    /// both delete columns and contradicts itself has no half to prefer, so it
+    /// is refused rather than half-written. `stage(_:)` cannot reach
+    /// `content.markdown` today (it is pull-only), so the projection is called
+    /// directly — the guard is a structural backstop, not a live code path.
+    ///
+    /// `title` and `content` ride along for the same `NOT NULL` reason as the
+    /// test below; without the guard this payload does not fail, it *succeeds*
+    /// and leaves a row that is tombstoned and not-deleted at once.
+    @Test("a partial patch whose two delete columns disagree is refused")
+    func partialPatchWithDisagreeingDeleteStateIsRefused() throws {
+        let store = try store()
+        try seedClaimed(store, id: "m1", content: "Milk\n", keys: [])
+
+        try store.database.write { conn in
+            #expect(throws: MarkdownProjectionError.partialPatchDeleteStateDisagrees(
+                resource: "content.markdown", id: "m1")) {
+                try MarkdownProjection().upsert(
+                    resource: "content.markdown", id: "m1", syncVersion: 2,
+                    data: ["title": .string("Groceries"), "content": .string("Milk\n"),
+                           "deleted_at": .string("2026-01-03T00:00:00Z"),
+                           "is_deleted": .number(0)],
+                    isFullRow: false, in: conn)
+            }
+        }
+    }
+
+    /// The other half, and the stated limit: a patch naming only one of the
+    /// two columns writes only that one. The missing half is exactly what the
+    /// patch is silent about — deriving it would either write a column the
+    /// caller never named (the force-bind that used to resurrect tombstoned
+    /// rows) or invent a timestamp. This pins that the gap is deliberate, so a
+    /// later reader cannot mistake it for an oversight or close it silently.
+    @Test("a partial patch naming one delete column leaves the other untouched")
+    func partialPatchNamingOneDeleteColumnLeavesTheOtherAlone() throws {
+        let store = try store()
+        try seedClaimed(store, id: "m1", content: "Milk\n", keys: [])
+
+        try store.database.write { conn in
+            // `title` and `content` ride along because both are `NOT NULL`
+            // with no `DEFAULT` and SQLite validates that on the row the
+            // `INSERT` would build, before it notices the conflict. The patch
+            // is still partial in the sense that matters here — it names one
+            // delete column and not the other.
+            try MarkdownProjection().upsert(
+                resource: "content.markdown", id: "m1", syncVersion: 2,
+                data: ["title": .string("Groceries"), "content": .string("Milk\n"),
+                       "is_deleted": .number(1)],
+                isFullRow: false, in: conn)
+        }
+
+        try store.database.read { conn in
+            let isDeleted = try Int.fetchOne(
+                conn, sql: "SELECT is_deleted FROM markdown WHERE id = 'm1'")
+            let deletedAt = try String.fetchOne(
+                conn, sql: "SELECT deleted_at FROM markdown WHERE id = 'm1'")
+            #expect(isDeleted == 1)
+            #expect(deletedAt == nil)
+        }
+    }
 }
