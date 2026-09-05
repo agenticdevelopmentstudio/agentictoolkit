@@ -5,7 +5,7 @@ import * as React from 'react';
 
 import { useStackLevel } from '@agentic-toolkit/resource';
 
-import type { DevRepo, Environment, RepoItem } from '../types';
+import type { AccessVerb, DevRepo, Environment, RepoItem } from '../types';
 
 /**
  * The Configure dialog's FRAME — the three things that are true of it before any of its
@@ -210,5 +210,73 @@ describe('the fleet as a file', () => {
     expect(await waitFor(() => dialog('Import configuration'))).toBeTruthy();
     // The bar button opens a plan; it never applies one.
     expect(onImport).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * THE VERBS LAND AFTER THE FIRST PAINT, AND A PRESS IN THAT WINDOW IS NOT A REFUSAL.
+ *
+ * The console paints its toolbar before the tree read returns, so Configure and then Add are
+ * both pressable while nothing yet knows what this operator may do. Pressing Add there raised
+ * "Not available / Still reading what you may do in this workspace." over the dialog — a modal
+ * answering no to a question that had not been asked, and that would have answered yes a
+ * moment later.
+ *
+ * Both halves are pinned here, because the cheap fix for the first breaks the second:
+ * dropping the press silently is the swallowed click `BarButton` exists to prevent, and
+ * treating every unlanded read as permission would hand a viewer the wizard.
+ */
+describe('a bar button pressed before the verbs have been read', () => {
+  function drawWithVerbs(verbs: readonly AccessVerb[] | undefined) {
+    const props = (v: readonly AccessVerb[] | undefined): React.ReactElement => (
+      <ConfigureDialog
+        open
+        onClose={() => {}}
+        client={{ workspace: 'acme' } as never}
+        groups={[]}
+        items={[]}
+        verbs={v}
+        onRegister={() => Promise.resolve()}
+        onRemove={() => Promise.resolve()}
+        onSaveSettings={() => Promise.resolve()}
+        onImport={() => Promise.resolve()}
+      />
+    );
+    const { rerender } = render(props(verbs));
+    return { land: (v: readonly AccessVerb[]) => rerender(props(v)) };
+  }
+
+  it('says nothing yet, then opens the wizard when the read grants it', async () => {
+    const user = userEvent.setup();
+    const { land } = drawWithVerbs(undefined);
+
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    // The press is held, not answered: no verdict has been reached, so there is nothing
+    // truthful to put on screen.
+    expect(screen.queryByText('Not available')).toBeNull();
+    expect(
+      screen.queryByText('Still reading what you may do in this workspace.'),
+    ).toBeNull();
+
+    land(['C', 'R', 'U', 'D', 'M']);
+
+    // And the press is not lost either — the operator gets the wizard they asked for, without
+    // having to notice the button went live and press it a second time.
+    expect(await screen.findByText('Repository')).toBeInTheDocument();
+  });
+
+  it('becomes the real refusal when the read grants nothing', async () => {
+    const user = userEvent.setup();
+    const { land } = drawWithVerbs(undefined);
+
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    land([]);
+
+    // A workspace that answered "nothing" IS a refusal, and it is spoken with the sentence
+    // that names the permission rather than the one about waiting.
+    expect(
+      await screen.findByText('You cannot register repositories here.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Repository')).toBeNull();
   });
 });

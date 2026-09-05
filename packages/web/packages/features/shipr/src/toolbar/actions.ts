@@ -29,6 +29,18 @@ export interface ButtonState {
   enabled: boolean;
   /** Empty when enabled. One short sentence otherwise, shown as the control's tooltip. */
   reason: string;
+  /**
+   * NOT YET, rather than NO — the verbs have not been read, so this control's answer is
+   * unknown rather than negative.
+   *
+   * `enabled` is false for both, because neither may be acted on this instant, and that is
+   * as far as the similarity goes. A refusal is a fact about the operator that will still be
+   * true in a second; this resolves on its own, usually before anyone finishes reading it.
+   * A surface that draws the two the same way tells an operator who pressed a control a
+   * fraction of a second early that they are not allowed to use it — which is the same
+   * false-absence `verbs` itself is three-state to avoid, leaking back out one layer up.
+   */
+  pending?: boolean;
 }
 
 export type ActionId =
@@ -103,8 +115,10 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
   // Pre-empts every verb-gated control below, and none of the ungated ones: Configure and
   // Integrations are always live precisely because they ask no verb, so there is nothing about
   // them left to be reading.
-  const pending =
-    verbs === undefined ? no('Still reading what you may do in this workspace.') : null;
+  const pending: ButtonState | null =
+    verbs === undefined
+      ? { ...no('Still reading what you may do in this workspace.'), pending: true }
+      : null;
   const nothing = targets.length === 0;
   const pipeline = (verb: AccessVerb, need: string): ButtonState =>
     pending ??

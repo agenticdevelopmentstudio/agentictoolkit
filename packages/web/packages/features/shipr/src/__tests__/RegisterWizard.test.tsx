@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RegisterWizard } from '../toolbar/RegisterWizard';
@@ -54,6 +54,9 @@ function draw(
     registeredSlugs?: string[];
     onSubmit?: (b: RegisterRequest) => Promise<void>;
     repositories?: typeof REPOSITORIES;
+    /** What each installation was granted, when a test cares that they differ. Keyed by
+     *  connection id; anything unnamed granted nothing. */
+    byConnection?: Record<string, typeof REPOSITORIES>;
     /** What the refresh answers, when the test cares. Defaults to the stored list, which is
      *  the ordinary case: nothing changed on GitHub between the two calls. */
     refreshed?: typeof REPOSITORIES;
@@ -63,16 +66,23 @@ function draw(
     connectionsError?: string;
   } = {},
 ) {
-  const stored = over.repositories ?? REPOSITORIES;
+  // One installation grants the list by default and the other grants nothing, because that is
+  // the shape every merge has to survive: an account with repositories beside an account
+  // without, both read, neither hiding the other.
+  const granted = over.byConnection ?? { c1: over.repositories ?? REPOSITORIES };
   const client = {
     connectionRepositories: vi
       .fn()
-      .mockResolvedValue({ repositories: stored, readAt: READ_AT }),
+      .mockImplementation(async (id: string) => ({
+        repositories: granted[id] ?? [],
+        readAt: READ_AT,
+      })),
     refreshConnectionRepositories: over.refreshError
       ? vi.fn().mockRejectedValue(new Error(over.refreshError))
-      : vi
-          .fn()
-          .mockResolvedValue({ repositories: over.refreshed ?? stored, readAt: READ_AT }),
+      : vi.fn().mockImplementation(async (id: string) => ({
+          repositories: over.refreshed ?? granted[id] ?? [],
+          readAt: READ_AT,
+        })),
     connectionDeclaration: vi.fn().mockResolvedValue(declaration),
   };
   const onSubmit = over.onSubmit ?? vi.fn().mockResolvedValue(undefined);
@@ -93,21 +103,111 @@ function draw(
   return { client, onSubmit };
 }
 
-/** Step 1 → step 2: pick the repository the list offers and press Next. */
+/**
+ * Which step is on screen, asked of the buttons rather than of a title.
+ *
+ * There IS no title any more — the wizard stopped being a modal, so the step heading these
+ * assertions used to read went with the dialog chrome. The buttons say the same thing and
+ * are what an operator actually navigates by: Back is dead on step 1, and step 3 is the only
+ * one that offers Register.
+ */
+const backButton = () => screen.getByRole('button', { name: 'Back' });
+
 async function toStepTwo(): Promise<void> {
   await userEvent.click(await screen.findByRole('button', { name: /acme\/site\b/ }));
   await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-  await screen.findByText(/step 2 of 3/);
+  await waitFor(() => expect(backButton()).not.toBeDisabled());
+}
+
+async function toStepThree(): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByRole('button', { name: 'Register' });
 }
 
 describe('RegisterWizard — step 1', () => {
-  it('reads the installation’s repositories rather than asking for a slug', async () => {
+  it('reads every installation’s repositories rather than asking for a slug', async () => {
     const { client } = draw(FALLBACK);
     expect(await screen.findByRole('button', { name: /acme\/site\b/ })).toBeTruthy();
-    // The FIRST connection, chosen for them: one installation is the common case, and a
-    // dialog that opens on "(choose one)" makes the operator answer a question with one
-    // possible answer before it will show them anything.
+    // BOTH, unprompted. There used to be a dropdown here and the wizard read only whichever
+    // installation it happened to open on, so a repository granted to the other one was
+    // invisible until the operator guessed which of two identical-looking apps to switch to.
     expect(client.connectionRepositories).toHaveBeenCalledWith('c1');
+    expect(client.connectionRepositories).toHaveBeenCalledWith('c2');
+  });
+
+  it('never asks which installation to look in', async () => {
+    // The dropdown, and the four alternative prose panels that hung under it explaining why it
+    // was empty, are what an operator used to meet before their own repositories. They are
+    // gone, and this asserts they stay gone.
+    draw(FALLBACK);
+    await screen.findByRole('button', { name: /acme\/site\b/ });
+    expect(screen.queryByLabelText('GitHub App installation')).toBeNull();
+  });
+
+  it('merges the installations into one browser', async () => {
+    draw(FALLBACK, {
+      byConnection: {
+        c1: [{ slug: 'acme/site', defaultBranch: 'trunk', private: true }],
+        c2: [{ slug: 'sandbox/toys', defaultBranch: 'main', private: false }],
+      },
+    });
+    // Two accounts, one list — and the owner column is what tells them apart, which is a thing
+    // an operator can read off the screen rather than a thing they had to know.
+    const orgs = await screen.findByRole('list', { name: 'Organizations' });
+    expect(within(orgs).getByRole('button', { name: /^acme — / })).toBeTruthy();
+    expect(within(orgs).getByRole('button', { name: /^sandbox — / })).toBeTruthy();
+  });
+
+  it('derives the installation from the repository that was picked', async () => {
+    // The whole reason the dropdown could go: which installation can reach a repository is
+    // knowable from the grant it came out of, and is not a thing anybody knows by heart.
+    const { client } = draw(FALLBACK, {
+      byConnection: {
+        c1: [{ slug: 'acme/site', defaultBranch: 'trunk', private: true }],
+        c2: [{ slug: 'sandbox/toys', defaultBranch: 'main', private: false }],
+      },
+    });
+    // The owner column is the browser's first half, so the other installation's account is
+    // reachable the ordinary way rather than by knowing it is a different installation.
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'sandbox — 1 repository' }),
+    );
+    await userEvent.click(
+      within(repoList()).getByRole('button', { name: /sandbox\/toys/ }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(backButton()).not.toBeDisabled());
+    expect(client.connectionDeclaration).toHaveBeenCalledWith(
+      'c2',
+      'sandbox/toys',
+      'main',
+    );
+  });
+
+  it('keeps the other installations’ repositories when one read fails', async () => {
+    // One account refusing is not every account refusing, and an empty browser is what the
+    // operator would otherwise be left holding.
+    const client = {
+      connectionRepositories: vi.fn().mockImplementation(async (id: string) => {
+        if (id === 'c2') throw new Error('installation suspended');
+        return { repositories: REPOSITORIES, readAt: READ_AT };
+      }),
+      refreshConnectionRepositories: vi
+        .fn()
+        .mockResolvedValue({ repositories: REPOSITORIES, readAt: READ_AT }),
+      connectionDeclaration: vi.fn().mockResolvedValue(FALLBACK),
+    };
+    render(
+      <RegisterWizard
+        open
+        onClose={vi.fn()}
+        client={client}
+        groups={[]}
+        connections={CONNECTIONS}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    expect(await screen.findByRole('button', { name: /acme\/site\b/ })).toBeTruthy();
   });
 
   it('offers an already registered repository disabled rather than omitting it', async () => {
@@ -127,40 +227,34 @@ describe('RegisterWizard — step 1', () => {
     await toStepTwo();
     expect(client.connectionDeclaration).toHaveBeenCalledWith('c1', 'acme/site', 'trunk');
   });
-
-  it('re-reads when a different installation is chosen', async () => {
-    const { client } = draw(FALLBACK);
-    await screen.findByRole('button', { name: /acme\/site\b/ });
-    await userEvent.selectOptions(
-      screen.getByLabelText('GitHub App installation'),
-      'c2',
-    );
-    expect(client.connectionRepositories).toHaveBeenLastCalledWith('c2');
-  });
 });
 
 /**
- * The three situations an absent installation list can be in.
+ * ONE empty box, three causes, three sentences.
  *
- * They share a shape — no list — and share nothing else, and for a while they shared one
- * sentence too: "No GitHub App installation". That sentence is a guess in two of the three
+ * They share a shape — no repositories — and share nothing else, and for a while they shared
+ * one sentence too: "No GitHub App installation". That sentence is a guess in two of the three
  * cases and flatly wrong in one, and the wrong one is the expensive one: it sends an operator
  * to GitHub to install an app they have already installed, over a read that simply failed.
+ *
+ * This used to be four alternative panels stacked under a dropdown. It is one line under the
+ * browser now, which is the same information in the place the operator is already looking.
  */
-describe('RegisterWizard — why there is no installation', () => {
-  it('says it is still reading while the list has not landed', async () => {
+describe('RegisterWizard — why the browser is empty', () => {
+  it('says it is still reading while the installations have not landed', async () => {
     draw(FALLBACK, { connections: undefined });
-    expect(
-      await screen.findByText(/Reading your GitHub App installations/),
-    ).toBeTruthy();
+    expect(await screen.findByText(/Reading your repositories/)).toBeTruthy();
   });
 
-  it('says the read failed, and why, rather than naming an absence', async () => {
+  it('says the installations read failed, and why, rather than naming an absence', async () => {
     draw(FALLBACK, { connections: undefined, connectionsError: 'network is down' });
     expect(await screen.findByText(/could not be read: network is down/)).toBeTruthy();
     // The one sentence that must NOT appear: it prescribes installing an app that may well
     // already be installed.
-    expect(screen.queryByText(/isn’t installed on any account/)).toBeNull();
+    expect(screen.queryByText(/hasn't been granted any repositories/)).toBeNull();
+    // And it must SETTLE. A failed read that leaves "reading…" on screen is the state this
+    // whole distinction exists to prevent, and it never resolves on its own.
+    expect(screen.queryByText(/Reading your repositories/)).toBeNull();
   });
 
   it('sends a read-and-empty list to the Test button for the second cause', async () => {
@@ -168,34 +262,32 @@ describe('RegisterWizard — why there is no installation', () => {
     // those apart, because only it asks GitHub out loud. Diagnosing it a second time here
     // would be two places answering one question.
     draw(FALLBACK, { connections: [] });
-    expect(await screen.findByText(/isn't installed on any account/)).toBeTruthy();
+    expect(
+      await screen.findByText(/hasn't been granted any repositories/),
+    ).toBeTruthy();
     expect(screen.getByText(/open Integrations and press Test/)).toBeTruthy();
   });
 
-  it.each([
-    ['the list has not landed', { connections: undefined } as const],
-    ['the read failed', { connections: undefined, connectionsError: 'network is down' } as const],
-    ['there are none', { connections: [] } as const],
-  ])('does not claim to be reading repositories when %s', async (_why, over) => {
-    // All three end with no installation SELECTED, and the repository field sits under a
-    // block that has just explained which one it is. A spinner there contradicts every one of
-    // those sentences and never resolves, because the read it claims to be doing is one no
-    // effect will ever start: there is no connection id to start it with.
-    draw(FALLBACK, over);
-    expect(
-      await screen.findByText(/listed once there is an installation to read them from/),
-    ).toBeTruthy();
-    expect(screen.queryByText(/Reading what this installation was granted/)).toBeNull();
+  it('says the repository read failed when the installations were fine', async () => {
+    const client = {
+      connectionRepositories: vi.fn().mockRejectedValue(new Error('rate limited')),
+      refreshConnectionRepositories: vi.fn(),
+      connectionDeclaration: vi.fn(),
+    };
+    render(
+      <RegisterWizard
+        open
+        onClose={vi.fn()}
+        client={client}
+        groups={[]}
+        connections={CONNECTIONS}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    expect(await screen.findByText(/rate limited/)).toBeTruthy();
   });
 });
 
-/**
- * The stored list, and the refresh behind it.
- *
- * The picker used to be built out of a live forge call on every open, so it opened on a
- * spinner and — whenever GitHub was slow, rate-limiting or briefly down — resolved to an empty
- * box indistinguishable from an installation that was granted nothing.
- */
 describe('RegisterWizard — the stored list', () => {
   it('draws the browser from what was written down, and asks GitHub behind it', async () => {
     const { client } = draw(FALLBACK);
@@ -237,8 +329,7 @@ describe('RegisterWizard — step 2 with shards declared', () => {
   it('carries both shards through to the confirmation, and sends no override', async () => {
     const { onSubmit } = draw(DECLARED);
     await toStepTwo();
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText(/step 3 of 3/);
+    await toStepThree();
     expect(screen.getByText(/create its 2 deployment repositories/)).toBeTruthy();
 
     await userEvent.click(screen.getByRole('button', { name: 'Register' }));
@@ -391,7 +482,7 @@ describe('RegisterWizard — the org and repo browser', () => {
 
     await userEvent.type(screen.getByLabelText('Filter repositories'), 'nope');
     expect(
-      screen.getByText(/No repository this installation granted matches/),
+      screen.getByText(/No repository this app was granted matches/),
     ).toBeTruthy();
   });
 
@@ -404,7 +495,7 @@ describe('RegisterWizard — the org and repo browser', () => {
       within(repoList()).getByRole('button', { name: /acme\/site\b/ }),
     );
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText(/step 2 of 3/);
+    await waitFor(() => expect(backButton()).not.toBeDisabled());
     expect(client.connectionDeclaration).toHaveBeenCalledWith('c1', 'acme/site', 'trunk');
   });
 });

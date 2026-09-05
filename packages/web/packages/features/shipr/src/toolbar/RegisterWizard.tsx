@@ -3,12 +3,6 @@
 import * as React from 'react';
 
 import { Button } from '@agenticdevelopertoolkit/ui/components/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@agenticdevelopertoolkit/ui/components/dialog';
 import { ErrorText } from '@agenticdevelopertoolkit/ui/components/error-text';
 import { Input } from '@agenticdevelopertoolkit/ui/components/input';
 import { Label } from '@agenticdevelopertoolkit/ui/components/label';
@@ -49,6 +43,13 @@ import { useSubmit } from './dialogs';
  * put the failure at the first push of a run instead of at the moment of choosing. So the
  * empty state still points at Integrations rather than at a search box: the filter narrows what
  * was granted, it never reaches past it.
+ *
+ * IT IS NOT A MODAL, and that is deliberate. It used to open as a Dialog on top of Configure,
+ * which is itself a Dialog — a popup over a popup, whose first screen was mostly an explanation
+ * of why the browser underneath it was empty. Registering is not an interruption of the
+ * repository list; it is the thing that ADDS to it, so it draws in the same pane the list draws
+ * in, and the browser is what is on screen when it opens. The host swaps one for the other and
+ * owns the close.
  *
  * WHAT IT IS ABOUT TO DO, in the words the confirm step uses: read the repository's committed
  * `.shipr` on its main branch; find or create the deployment repository, always private; seed
@@ -119,7 +120,7 @@ export function RegisterWizard({
   registeredSlugs,
   onManageConnections,
   onSubmit,
-}: RegisterWizardProps): React.ReactElement {
+}: RegisterWizardProps): React.ReactElement | null {
   const [step, setStep] = React.useState<Step>(1);
   const [connectionId, setConnectionId] = React.useState('');
   const [slug, setSlug] = React.useState('');
@@ -142,14 +143,38 @@ export function RegisterWizard({
   const [reading, setReading] = React.useState(false);
   const [readError, setReadError] = React.useState<string | null>(null);
 
-  const firstConnectionId = connections?.[0]?.id ?? '';
+  /**
+   * Which installation granted each repository, keyed by slug.
+   *
+   * This is what replaced the installation dropdown. Asking an operator to pick an installation
+   * before picking a repository asked them a question about our plumbing in order to answer a
+   * question about their code — and got it wrong half the time, because which installation
+   * granted a given repository is not a thing anyone knows off the top of their head. Every
+   * installation's repositories are read and merged into one browser instead, and the pick
+   * answers both questions at once: the slug they chose, and the installation that can reach it.
+   */
+  const [grantedBy, setGrantedBy] = React.useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
 
-  // Re-seeded on OPEN, not on mount: a dialog stays mounted while closed, and a second
+  const connectionIds = React.useMemo(
+    () => (connections ?? []).map((c) => c.id),
+    [connections],
+  );
+  /** The effect's key, rather than the array itself: the host rebuilds `connections` on every
+   *  render, and an equal-but-new array would re-read every installation each time. */
+  const connectionKey = connectionIds.join(',');
+  /** Whether the installations question has been ANSWERED, either way. A failed read is an
+   *  answer — it is the one that never arrives otherwise, and an empty box that says "reading…"
+   *  for the rest of the session is the exact failure this distinction exists to prevent. */
+  const connectionsSettled = connections !== undefined || Boolean(connectionsError);
+
+  // Re-seeded on OPEN, not on mount: the host may keep this mounted while closed, and a second
   // registration must not start on the answers of the first.
   React.useEffect(() => {
     if (!open) return;
     setStep(1);
-    setConnectionId(firstConnectionId);
+    setConnectionId('');
     setSlug('');
     setGroupId(defaultGroupId ?? '');
     setMainBranch('main');
@@ -158,60 +183,98 @@ export function RegisterWizard({
     setName('');
     setDecl(null);
     setReadError(null);
-  }, [open, firstConnectionId, defaultGroupId]);
+  }, [open, defaultGroupId]);
 
-  // The installation's repositories: what was written down, and then what GitHub says now.
+  // Every installation's repositories, merged into the one browser.
   //
-  // TWO CALLS, IN THAT ORDER, because they answer different questions and the operator needs
-  // the first answer immediately. The stored list is a database read that cannot fail on
-  // GitHub's account, so the browser is on screen without waiting on a forge round trip; the
-  // refresh replaces it behind them. When the refresh fails the stored list STAYS, with a note
+  // TWO CALLS PER INSTALLATION, IN THAT ORDER, because they answer different questions and the
+  // operator needs the first answer immediately. The stored list is a database read that cannot
+  // fail on GitHub's account, so the browser is on screen without waiting on a forge round trip;
+  // the refresh replaces it behind them. When a refresh fails the stored list STAYS, with a note
   // beside it — a list read an hour ago is a list you can pick from, and an empty box is not.
   //
-  // The first open after an integration is saved pays for two forge calls, because the stored
-  // read had nothing to draw on and went and asked itself. Deciding that from `readAt` would
-  // mean comparing the server's clock against the browser's to save one request, which is a
-  // worse trade than the request.
+  // The installations are read in PARALLEL and republished as each half lands, so one slow
+  // account does not hold the others off the screen, and one FAILING account does not take them
+  // with it: a failure becomes the empty state's sentence only when nothing at all was read.
   //
-  // `stale` discards every half of this when a later connection is chosen while an earlier
-  // one is still out, and is the whole reason this is not a bare `.then(setRepos)`.
+  // `stale` discards every half of this when the set of installations changes while reads are
+  // still out, and is the whole reason this is not a bare `.then(setRepos)`.
   React.useEffect(() => {
-    if (!open || !connectionId) {
-      setRepos(null);
+    if (!open || connectionIds.length === 0) {
+      // `null` is "still reading" and `[]` is "read, and there are none" — so an unread
+      // `connections` must not collapse into the same empty state as an empty one.
+      setRepos(connectionsSettled ? [] : null);
+      setGrantedBy(new Map());
       return;
     }
     let stale = false;
     setRepos(null);
+    setGrantedBy(new Map());
     setListError(null);
     setRefreshError(null);
-    void client.connectionRepositories(connectionId).then(
-      ({ repositories }) => {
-        if (stale) return;
-        setRepos(repositories);
-        return client.refreshConnectionRepositories(connectionId).then(
-          (fresh) => {
-            if (!stale) setRepos(fresh.repositories);
-          },
-          (e: Error) => {
-            // Deliberately not `setRepos`: what is on screen is a real answer GitHub gave,
-            // and replacing it with nothing because we could not ask again is the trade this
-            // whole cache exists to stop making.
-            if (!stale) setRefreshError(e.message);
-          },
-        );
-      },
-      (e: Error) => {
-        // The stored read failed, so there is nothing to leave standing and nothing to
-        // refresh. The empty state is all that is left, and it carries the reason.
-        if (stale) return;
-        setRepos([]);
-        setListError(e.message);
-      },
+
+    const byConnection = new Map<string, ForgeRepository[]>();
+    const storedFailures: string[] = [];
+    const refreshFailures: string[] = [];
+
+    const publish = () => {
+      if (stale) return;
+      setRefreshError(refreshFailures.length > 0 ? refreshFailures.join('; ') : null);
+      if (byConnection.size === 0) {
+        // Nothing has landed. Only once every read has SETTLED is that an empty list rather
+        // than a list still arriving.
+        if (storedFailures.length === connectionIds.length) {
+          setRepos([]);
+          setListError(storedFailures.join('; '));
+        }
+        return;
+      }
+      // Deduped by slug, because two installations on one account are granted overlapping
+      // repositories and the same repository twice is two rows the operator cannot tell apart.
+      const seen = new Map<string, ForgeRepository>();
+      const from = new Map<string, string>();
+      for (const [id, list] of byConnection) {
+        for (const repo of list) {
+          if (seen.has(repo.slug)) continue;
+          seen.set(repo.slug, repo);
+          from.set(repo.slug, id);
+        }
+      }
+      setRepos([...seen.values()]);
+      setGrantedBy(from);
+      setListError(null);
+    };
+
+    void Promise.all(
+      connectionIds.map(async (id) => {
+        try {
+          const { repositories } = await client.connectionRepositories(id);
+          byConnection.set(id, repositories);
+        } catch (e) {
+          storedFailures.push((e as Error).message);
+          publish();
+          return;
+        }
+        publish();
+        try {
+          const fresh = await client.refreshConnectionRepositories(id);
+          byConnection.set(id, fresh.repositories);
+        } catch (e) {
+          // Deliberately not clearing the list: what is on screen is a real answer GitHub
+          // gave, and replacing it with nothing because we could not ask again is the trade
+          // this whole cache exists to stop making.
+          refreshFailures.push((e as Error).message);
+        }
+        publish();
+      }),
     );
+
     return () => {
       stale = true;
     };
-  }, [open, connectionId, client]);
+    // `connectionKey` stands in for `connectionIds`; see its comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, connectionKey, connectionsSettled, client]);
 
   const registered = React.useMemo(
     () => new Set(registeredSlugs ?? []),
@@ -236,15 +299,22 @@ export function RegisterWizard({
   /** The file already named every mirror — see `DeclarationResponse`. */
   const declared = decl?.deployments ?? null;
 
-  const onPickRepo = React.useCallback((repo: ForgeRepository) => {
-    setSlug(repo.slug);
-    // The forge's own answer, not `main`: a repository whose default branch is `master` or
-    // `trunk` is otherwise registered against a branch that does not exist, and the first
-    // status run is where that turns up.
-    setMainBranch(repo.defaultBranch);
-    setDecl(null);
-    setReadError(null);
-  }, []);
+  const onPickRepo = React.useCallback(
+    (repo: ForgeRepository) => {
+      setSlug(repo.slug);
+      // The installation is DERIVED from the pick, never asked for. `connectionDeclaration` and
+      // the run itself both need one that can actually reach this repository, and the browser
+      // knows which one that is because the repository came out of its grant.
+      setConnectionId(grantedBy.get(repo.slug) ?? '');
+      // The forge's own answer, not `main`: a repository whose default branch is `master` or
+      // `trunk` is otherwise registered against a branch that does not exist, and the first
+      // status run is where that turns up.
+      setMainBranch(repo.defaultBranch);
+      setDecl(null);
+      setReadError(null);
+    },
+    [grantedBy],
+  );
 
   /** Step 1 → 2. The declaration is read HERE rather than on the pick, because it is what step
    *  2 is: with shards declared the step has nothing to ask, and without them it has two
@@ -301,94 +371,85 @@ export function RegisterWizard({
   const canNext = Boolean(connectionId && slug) && !reading;
   const canRegister = targets.length > 0 && !busy;
 
+  // Unmounted rather than hidden while closed, so the host's pane holds the repository list
+  // and nothing else. The reset effect above still keys on `open` — a host that keeps this
+  // mounted across opens gets the same fresh start a remount gives.
+  if (!open) return null;
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            Register a repository
-            <span className="pl-2 text-sm font-normal text-apt-text-muted">
-              step {step} of 3
-            </span>
-          </DialogTitle>
-        </DialogHeader>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-auto">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (step === 3) {
+            if (canRegister) run();
+          } else if (canNext) {
+            step === 1 ? onNext() : setStep(3);
+          }
+        }}
+        className="flex min-w-0 flex-col gap-3"
+      >
+        {step === 1 ? (
+          <StepConnection
+            repos={repos}
+            connectionsError={connectionsError}
+            listError={listError}
+            refreshError={refreshError}
+            registered={registered}
+            slug={slug}
+            onPick={onPickRepo}
+            onManageConnections={onManageConnections}
+            groups={groups}
+            groupId={groupId}
+            onGroup={setGroupId}
+            mainBranch={mainBranch}
+            onMainBranch={setMainBranch}
+            preparedBranch={preparedBranch}
+            onPreparedBranch={setPreparedBranch}
+          />
+        ) : step === 2 ? (
+          <StepTarget
+            slug={slug}
+            declared={declared}
+            note={decl?.note}
+            orgs={orgs}
+            owner={owner}
+            onOwner={setOwner}
+            name={name}
+            onName={setName}
+          />
+        ) : (
+          <StepConfirm slug={slug} mainBranch={mainBranch} targets={targets} />
+        )}
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (step === 3) {
-              if (canRegister) run();
-            } else if (canNext) {
-              step === 1 ? onNext() : setStep(3);
-            }
-          }}
-          className="flex min-w-0 flex-col gap-3"
-        >
-          {step === 1 ? (
-            <StepConnection
-              connections={connections}
-              connectionsError={connectionsError}
-              connectionId={connectionId}
-              onConnection={setConnectionId}
-              repos={repos}
-              listError={listError}
-              refreshError={refreshError}
-              registered={registered}
-              slug={slug}
-              onPick={onPickRepo}
-              onManageConnections={onManageConnections}
-              groups={groups}
-              groupId={groupId}
-              onGroup={setGroupId}
-              mainBranch={mainBranch}
-              onMainBranch={setMainBranch}
-              preparedBranch={preparedBranch}
-              onPreparedBranch={setPreparedBranch}
-            />
-          ) : step === 2 ? (
-            <StepTarget
-              slug={slug}
-              declared={declared}
-              note={decl?.note}
-              orgs={orgs}
-              owner={owner}
-              onOwner={setOwner}
-              name={name}
-              onName={setName}
-            />
-          ) : (
-            <StepConfirm slug={slug} mainBranch={mainBranch} targets={targets} />
-          )}
+        <ErrorText error={error ?? readError ?? null} />
 
-          <ErrorText error={error ?? readError ?? null} />
-
-          <div className="flex items-center justify-between gap-3 pt-1">
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={step === 1 || busy}
-              onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
-            >
-              Back
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={step === 1 || busy}
+            onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
+          >
+            Back
+          </Button>
+          <div className="flex items-center gap-3">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
             </Button>
-            <div className="flex items-center gap-3">
-              <Button type="button" variant="ghost" onClick={onClose}>
-                Cancel
+            {step === 3 ? (
+              <Button type="submit" disabled={!canRegister}>
+                {busy ? 'Registering…' : 'Register'}
               </Button>
-              {step === 3 ? (
-                <Button type="submit" disabled={!canRegister}>
-                  {busy ? 'Registering…' : 'Register'}
-                </Button>
-              ) : (
-                <Button type="submit" disabled={!canNext}>
-                  {reading ? 'Reading .shipr…' : 'Next'}
-                </Button>
-              )}
-            </div>
+            ) : (
+              <Button type="submit" disabled={!canNext}>
+                {reading ? 'Reading .shipr…' : 'Next'}
+              </Button>
+            )}
           </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -421,13 +482,17 @@ function RepoBrowser({
   const [filter, setFilter] = React.useState('');
   const [ownerPick, setOwnerPick] = React.useState<string | null>(null);
 
-  // A new installation is a new list of owners, and the old pick names nobody in it. Keyed on
-  // the array rather than on a connection id, because this component is handed the list and
-  // never the thing that produced it.
+  // A different set of repositories is a different list of owners, and the old pick names
+  // nobody in it. Keyed on the SLUGS rather than on the array, because the list is merged from
+  // every installation and republished as each read lands: the identity changes several times
+  // for one open, and keying on it would clear the operator's filter out from under them
+  // mid-typing. This component is handed the list and never the thing that produced it, so the
+  // list's own contents are the only stable name for "a different list".
+  const signature = repos.map((r) => r.slug).join(',');
   React.useEffect(() => {
     setFilter('');
     setOwnerPick(null);
-  }, [repos]);
+  }, [signature]);
 
   const needle = filter.trim().toLowerCase();
   const matched = React.useMemo(
@@ -469,7 +534,7 @@ function RepoBrowser({
       />
       {byOwner.length === 0 ? (
         <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
-          No repository this installation granted matches “{filter.trim()}”.
+          No repository this app was granted matches “{filter.trim()}”.
         </p>
       ) : (
         <div className="grid grid-cols-[minmax(0,11rem)_1fr] overflow-hidden rounded border border-apt-border bg-apt-surface-2">
@@ -548,12 +613,19 @@ function RepoBrowser({
   );
 }
 
+/**
+ * Step 1: the browser, and the three fields the registration cannot compute.
+ *
+ * THERE IS NO INSTALLATION PICKER. There used to be one, above the repository list, with four
+ * alternative prose panels underneath explaining why the list was empty — so the first thing an
+ * operator saw was an argument about GitHub App installations rather than their own
+ * repositories. Every installation is read and merged into the one browser now (see `grantedBy`
+ * in {@link RegisterWizard}), and the installation is derived from whichever repository is
+ * picked. The question was never one an operator could answer better than we can.
+ */
 function StepConnection({
-  connections,
-  connectionsError,
-  connectionId,
-  onConnection,
   repos,
+  connectionsError,
   listError,
   refreshError,
   registered,
@@ -568,11 +640,8 @@ function StepConnection({
   preparedBranch,
   onPreparedBranch,
 }: {
-  connections?: readonly ForgeConnection[];
-  connectionsError: string | null;
-  connectionId: string;
-  onConnection: (id: string) => void;
   repos: ForgeRepository[] | null;
+  connectionsError: string | null;
   listError: string | null;
   refreshError: string | null;
   registered: ReadonlySet<string>;
@@ -590,51 +659,6 @@ function StepConnection({
   return (
     <>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="shipr-register-connection">GitHub App installation</Label>
-        {connections && connections.length > 0 ? (
-          <Select
-            id="shipr-register-connection"
-            value={connectionId}
-            onChange={(e) => onConnection(e.target.value)}
-          >
-            {connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.accountLogin ? `${c.accountLogin} — ${c.label}` : c.label}
-              </option>
-            ))}
-          </Select>
-        ) : connectionsError ? (
-          // The read FAILED. Its own sentence, because "we could not ask" and "we asked and
-          // there are none" prescribe opposite next moves, and the one thing that must never
-          // happen here is telling an operator to go install an app they have already
-          // installed.
-          <Missing
-            text={`Your GitHub App installations could not be read: ${connectionsError}`}
-            onManageConnections={onManageConnections}
-          />
-        ) : connections === undefined ? (
-          <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
-            Reading your GitHub App installations…
-          </p>
-        ) : (
-          // Read, and empty. NOT a hidden picker: an installation is what makes every step
-          // after this one possible — the repository list, the deployment repository, the
-          // pushes — so its absence is stated where the list would have been rather than
-          // discovered at the first run.
-          //
-          // The second sentence exists because this state has two causes and only one of them
-          // is visible from here. Nothing is installed, or the credentials the backend holds
-          // are not credentials GitHub accepts — and that second question belongs to the Test
-          // button on the integration, which asks GitHub out loud and reports what it says.
-          // Answering it a second time here would be two places diagnosing one thing.
-          <Missing
-            text="This app isn't installed on any account. Install it on GitHub — on your own account or an organization — and its repositories will be listed here. If you have already installed it, open Integrations and press Test: that says what GitHub is refusing."
-            onManageConnections={onManageConnections}
-          />
-        )}
-      </div>
-
-      <div className="flex flex-col gap-1.5">
         <Label>Repository</Label>
         {/* Above the list rather than inside it, because it qualifies whichever of the three
             things below is showing — including the empty one, where "granted nothing" and
@@ -645,23 +669,27 @@ function StepConnection({
             {refreshError}
           </p>
         ) : null}
-        {!connectionId ? (
-          // There is no installation to read FROM, so nothing is being read and saying
-          // otherwise is the same conflation this whole block exists to undo: the field above
-          // has just explained — in one of three different sentences — why there is none, and
-          // a spinner underneath it would contradict every one of them and never resolve.
+        {repos === null ? (
           <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
-            Repositories are listed once there is an installation to read them from.
-          </p>
-        ) : repos === null ? (
-          <p className="rounded border border-apt-border bg-apt-surface-2 px-3 py-2 text-xs text-apt-text-muted">
-            Reading what this installation was granted…
+            Reading your repositories…
           </p>
         ) : repos.length === 0 ? (
+          // ONE line, and it is the whole of what used to be four panels. An empty box has
+          // three causes here and they prescribe different next moves — the installations could
+          // not be read, the repositories could not be read, or both were read and the app is
+          // granted nothing — so the sentence names which one, and the button goes to the only
+          // surface that can act on any of them.
+          //
+          // The last sentence exists because the third cause itself splits two ways, and only
+          // one half is visible from here: nothing is installed, or the credentials the backend
+          // holds are not credentials GitHub accepts. That second question belongs to the Test
+          // button on the integration, which asks GitHub out loud and reports what it says.
           <Missing
             text={
-              listError ??
-              'This installation was granted no repositories. Grant it the repository on GitHub and it will appear here.'
+              connectionsError
+                ? `Your GitHub App installations could not be read: ${connectionsError}`
+                : (listError ??
+                  "This app hasn't been granted any repositories. Install it on GitHub — on your own account or an organization — and its repositories will be listed here. If you have already installed it, open Integrations and press Test: that says what GitHub is refusing.")
             }
             onManageConnections={onManageConnections}
           />

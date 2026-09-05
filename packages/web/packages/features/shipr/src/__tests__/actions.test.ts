@@ -228,6 +228,11 @@ describe('toolbarState — before the verbs have been read', () => {
     });
     expect(s[id].enabled).toBe(false);
     expect(s[id].reason).toBe(PENDING);
+    // AND IT SAYS SO IN A FIELD, not only in prose. `enabled: false` is what a refusal and a
+    // not-yet-read have in common, so a surface that has only that has no way to tell them
+    // apart and draws both as no — which is how "Not available" came to be shown over the
+    // Configure dialog for a permission the operator held all along.
+    expect(s[id].pending).toBe(true);
   });
 
   it('leaves the two ungated controls alone', () => {
@@ -249,5 +254,8 @@ describe('toolbarState — before the verbs have been read', () => {
     // would leave them waiting forever.
     const s = state({}, []);
     expect(s.register.reason).toBe('You cannot register repositories here.');
+    // The other half of the same distinction: a real refusal must NOT carry the flag, or
+    // every surface that waits on it waits for a read that has already landed.
+    expect(s.register.pending).toBeFalsy();
   });
 });

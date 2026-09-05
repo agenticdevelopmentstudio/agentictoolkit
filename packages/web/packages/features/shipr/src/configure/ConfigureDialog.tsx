@@ -21,7 +21,7 @@ import { downloadDocument } from '../exchange/files';
 import { ImportDialog } from '../exchange/ImportDialog';
 import type { ImportPlan } from '../exchange/plan';
 import { SettingsForm, type RepoSettingsPatch } from '../settings/SettingsForm';
-import { toolbarState } from '../toolbar/actions';
+import { toolbarState, type ButtonState } from '../toolbar/actions';
 import { TypeToConfirmDialog } from '../toolbar/dialogs';
 import { RegisterWizard } from '../toolbar/RegisterWizard';
 import type { Selection } from '../selection';
@@ -257,112 +257,131 @@ function ConfigureBody({
 
   return (
     <>
-      {/* ABOVE the rail, and the dialog's bar rather than the list's — see the note at the
-          top of this file. Every button on it acts on the repository list, which is what
-          makes it the right bar for them and was what made it the wrong bar for the forge
-          accounts that used to sit on its right-hand end. */}
-      <div className="flex items-center gap-2">
-        <BarButton
-          label="Add"
-          icon={<Plus />}
-          state={buttons.register}
-          onClick={() => setWizard(true)}
-          onRefused={setRefused}
-        />
-        <BarButton
-          label="Remove"
-          icon={<Minus />}
-          state={buttons.unregister}
-          destructive
-          onClick={() => selected && setRemoving(selected)}
-          onRefused={setRefused}
-        />
-
-        {/* THE FLEET AS A FILE, both directions, on the bar that already owns the repository
-            list — because that list is exactly what the file holds. Import is gated by the
-            same permission as Add, since every `+` row in its plan IS an Add. Export is not
-            gated at all: it writes nothing, and it is built from rows already on the screen,
-            so anyone who can read this list can already read everything in the file. */}
-        <BarButton
-          label="Import"
-          icon={<Upload />}
-          state={buttons.register}
-          onClick={() => setImporting(true)}
-          onRefused={setRefused}
-        />
-        <BarButton
-          label="Export"
-          icon={<Download />}
-          state={{ enabled: items.length > 0, reason: 'Nothing is registered yet.' }}
-          onClick={() => downloadDocument(buildDocument({ groups, items }))}
-          onRefused={setRefused}
-        />
-      </div>
-
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-apt-border">
-        <StandaloneRailHost>
-          <StackLevels levels={[level]}>
-            <DetailPane
-              selected={selected}
-              onSaveSettings={onSaveSettings}
-              onSaved={onClose}
-            />
-          </StackLevels>
-        </StandaloneRailHost>
-      </div>
-
       {/*
-        OK AND CANCEL MEAN SOMETHING HERE, which is the only reason they are worth drawing.
-        Everything else this dialog does is committed by its own control the moment it is
-        confirmed — Add walks a wizard, Remove makes you type the slug — and none of it is
-        undone by closing. The environment boxes are the one thing held in hand: OK submits
-        them and closes, Cancel closes and drops them, which is what a modal's two buttons
-        are expected to mean and what a lone corner "×" could not say.
+        ONE PANE, ONE THING IN IT. Registering used to open as a Dialog on top of this one —
+        a popup over a popup, whose first screen was mostly prose explaining why the browser
+        underneath it was empty. But registering is not an interruption of the repository
+        list; it is the thing that ADDS to it, so it draws where the list draws, and the
+        browser is what is on screen the moment Add is pressed.
 
-        `form=` rather than a click handler, and only while a repository is selected: the
-        boxes live in a pane in the middle of this dialog, so the browser's own mechanism for
-        submitting a form from outside it is the whole implementation — the alternative is
-        lifting every checkbox up here so the footer can build the patch itself, and then two
-        surfaces compute the same diff. With nothing selected there is no form and no draft,
-        and OK is simply the way out.
+        The bar and the footer go with the list. Add/Remove/Import/Export act on a list that
+        is not being shown, and this dialog's own OK/Cancel would sit under the wizard's
+        Back/Cancel/Next saying something different by two buttons that look the same. The
+        wizard owns its own way out, and both of its exits — Cancel, and a completed
+        registration — land back on the list.
       */}
-      <DialogFooter>
-        <Button type="button" variant="ghost" onClick={onClose}>
-          Cancel
-        </Button>
-        {selected ? (
-          <Button type="submit" form={SETTINGS_FORM_ID}>
-            OK
-          </Button>
-        ) : (
-          <Button type="button" onClick={onClose}>
-            OK
-          </Button>
-        )}
-      </DialogFooter>
+      {wizard ? (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-apt-border p-3">
+          <RegisterWizard
+            open={wizard}
+            onClose={() => setWizard(false)}
+            client={client}
+            groups={groups}
+            connections={connections}
+            connectionsError={connectionsError}
+            registeredSlugs={rows.map((r) => r.devRepo.slug)}
+            /* Closes the wizard on the way out. The console is about to swap this whole dialog
+               for Integrations, so leaving the wizard open would leave it mounted behind a
+               dialog it can no longer be seen from — and showing again, mid-form, if the
+               operator came back to Configure. */
+            onManageConnections={
+              onManageConnections
+                ? () => {
+                    setWizard(false);
+                    onManageConnections();
+                  }
+                : undefined
+            }
+            onSubmit={onRegister}
+          />
+        </div>
+      ) : (
+        <>
+          {/* ABOVE the rail, and the dialog's bar rather than the list's — see the note at the
+              top of this file. Every button on it acts on the repository list, which is what
+              makes it the right bar for them and was what made it the wrong bar for the forge
+              accounts that used to sit on its right-hand end. */}
+          <div className="flex items-center gap-2">
+            <BarButton
+              label="Add"
+              icon={<Plus />}
+              state={buttons.register}
+              onClick={() => setWizard(true)}
+              onRefused={setRefused}
+            />
+            <BarButton
+              label="Remove"
+              icon={<Minus />}
+              state={buttons.unregister}
+              destructive
+              onClick={() => selected && setRemoving(selected)}
+              onRefused={setRefused}
+            />
 
-      <RegisterWizard
-        open={wizard}
-        onClose={() => setWizard(false)}
-        client={client}
-        groups={groups}
-        connections={connections}
-        connectionsError={connectionsError}
-        registeredSlugs={rows.map((r) => r.devRepo.slug)}
-        /* Closes the wizard on the way out. The console is about to swap this whole dialog
-           for Integrations, so leaving the wizard open would leave it mounted behind a
-           dialog it can no longer be seen from — and showing again, mid-form, if the
-           operator came back to Configure. */
-        onManageConnections={
-          onManageConnections
-            ? () => {
-                setWizard(false);
-                onManageConnections();
-              }
-            : undefined
-        }
-        onSubmit={onRegister}
-      />
+            {/* THE FLEET AS A FILE, both directions, on the bar that already owns the repository
+                list — because that list is exactly what the file holds. Import is gated by the
+                same permission as Add, since every `+` row in its plan IS an Add. Export is not
+                gated at all: it writes nothing, and it is built from rows already on the screen,
+                so anyone who can read this list can already read everything in the file. */}
+            <BarButton
+              label="Import"
+              icon={<Upload />}
+              state={buttons.register}
+              onClick={() => setImporting(true)}
+              onRefused={setRefused}
+            />
+            <BarButton
+              label="Export"
+              icon={<Download />}
+              state={{ enabled: items.length > 0, reason: 'Nothing is registered yet.' }}
+              onClick={() => downloadDocument(buildDocument({ groups, items }))}
+              onRefused={setRefused}
+            />
+          </div>
+
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-apt-border">
+            <StandaloneRailHost>
+              <StackLevels levels={[level]}>
+                <DetailPane
+                  selected={selected}
+                  onSaveSettings={onSaveSettings}
+                  onSaved={onClose}
+                />
+              </StackLevels>
+            </StandaloneRailHost>
+          </div>
+
+          {/*
+            OK AND CANCEL MEAN SOMETHING HERE, which is the only reason they are worth drawing.
+            Everything else this dialog does is committed by its own control the moment it is
+            confirmed — Add walks a wizard, Remove makes you type the slug — and none of it is
+            undone by closing. The environment boxes are the one thing held in hand: OK submits
+            them and closes, Cancel closes and drops them, which is what a modal's two buttons
+            are expected to mean and what a lone corner "×" could not say.
+
+            `form=` rather than a click handler, and only while a repository is selected: the
+            boxes live in a pane in the middle of this dialog, so the browser's own mechanism for
+            submitting a form from outside it is the whole implementation — the alternative is
+            lifting every checkbox up here so the footer can build the patch itself, and then two
+            surfaces compute the same diff. With nothing selected there is no form and no draft,
+            and OK is simply the way out.
+          */}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            {selected ? (
+              <Button type="submit" form={SETTINGS_FORM_ID}>
+                OK
+              </Button>
+            ) : (
+              <Button type="button" onClick={onClose}>
+                OK
+              </Button>
+            )}
+          </DialogFooter>
+        </>
+      )}
 
       <ImportDialog
         open={importing}
@@ -430,6 +449,20 @@ function ConfigureBody({
  * refusal for assistive tech and the greyed-out look for everyone else, while leaving the
  * button a real target: pressing it hands `state.reason` to `onRefused`, which says out
  * loud what the tooltip never got to.
+ *
+ * `state.pending` IS NOT A REFUSAL AND MUST NOT BE SPOKEN AS ONE. This console paints its
+ * toolbar before the first tree read lands, so Add is pressable for a fraction of a second
+ * while nothing yet knows whether it is allowed — and pressing it in that window used to
+ * raise "Not available / Still reading what you may do in this workspace." over the dialog,
+ * a modal that told the operator no to a question that had not been asked yet and would
+ * have answered yes. Nor may the press simply be dropped: a swallowed click is the failure
+ * this component exists to prevent, and it is worse here, because the control goes live
+ * immediately afterwards and the operator is left believing they already pressed it.
+ *
+ * So a pending press is ARMED rather than answered. When the read lands, the intent is
+ * spent on whatever the real answer turned out to be — the action if it is allowed, the
+ * genuine refusal if it is not. Either way the operator gets the outcome of the press they
+ * actually made, and never a refusal that was only ever "not yet".
  */
 function BarButton({
   label,
@@ -441,24 +474,40 @@ function BarButton({
 }: {
   label: string;
   icon: React.ReactNode;
-  state: { enabled: boolean; reason: string };
+  state: ButtonState;
   destructive?: boolean;
   onClick: () => void;
   /** Pressed while refused. Gets `state.reason`, or a stand-in when the gate named none. */
   onRefused: (reason: string) => void;
 }): React.ReactElement {
+  const [armed, setArmed] = React.useState(false);
+
+  // The whole point is to act on a state this render does not have yet, so the arming has to
+  // survive to the render that does. `refuse` is rebuilt each render and the effect is keyed
+  // on `armed` and `state`, which is what makes it fire on the read landing rather than on a
+  // press — an armed button whose state never resolves simply stays armed, which is correct.
+  const refuse = (): void => onRefused(state.reason || `${label} is not available here.`);
+  React.useEffect(() => {
+    if (!armed || state.pending) return;
+    setArmed(false);
+    if (state.enabled) onClick();
+    else refuse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armed, state.pending, state.enabled]);
+
   return (
     <Button
       type="button"
       size="xs"
       variant={destructive ? 'destructive-ghost' : 'ghost'}
       aria-disabled={!state.enabled}
+      aria-busy={state.pending || armed ? true : undefined}
       className={state.enabled ? undefined : 'opacity-50'}
-      onClick={() =>
-        state.enabled
-          ? onClick()
-          : onRefused(state.reason || `${label} is not available here.`)
-      }
+      onClick={() => {
+        if (state.enabled) onClick();
+        else if (state.pending) setArmed(true);
+        else refuse();
+      }}
     >
       {icon}
       {label}
