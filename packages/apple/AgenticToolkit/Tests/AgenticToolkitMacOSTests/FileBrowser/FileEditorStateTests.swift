@@ -13,6 +13,14 @@ private func makeClearEditor(_: DocumentUri) -> AnyView {
     AnyView(Color.clear)
 }
 
+/// Stands in for whichever view happens to hold the caret. The focus rules in
+/// `CachedEditorStackView.sync` turn only on whether the window's first
+/// responder is a descendant of the stack, so a bare focusable view is a
+/// truthful stand-in for both an editor's text view and the file tree.
+private final class FocusableProbeView: NSView {
+    override var acceptsFirstResponder: Bool { true }
+}
+
 /// The behaviours the file editor's document model exists for, none of which a
 /// compile can show: that a cached document survives the selection leaving it
 /// and coming back, that the cache is bounded, that a pane releasing a
@@ -350,6 +358,85 @@ struct CachedEditorStackViewTests {
             #expect(hostA.isHidden == (active != uriA))
             #expect(hostB.isHidden == (active != uriB))
         }
+    }
+
+    /// With nothing to show, the container must be out of `hitTest` as well as
+    /// out of sight. It is mounted unconditionally on top of everything else
+    /// the pane draws, and a plain `NSView` claims any point inside its bounds
+    /// that no subview takes — so a QuickLook preview underneath rendered but
+    /// could not be scrolled.
+    @Test("with nothing shown the container hides itself, so it cannot claim clicks meant for QuickLook")
+    func inactiveContainerIsHiddenSoItCannotClaimHits() throws {
+        let parent = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let stack = CachedEditorStackView(frame: parent.bounds)
+        parent.addSubview(stack)
+        let point = NSPoint(x: 200, y: 150)
+
+        stack.sync(uris: [uriA], activeURI: uriA, makeEditor: makeClearEditor)
+        #expect(stack.isHidden == false)
+
+        // A PDF, a movie, a directory, or a load still in flight: no editor is
+        // shown, so nothing of this stack may be hit.
+        stack.sync(uris: [uriA], activeURI: nil, makeEditor: makeClearEditor)
+        #expect(stack.isHidden)
+        #expect(parent.hitTest(point) === parent)
+        // …and hiding is all that happened: the editor is still mounted.
+        #expect(stack.host(for: uriA) != nil)
+
+        stack.sync(uris: [uriA], activeURI: uriA, makeEditor: makeClearEditor)
+        #expect(stack.isHidden == false)
+        #expect(parent.hitTest(point) !== parent)
+    }
+
+    /// AppKit does not resign a first responder because an ancestor became
+    /// hidden, so clearing the selection while the caret was in the editor
+    /// left keystrokes reaching a text view the user cannot see.
+    @Test("clearing the selection takes first responder out of the hidden editor")
+    func clearingTheSelectionResignsFocus() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let stack = CachedEditorStackView(frame: window.contentLayoutRect)
+        window.contentView?.addSubview(stack)
+
+        stack.sync(uris: [uriA], activeURI: uriA, makeEditor: makeClearEditor)
+
+        // Stands in for the editor's text view: what matters to `sync` is only
+        // that the window's first responder is a descendant of the stack.
+        let caret = FocusableProbeView()
+        stack.addSubview(caret)
+        #expect(window.makeFirstResponder(caret))
+        #expect(window.firstResponder === caret)
+
+        stack.sync(uris: [uriA], activeURI: nil, makeEditor: makeClearEditor)
+
+        #expect(window.firstResponder !== caret)
+    }
+
+    @Test("a selection change elsewhere in the window keeps its own first responder")
+    func focusOutsideTheStackIsLeftAlone() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let stack = CachedEditorStackView(frame: window.contentLayoutRect)
+        window.contentView?.addSubview(stack)
+
+        // Stands in for the file tree, which reselects on every arrow key.
+        let tree = FocusableProbeView()
+        window.contentView?.addSubview(tree)
+        #expect(window.makeFirstResponder(tree))
+
+        stack.sync(uris: [uriA], activeURI: uriA, makeEditor: makeClearEditor)
+        #expect(window.firstResponder === tree)
+
+        stack.sync(uris: [uriA], activeURI: nil, makeEditor: makeClearEditor)
+        #expect(window.firstResponder === tree)
     }
 
     @Test("an evicted document's editor is removed from the view hierarchy")

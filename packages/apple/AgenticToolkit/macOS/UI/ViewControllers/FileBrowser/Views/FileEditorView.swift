@@ -282,9 +282,26 @@ final class CachedEditorStackView: NSView {
             }
         }
 
-        for (uri, host) in hostsByURI {
-            host.isHidden = uri != activeURI
+        let visibleHost = activeURI.flatMap { hostsByURI[$0] }
+        for host in hostsByURI.values {
+            host.isHidden = host !== visibleHost
         }
+
+        // The container hides itself when it is showing nothing.
+        //
+        // It is mounted unconditionally and pinned to the whole pane, and a
+        // plain `NSView` returns *itself* from `hitTest(_:)` for any point
+        // inside its bounds that no subview claims — AppKit exempts neither
+        // transparency nor emptiness. Hiding only the hosts therefore left a
+        // dead, invisible sheet on top of whatever else the pane draws: a
+        // QuickLook preview underneath rendered fine but could not be
+        // scrolled, and a movie's transport controls did not respond, because
+        // the empty container took every click and scroll. `isHidden` on the
+        // container is the same documented exclusion the hosts rely on, and
+        // unlike a `hitTest` override it keeps the view honest about its own
+        // visibility — nothing else has to infer "showing nothing" from the
+        // absence of a claim.
+        isHidden = visibleHost == nil
 
         guard shownURI != activeURI else { return }
         shownURI = activeURI
@@ -304,17 +321,33 @@ final class CachedEditorStackView: NSView {
         hostsByURI[uri] = host
     }
 
-    /// Puts the caret in the editor that just became visible.
+    /// Puts the caret in the editor that just became visible — and takes it
+    /// out of the one that just stopped being visible.
     ///
-    /// Only when focus already belonged to this stack (or to nothing). Before
-    /// one-editor-per-document there was a single editor that simply kept
-    /// first responder across a switch; restoring that is the point. Taking
-    /// focus *unconditionally* would be a worse regression than the one being
-    /// fixed: the file tree changes the selection on every arrow key, so
-    /// grabbing first responder on selection change would make the tree
-    /// impossible to walk with the keyboard after the first press.
+    /// Focus is only *taken* when it already belonged to this stack (or to
+    /// nothing). Before one-editor-per-document there was a single editor that
+    /// simply kept first responder across a switch; restoring that is the
+    /// point. Taking focus *unconditionally* would be a worse regression than
+    /// the one being fixed: the file tree changes the selection on every arrow
+    /// key, so grabbing first responder on selection change would make the
+    /// tree impossible to walk with the keyboard after the first press.
+    ///
+    /// Focus is always *given up* when nothing is shown. AppKit does not
+    /// resign a first responder merely because an ancestor became hidden, so
+    /// without this a selection cleared while the caret was in the editor —
+    /// programmatically, since clicking or arrowing the tree takes first
+    /// responder first — left keystrokes going into a text view the user
+    /// cannot see, and the autosave writing them to a file that is not on
+    /// screen. That is the failure finding 3 was about, on the unload path.
     private func moveFocusToShownEditor() {
-        guard let shownURI, let host = hostsByURI[shownURI], let window = host.window else { return }
+        guard let window else { return }
+        let focusIsOurs = (window.firstResponder as? NSView)?.isDescendant(of: self) ?? false
+
+        guard let shownURI, let host = hostsByURI[shownURI] else {
+            if focusIsOurs { window.makeFirstResponder(nil) }
+            return
+        }
+
         if let current = window.firstResponder as? NSView, !current.isDescendant(of: self) { return }
         guard let target = Self.firstKeyViewCandidate(in: host) else { return }
         window.makeFirstResponder(target)
