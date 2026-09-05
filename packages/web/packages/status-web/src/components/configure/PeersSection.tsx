@@ -227,7 +227,7 @@ export function PeersSection({
           <Input
             inputMode="url"
             value={draft.baseUrl}
-            placeholder="https://lewis.agenticdeveloperhub.com"
+            placeholder="https://status.example.com"
             onChange={(e) => setDraft((d) => ({ ...d, baseUrl: e.target.value }))}
             aria-label="Peer base URL"
           />

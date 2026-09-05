@@ -1,7 +1,26 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { HeaderAuthSource, HeaderAuthState } from "@agentic-toolkit/adh/header-auth";
+
+/**
+ * What the host's header needs from the status session. Declared HERE, not imported
+ * from a header package: this package carries no dependency on any site's chrome. The
+ * shape is the common subset every header auth slot takes (`user` + the login/logout
+ * affordances), so the host passes {@link useStatusHeaderAuth} to its own header
+ * component unchanged.
+ */
+export interface StatusHeaderAuthState {
+  /** Signed-in account (`name` is what the header greets/initials), or null when signed out. */
+  user: { name: string } | null;
+  /** The first session load is still in flight — show a spinner, not login links. */
+  authLoading?: boolean;
+  loginHref?: string;
+  signupHref?: string;
+  onLogout?: () => void;
+}
+
+/** A React hook producing {@link StatusHeaderAuthState}; a stable module-level function. */
+export type StatusHeaderAuthSource = () => StatusHeaderAuthState;
 
 export interface StatusUser {
   email: string;
@@ -54,7 +73,7 @@ export function useStatusUser(): { user: StatusUser | null; isPending: boolean }
 }
 
 /**
- * The shared header's injectable `useAuthSource`, built on {@link useStatusUser}.
+ * The host header's injectable auth source, built on {@link useStatusUser}.
  *
  * Signed out → login + signup links (the only entry points to auth). Signed in → the
  * user's name + a sign-out that POSTs /api/auth/logout (clears the cookie) and returns
@@ -62,7 +81,7 @@ export function useStatusUser(): { user: StatusUser | null; isPending: boolean }
  * navigates straight to siblings rather than through a silent adh-SSO redirect (wrong
  * for a non-adh session).
  */
-export const useStatusHeaderAuth: HeaderAuthSource = (): HeaderAuthState => {
+export const useStatusHeaderAuth: StatusHeaderAuthSource = (): StatusHeaderAuthState => {
   const { user, isPending } = useStatusUser();
 
   if (!user) {

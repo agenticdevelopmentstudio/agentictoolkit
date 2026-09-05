@@ -6,6 +6,7 @@ import { StatList, StatListRow } from "@agentic-toolkit/ui/blocks/stat-list";
 import { ExternalLink } from "@agentic-toolkit/ui/components/external-link";
 import { type StatusDotTone } from "@agentic-toolkit/ui/components/status-dot";
 import { useTelemetry } from "../hooks/use-telemetry";
+import { useStatusHost } from "./StatusHost";
 import type { AnalyticsMetricDTO } from "../telemetry/types";
 
 // Errors (GlitchTip) and Traffic (PostHog) cards for the Overview rail, stacked
@@ -14,10 +15,8 @@ import type { AnalyticsMetricDTO } from "../telemetry/types";
 // The card itself is the shared StatCard (InfoPanel + StatRows + ExternalLink);
 // this file owns only the telemetry wiring and the Errors top-issue list.
 
-// Deep-dive targets — overridable per environment, with the known hosts as
-// fallback (the PostHog link is the app host, not the ingest host).
-const GLITCHTIP_URL = process.env.NEXT_PUBLIC_GLITCHTIP_URL ?? "https://errors.agenticdeveloperhub.com";
-const POSTHOG_URL = process.env.NEXT_PUBLIC_POSTHOG_URL ?? "https://us.posthog.com";
+// Deep-dive targets come from the HOST (StatusHostProvider) — this package knows no
+// hostname. Without one, a card renders its data and simply carries no deep link.
 
 function levelTone(level: string | null): StatusDotTone {
   switch (level) {
@@ -29,6 +28,13 @@ function levelTone(level: string | null): StatusDotTone {
     default:
       return "blue";
   }
+}
+
+/** The per-issue deep link: the issue's own permalink, else the host's GlitchTip,
+ *  else nothing — never a dead `#`. */
+function IssueLink({ href, title }: { href: string | undefined; title: string }): ReactElement | null {
+  if (!href) return null;
+  return <ExternalLink href={href} aria-label={`Open issue "${title}" in GlitchTip`} />;
 }
 
 /**
@@ -45,6 +51,7 @@ function levelTone(level: string | null): StatusDotTone {
 export function ErrorsCard(): ReactElement {
   const { errors } = useTelemetry();
   const totalEvents = errors.reduce((s, e) => s + (e.count || 0), 0);
+  const { glitchtipUrl } = useStatusHost();
   const totalUsers = errors.reduce((s, e) => s + (e.userCount || 0), 0);
   // Sort by event count desc so the shown "top 5" actually matches the prominent
   // {count}× label — the feed arrives in GlitchTip's last-seen order, not by volume.
@@ -54,7 +61,7 @@ export function ErrorsCard(): ReactElement {
     <StatCard
       title="Errors"
       icon={<Bug size={15} className={errors.length > 0 ? "text-apt-red" : "text-apt-text-muted"} />}
-      link={{ href: GLITCHTIP_URL, label: "GlitchTip" }}
+      link={glitchtipUrl ? { href: glitchtipUrl, label: "GlitchTip" } : undefined}
       stats={
         errors.length > 0
           ? [
@@ -83,10 +90,7 @@ export function ErrorsCard(): ReactElement {
               trailing={
                 <>
                   <span className="font-bold text-apt-red">{e.count}×</span>
-                  <ExternalLink
-                    href={e.permalink ?? GLITCHTIP_URL}
-                    aria-label={`Open issue "${e.title}" in GlitchTip`}
-                  />
+                  <IssueLink href={e.permalink ?? glitchtipUrl} title={e.title} />
                 </>
               }
             />
@@ -121,12 +125,13 @@ export function TrafficCard(): ReactElement {
   // "Not configured / no data" (every window null) vs a genuine measured 0 — only
   // the former gets the onboarding note; a real 0 shows as 0.
   const unconfigured = figures.every((f) => f.value === null);
+  const { posthogUrl } = useStatusHost();
 
   return (
     <StatCard
       title="Traffic"
       icon={<TrendingUp size={15} className="text-apt-blue" />}
-      link={{ href: POSTHOG_URL, label: "PostHog" }}
+      link={posthogUrl ? { href: posthogUrl, label: "PostHog" } : undefined}
       stats={figures.map((f) => ({ label: f.label, value: fmt(f.value) }))}
       footnote={
         unconfigured

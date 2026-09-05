@@ -1,6 +1,19 @@
 import { describe, it, expect } from "vitest";
 import type { DeploymentDTO } from "../types";
-import type { ServiceEndpoint } from "../config/services";
+
+// The endpoint shape the deploy-view helpers are exercised against. Local to this
+// test: the roster type it mirrors is HOST data, not something this package ships.
+interface ServiceEndpoint {
+  slug: string;
+  group: string;
+  name: string;
+  environment: "production" | "staging" | "testing";
+  url: string;
+  kind: string;
+  expectedStatus: number;
+  platform?: "vercel" | "railway" | "cloudflare";
+  deployProject?: string;
+}
 import {
   summarizeByPlatform,
   deploysForEndpoint,

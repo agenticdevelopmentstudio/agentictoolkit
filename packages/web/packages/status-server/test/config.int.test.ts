@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createApp } from '../src/app';
+import type { SeedRoster } from '../src/config/seed';
 import { sessionHeaders } from './helpers/auth';
 import { freshDb as bootDb } from './helpers/db';
 import { testConfig } from './helpers/config';
@@ -239,11 +240,20 @@ describe('/config CRUD', () => {
     expect(body.ok).toBe(true);
   });
 
-  it('POST /config/seed populates groups, sites, and endpoints', async () => {
+  // The roster is the HOST's data (AppDeps.seed) — the package ships none. A fixture
+  // roster with known shape proves the seed derives groups/sites/endpoints from what it
+  // is handed, and nothing else: 2 groups, 3 sites, 4 endpoints (one site spans 2 envs).
+  const FIXTURE_SEED: SeedRoster = [
+    { group: 'Fixture Group', name: 'App', baseSlug: 'fx-app', host: 'app.example.com', envs: ['production', 'staging'], kind: 'frontend' },
+    { group: 'Fixture Group', name: 'Backend', baseSlug: 'fx-backend', host: 'backend.example.com', envs: ['production'], kind: 'health', path: '/health' },
+    { group: 'Other', name: 'Docs', baseSlug: 'fx-docs', host: 'docs.example.com', envs: ['production'], kind: 'frontend' },
+  ];
+
+  it('POST /config/seed populates groups, sites, and endpoints from the host roster', async () => {
     // Use a fresh DB so seed counts are deterministic
     const db2 = await bootDb();
     const adminAuth2 = await sessionHeaders(db2, 'admin');
-    const app2 = createApp({ db: db2, config: testConfig() });
+    const app2 = createApp({ db: db2, config: testConfig(), seed: FIXTURE_SEED });
 
     const res = await app2.request('/config/seed', {
       method: 'POST',
@@ -252,8 +262,33 @@ describe('/config CRUD', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { ok: boolean; groups: number; sites: number; endpoints: number };
     expect(body.ok).toBe(true);
-    expect(body.groups).toBeGreaterThan(0);
-    expect(body.sites).toBeGreaterThan(0);
-    expect(body.endpoints).toBeGreaterThan(0);
+    expect(body.groups).toBe(2);
+    expect(body.sites).toBe(3);
+    expect(body.endpoints).toBe(4);
+
+    // Staging endpoints follow the `staging.<host>` convention; a path is appended.
+    const eps = await app2.request('/config/endpoints', { headers: adminAuth2 });
+    const rows = await eps.json() as { url: string }[];
+    const urls = rows.map((r) => r.url).sort();
+    expect(urls).toEqual([
+      'https://app.example.com',
+      'https://backend.example.com/health',
+      'https://docs.example.com',
+      'https://staging.app.example.com',
+    ]);
+  });
+
+  it('POST /config/seed with no host roster creates no groups, sites or endpoints', async () => {
+    const db3 = await bootDb();
+    const adminAuth3 = await sessionHeaders(db3, 'admin');
+    const app3 = createApp({ db: db3, config: testConfig() });
+
+    const res = await app3.request('/config/seed', { method: 'POST', headers: adminAuth3 });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; groups: number; sites: number; endpoints: number };
+    expect(body.ok).toBe(true);
+    expect(body.groups).toBe(0);
+    expect(body.sites).toBe(0);
+    expect(body.endpoints).toBe(0);
   });
 });

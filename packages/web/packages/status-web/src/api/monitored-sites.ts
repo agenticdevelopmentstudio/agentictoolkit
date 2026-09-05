@@ -8,7 +8,7 @@
 import { req } from "./req";
 
 // Row types mirror what the STATUS backend's /config/* routes return.
-// Typed locally — not against @agentic-toolkit/adh-api-types (that describes the hub's
+// Typed locally — not against the hub's own API type package (that describes the hub's
 // OpenAPI surface, which is a different contract). The status backend's schema
 // is the source of truth; these shapes are derived from the view interfaces below.
 type GroupRow = { id: string; slug: string; name: string; retentionDays: number };
@@ -168,7 +168,7 @@ export async function listEndpoints(siteId: string): Promise<EndpointView[]> {
 export async function listAllEndpoints(): Promise<EndpointView[]> {
   return (await req<EndpointRow[]>(ENDPOINTS)).map(toEndpoint);
 }
-// These bodies are typed LOCALLY, not against @agentic-toolkit/adh-api-types: that
+// These bodies are typed LOCALLY, not against the hub's own API type package: that
 // spec describes the HUB backend, whose monitored_sites table lacks
 // environment/platform/deployProject — but THESE requests hit the STATUS
 // backend's /config/endpoints surface, whose monitored_endpoints table DOES carry
@@ -222,7 +222,7 @@ export function deleteEndpoint(id: string): Promise<void> {
 }
 
 // --- integrations -----------------------------------------------------------
-// Hand-typed, not against @agentic-toolkit/adh-api-types: this is the STATUS backend's
+// Hand-typed, not against the hub's own API type package: this is the STATUS backend's
 // /config/integrations surface (deploy_integrations table) — not part of the HUB
 // openapi spec. Mirror the backend's deployIntegrations insert/patch shape here.
 export function listIntegrations(): Promise<IntegrationView[]> {

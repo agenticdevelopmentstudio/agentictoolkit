@@ -1,7 +1,7 @@
 {
   "name": "@agentic-toolkit/status-web",
   "version": "0.1.0",
-  "description": "The ADH status monitor's operator dashboard: React panels, hooks and the browser-side API client. A Next host mounts these in its own pages, providers and proxy.",
+  "description": "A status monitor's operator dashboard: React panels, hooks and the browser-side API client. A Next host mounts these in its own pages, providers and proxy.",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -44,7 +44,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agentic-toolkit/adh": "workspace:*",
     "@agentic-toolkit/deploy-platform": "workspace:*",
     "@agentic-toolkit/themes": "workspace:*",
     "@agentic-toolkit/ui": "workspace:*",

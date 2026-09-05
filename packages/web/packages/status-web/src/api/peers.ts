@@ -4,7 +4,7 @@
 //
 // A peer is another status monitor this one polls: the fleet is exactly the set of
 // rows here plus this monitor itself. This is the ONLY place the fleet is configured —
-// the public dashboard at status.agenticdeveloperhub.com has no config surface at all.
+// the public wallboard has no config surface at all.
 
 import { req } from "./req";
 

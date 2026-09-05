@@ -96,7 +96,7 @@ export const deployments = sqliteTable(
     // opening the provider dashboard. Null for healthy/in-progress deploys and for
     // platforms with no build-error concept (Cloudflare Workers, Crunchy).
     errorText: text("error_text"),
-    // The project's live custom domain host (e.g. "docs.agenticdeveloperhub.com"),
+    // The project's live custom domain host (e.g. "docs.example.com"),
     // resolved at fetch time from the platform's attached domains. The single key
     // for correlating a deploy to a monitored endpoint (host match) and for the
     // live-url link — replaces the dead DEPLOY_MAP name matching.

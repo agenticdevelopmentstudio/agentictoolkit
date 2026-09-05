@@ -6,7 +6,8 @@
 export { StatusSign } from "./components/StatusSign";
 export { StatusDot } from "./components/StatusDot";
 export { HomeGate } from "./components/HomeGate";
-export { StatusHeader } from "./components/StatusHeader";
+export { WallboardStatus } from "./components/WallboardStatus";
+export { StatusHostProvider, useStatusHost, type StatusHostSettings } from "./components/StatusHost";
 export { BoardShell } from "./components/BoardShell";
 export { AutoConfigureProvider } from "./components/AutoConfigureProvider";
 export { DeviceApproval } from "./components/DeviceApproval";

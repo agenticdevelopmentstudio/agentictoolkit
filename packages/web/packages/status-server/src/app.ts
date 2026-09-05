@@ -16,6 +16,7 @@ import { activityRoutes } from './routes/activity';
 import { autoConfigureRoutes } from './routes/auto-configure';
 import { badgeRoutes } from './routes/badge';
 import { configRoutes } from './routes/config';
+import type { SeedRoster } from './config/seed';
 import { cronRoutes } from './routes/cron';
 import { streamRoutes } from './routes/stream';
 import { hooksRoutes } from './routes/hooks';
@@ -120,6 +121,9 @@ export interface AppDeps {
   db: Db;
   scheduler?: Scheduler;
   config: StatusConfig;
+  /** The host's seed roster — what `POST /config/seed` creates in an empty configuration
+   *  (./config/seed.ts). Omitted or empty: seed creates only the provider connections. */
+  seed?: SeedRoster;
 }
 
 export function createApp(opts: AppDeps): OpenAPIHono<{ Variables: AuthVars }> {
@@ -294,7 +298,7 @@ export function createApp(opts: AppDeps): OpenAPIHono<{ Variables: AuthVars }> {
   // for the cadence frame, /live/check to trigger a cycle.
   app.route('/', streamRoutes(opts.db, opts.scheduler, opts.config));
   app.route('/', badgeRoutes(opts.db, opts.config));
-  app.route('/config', configRoutes(opts.db, opts.config));
+  app.route('/config', configRoutes(opts.db, opts.config, opts.seed ?? []));
   if (opts.scheduler) app.route('/', cronRoutes(opts.db, opts.scheduler));
   app.route('/', fleetRoutes(opts.db, opts.config));
   app.route('/', telemetryRoutes(opts.db, opts.config));

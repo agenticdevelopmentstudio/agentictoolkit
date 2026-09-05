@@ -66,7 +66,7 @@ describe("problemToRow", () => {
         state: "failed",
         name: "adh",
         sourceUrl: "https://vercel.com/team/adh",
-        liveUrl: "https://agenticdeveloperhub.com",
+        liveUrl: "https://app.example.com",
       }),
     );
     expect(r.source).toBe("vercel");
@@ -75,7 +75,7 @@ describe("problemToRow", () => {
     expect(r.tone).toBe("bad"); // major → bad (red, bold)
     // Links are the values recorded on the problem (the server stamps them).
     expect(r.sourceUrl).toBe("https://vercel.com/team/adh");
-    expect(r.liveUrl).toBe("https://agenticdeveloperhub.com");
+    expect(r.liveUrl).toBe("https://app.example.com");
     expect(r.at).toBe("2026-06-04T18:00:00.000Z"); // since
   });
 
@@ -86,12 +86,12 @@ describe("problemToRow", () => {
         state: "failed",
         name: "adh",
         commitHash: "abc1234def",
-        commitRepo: "agenticdevelopmentstudio/agenticdeveloperhub",
+        commitRepo: "example-org/example-app",
         commitMessage: "fix the thing\nbody text",
       }),
     );
     expect(r.sha).toBe("abc1234");
-    expect(r.commitUrl).toBe("https://github.com/agenticdevelopmentstudio/agenticdeveloperhub/commit/abc1234def");
+    expect(r.commitUrl).toBe("https://github.com/example-org/example-app/commit/abc1234def");
     expect(r.message).toBe("fix the thing");
   });
 
@@ -102,12 +102,12 @@ describe("problemToRow", () => {
         state: "failed",
         name: "adh-backend",
         commitHash: "abc1234def",
-        commitRepo: "agenticdevelopmentstudio/agenticdeveloperhub",
+        commitRepo: "example-org/example-app",
         commitMessage: "fix the thing\nbody text",
       }),
     );
     expect(r.sha).toBe("abc1234");
-    expect(r.commitUrl).toBe("https://github.com/agenticdevelopmentstudio/agenticdeveloperhub/commit/abc1234def");
+    expect(r.commitUrl).toBe("https://github.com/example-org/example-app/commit/abc1234def");
     expect(r.message).toBe("fix the thing");
   });
 

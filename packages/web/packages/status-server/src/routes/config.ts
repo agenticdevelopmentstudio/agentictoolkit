@@ -4,6 +4,7 @@ import { createInsertSchema } from 'drizzle-zod';
 import { z } from 'zod';
 import type { Db } from '../libsql/client';
 import type { StatusConfig, StatusCredentialName } from '../config/port';
+import type { SeedEnvironment, SeedRoster } from '../config/seed';
 import {
   siteGroups,
   monitoredSites,
@@ -124,64 +125,22 @@ async function peerWrite<T>(run: () => Promise<T>): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Seed data (ported from websites/main/status/src/config/services.ts)
+// Seed — the roster is the HOST's (../config/seed.ts, reached via AppDeps.seed);
+// this package only knows how to turn one into groups, sites and endpoints.
 // ---------------------------------------------------------------------------
 
-type EnvKey = 'production' | 'staging' | 'testing';
-
-interface SeedEndpoint {
-  group: string;
-  name: string;
-  baseSlug: string;
-  host: string;
-  envs: EnvKey[];
-  kind: string;
-  path?: string;
-  expectedStatus?: number;
-}
-
-function envHost(host: string, env: EnvKey): string {
+function envHost(host: string, env: SeedEnvironment): string {
   if (env === 'production') return host;
   return `${env === 'staging' ? 'staging' : 'testing'}.${host}`;
 }
 
-const ALL: EnvKey[] = ['production', 'staging', 'testing'];
-const PS: EnvKey[] = ['production', 'staging'];
-const P: EnvKey[] = ['production'];
-
-const ADH = 'Agentic Developer Hub';
-const OTHER = 'Other Products';
-const TEMPORAL = 'Temporal';
-const OLYLO = 'Olylo';
-
-const SEED_SERVICES: SeedEndpoint[] = [
-  { group: ADH, name: 'App', baseSlug: 'adh-app', host: 'agenticdeveloperhub.com', envs: ALL, kind: 'frontend' },
-  { group: ADH, name: 'Admin', baseSlug: 'adh-admin', host: 'admin.agenticdeveloperhub.com', envs: ALL, kind: 'admin' },
-  { group: ADH, name: 'API Docs', baseSlug: 'adh-api', host: 'api.agenticdeveloperhub.com', envs: ALL, kind: 'frontend' },
-  { group: ADH, name: 'MCP', baseSlug: 'adh-mcp', host: 'mcp.agenticdeveloperhub.com', envs: ALL, kind: 'custom' },
-  { group: ADH, name: 'Docs', baseSlug: 'adh-docs', host: 'docs.agenticdeveloperhub.com', envs: PS, kind: 'frontend' },
-  { group: ADH, name: 'Status', baseSlug: 'adh-status', host: 'status.agenticdeveloperhub.com', envs: PS, kind: 'frontend' },
-  { group: ADH, name: 'Backend', baseSlug: 'adh-backend', host: 'backend.agenticdeveloperhub.com', envs: ALL, kind: 'health', path: '/health' },
-  { group: ADH, name: 'API Docs (Scalar)', baseSlug: 'storage-apidocs', host: 'apidocs.agenticdeveloperhub.com', envs: P, kind: 'frontend' },
-  { group: ADH, name: 'Data API', baseSlug: 'storage-api', host: 'api.agenticdeveloperhub.com', envs: P, kind: 'health', path: '/health' },
-  { group: OLYLO, name: 'Olylo', baseSlug: 'olylo', host: 'olylo.ai', envs: PS, kind: 'frontend' },
-  { group: TEMPORAL, name: 'Temporal', baseSlug: 'temporal-today', host: 'temporal.today', envs: P, kind: 'frontend' },
-  { group: TEMPORAL, name: 'Temporal Landing', baseSlug: 'temporal-company', host: 'temporal.company', envs: P, kind: 'frontend' },
-  { group: TEMPORAL, name: 'Temporal Admin', baseSlug: 'temporal-admin', host: 'admin.temporal.today', envs: P, kind: 'admin' },
-  { group: OTHER, name: 'Mike Fullerton', baseSlug: 'mikefullerton', host: 'mikefullerton.com', envs: P, kind: 'frontend' },
-  { group: OTHER, name: 'Persona Registry', baseSlug: 'persona-registry', host: 'agenticpersonaregistry.com', envs: P, kind: 'frontend' },
-  { group: OTHER, name: 'Developer Team', baseSlug: 'dev-team', host: 'agenticdeveloperteam.com', envs: P, kind: 'frontend' },
-  { group: OTHER, name: 'Developer Projects', baseSlug: 'dev-projects', host: 'agenticdeveloperprojects.com', envs: P, kind: 'frontend' },
-  { group: OTHER, name: 'Developer Cookbook', baseSlug: 'cookbook', host: 'agenticdevelopercookbook.com', envs: P, kind: 'frontend' },
-  { group: OTHER, name: 'Developer Toolkit', baseSlug: 'toolkit', host: 'agenticdevelopertoolkit.com', envs: P, kind: 'frontend' },
-];
-
 async function runSeed(
   db: Db,
   config: StatusConfig,
+  roster: SeedRoster,
 ): Promise<{ groups: number; sites: number; endpoints: number; integrations: number }> {
   // Collect distinct group names in order
-  const groupNames = [...new Set(SEED_SERVICES.map((s) => s.group))];
+  const groupNames = [...new Set(roster.map((s) => s.group))];
 
   // Create groups (slug = lowercased, spaces → dashes)
   const groupMap = new Map<string, string>(); // name → id
@@ -195,7 +154,7 @@ async function runSeed(
   type SiteKey = { group: string; name: string; baseSlug: string };
   const siteKeys: SiteKey[] = [];
   const seen = new Set<string>();
-  for (const svc of SEED_SERVICES) {
+  for (const svc of roster) {
     const key = `${svc.group}|${svc.name}`;
     if (!seen.has(key)) {
       seen.add(key);
@@ -211,7 +170,7 @@ async function runSeed(
   }
 
   let endpointCount = 0;
-  for (const svc of SEED_SERVICES) {
+  for (const svc of roster) {
     const siteId = siteMap.get(`${svc.group}|${svc.name}`)!;
     for (const env of svc.envs) {
       const host = envHost(svc.host, env);
@@ -253,7 +212,7 @@ async function runSeed(
 // Router factory
 // ---------------------------------------------------------------------------
 
-export function configRoutes(db: Db, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
+export function configRoutes(db: Db, config: StatusConfig, seed: SeedRoster): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
 
   // All /config/* is admin-gated (requireAuth already applied app-wide)
@@ -491,7 +450,7 @@ export function configRoutes(db: Db, config: StatusConfig): Hono<{ Variables: { 
   // --- seed -----------------------------------------------------------------
 
   app.post('/seed', async (c) => {
-    const counts = await runSeed(db, config);
+    const counts = await runSeed(db, config, seed);
     return c.json({ ok: true, ...counts });
   });
 

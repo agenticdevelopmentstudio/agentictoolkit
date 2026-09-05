@@ -1,16 +1,11 @@
 "use client";
 import { type ReactElement } from "react";
-import { usePathname } from "next/navigation";
-import { SiteHeader } from "@agentic-toolkit/adh/header";
-import { useStatusHeaderAuth } from "../header-auth";
 import { useMediaQuery } from "../hooks/use-media-query";
 import { usePortfolioIndicator } from "../hooks/use-portfolio-indicator";
 import { type IndicatorState, headlineFor } from "../lib/overview";
-import { isBoardPath } from "./board-views";
 import { StatusDot } from "./StatusDot";
 import { StatusSign } from "./StatusSign";
 
-import { COLORS, PALETTE } from "../lib/colors";
 const mono = "var(--mono,ui-monospace,monospace)";
 
 // Pill copy per state — mirrors the live indicator (incl. failed deploys), so it
@@ -33,7 +28,7 @@ function PillGlyph({ pillKey, count, size, label }: { pillKey: IndicatorState | 
 }
 
 /**
- * The wallboard's live status, centred in the header: just the indicator sign
+ * The wallboard's live status, centred in the host's header: just the indicator sign
  * (with its problem count) + the state word (PROBLEMS / OPERATIONAL / …).
  *
  * This pill is GLOBAL — it counts problems across every environment, on purpose:
@@ -57,45 +52,18 @@ function WallboardStatusLive(): ReactElement {
 }
 
 /**
- * Wallboard-status wrapper. The centre slot is CSS-hidden at phone width (see
- * globals.css `.adh-header__center`), so don't MOUNT the live inner there — that
- * keeps phones from running the 30s clock + indicator recompute for an element no
- * one can see. Only the cheap media-query hook runs when narrow.
+ * The live status pill the host mounts in its header's centre slot on the board
+ * routes (`isBoardPath` in ./board-views says which). The host's header CSS hides
+ * that slot at phone width, so don't MOUNT the live inner there — that keeps phones
+ * from running the 30s clock + indicator recompute for an element no one can see.
+ * Only the cheap media-query hook runs when narrow.
  *
- * The gate is `(min-width: 761px)`, the exact complement of that CSS rule, so a
- * TABLET gets the pill: it is the only portfolio headline outside phone width (the
+ * The gate is `(min-width: 761px)`, the exact complement of the host's hide rule, so
+ * a TABLET gets the pill: it is the only portfolio headline outside phone width (the
  * BigIndicator hero renders only on the mobile layout), and it is the board's single
  * role="status" announcer. Anything narrower falls to that hero.
  */
-function WallboardStatus(): ReactElement | null {
+export function WallboardStatus(): ReactElement | null {
   const wide = useMediaQuery("(min-width: 761px)");
   return wide ? <WallboardStatusLive /> : null;
-}
-
-// isBoardPath (the /home landing + one path prefix per view) is the single
-// board-views source of truth. View NAVIGATION lives in the board's topic rail
-// now — the header carries only the centred live status pill on these routes.
-
-/**
- * The status site's header. Wraps the shared {@link SiteHeader} but: drops the
- * family dev-preview badges and, on the board routes, injects the live indicator
- * into the centre slot. Off those routes (landing/legal/auth) it's a plain bar.
- * The old Overview/Details/Config view switch + Fleet link moved into the board's
- * topic rail (BoardShell) — the header no longer carries nav.
- */
-export function StatusHeader(): ReactElement {
-  // The board lives at /home + the view routes, and `/` is the public landing
-  // (plain bar with just the Login link). Next strips any basePath/locale from
-  // usePathname(); normalise a trailing slash so the chrome still mounts at
-  // "/home/" or "/fleet/" too.
-  const path = (usePathname() ?? "/").replace(/\/+$/, "");
-  const onBoard = isBoardPath(path);
-  return (
-    <SiteHeader
-      siteId="status"
-      useAuthSource={useStatusHeaderAuth}
-      badges={[]}
-      center={onBoard ? <WallboardStatus /> : undefined}
-    />
-  );
 }
