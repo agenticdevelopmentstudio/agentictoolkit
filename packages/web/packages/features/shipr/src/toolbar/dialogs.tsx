@@ -370,6 +370,15 @@ export type ConnectionOption = ForgeConnection;
 export interface DeployRequest {
   /** Bring the prepared branch up to date first, as a run of its own before the deploy. */
   prepare: boolean;
+  /**
+   * Pin the tip even though nothing has cleared it under the gate context.
+   *
+   * The refusal this waives is the pipeline's, not the dialog's: prepare refuses an
+   * unverified tip server-side, and the only way past it is the caller saying so. So it is
+   * a box the operator ticks, never a retry the console sends on their behalf, and it is
+   * meaningless without {@link prepare}.
+   */
+  acknowledgeUnverified: boolean;
   environments: Environment[];
 }
 
@@ -401,6 +410,7 @@ export function DeployDialog({
   onSubmit,
 }: DeployDialogProps): React.ReactElement {
   const [prepare, setPrepare] = React.useState(false);
+  const [unverified, setUnverified] = React.useState(false);
   const [envs, setEnvs] = React.useState<readonly Environment[]>([]);
 
   // Every opening starts from nothing chosen. A dialog that remembers last time's ticks is
@@ -408,6 +418,7 @@ export function DeployDialog({
   React.useEffect(() => {
     if (open) {
       setPrepare(false);
+      setUnverified(false);
       setEnvs([]);
     }
   }, [open]);
@@ -423,11 +434,17 @@ export function DeployDialog({
   const anything = prepare || chosen.length > 0;
 
   const submit = React.useCallback(
-    () => onSubmit({ prepare, environments: [...chosen] }),
+    () =>
+      onSubmit({
+        prepare,
+        // Untickable without prepare, and unsent without it either — the flag is prepare's.
+        acknowledgeUnverified: prepare && unverified,
+        environments: [...chosen],
+      }),
     // `chosen` is derived from `envs` on every render; keying on the contents keeps the
     // submit callback from changing identity when nothing about the request has.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onSubmit, prepare, chosen.join(',')],
+    [onSubmit, prepare, unverified, chosen.join(',')],
   );
   const { busy, error, run } = useSubmit(submit, onClose);
 
@@ -458,6 +475,18 @@ export function DeployDialog({
             />
             <span>Prepare</span>
           </label>
+
+          {/* Only under a ticked Prepare, because it qualifies that step and nothing else. */}
+          {prepare ? (
+            <label className="flex items-center gap-2 pl-6 text-sm text-apt-text">
+              <Checkbox
+                checked={unverified}
+                aria-label="Pin without a verdict"
+                onCheckedChange={(checked: boolean) => setUnverified(checked)}
+              />
+              <span>Pin without a verdict</span>
+            </label>
+          ) : null}
 
           <fieldset className="flex flex-col gap-2 border-t border-apt-border pt-3">
             <div className="flex items-center gap-2">

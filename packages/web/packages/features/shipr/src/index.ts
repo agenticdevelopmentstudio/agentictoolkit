@@ -63,8 +63,8 @@ export type { RegisterWizardProps } from './toolbar/RegisterWizard';
 
 export { ConfigureDialog } from './configure/ConfigureDialog';
 export type { ConfigureDialogProps } from './configure/ConfigureDialog';
-export { OrgDefaultsDialog } from './configure/OrgDefaultsDialog';
-export type { OrgDefaultsDialogProps } from './configure/OrgDefaultsDialog';
+export { OrgDefaultsForm } from './configure/OrgDefaultsForm';
+export type { OrgDefaultsFormProps } from './configure/OrgDefaultsForm';
 
 // The forge, read once and held: what shipr can see, and what that means for a name nobody
 // has created yet. Exported because a host that mounts `ConfigureDialog` itself has to build

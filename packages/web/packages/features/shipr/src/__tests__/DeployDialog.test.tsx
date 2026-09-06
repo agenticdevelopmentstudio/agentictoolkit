@@ -100,6 +100,7 @@ describe('DeployDialog — what it submits', () => {
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith({
         prepare: false,
+        acknowledgeUnverified: false,
         environments: ['testing', 'production'],
       }),
     );
@@ -132,6 +133,7 @@ describe('DeployDialog — the keyboard', () => {
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith({
         prepare: false,
+        acknowledgeUnverified: false,
         environments: ['testing'],
       }),
     );
@@ -185,5 +187,52 @@ describe('DeployDialog — it remembers nothing between openings', () => {
     );
     expect(await tick(/production/)).toHaveAttribute('aria-checked', 'false');
     expect(deployButton()).toBeDisabled();
+  });
+});
+
+describe('DeployDialog — pinning a tip nothing has cleared', () => {
+  const ack = () => screen.queryByRole('checkbox', { name: /Pin without a verdict/ });
+
+  it('is not on offer until Prepare is ticked', async () => {
+    // It qualifies the prepare step and nothing else, so with no prepare in the request there
+    // is nothing for it to qualify.
+    draw();
+    expect(ack()).toBeNull();
+    await userEvent.click(await tick(/Prepare/));
+    expect(await tick(/Pin without a verdict/)).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('sends the acknowledgement only when the operator ticked it', async () => {
+    // The refusal it waives is the pipeline's: prepare refuses an unverified tip server-side,
+    // and this is the caller saying so out loud. The console never says it on their behalf.
+    const { onSubmit } = draw();
+    await userEvent.click(await tick(/Prepare/));
+    await userEvent.click(await tick(/Pin without a verdict/));
+    await userEvent.click(deployButton());
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith({
+        prepare: true,
+        acknowledgeUnverified: true,
+        environments: [],
+      }),
+    );
+  });
+
+  it('drops it again when Prepare is cleared', async () => {
+    // Otherwise a box ticked, then hidden by clearing Prepare, would still be in the request
+    // the operator can no longer see.
+    const { onSubmit } = draw();
+    await userEvent.click(await tick(/Prepare/));
+    await userEvent.click(await tick(/Pin without a verdict/));
+    await userEvent.click(await tick(/Prepare/));
+    await userEvent.click(await tick(/staging/));
+    await userEvent.click(deployButton());
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith({
+        prepare: false,
+        acknowledgeUnverified: false,
+        environments: ['staging'],
+      }),
+    );
   });
 });

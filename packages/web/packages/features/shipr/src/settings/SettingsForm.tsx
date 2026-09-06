@@ -323,6 +323,15 @@ export interface SettingsFormProps {
    */
   onProvision?: (devRepoId: string) => Promise<void> | void;
   /**
+   * STOP KNOWING ABOUT IT. Drawn in a band of its own below the fields that describe the
+   * repository (Mike: "add a remove button to the sites details pane").
+   *
+   * A NODE AND NOT A CALLBACK, like {@link cancel} above it: removing is gated by the host's
+   * own permission read, so the host hands down the button it already has rather than this
+   * form re-deriving it. A host with nowhere to send it passes nothing and no band is drawn.
+   */
+  remove?: React.ReactNode;
+  /**
    * The id to hang on the `<form>`, so a button OUTSIDE it can submit it with `form=`.
    *
    * Given, this draws NO buttons of its own: the host's button is the Save, and two Saves
@@ -378,6 +387,9 @@ function ProvisionButton({
         <Button
           type="button"
           disabled={busy || unsaved || mirrors.length === 0}
+          /* The one thing worth saying, and only while it applies: why the button is off.
+             A tooltip, not a paragraph beside it. */
+          title={unsaved ? 'Save the changes above first.' : undefined}
           onClick={() => {
             setBusy(true);
             setError(null);
@@ -397,13 +409,6 @@ function ProvisionButton({
               ? 'Doctor'
               : 'Provision'}
         </Button>
-        <span className="text-xs text-apt-text-muted">
-          {unsaved
-            ? 'Save the changes above first — provisioning acts on what is stored.'
-            : provisioned
-              ? 'Re-runs the registration against what is already there, and repairs what drifted.'
-              : 'Creates the deployment repositories named above and starts the pipeline.'}
-        </span>
       </div>
       <ErrorText error={error} />
     </div>
@@ -416,6 +421,7 @@ export function SettingsForm({
   onSave,
   onSaved,
   cancel,
+  remove,
   catalogue,
   onProvision,
   formId,
@@ -545,6 +551,8 @@ export function SettingsForm({
 
           <div className="flex flex-col gap-1">
             <Label htmlFor="shipr-display-name">Name</Label>
+            {/* The placeholder IS the explanation: it shows the slug this falls back to when
+                the box is empty, which is the only thing the paragraph here used to say. */}
             <Input
               id="shipr-display-name"
               aria-label="Name"
@@ -552,14 +560,6 @@ export function SettingsForm({
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
             />
-            {/* A LABEL AND NOTHING MORE. Said out loud because a field beside a slug reads
-                like a rename, and one that renamed the repository would be a very
-                expensive misunderstanding. */}
-            <p className="text-xs text-apt-text-muted">
-              What this is called on the home page. Empty shows{' '}
-              <span className="font-mono">{dev.devRepo.slug}</span>; nothing on the forge is
-              renamed either way.
-            </p>
           </div>
 
           <fieldset className="flex flex-col gap-3">
@@ -619,6 +619,12 @@ export function SettingsForm({
           unsaved={patches.length > 0}
           onProvision={onProvision}
         />
+      ) : null}
+
+      {/* Its own band, whether or not Provision is drawn: a host may wire one without the
+          other, and either way the two are opposite verbs that should not sit side by side. */}
+      {dev && remove ? (
+        <div className="border-t border-apt-border pt-3">{remove}</div>
       ) : null}
 
       <ErrorText error={error} />

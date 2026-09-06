@@ -153,6 +153,7 @@ function draw(items: RepoItem[] = [], over: Partial<React.ComponentProps<typeof 
   // out-of-range index into an empty tuple.
   const onSaveSettings = vi.fn((_patches: RepoSettingsPatch[]) => Promise.resolve());
   const onImport = vi.fn(() => Promise.resolve());
+  const onRemove = vi.fn((_devRepo: DevRepo) => Promise.resolve());
   render(
     <ConfigureDialog
       open
@@ -163,13 +164,13 @@ function draw(items: RepoItem[] = [], over: Partial<React.ComponentProps<typeof 
       items={items}
       verbs={['C', 'R', 'U', 'D', 'M']}
       onRegister={() => Promise.resolve()}
-      onRemove={() => Promise.resolve()}
+      onRemove={onRemove}
       onSaveSettings={onSaveSettings}
       onImport={onImport}
       {...over}
     />,
   );
-  return { onClose, onSaveSettings, onImport };
+  return { onClose, onSaveSettings, onImport, onRemove };
 }
 
 /**
@@ -181,8 +182,27 @@ function draw(items: RepoItem[] = [], over: Partial<React.ComponentProps<typeof 
  * is stated once.
  */
 async function openRepo(name = 'site') {
-  await userEvent.click(await screen.findByText('acme'));
-  await userEvent.click(await screen.findByText(name));
+  await userEvent.click(await railRow('acme'));
+  await userEvent.click(await railRow(name));
+}
+
+/**
+ * A row IN THE RAIL, rather than the same name spoken elsewhere on the screen.
+ *
+ * A bare `findByText` was enough while the detail pane held nothing but a hint. It is not any
+ * more: the account's own pane names the account it is about and shows a worked example built
+ * from the first repository in it — so `site` is on screen twice, and the walk that opens the
+ * repository has to say which one it means. `data-htd-row` is the rail's own hook for a row.
+ */
+function railRow(name: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const row = screen
+      .getAllByText(name)
+      .map((node) => node.closest<HTMLElement>('[data-htd-row]'))
+      .find((node): node is HTMLElement => node !== null);
+    if (!row) throw new Error(`no rail row named ${name}`);
+    return row;
+  });
 }
 
 /** The dialog with this title, of however many are open. */
@@ -311,31 +331,139 @@ describe('the repository rail', () => {
 });
 
 /**
- * THE GEAR IS THE ACCOUNT'S, NOT THE REPOSITORY'S.
+ * THE ACCOUNT'S SETTINGS ARE THE ACCOUNT'S TOPIC (Mike: "move the org related settings to org
+ * topic list").
  *
  * "The default deployment repo, the default naming scheme, the environments" (Mike) are
- * answers a whole organization gives once, and hanging them off the repository level's title —
- * which names that organization — is what keeps them from being asked again per repository. It
- * is drawn only when the host wired a save, because a menu whose one entry cannot write is
- * worse than no menu at all.
+ * answers a whole organization gives once, so the subject they belong to is the organization —
+ * and every other subject on this screen is asked about the same way: select it in the rail,
+ * read its detail pane. These were the exception. They hung off a gear on the REPOSITORY
+ * level's title, one level BELOW their own subject, and its single menu entry opened a Dialog
+ * on top of this Dialog — so two OK buttons and two Cancels were on screen at once, and the
+ * account's settings could not be reached at all until a repository column had been opened.
+ *
+ * They draw where a repository's settings draw now, one level up, and this dialog's own footer
+ * is their Save.
  */
 describe("the account's defaults", () => {
-  it('offers Settings from the gear on the account column', async () => {
+  it('draws them in the detail pane when the account itself is selected', async () => {
     const onSaveOrgDefaults = vi.fn(() => Promise.resolve());
     draw([mirror({})], { onSaveOrgDefaults });
+    // ONE click, and no menu: selecting the account IS how its settings are asked for.
     await userEvent.click(await screen.findByText('acme'));
 
-    await userEvent.click(await screen.findByRole('button', { name: 'acme settings' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Settings' }));
-
-    expect(await waitFor(() => dialog('acme defaults'))).toBeTruthy();
+    expect(await screen.findByLabelText('Deployment organization')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name suffix')).toBeInTheDocument();
   });
 
-  it('draws no gear at all when nothing can be saved', async () => {
+  it('has neither the gear nor the second dialog left anywhere', async () => {
+    // Both halves of what was removed, pinned separately so neither can come back on its own:
+    // the trigger that opened the modal, and the modal it opened.
+    draw([mirror({})], { onSaveOrgDefaults: vi.fn(() => Promise.resolve()) });
+    await userEvent.click(await screen.findByText('acme'));
+    await screen.findByLabelText('Name suffix');
+
+    expect(screen.queryByRole('button', { name: 'acme settings' })).toBeNull();
+    expect(screen.queryByText('acme defaults')).toBeNull();
+  });
+
+  it('yields the pane to a repository the moment one is chosen', async () => {
+    // The two panes share ONE footer OK, which submits whichever form is up — so they must
+    // never be up together. A selected row is the more specific subject, and the account's
+    // form is what the level above it is about.
+    draw([mirror({})], { onSaveOrgDefaults: vi.fn(() => Promise.resolve()) });
+    await openRepo();
+
+    await screen.findByRole('checkbox', { name: /testing/i });
+    expect(screen.queryByLabelText('Name suffix')).toBeNull();
+  });
+
+  it('draws nothing to save when the host wired no save', async () => {
+    // A form whose OK cannot write is worse than the hint that sends the operator down a
+    // level, so the pane falls back to the hint rather than to a dead form.
     draw([mirror({})]);
     await userEvent.click(await screen.findByText('acme'));
     await screen.findByText('site');
-    expect(screen.queryByRole('button', { name: 'acme settings' })).toBeNull();
+    expect(screen.queryByLabelText('Name suffix')).toBeNull();
+  });
+
+  it('will not draw the form before the stored defaults have been read', async () => {
+    // THE OVERWRITE THIS GUARDS. The form seeds its draft once, on mount, and an account
+    // whose defaults have not arrived seeds identically to one nobody has ever set defaults
+    // on. So a pane drawn early would let the footer's OK write the bare convention over a
+    // stored row — and re-aim every unprovisioned deployment repository in the account to
+    // match it. "Not read yet" is a third state, not a synonym for "none".
+    let land: (() => void) | null = null;
+    const client = {
+      workspace: 'acme',
+      orgDefaults: () =>
+        new Promise((resolve) => {
+          land = () => resolve({ orgDefaults: [] });
+        }),
+    } as never;
+    draw([mirror({})], { client, onSaveOrgDefaults: vi.fn(() => Promise.resolve()) });
+    await userEvent.click(await screen.findByText('acme'));
+    await screen.findByText('site');
+    expect(screen.queryByLabelText('Name suffix')).toBeNull();
+
+    await act(async () => {
+      (land as (() => void) | null)?.();
+    });
+    expect(await screen.findByLabelText('Name suffix')).toBeInTheDocument();
+  });
+});
+
+/**
+ * REMOVE IS ON THE ROW'S OWN PANE TOO (Mike: "add a remove button to the sites details pane").
+ *
+ * It lived only on the bar above the rail — three columns away from the repository it acts on,
+ * and identical in appearance whether or not one was selected. The pane copy sits under the
+ * fields that describe that repository, where the operator already is.
+ *
+ * It is the SAME button, not a second one: the same `toolbarState` answer decides whether it
+ * may be pressed, and the same type-to-confirm opens when it is. That is what keeps a second
+ * place to press it from becoming a second answer to whether it is allowed.
+ */
+describe('Remove in the repository pane', () => {
+  const removes = () => screen.getAllByRole('button', { name: 'Remove' });
+
+  it('appears with the repository, and only with it', async () => {
+    draw([mirror({})]);
+    // The bar's, and only the bar's, with nothing chosen.
+    expect(removes()).toHaveLength(1);
+
+    await openRepo();
+    await screen.findByRole('checkbox', { name: /testing/i });
+    expect(removes()).toHaveLength(2);
+  });
+
+  it('unregisters the row on the press, with nothing in the way', async () => {
+    // Mike: "it doesn't need to have the dangerzone confirmation dialog". Nothing here earns
+    // one — the run leaves the repositories on the forge exactly as they are — so the press
+    // IS the action.
+    const { onRemove } = draw([mirror({})]);
+    await openRepo();
+    await screen.findByRole('checkbox', { name: /testing/i });
+
+    await userEvent.click(removes()[1]!);
+    await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(1));
+    expect(onRemove.mock.calls[0]![0]).toMatchObject({ slug: 'acme/site' });
+  });
+
+  it('is an ordinary disabled button when the gate refuses', async () => {
+    // No `D`, so `toolbarState` refuses unregister. An ordinary button, refused the ordinary
+    // way (Mike: "the remove button needs to not look like some weird ui you invented"), with
+    // the gate's own sentence on the tooltip rather than in a modal.
+    const { onRemove } = draw([mirror({})], { verbs: ['C', 'R', 'U', 'M'] });
+    await openRepo();
+    await screen.findByRole('checkbox', { name: /testing/i });
+
+    const pane = removes()[1]!;
+    expect(pane).toBeDisabled();
+    expect(pane).toHaveAttribute('title', 'You cannot unregister repositories here.');
+
+    await userEvent.click(pane);
+    expect(onRemove).not.toHaveBeenCalled();
   });
 });
 

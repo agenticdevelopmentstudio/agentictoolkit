@@ -14,13 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@agenticdevelopertoolkit/ui/components/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@agenticdevelopertoolkit/ui/components/dropdown-menu';
-import { Download, Minus, Plus, Settings, TriangleAlert, Upload } from 'lucide-react';
+import { Download, Minus, Plus, TriangleAlert, Upload } from 'lucide-react';
 
 import { buildDocument } from '../exchange/document';
 import { downloadDocument } from '../exchange/files';
@@ -30,9 +24,8 @@ import { nameOf, ownerOf } from '../forge/existence';
 import type { ForgeCatalogue } from '../forge/useForgeCatalogue';
 import { SettingsForm, type RepoSettingsPatch } from '../settings/SettingsForm';
 import { toolbarState, type ButtonState } from '../toolbar/actions';
-import { TypeToConfirmDialog } from '../toolbar/dialogs';
 import { RegisterWizard } from '../toolbar/RegisterWizard';
-import { OrgDefaultsDialog } from './OrgDefaultsDialog';
+import { OrgDefaultsForm } from './OrgDefaultsForm';
 import type { Selection } from '../selection';
 import type {
   AccessVerb,
@@ -94,11 +87,11 @@ import type { ShiprClient } from '../client';
  * hang "what does a new repository in THIS account get" — so the owner became the level
  * above, its name is said once at the top of the column, and the repositories under it are
  * named the way a person in that account would name them. It is also what gives the org
- * defaults a home: a gear on the repository level's title, which is the only place on the
- * screen whose subject is the organization itself.
+ * defaults a home: they are the detail pane of the organization level, reached the same way
+ * anything else on this screen is — by selecting the thing they are about.
  *
- * NOTHING HERE PROVISIONS. Add writes a row and stops; the defaults dialog re-aims rows and
- * stops; the amber mark on an unconfigured name is what says the forge has not been touched
+ * NOTHING HERE PROVISIONS. Add writes a row and stops; the account's defaults re-aim rows and
+ * stop; the amber mark on an unconfigured name is what says the forge has not been touched
  * yet. Making anything is Provision's, in the detail pane, one repository at a time — which
  * is the whole reason the deployment organization is decided on a screen that cannot
  * accidentally create a repository in the wrong one.
@@ -110,6 +103,11 @@ const REPOS_LEVEL_ID = 'shipr-configure-repos';
 /** The `<form>` the footer's OK submits. The boxes are a pane in the middle of this dialog
  *  and OK is at the bottom of it, which is what `form=` on a button outside the form is for. */
 const SETTINGS_FORM_ID = 'shipr-configure-settings';
+
+/** The same, for the organization pane. A SECOND id and not a shared one: both panes are
+ *  mounted at different times and the footer picks between them by which level is open, so a
+ *  single id would make "which form does OK submit" a question about render order. */
+const ORG_FORM_ID = 'shipr-configure-org-defaults';
 
 /** A source repository and everything cut from it — the row, and what its settings write to. */
 interface Row {
@@ -233,13 +231,27 @@ function ConfigureBody({
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [wizard, setWizard] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
-  const [removing, setRemoving] = React.useState<Row | null>(null);
-  /** Which organization's defaults dialog is open, or null. The org rather than a boolean,
-   *  because the dialog's whole subject is which one. */
-  const [defaultsFor, setDefaultsFor] = React.useState<string | null>(null);
 
   /** Why the bar just refused a press — see `BarButton`. Null when nothing was refused. */
   const [refused, setRefused] = React.useState<string | null>(null);
+
+  /**
+   * Unregister a repository, with nothing in the way (Mike: "it doesn't need to have the
+   * dangerzone confirmation dialog").
+   *
+   * It used to open a type-to-confirm that made the operator retype the slug. Nothing here
+   * earns that: the run unregisters the row and leaves the repositories, their branches and
+   * their protection rules exactly as they are on the forge, so registering again adopts what
+   * is there rather than rebuilding it.
+   */
+  const remove = React.useCallback(
+    async (row: Row) => {
+      await onRemove(row.devRepo);
+      // The row is gone, so the selection that was showing it has to go too.
+      setSelectedId(null);
+    },
+    [onRemove],
+  );
 
   /**
    * One row per SOURCE repository, sorted by slug.
@@ -298,12 +310,21 @@ function ConfigureBody({
    * The stored per-organization defaults, read once per opening of this dialog.
    *
    * ON THIS SCREEN AND NOT IN THE CONSOLE, unlike the catalogue above it: the catalogue is
-   * a forge read worth prefetching and holding, this is one small row per account that only
-   * the gear menu behind it ever shows. `reload` is what a save calls, so the dialog that
-   * wrote them reopens on what was written rather than on what was read before it.
+   * a forge read worth prefetching and holding, this is one small row per account. `reload`
+   * is what a save calls, so the pane that wrote them re-seeds from what was written rather
+   * than from what was read before it.
+   *
+   * `orgDefaultsRead` IS THE THIRD STATE, and the pane may not draw without it. The form
+   * seeds its draft ONCE, on mount, and an organization can now be selected before this read
+   * lands — so a pane mounted early would seed from `undefined`, which is the same seed as
+   * "nobody has set any", and the footer's OK would then overwrite a stored row with the
+   * convention and re-aim every unprovisioned deployment repository in the account to match.
+   * A failed read counts as settled: `orgDefaultsError` is the form's own refusal, and it
+   * says so rather than silently drawing the convention.
    */
   const [orgDefaults, setOrgDefaults] = React.useState<readonly OrgDefaults[]>([]);
   const [orgDefaultsError, setOrgDefaultsError] = React.useState<string | null>(null);
+  const [orgDefaultsRead, setOrgDefaultsRead] = React.useState(false);
 
   const reloadOrgDefaults = React.useCallback(async () => {
     try {
@@ -312,12 +333,29 @@ function ConfigureBody({
       setOrgDefaultsError(null);
     } catch (e) {
       setOrgDefaultsError((e as Error).message);
+    } finally {
+      setOrgDefaultsRead(true);
     }
   }, [client]);
 
   React.useEffect(() => {
     void reloadOrgDefaults();
   }, [reloadOrgDefaults]);
+
+  /**
+   * The account's own settings are what the detail pane should be showing.
+   *
+   * An account is open, nothing under it is selected, the host wired the save, and the read
+   * that seeds the form has settled. All four, because each one is a different way for the
+   * pane to be wrong: no account is the empty hint, a selected repository is the repository's
+   * own settings, an unwired save is a form whose OK cannot write, and an unsettled read is
+   * the overwrite described above.
+   */
+  const orgPane =
+    activeOrg !== null &&
+    selected === null &&
+    onSaveOrgDefaults !== undefined &&
+    orgDefaultsRead;
 
   /**
    * WHAT REMOVE ACTS ON, in the vocabulary `toolbarState` already speaks.
@@ -394,34 +432,18 @@ function ConfigureBody({
     if (!activeOrg) return null;
     return {
       id: REPOS_LEVEL_ID,
-      // The account's name, said ONCE at the top of the column instead of once per row —
-      // which is also what makes the gear below safe to hang here. The rail host keys
-      // re-registration on a level's plain fields and never its React nodes, so a menu that
-      // only ever means "this title's account" is refreshed exactly when the title is.
+      // The account's name, said ONCE at the top of the column instead of once per row.
+      //
+      // NO GEAR HERE ANY MORE (Mike: "move the org related settings to org topic list"). It
+      // was a `titleActions` menu with one entry, and its entry opened a Dialog on top of
+      // this Dialog — a modal over a modal, with two sets of OK/Cancel on screen at once,
+      // hung off the title of the level BELOW the one whose subject it was. The account's
+      // settings now draw where every other subject on this screen draws: in the detail
+      // pane, when the account is what the rail has selected — which is also what makes them
+      // reachable before a repository is chosen rather than only after one is.
       title: activeOrg.login,
       railLabel: 'Repositories',
       itemNoun: 'repository',
-      titleActions: onSaveOrgDefaults ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <button
-                type="button"
-                aria-label={`${activeOrg.login} settings`}
-                title={`${activeOrg.login} settings`}
-                className="flex shrink-0 items-center justify-center rounded p-0.5 text-apt-text-muted outline-none hover:text-apt-text focus-visible:ring-2 focus-visible:ring-apt-gold/40"
-              />
-            }
-          >
-            <Settings size={16} aria-hidden />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setDefaultsFor(activeOrg.login)}>
-              Settings
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : undefined,
       items: activeOrg.rows.map((row) => ({
         id: row.devRepo.id,
         // WITHOUT THE ORGANIZATION IN IT: the column is already that account. `displayName`
@@ -445,7 +467,7 @@ function ConfigureBody({
       emptyLabel: 'Nothing is registered from this organization.',
       busy,
     };
-  }, [activeOrg, selectedId, busy, onSaveOrgDefaults]);
+  }, [activeOrg, selectedId, busy]);
 
   return (
     <>
@@ -505,7 +527,7 @@ function ConfigureBody({
               icon={<Minus />}
               state={buttons.unregister}
               destructive
-              onClick={() => selected && setRemoving(selected)}
+              onClick={() => selected && void remove(selected)}
               onRefused={setRefused}
             />
 
@@ -542,6 +564,49 @@ function ConfigureBody({
                   onSaveSettings={onSaveSettings}
                   onProvision={onProvision}
                   onSaved={onClose}
+                  orgOpen={activeOrg !== null}
+                  /* An ordinary button (Mike: "add a remove button to the sites details
+                     pane", and "the remove button needs to not look like some weird ui you
+                     invented"). Same shape as every other button in this dialog, the same
+                     `destructive` variant the rest of the app uses for the same job, and the
+                     same `buttons.unregister` gate the bar's copy reads. */
+                  remove={
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={!buttons.unregister.enabled}
+                      title={buttons.unregister.reason}
+                      onClick={() => selected && void remove(selected)}
+                    >
+                      Remove
+                    </Button>
+                  }
+                  orgForm={
+                    orgPane && activeOrg && onSaveOrgDefaults ? (
+                      <OrgDefaultsForm
+                        // Re-seeded per account, the same way the repository form is re-seeded
+                        // per repository: the draft is taken once on mount, so switching
+                        // accounts without a remount would show one account's defaults under
+                        // another one's title.
+                        key={activeOrg.login}
+                        org={activeOrg.login}
+                        defaults={orgDefaults.find((d) => d.org === activeOrg.login)}
+                        defaultsError={orgDefaultsError}
+                        rows={activeOrg.rows}
+                        catalogue={catalogue}
+                        formId={ORG_FORM_ID}
+                        onSaveDefaults={async (org, patch) => {
+                          await onSaveOrgDefaults(org, patch);
+                          // Read back rather than patching the held copy: the row the server
+                          // stored is what the next seeding has to start from, and it is the
+                          // server that fills in the fields this form did not send.
+                          await reloadOrgDefaults();
+                        }}
+                        onApply={onSaveSettings}
+                        onSaved={onClose}
+                      />
+                    ) : null
+                  }
                 />
               </StackLevels>
             </StandaloneRailHost>
@@ -550,17 +615,24 @@ function ConfigureBody({
           {/*
             OK AND CANCEL MEAN SOMETHING HERE, which is the only reason they are worth drawing.
             Everything else this dialog does is committed by its own control the moment it is
-            confirmed — Add walks a wizard, Remove makes you type the slug — and none of it is
-            undone by closing. The environment boxes are the one thing held in hand: OK submits
+            pressed — Add walks a wizard, Remove unregisters — and none of it is undone by
+            closing. The environment boxes are the one thing held in hand: OK submits
             them and closes, Cancel closes and drops them, which is what a modal's two buttons
             are expected to mean and what a lone corner "×" could not say.
 
-            `form=` rather than a click handler, and only while a repository is selected: the
+            `form=` rather than a click handler, and only while a pane with a form is showing: the
             boxes live in a pane in the middle of this dialog, so the browser's own mechanism for
             submitting a form from outside it is the whole implementation — the alternative is
             lifting every checkbox up here so the footer can build the patch itself, and then two
             surfaces compute the same diff. With nothing selected there is no form and no draft,
             and OK is simply the way out.
+
+            THREE BRANCHES, because there are now two panes that hold a draft. A repository's
+            settings submit `SETTINGS_FORM_ID`; an account's defaults submit `ORG_FORM_ID`, which
+            is what the organization's own settings became when they left the gear. They are
+            never both showing — `selected` is only ever non-null under an open account, and the
+            org pane is what draws when nothing under it is chosen — so the order here is a
+            statement of that, not a precedence rule.
           */}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
@@ -568,6 +640,10 @@ function ConfigureBody({
             </Button>
             {selected ? (
               <Button type="submit" form={SETTINGS_FORM_ID}>
+                OK
+              </Button>
+            ) : orgPane ? (
+              <Button type="submit" form={ORG_FORM_ID}>
                 OK
               </Button>
             ) : (
@@ -579,29 +655,6 @@ function ConfigureBody({
         </>
       )}
 
-      {/* The gear's one entry. Mounted next to the other sibling dialogs rather than inside
-          the level that opens it, because a level is re-registered whenever its plain fields
-          move and a dialog rendered from one would unmount mid-edit when a tree read lands. */}
-      {defaultsFor !== null && onSaveOrgDefaults ? (
-        <OrgDefaultsDialog
-          open
-          org={defaultsFor}
-          defaults={orgDefaults.find((d) => d.org === defaultsFor)}
-          defaultsError={orgDefaultsError}
-          rows={orgs.find((o) => o.login === defaultsFor)?.rows ?? []}
-          catalogue={catalogue}
-          onClose={() => setDefaultsFor(null)}
-          onSaveDefaults={async (org, patch) => {
-            await onSaveOrgDefaults(org, patch);
-            // Read back rather than patching the held copy: the row the server stored is
-            // what the next opening has to seed from, and it is the server that fills in
-            // the fields this form did not send.
-            await reloadOrgDefaults();
-          }}
-          onApply={onSaveSettings}
-        />
-      ) : null}
-
       <ImportDialog
         open={importing}
         onClose={() => setImporting(false)}
@@ -611,35 +664,6 @@ function ConfigureBody({
         onImport={onImport}
       />
 
-      <TypeToConfirmDialog
-        open={removing !== null}
-        onClose={() => setRemoving(null)}
-        title="Remove repository"
-        phrase={removing?.devRepo.slug ?? ''}
-        body={
-          removing ? (
-            <>
-              Unregisters{' '}
-              {removing.mirrors.length === 1
-                ? 'its deployment repository'
-                : `all ${removing.mirrors.length} of its deployment repositories`}{' '}
-              and retires <span className="font-mono">{removing.devRepo.slug}</span> from
-              this console. Nothing is deleted on GitHub — the repositories, their branches
-              and their protection rules are left exactly as they are, so registering again
-              adopts them rather than rebuilding them.
-            </>
-          ) : (
-            ''
-          )
-        }
-        confirmLabel="Remove"
-        onConfirm={async () => {
-          if (!removing) return;
-          await onRemove(removing.devRepo);
-          // The row is gone, so the selection that was showing it has to go too.
-          setSelectedId(null);
-        }}
-      />
 
       {/* The bar's refusal, said out loud — the click a greyed-out control used to swallow.
           `tone="info"` and not `"error"`: nothing went wrong, the operator asked for
@@ -734,15 +758,36 @@ function BarButton({
   );
 }
 
-/** The detail area: the selected repository's settings, or the reason there aren't any. */
+/**
+ * The detail area: whatever the rail has selected, at whichever level it selected it.
+ *
+ * THREE STATES AND ONE FRAME. A repository's settings, an account's defaults, or the hint
+ * that nothing is chosen — this component decides which and supplies the scroll box; the
+ * wiring for each is built by the dialog, which is the thing that holds the state. The
+ * account's defaults reached here from a gear on the repository level's title, which is to
+ * say from a modal on top of this modal, hung off the title of the level BELOW their own
+ * subject.
+ */
 function DetailPane({
   selected,
+  orgForm,
+  orgOpen,
   catalogue,
   onSaveSettings,
   onProvision,
   onSaved,
+  remove,
 }: {
   selected: Row | null;
+  /** The open account's defaults form, or null when the pane's subject is not an account —
+   *  nothing is open, a repository under it is selected, or the read that seeds it is still
+   *  out. Built by the dialog because that is where the read and the save live. */
+  orgForm: React.ReactNode;
+  /** An account is open, whether or not {@link orgForm} could be built for it. It decides
+   *  which hint the empty state gives: telling an operator to choose an organization while
+   *  the column of its repositories is on screen names the one thing they have already
+   *  done. */
+  orgOpen: boolean;
   /** Answers "is that deployment repository already there" without a round trip, and names
    *  the accounts the deployment-organization menu may offer. */
   catalogue: ForgeCatalogue;
@@ -750,6 +795,9 @@ function DetailPane({
   onProvision?: (devRepoId: string) => Promise<void> | void;
   /** The save the footer's OK started has landed. Closing is the rest of what OK means. */
   onSaved: () => void;
+  /** Remove, for the repository this pane is showing — the bar's own button, handed down.
+   *  See the note at the call site: one gate, two places to press it. */
+  remove: React.ReactNode;
 }): React.ReactElement {
   if (selected) {
     return (
@@ -769,15 +817,32 @@ function DetailPane({
           onSave={onSaveSettings}
           onProvision={onProvision}
           onSaved={onSaved}
+          remove={remove}
         />
       </div>
     );
   }
+  if (orgForm) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
+        {orgForm}
+      </div>
+    );
+  }
+  if (orgOpen) {
+    return (
+      <TopicSelectHint noun="repository" listTitle="Repositories">
+        Its deployment repositories, the branches they are cut from, and which environments
+        each one ships to. Add registers a new one — against a forge account from
+        Integrations, out on the right of the toolbar.
+      </TopicSelectHint>
+    );
+  }
   return (
-    <TopicSelectHint noun="repository" listTitle="Repositories">
-      Its deployment repositories, the branches they are cut from, and which environments
-      each one ships to. Add registers a new one — against a forge account from Integrations,
-      out on the right of the toolbar.
+    <TopicSelectHint noun="organization" listTitle="Organizations">
+      What a new repository in that account deploys to by default, and the repositories
+      already registered from it. Add registers a new one — against a forge account from
+      Integrations, out on the right of the toolbar.
     </TopicSelectHint>
   );
 }
