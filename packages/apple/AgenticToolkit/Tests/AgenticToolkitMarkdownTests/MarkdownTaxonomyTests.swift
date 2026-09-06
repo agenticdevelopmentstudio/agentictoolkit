@@ -138,6 +138,75 @@ struct MarkdownTaxonomyTests {
         } == "content.markdown")
     }
 
+    @Test("categoryEdges returns every live parent/child pair")
+    func categoryEdgesReturnsLiveEdges() throws {
+        let store = try store()
+        let top = try store.createCategory(name: "Top")
+        let left = try store.createCategory(name: "Left")
+        let right = try store.createCategory(name: "Right")
+        try store.addCategoryEdge(parent: top.id, child: left.id)
+        try store.addCategoryEdge(parent: top.id, child: right.id)
+        let edges = try store.categoryEdges()
+        #expect(edges.count == 2)
+        #expect(edges.contains { $0.parent == top.id && $0.child == left.id })
+        #expect(edges.contains { $0.parent == top.id && $0.child == right.id })
+    }
+
+    @Test("categoryEdges omits an edge removed by removeCategoryEdge")
+    func categoryEdgesOmitsRemovedEdges() throws {
+        let store = try store()
+        let top = try store.createCategory(name: "Top")
+        let sub = try store.createCategory(name: "Sub")
+        try store.addCategoryEdge(parent: top.id, child: sub.id)
+        try store.removeCategoryEdge(parent: top.id, child: sub.id)
+        #expect(try store.categoryEdges().isEmpty)
+    }
+
+    @Test("categoryNoteCounts counts only notes, not docs or papers")
+    func categoryNoteCountsCountsOnlyNotes() throws {
+        let store = try store()
+        let category = try store.createCategory(name: "Recipes")
+        let note = try store.createDocument(content: "a note", markers: [.note])
+        let doc = try store.createDocument(content: "a doc", markers: [.doc])
+        try store.assignCategory(category.id, toDocument: note.id)
+        try store.assignCategory(category.id, toDocument: doc.id)
+        let counts = try store.categoryNoteCounts()
+        #expect(counts[category.id] == 1)
+    }
+
+    @Test("categoryNoteCounts is direct, not transitive — a parent does not inherit a child's notes")
+    func categoryNoteCountsIsDirectNotTransitive() throws {
+        let store = try store()
+        let parent = try store.createCategory(name: "Parent")
+        let child = try store.createCategory(name: "Child")
+        try store.addCategoryEdge(parent: parent.id, child: child.id)
+        let note = try store.createDocument(content: "a note", markers: [.note])
+        try store.assignCategory(child.id, toDocument: note.id)
+        let counts = try store.categoryNoteCounts()
+        #expect(counts[child.id] == 1)
+        #expect(counts[parent.id] == nil)
+    }
+
+    @Test("documentIDs(forCategory:) returns the notes filed directly under it")
+    func documentIDsForCategoryReturnsDirectMembers() throws {
+        let store = try store()
+        let category = try store.createCategory(name: "Recipes")
+        let note = try store.createDocument(content: "a note", markers: [.note])
+        let otherNote = try store.createDocument(content: "another note", markers: [.note])
+        try store.assignCategory(category.id, toDocument: note.id)
+        #expect(try store.documentIDs(forCategory: category.id) == [note.id])
+        #expect(try store.documentIDs(forCategory: category.id).contains(otherNote.id) == false)
+    }
+
+    @Test("documentIDs(forCategory:) excludes a doc filed under the same category")
+    func documentIDsForCategoryExcludesNonNotes() throws {
+        let store = try store()
+        let category = try store.createCategory(name: "Recipes")
+        let doc = try store.createDocument(content: "a doc", markers: [.doc])
+        try store.assignCategory(category.id, toDocument: doc.id)
+        #expect(try store.documentIDs(forCategory: category.id).isEmpty)
+    }
+
     @Test("keywords round-trip and attach to a document")
     func keywordAssignment() throws {
         let store = try store()

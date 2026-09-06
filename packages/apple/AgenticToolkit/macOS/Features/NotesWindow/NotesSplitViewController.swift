@@ -1,12 +1,23 @@
 import AppKit
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticToolkitMarkdown
 
 public final class NotesSplitViewController: ThemedSplitViewController {
 
     // MARK: - Dependencies
 
     private let notesManager: NotesManager
+
+    /// The taxonomy store for the folders pane, when the host's storage has
+    /// one — see `NotesManager.markdownStore`.
+    ///
+    /// Stored rather than consumed here: Task 6 wires this into a
+    /// `NotesFolderListViewController` split item. Until then it sits here
+    /// unused, which is deliberately what closes the gap task-5-grounding G9
+    /// identified — `NotesWindowController` has somewhere to hand the value
+    /// on to right away, instead of Task 6 having to add the parameter too.
+    public let markdownStore: MarkdownStore?
 
     /// Divider-position key, distinct per pane when a host can open more than
     /// one notes pane at a time.
@@ -19,8 +30,9 @@ public final class NotesSplitViewController: ThemedSplitViewController {
 
     // MARK: - Initialization
 
-    public init(notesManager: NotesManager, autosaveName: String = "notes-split") {
+    public init(notesManager: NotesManager, markdownStore: MarkdownStore? = nil, autosaveName: String = "notes-split") {
         self.notesManager = notesManager
+        self.markdownStore = markdownStore
         self.splitAutosaveName = autosaveName
         // The list watches the manager itself, so a note created anywhere else
         // — Quick Note, a scripting command, a second window — reaches this

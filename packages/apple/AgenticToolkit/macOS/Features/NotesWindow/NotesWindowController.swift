@@ -17,7 +17,8 @@ public final class NotesWindowController: WindowController<NotesSplitViewControl
         self.notesManager = notesManager
         super.init(
             windowID: Self.windowID,
-            contentViewController: NotesSplitViewController(notesManager: notesManager)
+            contentViewController: NotesSplitViewController(
+                notesManager: notesManager, markdownStore: notesManager.markdownStore)
         )
         self.windowSpec = WindowSpec(
             defaultSize: NSSize(width: 700, height: 500),

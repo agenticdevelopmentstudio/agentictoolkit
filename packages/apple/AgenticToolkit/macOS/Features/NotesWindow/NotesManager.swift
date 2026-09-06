@@ -1,6 +1,7 @@
 import Foundation
 import os
 import AgenticToolkitCore
+import AgenticToolkitMarkdown
 
 /// Coordinates in-memory note state and storage persistence.
 /// All access must happen on the main actor.
@@ -84,6 +85,15 @@ public final class NotesManager {
 
     private let storage: NoteStorage
     private var saveTasks: [UUID: Task<Void, Never>] = [:]
+
+    /// The taxonomy store behind this manager's storage, when there is one.
+    ///
+    /// `NoteStorage` does not know about categories, so this asks whether the
+    /// concrete storage backing this manager happens to also be
+    /// `NoteTaxonomyProviding` — `MarkdownNoteStorage` is, an in-memory or
+    /// file-based test double is not. `nil` here is what keeps the folders
+    /// pane optional rather than a hard dependency on a `MarkdownStore`.
+    public var markdownStore: MarkdownStore? { (storage as? NoteTaxonomyProviding)?.store }
 
     /// Debounce interval for auto-save.
     private static let saveDebounce: Duration = .seconds(1)

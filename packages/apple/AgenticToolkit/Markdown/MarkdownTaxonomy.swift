@@ -94,6 +94,74 @@ extension MarkdownStore {
         }
     }
 
+    /// Every live `parent → child` edge, with no `ecosystem_id` predicate —
+    /// matching `categories()`, whose output this must line up with. Scoping
+    /// this one and not that one would silently orphan a node whose parent is
+    /// filtered out of the edge list but not out of the category list.
+    public func categoryEdges() throws -> [(parent: String, child: String)] {
+        try database.read { conn in
+            try Row.fetchAll(
+                conn,
+                sql: "SELECT parent_id, child_id FROM category_edges WHERE deleted_at IS NULL"
+            ).map { (parent: $0["parent_id"], child: $0["child_id"]) }
+        }
+    }
+
+    /// How many *notes* are filed directly under each category.
+    ///
+    /// Direct membership only — no recursive walk down to a category's
+    /// children. `category_items` records a direct assignment, and nothing in
+    /// the schema makes a child's items belong to its parent, so a parent's
+    /// count can be smaller than the sum of its children's; that is correct,
+    /// not a bug. Counting transitively would double-count a note reachable
+    /// through two parents, and the graph is a DAG, so that is not a rare
+    /// case. This also matches Apple Notes' own folder badges, which count a
+    /// folder's own notes.
+    ///
+    /// A *note* is a `markdown` row with a live `notes` marker row — the same
+    /// join `documents(marker: .note)` uses — so a `doc` or a `paper` filed
+    /// under a category is not counted here.
+    public func categoryNoteCounts() throws -> [String: Int] {
+        try database.read { conn in
+            let rows = try Row.fetchAll(
+                conn,
+                sql: """
+                    SELECT i.category_id AS category_id, COUNT(*) AS note_count
+                    FROM category_items i
+                    JOIN markdown m ON m.id = i.target_id AND m.is_deleted = 0
+                    JOIN notes n ON n.markdown_id = m.id AND n.deleted_at IS NULL
+                    WHERE i.target_kind = ? AND i.deleted_at IS NULL
+                    GROUP BY i.category_id
+                    """,
+                arguments: [Self.documentTargetKind])
+            var counts: [String: Int] = [:]
+            for row in rows {
+                counts[row["category_id"] as String] = row["note_count"]
+            }
+            return counts
+        }
+    }
+
+    /// The ids of every *note* filed directly under `categoryID` — the inverse
+    /// of `categories(forDocument:)`. Same joins as `categoryNoteCounts()`, but
+    /// scoped to one category rather than grouped over all of them, so a
+    /// folder's row can be filtered without an N-query sweep of every note.
+    public func documentIDs(forCategory categoryID: String) throws -> Set<String> {
+        try database.read { conn in
+            let ids = try String.fetchAll(
+                conn,
+                sql: """
+                    SELECT i.target_id
+                    FROM category_items i
+                    JOIN markdown m ON m.id = i.target_id AND m.is_deleted = 0
+                    JOIN notes n ON n.markdown_id = m.id AND n.deleted_at IS NULL
+                    WHERE i.category_id = ? AND i.target_kind = ? AND i.deleted_at IS NULL
+                    """,
+                arguments: [categoryID, Self.documentTargetKind])
+            return Set(ids)
+        }
+    }
+
     /// Adds `parent → child`, refusing an edge that would close a cycle.
     ///
     /// The schema's `CHECK (parent_id <> child_id)` catches the one-node case;
