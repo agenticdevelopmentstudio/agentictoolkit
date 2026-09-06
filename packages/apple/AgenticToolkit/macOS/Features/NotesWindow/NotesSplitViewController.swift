@@ -62,7 +62,7 @@ public final class NotesSplitViewController: ThemedSplitViewController {
     /// re-check itself — the same manual pattern
     /// `ComposableSettings.SettingsWindow.updateToolbarState()` already uses
     /// for its own custom-view items, for the identical reason.
-    public var onToolbarRelevantStateChange: (() -> Void)?
+    var onToolbarRelevantStateChange: (() -> Void)?
 
     // MARK: - Initialization
 

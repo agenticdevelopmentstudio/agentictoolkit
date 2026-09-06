@@ -52,6 +52,16 @@ public final class NotesWindowToolbar: NSObject, NSToolbarDelegate {
     private var moreButton: NSButton?
     private var helpButton: NSButton?
 
+    /// Repaints the help button on every theme change, the same way
+    /// `PanelHostView` and `NotesSplitViewController.helpThemeObserver` keep
+    /// their own help glyphs live: reading `ThemePaletteObserver.currentPalette`
+    /// only on demand (the original version of this file) left the tint stale
+    /// until some unrelated refresh — a selection change or a help toggle —
+    /// happened to call `refreshDynamicState()` next. A stored, live observer
+    /// applies immediately on creation and again on every subsequent theme
+    /// change, whether or not anything else asked.
+    private var helpThemeObserver: ThemePaletteObserver?
+
     public init(splitViewController: NotesSplitViewController) {
         self.splitViewController = splitViewController
         super.init()
@@ -133,7 +143,17 @@ public final class NotesWindowToolbar: NSObject, NSToolbarDelegate {
                 label: "Help",
                 action: #selector(helpTapped))
             helpButton = button
-            applyHelpAppearance(to: button)
+            // `host: button` mirrors `NotesSplitViewController.helpThemeObserver`
+            // (`host: view`) rather than `PanelHostView` (`host: self`): this
+            // toolbar is an `NSObject`, not a view, so the button itself — the
+            // real thing that ends up in the window's view hierarchy — is the
+            // only candidate that can resolve a `ThemeScope`. The observer
+            // applies immediately on creation, so this replaces the old
+            // seed-then-never-update call to `applyHelpAppearance(to: button)`.
+            helpThemeObserver = ThemePaletteObserver(host: button) { [weak self] _ in
+                guard let self, let helpButton = self.helpButton else { return }
+                self.applyHelpAppearance(to: helpButton)
+            }
             return item
 
         case .notesSearch:
@@ -252,7 +272,13 @@ public final class NotesWindowToolbar: NSObject, NSToolbarDelegate {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Help")
         button.image = image?.withSymbolConfiguration(
             NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))
-        let palette = ThemePaletteObserver.currentPalette
+        // The button's own resolved scope (task-7 fix round 1), not
+        // `ThemePaletteObserver.currentPalette` — matches
+        // `NotesSplitViewController`'s `view.resolvedThemeScope.palette` and
+        // `PanelHostView`'s `self.resolvedThemeScope.palette`: this toolbar may
+        // run inside a window with its own theme scope, and the static
+        // app-wide accessor would ignore that.
+        let palette = button.resolvedThemeScope.palette
         button.contentTintColor = disclosed ? palette.accentColor : palette.secondaryTextColor
         button.toolTip = disclosed ? "Hide Help" : "Show Help"
     }
