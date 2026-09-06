@@ -242,7 +242,11 @@ struct MarkdownStoreTests {
 
         try store.definalizeDocument(id: created.id)
         #expect(try #require(try store.document(id: created.id)).stage == .draft)
-        #expect(try store.pendingRemoteOps(limit: 10).map(\.intent) == [.finalize, .definalize])
+        // Just `[.definalize]`: the pending `finalize` had not drained, so the
+        // server never saw it, and the two annihilate rather than queueing a
+        // round trip that ends where it started. See
+        // `opposingIntentsCancelInsteadOfMergingInPlace`.
+        #expect(try store.pendingRemoteOps(limit: 10).map(\.intent) == [.definalize])
     }
 
     @Test("a lifecycle call for a document that is not there says so")
@@ -482,7 +486,10 @@ struct MarkdownStoreTests {
         try store.publishDocument(id: first.id, route: "/first", now: now)
 
         let queued = try store.pendingRemoteOps(limit: 10)
-        #expect(queued.map(\.intent) == [.finalize, .definalize, .publish])
+        // The `definalize` cancelled the pending `finalize`, so two ops remain
+        // — still enough to make the point, since both share `created_at` and
+        // only `seq` can order them.
+        #expect(queued.map(\.intent) == [.definalize, .publish])
         #expect(Set(queued.map(\.createdAt)).count == 1)
     }
 
@@ -508,6 +515,71 @@ struct MarkdownStoreTests {
         let created = try store.createDocument(content: "one", markers: [])
         try await store.drainRemoteQueue(into: RecordingWriter(), limit: 10)
         #expect(try store.remoteID(forDocument: created.id) == nil)
+    }
+
+    // MARK: - Opposing intents (final-review M1)
+
+    /// Merging in place keeps the merged row's `seq`, and for the four intents
+    /// that undo each other that reorders the queue. With a `publish` pending
+    /// at the head, an `unpublish` behind it and a second `publish` merging
+    /// back into the head, the queue drained publish → unpublish: the document
+    /// ended up unpublished upstream although the user's last action was to
+    /// publish it, and the local row said published. The queue has to drain in
+    /// the order the user acted.
+    @Test("an opposing intent cancels its twin instead of merging into its position")
+    func opposingIntentsCancelInsteadOfMergingInPlace() throws {
+        let store = try store()
+        let created = try store.createDocument(content: "body", markers: [])
+        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
+
+        // An unrelated op first, so "at the tail" is observable at all.
+        try store.finalizeDocument(id: created.id)
+        try store.publishDocument(id: created.id, route: "/one")
+        try store.unpublishDocument(id: created.id)
+        try store.publishDocument(id: created.id, route: "/two")
+
+        let queued = try store.pendingRemoteOps(limit: 10)
+        #expect(queued.map(\.intent) == [.finalize, .publish])
+        #expect(queued.last?.payload["route"] == .string("/two"))
+        #expect(try #require(try store.document(id: created.id)).publicRoute == "/two")
+    }
+
+    /// The same rule for the other pair, and from the other side: a document
+    /// the server already finalized, definalized locally, then finalized
+    /// again, must not leave a stale `definalize` behind it.
+    @Test("cancelling leaves the queue with one op per opposing pair")
+    func cancellingLeavesOneOpPerPair() throws {
+        let store = try store()
+        let created = try store.createDocument(content: "body", markers: [])
+        try store.completeRemoteOp(opID: try store.pendingRemoteOps(limit: 1)[0].opID)
+
+        try store.finalizeDocument(id: created.id)
+        try store.definalizeDocument(id: created.id)
+        try store.finalizeDocument(id: created.id)
+
+        #expect(try store.pendingRemoteOps(limit: 10).map(\.intent) == [.finalize])
+        #expect(try #require(try store.document(id: created.id)).stage == .final)
+    }
+
+    /// Cancelling is scoped to the pair and to the document. A `create` or an
+    /// `update` still coalesces exactly as it did, and another document's
+    /// pending op is untouched.
+    @Test("cancelling does not reach another document or another intent")
+    func cancellingIsScopedToOnePairAndOneDocument() throws {
+        let store = try store()
+        let first = try store.createDocument(content: "one", markers: [])
+        let second = try store.createDocument(content: "two", markers: [])
+        for queuedOp in try store.pendingRemoteOps(limit: 10) {
+            try store.completeRemoteOp(opID: queuedOp.opID)
+        }
+
+        try store.publishDocument(id: first.id, route: "/first")
+        try store.publishDocument(id: second.id, route: "/second")
+        try store.unpublishDocument(id: first.id)
+
+        let queued = try store.pendingRemoteOps(limit: 10)
+        #expect(queued.map(\.documentID) == [second.id, first.id])
+        #expect(queued.map(\.intent) == [.publish, .unpublish])
     }
 
     @Test("defaultPath puts the database beside Whippet's, not inside it")

@@ -86,6 +86,16 @@ public enum MarkdownStoreError: Error, Equatable {
 /// `BoundedDatabase` pool, so "synchronous" means "returns when the write is
 /// durable", not "on the main thread" — callers doing bulk work move it off
 /// themselves.
+///
+/// `@unchecked Sendable` is what makes that shape usable from more than one
+/// task, and the property it asserts is now established rather than assumed:
+/// every stored property is a `let`, and each is either itself `Sendable`
+/// (`String`) or a type that serialises its own concurrent use
+/// (`BoundedDatabase`'s pool, `GRDBSyncStore`). It used to hold two more —
+/// a shared `JSONEncoder` and `JSONDecoder`, which publish no thread-safety
+/// guarantee at all and were reachable from the concurrent read path; those
+/// are built per call now (`encodePayload`/`decodePayload`), which costs
+/// nothing on a path that is about to touch the disk.
 public final class MarkdownStore: @unchecked Sendable {
 
     public let database: BoundedDatabase
@@ -96,8 +106,6 @@ public final class MarkdownStore: @unchecked Sendable {
 
     let customerID: String
     let ecosystemID: String
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
 
     /// `~/.whippet/Markdown.db` — deliberately not `Whippet.db`. That file is
     /// driven by raw SQLite3 C API code and this store is GRDB; two stacks on
@@ -402,6 +410,25 @@ public final class MarkdownStore: @unchecked Sendable {
         }
     }
 
+    /// Tombstones a document, its markers and its frontmatter claims, and
+    /// replaces its queued ops with a `delete`.
+    ///
+    /// **Deleting an id that is not here is a success, not a `notFound`, and
+    /// that is deliberate — the one place in this file where idempotency
+    /// outranks fail-fast.** Every other method that cannot find its id throws
+    /// (`renameCategory`, `setAuthoredState`, `assignItem`), because they are
+    /// asked to *change* a row and there is no row to change. A delete is
+    /// asked to reach a state, and the state is already reached. This is a
+    /// synced store: the same delete arrives twice from a retried drain, from
+    /// a pull that already tombstoned the row, and from a UI that cannot know
+    /// which of those has happened — and every one of those callers would have
+    /// to catch and discard a `notFound` it does not care about, which is a
+    /// worse posture than not raising it. Raising it would also make the
+    /// error mean two different things at one call site: "your delete lost a
+    /// race" and "your id is wrong".
+    ///
+    /// (Raised as L1 in the final review and refused for the above; recorded
+    /// here so the next reader does not re-raise it.)
     public func deleteDocument(id: String, now: Date = Date()) throws {
         let now = Self.normalizedTimestamp(now)
         try database.write { conn in
@@ -686,14 +713,46 @@ public final class MarkdownStore: @unchecked Sendable {
 
     // MARK: - Outbox coalescing
 
+    /// Which intents undo each other. Coalescing one of these in place would
+    /// reorder the queue — see `enqueue`.
+    private static let opposingIntent: [MarkdownRemoteIntent: MarkdownRemoteIntent] = [
+        .publish: .unpublish, .unpublish: .publish,
+        .finalize: .definalize, .definalize: .finalize
+    ]
+
     /// Coalesces on `(document_id, intent)`, with one exception that matters:
     /// an `update` for a document whose `create` has not drained yet merges
     /// into the `create`. Queueing both would send adh an update for a row it
     /// has never seen.
+    ///
+    /// Merging in place keeps the merged row's `seq`, which is right for
+    /// create/update — an `update` folded into a pending `create` must keep
+    /// the create's position — and wrong for the four intents that *undo each
+    /// other*. With a `publish` pending at `seq = 5`, an unpublish landing at
+    /// `seq = 6` and a second publish merging back into `seq = 5` drained as
+    /// publish → unpublish, so the document ended up unpublished on the server
+    /// although the user's last action was to publish it, while the local
+    /// mirror said published. The queue has to drain in the order the user
+    /// acted.
+    ///
+    /// So an order-dependent intent *cancels* the opposing pending op instead
+    /// of ordering itself against it, and then enqueues at the tail. Cancelling
+    /// is not merely an optimisation: the two ops annihilate — the opposing one
+    /// was never sent, so the server never saw the state this one is undoing —
+    /// and it maintains the invariant that makes the in-place merge below safe,
+    /// namely that a document never has both halves of a pair pending at once.
+    /// The new op is still queued rather than dropped, because the server may
+    /// already be in the opposite state from an *earlier*, already-drained op.
     private func enqueue(
         _ intent: MarkdownRemoteIntent, for documentID: String,
         payload: [String: JSONValue], at now: Date, in conn: Database
     ) throws {
+        if let opposing = Self.opposingIntent[intent] {
+            try conn.execute(
+                sql: "DELETE FROM _markdown_outbox WHERE document_id = ? AND intent = ?",
+                arguments: [documentID, opposing.rawValue])
+        }
+
         var target = intent
         if intent == .update {
             let hasPendingCreate = try Bool.fetchOne(
@@ -739,14 +798,19 @@ public final class MarkdownStore: @unchecked Sendable {
         }
     }
 
+    /// Built per call, not held. See the note on the class's
+    /// `@unchecked Sendable` conformance: a shared `JSONEncoder` is state
+    /// with no published thread-safety guarantee sitting on a type that
+    /// promises it has none, and an outbox write is about to hit the disk
+    /// anyway.
     private func encodePayload(_ payload: [String: JSONValue]) throws -> String {
-        guard let text = String(bytes: try encoder.encode(payload), encoding: .utf8) else {
+        guard let text = String(bytes: try JSONEncoder().encode(payload), encoding: .utf8) else {
             throw MarkdownStoreError.payloadEncodingFailed
         }
         return text
     }
 
     private func decodePayload(_ text: String) throws -> [String: JSONValue] {
-        try decoder.decode([String: JSONValue].self, from: Data(text.utf8))
+        try JSONDecoder().decode([String: JSONValue].self, from: Data(text.utf8))
     }
 }
