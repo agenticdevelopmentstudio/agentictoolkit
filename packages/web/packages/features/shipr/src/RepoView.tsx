@@ -6,23 +6,11 @@ import { ErrorText } from '@agenticdevelopertoolkit/ui/components/error-text';
 import { Spinner } from '@agenticdevelopertoolkit/ui/components/spinner';
 
 import type { ShiprClient } from './client';
+import { stampMs } from './freshness';
 import { Ladder } from './ladder/Ladder';
+import { repoLabel } from './tree/toLevels';
 import { RepoReport } from './report/RepoReport';
 import { TERMINAL_STATES, type RepoDetail } from './types';
-
-/**
- * A backend stamp as milliseconds.
- *
- * `timestamp without time zone` read through drizzle's `mode: 'string'` comes back as
- * `2026-08-25 16:37:50.852` — a space, and no zone — which `Date.parse` reads as LOCAL time.
- * Both stamps compared here get the identical treatment, so the comparison holds whichever
- * shape the wire settles on; naming UTC keeps it right if only one side ever gains a `Z`.
- */
-function stampMs(at: string | null | undefined): number {
-  if (!at) return Number.NaN;
-  const iso = at.includes('T') ? at : at.replace(' ', 'T');
-  return Date.parse(/[Zz]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
-}
 
 /**
  * ONE REPOSITORY, THE WHOLE ANSWER — and the ONLY place this console draws one.
@@ -52,10 +40,12 @@ function stampMs(at: string | null | undefined): number {
  * the rail's Settings item now.
  *
  * A repository that has never had `status` run against it has NO ladder at all — the route
- * answers `null`, not an empty one — and the view says so and says to run it. That is
- * deliberately not done automatically: reading six branches on the forge is a network round
- * trip per repository, and a view that silently fires one every time someone browses is a
- * rate limit waiting to happen.
+ * answers `null`, not an empty one — and the view says so and says to run it. THIS VIEW
+ * still fires nothing itself: it is mounted once per repository inside a folder's stack, so
+ * a read started here would be forty of them the moment a folder is opened. Opening ONE
+ * repository does now read it, at most once an hour, and the console owns that because the
+ * console is the thing that knows a single row was clicked — see `statusIsStale` and the
+ * effect that uses it in `ShiprConsole`.
  *
  * The two absences are kept apart on purpose. `null` is "nobody has looked"; a ladder with
  * no rows is "we looked, and there is nothing" — and only the second one is a statement
@@ -239,18 +229,14 @@ export function RepoView({
               {relativePath}/
             </span>
           ) : null,
-          devRepo?.slug ?? repo.slug,
+          // ONE NAME, THE CONFIGURED ONE (Mike). The heading used to read
+          // `owner/name` plus a gold shard beside it — three tokens for one thing, none of
+          // them the name anybody chose. `repoLabel` is the single answer the rail already
+          // gives, so the pane and the row it was opened from now agree letter for letter.
+          // The full `owner/name` has not gone anywhere: it is the first line of the facts
+          // block below, where a reference belongs.
+          repoLabel({ slug: repo.slug, devRepo }),
         )}
-        {/* THE SHARD IS PART OF THE NAME, NOT AN ANNOTATION ON IT (Mike) — same size, same
-            weight, tinted. Two mirrors of one repository carry the same slug and differ only
-            here, so this word is the entire answer to "this is not that"; set at 11px in
-            muted grey inside a chip it read as metadata, and the two rows read as duplicates
-            of each other. Gold because that is what a GROUPING is coloured throughout this
-            console — the folder heading in `GroupDetailPane` and the breadcrumb above it —
-            and a shard is the repository's own grouping. */}
-        {repo.shard !== 'all' ? (
-          <span className="text-sm font-semibold text-apt-gold">{repo.shard}</span>
-        ) : null}
         {alone && group ? (
           // `name`, NEVER `path` — `path` is the backend's id ancestry, a key for prefix
           // matching an index, and rendering it puts a row of uuids where a folder name

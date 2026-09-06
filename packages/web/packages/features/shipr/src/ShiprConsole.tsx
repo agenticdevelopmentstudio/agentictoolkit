@@ -9,6 +9,7 @@ import { useRunningRepos } from './activity/useRunningRepos';
 import { isFinished, useRuns } from './activity/useRuns';
 import { ConfigureDialog } from './configure/ConfigureDialog';
 import { useForgeCatalogue } from './forge/useForgeCatalogue';
+import { STATUS_MAX_AGE_MS, statusIsStale } from './freshness';
 import {
   connectionsHashPresent,
   ConnectionsDialog,
@@ -193,7 +194,10 @@ function Console({
     | { kind: 'none' }
     | { kind: 'newGroup'; parentId: string | null }
     | { kind: 'rename'; id: string; name: string }
-    | { kind: 'delete'; id: string; name: string }
+    // IDS, NOT AN ID. Delete works on a batch for the same reason Move does: a select-mode
+    // tick on four folders is one statement about four folders, and a menu item that
+    // silently acted on whichever one happened to be first is worse than one that refuses.
+    | { kind: 'delete'; ids: string[]; names: string[] }
     | { kind: 'move'; refs: NodeRef[] }
     // No payload. Configure is a PLACE, not an act on a row: it opens on nothing selected
     // and the operator chooses inside it, so there is nothing for this console to hand it.
@@ -326,9 +330,19 @@ function Console({
       /** The control that was pressed — see `activeAction`. */
       action: ActionId,
       operations: readonly { operation: Operation; environments?: Environment[] }[],
+      /**
+       * The rows to run over — the selection, unless a caller names them.
+       *
+       * The buttons never name them: what the toolbar acts on IS the selection, and letting
+       * a control pass its own list is how a deploy lands somewhere the operator did not
+       * highlight. The one caller that does is {@link autoStatus}, which is not a control at
+       * all — it acts on the row that was just opened, and that row is not necessarily what
+       * the toolbar is pointed at, because ticking a batch leaves `focus` free to move.
+       */
+      on: readonly NodeRef[] = targets,
     ) => {
       setError(null);
-      if (targets.length === 0) return;
+      if (on.length === 0) return;
       // Before the first await, so the pane is empty by the time this function yields.
       setPressed((n) => n + 1);
       const started: string[] = [];
@@ -338,7 +352,7 @@ function Console({
         // makes "prepare, then deploy to staging and production" mean those words in that
         // order rather than three runs racing.
         for (const step of operations) {
-          for (const scope of targets.map(scopeOf)) {
+          for (const scope of on.map(scopeOf)) {
             const { runId } = await client.run({
               operation: step.operation,
               ...scope,
@@ -560,19 +574,31 @@ function Console({
   );
 
   const onDelete = React.useCallback(
-    async (id: string) => {
-      await client.deleteGroup(id);
-      // The deleted folder may be open. Truncating the path at it puts the operator in its
-      // parent instead of on a rail of nothing.
+    async (ids: readonly string[]) => {
+      // One at a time, first failure stops the rest — the same rule `onMove` follows, and
+      // for the same reason: the backend refuses a folder that still holds anything, so a
+      // batch of four where the second is non-empty must stop with two gone and say so,
+      // not report a success it did not have.
+      for (const id of ids) await client.deleteGroup(id);
+      const gone = new Set(ids);
+      // A deleted folder may be open. Truncating the path at the FIRST deleted ancestor puts
+      // the operator in its surviving parent instead of on a rail of nothing.
       setPath((prev) => {
-        const at = prev.indexOf(id);
+        const at = prev.findIndex((id) => gone.has(id));
         return at === -1 ? prev : prev.slice(0, at);
       });
-      setSelection((prev) =>
-        prev.focus?.kind === 'group' && prev.focus.id === id
-          ? { ...prev, focus: null }
-          : prev,
-      );
+      setSelection((prev) => ({
+        ...prev,
+        focus:
+          prev.focus?.kind === 'group' && gone.has(prev.focus.id)
+            ? null
+            : prev.focus,
+        // Ticks pointing at rows that no longer exist are ticks every other control is
+        // still aimed at.
+        checked: prev.checked.filter(
+          (c) => !(c.kind === 'group' && gone.has(c.id)),
+        ),
+      }));
       refreshAll();
     },
     [client, refreshAll],
@@ -680,6 +706,15 @@ function Console({
     soleTarget?.kind === 'group'
       ? (groups.find((g) => g.id === soleTarget.id) ?? null)
       : null;
+  /** EVERY folder the menu is pointed at — Delete's targets. `soleGroup` stays what Rename
+   *  and Settings use, because those genuinely are one-at-a-time. */
+  const selectedGroups = React.useMemo(
+    () =>
+      targets.flatMap((t) =>
+        t.kind === 'group' ? groups.filter((g) => g.id === t.id) : [],
+      ),
+    [targets, groups],
+  );
   const focusedGroup =
     selection.focus?.kind === 'group'
       ? (groups.find((g) => g.id === selection.focus!.id) ?? null)
@@ -698,6 +733,48 @@ function Console({
     [selection, verbs, busy, groups.length],
   );
 
+  /**
+   * OPENING A REPOSITORY READS IT, IF NOBODY HAS LOOKED IN AN HOUR.
+   *
+   * Mike: "clicking on a website in home should fire status if it's never been fired before,
+   * or if the last check was more than an hour prior". A ladder is only worth anything if it
+   * is current, and until now the only thing that made it current was an operator
+   * remembering to press Status — so the usual state of this console was rows of readings
+   * from whenever somebody last thought to take one, presented as if they were now.
+   *
+   * HERE, AND NOT IN `RepoView`, because this is the only layer that knows a single row was
+   * opened. The pane is mounted once per repository inside a folder's stack, so the same
+   * rule written there would fire forty reads the moment a folder is opened — which is the
+   * rate limit that kept it manual in the first place. `focus` moving to ONE repository is
+   * the click, and it is the whole trigger.
+   *
+   * Three things keep it to one read per repository per hour:
+   *
+   *  - `statusIsStale` on the state the tree ALREADY carries — no extra round trip to decide
+   *    whether to spend a round trip, and a repository nobody has ever read (`state` null)
+   *    is stale by definition, which is the case the operator named first.
+   *  - `asked`, because the tree is re-read while the run is still in flight and the read it
+   *    answers with is still the old one. Without this the second refresh would see a stale
+   *    stamp and fire again, and so would the third.
+   *  - `buttons.status.enabled`, which is the SAME answer the Status button gives, so a
+   *    viewer who may not read these repositories does not silently start a run by browsing,
+   *    and nothing is queued behind a run already in flight.
+   */
+  const asked = React.useRef(new Map<string, number>());
+  React.useEffect(() => {
+    if (!selectedRepoId || !buttons.status.enabled) return;
+    const item = items.find((r) => r.id === selectedRepoId);
+    if (!item) return;
+    const now = Date.now();
+    if (now - (asked.current.get(selectedRepoId) ?? -Infinity) < STATUS_MAX_AGE_MS)
+      return;
+    if (!statusIsStale(item.state, now)) return;
+    asked.current.set(selectedRepoId, now);
+    void start('status', [{ operation: 'status' }], [
+      { kind: 'repo', id: selectedRepoId },
+    ]);
+  }, [selectedRepoId, items, buttons.status.enabled, start]);
+
   /** The gear menu, one per rail. Built here rather than in `toLevels` because every item
    *  in it is one of this component's own callbacks. */
   const railActions = React.useCallback(
@@ -708,8 +785,12 @@ function Console({
         selecting={selection.selecting}
         onNewGroup={(parentId) => setModal({ kind: 'newGroup', parentId })}
         onDelete={() =>
-          soleGroup &&
-          setModal({ kind: 'delete', id: soleGroup.id, name: soleGroup.name })
+          selectedGroups.length > 0 &&
+          setModal({
+            kind: 'delete',
+            ids: selectedGroups.map((g) => g.id),
+            names: selectedGroups.map((g) => g.name),
+          })
         }
         onRename={() =>
           soleGroup &&
@@ -727,6 +808,7 @@ function Console({
       targetLabel,
       soleTarget,
       soleGroup,
+      selectedGroups,
       selection.selecting,
       targets,
       onToggleSelecting,
@@ -943,15 +1025,21 @@ function Console({
       <ConfirmDialog
         open={modal.kind === 'delete'}
         onClose={close}
-        title="Delete folder"
+        title={modal.kind === 'delete' && modal.ids.length > 1 ? 'Delete folders' : 'Delete folder'}
         body={
           modal.kind === 'delete'
-            ? `Delete “${modal.name}”? A folder that still holds repositories or sub-folders cannot be deleted — move them out first.`
+            ? `${
+                modal.names.length === 1
+                  ? `Delete “${modal.names[0]!}”?`
+                  : `Delete these ${modal.names.length} folders — ${modal.names
+                      .map((n) => `“${n}”`)
+                      .join(', ')}?`
+              } A folder that still holds repositories or sub-folders cannot be deleted — move them out first.`
             : ''
         }
         confirmLabel="Delete"
         onConfirm={() =>
-          modal.kind === 'delete' ? onDelete(modal.id) : Promise.resolve()
+          modal.kind === 'delete' ? onDelete(modal.ids) : Promise.resolve()
         }
       />
 

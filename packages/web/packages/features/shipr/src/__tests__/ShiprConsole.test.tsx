@@ -58,7 +58,19 @@ const repo: RepoItem = {
   registeredAt: null,
   position: 0,
   devRepo: null,
-  state: null,
+  // READ A MOMENT AGO, so that clicking this row is only a click. Every spec below picks
+  // this repository to give the buttons a target, and a repository nobody has read is one
+  // the console now reads on sight — which would put a `status` run in the queue underneath
+  // specs that are about something else entirely, and every one of them would then be
+  // asserting against a console that says "a run is already in flight". The rule itself is
+  // pinned in its own describe at the bottom of this file, on a fixture that is stale.
+  state: {
+    deployRepoId: 'm1',
+    tips: {},
+    settled: true,
+    notes: [],
+    readAt: new Date().toISOString(),
+  },
 };
 
 const tree: TreeResponse = {
@@ -462,5 +474,104 @@ describe('ShiprConsole — faults are raised, not printed into the chrome', () =
     );
 
     await waitFor(() => expect(screen.queryAllByRole('dialog')).toHaveLength(0));
+  });
+});
+
+/**
+ * OPENING A REPOSITORY READS IT, IF NOBODY HAS LOOKED IN AN HOUR.
+ *
+ * Mike: "clicking on a website in home should fire status if it's never been fired before,
+ * or if the last check was more than an hour prior". Everything under test here is the
+ * `if`: the ladder the console draws is only worth reading when it is current, and the
+ * price of making it current is forge round trips, so the interesting cases are the three
+ * that must NOT spend them.
+ */
+describe('ShiprConsole — a stale repository reads itself when it is opened', () => {
+  /** The one row, with whatever was last known about it. */
+  function treeWith(state: RepoItem['state']): TreeResponse {
+    return { ...tree, items: [{ ...repo, state }] };
+  }
+
+  const statusRuns = (client: ShiprClient) =>
+    (client.run as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([body]) => (body as { operation: string }).operation === 'status',
+    );
+
+  it('reads one nobody has ever read', async () => {
+    // `state` null is every repository the moment it is registered or seeded — the case the
+    // operator named first, and the one whose pane otherwise says "Never read" until
+    // somebody thinks to press a button.
+    const client = stubClient({ tree: vi.fn().mockResolvedValue(treeWith(null)) });
+    render(<ShiprConsole client={client} />);
+    await chooseRepo();
+
+    await waitFor(() => expect(statusRuns(client)).toHaveLength(1));
+    expect(statusRuns(client)[0]![0]).toMatchObject({
+      operation: 'status',
+      scopeKind: 'deploy_repo',
+      scopeId: 'm1',
+    });
+  });
+
+  it('reads one last read more than an hour ago', async () => {
+    const client = stubClient({
+      tree: vi.fn().mockResolvedValue(
+        treeWith({
+          deployRepoId: 'm1',
+          tips: {},
+          settled: true,
+          notes: [],
+          readAt: new Date(Date.now() - 61 * 60_000).toISOString(),
+        }),
+      ),
+    });
+    render(<ShiprConsole client={client} />);
+    await chooseRepo();
+
+    await waitFor(() => expect(statusRuns(client)).toHaveLength(1));
+  });
+
+  it('spends nothing on one read a minute ago', async () => {
+    // The whole rate limit. Browsing a workspace of forty must cost forty clicks and no
+    // round trips at all.
+    const client = stubClient();
+    render(<ShiprConsole client={client} />);
+    await chooseRepo();
+
+    await screen.findByRole('button', { name: 'Status' });
+    expect(statusRuns(client)).toHaveLength(0);
+  });
+
+  it('does not fire again while the read it started is still out', async () => {
+    // The tree is re-read while the run is in flight, and what comes back still carries the
+    // OLD stamp — `status` writes its read when it lands, not when it starts. Keyed on the
+    // stamp alone, every one of those refreshes would start another run, and so would every
+    // return to the row.
+    const client = stubClient({ tree: vi.fn().mockResolvedValue(treeWith(null)) });
+    render(<ShiprConsole client={client} />);
+    await chooseRepo();
+    await waitFor(() => expect(statusRuns(client)).toHaveLength(1));
+
+    await chooseRepo();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(statusRuns(client)).toHaveLength(1);
+  });
+
+  it('reads nothing on behalf of an operator who may not read', async () => {
+    // The same answer the Status button gives, asked once — a viewer whose button is greyed
+    // with "You cannot read these repositories" must not start the identical run by
+    // clicking a row.
+    const client = stubClient({
+      tree: vi.fn().mockResolvedValue({ ...treeWith(null), verbs: [] }),
+    });
+    render(<ShiprConsole client={client} />);
+    await chooseRepo();
+
+    await screen.findByRole('button', {
+      name: 'Status — You cannot read these repositories.',
+    });
+    expect(statusRuns(client)).toHaveLength(0);
   });
 });

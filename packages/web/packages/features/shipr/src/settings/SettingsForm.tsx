@@ -12,7 +12,7 @@ import { Select } from '@agenticdevelopertoolkit/ui/components/select';
 import { Existence, nameOf, ownerOf } from '../forge/existence';
 import type { ForgeCatalogue } from '../forge/useForgeCatalogue';
 import { useSubmit } from '../toolbar/dialogs';
-import { repoLabel, shardLabel } from '../tree/toLevels';
+import { repoLabel } from '../tree/toLevels';
 import type { Descendant } from '../tree/levels';
 import {
   ENVIRONMENTS,
@@ -132,11 +132,11 @@ function Facts({ children }: { children: React.ReactNode }): React.ReactElement 
   );
 }
 
-/** The reference block: what this mirror's pipeline is actually made of. */
+/** The reference block: what this deployment repository's pipeline is actually made of. */
 function RepoFacts({ repo }: { repo: RepoItem }): React.ReactElement {
   return (
     <Facts>
-      <Fact name="mirror" value={repo.slug} />
+      <Fact name="deployment repository" value={repo.slug} />
       {repo.devRepo ? (
         <>
           <Fact name="main" value={repo.devRepo.mainBranch} />
@@ -168,8 +168,9 @@ function DevRepoFacts({ devRepo }: { devRepo: DevRepo }): React.ReactElement {
 }
 
 /** A list of repositories, by whatever distinguishes them. Two repositories called `web` in
- *  two sub-folders are one word apart, and the word is the sub-folder; two mirrors of one
- *  repository are one word apart, and the word is the shard. */
+ *  two sub-folders are one word apart, and the word is the sub-folder — the one qualifier
+ *  that is still drawn beside a name here. The shard is not: a row shows the name that was
+ *  configured for it and nothing else, the same rule the rail and the detail heading follow. */
 function ContentsList({
   contents,
   emptyLabel,
@@ -192,9 +193,6 @@ function ContentsList({
             {relativePath ? `${relativePath}/` : ''}
             {repoLabel(repo)}
           </span>
-          {shardLabel(repo) ? (
-            <span className="text-apt-text-muted">{shardLabel(repo)}</span>
-          ) : null}
         </li>
       ))}
     </ul>
@@ -249,7 +247,7 @@ function DeploymentTarget({
         {mirror.shard ? <Label>{mirror.shard}</Label> : null}
         <p className="text-sm text-apt-text-muted">
           Deploys to <span className="font-mono text-apt-text">{mirror.slug}</span>, provisioned{' '}
-          {mirror.registeredAt}. Where a live mirror points is not editable.
+          {mirror.registeredAt}. Where a live deployment repository points is not editable.
         </p>
       </div>
     );

@@ -129,7 +129,7 @@ export { useTree } from './tree/useTree';
 export type { Tree } from './tree/useTree';
 export { RailMenu } from './tree/RailMenu';
 export type { RailMenuProps } from './tree/RailMenu';
-export { buildLevels, repoLabel, shardLabel } from './tree/toLevels';
+export { buildLevels, repoLabel } from './tree/toLevels';
 export type { LevelsOptions } from './tree/toLevels';
 export {
   childGroups,

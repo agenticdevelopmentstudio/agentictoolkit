@@ -184,9 +184,9 @@ describe('GroupDetailPane', () => {
     );
     await screen.findAllByRole('region', { name: 'Latest output' });
     expect(repoHeadings()).toEqual([
-      'acme/one',
-      'marketing/acme/two',
-      'marketing/europe/acme/three',
+      'one',
+      'marketing/two',
+      'marketing/europe/three',
     ]);
   });
 

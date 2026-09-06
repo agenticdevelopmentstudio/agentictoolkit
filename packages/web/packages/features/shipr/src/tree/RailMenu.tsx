@@ -64,26 +64,26 @@ export interface RailMenuProps {
  *  and says nothing is a menu the operator has to guess at, and the guess is usually
  *  "it's broken".
  *
- *  `locked` is batch mode: every entry but the one that ends it goes dead while ticks are
- *  being collected, and says so. */
+ *  THERE IS NO BATCH LOCK ANY MORE (Mike: "move and delete should work for batch selecting
+ *  directories"). Every entry below used to go dead the moment batch mode came on, which
+ *  inverted the point of the mode: ticking four folders is how you say "these four", and the
+ *  two verbs that can act on four were the ones it switched off. `toolbarState` already
+ *  refuses the genuinely one-at-a-time entries — Rename and Settings say so in their own
+ *  words — so it is the single answer here, as this file's own rule says it should be. */
 function Entry({
   id,
   state,
   label,
   icon,
   onClick,
-  locked = false,
 }: {
   id: ActionId;
   state: ToolbarState;
   label: string;
   icon: React.ReactNode;
   onClick: () => void;
-  locked?: boolean;
 }): React.ReactElement {
-  const { enabled, reason } = locked
-    ? { enabled: false, reason: 'Finish batch selecting first.' }
-    : state[id];
+  const { enabled, reason } = state[id];
   return (
     <DropdownMenuItem
       disabled={!enabled}
@@ -125,8 +125,7 @@ export function RailMenu({
 
       <DropdownMenuContent align="end">
         {/* ONE entry in ONE position, in both states: the way out of batch mode has to be
-            where the way in was, or the checkboxes feel stuck. While it is on it is also
-            the ONLY live entry — see `locked` below. */}
+            where the way in was, or the checkboxes feel stuck. */}
         <Entry
           id="select"
           state={state}
@@ -143,7 +142,6 @@ export function RailMenu({
           label="Add directory"
           icon={<FolderPlus className="size-4" />}
           onClick={() => onNewGroup(groupId)}
-          locked={selecting}
         />
         <Entry
           id="rename"
@@ -151,7 +149,6 @@ export function RailMenu({
           label="Rename"
           icon={<Pencil className="size-4" />}
           onClick={onRename}
-          locked={selecting}
         />
         <Entry
           id="move"
@@ -159,7 +156,6 @@ export function RailMenu({
           label="Move"
           icon={<FolderInput className="size-4" />}
           onClick={onMove}
-          locked={selecting}
         />
         <Entry
           id="delete"
@@ -167,7 +163,6 @@ export function RailMenu({
           label="Delete"
           icon={<Trash2 className="size-4" />}
           onClick={onDelete}
-          locked={selecting}
         />
         {/* No target in the label. It read `Settings — acme/site-deployment`, which put the
             same name the rail is already showing into a menu row and made that row twice the
@@ -178,7 +173,6 @@ export function RailMenu({
           label="Settings"
           icon={<SlidersHorizontal className="size-4" />}
           onClick={onSettings}
-          locked={selecting}
         />
       </DropdownMenuContent>
     </DropdownMenu>

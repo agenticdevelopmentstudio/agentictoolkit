@@ -12,7 +12,7 @@ import type {
 } from '@agenticdevelopertoolkit/ui/blocks';
 
 import { isChecked, type Selection } from '../selection';
-import type { Group, RepoItem } from '../types';
+import type { DevRepo, Group, RepoItem } from '../types';
 import type { LevelPlan, NodeRef } from './levels';
 
 /**
@@ -37,18 +37,15 @@ import type { LevelPlan, NodeRef } from './levels';
  *  It is set in Configure and it is set for exactly this: two repositories called `web` in
  *  two accounts are two identical rows here, and the slug they differ by is the half this
  *  function drops. */
-export function repoLabel(item: RepoItem): string {
+export function repoLabel(item: {
+  slug: string;
+  devRepo?: DevRepo | null;
+}): string {
   const chosen = item.devRepo?.displayName;
   if (chosen) return chosen;
   const slug = item.devRepo?.slug ?? item.slug;
   const short = slug.includes('/') ? slug.slice(slug.indexOf('/') + 1) : slug;
   return short;
-}
-
-/** `all` is the shard a repository with no `[deployments]` gets — it is the ABSENCE of
- *  sharding, so showing it would put the same meaningless word on almost every row. */
-export function shardLabel(item: RepoItem): string | undefined {
-  return item.shard && item.shard !== 'all' ? item.shard : undefined;
 }
 
 function repoTone(item: RepoItem): 'success' | 'orange' | 'muted' {
@@ -129,15 +126,11 @@ function repoItem(item: RepoItem, opts: LevelsOptions): TopicDetailItem {
   return {
     id: `repo:${item.id}`,
     label,
-    // THE SHARD IS PART OF THE NAME, NOT AN ANNOTATION ON IT (Mike). Six mirrors of one
-    // repository carry the same slug and differ only here, so as a dim 11px `sublabel` the
-    // rail read as six identical rows called `agenticdeveloperhub` — the one word telling
-    // them apart set in the size reserved for things that do not matter. `labelSuffix` puts
-    // it at the label's own size and weight, gold, which is the same rule `RepoView`'s
-    // heading follows and the colour a GROUPING carries everywhere in this console.
-    labelSuffix: shardLabel(item) ? (
-      <span className="font-semibold text-apt-gold">{shardLabel(item)}</span>
-    ) : undefined,
+    // ONE NAME, NOT A NAME AND A QUALIFIER (Mike). The shard used to ride here as a second
+    // gold token, so a row read as two things — `adhmarketingwebsites` and `group3` — and
+    // the eye had to put them back together. The row now shows exactly the name that was
+    // configured for it and nothing else; where two rows would otherwise read alike, the
+    // answer is to name them, which is what `displayName` is for.
     leadsTo: 'detail',
     // The amber dot and its sr-only "needs attention" — the half of the mark that survives a
     // rail collapsed to icons, and the only half a screen reader gets.

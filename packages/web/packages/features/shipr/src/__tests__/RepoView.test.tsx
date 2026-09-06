@@ -89,7 +89,7 @@ describe('RepoView — the two ways a ladder can be absent', () => {
   it('still names the repository when there is no ladder to draw', async () => {
     render(<RepoView client={stubClient(detail(null))} repoId="m1" />);
     expect(
-      await screen.findByRole('heading', { name: 'acme/site-deployment' }),
+      await screen.findByRole('heading', { name: 'site-deployment' }),
     ).toBeTruthy();
   });
 
@@ -99,7 +99,7 @@ describe('RepoView — the two ways a ladder can be absent', () => {
   // rail's Settings item now, so the view is the ladder and the output and nothing else.
   it('keeps the reference facts out of the view entirely', async () => {
     render(<RepoView client={stubClient(detail(null))} repoId="m1" />);
-    await screen.findByRole('heading', { name: 'acme/site-deployment' });
+    await screen.findByRole('heading', { name: 'site-deployment' });
     expect(screen.queryByText('deploy/ci')).toBeNull();
     expect(screen.queryByText(/Gate context/i)).toBeNull();
     expect(screen.queryByText(/Ship branch/i)).toBeNull();
@@ -112,7 +112,7 @@ describe('RepoView — the two ways a ladder can be absent', () => {
   // two vocabularies is what made the pane look like it was reporting a problem.
   it('draws no output block at all when there is nothing to report', async () => {
     render(<RepoView client={stubClient(detail(null))} repoId="m1" />);
-    await screen.findByRole('heading', { name: 'acme/site-deployment' });
+    await screen.findByRole('heading', { name: 'site-deployment' });
     expect(screen.queryByRole('region', { name: 'Latest output' })).toBeNull();
     expect(screen.queryByText(/Nothing has been run/i)).toBeNull();
   });
@@ -154,12 +154,12 @@ describe('RepoView — when the last run finished', () => {
     const stamp = await screen.findByText('2026-08-24 16:43:49.378638');
     const header = stamp.closest('header');
     expect(header).not.toBeNull();
-    expect(header!.textContent).toContain('acme/site-deployment');
+    expect(header!.textContent).toContain('site-deployment');
   });
 
   it('shows no time at all for a repository nothing has ever been run against', async () => {
     render(<RepoView client={stubClient(detail(null))} repoId="m1" />);
-    await screen.findByRole('heading', { name: 'acme/site-deployment' });
+    await screen.findByRole('heading', { name: 'site-deployment' });
     expect(screen.queryByText(/^2026-/)).toBeNull();
   });
 
@@ -215,7 +215,7 @@ describe('RepoView — alone versus one section of a folder', () => {
   it('heads the pane and names its folder when it stands alone', async () => {
     render(<RepoView client={stubClient(detail(null, { group }))} repoId="m1" />);
     expect(
-      await screen.findByRole('heading', { level: 2, name: /acme\/site-deployment/ }),
+      await screen.findByRole('heading', { level: 2, name: /site-deployment/ }),
     ).toBeTruthy();
     expect(screen.getByText('in adh')).toBeTruthy();
   });
@@ -231,7 +231,7 @@ describe('RepoView — alone versus one section of a folder', () => {
       />,
     );
     expect(
-      await screen.findByRole('heading', { level: 3, name: /acme\/site-deployment/ }),
+      await screen.findByRole('heading', { level: 3, name: /site-deployment/ }),
     ).toBeTruthy();
     expect(screen.queryByText('in adh')).toBeNull();
   });
@@ -282,7 +282,7 @@ describe('RepoView — a pressed button clears what it is about', () => {
     );
     // The heading renders either way, so waiting on it means the absence below is measured
     // after the read landed rather than before it.
-    await screen.findByRole('heading', { level: 2, name: /acme\/site-deployment/ });
+    await screen.findByRole('heading', { level: 2, name: /site-deployment/ });
     expect(screen.queryByText(/No history to show/)).toBeNull();
     // And NOT the never-read line either: an empty slot, because the report underneath is
     // already saying it is waiting.
@@ -315,7 +315,7 @@ describe('RepoView — a pressed button clears what it is about', () => {
     render(
       <RepoView client={stubClient(detail(null, { runs: [inFlight] }))} repoId="m1" />,
     );
-    await screen.findByRole('heading', { level: 2, name: /acme\/site-deployment/ });
+    await screen.findByRole('heading', { level: 2, name: /site-deployment/ });
     expect(screen.queryByText(/Never read/)).toBeNull();
   });
 });

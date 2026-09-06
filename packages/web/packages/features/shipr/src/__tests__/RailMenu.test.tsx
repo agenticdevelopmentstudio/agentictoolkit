@@ -150,16 +150,31 @@ describe('RailMenu — batch mode and settings', () => {
     expect(h.onToggleSelecting).toHaveBeenCalled();
   });
 
-  it('kills every other entry while ticks are being collected', async () => {
-    // Batch mode is a MODE: the entries below it act on one thing, and half of them would be
-    // acting on the highlight rather than on the ticks. Only the exit stays live (Mike). The
-    // toolbar's pipeline verbs are untouched by this — running the batch is the point of it.
-    await open({ selection: { selecting: true, checked: [g('a')] } });
-    for (const label of ['Add directory', 'Rename', 'Move', 'Delete', 'Settings']) {
-      expect(await entry(`${label} — Finish batch selecting first.`)).toHaveAttribute(
-        'data-disabled',
-      );
+  it('keeps the two batch verbs live on a batch of folders', async () => {
+    // THE BUG THIS REPLACED. Batch mode used to grey every entry but its own exit, which
+    // inverted the point of the mode: ticking four folders is how an operator says "these
+    // four", and Move and Delete — the only two entries that can act on four — were the ones
+    // it switched off (Mike: "move and delete should work for batch selecting directories").
+    const h = await open({
+      selection: { selecting: true, checked: [g('a'), g('b')] },
+    });
+    for (const label of ['Move', 'Delete']) {
+      expect(await entry(label)).not.toHaveAttribute('data-disabled');
     }
+    await userEvent.click(await entry('Delete'));
+    expect(h.onDelete).toHaveBeenCalled();
+  });
+
+  it('still refuses the entries that genuinely take one row, and says which', async () => {
+    // `toolbarState` is the single answer, so the refusal is in its own words rather than a
+    // blanket "finish batch selecting first" that told the operator nothing about WHY.
+    await open({ selection: { selecting: true, checked: [g('a'), g('b')] } });
+    expect(
+      await entry(/^Rename — Rename works on one folder at a time\./),
+    ).toHaveAttribute('data-disabled');
+    expect(
+      await entry(/^Settings — Settings opens one at a time\./),
+    ).toHaveAttribute('data-disabled');
   });
 
   it('does not put the target’s name in the Settings entry', async () => {
