@@ -587,6 +587,32 @@ struct MarkdownStoreTests {
         let home = URL(fileURLWithPath: "/Users/example")
         #expect(MarkdownStore.defaultPath(inHome: home) == "/Users/example/.whippet/Markdown.db")
     }
+
+    @Test("concurrent mutateDocument merges all survive — no lost update")
+    func mutateDocumentIsAtomic() async throws {
+        let store = try store()
+        let document = try store.createDocument(content: "start", markers: [.note])
+
+        // Twenty appends, each of which must land on top of the previous
+        // nineteen. Split across `document(id:)` + `updateDocument(_:)` —
+        // separate transactions — writers read the same stale copy and
+        // overwrite one another, so only a fraction of the twenty survive.
+        // In one transaction every append reads what the last one wrote.
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<20 {
+                group.addTask {
+                    try? store.mutateDocument(id: document.id) { merging, _ in
+                        merging.content += "\nline-\(index)"
+                    }
+                }
+            }
+        }
+
+        let content = try #require(try store.document(id: document.id)?.content)
+        for index in 0..<20 {
+            #expect(content.contains("line-\(index)"), "append \(index) was lost")
+        }
+    }
 }
 
 /// Records what it was handed, and answers a `create` with the id adh would

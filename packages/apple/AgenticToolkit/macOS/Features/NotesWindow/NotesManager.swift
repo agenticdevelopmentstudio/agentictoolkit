@@ -96,29 +96,59 @@ public final class NotesManager {
 
     // MARK: - Dependencies
 
-    /// `nonisolated` so `performStorage(_:)` — itself `nonisolated` — can read
+    /// `nonisolated` so the detached task in `performStorage(_:)` can capture
     /// it without a main-actor hop. Safe because `NoteStorage` is `Sendable`
     /// (M1(b) in the review this fixes) and this is a `let`: the reference
     /// never changes after `init`, only what it points to does I/O.
     private nonisolated let storage: NoteStorage
     private var saveTasks: [UUID: Task<Void, Never>] = [:]
 
-    /// Runs a storage call off the main actor so the actual disk I/O in
-    /// `NoteStorage`'s conformers (`MarkdownNoteStorage`, backed by SQLite)
-    /// never blocks whichever other main-actor host — Quick Note, a second
-    /// notes window, this manager's own caller — shares this instance while
-    /// a note is read or written (M1(b) in the review this fixes).
+    /// The tail of the storage queue: the task every next storage call waits
+    /// for before it starts. See `performStorage(_:)`.
+    private var storageChain: Task<Void, Never> = Task {}
+
+    /// Runs a storage call off the main actor, after every storage call this
+    /// manager issued before it.
     ///
-    /// `storage` is `Sendable`, so capturing it into a detached task is
-    /// sound; awaiting `.value` from a main-actor caller is what hops the
-    /// result back onto the main actor, where every call site below
-    /// publishes it.
-    private nonisolated func performStorage<Value: Sendable>(
+    /// Two things have to be true at once, and each is why the other cannot
+    /// be dropped.
+    ///
+    /// **Off the main actor**, because the I/O in `NoteStorage`'s conformers
+    /// (`MarkdownNoteStorage`, backed by SQLite) would otherwise block
+    /// whichever host — Quick Note, a second notes window, this manager's own
+    /// caller — shares the main actor while a note is read or written (M1(b)
+    /// in the review this fixes). `storage` is `Sendable`, so capturing it
+    /// into a detached task is sound, and awaiting `.value` from a main-actor
+    /// caller is what hops the result back for the call sites below to
+    /// publish.
+    ///
+    /// **In issue order**, because the calls are not independent: each writer
+    /// hands `updateNote` a *whole* `Note` snapshot taken on the main actor,
+    /// so a pin toggle issued after a content save carries the pre-save
+    /// content, and landing first would resurrect it. Before the work moved
+    /// off the main actor that could not happen — every call ran to
+    /// completion with no suspension point, so issue order *was* execution
+    /// order — and detaching each call independently silently gave that up.
+    /// This restores it: the chain is read and replaced synchronously here on
+    /// the main actor, so the order calls line up in is the order they were
+    /// issued, and only one of them is ever in flight.
+    ///
+    /// This orders *this manager's* calls, which is the whole scope of the
+    /// snapshot problem — a snapshot only races the writes made from the same
+    /// `notes` array. A second manager over the same storage (Quick Note
+    /// beside the notes window) is ordered by the storage instead, where
+    /// `MarkdownStore.mutateDocument` makes each read-merge-write one
+    /// transaction.
+    private func performStorage<Value: Sendable>(
         _ operation: @escaping @Sendable (NoteStorage) throws -> Value
     ) async throws -> Value {
-        try await Task.detached { [storage] in
-            try operation(storage)
-        }.value
+        let previous = storageChain
+        let work = Task.detached { [storage] () throws -> Value in
+            await previous.value
+            return try operation(storage)
+        }
+        storageChain = Task { _ = try? await work.value }
+        return try await work.value
     }
 
     /// The taxonomy store behind this manager's storage, when there is one.

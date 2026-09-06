@@ -329,17 +329,74 @@ public final class MarkdownStore: @unchecked Sendable {
                 arguments: [document.id]) else {
                 throw MarkdownStoreError.notFound(document.id)
             }
-            try Self.refuseAuthoredFieldDrift(from: stored, to: document)
+            try store(document, over: stored, ownedFrontmatterKeys: ownedFrontmatterKeys,
+                      at: now, in: conn)
+        }
+    }
 
-            var updated = document
-            updated.updatedAt = now
-            try write(updated, in: conn)
-            try enqueue(.update, for: document.id, payload: [
-                "content": .string(document.content)
-            ], at: now, in: conn)
-            if let ownedFrontmatterKeys {
-                try Self.writeOwnedFrontmatterKeys(ownedFrontmatterKeys, for: document.id, in: conn)
+    /// Reads a document, hands it to `merge`, and writes the merged result
+    /// back — all inside **one** write transaction.
+    ///
+    /// `document(id:)` + edit + `updateDocument(_:)` does the same three
+    /// things in three separate transactions, and a second writer that lands
+    /// between the read and the write loses its change with no error: the
+    /// merged row is written whole, so it carries the *first* writer's view
+    /// of every field it did not itself set. That is a lost update, and it is
+    /// reachable from one process — two `NotesManager`s (Quick Note and the
+    /// notes window) over one store, a debounced content save landing beside
+    /// a pin toggle — not only from a future background sync.
+    ///
+    /// So a caller whose write depends on what it just read uses this instead.
+    /// Last-writer-wins across *whole* transactions is still the model (adh's
+    /// head is last-writer-wins too, and there is no concurrency token on the
+    /// wire); what this removes is the torn read-merge-write inside one.
+    ///
+    /// `merge` runs on the writer connection and must not call back into this
+    /// store — every public method here takes the same lock, so a re-entrant
+    /// call deadlocks.
+    public func mutateDocument(
+        id: String,
+        now: Date = Date(),
+        _ merge: (inout MarkdownDocument, inout Set<String>) throws -> Void
+    ) throws {
+        let now = Self.normalizedTimestamp(now)
+        try database.write { conn in
+            guard let stored = try Row.fetchOne(
+                conn, sql: "SELECT * FROM markdown WHERE id = ? AND is_deleted = 0",
+                arguments: [id]) else {
+                throw MarkdownStoreError.notFound(id)
             }
+            var document = try Self.document(from: stored)
+            var owned = try Set(String.fetchAll(
+                conn,
+                sql: "SELECT key FROM _markdown_frontmatter_owner WHERE document_id = ?",
+                arguments: [id]))
+
+            try merge(&document, &owned)
+
+            try store(document, over: stored, ownedFrontmatterKeys: owned, at: now, in: conn)
+        }
+    }
+
+    /// The write half both `updateDocument` and `mutateDocument` perform, on a
+    /// connection whose transaction already holds `stored`.
+    private func store(
+        _ document: MarkdownDocument,
+        over stored: Row,
+        ownedFrontmatterKeys: Set<String>?,
+        at now: Date,
+        in conn: Database
+    ) throws {
+        try Self.refuseAuthoredFieldDrift(from: stored, to: document)
+
+        var updated = document
+        updated.updatedAt = now
+        try write(updated, in: conn)
+        try enqueue(.update, for: document.id, payload: [
+            "content": .string(document.content)
+        ], at: now, in: conn)
+        if let ownedFrontmatterKeys {
+            try Self.writeOwnedFrontmatterKeys(ownedFrontmatterKeys, for: document.id, in: conn)
         }
     }
 
