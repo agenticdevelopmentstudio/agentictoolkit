@@ -506,6 +506,57 @@ targets:
         embed: true
         codeSign: true
 
+  AgenticToolkitHTDV:
+    type: framework
+    supportedDestinations: [macOS, iOS]
+    templates: [SwiftLint]
+    sources:
+      - HTDV
+    settings:
+      base:
+        SDKROOT: auto
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+
+  AgenticToolkitHTDVTests:
+    type: bundle.unit-test
+    platform: macOS
+    templates: [SwiftLint]
+    sources:
+      - Tests/AgenticToolkitHTDVTests
+    dependencies:
+      - target: AgenticToolkitHTDV
+        embed: true
+        codeSign: true
+
+  AgenticToolkitHub:
+    type: framework
+    supportedDestinations: [macOS, iOS]
+    templates: [SwiftLint]
+    sources:
+      - Hub
+    dependencies:
+      - target: AgenticToolkitHTDV
+    settings:
+      base:
+        SDKROOT: auto
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+
+  AgenticToolkitHubTests:
+    type: bundle.unit-test
+    platform: macOS
+    templates: [SwiftLint]
+    sources:
+      - Tests/AgenticToolkitHubTests
+    dependencies:
+      - target: AgenticToolkitHub
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitHTDV
+        embed: true
+        codeSign: true
+
 aggregateTargets:
   AgenticToolkitMacOSAll:
     targets:
@@ -520,6 +571,8 @@ aggregateTargets:
       - AgenticToolkitSync
       - AgenticToolkitSyncGRDB
       - AgenticToolkitMarkdown-macOS
+      - AgenticToolkitHTDV
+      - AgenticToolkitHub
 
   # The spec files this store under "macOS, iOS", and `AgenticToolkitMarkdown-iOS`
   # existed but was reachable from no aggregate and no scheme — so nothing ever
@@ -534,6 +587,8 @@ aggregateTargets:
       - AgenticToolkitSync
       - AgenticToolkitSyncGRDB
       - AgenticToolkitMarkdown-iOS
+      - AgenticToolkitHTDV
+      - AgenticToolkitHub
 
   AgenticToolkitMacOSTestsAll:
     targets:
@@ -559,6 +614,10 @@ aggregateTargets:
       - AgenticToolkitSyncGRDBTests
       - AgenticToolkitMarkdown-macOS
       - AgenticToolkitMarkdownTests
+      - AgenticToolkitHTDV
+      - AgenticToolkitHTDVTests
+      - AgenticToolkitHub
+      - AgenticToolkitHubTests
 
 schemes:
   AgenticToolkitDatabase:
@@ -710,6 +769,40 @@ schemes:
         - AgenticToolkitPermissionsUITests
         - AgenticToolkitMacOSTests
         - AgenticToolkitDatabaseTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitHTDV:
+    build:
+      targets:
+        AgenticToolkitHTDV: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitHTDVTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitHub:
+    build:
+      targets:
+        AgenticToolkitHub: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitHubTests
     profile:
       config: Release
     analyze:

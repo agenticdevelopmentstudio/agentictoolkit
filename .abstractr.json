@@ -117,6 +117,26 @@
       "holds": "AgenticToolkitMacOS. The feature-rich framework the host app, plugins, Whippet and Stenographer all consume."
     },
     {
+      "name": "apple-htdv",
+      "paths": [
+        "packages/apple/AgenticToolkit/HTDV/"
+      ],
+      "depends_on": [],
+      "shared": true,
+      "holds": "AgenticToolkitHTDV. Native Hierarchical Topic Detail View: HTDVDataSource/HTDVController/HTDVLayoutEngine, form spec + FormState + FormViewController, MarkdownEditing protocol. Foundation + AppKit/UIKit only."
+    },
+    {
+      "name": "apple-hub",
+      "paths": [
+        "packages/apple/AgenticToolkit/Hub/"
+      ],
+      "depends_on": [
+        "apple-htdv"
+      ],
+      "shared": true,
+      "holds": "AgenticToolkitHub. Shared hub feature layer: HubModules registry hook, HubError, and per-feature models/data sources/modules consumed by the native hub apps."
+    },
+    {
       "name": "apple-tests",
       "paths": [
         "packages/apple/AgenticToolkit/Tests/"
@@ -131,7 +151,9 @@
         "apple-pluginkit",
         "apple-database",
         "apple-sync",
-        "apple-syncgrdb"
+        "apple-syncgrdb",
+        "apple-htdv",
+        "apple-hub"
       ],
       "shared": false,
       "holds": "Test bundles. Nothing depends on these."
