@@ -651,6 +651,7 @@
 		D1EE57A588A561E9BA12CA50 /* LLMChatViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E63C0C56825BFBAFD19C516C /* LLMChatViewController.swift */; };
 		D21E64220F721413CA25BA5D /* PopupMenuChoiceViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546447A5E3CFAF9218D61C4B /* PopupMenuChoiceViewTests.swift */; };
 		D2D88301C7C912CD735CF566 /* ChatEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DA56E0ADF90FCB532FEE763 /* ChatEvent.swift */; };
+		D30B841253F2092E830FE5E6 /* AppFeatureRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44B9CD746F483DAD9143D69 /* AppFeatureRegistryTests.swift */; };
 		D35788BA91E0E2FF4BA260E6 /* SettingsKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21632D2A100D8B2EAEE30D47 /* SettingsKeyTests.swift */; };
 		D3C781B34E8C55C934EAAC7B /* ColorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6CCE95461780CEB975B410C /* ColorViewModel.swift */; };
 		D3DFEEA7CD3BC8E5031160C8 /* AIModelChatConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310D7389C2AAF6717CCC2A67 /* AIModelChatConfig.swift */; };
@@ -1981,6 +1982,7 @@
 		B34A549A9DB4762084ACA258 /* ProviderPickerInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPickerInfo.swift; sourceTree = "<group>"; };
 		B3D112853E30CE786A73B192 /* UserSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSetting.swift; sourceTree = "<group>"; };
 		B3E5D84B295AC71E18A40CEC /* Spacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spacing.swift; sourceTree = "<group>"; };
+		B44B9CD746F483DAD9143D69 /* AppFeatureRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFeatureRegistryTests.swift; sourceTree = "<group>"; };
 		B4C87939516A070CC66803F4 /* Placeholder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Placeholder.swift; sourceTree = "<group>"; };
 		B5BB28294B4FC8F45F42DBEF /* WindowFrameManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowFrameManager.swift; sourceTree = "<group>"; };
 		B6482AAB006B499689718564 /* TerminalSessionContentViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionContentViewController.swift; sourceTree = "<group>"; };
@@ -3455,6 +3457,7 @@
 		99DFB18462E9CC5EF1C5690F /* AppShell */ = {
 			isa = PBXGroup;
 			children = (
+				B44B9CD746F483DAD9143D69 /* AppFeatureRegistryTests.swift */,
 				EB8055735898C0B7EBEA7A73 /* NewItemRegistryTests.swift */,
 			);
 			path = AppShell;
@@ -5675,6 +5678,7 @@
 				14D93023DECA76AF9EAB927C /* AIProviderMigrationTests.swift in Sources */,
 				3CBCD0A41F04581E70F5932C /* AIRequestBuilderTests.swift in Sources */,
 				EC8019B4198DE72AC5C44E4C /* AgenticFileBrowserTests.swift in Sources */,
+				D30B841253F2092E830FE5E6 /* AppFeatureRegistryTests.swift in Sources */,
 				02CE8B8B3EF061F8561BD836 /* AppleScriptRunnerTests.swift in Sources */,
 				5ACB1C9591DDEC3535B45E35 /* ChatErrorTests.swift in Sources */,
 				7E3D59A2283D3441B672E851 /* ChatViewFocusTests.swift in Sources */,

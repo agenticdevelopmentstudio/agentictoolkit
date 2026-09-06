@@ -77,16 +77,24 @@ import AgenticToolkitMarkdown
     /// no explanation.
     public func reload() {
         let previouslySelected = selectedFolderID
+        // Captured from the tree this call is about to replace, and only
+        // after the first load — `reloadData()` invalidates the outline's
+        // item cache, so this is the last point `outline.isItemExpanded(_:)`
+        // can still answer for it (L1 in the review this fixes). The first
+        // load has nothing expanded to preserve, so it keeps the unconditional
+        // expand-all it always had.
+        let expandedIDs = hasLoadedOnce ? expandedFolderIDs() : nil
         guard let store else {
             topLevelItems = [Self.allNotesFolder(total: 0)]
             outline.reloadData()
+            hasLoadedOnce = true
             return
         }
         do {
             let categories = try store.categories()
             let edges = try store.categoryEdges()
             let counts = try store.categoryNoteCounts()
-            let total = try store.documents(marker: .note).count
+            let total = try store.noteCount(marker: .note)
             let roots = NoteFolder.tree(from: categories, counts: counts, edges: edges, total: total)
             topLevelItems = [Self.allNotesFolder(total: total)] + roots
         } catch {
@@ -94,7 +102,12 @@ import AgenticToolkitMarkdown
             return
         }
         outline.reloadData()
-        outline.expandItem(nil, expandChildren: true)
+        if let expandedIDs {
+            expand(foldersWithIDs: expandedIDs)
+        } else {
+            outline.expandItem(nil, expandChildren: true)
+        }
+        hasLoadedOnce = true
         if let previouslySelected {
             selectFolder(id: previouslySelected)
         }
@@ -202,6 +215,11 @@ import AgenticToolkitMarkdown
     private var topLevelItems: [NoteFolder] = []
     private var isSyncingSelection = false
 
+    /// `reload()` expands every folder unconditionally only the first time it
+    /// runs, when the outline has nothing expanded yet to preserve. Every
+    /// reload after that restores the caller's own expansion instead (L1).
+    private var hasLoadedOnce = false
+
     private static func allNotesFolder(total: Int) -> NoteFolder {
         NoteFolder(id: "", name: "All Notes", noteCount: total, children: [])
     }
@@ -217,10 +235,57 @@ import AgenticToolkitMarkdown
         }
     }
 
-    private func row(forFolderID id: String) -> Int? {
-        (0..<outline.numberOfRows).first {
-            (outline.item(atRow: $0) as? NoteFolder)?.id == id
+    /// Every id in `topLevelItems`'s current tree whose row is expanded.
+    /// Walked, not looked up per-row, because `NSOutlineView` has no API that
+    /// lists its expanded items directly — `isItemExpanded(_:)` only answers
+    /// for one item at a time, and `NoteFolder`'s `Hashable` conformance is
+    /// what lets that answer be trusted for these exact values.
+    private func expandedFolderIDs() -> Set<String> {
+        var ids: Set<String> = []
+        func walk(_ folders: [NoteFolder]) {
+            for folder in folders {
+                if outline.isItemExpanded(folder) {
+                    ids.insert(folder.id)
+                }
+                walk(folder.children)
+            }
         }
+        walk(topLevelItems)
+        return ids
+    }
+
+    /// Expands exactly the folders named in `ids`, walked top-down from the
+    /// freshly rebuilt `topLevelItems` so a parent is always expanded before
+    /// its children are visited — `Hashable` is what lets `expandItem` accept
+    /// these new values (built with this reload's counts, not the ones
+    /// `expandedFolderIDs()` read `isItemExpanded` against) as the same
+    /// folders by id.
+    private func expand(foldersWithIDs ids: Set<String>) {
+        func walk(_ folders: [NoteFolder]) {
+            for folder in folders {
+                if ids.contains(folder.id) {
+                    outline.expandItem(folder)
+                }
+                walk(folder.children)
+            }
+        }
+        walk(topLevelItems)
+    }
+
+    /// The folder in the current tree with `id`, depth-first — `nil` if it no
+    /// longer exists (e.g. it was just deleted).
+    private func folder(withID id: String, in folders: [NoteFolder]) -> NoteFolder? {
+        for candidate in folders {
+            if candidate.id == id { return candidate }
+            if let found = folder(withID: id, in: candidate.children) { return found }
+        }
+        return nil
+    }
+
+    private func row(forFolderID id: String) -> Int? {
+        guard let folder = folder(withID: id, in: topLevelItems) else { return nil }
+        let row = outline.row(forItem: folder)
+        return row >= 0 ? row : nil
     }
 
     private func clickedFolder() -> NoteFolder? {
@@ -353,7 +418,14 @@ extension NotesFolderListViewController: NSOutlineViewDataSource, NSOutlineViewD
         item: Any
     ) -> NSView? {
         guard let folder = item as? NoteFolder else { return nil }
-        let row = NoteFolderRowView(folder: folder)
+        let id = NSUserInterfaceItemIdentifier("NoteFolderRow")
+        let row = outline.makeView(withIdentifier: id, owner: nil) as? NoteFolderRowView
+            ?? NoteFolderRowView(identifier: id)
+        row.configure(with: folder)
+        // Rebound every time, reuse included (L6): a recycled row's closure
+        // still names whichever folder it was last bound to, and capturing
+        // `folder` fresh here is what keeps a rename committing against the
+        // row's *current* folder rather than a stale one.
         row.onCommit = { [weak self] newName in
             self?.commitRename(of: folder, to: newName)
         }
@@ -403,31 +475,40 @@ extension NotesFolderListViewController: Loggable {
 /// editing ends for any reason (Return, Tab, or the field simply losing
 /// first responder); `commitRename(of:to:)` on the controller is what trims
 /// and decides whether that counts as a real rename. All Notes is built with
-/// an uneditable field — `isEditable` follows `folder.isAllNotes` at
-/// construction, and `beginRenaming(row:)` checks it again before handing
-/// the field first responder, so there is no path that opens editing on it.
+/// an uneditable field — `isEditable`/`isSelectable` follow `folder.isAllNotes`
+/// in `configure(with:)`, and `beginRenaming(row:)` checks `isEditable` again
+/// before handing the field first responder, so there is no path that opens
+/// editing on it.
+///
+/// Built empty and always bound through `configure(with:)` (L6) rather than
+/// taking a folder at `init` — `outlineView(_:viewFor:item:)` now recycles
+/// these through `makeView(withIdentifier:owner:)`, the same reuse
+/// `NotesListViewController`'s `NoteListCellView` already does, so a row
+/// handed back by AppKit needs rebinding to whichever folder it is showing
+/// now, not just at construction.
 private final class NoteFolderRowView: NSView, NSTextFieldDelegate {
 
     let nameField: NSTextField
+    private let countLabel: NSTextField
 
-    /// Called with the field's text once editing ends. `nil` until the
-    /// controller wires it up in `outlineView(_:viewFor:item:)`.
+    /// Called with the field's text once editing ends. Rebound in
+    /// `outlineView(_:viewFor:item:)` on every call, reuse included, since a
+    /// recycled row's existing closure still names whichever folder it was
+    /// last bound to.
     var onCommit: ((String) -> Void)?
 
-    init(folder: NoteFolder) {
-        let nameField = ThemedLabel(string: folder.name, role: .primaryText, textRole: .body)
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        let nameField = ThemedLabel(string: "", role: .primaryText, textRole: .body)
         nameField.lineBreakMode = .byTruncatingTail
         nameField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        nameField.isEditable = !folder.isAllNotes
-        nameField.isSelectable = !folder.isAllNotes
         self.nameField = nameField
 
-        let countLabel = ThemedLabel(
-            string: "\(folder.noteCount)", role: .secondaryText, textRole: .caption)
+        let countLabel = ThemedLabel(string: "", role: .secondaryText, textRole: .caption)
         countLabel.alignment = .right
         countLabel.setContentHuggingPriority(.required, for: .horizontal)
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        self.countLabel = countLabel
 
         let stack = NSStackView(views: [nameField, countLabel])
         stack.orientation = .horizontal
@@ -436,6 +517,7 @@ private final class NoteFolderRowView: NSView, NSTextFieldDelegate {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         super.init(frame: .zero)
+        self.identifier = identifier
         addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -449,6 +531,14 @@ private final class NoteFolderRowView: NSView, NSTextFieldDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Rebinds this row — fresh or reused — to `folder`.
+    func configure(with folder: NoteFolder) {
+        nameField.stringValue = folder.name
+        nameField.isEditable = !folder.isAllNotes
+        nameField.isSelectable = !folder.isAllNotes
+        countLabel.stringValue = "\(folder.noteCount)"
+    }
 
     func controlTextDidEndEditing(_ obj: Notification) {
         onCommit?(nameField.stringValue)

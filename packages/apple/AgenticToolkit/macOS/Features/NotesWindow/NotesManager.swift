@@ -81,10 +81,45 @@ public final class NotesManager {
         NotificationCenter.default.post(name: Self.storageDidFailNotification, object: self)
     }
 
+    /// The same recording `record(_:_:)` does for this manager's own CRUD
+    /// methods, exposed for a caller that wrote to the manager's storage
+    /// directly — `NotesSplitViewController.moveSelectedNote(toFolder:)`
+    /// writes taxonomy assignments straight to the `MarkdownStore` this
+    /// manager wraps, not through any method here, but a failure there is
+    /// still a failed write and deserves the same sheet (M2 in the review
+    /// this fixes): logged, stashed as `storageFailure`, and announced on
+    /// `storageDidFailNotification` so whichever host has a window on screen
+    /// can show it.
+    public func reportStorageFailure(_ operation: NotesStorageFailure.Operation, _ error: any Error) {
+        record(operation, error)
+    }
+
     // MARK: - Dependencies
 
-    private let storage: NoteStorage
+    /// `nonisolated` so `performStorage(_:)` — itself `nonisolated` — can read
+    /// it without a main-actor hop. Safe because `NoteStorage` is `Sendable`
+    /// (M1(b) in the review this fixes) and this is a `let`: the reference
+    /// never changes after `init`, only what it points to does I/O.
+    private nonisolated let storage: NoteStorage
     private var saveTasks: [UUID: Task<Void, Never>] = [:]
+
+    /// Runs a storage call off the main actor so the actual disk I/O in
+    /// `NoteStorage`'s conformers (`MarkdownNoteStorage`, backed by SQLite)
+    /// never blocks whichever other main-actor host — Quick Note, a second
+    /// notes window, this manager's own caller — shares this instance while
+    /// a note is read or written (M1(b) in the review this fixes).
+    ///
+    /// `storage` is `Sendable`, so capturing it into a detached task is
+    /// sound; awaiting `.value` from a main-actor caller is what hops the
+    /// result back onto the main actor, where every call site below
+    /// publishes it.
+    private nonisolated func performStorage<Value: Sendable>(
+        _ operation: @escaping @Sendable (NoteStorage) throws -> Value
+    ) async throws -> Value {
+        try await Task.detached { [storage] in
+            try operation(storage)
+        }.value
+    }
 
     /// The taxonomy store behind this manager's storage, when there is one.
     ///
@@ -108,7 +143,7 @@ public final class NotesManager {
 
     public func loadNotes() async {
         do {
-            let loaded = try storage.fetchAllNotes()
+            let loaded = try await performStorage { try $0.fetchAllNotes() }
             notes = loaded.sorted(by: Note.defaultSort)
             isLoaded = true
             postNotesDidChange()
@@ -134,7 +169,7 @@ public final class NotesManager {
     public func createNote(content: String) async -> UUID? {
         let note = Note.new(content: content)
         do {
-            try storage.insertNote(note)
+            try await performStorage { try $0.insertNote(note) }
         } catch {
             record(.create, error)
             return nil
@@ -166,8 +201,11 @@ public final class NotesManager {
         updated.modifiedDate = Date()
         notes[idx] = updated
         notes.sort(by: Note.defaultSort)
+        // `updated` is a `var`; the `@Sendable` closure below cannot capture
+        // it by reference, only a snapshot — `toSave` is that snapshot.
+        let toSave = updated
         do {
-            try storage.updateNote(updated)
+            try await performStorage { try $0.updateNote(toSave) }
         } catch {
             record(.save, error)
         }
@@ -177,7 +215,7 @@ public final class NotesManager {
     public func deleteNote(id: UUID) async {
         notes.removeAll(where: { $0.id == id })
         do {
-            try storage.deleteNote(id: id)
+            try await performStorage { try $0.deleteNote(id: id) }
         } catch {
             record(.delete, error)
         }
@@ -197,7 +235,7 @@ public final class NotesManager {
             self.saveTasks.removeValue(forKey: noteID)
             guard let current = self.notes.first(where: { $0.id == noteID }) else { return }
             do {
-                try self.storage.updateNote(current)
+                try await self.performStorage { try $0.updateNote(current) }
             } catch {
                 self.record(.save, error)
             }
@@ -222,7 +260,7 @@ public final class NotesManager {
         for (noteID, _) in pending {
             guard let note = notes.first(where: { $0.id == noteID }) else { continue }
             do {
-                try storage.updateNote(note)
+                try await performStorage { try $0.updateNote(note) }
             } catch {
                 record(.save, error)
             }

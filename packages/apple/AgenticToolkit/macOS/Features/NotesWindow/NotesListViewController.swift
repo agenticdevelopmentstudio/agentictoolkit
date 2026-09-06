@@ -23,6 +23,17 @@ public final class NotesListViewController: NSViewController {
     /// remembering to call `reload` after its own actions.
     private weak var notesManager: NotesManager?
 
+    /// Supplies the notes this pane should show when `notesManager` posts
+    /// `notesDidChangeNotification` from anywhere else. `NotesSplitViewController`
+    /// sets this to `{ [weak self] in self?.notesForCurrentFolder() ?? [] }`
+    /// (H1 in the review this fixes) so the pane's self-refresh honours
+    /// whatever folder filter is currently selected, without this class ever
+    /// learning folders exist. `nil` — the default, and what every existing
+    /// caller that supplies no provider gets — falls back to the manager's own
+    /// unfiltered `notes`, which is what this pane always showed before folders
+    /// existed.
+    public var notesProvider: (() -> [Note])?
+
     public init(notesManager: NotesManager? = nil) {
         self.notesManager = notesManager
         super.init(nibName: nil, bundle: nil)
@@ -141,11 +152,12 @@ public final class NotesListViewController: NSViewController {
             NotificationCenter.default.addObserver(
                 self, selector: #selector(notesDidChange),
                 name: NotesManager.notesDidChangeNotification, object: notesManager)
-            reload(notes: notesManager.notes, keepingSelectedID: selectedNoteID)
+            reload(notes: notesProvider?() ?? notesManager.notes, keepingSelectedID: selectedNoteID)
         }
     }
 
-    /// Mirrors the manager's notes into the table, and touches nothing else.
+    /// Mirrors the manager's (possibly filtered) notes into the table, and
+    /// touches nothing else.
     ///
     /// Deliberately narrower than `NotesSplitViewController.reload()`, which
     /// also pushes the selected note back into the editor: this fires on
@@ -154,18 +166,27 @@ public final class NotesListViewController: NSViewController {
     /// view under the cursor. The list is safe to refresh at any moment; the
     /// editor is not, and it already has the text.
     ///
-    /// The early return is the second half of that guarantee. The split view
+    /// Reads through `notesProvider` rather than `notesManager.notes`
+    /// directly (H1 in the review this fixes): the manager's array is always
+    /// the *unfiltered* set, and a folder filter lives one level up, in
+    /// whatever `notesProvider` was set to. Reaching into the manager here
+    /// instead used to drop the filter the instant a note changed anywhere
+    /// else — a Quick Note save, a second window — while the sidebar still
+    /// showed a folder selected.
+    ///
+    /// The early return is the second half of the "only reloads that carry
+    /// news are visible" guarantee, and it now compares against the same
+    /// filtered set `reload` is about to be asked to show — the split view
     /// controller still reloads the list explicitly after each of its own
     /// actions, so this notification usually arrives to find the table
-    /// already showing exactly these notes — and re-selecting a row that is
+    /// already showing exactly these notes, and re-selecting a row that is
     /// already selected is not free: `selectRowIndexes` scrolls, and a table
     /// reload drops the search field's first responder ordering on the floor.
-    /// Doing nothing when nothing changed leaves the redundant case
-    /// genuinely inert, so the only reloads a user can perceive are the ones
-    /// carrying news.
     @objc private func notesDidChange(_ notification: Notification) {
-        guard let notesManager, notesManager.notes != allNotes else { return }
-        reload(notes: notesManager.notes, keepingSelectedID: selectedNoteID)
+        guard let notesManager else { return }
+        let notes = notesProvider?() ?? notesManager.notes
+        guard notes != allNotes else { return }
+        reload(notes: notes, keepingSelectedID: selectedNoteID)
     }
 
     // MARK: - Filtering

@@ -8,7 +8,16 @@ import AgenticToolkitMarkdown
 /// produced by `tree(from:counts:edges:total:)` itself — `createCategory`
 /// mints a lowercased UUID, so a real category id is never empty, and the
 /// caller (the folders pane) constructs "All Notes" directly from `total`.
-public struct NoteFolder: Identifiable, Equatable, Sendable {
+/// `Hashable` (its four stored properties are all hashable, including
+/// `children` recursively) is not decorative: `NSOutlineView` bridges a Swift
+/// value that lacks it to a boxed object whose `-hash` falls back to that
+/// box's own identity rather than to `NoteFolder`'s own `==`. Two
+/// differently-boxed-but-equal folders — which is exactly what two separate
+/// `reload()`s produce — then hash unequally, and `isItemExpanded(_:)` /
+/// `row(forItem:)` can never find a match across a reload even though the
+/// values are equal. Adding this conformance is the whole fix (see L1 in the
+/// review this closes); nothing else about the type changes.
+public struct NoteFolder: Identifiable, Equatable, Hashable, Sendable {
     public let id: String
     public var name: String
     public var noteCount: Int
@@ -34,7 +43,7 @@ public struct NoteFolder: Identifiable, Equatable, Sendable {
     ///   under each — `NoteFolder` has no identity beyond its fields, so two
     ///   equal-looking nodes in different branches are simply two values, not
     ///   a shared reference.
-    /// - `total` is `store.documents(marker: .note).count`, not
+    /// - `total` is `store.noteCount(marker: .note)`, not
     ///   `counts.values.reduce(0, +)`: a note filed under two categories would
     ///   be double-counted by the sum, and an uncategorised note would be
     ///   missed by it entirely. The caller uses `total` to build "All Notes";

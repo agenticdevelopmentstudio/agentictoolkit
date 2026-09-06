@@ -83,6 +83,14 @@ public final class NotesSplitViewController: ThemedSplitViewController {
         self.listVC = NotesListViewController(notesManager: notesManager)
         self.folderVC = NotesFolderListViewController(store: markdownStore)
         super.init(nibName: nil, bundle: nil)
+        // Must wait until after `super.init()`: capturing `self`, even
+        // weakly, to reach `notesForCurrentFolder()` is "use of self before
+        // all stored properties are set" before that point. This is what
+        // keeps the list pane's own self-refresh (above) honouring the
+        // current folder filter instead of falling back to the manager's
+        // unfiltered notes (H1) — this controller is the single owner of the
+        // filter, and the list pane never needs to learn folders exist.
+        listVC.notesProvider = { [weak self] in self?.notesForCurrentFolder() ?? [] }
     }
 
     @available(*, unavailable)
@@ -455,6 +463,18 @@ public final class NotesSplitViewController: ThemedSplitViewController {
                 try markdownStore.assignCategory(id, toDocument: documentID)
             }
         } catch {
+            // Matches `createNote()`'s log shape (documentID, the folder id,
+            // then the error) and routes through the manager's existing
+            // storage-failure path rather than swallowing the error, so a
+            // failed move reaches the user the same way a failed save does
+            // (M2 in the review this fixes) instead of silently doing nothing.
+            Self.logger.error(
+                """
+                Failed to move document \(documentID, privacy: .public) \
+                to category \(id, privacy: .public): \
+                \(error, privacy: .public)
+                """)
+            notesManager.reportStorageFailure(.save, error)
             return
         }
         Task { @MainActor in
@@ -602,7 +622,17 @@ extension NotesSplitViewController: NotesFolderListViewControllerDelegate {
         // A deleted folder can never be the current selection again — its
         // notes are still there, just no longer filtered to a folder that no
         // longer exists.
-        if selectedFolderID == folder.id { selectedFolderID = "" }
+        if selectedFolderID == folder.id {
+            selectedFolderID = ""
+            // `folderVC.reload()` already ran (inside `deleteFolder(_:)`,
+            // before this delegate callback) and, finding no row left for the
+            // id just deleted, fell back to `outline.deselectAll`. Selecting
+            // "All Notes" explicitly — non-notifying, so there is no delegate
+            // bounce back into this method — is what keeps the sidebar
+            // showing a highlighted row that matches what the list falls
+            // back to (L2 in the review this fixes).
+            folderVC.selectFolder(id: "")
+        }
         folderMembership = nil
         reload()
     }

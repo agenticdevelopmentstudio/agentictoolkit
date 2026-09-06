@@ -121,22 +121,31 @@ extension MarkdownStore {
     /// A *note* is a `markdown` row with a live `notes` marker row — the same
     /// join `documents(marker: .note)` uses — so a `doc` or a `paper` filed
     /// under a category is not counted here.
+    ///
+    /// Also filters to rows whose id parses as a `UUID`, the same filter
+    /// `noteCount(marker:)` applies for the "All Notes" total — a
+    /// server-authored, non-UUID document is one `fetchAllNotes()` drops from
+    /// the list, and a per-folder badge that still counted it would disagree
+    /// with what that folder's list shows. Grouping moves into Swift because
+    /// the filter needs each row's id, not just its category.
     public func categoryNoteCounts() throws -> [String: Int] {
         try database.read { conn in
             let rows = try Row.fetchAll(
                 conn,
                 sql: """
-                    SELECT i.category_id AS category_id, COUNT(*) AS note_count
+                    SELECT i.category_id AS category_id, m.id AS document_id
                     FROM category_items i
                     JOIN markdown m ON m.id = i.target_id AND m.is_deleted = 0
                     JOIN notes n ON n.markdown_id = m.id AND n.deleted_at IS NULL
                     WHERE i.target_kind = ? AND i.deleted_at IS NULL
-                    GROUP BY i.category_id
                     """,
                 arguments: [Self.documentTargetKind])
             var counts: [String: Int] = [:]
             for row in rows {
-                counts[row["category_id"] as String] = row["note_count"]
+                let documentID: String = row["document_id"]
+                guard UUID(uuidString: documentID) != nil else { continue }
+                let categoryID: String = row["category_id"]
+                counts[categoryID, default: 0] += 1
             }
             return counts
         }

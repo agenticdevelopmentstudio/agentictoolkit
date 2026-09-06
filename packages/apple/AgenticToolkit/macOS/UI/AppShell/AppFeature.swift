@@ -86,17 +86,34 @@ open class AppFeatureRegistry {
 
     public private(set) var featureMap: [String: AppFeature] = [:]
 
+    /// Registration order. `featureMap.values` is a Swift `Dictionary`'s value
+    /// order, which is seeded per process — different on every launch, not
+    /// stable within one — and `features` used to return exactly that (W-M1
+    /// in the review this fixes). Whippet's `MenuManager` relies on `features`'
+    /// order for the order File-menu groups appear in, so `featureMap` stays
+    /// for lookup by name but is never again what `features` reads from.
+    private var orderedFeatures: [AppFeature] = []
+
     public var features: [AppFeature] {
-        Array(featureMap.values)
+        orderedFeatures
     }
 
     public func register(_ feature: AppFeature) {
+        if let index = orderedFeatures.firstIndex(where: { $0.featureName == feature.featureName }) {
+            // Re-registering a name already known replaces it in place,
+            // keeping its original position — a rename-in-place, not a
+            // reordering.
+            orderedFeatures[index] = feature
+        } else {
+            orderedFeatures.append(feature)
+        }
         featureMap[feature.featureName] = feature
         logger.info("Registered feature: \(feature.featureName)")
     }
 
     public func unregister(_ feature: AppFeature) {
         featureMap.removeValue(forKey: feature.featureName)
+        orderedFeatures.removeAll { $0.featureName == feature.featureName }
         logger.info("Unegistered feature: \(feature.featureName)")
     }
 

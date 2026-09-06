@@ -8,7 +8,12 @@ import AgenticToolkitMarkdown
 /// `NotesCoordinator` already takes one from its caller, so replacing
 /// `NotesDatabaseManager` is one conformance here and one line in Whippet —
 /// which is the whole reason that seam exists.
-public final class MarkdownNoteStorage: NoteStorage {
+///
+/// `Sendable` as written: `store` is a `let MarkdownStore`, itself
+/// `@unchecked Sendable`, and `pinnedKey` is a `static let` constant — there
+/// is no other stored state, so the compiler-derived conformance below costs
+/// nothing (M1(b) in the review this fixes).
+public final class MarkdownNoteStorage: NoteStorage, Sendable {
 
     /// Exposed so a host can reach the taxonomy and the REST queue; the four
     /// `NoteStorage` methods deliberately do not.

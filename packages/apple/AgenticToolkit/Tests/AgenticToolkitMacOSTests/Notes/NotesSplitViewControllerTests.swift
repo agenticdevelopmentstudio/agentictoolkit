@@ -330,6 +330,51 @@ final class NotesSplitViewControllerTests: XCTestCase {
             "the new note must be a member of the folder it was created in")
     }
 
+    /// H1 in the review this fixes: `NotesListViewController` used to reload
+    /// straight from `notesManager.notes` on every `notesDidChangeNotification`
+    /// — gated by a `notesManager.notes != allNotes` early-out that was never
+    /// true while a folder was selected, because `NotesSplitViewController`
+    /// keeps `allNotes` in sync with the manager's own array regardless of
+    /// filter. A note that changed from *outside* this pane (Quick Note, a
+    /// scripting command, a second window — anything calling
+    /// `NotesManager.createNote(content:)` directly, not through
+    /// `notesListDidRequestNewNote()`) posted the same notification and blew
+    /// the folder filter away, showing every note again until the folder was
+    /// reselected.
+    func testExternalNoteChangeDoesNotBreakTheFolderFilter() async throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let inFolder = try store.createDocument(content: "a recipe", markers: [.note])
+        try store.assignCategory(recipes.id, toDocument: inFolder.id)
+        _ = try store.createDocument(content: "unfiled", markers: [.note])
+
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        split.reload()
+
+        let folderVC = try XCTUnwrap(split.splitViewItems[0].viewController as? NotesFolderListViewController)
+        let row = try XCTUnwrap((0..<folderVC.outline.numberOfRows).first {
+            (folderVC.outline.item(atRow: $0) as? NoteFolder)?.id == recipes.id
+        })
+        folderVC.outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        XCTAssertEqual(listRowCount(split), 1, "narrowed to the Recipes folder")
+
+        // A note created directly through the manager — unfiled, the way
+        // Quick Note or a scripting command would — rather than through
+        // `notesListDidRequestNewNote()`, which files it under the selected
+        // folder and would mask the bug this pins.
+        _ = await notesManager.createNote(content: "external note")
+
+        let settled = try await pollUntil { notesManager.notes.count == 3 }
+        XCTAssertTrue(settled, "expected the external create to actually happen")
+        XCTAssertEqual(
+            listRowCount(split), 1,
+            "the folder filter must survive a notesDidChange that originated outside this pane")
+    }
+
     // MARK: - The ⋯ menu's actions (Task 8)
 
     /// Selects the store's first (and only) note by loading it into the
@@ -367,11 +412,25 @@ final class NotesSplitViewControllerTests: XCTestCase {
         XCTAssertTrue(pinned)
     }
 
-    func testTogglePinOnSelectedNoteDoesNothingWithNoSelection() {
-        let split = makeSplit(autosaveName: makeAutosaveName())
+    /// `togglePinOnSelectedNote()`'s guard is checked before the `Task` that
+    /// does the actual toggle is even created, so a store with a real,
+    /// unselected note (rather than the empty stub `makeSplit` uses) is what
+    /// makes the assertion mean something: nothing here would notice a
+    /// missing guard if there were no note capable of getting pinned.
+    func testTogglePinOnSelectedNoteDoesNothingWithNoSelection() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "hello", markers: [.note])
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
         split.loadViewIfNeeded()
+        // Deliberately no selection made through the list pane.
 
-        split.togglePinOnSelectedNote() // must not crash
+        split.togglePinOnSelectedNote()
+
+        XCTAssertNil(split.selectedNote(), "no selection means no note to toggle")
+        XCTAssertFalse(notesManager.notes.contains { $0.isPinned }, "no selection means no pin toggle")
     }
 
     func testDuplicateSelectedNoteCreatesANoteWithIdenticalContent() async throws {
@@ -479,6 +538,14 @@ final class NotesSplitViewControllerTests: XCTestCase {
     /// task-8-grounding G3/G9's recovered guard: `guard let window =
     /// view.window else { return }`, checked *before* the alert — a delete
     /// requested with no window silently does nothing rather than trapping.
+    /// `deleteSelectedNote()`'s window guard returns before any `Task` is
+    /// created, so a bug that removed it would delete asynchronously, inside
+    /// `performDelete(_:)`'s own `Task`. An assertion taken immediately after
+    /// the call cannot tell "the guard held" apart from "the delete just
+    /// hasn't finished yet" — so this waits out the same budget `pollUntil`
+    /// gives a real async settle elsewhere in this file, and asserts the
+    /// delete never happens in that window, rather than asserting it hasn't
+    /// happened yet.
     func testDeleteSelectedNoteWithNoWindowDoesNothing() async throws {
         let store = try store()
         _ = try store.createDocument(content: "hello", markers: [.note])
@@ -486,14 +553,18 @@ final class NotesSplitViewControllerTests: XCTestCase {
 
         split.deleteSelectedNote()
 
-        XCTAssertEqual(notesManager.notes.count, 1, "no window means no sheet, and no deletion")
+        let deleted = try await pollUntil { notesManager.notes.isEmpty }
+        XCTAssertFalse(deleted, "no window means no sheet, and no deletion")
+        XCTAssertEqual(notesManager.notes.count, 1)
     }
 
     func testShareSelectedNoteDoesNothingWithNoSelection() {
         let split = makeSplit(autosaveName: makeAutosaveName())
         split.loadViewIfNeeded()
 
-        split.shareSelectedNote(from: split.view) // must not crash
+        split.shareSelectedNote(from: split.view)
+
+        XCTAssertNil(split.selectedNote(), "no selection means nothing to share, and the guard must hold")
     }
 
     /// `focusEditor()`'s own test (ADT's `MarkdownTextPaneInputTests`) already

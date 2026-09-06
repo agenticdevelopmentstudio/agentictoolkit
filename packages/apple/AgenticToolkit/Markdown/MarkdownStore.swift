@@ -262,6 +262,31 @@ public final class MarkdownStore: @unchecked Sendable {
         }
     }
 
+    /// The count `documents(marker:)` would return, without reading a single
+    /// row's content — a badge or a menu wants only the number, and the query
+    /// above joins and returns whole markdown bodies to answer it.
+    ///
+    /// Filters to rows whose id parses as a `UUID`, matching
+    /// `MarkdownNoteStorage.fetchAllNotes()`'s `compactMap` (a document with a
+    /// server-authored, non-UUID id is not one `Note`'s `UUID`-keyed world can
+    /// represent, and `fetchAllNotes()` drops it from the list). Doing the same
+    /// filter here — on the id column alone, never the row's content — is what
+    /// keeps a folder's badge and its list agreeing by construction instead of
+    /// by coincidence.
+    public func noteCount(marker: MarkdownMarker) throws -> Int {
+        try database.read { conn in
+            let ids = try String.fetchAll(
+                conn,
+                sql: """
+                    SELECT m.id FROM markdown m
+                    JOIN \(marker.table) k ON k.markdown_id = m.id AND k.deleted_at IS NULL
+                    WHERE m.is_deleted = 0
+                    """
+            )
+            return ids.lazy.filter { UUID(uuidString: $0) != nil }.count
+        }
+    }
+
     /// Writes the document's content and queues a `PUT /content/markdown/:id`.
     ///
     /// The wire payload is `content` and nothing else, which is narrower than

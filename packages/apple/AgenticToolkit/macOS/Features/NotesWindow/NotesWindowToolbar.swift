@@ -255,6 +255,14 @@ public final class NotesWindowToolbar: NSObject, NSToolbarDelegate {
     /// additionally needs a store (task-8-grounding G5).
     func buildMoreMenu() -> NSMenu {
         let menu = NSMenu(title: "More")
+        // `autoenablesItems` defaults to `true`, which has AppKit recompute
+        // every item's enabled state at popup time from whether `target`
+        // responds to `action` — discarding every manual `isEnabled` below,
+        // including "Move to"'s (L4 in the review this fixes). This menu's
+        // enablement is a deliberate, precomputed fact about the current
+        // selection and store, not something AppKit's default guess should
+        // override.
+        menu.autoenablesItems = false
         let note = splitViewController?.selectedNote()
         let hasSelection = note != nil
 
@@ -336,7 +344,7 @@ public final class NotesWindowToolbar: NSObject, NSToolbarDelegate {
         let categories = (try? store.categories()) ?? []
         let counts = (try? store.categoryNoteCounts()) ?? [:]
         let edges = (try? store.categoryEdges()) ?? []
-        let total = (try? store.documents(marker: .note).count) ?? 0
+        let total = (try? store.noteCount(marker: .note)) ?? 0
         let tree = NoteFolder.tree(from: categories, counts: counts, edges: edges, total: total)
 
         func addItems(_ folders: [NoteFolder], depth: Int) {
