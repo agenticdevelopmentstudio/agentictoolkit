@@ -768,6 +768,24 @@ public final class MarkdownStore: @unchecked Sendable {
     /// namely that a document never has both halves of a pair pending at once.
     /// The new op is still queued rather than dropped, because the server may
     /// already be in the opposite state from an *earlier*, already-drained op.
+    ///
+    /// The cancel is unconditional, and `_markdown_outbox` has no status
+    /// column: a row exists from here until `complete(opID:)` deletes it,
+    /// which happens only after `await writer.send(...)` returns. So this
+    /// `DELETE` can remove a row whose op is already in flight, and
+    /// `complete`'s own delete then becomes a no-op. That is safe on two
+    /// invariants, and only on them — a `MarkdownRemoteWriter` that breaks
+    /// either one needs a real in-flight marker here, not a comment:
+    ///
+    /// 1. **Sends are idempotent.** An op that was cancelled locally may
+    ///    still reach the server, so the server must tolerate being told
+    ///    something it already knows.
+    /// 2. **The latest instruction wins and is never dropped.** The op
+    ///    enqueued here always drains after the one it cancelled, so
+    ///    whatever the in-flight op did on the server, this one undoes.
+    ///
+    /// Both hold today: no remote writer exists yet, and the drain is
+    /// strictly ordered by `seq`.
     private func enqueue(
         _ intent: MarkdownRemoteIntent, for documentID: String,
         payload: [String: JSONValue], at now: Date, in conn: Database
