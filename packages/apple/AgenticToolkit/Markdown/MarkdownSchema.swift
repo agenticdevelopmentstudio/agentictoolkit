@@ -122,6 +122,18 @@ public enum MarkdownSchema {
             try conn.execute(sql: frontmatterOwnerDDL)
             try backfillFrontmatterOwners(in: conn)
         }
+        // `markdown-v4-release-title-claims`: the app no longer writes
+        // `title:` at all — a markdown document's title is its first line
+        // (`MarkdownText.deriveTitle`), which is also what adh recomputes on
+        // every write. A claim left behind from before that change is not
+        // merely stale, it is dangerous: `MarkdownNoteStorage.strippedContent`
+        // hides every key the app owns, so a surviving `title` claim would
+        // delete from the editor a `title:` line the user is now the only
+        // possible author of.
+        migrator.registerMigration("markdown-v4-release-title-claims") { conn in
+            try conn.execute(
+                sql: "DELETE FROM _markdown_frontmatter_owner WHERE key = 'title'")
+        }
         return migrator
     }
 
@@ -297,21 +309,31 @@ public enum MarkdownSchema {
             ON _markdown_outbox(document_id, intent);
         """
 
-    /// Claims every `title`/`pinned` already on disk for the app.
+    /// Claims every `pinned` key already on disk for the app.
     ///
     /// Before this table existed the app was the only *intentional* writer of
-    /// those two keys and read every one of them as its own — a `pinned: true`
+    /// `pinned` and read every one of them as its own — a `pinned: true`
     /// pinned the note whoever typed it. Backfilling therefore reproduces
     /// exactly what the user sees today; leaving the table empty instead would
-    /// unpin every pinned note and un-rename every renamed one on first launch
-    /// after the upgrade, which is data loss dressed up as a stricter rule. The
-    /// new rule applies to everything written from here on, where the answer is
-    /// known rather than assumed.
+    /// unpin every pinned note on first launch after the upgrade, which is
+    /// data loss dressed up as a stricter rule. The new rule applies to
+    /// everything written from here on, where the answer is known rather than
+    /// assumed.
+    ///
+    /// `title` used to be claimed here too, on the same reasoning: the app
+    /// was its only intentional writer, so a rename left on disk had to be
+    /// reproduced or it would look undone. That reasoning is gone, not just
+    /// its conclusion — the app no longer writes `title:` at all, a
+    /// document's title is its first line (`MarkdownText.deriveTitle`), and
+    /// there is no such thing as a renamed note left for a claim to protect.
+    /// A `title` claim this function already wrote to a pre-v4 install is
+    /// released by `markdown-v4-release-title-claims`, which is a fact about
+    /// undoing history, not about what a fresh backfill should still do.
     private static func backfillFrontmatterOwners(in conn: Database) throws {
         for row in try Row.fetchAll(conn, sql: "SELECT id, content FROM markdown") {
             let content: String = row["content"]
             let id: String = row["id"]
-            for key in ["title", "pinned"] where Frontmatter.value(key, in: content) != nil {
+            for key in ["pinned"] where Frontmatter.value(key, in: content) != nil {
                 try conn.execute(
                     sql: """
                         INSERT OR IGNORE INTO _markdown_frontmatter_owner (document_id, key)

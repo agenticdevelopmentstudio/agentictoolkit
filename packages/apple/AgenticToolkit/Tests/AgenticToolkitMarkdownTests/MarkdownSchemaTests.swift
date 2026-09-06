@@ -214,6 +214,66 @@ struct MarkdownSchemaTests {
             #expect(exists)
         }
     }
+
+    /// Seeds a document that already carries both `title:` and `pinned:` in
+    /// its content, then migrates from just before the ownership table
+    /// exists (`markdown-v2-outbox-order`) straight through to head. The v3
+    /// backfill runs during that migrate, and this is what proves it no
+    /// longer claims `title` on a fresh install: it must still claim
+    /// `pinned` — the key it is still responsible for — while leaving
+    /// `title` unclaimed rather than backfilling it and then releasing it
+    /// again a migration later.
+    @Test("the v3 backfill no longer claims title")
+    func theV3BackfillNoLongerClaimsTitle() throws {
+        let database = try BoundedDatabase(path: ":memory:")
+        try MarkdownSchema.migrator().migrate(database.writer, upTo: "markdown-v2-outbox-order")
+        try database.write { conn in
+            try conn.execute(
+                sql: """
+                    INSERT INTO markdown (id, title, content, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    "m1", "Groceries", "---\ntitle: Groceries\npinned: true\n---\n\nBody",
+                    "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"
+                ])
+        }
+        try MarkdownSchema.migrate(database)
+        let keys = try database.read { conn in
+            try String.fetchAll(
+                conn, sql: "SELECT key FROM _markdown_frontmatter_owner WHERE document_id = 'm1'")
+        }
+        #expect(keys.contains("pinned"))
+        #expect(!keys.contains("title"))
+    }
+
+    /// Seeds `title` and `pinned` claims directly into
+    /// `_markdown_frontmatter_owner` *after* `markdown-v3-frontmatter-owner`
+    /// has already run — the point of seeding there rather than earlier is
+    /// that v3's backfill has nothing left to do by then, so any claim this
+    /// test finds afterward can only have survived (or been released) by v4
+    /// itself. Migrating the rest of the way to head must delete the `title`
+    /// claim and leave `pinned` untouched, proving an *upgrade* — not just a
+    /// fresh install — sheds every stale `title` claim already on disk.
+    @Test("migrating an existing database releases every title claim")
+    func migratingAnExistingDatabaseReleasesEveryTitleClaim() throws {
+        let database = try BoundedDatabase(path: ":memory:")
+        try MarkdownSchema.migrator().migrate(database.writer, upTo: "markdown-v3-frontmatter-owner")
+        try database.write { conn in
+            try conn.execute(
+                sql: "INSERT INTO _markdown_frontmatter_owner (document_id, key) VALUES (?, ?)",
+                arguments: ["m1", "title"])
+            try conn.execute(
+                sql: "INSERT INTO _markdown_frontmatter_owner (document_id, key) VALUES (?, ?)",
+                arguments: ["m1", "pinned"])
+        }
+        try MarkdownSchema.migrate(database)
+        let keys = try database.read { conn in
+            try String.fetchAll(
+                conn, sql: "SELECT key FROM _markdown_frontmatter_owner WHERE document_id = 'm1'")
+        }
+        #expect(keys == ["pinned"])
+    }
 }
 
 @Suite("MarkdownTimestamp")
