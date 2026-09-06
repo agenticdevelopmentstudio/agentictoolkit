@@ -8,6 +8,7 @@ import { notifyIssueAlert, flushAlerts, _resetAlerts } from '../src/monitor/aler
 import { applyBoardToLedger, openByTarget } from '../src/monitor/issues';
 import type { Board, Problem } from '../src/board';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
+import { createLibsqlStorage } from '../src/libsql';
 
 // The monitor detected outages but told NO ONE — an issue was only visible to
 // someone already looking at the wallboard. Issue open/resolve transitions now
@@ -129,21 +130,22 @@ describe('alert queue', () => {
 describe('issue lifecycle alerts (real recorder path)', () => {
   it('emits opened on a new outage and resolved on recovery — silent in between', async () => {
     const db = await freshDb();
+    const storage = createLibsqlStorage(db);
 
-    await applyBoardToLedger(db, board([appDown], ['ep-1']));
+    await applyBoardToLedger(storage, board([appDown], ['ep-1']));
     await flushAlerts(ALERT_URL);
     expect(sent).toHaveLength(1);
     expect(String(sent[0]!.body.text)).toMatch(/opened/i);
     expect(String(sent[0]!.body.text)).toContain('App');
 
     // Still down next cycle: the open issue persists, no re-alert.
-    await applyBoardToLedger(db, board([appDown], ['ep-1']));
+    await applyBoardToLedger(storage, board([appDown], ['ep-1']));
     await flushAlerts(ALERT_URL);
     expect(sent).toHaveLength(1);
-    expect([...(await openByTarget(db)).keys()]).toEqual(['ep-1']); // one row, still open
+    expect([...(await openByTarget(storage)).keys()]).toEqual(['ep-1']); // one row, still open
 
     // Healthy: the board derives no problem for a target it still WATCHES.
-    await applyBoardToLedger(db, board([], ['ep-1']));
+    await applyBoardToLedger(storage, board([], ['ep-1']));
     await flushAlerts(ALERT_URL);
     expect(sent).toHaveLength(2);
     expect(String(sent[1]!.body.text)).toMatch(/resolved/i);
@@ -154,12 +156,13 @@ describe('issue lifecycle alerts (real recorder path)', () => {
 describe('config-driven resolves must NOT alert (they are not recoveries)', () => {
   it('stays silent when a platform-health issue clears because its TOKEN was removed', async () => {
     const db = await freshDb();
+    const storage = createLibsqlStorage(db);
 
     // 1) Vercel unreachable past the debounce window → the board carries the problem and
     //    the issue opens (a real alert). The debounce itself is the fold's now
     //    (`platformProblems` + the streak `recordPlatformObservations` keeps), so this
     //    states the post-debounce board rather than replaying two failing polls.
-    await applyBoardToLedger(db, board([vercelUnreachable], ['platform-health|vercel']));
+    await applyBoardToLedger(storage, board([vercelUnreachable], ['platform-health|vercel']));
     await flushAlerts(ALERT_URL);
     expect(sent).toHaveLength(1);
     expect(String(sent[0]!.body.text)).toMatch(/opened/i);
@@ -168,7 +171,7 @@ describe('config-driven resolves must NOT alert (they are not recoveries)', () =
     //    `monitoredTargets` at all, so the issue is resolved because we stopped monitoring
     //    the platform — not because Vercel recovered. Alerting "✅ resolved" here tells
     //    on-call the outage cleared when it did not.
-    await applyBoardToLedger(db, board([], []));
+    await applyBoardToLedger(storage, board([], []));
     await flushAlerts(ALERT_URL);
     expect(sent).toHaveLength(1); // still just the open — no resolve alert
 
@@ -179,12 +182,13 @@ describe('config-driven resolves must NOT alert (they are not recoveries)', () =
 
   it('still alerts when the platform genuinely RECOVERS (token intact)', async () => {
     const db = await freshDb();
-    await applyBoardToLedger(db, board([vercelUnreachable], ['platform-health|vercel']));
+    const storage = createLibsqlStorage(db);
+    await applyBoardToLedger(storage, board([vercelUnreachable], ['platform-health|vercel']));
     await flushAlerts(ALERT_URL);
     expect(sent).toHaveLength(1);
 
     // Reachable again — still configured, so still WATCHED. That is a recovery.
-    await applyBoardToLedger(db, board([], ['platform-health|vercel']));
+    await applyBoardToLedger(storage, board([], ['platform-health|vercel']));
     await flushAlerts(ALERT_URL);
     expect(sent).toHaveLength(2);
     expect(String(sent[1]!.body.text)).toMatch(/resolved/i);

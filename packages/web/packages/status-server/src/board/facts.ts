@@ -13,7 +13,6 @@ import { combinedStatus, inFlightSql } from "../monitor/deploy-status";
 import type { BuildPhase, DeployPhase } from "../monitor/deploy-status";
 import { deployIsBad, deployIsResolving } from "../monitor/issue-sources";
 import type { IssueSource } from "../monitor/issue-sources";
-import { liveVercelProjectNames } from "../monitor/refresh-project-meta";
 import type { Storage } from "../storage/ports";
 import { deriveActivity, pageActivity } from "./derive-activity";
 import { monitoredTargets } from "./derive-problems";
@@ -400,11 +399,10 @@ export async function readBoardFacts(db: Db, storage: Storage, nowMs: number, co
   // mirror silences nothing. A read that failed leaves yesterday's rows in place, which
   // errs toward keeping problems visible; that is the safe direction.
   //
-  // Reads via `liveVercelProjectNames` (`refresh-project-meta.ts:172`) rather than
-  // re-spelling the query a second time: that module has no import cycle with `facts.ts`
-  // (`monitor/` never imports `board/`), so there is no justification for a second copy of
-  // the same SELECT.
-  const liveVercelProjects = [...(await liveVercelProjectNames(db))];
+  // Reads via `storage.deploy.listProjectMetaNames` rather than re-spelling the query a
+  // second time: that store method already exists for the monitor's own reconcile path,
+  // so there is no justification for a second copy of the same SELECT.
+  const liveVercelProjects = await storage.deploy.listProjectMetaNames("vercel");
 
   // The unresolved error groups, and separately EVERY project the table has ever held.
   //

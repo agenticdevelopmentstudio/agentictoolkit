@@ -55,16 +55,26 @@ export function connFromEnv(): ProviderConn {
   };
 }
 
-/** Provider connections from the DB's deploy_integrations table (active rows only). */
-export async function providerConnFromConfig(db: DeployDb): Promise<ProviderConn> {
-  const integrations = await db
-    .select()
-    .from(deployIntegrations)
-    .where(eq(deployIntegrations.isActive, true));
+/** The slice of a deploy_integrations row `providerConnFromIntegrations` reads — a plain
+ *  shape, so a consumer that keeps its integrations behind its own storage port can hand
+ *  them over without this package seeing its database. */
+export interface IntegrationLike {
+  platform: string;
+  config: unknown;
+  tokenEnvVar: string | null;
+}
 
+/** Provider connections from already-loaded integration rows (the caller passes only the
+ *  ACTIVE ones) and a token lookup by credential name. Pure: no database, no env read —
+ *  the lookup is where the caller decides whether that name means `process.env` or its
+ *  own secret store. */
+export function providerConnFromIntegrations(
+  integrations: IntegrationLike[],
+  token: (envVar: string) => string | undefined,
+): ProviderConn {
   const find = (p: string) => integrations.find((i) => i.platform === p);
-  const tokenOf = (i: { tokenEnvVar: string | null } | undefined): string | undefined =>
-    i?.tokenEnvVar ? process.env[i.tokenEnvVar] : undefined;
+  const tokenOf = (i: IntegrationLike | undefined): string | undefined =>
+    i?.tokenEnvVar ? token(i.tokenEnvVar) : undefined;
   const cfg = (i: { config: unknown } | undefined, key: string): unknown =>
     (i?.config as Record<string, unknown> | undefined)?.[key];
 
@@ -82,4 +92,14 @@ export async function providerConnFromConfig(db: DeployDb): Promise<ProviderConn
     railway: { token: tokenOf(railway), projects: cfg(railway, "projects") as RailwayProject[] | undefined },
     crunchy: { token: tokenOf(crunchy) },
   };
+}
+
+/** Provider connections from the DB's deploy_integrations table (active rows only),
+ *  tokens from `process.env` by the row's `tokenEnvVar`. */
+export async function providerConnFromConfig(db: DeployDb): Promise<ProviderConn> {
+  const integrations = await db
+    .select()
+    .from(deployIntegrations)
+    .where(eq(deployIntegrations.isActive, true));
+  return providerConnFromIntegrations(integrations, (envVar) => process.env[envVar]);
 }

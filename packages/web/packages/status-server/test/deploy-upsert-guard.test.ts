@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../src/libsql/schema";
 import { deployments } from "../src/libsql/schema";
 import type { Db } from "../src/libsql/client";
-import { upsertDeployments } from "../src/monitor/sync";
+import { createLibsqlStorage } from "../src/libsql";
 import type { ProviderDeploy } from "../src/monitor/provider-deploy";
 import type { BuildPhase, DeployPhase } from "../src/monitor/deploy-status";
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
@@ -55,8 +55,9 @@ async function phasesOf(db: Db): Promise<{ buildPhase: string | null; deployPhas
 describe("upsertDeployments — webhook build-phase ordering", () => {
   it("lets a build-requested webhook move a queued row to building", async () => {
     const db = await bootDb();
-    await upsertDeployments(db, [deploy("queued")], { source: "webhook" });
-    await upsertDeployments(db, [deploy("building")], { source: "webhook" });
+    const storage = createLibsqlStorage(db);
+    await storage.deploy.upsertDeployments([deploy("queued")], { source: "webhook" });
+    await storage.deploy.upsertDeployments([deploy("building")], { source: "webhook" });
     expect(await phasesOf(db)).toEqual({ buildPhase: "building", deployPhase: "none" });
   });
 
@@ -66,23 +67,26 @@ describe("upsertDeployments — webhook build-phase ordering", () => {
    *  board backwards: a site that visibly started building reverts to "queued". */
   it("refuses a late deployment.created that would drag building back to queued", async () => {
     const db = await bootDb();
-    await upsertDeployments(db, [deploy("building")], { source: "webhook" });
-    await upsertDeployments(db, [deploy("queued")], { source: "webhook" });
+    const storage = createLibsqlStorage(db);
+    await storage.deploy.upsertDeployments([deploy("building")], { source: "webhook" });
+    await storage.deploy.upsertDeployments([deploy("queued")], { source: "webhook" });
     expect(await phasesOf(db)).toEqual({ buildPhase: "building", deployPhase: "none" });
   });
 
   it("still refuses an in-flight webhook that would overwrite a settled verdict", async () => {
     const db = await bootDb();
-    await upsertDeployments(db, [deploy("built", "deployed")], { source: "webhook" });
-    await upsertDeployments(db, [deploy("queued")], { source: "webhook" });
+    const storage = createLibsqlStorage(db);
+    await storage.deploy.upsertDeployments([deploy("built", "deployed")], { source: "webhook" });
+    await storage.deploy.upsertDeployments([deploy("queued")], { source: "webhook" });
     expect(await phasesOf(db)).toEqual({ buildPhase: "built", deployPhase: "deployed" });
   });
 
   /** A terminal event is current truth whichever in-flight phase it lands on. */
   it.each(["queued", "building"] as const)("lets a terminal webhook settle a %s row", async (from) => {
     const db = await bootDb();
-    await upsertDeployments(db, [deploy(from)], { source: "webhook" });
-    await upsertDeployments(db, [deploy("failed")], { source: "webhook" });
+    const storage = createLibsqlStorage(db);
+    await storage.deploy.upsertDeployments([deploy(from)], { source: "webhook" });
+    await storage.deploy.upsertDeployments([deploy("failed")], { source: "webhook" });
     expect((await phasesOf(db)).buildPhase).toBe("failed");
   });
 
@@ -91,8 +95,9 @@ describe("upsertDeployments — webhook build-phase ordering", () => {
    *  rule and must not have leaked into it. */
   it("leaves the poll free to move a row backwards", async () => {
     const db = await bootDb();
-    await upsertDeployments(db, [deploy("building")], { source: "webhook" });
-    await upsertDeployments(db, [deploy("queued")], { source: "poll" });
+    const storage = createLibsqlStorage(db);
+    await storage.deploy.upsertDeployments([deploy("building")], { source: "webhook" });
+    await storage.deploy.upsertDeployments([deploy("queued")], { source: "poll" });
     expect((await phasesOf(db)).buildPhase).toBe("queued");
   });
 });

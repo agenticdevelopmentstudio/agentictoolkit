@@ -4,7 +4,7 @@ import { createApp } from '../src/app';
 import { testDeps } from './helpers/storage';
 import type { Db } from '../src/libsql/client';
 import { _resetCfAccountCache } from '@agentic-toolkit/deploy-platform/providers';
-import { rollupMetricsSql } from '../src/monitor/sync';
+import { rollupMetricsSql } from '../src/libsql/stores/maintenance-store';
 import { sessionHeaders } from './helpers/auth';
 import { freshDb as bootDb, type Db as TestDb } from './helpers/db';
 import { stubVercelAccount, type FakeVercelAccount } from './helpers/vercel-account';

@@ -1,10 +1,9 @@
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import { requireAdmin, type Tier } from '../middleware/auth';
 import type { Scheduler } from '../scheduler';
-import type { Db } from '../libsql/client';
-import { runMaintenance } from '../monitor/sync';
+import type { Storage } from '../storage/ports';
 
-export function cronRoutes(db: Db, scheduler: Scheduler): OpenAPIHono<{ Variables: { tier: Tier } }> {
+export function cronRoutes(storage: Storage, scheduler: Scheduler): OpenAPIHono<{ Variables: { tier: Tier } }> {
   const app = new OpenAPIHono<{ Variables: { tier: Tier } }>();
   const ok = {
     200: { description: 'ok', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
@@ -33,7 +32,7 @@ export function cronRoutes(db: Db, scheduler: Scheduler): OpenAPIHono<{ Variable
   app.openapi(
     createRoute({ method: 'post', path: '/cron/maintenance', tags: ['cron'], responses: pruned }),
     async (c) => {
-      const { deleted, done } = await runMaintenance(db);
+      const { deleted, done } = await storage.maintenance.runMaintenance();
       return c.json({ ok: true, deleted, done });
     },
   );

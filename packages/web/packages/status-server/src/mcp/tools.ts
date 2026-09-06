@@ -194,14 +194,14 @@ const READ_TOOLS: McpTool[] = [
     // Same read as GET /deploy-projects: re-verify the Vercel project table, THEN enumerate.
     // Uncached (a tool call is rare and always deliberate), but the same function, so the
     // twins can't report different project sets.
-    execute: async (db, storage) => buildDeployProjects(storage, (await refreshAndEnumerateDeployProjects(db)).enumerated),
+    execute: async (db, storage) => buildDeployProjects(storage, (await refreshAndEnumerateDeployProjects(db, storage)).enumerated),
   },
   {
     name: 'find_unconfigured_sites',
     description: 'The configuration gaps: pending/addable deploy projects and monitored endpoints not wired to a project.',
     readOnly: true,
     inputSchema: {},
-    execute: async (db, storage) => findUnconfiguredSites(db, storage, (await refreshAndEnumerateDeployProjects(db)).enumerated),
+    execute: async (db, storage) => findUnconfiguredSites(db, storage, (await refreshAndEnumerateDeployProjects(db, storage)).enumerated),
   },
   {
     name: 'list_users',
@@ -348,8 +348,8 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Trigger a telemetry-collection pass (poll the configured error/analytics providers and persist their latest summaries), then return the fresh summary.',
     readOnly: false,
     inputSchema: {},
-    execute: async (db, _storage, _args, config) => {
-      await collectTelemetry(db, config);
+    execute: async (db, storage, _args, config) => {
+      await collectTelemetry(db, storage, config);
       return { collected: true, errors: await errorsStore.load(db), analytics: await analyticsStore.load(db) };
     },
   },

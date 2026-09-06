@@ -1,6 +1,4 @@
-import { sql } from "drizzle-orm";
-import type { Db } from "../libsql/client";
-import { healthChecks } from "../libsql/schema";
+import type { Storage } from "../storage/ports";
 import { withTimeout } from "@agentic-toolkit/deploy-platform/util";
 import { timeAgo } from "./time-ago";
 import { resolveCfAccountId, listWorkerScripts } from "@agentic-toolkit/deploy-platform/providers";
@@ -79,41 +77,18 @@ export function overallState(checks: { state: CheckState }[]): CheckState {
   return "ok";
 }
 
-/** Aggregate stats over the persisted health checks — total samples + distinct
- *  services (mirrors the old statsStore.summary()). The new backend's stats are
- *  DB-backed (persistent), unlike the status site's interim in-memory store. */
-async function statsSummary(db: Db): Promise<{ samples: number; services: number }> {
-  const [row] = await db
-    .select({
-      samples: sql<number>`count(*)`,
-      services: sql<number>`count(distinct ${healthChecks.serviceSlug})`,
-    })
-    .from(healthChecks);
-  return { samples: Number(row?.samples ?? 0), services: Number(row?.services ?? 0) };
-}
-
-/** Most recent health-check time in ms, or null when no checks have run yet
- *  (mirrors the old statsStore.lastCheckedAt()). */
-async function lastCheckedAtMs(db: Db): Promise<number | null> {
-  const [row] = await db
-    .select({ last: sql<number | null>`max(${healthChecks.checkedAt})` })
-    .from(healthChecks);
-  // checkedAt is stored as unix-seconds — scale to ms.
-  return row?.last == null ? null : Number(row.last) * 1000;
-}
-
-async function checkStatsStore(db: Db): Promise<IntegrationCheck> {
+async function checkStatsStore(storage: Storage): Promise<IntegrationCheck> {
   const id = "stats";
   const label = "Stats store";
-  const s = await statsSummary(db);
+  const s = await storage.health.checksSummary();
   const detail = `persistent · ${s.samples} samples across ${s.services} services`;
   return { id, label, configured: true, ok: true, state: "ok", detail };
 }
 
-async function checkStatsFreshness(db: Db): Promise<IntegrationCheck> {
+async function checkStatsFreshness(storage: Storage): Promise<IntegrationCheck> {
   const id = "cron";
   const label = "Stats freshness";
-  const last = await lastCheckedAtMs(db);
+  const last = await storage.health.lastCheckedAtMs();
   if (last === null) {
     // Right after a (re)start there are no samples until the first poll/cron
     // tick — that's expected, not a failure, so warn rather than error.
@@ -357,13 +332,13 @@ export function _resetSelfCheckStability(): void {
  * (see self-check-stability).
  */
 export async function runIntegrationsCheck(
-  db: Db,
+  storage: Storage,
   config: StatusConfig,
   nowMs: number = Date.now(),
 ): Promise<IntegrationsResponse> {
   const results = await Promise.allSettled([
-    checkStatsStore(db),
-    checkStatsFreshness(db),
+    checkStatsStore(storage),
+    checkStatsFreshness(storage),
     checkVercel(config),
     checkCloudflare(config),
     checkRailway(config),

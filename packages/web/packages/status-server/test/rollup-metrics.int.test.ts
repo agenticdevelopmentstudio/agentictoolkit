@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { healthChecks, metricsHourly } from '../src/libsql/schema';
-import { rollupMetricsSql } from '../src/monitor/sync';
+import { rollupMetricsSql } from '../src/libsql/stores/maintenance-store';
 import { freshDb, type Db } from './helpers/db';
 
 describe('rollupMetrics', () => {

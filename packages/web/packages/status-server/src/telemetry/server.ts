@@ -1,7 +1,7 @@
 import type { Db } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
 import { glitchtipConfigured, posthogConfigured } from "../config/port";
-import { recordPlatformObservations } from "../monitor/observations";
+import type { Storage } from "../storage/ports";
 import { collect } from "./collect";
 import { glitchtipFetcher } from "./fetchers/glitchtip";
 import { posthogFetcher } from "./fetchers/posthog";
@@ -44,7 +44,7 @@ export { errorsStore, analyticsStore };
  *  Vercel crons: poll each configured provider and persist into the SQLite trend
  *  store. GUARDED (skips a provider whose credentials are unset) + fail-soft (each
  *  in its own try/catch) so a provider outage can never abort the scheduler cycle. */
-export async function collectTelemetry(db: Db, config: StatusConfig): Promise<void> {
+export async function collectTelemetry(db: Db, storage: Storage, config: StatusConfig): Promise<void> {
   const gtConfigured = glitchtipConfigured(config);
   const errorsFetcher = buildErrorsFetcher(config);
   const analyticsFetcher = buildAnalyticsFetcher(config);
@@ -86,7 +86,7 @@ export async function collectTelemetry(db: Db, config: StatusConfig): Promise<vo
   //
   // Fail-soft like everything else in this cycle — a write that throws must not abort it.
   try {
-    await recordPlatformObservations(db, [
+    await storage.observations.recordObservations([
       { source: "glitchtip", configured: gtConfigured, reachable: errorsReachable },
     ]);
   } catch (err) {

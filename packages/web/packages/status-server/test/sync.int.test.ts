@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { isNull, eq, sql } from 'drizzle-orm';
 import * as schema from '../src/libsql/schema';
-import { runCycle, runMaintenance, upsertDeployments } from '../src/monitor/sync';
+import { runCycle } from '../src/monitor/sync';
 import type { ProviderDeploy } from '../src/monitor/provider-deploy';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
 import { createLibsqlStorage } from '../src/libsql';
@@ -362,10 +362,11 @@ describe('upsertDeployments', () => {
 
   it('keeps the EARLIEST created_at on conflict — a later webhook event time never moves it forward', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     const t0 = new Date('2026-07-10T10:00:00Z');
-    await upsertDeployments(db, [deploy({ createdAt: t0 })]); // poll: true creation time
+    await storage.deploy.upsertDeployments([deploy({ createdAt: t0 })]); // poll: true creation time
     // Webhook for the same deploy, carrying its (later) event-emission time.
-    await upsertDeployments(db, [deploy({ buildPhase: 'built', createdAt: new Date('2026-07-10T10:05:00Z') })], { source: 'webhook' });
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'built', createdAt: new Date('2026-07-10T10:05:00Z') })], { source: 'webhook' });
     const [row] = await db.select().from(schema.deployments).where(eq(schema.deployments.id, 'vc_up'));
     expect(Math.floor(row!.createdAt.getTime() / 1000)).toBe(Math.floor(t0.getTime() / 1000));
     expect(row!.buildPhase).toBe('built'); // the phases still updated
@@ -373,9 +374,10 @@ describe('upsertDeployments', () => {
 
   it('a stale out-of-order WEBHOOK cannot regress a terminal row back to in-flight', async () => {
     const db = await bootDb();
-    await upsertDeployments(db, [deploy({ buildPhase: 'built', deployPhase: 'deployed' })]); // poll saw READY
+    const storage = createLibsqlStorage(db);
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'built', deployPhase: 'deployed' })]); // poll saw READY
     // Delayed deployment.created arrives after the fact.
-    await upsertDeployments(db, [deploy({ buildPhase: 'queued', deployPhase: 'none' })], { source: 'webhook' });
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'queued', deployPhase: 'none' })], { source: 'webhook' });
     const [row] = await db.select().from(schema.deployments).where(eq(schema.deployments.id, 'vc_up'));
     expect(row!.buildPhase).toBe('built');
     expect(row!.deployPhase).toBe('deployed');
@@ -383,14 +385,16 @@ describe('upsertDeployments', () => {
 
   it('a webhook still terminalizes an in-flight row (its whole purpose)', async () => {
     const db = await bootDb();
-    await upsertDeployments(db, [deploy({ buildPhase: 'building', deployPhase: 'none' })]);
-    await upsertDeployments(db, [deploy({ buildPhase: 'failed', deployPhase: 'none' })], { source: 'webhook' });
+    const storage = createLibsqlStorage(db);
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'building', deployPhase: 'none' })]);
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'failed', deployPhase: 'none' })], { source: 'webhook' });
     const [row] = await db.select().from(schema.deployments).where(eq(schema.deployments.id, 'vc_up'));
     expect(row!.buildPhase).toBe('failed');
   });
 
   it('a webhook HEALS a stored `unknown` (expired) row — fresh truth overwrites the gave-up marker', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     // A row the expiry sweep collapsed to `unknown` (in-flight, nothing re-confirmed).
     await db.insert(schema.deployments).values({
       id: 'vc_up', platform: 'vercel', projectName: 'olylo',
@@ -400,13 +404,14 @@ describe('upsertDeployments', () => {
     // A late webhook carrying an IN-FLIGHT phase must still heal it: `unknown` is
     // overwritable (the monitor's gave-up marker, not a provider verdict), so the guard
     // that blocks a terminal→in-flight regression deliberately does NOT protect it.
-    await upsertDeployments(db, [deploy({ buildPhase: 'building', deployPhase: 'none' })], { source: 'webhook' });
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'building', deployPhase: 'none' })], { source: 'webhook' });
     const [row] = await db.select().from(schema.deployments).where(eq(schema.deployments.id, 'vc_up'));
     expect(row!.buildPhase).toBe('building');
   });
 
   it('a stale in-flight webhook does NOT regress a REAL verdict on the sibling lifecycle when the other is `unknown`', async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     // The realistic mixed shape from expireUnconfirmedDeploys on a settled build with a
     // wedged deploy: build is a REAL 'built' verdict, deploy expired to 'unknown'.
     await db.insert(schema.deployments).values({
@@ -416,7 +421,7 @@ describe('upsertDeployments', () => {
     });
     // A stale, out-of-order in-flight webhook. The per-lifecycle guard heals the `unknown`
     // deploy but must PROTECT the real 'built' — a whole-row overwritable test regressed it.
-    await upsertDeployments(db, [deploy({ buildPhase: 'queued', deployPhase: 'none' })], { source: 'webhook' });
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'queued', deployPhase: 'none' })], { source: 'webhook' });
     const [row] = await db.select().from(schema.deployments).where(eq(schema.deployments.id, 'vc_up'));
     expect(row!.buildPhase).toBe('built'); // settled build verdict protected (was regressed to 'queued' pre-fix)
     expect(row!.deployPhase).toBe('none'); // the unknown deploy healed to the webhook's terminal 'none'
@@ -424,8 +429,9 @@ describe('upsertDeployments', () => {
 
   it('the POLL may take a terminal row back in flight (Vercel re-promotion is current truth)', async () => {
     const db = await bootDb();
-    await upsertDeployments(db, [deploy({ buildPhase: 'built', deployPhase: 'deployed' })]);
-    await upsertDeployments(db, [deploy({ buildPhase: 'built', deployPhase: 'deploying' })]); // poll: ROLLING
+    const storage = createLibsqlStorage(db);
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'built', deployPhase: 'deployed' })]);
+    await storage.deploy.upsertDeployments([deploy({ buildPhase: 'built', deployPhase: 'deploying' })]); // poll: ROLLING
     const [row] = await db.select().from(schema.deployments).where(eq(schema.deployments.id, 'vc_up'));
     expect(row!.deployPhase).toBe('deploying');
   });
@@ -443,7 +449,7 @@ describe('runMaintenance', () => {
       { serviceSlug: slug, status: 'healthy', checkedAt: recent },
     ]);
 
-    await runMaintenance(db);
+    await createLibsqlStorage(db).maintenance.runMaintenance();
 
     const remaining = await db.select().from(schema.healthChecks);
     expect(remaining).toHaveLength(1);

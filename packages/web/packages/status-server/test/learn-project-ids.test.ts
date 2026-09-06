@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { freshDb } from "./helpers/db";
-import { learnDeployProjectIds } from "../src/monitor/sync";
+import { createLibsqlStorage } from "../src/libsql";
 import { siteGroups, monitoredSites, monitoredEndpoints } from "../src/libsql/schema";
 import type { ProviderDeploy } from "../src/monitor/provider-deploy";
 
@@ -33,7 +33,7 @@ describe("learnDeployProjectIds", () => {
   it("fills a null id from the deploy whose name already matches", async () => {
     const db = await freshDb();
     const id = await seedEndpoint(db, { platform: "vercel", deployProject: "hub-help-testing" });
-    await learnDeployProjectIds(db, [deploy({ providerProjectId: "prj_abc" })]);
+    await createLibsqlStorage(db).deploy.learnProjectIds([deploy({ providerProjectId: "prj_abc" })]);
     expect(await idOf(db, id)).toBe("prj_abc");
   });
 
@@ -42,21 +42,21 @@ describe("learnDeployProjectIds", () => {
     const id = await seedEndpoint(db, {
       platform: "vercel", deployProject: "hub-help-testing", deployProjectId: "prj_operator",
     });
-    await learnDeployProjectIds(db, [deploy({ providerProjectId: "prj_abc" })]);
+    await createLibsqlStorage(db).deploy.learnProjectIds([deploy({ providerProjectId: "prj_abc" })]);
     expect(await idOf(db, id)).toBe("prj_operator");
   });
 
   it("matches per PLATFORM, so a same-named project elsewhere cannot claim the endpoint", async () => {
     const db = await freshDb();
     const id = await seedEndpoint(db, { platform: "railway", deployProject: "hub-help-testing" });
-    await learnDeployProjectIds(db, [deploy({ providerProjectId: "prj_abc" })]);
+    await createLibsqlStorage(db).deploy.learnProjectIds([deploy({ providerProjectId: "prj_abc" })]);
     expect(await idOf(db, id)).toBeNull();
   });
 
   it("canonicalises the platform, so a `cloudflare-pages` deploy matches a `cloudflare` endpoint", async () => {
     const db = await freshDb();
     const id = await seedEndpoint(db, { platform: "cloudflare", deployProject: "docs" });
-    await learnDeployProjectIds(db, [
+    await createLibsqlStorage(db).deploy.learnProjectIds([
       deploy({ platform: "cloudflare-pages", projectName: "docs", providerProjectId: "cf_1" }),
     ]);
     expect(await idOf(db, id)).toBe("cf_1");
@@ -65,7 +65,7 @@ describe("learnDeployProjectIds", () => {
   it("writes nothing when no deploy carries an id", async () => {
     const db = await freshDb();
     const id = await seedEndpoint(db, { platform: "vercel", deployProject: "hub-help-testing" });
-    await learnDeployProjectIds(db, [deploy()]);
+    await createLibsqlStorage(db).deploy.learnProjectIds([deploy()]);
     expect(await idOf(db, id)).toBeNull();
   });
 });

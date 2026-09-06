@@ -304,7 +304,7 @@ export function createApp(opts: AppDeps): OpenAPIHono<{ Variables: AuthVars }> {
   app.route('/', streamRoutes(opts.db, opts.storage, opts.scheduler, opts.config));
   app.route('/', badgeRoutes(opts.db, opts.storage, opts.config));
   app.route('/config', configRoutes(opts.db, opts.storage, opts.config, opts.seed ?? []));
-  if (opts.scheduler) app.route('/', cronRoutes(opts.db, opts.scheduler));
+  if (opts.scheduler) app.route('/', cronRoutes(opts.storage, opts.scheduler));
   app.route('/', fleetRoutes(opts.db, opts.storage, opts.config));
   app.route('/', telemetryRoutes(opts.db, opts.config));
   // API bearer tokens (mint/list/revoke) — admin-gated, EXCEPT a token may revoke

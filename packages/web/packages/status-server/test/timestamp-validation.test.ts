@@ -103,7 +103,7 @@ describe('upsertDeployments is the LAST line of defence', () => {
     const { drizzle } = await import('drizzle-orm/libsql');
     const { migrate } = await import('drizzle-orm/libsql/migrator');
     const schema = await import('../src/libsql/schema');
-    const { upsertDeployments } = await import('../src/monitor/sync');
+    const { createLibsqlStorage } = await import('../src/libsql');
 
     const db = drizzle(createClient({ url: ':memory:' }), { schema });
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
@@ -124,7 +124,7 @@ describe('upsertDeployments is the LAST line of defence', () => {
     });
 
     await expect(
-      upsertDeployments(db, [row('vc_good', new Date()), row('vc_poison', new Date('garbage'))]),
+      createLibsqlStorage(db).deploy.upsertDeployments([row('vc_good', new Date()), row('vc_poison', new Date('garbage'))]),
     ).resolves.toBeUndefined(); // the batch must NOT throw
 
     const stored = await db.select().from(schema.deployments);

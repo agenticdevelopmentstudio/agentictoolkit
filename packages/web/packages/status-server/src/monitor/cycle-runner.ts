@@ -1,12 +1,11 @@
-import type { Db, LibsqlConnection } from "../libsql/client";
+import type { Db } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
 import type { Storage } from "../storage/ports";
-import { runCycle, runMaintenance } from "./sync";
+import { runCycle } from "./sync";
 import { fetchPeers } from "../peers/fetch";
 import { collectTelemetry } from "../telemetry/server";
 import { pingHeartbeat } from "./heartbeat";
 import { flushAlerts } from "./alerts";
-import { maybeSnapshotDb } from "./db-snapshot";
 
 /**
  * The complete monitor cycle body — the cheap endpoint probe every tick, the
@@ -15,17 +14,17 @@ import { maybeSnapshotDb } from "./db-snapshot";
  * so the worker entry (worker.ts) is pure glue and this composition stays
  * importable/testable without threads.
  *
- * THE monitor composition root: `config` and `conn` arrive from the host (via
- * `index.ts` on the API thread, via `worker.ts`'s `workerData` on the worker
- * thread) and are threaded to every function below that needs a setting or the
- * connection url — nothing here reads env or a config singleton.
+ * THE monitor composition root: `config` arrives from the host (via `index.ts`
+ * on the API thread, via `worker.ts`'s `workerData` on the worker thread) and is
+ * threaded to every function below that needs a setting. The connection itself
+ * stays behind `storage` — `runMonitorCycle` never threads it through.
  */
 export async function runMonitorCycle(
   db: Db,
   storage: Storage,
-  opts: { fullSync: boolean; config: StatusConfig; conn: LibsqlConnection },
+  opts: { fullSync: boolean; config: StatusConfig },
 ): Promise<void> {
-  const { config, conn } = opts;
+  const { config } = opts;
   try {
     await runCycle(db, storage, config, { skipDeploys: !opts.fullSync });
   } finally {
@@ -35,20 +34,20 @@ export async function runMonitorCycle(
   }
   if (opts.fullSync) {
     await fetchPeers(db);
-    await collectTelemetry(db, config); // guarded + fail-soft; no-op when GlitchTip/PostHog unset
+    await collectTelemetry(db, storage, config); // guarded + fail-soft; no-op when GlitchTip/PostHog unset
     // Bound every accruing table (health_checks, metrics_hourly, analytics_metrics,
     // expired sessions). THIS is the only caller in the running process — the
     // `POST /cron/maintenance` route needs an external cron that Railway never had, so
     // health_checks was never pruned and grew forever, which is what drove the per-tick
     // rollup cost past the container's CPU quota. Chunked + bounded per run, so a long
     // backlog is cleared over successive cycles rather than in one huge transaction.
-    const pruned = await runMaintenance(db, conn);
+    const pruned = await storage.maintenance.runMaintenance();
     if (pruned.deleted > 0) {
       console.log(`[maintenance] pruned ${pruned.deleted} retention rows${pruned.done ? '' : ' — more next cycle'}`);
     }
     // On-volume DB snapshot (once per day; fail-soft; embedded-file DBs only) —
     // the config the operator hand-entered must survive a corrupted live file.
-    await maybeSnapshotDb(db, { dbUrl: conn.url });
+    await storage.maintenance.snapshotIfDue();
     // Dead-man check-in — LAST, so it only fires when the whole full sync
     // succeeded. A failing or wedged monitor stops pinging, and the external
     // service (healthchecks.io-style) raises the alert no in-container code

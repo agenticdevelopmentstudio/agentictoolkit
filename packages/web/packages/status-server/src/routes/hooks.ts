@@ -6,7 +6,6 @@ import type { Storage } from '../storage/ports';
 import { verifyVercelSignature, verifySharedSecret } from '../monitor/webhook-verify';
 import { mapVercelDeployEvent, mapRailwayDeployEvent } from '../monitor/webhook-events';
 import { pushDeployEvent } from '../monitor/live-buffer';
-import { upsertDeployments } from '../monitor/sync';
 import { emitLiveUpdate } from '../live/live-events';
 import {
   ownsDeployProject, readRoster, reconcileBoardLedger, rosterDeployProjects, type DeployIdentity,
@@ -171,7 +170,7 @@ export function hooksRoutes(db: Db, storage: Storage, config: StatusConfig): Hon
     // poll window — without this write it would stay "building" in the DB
     // forever. Fail-soft: the buffer + poll still cover a failed write.
     try {
-      await upsertDeployments(db, [row], { source: 'webhook' });
+      await storage.deploy.upsertDeployments([row], { source: 'webhook' });
     } catch (err) {
       console.error('[hooks] vercel deploy upsert failed:', err);
     }
@@ -212,7 +211,7 @@ export function hooksRoutes(db: Db, storage: Storage, config: StatusConfig): Hon
     if (owned === 'not-owned') return c.json({ ok: true, ignored: 'not owned by a site' });
     // Persist like the Vercel hook: webhook truth must survive the poll window.
     try {
-      await upsertDeployments(db, [row], { source: 'webhook' });
+      await storage.deploy.upsertDeployments([row], { source: 'webhook' });
     } catch (err) {
       console.error('[hooks] railway deploy upsert failed:', err);
     }

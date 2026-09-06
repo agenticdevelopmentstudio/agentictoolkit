@@ -22,7 +22,6 @@ vi.mock('../src/board', () => ({
   ownsDeployProject,
   rosterDeployProjects: () => new Map<string, unknown>(),
 }));
-vi.mock('../src/monitor/sync', () => ({ upsertDeployments }));
 vi.mock('../src/live/live-events', () => ({ emitLiveUpdate: vi.fn() }));
 vi.mock('../src/monitor/alerts', () => ({ flushAlerts: vi.fn(async () => {}) }));
 
@@ -31,7 +30,9 @@ import { testConfig } from './helpers/config';
 
 const SECRET = 's3cr3t';
 const db = {} as Db;
-const storage = {} as Storage;
+// The route persists through the storage port, so the stub IS the port: only the one
+// method the webhook path touches, counted like the old module mock was.
+const storage = { deploy: { upsertDeployments } } as unknown as Storage;
 
 /** A distinct deployment per call, so nothing can be coalesced by deploy id. */
 function vercelBody(n: number): string {

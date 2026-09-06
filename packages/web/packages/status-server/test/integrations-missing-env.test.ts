@@ -3,6 +3,7 @@ import { runIntegrationsCheck } from "../src/monitor/integrations";
 import { _resetCfAccountCache } from "@agentic-toolkit/deploy-platform/providers";
 import { freshDb as bootDb } from "./helpers/db";
 import { testConfig } from "./helpers/config";
+import { createLibsqlStorage } from "../src/libsql";
 
 // Provider env vars the monitor expects. With none set, the provider checks return
 // BEFORE any network call, so this test is deterministic and offline.
@@ -47,7 +48,8 @@ describe("runIntegrationsCheck — missing expected env", () => {
 
   it("names each provider's missing token by exact env var", async () => {
     const db = await bootDb();
-    const { checks } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks } = await runIntegrationsCheck(storage, testConfig());
     const by = (id: string) => checks.find((c) => c.id === id);
     expect(by("vercel")?.missingEnv).toEqual(["VERCEL_API_TOKEN"]);
     expect(by("cloudflare")?.missingEnv).toEqual(["CLOUDFLARE_API_TOKEN"]);
@@ -63,7 +65,8 @@ describe("runIntegrationsCheck — missing expected env", () => {
     // is genuinely broken, so it's an error, not a soft warning.
     process.env.CLOUDFLARE_API_TOKEN = "dummy-token";
     const db = await bootDb();
-    const { checks } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks } = await runIntegrationsCheck(storage, testConfig());
     const cf = checks.find((c) => c.id === "cloudflare");
     expect(cf?.missingEnv).toEqual(["CLOUDFLARE_ACCOUNT_ID"]);
     expect(cf?.state).toBe("error");
@@ -83,7 +86,8 @@ describe("runIntegrationsCheck — missing expected env", () => {
       ),
     );
     const db = await bootDb();
-    const { checks } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks } = await runIntegrationsCheck(storage, testConfig());
     const cf = checks.find((c) => c.id === "cloudflare");
     expect(cf?.state).toBe("warn");
     expect(cf?.ok).toBe(true);
@@ -93,7 +97,8 @@ describe("runIntegrationsCheck — missing expected env", () => {
 
   it("omits missingEnv on checks that have nothing missing (stats store)", async () => {
     const db = await bootDb();
-    const { checks } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks } = await runIntegrationsCheck(storage, testConfig());
     expect(checks.find((c) => c.id === "stats")?.missingEnv).toBeUndefined();
   });
 });

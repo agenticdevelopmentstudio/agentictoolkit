@@ -7,8 +7,9 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import * as schema from '../src/libsql/schema';
 import type { Db } from '../src/libsql/client';
-import { maybeSnapshotDb } from '../src/monitor/db-snapshot';
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
+import { createLibsqlStorage } from '../src/libsql';
+import type { Storage } from '../src/storage/ports';
 
 // The SQLite file on the single Railway volume is a single point of data loss —
 // all hand-entered config (groups, sites, endpoints, integrations, users) lives
@@ -18,12 +19,14 @@ import { MIGRATIONS_FOLDER } from '../src/libsql/client';
 
 let dir: string;
 let db: Db;
+let storage: Storage;
 let dbPath: string;
 
 beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'snap-'));
   dbPath = path.join(dir, 'status.db');
   db = drizzle(createClient({ url: `file:${dbPath}` }), { schema });
+  storage = createLibsqlStorage(db);
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
   await db.insert(schema.siteGroups).values({ slug: 'g', name: 'Precious Config' });
 });
@@ -35,15 +38,15 @@ afterEach(() => {
 const listSnapshots = (): string[] =>
   readdirSync(path.join(dir, 'backups')).filter((f) => f.startsWith('status-') && f.endsWith('.db'));
 
-describe('maybeSnapshotDb', () => {
+describe('storage.maintenance.snapshotIfDue', () => {
   it('creates a restorable snapshot, then skips until the interval lapses', async () => {
     const t0 = Date.now();
-    const first = await maybeSnapshotDb(db, { dbUrl: `file:${dbPath}`, now: () => t0 });
+    const first = await storage.maintenance.snapshotIfDue({ dbUrl: `file:${dbPath}`, now: () => t0 });
     expect(first.created).toBe(true);
     expect(listSnapshots()).toHaveLength(1);
 
     // Within the interval → no second snapshot.
-    const again = await maybeSnapshotDb(db, { dbUrl: `file:${dbPath}`, now: () => t0 + 60_000 });
+    const again = await storage.maintenance.snapshotIfDue({ dbUrl: `file:${dbPath}`, now: () => t0 + 60_000 });
     expect(again.created).toBe(false);
     expect(listSnapshots()).toHaveLength(1);
 
@@ -61,7 +64,7 @@ describe('maybeSnapshotDb', () => {
     // off by the milliseconds the test itself takes).
     const step = 25 * 3_600_000;
     for (let i = 0; i < 3; i++) {
-      const res = await maybeSnapshotDb(db, { dbUrl: `file:${dbPath}`, now: () => t0 + i * step, keep: 2 });
+      const res = await storage.maintenance.snapshotIfDue({ dbUrl: `file:${dbPath}`, now: () => t0 + i * step, keep: 2 });
       expect(res.created).toBe(true);
     }
     expect(listSnapshots()).toHaveLength(2);
@@ -69,7 +72,8 @@ describe('maybeSnapshotDb', () => {
 
   it('is a no-op for non-file databases', async () => {
     const mem = drizzle(createClient({ url: ':memory:' }), { schema });
-    const res = await maybeSnapshotDb(mem, { dbUrl: ':memory:' });
+    const memStorage = createLibsqlStorage(mem);
+    const res = await memStorage.maintenance.snapshotIfDue({ dbUrl: ':memory:' });
     expect(res.created).toBe(false);
   });
 });

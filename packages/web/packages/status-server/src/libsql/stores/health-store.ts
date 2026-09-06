@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Db } from "../client";
-import type { BadRunOnsetRow, HealthStore, LatestCheckRow } from "../../storage/ports";
+import { healthChecks } from "../schema";
+import type { BadRunOnsetRow, HealthCheckInput, HealthStore, LatestCheckRow } from "../../storage/ports";
 
 // ---------------------------------------------------------------------------
 // The libSQL implementation of `HealthStore`. Bodies moved verbatim from the
@@ -83,6 +84,43 @@ export function createHealthStore(db: Db): HealthStore {
 
     badRunOnsets(slugs: string[]): Promise<BadRunOnsetRow[]> {
       return db.all<BadRunOnsetRow>(badRunOnsetBySlugSql(slugs));
+    },
+
+    /** Persist one `health_checks` row per probe result — the cycle's step 3. */
+    async recordChecks(checks: HealthCheckInput[]): Promise<void> {
+      if (checks.length === 0) return;
+      await db.insert(healthChecks).values(
+        checks.map((c) => ({
+          serviceSlug: c.serviceSlug,
+          status: c.status,
+          responseTimeMs: c.responseTimeMs,
+          statusCode: c.statusCode,
+          error: c.error,
+          dnsOk: c.dnsOk,
+        })),
+      );
+    },
+
+    /** Aggregate stats over every persisted check: total samples + distinct
+     *  services (mirrors the old statsStore.summary()). */
+    async checksSummary(): Promise<{ samples: number; services: number }> {
+      const [row] = await db
+        .select({
+          samples: sql<number>`count(*)`,
+          services: sql<number>`count(distinct ${healthChecks.serviceSlug})`,
+        })
+        .from(healthChecks);
+      return { samples: Number(row?.samples ?? 0), services: Number(row?.services ?? 0) };
+    },
+
+    /** Most recent health-check time in ms, or null when no checks have run yet
+     *  (mirrors the old statsStore.lastCheckedAt()). */
+    async lastCheckedAtMs(): Promise<number | null> {
+      const [row] = await db
+        .select({ last: sql<number | null>`max(${healthChecks.checkedAt})` })
+        .from(healthChecks);
+      // checkedAt is stored as unix-seconds — scale to ms.
+      return row?.last == null ? null : Number(row.last) * 1000;
     },
   };
 }

@@ -172,7 +172,7 @@ export async function performAutoConfigure(db: Db, storage: Storage, { ignore, c
   //    a dead target whose last failed build becomes an unclearable Problem. Fail CLOSED: a
   //    read we couldn't complete (partial page walk, API error) means Vercel contributes
   //    NOTHING this run rather than suggestions from a table we can't vouch for.
-  const { vercel, enumerated, verifiedPlatforms } = await refreshAndEnumerateDeployProjects(db);
+  const { vercel, enumerated, verifiedPlatforms } = await refreshAndEnumerateDeployProjects(db, storage);
 
   // 3. Enrich with wired/ignored flags, then classify — the SAME model /deploy-projects and
   //    the banner derive from.

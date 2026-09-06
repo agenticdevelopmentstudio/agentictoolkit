@@ -59,7 +59,7 @@ describe('pingHeartbeat', () => {
 describe('cycle-runner heartbeat wiring', () => {
   it('pings after a successful FULL sync, not on probe-only ticks', async () => {
     const db = await freshDb();
-    const storage = createLibsqlStorage(db);
+    const storage = createLibsqlStorage(db, { url: ':memory:' });
     const pings: string[] = [];
     vi.stubGlobal(
       'fetch',
@@ -69,10 +69,10 @@ describe('cycle-runner heartbeat wiring', () => {
       }),
     );
 
-    await runMonitorCycle(db, storage, { fullSync: false, config: testConfig(), conn: { url: ':memory:' } });
+    await runMonitorCycle(db, storage, { fullSync: false, config: testConfig() });
     expect(pings.filter((u) => u.includes('hc.example.com'))).toHaveLength(0);
 
-    await runMonitorCycle(db, storage, { fullSync: true, config: testConfig(), conn: { url: ':memory:' } });
+    await runMonitorCycle(db, storage, { fullSync: true, config: testConfig() });
     expect(pings.filter((u) => u.includes('hc.example.com'))).toHaveLength(1);
   });
 
@@ -80,7 +80,7 @@ describe('cycle-runner heartbeat wiring', () => {
     // Un-migrated DB: the cycle's first read throws — the heartbeat must stay
     // silent so the external monitor sees the miss.
     const db = drizzle(createClient({ url: ':memory:' }), { schema });
-    const storage = createLibsqlStorage(db);
+    const storage = createLibsqlStorage(db, { url: ':memory:' });
     const pings: string[] = [];
     vi.stubGlobal(
       'fetch',
@@ -89,7 +89,7 @@ describe('cycle-runner heartbeat wiring', () => {
         return new Response('ok');
       }),
     );
-    await expect(runMonitorCycle(db, storage, { fullSync: true, config: testConfig(), conn: { url: ':memory:' } })).rejects.toThrow();
+    await expect(runMonitorCycle(db, storage, { fullSync: true, config: testConfig() })).rejects.toThrow();
     expect(pings.filter((u) => u.includes('hc.example.com'))).toHaveLength(0);
   });
 });

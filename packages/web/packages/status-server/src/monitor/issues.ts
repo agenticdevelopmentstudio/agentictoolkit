@@ -1,9 +1,7 @@
-import { eq, isNull } from "drizzle-orm";
-import type { Db } from "../libsql/client";
-import { issues } from "../libsql/schema";
 import { notifyIssueAlert } from "./alerts";
 import type { IssueSource } from "./issue-sources";
 import type { Board } from "../board/types";
+import type { IssueRow, Storage } from "../storage/ports";
 
 // ---------------------------------------------------------------------------
 // The LEDGER. `issues` is no longer where a Problem is decided — `deriveBoard` is
@@ -11,9 +9,11 @@ import type { Board } from "../board/types";
 // three things a derived board cannot: alert dedup (the uniq_open_issue_per_target
 // partial unique index), the onset time a problem started, and 90 days of resolved
 // history. Every verdict rule that used to live here now lives in the fold.
+//
+// The raw reads/writes themselves live behind the `storage.issues` port (the libSQL issue
+// store implements it) — this file is business logic layered on those plain CRUD
+// primitives: which row is canonical, when to alert, and when a close is silent.
 // ---------------------------------------------------------------------------
-
-type OpenRow = typeof issues.$inferSelect;
 
 /**
  * All currently-open issues, grouped by target, OLDEST FIRST — so `[0]` is the CANONICAL
@@ -32,15 +32,9 @@ type OpenRow = typeof issues.$inferSelect;
  * row. Exported only so the tests can assert the ledger through the same view the writer
  * uses.
  */
-export async function openByTarget(db: Db): Promise<Map<string, OpenRow[]>> {
-  const rows = await db
-    .select()
-    .from(issues)
-    .where(isNull(issues.resolvedAt))
-    // `id` breaks the tie so two rows opened in the same millisecond still pick the same
-    // canonical row on every read — an arbitrary canonical row is an arbitrary onset.
-    .orderBy(issues.openedAt, issues.id);
-  const map = new Map<string, OpenRow[]>();
+export async function openByTarget(storage: Storage): Promise<Map<string, IssueRow[]>> {
+  const rows = await storage.issues.listOpen();
+  const map = new Map<string, IssueRow[]>();
   for (const r of rows) {
     const list = map.get(r.target);
     if (list) list.push(r);
@@ -67,14 +61,14 @@ interface OpenInput {
   commitRepo?: string | null;
 }
 
-async function openIssue(db: Db, v: OpenInput): Promise<void> {
-  // onConflictDoNothing guards the partial unique index against a race.
-  await db.insert(issues).values(v).onConflictDoNothing();
+async function openIssue(storage: Storage, v: OpenInput): Promise<void> {
+  // insertIssue guards the partial unique index against a race (onConflictDoNothing).
+  await storage.issues.insertIssue(v);
   notifyIssueAlert({ kind: 'opened', target: v.target, name: v.name, environment: v.environment, state: v.state, detail: v.detail });
 }
 
 async function updateIssue(
-  db: Db,
+  storage: Storage,
   id: number,
   v: Pick<
     OpenInput,
@@ -93,24 +87,20 @@ async function updateIssue(
   // project nothing answers to — in both cases for as long as it stays open, because an
   // open row is updated and never re-opened, and nothing short of a hand-written UPDATE
   // would clear it.
-  await db
-    .update(issues)
-    .set({
-      source: v.source,
-      name: v.name,
-      environment: v.environment,
-      severity: v.severity,
-      state: v.state,
-      statusCode: v.statusCode,
-      detail: v.detail,
-      sourceUrl: v.sourceUrl,
-      liveUrl: v.liveUrl,
-      commitHash: v.commitHash ?? null,
-      commitMessage: v.commitMessage ?? null,
-      commitRepo: v.commitRepo ?? null,
-      updatedAt: new Date(),
-    })
-    .where(eq(issues.id, id));
+  await storage.issues.updateIssue(id, {
+    source: v.source,
+    name: v.name,
+    environment: v.environment,
+    severity: v.severity,
+    state: v.state,
+    statusCode: v.statusCode,
+    detail: v.detail,
+    sourceUrl: v.sourceUrl,
+    liveUrl: v.liveUrl,
+    commitHash: v.commitHash ?? null,
+    commitMessage: v.commitMessage ?? null,
+    commitRepo: v.commitRepo ?? null,
+  });
 }
 
 /**
@@ -136,14 +126,11 @@ async function updateIssue(
  * because nothing forced it to state its reason.
  */
 async function resolveIssue(
-  db: Db,
-  cur: OpenRow,
+  storage: Storage,
+  cur: IssueRow,
   reason: "recovered" | "unmonitored" | "duplicate",
 ): Promise<void> {
-  await db
-    .update(issues)
-    .set({ resolvedAt: new Date(), resolvedReason: reason, updatedAt: new Date() })
-    .where(eq(issues.id, cur.id));
+  await storage.issues.resolveIssue(cur.id, reason);
   if (reason !== "recovered") return;
   notifyIssueAlert({ kind: 'resolved', target: cur.target, name: cur.name, environment: cur.environment, state: cur.state, detail: cur.detail });
 }
@@ -162,9 +149,9 @@ async function resolveIssue(
  * this is bookkeeping, not an observation. A warning per row so a violated unique index
  * leaves a trail rather than being quietly papered over.
  */
-async function closeShadows(db: Db, rows: OpenRow[]): Promise<void> {
+async function closeShadows(storage: Storage, rows: IssueRow[]): Promise<void> {
   for (const dup of rows.slice(1)) {
-    await resolveIssue(db, dup, "duplicate");
+    await resolveIssue(storage, dup, "duplicate");
     console.warn(
       `[ledger] retired duplicate open issue #${dup.id} for ${dup.target} — uniq_open_issue_per_target should have prevented it`,
     );
@@ -264,18 +251,18 @@ function logLedgerFailure(target: string, err: unknown): void {
  * per-row (`076fe254b:issues.ts:335,449,551,636`), and folding them into one loop without
  * that isolation moved the blast radius rather than removing it: an exception here escapes
  * `runCycle`, and `runMonitorCycle` rethrows past its `finally`, skipping `fetchPeers`,
- * `collectTelemetry`, `runMaintenance`, `maybeSnapshotDb` and `pingHeartbeat`
- * (`cycle-runner.ts:24-45`). Retention pruning not running is what previously drove the
- * per-tick cost past the container's CPU quota. On a config route the same throw turns an
- * already-committed DELETE into an unfixable 500. The board is DERIVED, so anything
+ * `collectTelemetry`, the maintenance store's `runMaintenance`/`snapshotIfDue` and
+ * `pingHeartbeat` (`cycle-runner.ts:24-45`). Retention pruning not running is what previously
+ * drove the per-tick cost past the container's CPU quota. On a config route the same throw
+ * turns an already-committed DELETE into an unfixable 500. The board is DERIVED, so anything
  * skipped is re-derived and rewritten on the next cycle — dropping one row is recoverable,
  * dropping the cycle tail is not.
  */
 export async function applyBoardToLedger(
-  db: Db,
+  storage: Storage,
   board: Board,
 ): Promise<{ opened: number; updated: number; resolved: number; resolvedTargets: string[] }> {
-  const open = await openByTarget(db);
+  const open = await openByTarget(storage);
   const live = new Map(board.problems.map((p) => [p.target, p]));
   let opened = 0;
   let updated = 0;
@@ -285,7 +272,7 @@ export async function applyBoardToLedger(
     const cur = rows[0];
     try {
       if (!cur) {
-        await openIssue(db, {
+        await openIssue(storage, {
           target, source: p.source, name: p.name, environment: p.environment,
           severity: p.severity, state: p.state, statusCode: p.statusCode, detail: p.detail,
           sourceUrl: p.sourceUrl, liveUrl: p.liveUrl, commitHash: p.commitHash,
@@ -293,12 +280,12 @@ export async function applyBoardToLedger(
         });
         opened++;
       } else {
-        await updateIssue(db, cur.id, {
+        await updateIssue(storage, cur.id, {
           source: p.source, name: p.name, environment: p.environment, severity: p.severity, state: p.state, statusCode: p.statusCode,
           detail: p.detail, sourceUrl: p.sourceUrl, liveUrl: p.liveUrl,
           commitHash: p.commitHash, commitMessage: p.commitMessage, commitRepo: p.commitRepo,
         });
-        await closeShadows(db, rows);
+        await closeShadows(storage, rows);
         updated++;
       }
     } catch (err) {
@@ -324,9 +311,9 @@ export async function applyBoardToLedger(
     try {
       // The canonical row closes with the real reason and may alert; its shadows close
       // silently, so a duplicated target cannot page on-call twice for one recovery.
-      await resolveIssue(db, cur, watched.has(t) ? "recovered" : "unmonitored");
+      await resolveIssue(storage, cur, watched.has(t) ? "recovered" : "unmonitored");
       resolvedTargets.push(t);
-      await closeShadows(db, rows);
+      await closeShadows(storage, rows);
     } catch (err) {
       logLedgerFailure(t, err);
     }

@@ -4,6 +4,7 @@ import { CONFIRM_WINDOW_MS } from "../src/monitor/self-check-stability";
 import { _resetCfAccountCache } from "@agentic-toolkit/deploy-platform/providers";
 import { freshDb as bootDb } from "./helpers/db";
 import { testConfig } from "./helpers/config";
+import { createLibsqlStorage } from "../src/libsql";
 
 // Provider env so every check is "configured" and proceeds to its outbound probe.
 // CLOUDFLARE_ACCOUNT_ID is set so account resolution short-circuits with NO network
@@ -82,7 +83,8 @@ describe("runIntegrationsCheck — transient blips retry before going red", () =
       }),
     );
     const db = await bootDb();
-    const { checks, overall } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks, overall } = await runIntegrationsCheck(storage, testConfig());
     const by = (id: string) => checks.find((c) => c.id === id);
     expect(by("vercel")?.state).toBe("ok");
     expect(by("railway")?.state).toBe("ok");
@@ -98,7 +100,8 @@ describe("runIntegrationsCheck — transient blips retry before going red", () =
       }),
     );
     const db = await bootDb();
-    const { checks, overall } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks, overall } = await runIntegrationsCheck(storage, testConfig());
     const by = (id: string) => checks.find((c) => c.id === id);
     expect(by("vercel")?.state).toBe("ok");
     expect(by("vercel")?.detail).toBe("recheck pending — This operation was aborted");
@@ -117,9 +120,10 @@ describe("runIntegrationsCheck — transient blips retry before going red", () =
       }),
     );
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     const t0 = Date.now();
-    await runIntegrationsCheck(db, testConfig(), t0);
-    const { checks, overall } = await runIntegrationsCheck(db, testConfig(), t0 + CONFIRM_WINDOW_MS + 1_000);
+    await runIntegrationsCheck(storage, testConfig(), t0);
+    const { checks, overall } = await runIntegrationsCheck(storage, testConfig(), t0 + CONFIRM_WINDOW_MS + 1_000);
     const by = (id: string) => checks.find((c) => c.id === id);
     for (const id of ["vercel", "cloudflare", "railway"]) {
       expect(by(id)?.state).toBe("warn");
@@ -141,9 +145,10 @@ describe("runIntegrationsCheck — transient blips retry before going red", () =
       }),
     );
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     const t0 = Date.now();
-    await runIntegrationsCheck(db, testConfig(), t0);
-    const { checks } = await runIntegrationsCheck(db, testConfig(), t0 + CONFIRM_WINDOW_MS + 1_000);
+    await runIntegrationsCheck(storage, testConfig(), t0);
+    const { checks } = await runIntegrationsCheck(storage, testConfig(), t0 + CONFIRM_WINDOW_MS + 1_000);
     const by = (id: string) => checks.find((c) => c.id === id);
     expect(by("vercel")?.state).toBe("error");
     expect(by("vercel")?.correlated).toBeUndefined();
@@ -159,7 +164,8 @@ describe("runIntegrationsCheck — transient blips retry before going red", () =
     });
     vi.stubGlobal("fetch", calls);
     const db = await bootDb();
-    const { checks } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks } = await runIntegrationsCheck(storage, testConfig());
     const by = (id: string) => checks.find((c) => c.id === id);
     expect(by("vercel")?.state).toBe("error");
     expect(by("vercel")?.detail).toContain("token invalid");

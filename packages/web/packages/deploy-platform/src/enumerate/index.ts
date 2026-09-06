@@ -79,9 +79,35 @@ export async function enumerateDeployProjects(db: DeployDb): Promise<EnumeratedP
   return (await enumerateDeployProjectsVerified(db)).projects;
 }
 
+/** The persisted project-meta slice `enumerateDeployProjectsFrom` reads (the Vercel
+ *  mirror, one row per project) — a plain shape so a consumer can supply it from its own
+ *  storage port. */
+export interface ProjectMetaLike {
+  platform: string;
+  projectName: string;
+  domain: string | null;
+  gitRepo: string | null;
+  gitBranch: string | null;
+  rootDirectory: string | null;
+  framework: string | null;
+}
+
+/** Everything the enumeration needs, already loaded: the provider connections and the
+ *  persisted project meta. The provider calls themselves still happen here. */
+export interface DeployEnumerationInputs {
+  conn: ProviderConn;
+  projectMeta: ProjectMetaLike[];
+}
+
 /** {@link enumerateDeployProjects}, plus which platforms the listing can speak for. */
 export async function enumerateDeployProjectsVerified(db: DeployDb): Promise<DeployEnumeration> {
-  const conn = await providerConnFromConfig(db);
+  const [conn, projectMeta] = await Promise.all([providerConnFromConfig(db), db.select().from(deployProjectMeta)]);
+  return enumerateDeployProjectsFrom({ conn, projectMeta });
+}
+
+/** {@link enumerateDeployProjectsVerified} over already-loaded inputs — for a consumer that
+ *  reaches its database only through its own storage port. */
+export async function enumerateDeployProjectsFrom({ conn, projectMeta: metas }: DeployEnumerationInputs): Promise<DeployEnumeration> {
   const railwayTimer = withTimeout(6_000);
   // One Railway project list, shared by the enumeration AND the per-project domain
   // resolution — so the latter can overlap the Cloudflare work instead of waiting for it.
@@ -111,8 +137,7 @@ export async function enumerateDeployProjectsVerified(db: DeployDb): Promise<Dep
   ).finally(() => railwayTimer.done());
   const railwayProjectsP = railwayListingP.then((l) => l.projects);
 
-  const [metas, railwayListing, cf, railwayDomains] = await Promise.all([
-    db.select().from(deployProjectMeta),
+  const [railwayListing, cf, railwayDomains] = await Promise.all([
     railwayListingP,
     // Resolve the CF account ONCE (a blank CLOUDFLARE_ACCOUNT_ID is discovered from the
     // token), then fan out to the worker list + the live custom-domain map under that

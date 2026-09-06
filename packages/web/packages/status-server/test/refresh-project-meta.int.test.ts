@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { deployProjectMeta } from '../src/libsql/schema';
 import { syncVercelProjectMeta, refreshVercelProjectMeta } from '../src/monitor/refresh-project-meta';
 import { freshDb, type Db } from './helpers/db';
+import { createLibsqlStorage } from '../src/libsql';
+import type { Storage } from '../src/storage/ports';
 
 // `deploy_project_meta` is the ONLY source of "which Vercel projects exist" (the
 // enumeration seeds its Vercel pairs from this table), and it used to be upsert-only —
@@ -21,9 +23,11 @@ const META = (projectName: string, domain: string | null = `${projectName}.examp
 
 describe('syncVercelProjectMeta', () => {
   let db: Db;
+  let storage: Storage;
 
   beforeEach(async () => {
     db = await freshDb();
+    storage = createLibsqlStorage(db);
     // Two Vercel projects and one Cloudflare row already recorded — the state a prior
     // cycle's upsert leaves behind.
     await db.insert(deployProjectMeta).values([
@@ -37,7 +41,7 @@ describe('syncVercelProjectMeta', () => {
     (await db.select().from(deployProjectMeta)).map((r) => `${r.platform}|${r.projectName}`).sort();
 
   it('evicts a project a COMPLETE enumeration did not return, and refreshes the ones it did', async () => {
-    const out = await syncVercelProjectMeta(db, {
+    const out = await syncVercelProjectMeta(storage, {
       meta: [META('live-site', 'renamed.example.com'), META('new-site')],
       ok: true,
       configured: true,
@@ -59,12 +63,12 @@ describe('syncVercelProjectMeta', () => {
     // statement, and the prune binds one per name; both are chunked, so team size can't
     // turn this read path into a runtime failure.
     const many = Array.from({ length: 400 }, (_, i) => META(`p${i}`));
-    const first = await syncVercelProjectMeta(db, { meta: many, ok: true, configured: true });
+    const first = await syncVercelProjectMeta(storage, { meta: many, ok: true, configured: true });
     expect(first.pruned.sort()).toEqual(['deleted-site', 'live-site']);
     expect((await db.select().from(deployProjectMeta)).filter((r) => r.platform === 'vercel')).toHaveLength(400);
 
     // …and now delete all 400 upstream: the eviction is chunked the same way.
-    const second = await syncVercelProjectMeta(db, { meta: [], ok: true, configured: true });
+    const second = await syncVercelProjectMeta(storage, { meta: [], ok: true, configured: true });
     expect(second.pruned).toHaveLength(400);
     expect(await rows()).toEqual(['cloudflare-pages|worker-a']);
   });
@@ -72,7 +76,7 @@ describe('syncVercelProjectMeta', () => {
   it('evicts NOTHING from a PARTIAL enumeration, but still records what it did get', async () => {
     // ok:false = budget-truncated or API failure: the missing projects may well exist,
     // so the upsert still lands (a real build failure must not be lost) and nothing is cut.
-    const out = await syncVercelProjectMeta(db, { meta: [META('new-site')], ok: false, configured: true });
+    const out = await syncVercelProjectMeta(storage, { meta: [META('new-site')], ok: false, configured: true });
 
     expect(out.pruned).toEqual([]);
     // …and it says so: `live: null` means "this read proves nothing about what's gone",
@@ -90,7 +94,7 @@ describe('syncVercelProjectMeta', () => {
     // The exact shape fetchVercelProductionStates returns with no VERCEL_API_TOKEN.
     // Without the `configured` gate this would wipe every project the moment the token
     // went missing.
-    const out = await syncVercelProjectMeta(db, { meta: [], ok: true, configured: false });
+    const out = await syncVercelProjectMeta(storage, { meta: [], ok: true, configured: false });
 
     expect(out.pruned).toEqual([]);
     expect(out.live).toBeNull();
@@ -100,7 +104,7 @@ describe('syncVercelProjectMeta', () => {
   it('evicts every Vercel project when a real account has had its LAST one deleted', async () => {
     // The case `meta.length > 0` as a prune gate would get wrong: an empty list from an
     // authenticated, complete read is the truth, not a failure.
-    const out = await syncVercelProjectMeta(db, { meta: [], ok: true, configured: true });
+    const out = await syncVercelProjectMeta(storage, { meta: [], ok: true, configured: true });
 
     expect(out.pruned.sort()).toEqual(['deleted-site', 'live-site']);
     expect(await rows()).toEqual(['cloudflare-pages|worker-a']);
@@ -109,9 +113,11 @@ describe('syncVercelProjectMeta', () => {
 
 describe('refreshVercelProjectMeta', () => {
   let db: Db;
+  let storage: Storage;
 
   beforeEach(async () => {
     db = await freshDb();
+    storage = createLibsqlStorage(db);
     await db.insert(deployProjectMeta).values([
       { platform: 'vercel', projectName: 'live-site', domain: 'live.example.com' },
       { platform: 'vercel', projectName: 'deleted-site', domain: 'gone.example.com' },
@@ -147,7 +153,7 @@ describe('refreshVercelProjectMeta', () => {
       }),
     );
 
-    const out = await refreshVercelProjectMeta(db, { VERCEL_API_TOKEN: 'tok' });
+    const out = await refreshVercelProjectMeta(storage, { VERCEL_API_TOKEN: 'tok' });
 
     expect(out).toEqual({ ok: true, configured: true, pruned: ['deleted-site'] });
     expect((await db.select().from(deployProjectMeta)).map((r) => r.projectName)).toEqual(['live-site']);
@@ -163,7 +169,7 @@ describe('refreshVercelProjectMeta', () => {
     // treat the (stale) table as truth. Asserted via a fetch that would throw if called.
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('must not call Vercel without a token'); }));
 
-    const out = await refreshVercelProjectMeta(db, {});
+    const out = await refreshVercelProjectMeta(storage, {});
 
     // `configured:false` is what tells callers "no verdict", as distinct from a configured
     // read that failed — the Auto Configure banner only warns about the latter.

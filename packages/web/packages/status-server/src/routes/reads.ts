@@ -25,11 +25,7 @@ import type { StatusConfig } from '../config/port';
 import { siteLinks, type PlatformMeta } from '../lib/links';
 import { cachedSingleFlight } from '@agentic-toolkit/deploy-platform/util';
 import { providerConnFromConfig } from '@agentic-toolkit/deploy-platform/conn';
-import {
-  refreshVercelProjectMetaFromConfig,
-  liveVercelProjectNames,
-  type VercelRefreshResult,
-} from '../monitor/refresh-project-meta';
+import { refreshVercelProjectMetaFromConfig, type VercelRefreshResult } from '../monitor/refresh-project-meta';
 import { enumerateDeployProjects, enumerateDeployProjectsVerified, type EnumeratedProject } from '@agentic-toolkit/deploy-platform/enumerate';
 import { partitionPending, endpointUnconfigured } from '@agentic-toolkit/deploy-platform/engine';
 import { uptimePercent, dayStatus, type Counts } from '../monitor/uptime';
@@ -290,7 +286,7 @@ export async function buildLiveSnapshot(db: Db, storage: Storage, config: Status
   const [endpoints, roster, liveVercel] = await Promise.all([
     storage.config.listActiveEndpoints(),
     readRoster(db),
-    liveVercelProjectNames(db),
+    storage.deploy.listProjectMetaNames('vercel'),
   ]);
   // ONE resolution of "which deploy projects does a live site monitor", shared with the
   // fold (`src/board/ownership.ts`) instead of re-derived here by project name. It has to
@@ -715,8 +711,9 @@ const PROVIDER_READ_CACHE_MS = 30_000;
  */
 export async function refreshAndEnumerateDeployProjects(
   db: Db,
+  storage: Storage,
 ): Promise<{ vercel: VercelRefreshResult; enumerated: EnumeratedProject[]; verifiedPlatforms: string[] }> {
-  const vercel = await refreshVercelProjectMetaFromConfig(db);
+  const vercel = await refreshVercelProjectMetaFromConfig(db, storage);
   const { projects, verifiedPlatforms } = await enumerateDeployProjectsVerified(db);
   // The enumeration vouches for the platforms it polls live (Railway, Cloudflare); Vercel's
   // projects come from `deploy_project_meta`, and only THIS function knows whether the
@@ -733,8 +730,8 @@ export function readsRoutes(db: Db, storage: Storage, config: StatusConfig): Hon
   // SHARED by both deploy-project routes so a burst (the badge loop + an open modal +
   // several tabs) coalesces onto ONE account scan — and so `fresh=1` on either route
   // means fresh all the way down, refresh included.
-  const cachedEnumerate = cachedSingleFlight(PROVIDER_READ_CACHE_MS, () => refreshAndEnumerateDeployProjects(db));
-  const cachedIntegrations = cachedSingleFlight(PROVIDER_READ_CACHE_MS, () => runIntegrationsCheck(db, config));
+  const cachedEnumerate = cachedSingleFlight(PROVIDER_READ_CACHE_MS, () => refreshAndEnumerateDeployProjects(db, storage));
+  const cachedIntegrations = cachedSingleFlight(PROVIDER_READ_CACHE_MS, () => runIntegrationsCheck(storage, config));
   const platformMeta = platformMetaFromConfig(config);
 
   app.get('/live', async (c) => c.json(await buildLiveSnapshot(db, storage, config)));

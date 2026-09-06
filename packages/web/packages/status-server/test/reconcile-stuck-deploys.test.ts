@@ -18,6 +18,7 @@ import { isInFlight } from "../src/monitor/deploy-status";
 import { noteRateLimited, rateLimitedUntil, _resetProviderCooldowns } from "@agentic-toolkit/deploy-platform/cooldown";
 import type { ProviderConn } from "@agentic-toolkit/deploy-platform/conn";
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
+import { createLibsqlStorage } from '../src/libsql';
 
 async function bootDb(): Promise<Db> {
   const db: Db = drizzle(createClient({ url: ":memory:" }), { schema });
@@ -69,6 +70,7 @@ describe("isInFlight", () => {
 describe("reconcileVanishedDeploys", () => {
   it("terminalizes a vanished building Vercel deploy from its by-id state", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_gone" }));
     vi.stubGlobal(
       "fetch",
@@ -76,7 +78,7 @@ describe("reconcileVanishedDeploys", () => {
         Response.json({ readyState: "READY", readySubstate: "PROMOTED", target: "production" }),
       ),
     );
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_gone"));
     expect(after.buildPhase).toBe("built");
     expect(after.deployPhase).toBe("deployed");
@@ -84,10 +86,11 @@ describe("reconcileVanishedDeploys", () => {
 
   it("leaves a FRESH in-flight row alone — the poll window still covers it", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_fresh", fetchedAt: new Date(NOW) }));
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     expect(fetchSpy).not.toHaveBeenCalled();
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_fresh"));
     expect(after.buildPhase).toBe("building");
@@ -95,9 +98,10 @@ describe("reconcileVanishedDeploys", () => {
 
   it("a still-building deploy just gets its fetched_at bumped (natural backoff)", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_slow" }));
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ readyState: "BUILDING" })));
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_slow"));
     expect(after.buildPhase).toBe("building");
     expect(after.fetchedAt.getTime()).toBeGreaterThan(NOW - RECONCILE_STALE_MS);
@@ -105,10 +109,11 @@ describe("reconcileVanishedDeploys", () => {
 
   it("a TRANSIENT by-id failure (500) leaves the row untouched for a later cycle", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     const stale = row({ id: "vc_err" });
     await db.insert(deployments).values(stale);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_err"));
     expect(after.buildPhase).toBe("building");
     // Second precision — the timestamp column stores unix seconds.
@@ -117,9 +122,10 @@ describe("reconcileVanishedDeploys", () => {
 
   it("a provider-DELETED Vercel deploy (404) terminalizes as canceled — it must not hog the cap forever", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_deleted" }));
     vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", { status: 404 })));
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_deleted"));
     expect(after.buildPhase).toBe("canceled");
     expect(after.deployPhase).toBe("none");
@@ -128,9 +134,10 @@ describe("reconcileVanishedDeploys", () => {
 
   it("a provider-DELETED Railway deployment (data.deployment null) terminalizes as canceled", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "ry_deleted", platform: "railway" }));
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: { deployment: null } })));
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "ry_deleted"));
     expect(after.buildPhase).toBe("canceled");
     expect(after.deployPhase).toBe("none");
@@ -140,11 +147,12 @@ describe("reconcileVanishedDeploys", () => {
     // Regression: the gone-branch used to overwrite BOTH phases to canceled/none, erasing
     // a settled build verdict when only the DEPLOY was still in flight.
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(
       row({ id: "vc_gone_rolling", buildPhase: "built", deployPhase: "deploying" }),
     );
     vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", { status: 404 })));
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_gone_rolling"));
     expect(after.buildPhase).toBe("built"); // settled build verdict preserved
     expect(after.deployPhase).toBe("none"); // only the in-flight deploy collapsed
@@ -152,21 +160,23 @@ describe("reconcileVanishedDeploys", () => {
 
   it("a Railway GraphQL ERROR response (no data) is transient — row untouched", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "ry_err", platform: "railway" }));
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ errors: [{ message: "rate limited" }] })));
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "ry_err"));
     expect(after.buildPhase).toBe("building");
   });
 
   it("reconciles a vanished Railway deployment via its GraphQL status", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "ry_gone", platform: "railway" }));
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => Response.json({ data: { deployment: { status: "SUCCESS" } } })),
     );
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "ry_gone"));
     expect(after.buildPhase).toBe("built");
     expect(after.deployPhase).toBe("deployed");
@@ -174,26 +184,29 @@ describe("reconcileVanishedDeploys", () => {
 
   it("terminal rows are never candidates", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_done", buildPhase: "built", deployPhase: "deployed" }));
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("a failing row is PARKED after one attempt (backoff) so it can't hog the cap every tick", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_perma" }));
     const fetchSpy = vi.fn(async () => new Response("forbidden", { status: 403 }));
     vi.stubGlobal("fetch", fetchSpy);
-    await reconcileVanishedDeploys(db, CONN); // fails → parks the row
-    await reconcileVanishedDeploys(db, CONN); // still parked → no second fetch
+    await reconcileVanishedDeploys(storage, CONN); // fails → parks the row
+    await reconcileVanishedDeploys(storage, CONN); // still parked → no second fetch
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(RECONCILE_BACKOFF_BASE_MS).toBeGreaterThan(0);
   });
 
   it("a parked failing row does not starve OTHER stale rows (no head-of-line blocking)", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     // The failing row is NEWER, so newest-first selection sees it first.
     await db.insert(deployments).values(row({ id: "vc_perma", createdAt: new Date(NOW - 10 * 60_000) }));
     await db.insert(deployments).values(row({ id: "vc_older", createdAt: new Date(NOW - 50 * 60_000) }));
@@ -205,7 +218,7 @@ describe("reconcileVanishedDeploys", () => {
           : Response.json({ readyState: "READY", readySubstate: null, target: null }),
       ),
     );
-    await reconcileVanishedDeploys(db, CONN); // perma fails+parks; older heals same pass
+    await reconcileVanishedDeploys(storage, CONN); // perma fails+parks; older heals same pass
     const [older] = await db.select().from(deployments).where(eq(deployments.id, "vc_older"));
     expect(older.buildPhase).toBe("built");
     const [perma] = await db.select().from(deployments).where(eq(deployments.id, "vc_perma"));
@@ -214,6 +227,7 @@ describe("reconcileVanishedDeploys", () => {
 
   it("fills the per-cycle cap with failing rows, then serves an older stale row on the NEXT pass", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     // MORE than the per-cycle cap (10) of NEWER failing rows. A naive newest-first cap
     // would fetch only these every tick and never reach the older row beneath them; the
     // SQL parked-id exclusion frees the cap on the next pass. (The 2-row test above can't
@@ -231,28 +245,30 @@ describe("reconcileVanishedDeploys", () => {
       ),
     );
     // Pass 1: the cap fills with the newest failing rows; they fail and park. Older not reached.
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     expect((await db.select().from(deployments).where(eq(deployments.id, "vc_older")))[0]!.buildPhase).toBe("building");
     // Pass 2: parked ids are excluded IN SQL, so the older row now fits the cap and heals.
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     expect((await db.select().from(deployments).where(eq(deployments.id, "vc_older")))[0]!.buildPhase).toBe("built");
   });
 
   it("honors the shared provider cooldown: a throttled provider is not fetched at all", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_cooling" }));
     noteRateLimited("vercel");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("registers a 429 in the shared cooldown instead of hammering next tick", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_429" }));
     vi.stubGlobal("fetch", vi.fn(async () => new Response("slow down", { status: 429 })));
-    await reconcileVanishedDeploys(db, CONN);
+    await reconcileVanishedDeploys(storage, CONN);
     expect(rateLimitedUntil("vercel")).not.toBeNull();
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_429"));
     expect(after.buildPhase).toBe("building"); // untouched — retried after the cooldown
@@ -264,8 +280,9 @@ describe("expireUnconfirmedDeploys", () => {
 
   it("collapses an in-flight phase nothing confirmed for the expiry window to terminal `unknown`", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_zombie", fetchedAt: expired }));
-    await expireUnconfirmedDeploys(db);
+    await expireUnconfirmedDeploys(storage);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_zombie"));
     expect(after.buildPhase).toBe("unknown");
     expect(after.deployPhase).toBe("none"); // was never in flight — untouched
@@ -274,10 +291,11 @@ describe("expireUnconfirmedDeploys", () => {
 
   it("collapses ONLY the in-flight lifecycle: a finished build with a wedged deploy keeps `built`", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(
       row({ id: "vc_rolling", buildPhase: "built", deployPhase: "deploying", fetchedAt: expired }),
     );
-    await expireUnconfirmedDeploys(db);
+    await expireUnconfirmedDeploys(storage);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_rolling"));
     expect(after.buildPhase).toBe("built");
     expect(after.deployPhase).toBe("unknown");
@@ -285,21 +303,23 @@ describe("expireUnconfirmedDeploys", () => {
 
   it("clears zombies OLDER than the reconcile window — the rows nothing else can ever fix", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(
       row({ id: "vc_ancient", createdAt: new Date(NOW - 20 * 86_400_000), fetchedAt: expired }),
     );
-    await expireUnconfirmedDeploys(db);
+    await expireUnconfirmedDeploys(storage);
     const [after] = await db.select().from(deployments).where(eq(deployments.id, "vc_ancient"));
     expect(after.buildPhase).toBe("unknown");
   });
 
   it("leaves rows the healers are still confirming (fresh fetched_at) and terminal rows alone", async () => {
     const db = await bootDb();
+    const storage = createLibsqlStorage(db);
     await db.insert(deployments).values(row({ id: "vc_live", fetchedAt: new Date(NOW - 60_000) }));
     await db.insert(deployments).values(
       row({ id: "vc_settled", buildPhase: "built", deployPhase: "deployed", fetchedAt: expired }),
     );
-    await expireUnconfirmedDeploys(db);
+    await expireUnconfirmedDeploys(storage);
     const [live] = await db.select().from(deployments).where(eq(deployments.id, "vc_live"));
     expect(live.buildPhase).toBe("building");
     const [settled] = await db.select().from(deployments).where(eq(deployments.id, "vc_settled"));

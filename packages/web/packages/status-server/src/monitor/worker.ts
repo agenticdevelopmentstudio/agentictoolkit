@@ -32,12 +32,12 @@ attachCooldownState(cooldowns);
 // Migrations already ran on the main thread before this worker was spawned.
 const db = openLibsql(conn);
 await tuneDbForConcurrency(db, conn);
-const storage = createLibsqlStorage(db);
+const storage = createLibsqlStorage(db, conn);
 
 port.on("message", (msg: CycleRequest) => {
   void (async (): Promise<void> => {
     try {
-      await runMonitorCycle(db, storage, { fullSync: msg.fullSync, config, conn });
+      await runMonitorCycle(db, storage, { fullSync: msg.fullSync, config });
       port.postMessage({ seq: msg.seq, ok: true } satisfies CycleReply);
     } catch (err) {
       port.postMessage({

@@ -1,15 +1,6 @@
-import { and, desc, gt, inArray, lt, notInArray, eq, sql } from "drizzle-orm";
-import type { Db } from "../libsql/client";
-import { deployments } from "../libsql/schema";
+import type { Storage } from "../storage/ports";
 import { mapLimit } from "@agentic-toolkit/deploy-platform/util";
-import {
-  vercelPhases,
-  railwayPhases,
-  inFlightSql,
-  collapseInFlightBuildSql,
-  collapseInFlightDeploySql,
-  type Phases,
-} from "./deploy-status";
+import { vercelPhases, railwayPhases, type Phases } from "./deploy-status";
 import { pollableByIdPlatforms, type ProviderConn } from "@agentic-toolkit/deploy-platform/conn";
 import { gqlPost } from "@agentic-toolkit/deploy-platform/providers";
 import { rateLimitedUntil, noteIfRateLimited } from "@agentic-toolkit/deploy-platform/cooldown";
@@ -189,7 +180,7 @@ async function fetchPhasesFor(
  * Rows that are GENUINELY still building get their `fetched_at` bumped, which
  * defers their next re-check by RECONCILE_STALE_MS.
  */
-export async function reconcileVanishedDeploys(db: Db, conn: ProviderConn): Promise<void> {
+export async function reconcileVanishedDeploys(storage: Storage, conn: ProviderConn): Promise<void> {
   // Honor the shared cooldown: a throttled provider is left alone entirely — by-id
   // fetches burn the same quota the poll does, and hammering 10 of them every fast
   // tick is exactly how a throttle never lapses (the rows stay stale the whole time).
@@ -214,22 +205,13 @@ export async function reconcileVanishedDeploys(db: Db, conn: ProviderConn): Prom
 
   let candidates: { id: string; platform: string }[];
   try {
-    candidates = await db
-      .select({ id: deployments.id, platform: deployments.platform })
-      .from(deployments)
-      .where(
-        and(
-          inArray(deployments.platform, polled),
-          // Literal in-flight predicate (shared vocabulary) — matches idx_deploy_inflight's
-          // partial WHERE textually, so this per-tick query seeks the index, not a full scan.
-          sql.raw(inFlightSql("")),
-          gt(deployments.createdAt, new Date(now - RECONCILE_WINDOW_DAYS * 86_400_000)),
-          lt(deployments.fetchedAt, new Date(now - RECONCILE_STALE_MS)),
-          parkedIds.length > 0 ? notInArray(deployments.id, parkedIds) : undefined,
-        ),
-      )
-      .orderBy(desc(deployments.createdAt))
-      .limit(RECONCILE_MAX_PER_CYCLE);
+    candidates = await storage.deploy.listInFlightCandidates({
+      platforms: polled,
+      excludeIds: parkedIds,
+      createdAfterMs: now - RECONCILE_WINDOW_DAYS * 86_400_000,
+      fetchedBeforeMs: now - RECONCILE_STALE_MS,
+      limit: RECONCILE_MAX_PER_CYCLE,
+    });
   } catch (err) {
     console.error("[reconcile] vanished-deploy query failed:", err);
     return;
@@ -255,24 +237,10 @@ export async function reconcileVanishedDeploys(db: Db, conn: ProviderConn): Prom
         // already reached — a built+deploying row that vanishes keeps its `built` — and
         // is race-safe against a concurrent write between the select and this update.
         console.log(`[reconcile] ${row.id} gone at provider → canceling in-flight lifecycle(s)`);
-        await db
-          .update(deployments)
-          .set({
-            buildPhase: sql.raw(collapseInFlightBuildSql("canceled")),
-            deployPhase: sql.raw(collapseInFlightDeploySql("none")),
-            fetchedAt: new Date(),
-          })
-          .where(eq(deployments.id, row.id));
+        await storage.deploy.markDeployGone(row.id);
       } else {
         // Fresh by-id provider truth — authoritative, so it overwrites both phases.
-        await db
-          .update(deployments)
-          .set({
-            buildPhase: phases.buildPhase,
-            deployPhase: phases.deployPhase,
-            fetchedAt: new Date(),
-          })
-          .where(eq(deployments.id, row.id));
+        await storage.deploy.markDeployPhases(row.id, phases);
       }
       retryAfterFailure.delete(row.id);
     } catch (err) {
@@ -301,24 +269,9 @@ export async function reconcileVanishedDeploys(db: Db, conn: ProviderConn): Prom
  * lifecycle collapses only if IT was the in-flight one (a finished build with a
  * wedged deploy keeps its `built`).
  */
-export async function expireUnconfirmedDeploys(db: Db): Promise<void> {
+export async function expireUnconfirmedDeploys(storage: Storage): Promise<void> {
   try {
-    const res = await db
-      .update(deployments)
-      // Same per-lifecycle collapse the gone-branch uses, to `unknown` — a settled
-      // lifecycle keeps its verdict; only the in-flight one(s) expire.
-      .set({
-        buildPhase: sql.raw(collapseInFlightBuildSql("unknown")),
-        deployPhase: sql.raw(collapseInFlightDeploySql("unknown")),
-      })
-      .where(
-        and(
-          // Same shared in-flight predicate the reconcile uses → also seeks idx_deploy_inflight.
-          sql.raw(inFlightSql("")),
-          lt(deployments.fetchedAt, new Date(Date.now() - EXPIRE_UNCONFIRMED_MS)),
-        ),
-      );
-    const n = Number(res.rowsAffected ?? 0);
+    const n = await storage.deploy.expireStaleInFlight(EXPIRE_UNCONFIRMED_MS);
     if (n > 0) console.log(`[reconcile] ${n} in-flight deploy row(s) unconfirmable for 6h+ → unknown`);
   } catch (err) {
     // Fail-soft like the reconcile: a failed sweep just waits for the next cycle.

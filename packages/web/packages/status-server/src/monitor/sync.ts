@@ -1,11 +1,9 @@
-import { sql, eq, and, inArray, isNull, type SQL } from "drizzle-orm";
-import { checkpointWal, type Db, type LibsqlConnection } from "../libsql/client";
+import type { Db } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
-import { deployments, healthChecks, siteGroups, issues, monitoredEndpoints } from "../libsql/schema";
 import type { ConfiguredEndpoint, Storage } from "../storage/ports";
 import { probeEndpoints } from "./probe";
 import { matchRosterEntry, readRoster, reconcileBoardLedger, rosterTargets } from "../board";
-import { recordPlatformObservations, recordVercelProdStates, type PlatformObservation } from "./observations";
+import type { PlatformObservationInput } from "../storage/ports";
 import { providerConnFromConfig, type ProviderConn } from "@agentic-toolkit/deploy-platform/conn";
 import { endpointsClaimedByNothing, platformCanon } from "@agentic-toolkit/deploy-platform";
 import { enumerateDeployProjectsVerified } from "@agentic-toolkit/deploy-platform/enumerate";
@@ -16,7 +14,6 @@ import { fetchCloudflareDeployments } from "./fetch-cloudflare";
 import { resolveCfAccountForConn } from "@agentic-toolkit/deploy-platform/providers";
 import { fetchRailwayDeployments } from "./fetch-railway";
 import { fetchCrunchyClusters } from "./fetch-crunchy";
-import { webhookKeepsStoredSql } from "./deploy-status";
 import { enrichDeployErrors } from "./enrich-deploy-errors";
 import { reconcileVanishedDeploys, expireUnconfirmedDeploys } from "./reconcile-stuck-deploys";
 import type { ProviderDeploy } from "./provider-deploy";
@@ -29,7 +26,8 @@ import { notifyIssueAlert } from "./alerts";
 // `runCycle` is the full server-side sweep that the pre-redesign cron + the live
 // route did between them: probe every active endpoint, persist the checks, roll
 // up the hourly metrics, poll the deploy providers, upsert their deployments,
-// and derive the issue rows. `runMaintenance` is the retention prune.
+// and derive the issue rows. The retention prune lives in the libsql
+// `MaintenanceStore` (`storage.maintenance.runMaintenance`).
 //
 // Every PROVIDER poll is individually guarded (try/catch each) so a missing
 // token or a provider API error degrades to "unreachable" for THAT provider and
@@ -265,10 +263,7 @@ export async function runCycle(
     // observed to recover. Leaving the reason NULL would be silent by accident — NULL is
     // documented as "resolved before this column existed, so we claim nothing", and this
     // close knows exactly why it happened.
-    await db
-      .update(issues)
-      .set({ resolvedAt: new Date(), resolvedReason: "unmonitored", updatedAt: new Date() })
-      .where(and(isNull(issues.resolvedAt), inArray(issues.target, pruned.prunedEndpointIds)));
+    await storage.issues.resolveUnmonitoredTargets(pruned.prunedEndpointIds);
   }
 
   // --- 1. config -----------------------------------------------------------
@@ -290,7 +285,7 @@ export async function runCycle(
     const results = await probeEndpoints(endpoints);
     stillServing = new Set(results.filter((r) => r.status === "healthy").map((r) => r.slug));
 
-    await db.insert(healthChecks).values(
+    await storage.health.recordChecks(
       results.map((r) => ({
         serviceSlug: r.slug,
         status: r.status,
@@ -301,10 +296,7 @@ export async function runCycle(
       })),
     );
 
-    await rollupMetrics(
-      db,
-      results.map((r) => r.slug),
-    );
+    await storage.maintenance.rollupMetrics(results.map((r) => r.slug));
   }
 
   // Fast probe-only tick: steps 0-5 (probe + the ledger write) are cheap and MUST run every
@@ -322,7 +314,7 @@ export async function runCycle(
   // board goes stale. `providerConnFromConfig` is a small local read (integrations table +
   // env), not a provider call, so it is safe at this cadence.
   if (opts?.skipDeploys) {
-    await reconcileVanishedDeploys(db, await providerConnFromConfig(db));
+    await reconcileVanishedDeploys(storage, await providerConnFromConfig(db));
     // The fast tick must still write the ledger. applyHttpIssues used to run above this
     // return, and opening an HTTP issue is what pages on-call; folding here keeps
     // probe-to-alert at the probe interval instead of the 5-minute full-sync cadence.
@@ -381,30 +373,30 @@ export async function runCycle(
 
   // --- 7. upsert deploys + prune + stamp hosts + project meta --------------
   const fetched = [...prod.deploys, ...vc.deploys, ...cf.deploys, ...ry.deploys, ...cr.deploys];
-  await upsertDeployments(db, fetched);
-  await learnDeployProjectIds(db, fetched);
+  await storage.deploy.upsertDeployments(fetched);
+  await storage.deploy.learnProjectIds(fetched);
 
   // Explain the FAILED deploys: fetch each one's provider failure reason (Vercel
   // errorMessage / Railway build-log tail) ONCE and persist it, so the details
   // pane shows WHY a build failed. Best-effort + bounded (see enrichDeployErrors);
   // it never throws, so it can't abort the cycle.
-  await enrichDeployErrors(db, conn);
+  await enrichDeployErrors(storage, conn);
 
   // Heal in-flight rows the recent-deploys window can no longer see: a deploy
   // burst pushes unfinished ids past the provider's ~100-row window, freezing
   // them at "building" — re-fetch those by id and persist their real phases.
   // Best-effort + bounded (see reconcileVanishedDeploys); never throws.
-  await reconcileVanishedDeploys(db, conn);
+  await reconcileVanishedDeploys(storage, conn);
 
   // Terminal backstop behind the healer: an in-flight row NOTHING has managed to
   // confirm for hours stops being asserted at all (→ `unknown`) instead of
   // reading "building" forever. Never throws.
-  await expireUnconfirmedDeploys(db);
+  await expireUnconfirmedDeploys(storage);
 
   // Only prune stale records if at least one fetcher succeeded, to avoid deleting
   // history when a temporary outage makes all fetchers return ok:false.
   if (vc.ok || cf.ok || ry.ok || prod.ok || cr.ok) {
-    await db.delete(deployments).where(sql`${deployments.createdAt} < unixepoch() - 90 * 86400`);
+    await storage.deploy.pruneOlderThanDays(90);
   } else {
     console.error("[sync] all deploy fetchers failed — skipping prune");
   }
@@ -412,7 +404,7 @@ export async function runCycle(
   // Stamp each deploy's live host from its matched monitored endpoint — the
   // EXPLICIT config, not per-platform domain enumeration.
   const roster = await readRoster(db);
-  await stampLiveHosts(db, roster);
+  await stampLiveHosts(storage, roster);
   // The same correlation for the stale-production states, which carry a project NAME and
   // nothing else — so this is the one caller with no id to try first. Routed through
   // `matchRosterEntry` anyway so there is one lookup rule rather than a second one that
@@ -439,7 +431,7 @@ export async function runCycle(
   // `live` is that reconcile's verdict on what still exists — non-null ONLY for a complete
   // authenticated read. Taking it from here rather than re-deriving `prod.meta`/`prod.ok`
   // below keeps ONE definition of "this read may be acted on".
-  const { live: liveVercelProjects } = await syncVercelProjectMeta(db, {
+  const { live: liveVercelProjects } = await syncVercelProjectMeta(storage, {
     meta: prod.meta,
     ok: prod.ok,
     configured: has.vercelToken,
@@ -499,7 +491,7 @@ export async function runCycle(
   // (ok:false → empty states) so a transient Vercel outage can't mass-resolve.
   if (endpoints.length > 0) {
     if (prod.ok) {
-      await recordVercelProdStates(db, prod.states);
+      await storage.observations.recordVercelProdStates(prod.states);
     }
   }
 
@@ -507,13 +499,13 @@ export async function runCycle(
   // unreachable, so we can't see any of its deploys — record that blind spot.
   // `configured` gates on a token being present (a tokenless fetcher returns
   // ok:true, so it never looks "unreachable").
-  const platformObservations: PlatformObservation[] = [
+  const platformObservations: PlatformObservationInput[] = [
     { source: "vercel", configured: has.vercelToken, reachable: vc.ok },
     { source: "cloudflare-pages", configured: has.cloudflareToken, reachable: cf.ok },
     { source: "railway", configured: has.railwayToken, reachable: ry.ok },
     { source: "crunchy", configured: has.crunchyToken, reachable: cr.ok },
   ];
-  await recordPlatformObservations(db, platformObservations);
+  await storage.observations.recordObservations(platformObservations);
   // AFTER both recorders and OUTSIDE the endpoints guard, so the fold sees this cycle's
   // own writes — including platform observations, which are not roster-bound and are
   // recorded past the guard's closing brace.
@@ -528,198 +520,6 @@ export async function runCycle(
 }
 
 /**
- * The per-tick `metrics_hourly` upsert, as SQL. Exported so the test can EXPLAIN the
- * REAL statement (see rollup-metrics.int.test.ts) rather than a copy that could drift.
- *
- * The hour predicate must stay a RANGE OVER THE BARE COLUMN. Wrapping `checked_at` in
- * arithmetic — `(checked_at / 3600) * 3600 = (unixepoch() / 3600) * 3600`, as this did —
- * is not sargable, so SQLite cannot use `idx_health_service_checked` to seek the hour and
- * instead walks EVERY historical row of every probed slug, on every tick. Against a
- * 2.7M-row table that measured 740ms of CPU per tick versus 5ms for this form (~148x) —
- * and since the table grows forever, so did the cost, until the container's CPU quota
- * could no longer absorb a tick and the supervisor restarted it. Keep the arithmetic in
- * the SELECT list (it only labels the bucket); keep it OUT of the WHERE.
- */
-export function rollupMetricsSql(serviceSlugs: string[]): SQL {
-  return sql`
-    insert into metrics_hourly (
-      service_slug, hour, total_checks, healthy_checks, degraded_checks,
-      down_checks, avg_response_time_ms, min_response_time_ms, max_response_time_ms
-    )
-    select
-      service_slug,
-      (checked_at / 3600) * 3600 as hour,
-      count(*),
-      sum(case when status = 'healthy' then 1 else 0 end),
-      sum(case when status = 'degraded' then 1 else 0 end),
-      sum(case when status = 'down' then 1 else 0 end),
-      avg(response_time_ms),
-      min(response_time_ms),
-      max(response_time_ms)
-    from health_checks
-    where service_slug in (${sql.join(serviceSlugs, sql`, `)})
-      and checked_at >= (unixepoch() / 3600) * 3600
-      and checked_at < (unixepoch() / 3600) * 3600 + 3600
-    group by service_slug, hour
-    on conflict(service_slug, hour) do update set
-      total_checks = excluded.total_checks,
-      healthy_checks = excluded.healthy_checks,
-      degraded_checks = excluded.degraded_checks,
-      down_checks = excluded.down_checks,
-      avg_response_time_ms = excluded.avg_response_time_ms,
-      min_response_time_ms = excluded.min_response_time_ms,
-      max_response_time_ms = excluded.max_response_time_ms
-  `;
-}
-
-/** Roll up `metrics_hourly` for the hour buckets touched by this cycle's checks.
- *  Recomputes each (service, hour) bucket from `health_checks` and upserts it, so
- *  reruns are idempotent (the unique index keeps one row per service+hour). */
-async function rollupMetrics(db: Db, serviceSlugs: string[]): Promise<void> {
-  const slugs = [...new Set(serviceSlugs)];
-  if (slugs.length === 0) return;
-  // `checked_at` is unix-seconds; aggregate only the services we just probed (their
-  // current hour bucket is what changed).
-  await db.run(rollupMetricsSql(slugs));
-}
-
-/** Upsert fetched provider deploys into the `deployments` table by id (phases win
- *  the update so a re-fetched build moves to its latest state). Exported for the
- *  webhook routes: a provider-pushed terminal state persists even when the deploy
- *  has already left the recent-deploys poll window. */
-export async function upsertDeployments(
-  db: Db,
-  deploys: ProviderDeploy[],
-  opts: { source?: "poll" | "webhook" } = {},
-): Promise<void> {
-  // Dedup by id within this batch (the projects fetch + recent fetch overlap) —
-  // recent rows are appended after prod, so last-write-wins on identical data.
-  const byId = new Map<string, ProviderDeploy>();
-  for (const d of deploys) {
-    // LAST LINE OF DEFENCE for the timestamp. Every fetcher validates at its own
-    // boundary, but that is a convention each one must remember; this is the choke
-    // point EVERY deploy crosses before the DB. An Invalid Date reaching the insert
-    // fails the whole batch — and since the deploy stays in the provider's window,
-    // it fails it again every cycle: /health goes stale and the container
-    // restart-loops. One bad row must cost that row, never the cycle.
-    if (!Number.isFinite(d.createdAt?.getTime?.())) {
-      console.error(`[sync] deploy ${d.id} has an invalid createdAt — dropping it (fetcher should have caught this)`);
-      continue;
-    }
-    byId.set(d.id, d);
-  }
-  const rows = [...byId.values()];
-  if (rows.length === 0) return;
-
-  // Webhooks arrive OUT OF ORDER — relative to the poll (a delayed deployment.created
-  // after the poll already recorded READY) and relative to EACH OTHER (a redelivered
-  // `created` after its own `build-requested`). Either way a webhook upsert must never
-  // walk a row backwards. `webhookKeepsStoredSql` is the whole rule and states its own
-  // reasoning; it lives beside the phase vocabulary so no query can drift from it.
-  //
-  // The POLL takes no guard: its by-id state is current truth, and a genuine
-  // terminal→in-flight transition (Vercel re-promotion → ROLLING) must go through.
-  const guardRegression = opts.source === "webhook";
-  const phase = (col: "build_phase" | "deploy_phase"): ReturnType<typeof sql.raw> =>
-    guardRegression
-      ? sql.raw(`CASE WHEN ${webhookKeepsStoredSql(col)} THEN ${col} ELSE excluded.${col} END`)
-      : sql.raw(`excluded.${col}`);
-
-  await db
-    .insert(deployments)
-    .values(
-      rows.map((d) => ({
-        id: d.id,
-        platform: d.platform,
-        projectName: d.projectName,
-        providerProjectId: d.providerProjectId ?? null,
-        buildPhase: d.buildPhase,
-        deployPhase: d.deployPhase,
-        environment: d.environment,
-        commitHash: d.commitHash,
-        commitMessage: d.commitMessage,
-        branch: d.branch,
-        commitRepo: d.commitRepo,
-        url: d.url,
-        createdAt: d.createdAt,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: deployments.id,
-      set: {
-        buildPhase: phase("build_phase"),
-        deployPhase: phase("deploy_phase"),
-        // NOT COALESCE and not omitted: a project renamed upstream keeps re-reporting
-        // its existing deploys under the NEW name, and a row frozen at the old name
-        // would sit in the table for the full 90-day retention minting a second group
-        // for a single target. `platform` is deliberately absent — it is part of the
-        // identity, not a description of it.
-        projectName: sql`excluded.project_name`,
-        // Descriptive fields COALESCE so a sparser source (a webhook event
-        // without commit meta) can update the PHASES without erasing what a
-        // richer fetch already recorded.
-        // COALESCE, like the other descriptive columns: a webhook carries no project id,
-        // and a sparser source must never erase what a richer fetch already recorded.
-        providerProjectId: sql`COALESCE(excluded.provider_project_id, provider_project_id)`,
-        environment: sql`COALESCE(excluded.environment, environment)`,
-        commitHash: sql`COALESCE(excluded.commit_hash, commit_hash)`,
-        commitMessage: sql`COALESCE(excluded.commit_message, commit_message)`,
-        branch: sql`COALESCE(excluded.branch, branch)`,
-        commitRepo: sql`COALESCE(excluded.commit_repo, commit_repo)`,
-        url: sql`COALESCE(excluded.url, url)`,
-        // Keep the EARLIEST creation time seen: webhook rows carry event-emission
-        // time (later than true creation), so letting them overwrite would skew
-        // ordering, the reconcile window, and stuck-deploy detection.
-        createdAt: sql`min(excluded.created_at, created_at)`,
-        fetchedAt: sql`(unixepoch())`,
-      },
-    });
-}
-
-/**
- * Learn each endpoint's provider project id from the deploys we just fetched, keyed by the
- * NAME that already matches. One poll arms every already-wired endpoint; from then on a
- * rename upstream resolves by id even though `deploy_project` still holds the OLD name,
- * which is the entire point of adopting ids.
- *
- * Idempotent and null-only: it never overwrites an id, so an operator's hand-entered value
- * always wins and a re-run is free. Nested maps rather than a composite string key — the
- * only function allowed to mint a target string is `boardTargetKey`, and this is not one
- * (a Railway project id is environment-independent, so a target key would be the wrong
- * shape here anyway).
- */
-export async function learnDeployProjectIds(db: Db, deploys: ProviderDeploy[]): Promise<void> {
-  const idByPlatform = new Map<string, Map<string, string>>();
-  for (const d of deploys) {
-    if (!d.providerProjectId) continue;
-    const platform = platformCanon(d.platform);
-    const byName = idByPlatform.get(platform) ?? new Map<string, string>();
-    if (!byName.has(d.projectName)) byName.set(d.projectName, d.providerProjectId);
-    idByPlatform.set(platform, byName);
-  }
-  if (idByPlatform.size === 0) return;
-
-  const rows = await db
-    .select({
-      id: monitoredEndpoints.id,
-      platform: monitoredEndpoints.platform,
-      deployProject: monitoredEndpoints.deployProject,
-    })
-    .from(monitoredEndpoints)
-    .where(isNull(monitoredEndpoints.deployProjectId));
-
-  for (const r of rows) {
-    if (!r.platform || !r.deployProject) continue;
-    const hit = idByPlatform.get(platformCanon(r.platform))?.get(r.deployProject);
-    if (!hit) continue;
-    await db
-      .update(monitoredEndpoints)
-      .set({ deployProjectId: hit, updatedAt: new Date() })
-      .where(eq(monitoredEndpoints.id, r.id));
-  }
-}
-
-/**
  * Reconcile each deploy row's `live_host` with the configured endpoint wiring — only
  * writing rows whose host actually changed.
  *
@@ -731,166 +531,17 @@ export async function learnDeployProjectIds(db: Db, deploys: ProviderDeploy[]): 
  * scoping is unchanged; `boardTargetKey` and `deployTargetKey` both carry an env segment
  * for railway only.
  */
-async function stampLiveHosts(db: Db, roster: Awaited<ReturnType<typeof readRoster>>): Promise<void> {
+async function stampLiveHosts(storage: Storage, roster: Awaited<ReturnType<typeof readRoster>>): Promise<void> {
   // No account mirror: this caller only needs the ownership MAPS, and narrowing a
   // deleted Vercel project is a Problems decision, not a correlation one. An empty
   // set is `rosterTargets`' documented way to say so — it narrows nothing.
   const { byId, byName } = rosterTargets(roster, []);
-  const rows = await db
-    .select({
-      id: deployments.id,
-      platform: deployments.platform,
-      providerProjectId: deployments.providerProjectId,
-      projectName: deployments.projectName,
-      environment: deployments.environment,
-      liveHost: deployments.liveHost,
-    })
-    .from(deployments);
+  const rows = await storage.deploy.listForLiveHostStamp();
   for (const d of rows) {
     const owner = matchRosterEntry(d, byId, byName);
     const host = (owner?.url ? hostOf(owner.url).toLowerCase() : "") || null;
     if ((d.liveHost ?? null) !== host) {
-      await db.update(deployments).set({ liveHost: host }).where(eq(deployments.id, d.id));
+      await storage.deploy.setLiveHost(d.id, host);
     }
   }
-}
-
-/** Rows deleted per DELETE statement, and per {@link runMaintenance} call. Chunked so the
- *  prune is many small transactions instead of one enormous one: the first real prune on a
- *  long-unpruned table has millions of rows to clear, and a single DELETE of that size on a
- *  container volume means one giant transaction and a WAL to match. Bounded per call, it
- *  simply catches up over successive cycles. */
-export const PRUNE_CHUNK_ROWS = 25_000;
-export const PRUNE_MAX_ROWS_PER_RUN = 100_000;
-
-/** metrics_hourly horizon: /response-history serves sparklines up to 90 days, so
- *  keep at least that — longer when a group's configured retention exceeds it. */
-export const METRICS_MIN_RETENTION_DAYS = 90;
-/** analytics_metrics horizon: the trend store is only ever read as "the newest
- *  rows" (see telemetry/stores/analytics.ts), so 90 days is already generous. */
-export const ANALYTICS_RETENTION_DAYS = 90;
-/** RESOLVED issues horizon. Closed incidents are kept as history (deleting a site resolves
- *  its Problems rather than erasing them), but "history" is bounded like every other
- *  accruing table — a self-healing flap can close and reopen an issue every cycle, so
- *  without this the one table nothing prunes grows fastest. Open issues are untouched:
- *  `resolved_at < cutoff` is never true for NULL. */
-export const ISSUE_RESOLVED_RETENTION_DAYS = 90;
-
-/** One table's chunked age prune: delete rows whose `timeCol` is before
- *  `cutoffSec`, by id from an indexed seek, at most `budget` rows in chunks of
- *  `chunkRows`. `done` is false when the budget ran out with backlog remaining. */
-async function pruneChunked(
-  db: Db,
-  table: 'health_checks' | 'metrics_hourly' | 'analytics_metrics' | 'issues',
-  timeCol: 'checked_at' | 'hour' | 'captured_at' | 'resolved_at',
-  cutoffSec: number,
-  chunkRows: number,
-  budget: number,
-): Promise<{ deleted: number; done: boolean }> {
-  let deleted = 0;
-  while (deleted < budget) {
-    const limit = Math.min(chunkRows, budget - deleted);
-    const res = await db.run(sql`
-      delete from ${sql.raw(table)}
-      where id in (select id from ${sql.raw(table)} where ${sql.raw(timeCol)} < ${cutoffSec} limit ${limit})
-    `);
-    const n = Number(res.rowsAffected ?? 0);
-    deleted += n;
-    if (n < limit) return { deleted, done: true }; // drained this table's backlog
-  }
-  return { deleted, done: false }; // budget exhausted; more next run
-}
-
-/**
- * Retention prune over EVERY accruing table — an unpruned table is a future
- * CPU/disk bomb (per-tick and per-read costs that scale with total history are
- * exactly what took the container down via `health_checks`):
- *
- *  - `health_checks`: past the longest configured group `retentionDays`.
- *  - `metrics_hourly`: past max(90d sparkline horizon, longest group retention).
- *  - `analytics_metrics`: past 90 days (only ever read as "the newest rows").
- *  - `issues`: RESOLVED rows past 90 days. Every reader filters `resolved_at is null`,
- *    so a closed issue is history — kept, but bounded like the rest.
- *  - `sessions`: expired rows (otherwise reaped only if that exact token is
- *    presented again — a session that just lapses lingers forever).
- *
- * THE SCHEDULER MUST CALL THIS (see index.ts). It used to be reachable only via
- * `POST /cron/maintenance`, which nothing on Railway ever called — so health_checks was
- * never pruned at all and grew ~193k rows/day forever, until a tick could no longer fit
- * in the container's CPU quota and the supervisor's /health probes started timing out.
- *
- * The chunk budget (`maxRows`) is shared across the chunked tables, so one huge backlog
- * is drained over successive cycles without starving the others forever. Returns total
- * rows deleted and whether every backlog is fully caught up (`done`).
- *
- * `conn` is OPTIONAL: the monitor cycle (which owns the connection) passes it so the
- * WAL truncation below runs; `POST /cron/maintenance` (no connection in its AppDeps —
- * only `db`) calls this without one and gets the prune with the checkpoint skipped
- * rather than failing the whole route over a disk-reclaim step it cannot drive.
- */
-export async function runMaintenance(
-  db: Db,
-  conn?: LibsqlConnection,
-  opts: { maxRows?: number; chunkRows?: number } = {},
-): Promise<{ deleted: number; done: boolean }> {
-  const maxRows = opts.maxRows ?? PRUNE_MAX_ROWS_PER_RUN;
-  const chunkRows = opts.chunkRows ?? PRUNE_CHUNK_ROWS;
-
-  const groups = await db.select({ retentionDays: siteGroups.retentionDays }).from(siteGroups);
-  // The conservative horizon: keep checks at least as long as the LONGEST
-  // configured retention. A per-service prune would need the endpoint→group join
-  // for every slug; the longest-horizon sweep is the simple, safe prune the
-  // maintenance cron needs (the UI never reads beyond the longest window anyway).
-  const maxRetentionDays = groups.reduce((max, g) => Math.max(max, g.retentionDays), 14);
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  const sweeps = [
-    { table: 'health_checks', timeCol: 'checked_at', cutoffSec: nowSec - maxRetentionDays * 86_400 },
-    {
-      table: 'metrics_hourly',
-      timeCol: 'hour',
-      cutoffSec: nowSec - Math.max(METRICS_MIN_RETENTION_DAYS, maxRetentionDays) * 86_400,
-    },
-    { table: 'analytics_metrics', timeCol: 'captured_at', cutoffSec: nowSec - ANALYTICS_RETENTION_DAYS * 86_400 },
-    // Only CLOSED incidents age out — an open issue has a NULL resolved_at, which no
-    // `<` comparison ever selects.
-    { table: 'issues', timeCol: 'resolved_at', cutoffSec: nowSec - ISSUE_RESOLVED_RETENTION_DAYS * 86_400 },
-  ] as const;
-
-  let deleted = 0;
-  let done = true;
-  for (const s of sweeps) {
-    const budget = maxRows - deleted;
-    if (budget <= 0) {
-      done = false; // budget exhausted before this table got a turn
-      break;
-    }
-    const r = await pruneChunked(db, s.table, s.timeCol, s.cutoffSec, chunkRows, budget);
-    deleted += r.deleted;
-    if (!r.done) {
-      done = false;
-      break;
-    }
-  }
-
-  // Expired sessions: a tiny table (rows = logins), so one unchunked statement
-  // outside the budget.
-  const reaped = await db.run(sql`delete from sessions where expires_at < ${nowSec}`);
-  deleted += Number(reaped.rowsAffected ?? 0);
-
-  // Pruning rows frees PAGES, not BYTES: the deletes above are the biggest write
-  // transaction this process runs, and the WAL they inflate is reused-in-place rather
-  // than shrunk. Truncate it here — immediately after the sweep that grew it — so the
-  // volume gets the space back instead of carrying the high-water mark forever.
-  // Fail-soft: a busy checkpoint just retries next pass; a throw must not lose the
-  // prune result we already earned.
-  if (conn) {
-    try {
-      await checkpointWal(db, conn);
-    } catch (err) {
-      console.error(`[maintenance] wal checkpoint failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  return { deleted, done };
 }

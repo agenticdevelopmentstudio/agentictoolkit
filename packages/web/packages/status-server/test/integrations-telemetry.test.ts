@@ -7,6 +7,7 @@ import { runIntegrationsCheck } from "../src/monitor/integrations";
 import type { Db } from "../src/libsql/client";
 import { MIGRATIONS_FOLDER } from '../src/libsql/client';
 import { testConfig } from "./helpers/config";
+import { createLibsqlStorage } from "../src/libsql";
 
 // The telemetry providers configured; the deploy providers UNSET so the ONLY
 // outbound fetches this test makes are the GlitchTip + PostHog reachability probes.
@@ -49,7 +50,8 @@ describe("runIntegrationsCheck — telemetry providers (GlitchTip / PostHog)", (
   it("reports both reachable (ok) on a 200 from the authed probe", async () => {
     stub(() => new Response("{}", { status: 200 }));
     const db = await bootDb();
-    const { checks } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks } = await runIntegrationsCheck(storage, testConfig());
     const by = (id: string) => checks.find((c) => c.id === id);
     expect(by("glitchtip")?.state).toBe("ok");
     expect(by("glitchtip")?.detail).toBe("reachable");
@@ -64,7 +66,8 @@ describe("runIntegrationsCheck — telemetry providers (GlitchTip / PostHog)", (
       return new Response("{}", { status: 200 });
     });
     const db = await bootDb();
-    await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    await runIntegrationsCheck(storage, testConfig());
     // GlitchTip: cheap org metadata, not /issues/. PostHog: the SAME query API the
     // analytics band uses (the personal key 403s on project-metadata), not /projects/42/.
     expect(urls).toContain("https://errors.example.com/api/0/organizations/acme/");
@@ -74,7 +77,8 @@ describe("runIntegrationsCheck — telemetry providers (GlitchTip / PostHog)", (
   it("marks a provider error (red) on a 401 — an invalid token/key surfaces immediately", async () => {
     stub((url) => (url.includes("errors.example.com") ? new Response("nope", { status: 401 }) : new Response("{}", { status: 200 })));
     const db = await bootDb();
-    const { checks } = await runIntegrationsCheck(db, testConfig());
+    const storage = createLibsqlStorage(db);
+    const { checks } = await runIntegrationsCheck(storage, testConfig());
     const by = (id: string) => checks.find((c) => c.id === id);
     expect(by("glitchtip")?.state).toBe("error");
     expect(by("glitchtip")?.detail).toContain("token invalid");

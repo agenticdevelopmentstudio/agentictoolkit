@@ -1,6 +1,4 @@
-import { and, or, eq, gt, isNull, inArray, desc } from "drizzle-orm";
-import type { Db } from "../libsql/client";
-import { deployments } from "../libsql/schema";
+import type { Storage, DeployIdPlatformRow } from "../storage/ports";
 import { mapLimit } from "@agentic-toolkit/deploy-platform/util";
 import { fetchVercelDeployError } from "./fetch-vercel";
 import { fetchRailwayBuildLogTail } from "./fetch-railway";
@@ -16,15 +14,10 @@ const ENRICH_MAX_PER_CYCLE = 8;
 const ENRICH_CONCURRENCY = 4;
 const ENRICH_CALL_TIMEOUT_MS = 8_000;
 
-interface FailedRow {
-  id: string; // 'vc_<uid>' | 'ry_<id>'
-  platform: string;
-}
-
 /** The provider failure reason for ONE failed deploy — dispatched by platform.
  *  Vercel has a clean single `errorMessage`; Railway's reason lives in the build
  *  log tail. Returns null for a platform we can't fetch (no token / no reason). */
-async function fetchErrorFor(row: FailedRow, conn: ProviderConn, signal: AbortSignal): Promise<string | null> {
+async function fetchErrorFor(row: DeployIdPlatformRow, conn: ProviderConn, signal: AbortSignal): Promise<string | null> {
   if (row.platform === "vercel" && conn.vercel.token) {
     return fetchVercelDeployError(
       row.id.replace(/^vc_/, ""),
@@ -49,7 +42,7 @@ async function fetchErrorFor(row: FailedRow, conn: ProviderConn, signal: AbortSi
  * timeout) and every fetch is wrapped so one failure never aborts the cycle — a
  * failed fetch just leaves `error_text` null, to retry next cycle.
  */
-export async function enrichDeployErrors(db: Db, conn: ProviderConn): Promise<void> {
+export async function enrichDeployErrors(storage: Storage, conn: ProviderConn): Promise<void> {
   // Honor the shared cooldown (same rule as the reconcile): a throttled provider's rows
   // wait for a later cycle rather than spending requests that extend the throttle.
   // pollableByIdPlatforms is typed ProviderName[], so no `as` cast can slip a non-slot
@@ -57,21 +50,13 @@ export async function enrichDeployErrors(db: Db, conn: ProviderConn): Promise<vo
   const polled = pollableByIdPlatforms(conn).filter((p) => !rateLimitedUntil(p));
   if (polled.length === 0) return; // no token, or both cooling down
 
-  let candidates: FailedRow[];
+  let candidates: DeployIdPlatformRow[];
   try {
-    candidates = await db
-      .select({ id: deployments.id, platform: deployments.platform })
-      .from(deployments)
-      .where(
-        and(
-          isNull(deployments.errorText),
-          inArray(deployments.platform, polled),
-          or(eq(deployments.buildPhase, "failed"), eq(deployments.deployPhase, "failed")),
-          gt(deployments.createdAt, new Date(Date.now() - ENRICH_WINDOW_DAYS * 86_400_000)),
-        ),
-      )
-      .orderBy(desc(deployments.createdAt))
-      .limit(ENRICH_MAX_PER_CYCLE);
+    candidates = await storage.deploy.listFailedWithoutError({
+      platforms: polled,
+      createdAfterMs: Date.now() - ENRICH_WINDOW_DAYS * 86_400_000,
+      limit: ENRICH_MAX_PER_CYCLE,
+    });
   } catch (err) {
     console.error("[enrich] failed-deploy query failed:", err);
     return;
@@ -83,7 +68,7 @@ export async function enrichDeployErrors(db: Db, conn: ProviderConn): Promise<vo
     const timer = setTimeout(() => controller.abort(), ENRICH_CALL_TIMEOUT_MS);
     try {
       const text = await fetchErrorFor(row, conn, controller.signal);
-      if (text) await db.update(deployments).set({ errorText: text }).where(eq(deployments.id, row.id));
+      if (text) await storage.deploy.setErrorText(row.id, text);
     } catch (err) {
       console.error(`[enrich] ${row.id} error fetch/store failed:`, err);
     } finally {

@@ -59,7 +59,7 @@ export async function reconcileBoardLedger(
   if (opts.skipOnEmptyRoster && facts.roster.length === 0) {
     return { board, opened: 0, updated: 0, resolved: 0, resolvedTargets: [], skipped: true };
   }
-  const counts = await applyBoardToLedger(db, board);
+  const counts = await applyBoardToLedger(storage, board);
   await flushAlerts(config.alertWebhookUrl);
   return { board, ...counts, skipped: false };
 }
