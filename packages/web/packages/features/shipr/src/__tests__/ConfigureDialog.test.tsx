@@ -262,7 +262,7 @@ describe('a bar button pressed before the verbs have been read', () => {
 
     // And the press is not lost either — the operator gets the wizard they asked for, without
     // having to notice the button went live and press it a second time.
-    expect(await screen.findByText('Repository')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Filter repositories')).toBeInTheDocument();
   });
 
   it('becomes the real refusal when the read grants nothing', async () => {
@@ -277,6 +277,6 @@ describe('a bar button pressed before the verbs have been read', () => {
     expect(
       await screen.findByText('You cannot register repositories here.'),
     ).toBeInTheDocument();
-    expect(screen.queryByText('Repository')).toBeNull();
+    expect(screen.queryByLabelText('Filter repositories')).toBeNull();
   });
 });

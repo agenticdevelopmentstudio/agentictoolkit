@@ -276,7 +276,6 @@ function ConfigureBody({
             open={wizard}
             onClose={() => setWizard(false)}
             client={client}
-            groups={groups}
             connections={connections}
             connectionsError={connectionsError}
             registeredSlugs={rows.map((r) => r.devRepo.slug)}
