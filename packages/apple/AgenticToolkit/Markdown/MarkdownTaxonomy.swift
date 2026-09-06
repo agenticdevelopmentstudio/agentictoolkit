@@ -198,7 +198,7 @@ extension MarkdownStore {
                 throw MarkdownStoreError.categoryCycle(parent: parent, child: child)
             }
 
-            let id = UUID().uuidString.lowercased()
+            let newID = UUID().uuidString.lowercased()
             let stamp = MarkdownTimestamp.string(now)
             try conn.execute(
                 sql: """
@@ -206,21 +206,48 @@ extension MarkdownStore {
                         (id, customer_id, ecosystem_id, parent_id, child_id, sort_order,
                          created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(ecosystem_id, parent_id, child_id) DO NOTHING
+                    ON CONFLICT(ecosystem_id, parent_id, child_id) DO UPDATE SET
+                        deleted_at = NULL,
+                        sort_order = excluded.sort_order,
+                        updated_at = excluded.updated_at
+                    WHERE category_edges.deleted_at IS NOT NULL
                     """,
-                arguments: [id, customerID, ecosystemID, parent, child, sortOrder, stamp, stamp])
-            // `ON CONFLICT DO NOTHING` means this edge already existed — the
-            // first call already staged its mutation, so a duplicate call
-            // must not queue a second one for a row that was never inserted
-            // (it has no local `id` behind it, and adh's own unique
-            // constraint would reject or duplicate the push).
+                arguments: [newID, customerID, ecosystemID, parent, child, sortOrder, stamp, stamp])
+            // `UNIQUE (ecosystem_id, parent_id, child_id)` is unconditional —
+            // deliberately, because adh's is — so `removeCategoryEdge`'s
+            // tombstone keeps occupying the key forever. A plain
+            // `DO NOTHING` therefore made re-adding an edge that was once
+            // removed a permanent silent no-op: nothing written, nothing
+            // staged, and a *successful* return. Reviving is the same answer
+            // `createKeyword` reaches for the same constraint, and for the
+            // same reason — a second row for the key is a local state adh
+            // would reject on push.
+            //
+            // The `WHERE` makes the UPDATE branch a no-op for a live row, so
+            // zero changes here still means precisely "this edge already
+            // exists and is live", which is the case that must not stage a
+            // second mutation for a row it never inserted.
             guard conn.changesCount > 0 else { return }
+            // A revive keeps the tombstone's id, so the id that survived — not
+            // the one just minted — is what the staged mutation must address.
+            let id = try String.fetchOne(
+                conn,
+                sql: """
+                    SELECT id FROM category_edges
+                    WHERE ecosystem_id = ? AND parent_id = ? AND child_id = ?
+                    """,
+                arguments: [ecosystemID, parent, child]) ?? newID
+            var data: [String: JSONValue] = [
+                "parent_id": .string(parent), "child_id": .string(child),
+                "sort_order": .number(Double(sortOrder))
+            ]
+            // Only on a revive: a plain insert has no `deleted_at` to clear,
+            // and naming the column anyway would push a write adh has no
+            // reason to receive.
+            if id != newID { data["deleted_at"] = .null }
             try syncStore.stage(LocalMutation(
                 resource: "content.category_edges", rowId: id, type: .upsert,
-                data: [
-                    "parent_id": .string(parent), "child_id": .string(child),
-                    "sort_order": .number(Double(sortOrder))
-                ]), in: conn)
+                data: data), in: conn)
         }
     }
 
@@ -566,7 +593,7 @@ extension MarkdownStore {
         documentID: String, sortOrder: Int, now: Date
     ) throws {
         let ownerTable = column == "category_id" ? "categories" : "keywords"
-        let id = UUID().uuidString.lowercased()
+        let newID = UUID().uuidString.lowercased()
         let stamp = MarkdownTimestamp.string(now)
         try database.write { conn in
             let documentExists = try Bool.fetchOne(
@@ -586,22 +613,53 @@ extension MarkdownStore {
                         (id, customer_id, ecosystem_id, \(column), target_kind, target_id,
                          sort_order, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(ecosystem_id, \(column), target_kind, target_id) DO NOTHING
+                    ON CONFLICT(ecosystem_id, \(column), target_kind, target_id) DO UPDATE SET
+                        deleted_at = NULL,
+                        sort_order = excluded.sort_order,
+                        updated_at = excluded.updated_at
+                    WHERE \(table).deleted_at IS NOT NULL
                     """,
-                arguments: [id, customerID, ecosystemID, ownerID,
+                arguments: [newID, customerID, ecosystemID, ownerID,
                             Self.documentTargetKind, documentID, sortOrder, stamp, stamp])
-            // `ON CONFLICT DO NOTHING` means this assignment already existed
-            // — the first call already staged its mutation, so a duplicate
-            // must not queue a second one for a row that was never inserted.
+            // The unique this conflicts on is unconditional — deliberately,
+            // because adh's is — and `unassignCategory` only *tombstones* the
+            // row, so it keeps occupying the key forever. A plain
+            // `DO NOTHING` therefore turned "file this note back into the
+            // folder you took it out of" into a permanent silent no-op:
+            // nothing written, nothing staged, and a *successful* return, with
+            // no way for the caller to tell. Reviving is what `createKeyword`
+            // does against the same shape of constraint, and for the same
+            // reason — minting a second row for a key adh already holds is a
+            // local state the server would reject on push.
+            //
+            // The `WHERE` makes the UPDATE branch a no-op for a live row, so
+            // zero changes still means precisely "this assignment already
+            // exists and is live" — the case that must not stage a second
+            // mutation for a row it never inserted.
             guard conn.changesCount > 0 else { return }
+            // A revive keeps the tombstone's id, so the id that survived — not
+            // the one just minted — is what the staged mutation must address.
+            let rowID = try String.fetchOne(
+                conn,
+                sql: """
+                    SELECT id FROM \(table)
+                    WHERE ecosystem_id = ? AND \(column) = ?
+                      AND target_kind = ? AND target_id = ?
+                    """,
+                arguments: [ecosystemID, ownerID, Self.documentTargetKind, documentID]) ?? newID
+            var data: [String: JSONValue] = [
+                column: .string(ownerID),
+                "target_kind": .string(Self.documentTargetKind),
+                "target_id": .string(documentID),
+                "sort_order": .number(Double(sortOrder))
+            ]
+            // Only on a revive: a plain insert has no `deleted_at` to clear,
+            // and naming the column anyway would push a write adh has no
+            // reason to receive.
+            if rowID != newID { data["deleted_at"] = .null }
             try syncStore.stage(LocalMutation(
-                resource: resource, rowId: id, type: .upsert,
-                data: [
-                    column: .string(ownerID),
-                    "target_kind": .string(Self.documentTargetKind),
-                    "target_id": .string(documentID),
-                    "sort_order": .number(Double(sortOrder))
-                ]), in: conn)
+                resource: resource, rowId: rowID, type: .upsert,
+                data: data), in: conn)
         }
     }
 }

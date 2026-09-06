@@ -512,4 +512,128 @@ struct MarkdownTaxonomyTests {
         }
         #expect(payload?.contains("deleted_at") == true)
     }
+
+    // MARK: - Reviving a tombstoned link row (final-review C1)
+    //
+    // `category_items`, `keyword_items` and `category_edges` all carry an
+    // *unconditional* unique, mirroring adh's, and every removal in this file
+    // is a tombstone rather than a delete — so a removed row keeps occupying
+    // its unique key forever. Under the `ON CONFLICT ... DO NOTHING` these
+    // three writers used to have, re-adding a link that had once been removed
+    // wrote nothing, staged nothing and returned *successfully*, with no way
+    // for the caller to tell. These pin the revive that replaces it.
+
+    @Test("re-assigning a category after unassigning it files the document again")
+    func reassigningACategoryRevivesTheTombstonedRow() throws {
+        let harness = try store()
+        let note = try harness.createDocument(content: "a note", markers: [.note])
+        let category = try harness.createCategory(name: "Groceries")
+        try harness.assignCategory(category.id, toDocument: note.id)
+        try harness.unassignCategory(category.id, fromDocument: note.id)
+        #expect(try harness.documentIDs(forCategory: category.id).isEmpty)
+
+        try harness.assignCategory(category.id, toDocument: note.id, sortOrder: 7)
+
+        #expect(try harness.documentIDs(forCategory: category.id) == [note.id])
+        #expect(try harness.categories(forDocument: note.id).map(\.id) == [category.id])
+        // One row, revived — not a second one, which adh's unconditional
+        // unique would reject on push.
+        let counted = try harness.database.read { conn -> (rows: Int, sortOrder: Int) in
+            (rows: try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM category_items") ?? -1,
+             sortOrder: try Int.fetchOne(conn, sql: "SELECT sort_order FROM category_items") ?? -1)
+        }
+        #expect(counted.rows == 1)
+        #expect(counted.sortOrder == 7)
+        // And the revive is staged as an explicit `deleted_at = null`, or the
+        // server keeps the tombstone and puts it back on the next pull.
+        #expect(try Self.stagedDeletedAt(resource: "content.category_items", in: harness) == .null)
+    }
+
+    @Test("re-assigning a keyword after its link row is tombstoned tags the document again")
+    func reassigningAKeywordRevivesTheTombstonedRow() throws {
+        let harness = try store()
+        let note = try harness.createDocument(content: "a note", markers: [.note])
+        let keyword = try harness.createKeyword(label: "swift")
+        try harness.assignKeyword(keyword.id, toDocument: note.id)
+        // No `unassignKeyword` ships yet, so the tombstone is written here
+        // directly — the row shape a pulled removal (or that method, once it
+        // exists) leaves behind.
+        try harness.database.write { conn in
+            try conn.execute(
+                sql: "UPDATE keyword_items SET deleted_at = '2026-01-01T00:00:00.000Z'")
+        }
+        #expect(try harness.keywords(forDocument: note.id).isEmpty)
+
+        try harness.assignKeyword(keyword.id, toDocument: note.id)
+
+        #expect(try harness.keywords(forDocument: note.id).map(\.id) == [keyword.id])
+        #expect(try harness.database.read { conn in
+            try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM keyword_items")
+        } == 1)
+        #expect(try Self.stagedDeletedAt(resource: "content.keyword_items", in: harness) == .null)
+    }
+
+    @Test("re-adding a category edge after removing it nests the folder again")
+    func readdingACategoryEdgeRevivesTheTombstonedRow() throws {
+        let harness = try store()
+        let parent = try harness.createCategory(name: "Work")
+        let child = try harness.createCategory(name: "Invoices")
+        try harness.addCategoryEdge(parent: parent.id, child: child.id)
+        try harness.removeCategoryEdge(parent: parent.id, child: child.id)
+        #expect(try harness.categoryEdges().isEmpty)
+
+        try harness.addCategoryEdge(parent: parent.id, child: child.id)
+
+        let edges = try harness.categoryEdges()
+        #expect(edges.count == 1)
+        #expect(edges.first?.parent == parent.id)
+        #expect(edges.first?.child == child.id)
+        #expect(try harness.database.read { conn in
+            try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM category_edges")
+        } == 1)
+        #expect(try Self.stagedDeletedAt(resource: "content.category_edges", in: harness) == .null)
+    }
+
+    @Test("assigning a live category twice stages one mutation and no revive")
+    func assigningTwiceStagesOneMutation() throws {
+        let harness = try store()
+        let note = try harness.createDocument(content: "a note", markers: [.note])
+        let category = try harness.createCategory(name: "Groceries")
+        try harness.assignCategory(category.id, toDocument: note.id)
+        try harness.assignCategory(category.id, toDocument: note.id)
+        #expect(try harness.database.read { conn in
+            try Int.fetchOne(
+                conn,
+                sql: "SELECT COUNT(*) FROM _sync_outbox WHERE resource = 'content.category_items'")
+        } == 1)
+        // A live row is left alone, so nothing about a tombstone is staged.
+        #expect(try Self.stagedDeletedAt(resource: "content.category_items", in: harness) == .absent)
+    }
+
+    /// How `deleted_at` appears in the single staged payload a resource has in
+    /// the sync outbox. The revive path turns on the difference between the
+    /// two: an explicit JSON `null` tells adh to clear the tombstone, while a
+    /// key that was never sent leaves the server's row alone.
+    private enum StagedDeletedAt: Equatable {
+        case absent
+        case null
+        case stamp(String)
+    }
+
+    private static func stagedDeletedAt(
+        resource: String, in harness: MarkdownStore
+    ) throws -> StagedDeletedAt {
+        let payload = try harness.database.read { conn in
+            try String.fetchOne(
+                conn, sql: "SELECT payload FROM _sync_outbox WHERE resource = ?",
+                arguments: [resource])
+        }
+        guard let payload,
+              let fields = try JSONSerialization.jsonObject(
+                with: Data(payload.utf8)) as? [String: Any],
+              let value = fields["deleted_at"]
+        else { return .absent }
+        if let stamp = value as? String { return .stamp(stamp) }
+        return .null
+    }
 }
