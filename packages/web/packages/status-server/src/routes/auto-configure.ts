@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
-import type { Db } from '../libsql/client';
+import type { StatusConfig } from '../config/port';
 import type { Tier } from '../middleware/auth';
 import { requireAdmin } from '../middleware/auth';
 import type { EndpointRow, Storage } from '../storage/ports';
@@ -160,7 +160,7 @@ export type AutoConfigureInput = z.infer<typeof autoConfigureBody>;
  * POST /auto-configure AND the run_auto_configure MCP tool, so both drive the engine
  * identically and can never diverge.
  */
-export async function performAutoConfigure(db: Db, storage: Storage, { ignore, create }: AutoConfigureInput) {
+export async function performAutoConfigure(storage: Storage, config: StatusConfig, { ignore, create }: AutoConfigureInput) {
   // 1. Persist the operator's ignores BEFORE enumerating so the fresh classify treats
   //    them as ignored (dropping them from the addable set the project axis acts on).
   if (ignore.length) await storage.config.addIgnoredProjects(ignore);
@@ -172,7 +172,7 @@ export async function performAutoConfigure(db: Db, storage: Storage, { ignore, c
   //    a dead target whose last failed build becomes an unclearable Problem. Fail CLOSED: a
   //    read we couldn't complete (partial page walk, API error) means Vercel contributes
   //    NOTHING this run rather than suggestions from a table we can't vouch for.
-  const { vercel, enumerated, verifiedPlatforms } = await refreshAndEnumerateDeployProjects(db, storage);
+  const { vercel, enumerated, verifiedPlatforms } = await refreshAndEnumerateDeployProjects(storage, config);
 
   // 3. Enrich with wired/ignored flags, then classify — the SAME model /deploy-projects and
   //    the banner derive from.
@@ -245,7 +245,7 @@ export async function performAutoConfigure(db: Db, storage: Storage, { ignore, c
   };
 }
 
-export function autoConfigureRoutes(db: Db, storage: Storage): Hono<{ Variables: { tier: Tier } }> {
+export function autoConfigureRoutes(storage: Storage, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
 
   // requireAdmin is applied PER-ROUTE (not blanket `use('*')`): this sub-app mounts at the
@@ -258,7 +258,7 @@ export function autoConfigureRoutes(db: Db, storage: Storage): Hono<{ Variables:
     });
     const parsed = autoConfigureBody.safeParse(raw);
     if (!parsed.success) throw new HTTPException(400, { message: `Invalid request body: ${String(parsed.error)}` });
-    return c.json(await performAutoConfigure(db, storage, parsed.data));
+    return c.json(await performAutoConfigure(storage, config, parsed.data));
   });
 
   return app;

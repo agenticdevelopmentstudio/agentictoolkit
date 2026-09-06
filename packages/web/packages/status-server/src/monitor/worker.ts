@@ -1,5 +1,5 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { openLibsql, tuneDbForConcurrency } from "../libsql/client";
+import { openLibsql, tuneDbForConcurrency, type LibsqlConnection } from "../libsql/client";
 import { attachCooldownState } from "@agentic-toolkit/deploy-platform/cooldown";
 import { createLibsqlStorage } from "../libsql";
 import { runMonitorCycle } from "./cycle-runner";
@@ -19,7 +19,7 @@ if (!port) throw new Error("monitor worker must be spawned via worker_threads (s
 // Fail fast on a malformed spawn rather than surfacing a confusing crash deep inside
 // openLibsql/runMonitorCycle: `db`/`config` are the two things the client MUST supply
 // (see MonitorWorkerData) and a missing one means the client itself is broken.
-const { db: conn, config, cooldowns } = (workerData ?? {}) as Partial<MonitorWorkerData>;
+const { db: conn, config, cooldowns } = (workerData ?? {}) as Partial<MonitorWorkerData<LibsqlConnection>>;
 if (!conn?.url) throw new Error("monitor worker spawned without workerData.db.url (see MonitorWorkerData)");
 if (!config) throw new Error("monitor worker spawned without workerData.config (see MonitorWorkerData)");
 
@@ -37,7 +37,7 @@ const storage = createLibsqlStorage(db, conn);
 port.on("message", (msg: CycleRequest) => {
   void (async (): Promise<void> => {
     try {
-      await runMonitorCycle(db, storage, { fullSync: msg.fullSync, config });
+      await runMonitorCycle(storage, { fullSync: msg.fullSync, config });
       port.postMessage({ seq: msg.seq, ok: true } satisfies CycleReply);
     } catch (err) {
       port.postMessage({

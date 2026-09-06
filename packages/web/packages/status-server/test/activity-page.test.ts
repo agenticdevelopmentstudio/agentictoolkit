@@ -71,10 +71,10 @@ describe("issues indexes", () => {
 
 describe("readActivityPage", () => {
   it("with no cursor serves the newest page, whose tail is exactly board.activity", async () => {
-    const { db, storage } = await seedActivityFixture();
+    const { storage } = await seedActivityFixture();
     const nowMs = Date.now();
-    const board = deriveBoard(await readBoardFacts(db, storage, nowMs, testConfig()), nowMs);
-    const page = await readActivityPage(db, storage, nowMs, testConfig(), { cursor: null, limit: 300 });
+    const board = deriveBoard(await readBoardFacts(storage, nowMs, testConfig()), nowMs);
+    const page = await readActivityPage(storage, nowMs, testConfig(), { cursor: null, limit: 300 });
 
     // Both lists read oldest-first, so the live board is the page's newest TAIL. They are
     // deliberately not equal: the page has no 24h floor, which is the feature — it also
@@ -87,9 +87,9 @@ describe("readActivityPage", () => {
   });
 
   it("returns rows from 40 days ago — the reported bug", async () => {
-    const { db, storage, ancientAtMs } = await seedActivityFixture();
+    const { storage, ancientAtMs } = await seedActivityFixture();
     const nowMs = Date.now();
-    const first = await readActivityPage(db, storage, nowMs, testConfig(), { cursor: null, limit: 5 });
+    const first = await readActivityPage(storage, nowMs, testConfig(), { cursor: null, limit: 5 });
     expect(first.nextCursor).not.toBeNull();
 
     // Walk back until the 40-day-old row appears, or the facts run out. Both halves are
@@ -100,7 +100,7 @@ describe("readActivityPage", () => {
     const seen: string[] = [];
     const seenIds: string[] = [];
     for (let i = 0; i < 50 && cursor != null; i++) {
-      const page = await readActivityPage(db, storage, nowMs, testConfig(), { cursor, limit: 5 });
+      const page = await readActivityPage(storage, nowMs, testConfig(), { cursor, limit: 5 });
       seen.push(...page.rows.map((r) => r.at));
       seenIds.push(...page.rows.map((r) => r.id));
       cursor = page.nextCursor;
@@ -110,12 +110,12 @@ describe("readActivityPage", () => {
   });
 
   it("reports exhaustion when the facts run out", async () => {
-    const { db, storage } = await seedActivityFixture();
+    const { storage } = await seedActivityFixture();
     const nowMs = Date.now();
-    let cursor = (await readActivityPage(db, storage, nowMs, testConfig(), { cursor: null, limit: 5 })).nextCursor;
+    let cursor = (await readActivityPage(storage, nowMs, testConfig(), { cursor: null, limit: 5 })).nextCursor;
     let last: Awaited<ReturnType<typeof readActivityPage>> | null = null;
     for (let i = 0; i < 100 && cursor != null; i++) {
-      last = await readActivityPage(db, storage, nowMs, testConfig(), { cursor, limit: 5 });
+      last = await readActivityPage(storage, nowMs, testConfig(), { cursor, limit: 5 });
       cursor = last.nextCursor;
     }
     expect(last?.nextCursor).toBeNull();
@@ -146,12 +146,12 @@ describe("readActivityPage", () => {
     );
 
     const nowMs = Date.now();
-    const first = await readActivityPage(db, storage, nowMs, testConfig(), { cursor: null, limit: 300 });
+    const first = await readActivityPage(storage, nowMs, testConfig(), { cursor: null, limit: 300 });
     expect(first.rows).toHaveLength(300);
     // The page filled, so there is provably more behind it whatever the sources said.
     expect(first.nextCursor).not.toBeNull();
 
-    const second = await readActivityPage(db, storage, nowMs, testConfig(), { cursor: first.nextCursor, limit: 300 });
+    const second = await readActivityPage(storage, nowMs, testConfig(), { cursor: first.nextCursor, limit: 300 });
     expect(second.rows.length).toBeGreaterThan(0);
     const firstIds = new Set(first.rows.map((r) => r.id));
     expect(second.rows.every((r) => !firstIds.has(r.id))).toBe(true);
@@ -178,7 +178,7 @@ describe("readActivityPage", () => {
     const nowMs = Date.now();
     const seen = new Map<string, string>();
     const readIds: string[] = [];
-    let page = await readActivityPage(db, storage, nowMs, testConfig(), { cursor: null, limit: 3 });
+    let page = await readActivityPage(storage, nowMs, testConfig(), { cursor: null, limit: 3 });
     const absorb = (rows: { id: string; at: string }[]) => {
       for (const r of rows) {
         readIds.push(r.id);
@@ -188,7 +188,7 @@ describe("readActivityPage", () => {
     absorb(page.rows);
     let cursor = page.nextCursor;
     for (let i = 0; i < 60 && cursor != null; i++) {
-      page = await readActivityPage(db, storage, nowMs, testConfig(), { cursor, limit: 3 });
+      page = await readActivityPage(storage, nowMs, testConfig(), { cursor, limit: 3 });
       absorb(page.rows);
       cursor = page.nextCursor;
     }
@@ -225,15 +225,15 @@ describe("readActivityPage", () => {
       })),
     );
 
-    const page = await readActivityPage(db, storage, Date.now(), testConfig(), { cursor: null, limit: 5 });
+    const page = await readActivityPage(storage, Date.now(), testConfig(), { cursor: null, limit: 5 });
     expect(page.rows.length).toBeGreaterThan(0);
     expect(page.rows.every((r) => !r.target.startsWith("ep-gone"))).toBe(true);
   });
 
   it("finds an issue that opened before the window and resolved inside it", async () => {
-    const { db, storage } = await seedActivityFixture();
+    const { storage } = await seedActivityFixture();
     const nowMs = Date.now();
-    const page = await readActivityPage(db, storage, nowMs, testConfig(), { cursor: null, limit: 300 });
+    const page = await readActivityPage(storage, nowMs, testConfig(), { cursor: null, limit: 300 });
     expect(page.rows.some((r) => r.id.startsWith("issue:") && r.verb.endsWith("resolved"))).toBe(true);
   });
 });

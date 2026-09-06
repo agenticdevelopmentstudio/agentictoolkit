@@ -39,7 +39,7 @@ describe('MCP deploy-project tools re-verify the project mirror', () => {
     account.add('mcp-live');
     await db.insert(deployProjectMeta).values({ platform: 'vercel', projectName: 'mcp-ghost', domain: 'ghost.example.test' });
 
-    const out = (await tool('list_platform_projects').execute(db, storage, {}, testConfig())) as { projectName: string }[];
+    const out = (await tool('list_platform_projects').execute(storage, {}, testConfig())) as { projectName: string }[];
 
     expect(out.map((p) => p.projectName)).toEqual(['mcp-live']);
     // The refresh corrected the mirror itself, exactly as the REST read does.
@@ -50,7 +50,7 @@ describe('MCP deploy-project tools re-verify the project mirror', () => {
     account.add('mcp-live');
     await db.insert(deployProjectMeta).values({ platform: 'vercel', projectName: 'mcp-ghost', domain: 'ghost.example.test' });
 
-    const out = (await tool('find_unconfigured_sites').execute(db, storage, {}, testConfig())) as {
+    const out = (await tool('find_unconfigured_sites').execute(storage, {}, testConfig())) as {
       pending: { projectName: string }[];
       addable: { projectName: string }[];
     };

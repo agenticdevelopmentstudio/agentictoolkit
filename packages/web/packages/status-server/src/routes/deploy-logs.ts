@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { eq } from 'drizzle-orm';
-import type { Db } from '../libsql/client';
 import type { Tier } from '../middleware/auth';
-import { deployments } from '../libsql/schema';
-import { providerConnFromConfig, type ProviderConn } from '@agentic-toolkit/deploy-platform/conn';
+import type { StatusConfig } from '../config/port';
+import type { Storage } from '../storage/ports';
+import { type ProviderConn } from '@agentic-toolkit/deploy-platform/conn';
+import { providerConn } from '../monitor/provider-conn';
 import { fetchVercelBuildLog } from '../monitor/fetch-vercel';
 import { fetchRailwayBuildLog } from '../monitor/fetch-railway';
 
@@ -51,27 +51,17 @@ async function fetchLogFor(
  *  response — but still bounded, so a hung provider can't pin the handler. */
 const LOG_TIMEOUT_MS = 25_000;
 
-export function deployLogRoutes(db: Db): Hono<{ Variables: { tier: Tier } }> {
+export function deployLogRoutes(storage: Storage, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
 
   app.get('/deployments/:id/log', async (c) => {
     const id = c.req.param('id');
-    const [row] = await db
-      .select({
-        id: deployments.id,
-        platform: deployments.platform,
-        projectName: deployments.projectName,
-        environment: deployments.environment,
-        errorText: deployments.errorText,
-      })
-      .from(deployments)
-      .where(eq(deployments.id, id))
-      .limit(1);
+    const row = await storage.deploy.findById(id);
     // A 404 here means "no such deployment in the monitored feed" — a real client
     // error worth distinguishing from a deployment that exists but has no log.
     if (!row) throw new HTTPException(404, { message: `Unknown deployment: ${id}` });
 
-    const conn = await providerConnFromConfig(db);
+    const conn = await providerConn(storage, config);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), LOG_TIMEOUT_MS);
     let log: string | null;

@@ -15,6 +15,11 @@ import { createDeployStore } from "./stores/deploy-store";
 import { createIssueStore } from "./stores/issue-store";
 import { createObservationStore } from "./stores/observation-store";
 import { createMaintenanceStore } from "./stores/maintenance-store";
+import { createBoardStore } from "./stores/board-store";
+import { createHistoryStore } from "./stores/history-store";
+import { createDeviceStore } from "./stores/device-store";
+import { createPeerStore } from "./stores/peer-store";
+import { createTelemetryStore } from "./stores/telemetry-store";
 
 /**
  * Build the full `Storage` port over one connection — the libSQL adapter a host
@@ -36,5 +41,10 @@ export function createLibsqlStorage(db: Db, conn?: LibsqlConnection): Storage {
     issues: createIssueStore(db),
     observations: createObservationStore(db),
     maintenance: createMaintenanceStore(db, conn),
+    board: createBoardStore(db),
+    history: createHistoryStore(db),
+    device: createDeviceStore(db),
+    peers: createPeerStore(db),
+    telemetry: createTelemetryStore(db),
   };
 }

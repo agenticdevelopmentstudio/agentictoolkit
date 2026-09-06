@@ -101,13 +101,13 @@ describe('latestCheckBySlug', () => {
         { serviceSlug: 'ep-deleted', status: 'down', responseTimeMs: null, statusCode: 500, checkedAt: new Date() },
       ]);
 
-      const facts = await readBoardFacts(db, createLibsqlStorage(db), Date.now(), testConfig());
+      const facts = await readBoardFacts(createLibsqlStorage(db), Date.now(), testConfig());
       expect(facts.endpoints.map((e) => e.endpointId)).toEqual(['ep-1']);
     });
 
     it('SEEKS per slug, exactly like the route read — same statement, same plan', async () => {
       await seedRoster(db);
-      const facts = await readBoardFacts(db, createLibsqlStorage(db), Date.now(), testConfig());
+      const facts = await readBoardFacts(createLibsqlStorage(db), Date.now(), testConfig());
       // Drive the EXPLAIN from the slug list the board actually assembled, so this
       // cannot pass against a list no caller would ever produce.
       const slugs = facts.roster.filter((e) => e.isActive).map((e) => e.endpointId);

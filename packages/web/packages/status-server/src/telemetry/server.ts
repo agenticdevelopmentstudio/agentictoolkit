@@ -1,20 +1,16 @@
-import type { Db } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
 import { glitchtipConfigured, posthogConfigured } from "../config/port";
 import type { Storage } from "../storage/ports";
 import { collect } from "./collect";
 import { glitchtipFetcher } from "./fetchers/glitchtip";
 import { posthogFetcher } from "./fetchers/posthog";
-import { errorsStore } from "./stores/errors";
-import { analyticsStore } from "./stores/analytics";
 import type { Fetcher } from "./ports";
 import type { AnalyticsMetricDTO, ErrorDTO } from "./types";
 
 // THE server composition root — the single place that picks which provider feeds
-// each stream and which store persists/serves it. Swap a store here and every
-// trigger (the scheduler cycle) and read route that uses it follows; nothing else
-// changes. Server-only: imported by routes + the scheduler cycle, never by client
-// code (the stores pull in the db schema).
+// each stream. Which store persists/serves it is decided at the STORAGE
+// composition root (`../libsql/index.ts`) and handed in via `Storage.telemetry`;
+// this module never reaches for one itself.
 
 /** Build the errors-stream fetcher from the given config — no module-level env
  *  snapshot, so a test (or a config change) is never stuck with a fetcher built
@@ -36,15 +32,12 @@ export function buildAnalyticsFetcher(config: StatusConfig): Fetcher<AnalyticsMe
   });
 }
 
-// The stores take the db handle as a parameter (this backend has no db
-// singleton) — the routes/scheduler pass it in. Re-exported for the read routes.
-export { errorsStore, analyticsStore };
-
 /** The in-process replacement for the old /api/cron/errors + /api/cron/analytics
  *  Vercel crons: poll each configured provider and persist into the SQLite trend
- *  store. GUARDED (skips a provider whose credentials are unset) + fail-soft (each
- *  in its own try/catch) so a provider outage can never abort the scheduler cycle. */
-export async function collectTelemetry(db: Db, storage: Storage, config: StatusConfig): Promise<void> {
+ *  store (`storage.telemetry`). GUARDED (skips a provider whose credentials are
+ *  unset) + fail-soft (each in its own try/catch) so a provider outage can never
+ *  abort the scheduler cycle. */
+export async function collectTelemetry(storage: Storage, config: StatusConfig): Promise<void> {
   const gtConfigured = glitchtipConfigured(config);
   const errorsFetcher = buildErrorsFetcher(config);
   const analyticsFetcher = buildAnalyticsFetcher(config);
@@ -54,7 +47,7 @@ export async function collectTelemetry(db: Db, storage: Storage, config: StatusC
   // Each still swallows its own error so one provider's outage can't abort the other.
   const [errorsReachable] = await Promise.all([
     gtConfigured
-      ? collect(errorsFetcher, errorsStore, db)
+      ? collect(errorsFetcher, storage.telemetry.errors)
           .then((r) => r.ok)
           .catch((err) => {
             console.error("[telemetry] errors collection failed", err);
@@ -65,7 +58,7 @@ export async function collectTelemetry(db: Db, storage: Storage, config: StatusC
         // `configured:false, reachable:true`.
         Promise.resolve(true),
     posthogConfigured(config)
-      ? collect(analyticsFetcher, analyticsStore, db).catch((err) =>
+      ? collect(analyticsFetcher, storage.telemetry.analytics).catch((err) =>
           console.error("[telemetry] analytics collection failed", err),
         )
       : Promise.resolve(),

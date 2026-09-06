@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { Db } from '../src/libsql/client';
 import type { Scheduler } from '../src/scheduler';
 import type { Storage } from '../src/storage/ports';
 import { createApp } from '../src/app';
@@ -12,13 +11,13 @@ import { normHonoPath } from '../src/openapi/route-key';
 import { PERMANENTLY_UNDOCUMENTED } from './openapi-exclusions';
 import { testConfig } from './helpers/config';
 
-// Registration never touches the db/scheduler (only handlers do), so stubs are
+// Registration never touches storage/scheduler (only handlers do), so stubs are
 // enough to read app.routes and build the spec. A truthy scheduler ensures the
 // conditionally-mounted /cron/* routes are present (they're gated on opts.scheduler).
 const config = testConfig();
 const storage = {} as unknown as Storage;
 const auth = createDefaultAuthGate(storage, config);
-const app = createApp({ db: {} as unknown as Db, storage, scheduler: {} as unknown as Scheduler, config, auth });
+const app = createApp({ storage, scheduler: {} as unknown as Scheduler, config, auth });
 const spec = buildOpenApiSpec(app, config.appVersion) as {
   openapi: string;
   components: { securitySchemes: Record<string, { scheme: string }> };
@@ -78,11 +77,11 @@ describe('OpenAPI spec stays in sync with the routes', () => {
   it('the committed openapi.json matches a fresh build (re-run: pnpm openapi:dump)', () => {
     // The tracked websites/main/openapi.json is what `pnpm openapi:dump` writes;
     // this pins it to the code so it can never silently drift. dump-openapi.ts builds
-    // with NO scheduler (createApp({ db, storage, config })), so the committed artifact omits the
+    // with NO scheduler (createApp({ storage, config })), so the committed artifact omits the
     // scheduler-gated /cron/* routes — build it the SAME way here for an apples-to-
     // apples compare. (The drift guard above still covers /cron via the scheduler-
     // stubbed `app`, so cron isn't left unchecked.)
-    const dumpSpec = buildOpenApiSpec(createApp({ db: {} as unknown as Db, storage, config, auth }), config.appVersion);
+    const dumpSpec = buildOpenApiSpec(createApp({ storage, config, auth }), config.appVersion);
     const committedPath = resolve(dirname(fileURLToPath(import.meta.url)), '../openapi.json');
     const committed = JSON.parse(readFileSync(committedPath, 'utf8')) as { info: Record<string, unknown> };
     // info.version derives from APP_VERSION at build time — normalize it so this

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
 import type { Tier } from '../middleware/auth';
 import type { Storage } from '../storage/ports';
@@ -28,7 +27,7 @@ import { autoConfigureBody, performAutoConfigure } from '../routes/auto-configur
 import { roleBody } from '../routes/users';
 import { reconcileBoardLedger } from '../board';
 import { siteLinks } from '../lib/links';
-import { collectTelemetry, errorsStore, analyticsStore } from '../telemetry/server';
+import { collectTelemetry } from '../telemetry/server';
 import { assembleFleet } from '../peers/fleet';
 
 // ---------------------------------------------------------------------------
@@ -59,7 +58,7 @@ export interface McpTool {
    *  platform config, peer topology). Writes are admin-gated by `!readOnly` already. */
   adminOnly?: boolean;
   inputSchema: z.ZodRawShape;
-  execute(db: Db, storage: Storage, args: Record<string, unknown>, config: StatusConfig): Promise<unknown>;
+  execute(storage: Storage, args: Record<string, unknown>, config: StatusConfig): Promise<unknown>;
 }
 
 /** A tool the view tier may NOT use: any write, or a read whose REST route is admin-only.
@@ -87,66 +86,66 @@ const READ_TOOLS: McpTool[] = [
     description: 'Overall status rollup plus per-service statuses and the open-issue list (the /snapshot payload).',
     readOnly: true,
     inputSchema: {},
-    execute: (db, storage, _args, config) => buildSnapshot(db, storage, config),
+    execute: (storage, _args, config) => buildSnapshot(storage, config),
   },
   {
     name: 'get_problems',
     description: 'Every currently-open issue (health, deploy, stale-prod, platform), newest-first.',
     readOnly: true,
     inputSchema: {},
-    execute: async (db, storage, _args, config) => boardProblems(db, storage, config),
+    execute: async (storage, _args, config) => boardProblems(storage, config),
   },
   {
     name: 'get_issue',
     description: 'The single open issue for a target key (endpoint slug or deploy target), or null if none is open.',
     readOnly: true,
     inputSchema: { target: z.string() },
-    execute: async (db, storage, args, config) =>
-      (await boardProblems(db, storage, config)).find((p) => p.target === (args.target as string)) ?? null,
+    execute: async (storage, args, config) =>
+      (await boardProblems(storage, config)).find((p) => p.target === (args.target as string)) ?? null,
   },
   {
     name: 'get_uptime',
     description: 'Per-endpoint daily uptime over the last N days (default 90, clamped 1-365).',
     readOnly: true,
     inputSchema: { days: z.number().int().optional() },
-    execute: (db, storage, args) => buildUptime(db, storage, clampInt((args.days as number | undefined) ?? 90, 1, 365)),
+    execute: (storage, args) => buildUptime(storage, clampInt((args.days as number | undefined) ?? 90, 1, 365)),
   },
   {
     name: 'query_history',
     description: "One endpoint's health-check samples over the last N hours (default 24, clamped 1-168).",
     readOnly: true,
     inputSchema: { slug: z.string(), hours: z.number().int().optional() },
-    execute: (db, _storage, args) => queryHistory(db, args.slug as string, clampInt((args.hours as number | undefined) ?? 24, 1, 168)),
+    execute: (storage, args) => queryHistory(storage, args.slug as string, clampInt((args.hours as number | undefined) ?? 24, 1, 168)),
   },
   {
     name: 'get_telemetry_summary',
     description: 'Latest persisted error groups and analytics metrics (the last telemetry-collection pass).',
     readOnly: true,
     inputSchema: {},
-    execute: async (db) => ({ errors: await errorsStore.load(db), analytics: await analyticsStore.load(db) }),
+    execute: async (storage) => ({ errors: await storage.telemetry.errors.load(), analytics: await storage.telemetry.analytics.load() }),
   },
   {
     name: 'list_errors',
     description: 'The open error groups from the last telemetry-collection pass.',
     readOnly: true,
     inputSchema: {},
-    execute: (db) => errorsStore.load(db),
+    execute: (storage) => storage.telemetry.errors.load(),
   },
   {
     name: 'get_analytics',
     description: 'The latest analytics metric per metric/window/scope from the last telemetry-collection pass.',
     readOnly: true,
     inputSchema: {},
-    execute: (db) => analyticsStore.load(db),
+    execute: (storage) => storage.telemetry.analytics.load(),
   },
   {
     name: 'get_fleet',
     description: "This monitor's compact snapshot plus the latest stored snapshot per configured peer, annotated with freshness.",
     readOnly: true,
     inputSchema: {},
-    execute: async (db, storage, _args, config) => {
-      const snap = await buildSnapshot(db, storage, config);
-      return assembleFleet(db, { label: config.monitorLabel, snapshot: snap, overall: snap.overall });
+    execute: async (storage, _args, config) => {
+      const snap = await buildSnapshot(storage, config);
+      return assembleFleet(storage, { label: config.monitorLabel, snapshot: snap, overall: snap.overall });
     },
   },
   {
@@ -155,7 +154,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // Only REST twin is GET /config/sites (admin) — raw SiteRow config, not the /status DTO.
     inputSchema: {},
-    execute: (_db, storage) => storage.config.listSites(),
+    execute: (storage) => storage.config.listSites(),
   },
   {
     name: 'get_site',
@@ -163,7 +162,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // Only REST twins are GET /config/sites + /config/endpoints (admin) — raw Site/EndpointRow.
     inputSchema: { id: z.string() },
-    execute: async (_db, storage, args) => {
+    execute: async (storage, args) => {
       const id = args.id as string;
       const site = (await storage.config.listSites()).find((s) => s.id === id);
       if (!site) throw new Error('site not found');
@@ -176,7 +175,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // Only REST twin is GET /config/site-groups (admin) — raw GroupRow (retention, empty groups).
     inputSchema: {},
-    execute: (_db, storage) => storage.config.listSiteGroups(),
+    execute: (storage) => storage.config.listSiteGroups(),
   },
   {
     name: 'list_platforms',
@@ -184,7 +183,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // REST /config/integrations is admin-only — infra config, not viewer-visible.
     inputSchema: {},
-    execute: (_db, storage) => storage.config.listIntegrations(),
+    execute: (storage) => storage.config.listIntegrations(),
   },
   {
     name: 'list_platform_projects',
@@ -194,14 +193,15 @@ const READ_TOOLS: McpTool[] = [
     // Same read as GET /deploy-projects: re-verify the Vercel project table, THEN enumerate.
     // Uncached (a tool call is rare and always deliberate), but the same function, so the
     // twins can't report different project sets.
-    execute: async (db, storage) => buildDeployProjects(storage, (await refreshAndEnumerateDeployProjects(db, storage)).enumerated),
+    execute: async (storage, _args, config) => buildDeployProjects(storage, (await refreshAndEnumerateDeployProjects(storage, config)).enumerated),
   },
   {
     name: 'find_unconfigured_sites',
     description: 'The configuration gaps: pending/addable deploy projects and monitored endpoints not wired to a project.',
     readOnly: true,
     inputSchema: {},
-    execute: async (db, storage) => findUnconfiguredSites(db, storage, (await refreshAndEnumerateDeployProjects(db, storage)).enumerated),
+    execute: async (storage, _args, config) =>
+      findUnconfiguredSites(storage, (await refreshAndEnumerateDeployProjects(storage, config)).enumerated),
   },
   {
     name: 'list_users',
@@ -209,14 +209,14 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // REST /users is admin-only — roster PII, not viewer-visible.
     inputSchema: {},
-    execute: (_db, storage) => storage.auth.listUsers(),
+    execute: (storage) => storage.auth.listUsers(),
   },
   {
     name: 'get_links',
     description: 'Per active endpoint: its live URL and deploy-platform dashboard link.',
     readOnly: true,
     inputSchema: {},
-    execute: async (_db, storage, _args, config) => {
+    execute: async (storage, _args, config) => {
       const eps = await storage.config.listActiveEndpoints();
       const platformMeta = platformMetaFromConfig(config);
       return eps.map((e) => ({
@@ -235,7 +235,7 @@ const READ_TOOLS: McpTool[] = [
     readOnly: true,
     adminOnly: true, // REST /config/peers is admin-only — peer topology, not viewer-visible.
     inputSchema: {},
-    execute: async (_db, storage) => (await storage.config.listPeers()).map(redactPeer),
+    execute: async (storage) => (await storage.config.listPeers()).map(redactPeer),
   },
 ];
 
@@ -245,14 +245,14 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Create a monitored site under a group.',
     readOnly: false,
     inputSchema: monitoredSiteInsert.shape,
-    execute: (_db, storage, args) => storage.config.createSite(monitoredSiteInsert.parse(args)),
+    execute: (storage, args) => storage.config.createSite(monitoredSiteInsert.parse(args)),
   },
   {
     name: 'update_site',
     description: 'Update a monitored site by id.',
     readOnly: false,
     inputSchema: siteUpdateArgs.shape,
-    execute: async (_db, storage, args) => {
+    execute: async (storage, args) => {
       const { id, ...patch } = siteUpdateArgs.parse(args);
       const row = await storage.config.updateSite(id, patch);
       if (!row) throw new Error('site not found');
@@ -264,9 +264,9 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Delete a monitored site (purges its endpoints, history, and issues).',
     readOnly: false,
     inputSchema: idArgs.shape,
-    execute: async (db, storage, args, config) => {
+    execute: async (storage, args, config) => {
       await storage.config.deleteSite(idArgs.parse(args).id);
-      await reconcileBoardLedger(db, storage, config);
+      await reconcileBoardLedger(storage, config);
       return { ok: true };
     },
   },
@@ -275,14 +275,14 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Create a site group.',
     readOnly: false,
     inputSchema: siteGroupInsert.shape,
-    execute: (_db, storage, args) => storage.config.createGroup(siteGroupInsert.parse(args)),
+    execute: (storage, args) => storage.config.createGroup(siteGroupInsert.parse(args)),
   },
   {
     name: 'update_group',
     description: 'Update a site group by id.',
     readOnly: false,
     inputSchema: groupUpdateArgs.shape,
-    execute: async (_db, storage, args) => {
+    execute: async (storage, args) => {
       const { id, ...patch } = groupUpdateArgs.parse(args);
       const row = await storage.config.updateGroup(id, patch);
       if (!row) throw new Error('group not found');
@@ -294,9 +294,9 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Delete a site group (cascades to its sites/endpoints and purges their history + issues).',
     readOnly: false,
     inputSchema: idArgs.shape,
-    execute: async (db, storage, args, config) => {
+    execute: async (storage, args, config) => {
       await storage.config.deleteGroup(idArgs.parse(args).id);
-      await reconcileBoardLedger(db, storage, config);
+      await reconcileBoardLedger(storage, config);
       return { ok: true };
     },
   },
@@ -305,14 +305,14 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Create a deploy-platform integration.',
     readOnly: false,
     inputSchema: deployIntegrationInsert.shape,
-    execute: (_db, storage, args) => storage.config.createIntegration(deployIntegrationInsert.parse(args)),
+    execute: (storage, args) => storage.config.createIntegration(deployIntegrationInsert.parse(args)),
   },
   {
     name: 'update_platform',
     description: 'Update a deploy-platform integration by id.',
     readOnly: false,
     inputSchema: platformUpdateArgs.shape,
-    execute: async (_db, storage, args) => {
+    execute: async (storage, args) => {
       const { id, ...patch } = platformUpdateArgs.parse(args);
       const row = await storage.config.updateIntegration(id, patch);
       if (!row) throw new Error('integration not found');
@@ -324,7 +324,7 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Delete a deploy-platform integration by id.',
     readOnly: false,
     inputSchema: idArgs.shape,
-    execute: async (db, storage, args, config) => {
+    execute: async (storage, args, config) => {
       // `deleteIntegration` clears `platform_health_state.configured` for the platform it
       // was the last active integration for, in the same transaction — that is what makes
       // the sweep below true rather than decorative (`platformProblems` reads that column).
@@ -332,7 +332,7 @@ const WRITE_TOOLS: McpTool[] = [
       // Same inline sweep as delete_site / delete_group and DELETE /config/integrations/:id:
       // the platform is no longer configured, so its open ledger rows can no longer be
       // re-derived and would otherwise sit open (and alert-deduped) until the next cycle.
-      await reconcileBoardLedger(db, storage, config);
+      await reconcileBoardLedger(storage, config);
       return { ok: true };
     },
   },
@@ -341,16 +341,16 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Run the server-side Auto Configure pass (enumerate → classify → match/create → wire). Optionally ignore projects and create missing sites in a group.',
     readOnly: false,
     inputSchema: autoConfigureBody.shape,
-    execute: (db, storage, args) => performAutoConfigure(db, storage, autoConfigureBody.parse(args)),
+    execute: (storage, args, config) => performAutoConfigure(storage, config, autoConfigureBody.parse(args)),
   },
   {
     name: 'configure_telemetry',
     description: 'Trigger a telemetry-collection pass (poll the configured error/analytics providers and persist their latest summaries), then return the fresh summary.',
     readOnly: false,
     inputSchema: {},
-    execute: async (db, storage, _args, config) => {
-      await collectTelemetry(db, storage, config);
-      return { collected: true, errors: await errorsStore.load(db), analytics: await analyticsStore.load(db) };
+    execute: async (storage, _args, config) => {
+      await collectTelemetry(storage, config);
+      return { collected: true, errors: await storage.telemetry.errors.load(), analytics: await storage.telemetry.analytics.load() };
     },
   },
   {
@@ -358,7 +358,7 @@ const WRITE_TOOLS: McpTool[] = [
     description: "Set a user's role (pending/viewer/admin). Refuses to demote the last admin.",
     readOnly: false,
     inputSchema: userUpdateArgs.shape,
-    execute: async (_db, storage, args) => {
+    execute: async (storage, args) => {
       const { id, role } = userUpdateArgs.parse(args);
       const updated = await storage.auth.setUserRoleGuarded(id, role);
       if (updated === undefined) throw new Error('user not found');
@@ -373,7 +373,7 @@ const WRITE_TOOLS: McpTool[] = [
     inputSchema: peerInsert.shape,
     // The same duplicate → readable sentence the HTTP POST maps to a 409. An agent
     // that hits `uniq_peer_base_url` should read why, not a driver's constraint text.
-    execute: async (_db, storage, args, config) => {
+    execute: async (storage, args, config) => {
       const data = peerInsert.parse(args);
       if (isSelfPeerUrl(data.baseUrl, config)) {
         throw new Error('baseUrl is this monitor’s own URL — a monitor is already in its own fleet view');
@@ -391,7 +391,7 @@ const WRITE_TOOLS: McpTool[] = [
     description: 'Remove a fleet peer by id.',
     readOnly: false,
     inputSchema: idArgs.shape,
-    execute: async (_db, storage, args) => {
+    execute: async (storage, args) => {
       await storage.config.deletePeer(idArgs.parse(args).id);
       return { ok: true };
     },

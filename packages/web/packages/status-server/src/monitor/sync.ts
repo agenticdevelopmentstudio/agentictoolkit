@@ -1,12 +1,12 @@
-import type { Db } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
 import type { ConfiguredEndpoint, Storage } from "../storage/ports";
 import { probeEndpoints } from "./probe";
-import { matchRosterEntry, readRoster, reconcileBoardLedger, rosterTargets } from "../board";
+import { matchRosterEntry, reconcileBoardLedger, rosterTargets } from "../board";
+import type { RosterEntry } from "../board/types";
 import type { PlatformObservationInput } from "../storage/ports";
-import { providerConnFromConfig, type ProviderConn } from "@agentic-toolkit/deploy-platform/conn";
+import { type ProviderConn } from "@agentic-toolkit/deploy-platform/conn";
 import { endpointsClaimedByNothing, platformCanon } from "@agentic-toolkit/deploy-platform";
-import { enumerateDeployProjectsVerified } from "@agentic-toolkit/deploy-platform/enumerate";
+import { enumerateDeployProjects, providerConn } from "./provider-conn";
 import { fetchVercelDeployments } from "./fetch-vercel";
 import { fetchVercelProductionStates, type VercelProjectsResult } from "./fetch-vercel-projects";
 import { syncVercelProjectMeta } from "./refresh-project-meta";
@@ -35,7 +35,7 @@ import { notifyIssueAlert } from "./alerts";
 // already encode network errors as `{ ok: false }`; the guard here additionally
 // catches a thrown error (an unexpected throw inside a fetcher) and turns it into
 // the same `ok: false` shape so the cycle is fail-soft. (dependency-injection:
-// the Db is always passed in; no singleton.)
+// the Storage is always passed in; no singleton.)
 // ---------------------------------------------------------------------------
 
 const EMPTY_DEPLOYS = { ok: false as const, deploys: [] as ProviderDeploy[] };
@@ -240,7 +240,6 @@ function cfg(conn: ProviderConn): {
  * no-op when nothing is in flight.
  */
 export async function runCycle(
-  db: Db,
   storage: Storage,
   config: StatusConfig,
   opts?: { skipDeploys?: boolean },
@@ -311,24 +310,24 @@ export async function runCycle(
   // it is by-id, capped at RECONCILE_MAX_PER_CYCLE, and no-ops on an indexed candidate
   // query whenever nothing is in flight — the steady state — so it costs one small query
   // per tick and only does real work during a deploy burst, which is exactly when the
-  // board goes stale. `providerConnFromConfig` is a small local read (integrations table +
-  // env), not a provider call, so it is safe at this cadence.
+  // board goes stale. `providerConn` is a small local read (the integrations port +
+  // config.credentials), not a provider call, so it is safe at this cadence.
   if (opts?.skipDeploys) {
-    await reconcileVanishedDeploys(storage, await providerConnFromConfig(db));
+    await reconcileVanishedDeploys(storage, await providerConn(storage, config));
     // The fast tick must still write the ledger. applyHttpIssues used to run above this
     // return, and opening an HTTP issue is what pages on-call; folding here keeps
     // probe-to-alert at the probe interval instead of the 5-minute full-sync cadence.
     // Folding the WHOLE board on a probe-only tick is correct and cheap: it reads
     // persisted deploy rows, so it re-derives the same deploy verdicts and writes nothing.
-    await reconcileBoardLedger(db, storage, config, { skipOnEmptyRoster: true });
+    await reconcileBoardLedger(storage, config, { skipOnEmptyRoster: true });
     return;
   }
 
   // --- 6. poll providers (each guarded) ------------------------------------
-  // Connections come from the DB integrations table — non-secret config there,
-  // tokens from env by name. The token presence drives whether a provider is even
-  // polled (and whether it counts as "configured" for platform-health).
-  const conn = await providerConnFromConfig(db);
+  // Connections come from the integrations port — non-secret config there,
+  // tokens from `config.credentials` by name. The token presence drives whether a
+  // provider is even polled (and whether it counts as "configured" for platform-health).
+  const conn = await providerConn(storage, config);
   const has = cfg(conn);
 
   // The live-production-vs-latest-build staleness check (a project frozen on an old
@@ -403,7 +402,7 @@ export async function runCycle(
 
   // Stamp each deploy's live host from its matched monitored endpoint — the
   // EXPLICIT config, not per-platform domain enumeration.
-  const roster = await readRoster(db);
+  const roster = await storage.board.readRoster();
   await stampLiveHosts(storage, roster);
   // The same correlation for the stale-production states, which carry a project NAME and
   // nothing else — so this is the one caller with no id to try first. Routed through
@@ -456,7 +455,7 @@ export async function runCycle(
   // gained by noticing a deleted project seconds sooner. A throw would be a blind pass, not
   // a licence to delete, so it degrades to an unverified enumeration that condemns nothing.
   if (live.length > 0) {
-    const enumerated = await enumerateDeployProjectsVerified(db).catch((err) => {
+    const enumerated = await enumerateDeployProjects(storage, config).catch((err) => {
       console.error("[sync] deploy-project enumeration failed — skipping monitor removal:", err);
       return { projects: [], verifiedPlatforms: [] as string[], verifiedDomains: [] as string[] };
     });
@@ -516,7 +515,7 @@ export async function runCycle(
   // filters on `isActive`. Deactivating every endpoint therefore empties `endpoints` but
   // not `roster` — under the old guard that would freeze every open issue forever. Under
   // the flag it sweeps and Problems empties, which is what switching monitoring off means.
-  await reconcileBoardLedger(db, storage, config, { skipOnEmptyRoster: true });
+  await reconcileBoardLedger(storage, config, { skipOnEmptyRoster: true });
 }
 
 /**
@@ -531,7 +530,7 @@ export async function runCycle(
  * scoping is unchanged; `boardTargetKey` and `deployTargetKey` both carry an env segment
  * for railway only.
  */
-async function stampLiveHosts(storage: Storage, roster: Awaited<ReturnType<typeof readRoster>>): Promise<void> {
+async function stampLiveHosts(storage: Storage, roster: RosterEntry[]): Promise<void> {
   // No account mirror: this caller only needs the ownership MAPS, and narrowing a
   // deleted Vercel project is a Problems decision, not a correlation one. An empty
   // set is `rosterTargets`' documented way to say so — it narrows nothing.

@@ -1,13 +1,8 @@
 import { Hono } from 'hono';
-import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
+import type { Storage } from '../storage/ports';
 import type { Tier } from '../middleware/auth';
-import {
-  buildAnalyticsFetcher,
-  analyticsStore,
-  buildErrorsFetcher,
-  errorsStore,
-} from '../telemetry/server';
+import { buildAnalyticsFetcher, buildErrorsFetcher } from '../telemetry/server';
 import type { Fetcher } from '../telemetry/ports';
 import { cachedSingleFlight } from '@agentic-toolkit/deploy-platform/util';
 import type { AnalyticsMetricDTO, ErrorDTO, TelemetrySnapshot } from '../telemetry/types';
@@ -32,7 +27,7 @@ import type { AnalyticsMetricDTO, ErrorDTO, TelemetrySnapshot } from '../telemet
 const CACHE_TTL_MS = 30_000;
 
 export function telemetryRoutes(
-  db: Db,
+  storage: Storage,
   config: StatusConfig,
   // Injectable for tests (a fetcher built once at call time can't be varied
   // per-case otherwise); production wiring passes nothing.
@@ -77,12 +72,12 @@ export function telemetryRoutes(
   });
 
   app.get('/errors', async (c) => {
-    const errors = await errorsStore.load(db);
+    const errors = await storage.telemetry.errors.load();
     return c.json({ errors }, 200, { 'Cache-Control': 'public, max-age=30' });
   });
 
   app.get('/analytics', async (c) => {
-    const metrics = await analyticsStore.load(db);
+    const metrics = await storage.telemetry.analytics.load();
     return c.json({ metrics }, 200, { 'Cache-Control': 'public, max-age=30' });
   });
 

@@ -69,10 +69,10 @@ describe('cycle-runner heartbeat wiring', () => {
       }),
     );
 
-    await runMonitorCycle(db, storage, { fullSync: false, config: testConfig() });
+    await runMonitorCycle(storage, { fullSync: false, config: testConfig() });
     expect(pings.filter((u) => u.includes('hc.example.com'))).toHaveLength(0);
 
-    await runMonitorCycle(db, storage, { fullSync: true, config: testConfig() });
+    await runMonitorCycle(storage, { fullSync: true, config: testConfig() });
     expect(pings.filter((u) => u.includes('hc.example.com'))).toHaveLength(1);
   });
 
@@ -89,7 +89,7 @@ describe('cycle-runner heartbeat wiring', () => {
         return new Response('ok');
       }),
     );
-    await expect(runMonitorCycle(db, storage, { fullSync: true, config: testConfig() })).rejects.toThrow();
+    await expect(runMonitorCycle(storage, { fullSync: true, config: testConfig() })).rejects.toThrow();
     expect(pings.filter((u) => u.includes('hc.example.com'))).toHaveLength(0);
   });
 });

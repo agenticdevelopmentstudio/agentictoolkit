@@ -1,14 +1,25 @@
 import type { StatusConfig } from '../config/port';
+import type { Store } from '../telemetry/ports';
+import type { AnalyticsMetricDTO, ErrorDTO } from '../telemetry/types';
+import type {
+  DeployFact,
+  ErrorFact,
+  IssueEvent,
+  LedgerEntry,
+  PlatformFact,
+  RosterEntry,
+  StaleProdFact,
+} from '../board/types';
 
 // ---------------------------------------------------------------------------
 // The storage boundary: plain-domain-type interfaces every consumer (routes,
 // monitor, board, MCP tools, peers, telemetry) reads and writes through.
 //
-// NOTHING here imports drizzle-orm, @libsql/*, or a schema/table module — every
-// method signature takes and returns the plain types below, never a `$inferSelect`
-// row alias, a `Db`, or a raw `SQL` fragment. The libSQL implementation of these
-// interfaces (`createLibsqlStorage`) lives under `../libsql/stores/` and is the
-// only place permitted to speak drizzle.
+// NOTHING here imports a query-builder, driver client, or a schema/table module —
+// every method signature takes and returns the plain types below, never a
+// generated row-inference alias, a connection handle, or a raw query fragment.
+// The libSQL implementation of these interfaces (`createLibsqlStorage`) lives
+// under `../libsql/stores/` and is the only place permitted to speak to the driver.
 //
 // Each store is named for the concern the existing code already expresses
 // (Config, Auth, Token, Health, …) rather than an invented grouping. `Storage`
@@ -42,7 +53,7 @@ export interface ConfiguredEndpoint {
   dnsCheckCname?: boolean;
 }
 
-/** A `site_groups` row, as a plain type (was `typeof siteGroups.$inferSelect`). */
+/** A `site_groups` row, as a plain domain type. */
 export interface GroupRow {
   id: string;
   slug: string;
@@ -52,7 +63,7 @@ export interface GroupRow {
   updatedAt: Date;
 }
 
-/** A `monitored_sites` row, as a plain type (was `typeof monitoredSites.$inferSelect`). */
+/** A `monitored_sites` row, as a plain domain type. */
 export interface SiteRow {
   id: string;
   siteGroupId: string;
@@ -62,7 +73,7 @@ export interface SiteRow {
   updatedAt: Date;
 }
 
-/** A `monitored_endpoints` row, as a plain type (was `typeof monitoredEndpoints.$inferSelect`). */
+/** A `monitored_endpoints` row, as a plain domain type. */
 export interface EndpointRow {
   id: string;
   siteId: string;
@@ -86,7 +97,7 @@ export interface EndpointRow {
   updatedAt: Date;
 }
 
-/** A `deploy_integrations` row, as a plain type (was `typeof deployIntegrations.$inferSelect`). */
+/** A `deploy_integrations` row, as a plain domain type. */
 export interface IntegrationRow {
   id: string;
   platform: string;
@@ -99,7 +110,7 @@ export interface IntegrationRow {
   updatedAt: Date;
 }
 
-/** A `peers` row, as a plain type (was `typeof peers.$inferSelect`). */
+/** A `peers` row, as a plain domain type. */
 export interface PeerRow {
   id: string;
   label: string;
@@ -185,11 +196,19 @@ export interface ConfigStore {
     label: string;
     config?: unknown;
     tokenEnvVar?: string | null;
+    secretRef?: string | null;
     isActive?: boolean;
   }): Promise<IntegrationRow>;
   updateIntegration(
     id: string,
-    patch: { platform?: string; label?: string; config?: unknown; tokenEnvVar?: string | null; isActive?: boolean },
+    patch: {
+      platform?: string;
+      label?: string;
+      config?: unknown;
+      tokenEnvVar?: string | null;
+      secretRef?: string | null;
+      isActive?: boolean;
+    },
   ): Promise<IntegrationRow | null>;
   deleteIntegration(id: string): Promise<void>;
 
@@ -229,8 +248,8 @@ export interface AuthUser {
   role: UserRole;
 }
 
-/** A `users` row, as a plain type (was `typeof users.$inferSelect`). Internal to
- *  the auth flows (signup/login/OAuth) that need the password hash or GitHub id;
+/** A `users` row, as a plain domain type. Internal to the auth flows
+ *  (signup/login/OAuth) that need the password hash or GitHub id;
  *  everything else reads the narrower `AuthUser`. */
 export interface UserRecord {
   id: string;
@@ -451,6 +470,38 @@ export interface ProjectMetaInput {
   framework: string | null;
 }
 
+/** One project's descriptive metadata as read back — the shape `ProjectMetaLike`
+ *  (`@agentic-toolkit/deploy-platform/enumerate`) expects. */
+export type ProjectMetaRow = ProjectMetaInput;
+
+/** Which deploy projects a live site monitors, keyed by canonical platform — the input
+ *  `ownsDeployProject`/`ownedDeploysWhere` narrow a deployments read against. Built by
+ *  `rosterDeployProjects` (`src/board/ownership.ts`) from the roster; a storage-boundary
+ *  type because both `DeployStore.listRecentOwned` and `BoardStore`'s event/activity reads
+ *  take it. */
+export type OwnedProjects = Map<string, { ids: Set<string>; names: Set<string> }>;
+
+/** A full `deployments` row, as a plain domain type — the shape
+ *  `rowToProviderDeploy`/`deploymentDtos` map into `DeploymentDTO`. */
+export interface DeploymentRow {
+  id: string;
+  platform: string;
+  projectName: string;
+  providerProjectId: string | null;
+  buildPhase: string | null;
+  deployPhase: string;
+  environment: string | null;
+  commitHash: string | null;
+  commitMessage: string | null;
+  branch: string | null;
+  commitRepo: string | null;
+  url: string | null;
+  errorText: string | null;
+  createdAt: Date;
+  fetchedAt: Date;
+  liveHost: string | null;
+}
+
 export interface DeployStore {
   /** Upsert fetched/webhook deploys by id (phases win the update so a re-fetched
    *  build moves to its latest state) — see the libsql implementation for the
@@ -501,13 +552,36 @@ export interface DeployStore {
   upsertProjectMeta(rows: ProjectMetaInput[]): Promise<void>;
   /** Every stored project name for a platform. */
   listProjectMetaNames(platform: string): Promise<string[]>;
+  /** Every stored project-meta row, across all platforms — the input
+   *  `enumerateDeployProjectsFrom` correlates live provider reads against. */
+  listProjectMeta(): Promise<ProjectMetaRow[]>;
   /** Delete stored project-meta rows for a platform, by name (chunked internally). */
   deleteProjectMeta(platform: string, names: string[]): Promise<void>;
+
+  /** The most recent `limit` deploys some live site monitors (see `OwnedProjects`),
+   *  newest-created first — the Deployments-tab feed. Crunchy clusters (not
+   *  site-bound) are always included. */
+  listRecentOwned(owned: OwnedProjects, limit: number): Promise<DeploymentRow[]>;
+
+  /** One deployment's identity + persisted failure summary, for `GET /deployments/:id/log` —
+   *  null when no such row exists. */
+  findById(id: string): Promise<DeployLogRow | null>;
+}
+
+/** The fields `GET /deployments/:id/log` needs off one `deployments` row — its identity for
+ *  dispatching the provider log fetch, plus the summary already persisted so the response
+ *  answers both the summary and (best-effort) the full log in one call. */
+export interface DeployLogRow {
+  id: string;
+  platform: string;
+  projectName: string;
+  environment: string | null;
+  errorText: string | null;
 }
 
 // --- issues: the deploy/HTTP issue ledger ------------------------------------
 
-/** An `issues` row, as a plain type (was `typeof issues.$inferSelect`). */
+/** An `issues` row, as a plain domain type. */
 export interface IssueRow {
   id: number;
   target: string;
@@ -629,6 +703,169 @@ export interface MaintenanceStore {
   snapshotIfDue(opts?: SnapshotOptions): Promise<{ created: boolean; path?: string }>;
 }
 
+// --- device: RFC 8628 device-authorization grants ---------------------------
+
+export type DeviceGrantStatus = 'pending' | 'approved' | 'denied';
+
+/** A `device_authorizations` row, minus the secret columns (`deviceCodeHash`,
+ *  `userCodeHash`, `tokenRaw`) — those are write-only/consume-only and never
+ *  read back through this shape. */
+export interface DeviceGrantRow {
+  id: string;
+  cliLabel: string;
+  status: DeviceGrantStatus;
+  createdAt: Date;
+  expiresAt: Date;
+  lastPollAt: Date | null;
+}
+
+export interface DeviceStore {
+  /** Delete every grant past its expiry — run opportunistically before minting a
+   *  new one so the table never accumulates dead rows. */
+  purgeExpired(): Promise<void>;
+  /** Insert a freshly-requested grant. */
+  create(input: { deviceCodeHash: string; userCodeHash: string; cliLabel: string; expiresAt: Date }): Promise<void>;
+  findByDeviceCodeHash(hash: string): Promise<DeviceGrantRow | null>;
+  findByUserCodeHash(hash: string): Promise<DeviceGrantRow | null>;
+  deleteById(id: string): Promise<void>;
+  /** Stamp `lastPollAt` on a still-pending grant. */
+  markPolled(id: string): Promise<void>;
+  /** Atomically delete an approved grant and hand back its stashed secret — the
+   *  single-use consume. Null when the row is gone or was never approved. */
+  consumeApproved(id: string): Promise<{ tokenRaw: string; tokenId: string } | null>;
+  /** Mark a still-pending grant approved with its minted token, guarded on status
+   *  so two racing approvers can't both win. False when the guard didn't match. */
+  approve(id: string, patch: { tokenId: string; tokenRaw: string; approvedBy: string }): Promise<boolean>;
+  /** Mark a still-pending grant denied, guarded on status. False when it didn't match. */
+  deny(id: string): Promise<boolean>;
+  /** The role + expiry of a minted token, for the poll response. */
+  tokenRoleAndExpiry(tokenId: string): Promise<{ role: 'admin' | 'user'; expiresAt: Date | null } | null>;
+}
+
+// --- board: the raw reads behind the deploy/issue fold ----------------------
+
+/** One page of a time-descending source read, with the tie group its LIMIT cut
+ *  through re-read in full — see the libsql implementation (`readSourcePage`) for
+ *  why a partial instant can never be returned. `floorMs` is null when the page
+ *  exhausted the source (nothing older exists). */
+export interface SourcePage<T> {
+  rows: T[];
+  floorMs: number | null;
+}
+
+/** One page-query's cursor: read strictly before `atMs` (a stalled page's empty-id
+ *  sentinel) or at-or-before it (an ordinary cursor) — null `beforeMs` means "from
+ *  the newest row", the first page. */
+export interface PageCursor {
+  beforeMs: number | null;
+  strict: boolean;
+  limit: number;
+}
+
+export interface BoardStore {
+  /** Every monitored endpoint with the columns ownership is resolved from. */
+  readRoster(): Promise<RosterEntry[]>;
+  /** Every deploy row that has CONCLUDED or is still IN-FLIGHT, one per (platform,
+   *  projectName, environment) group — the state projection `binByOutcome` (pure,
+   *  stays in board/facts.ts) partitions into verdicts vs. still-changing rows. */
+  readDeployOutcomeCandidates(): Promise<DeployFact[]>;
+  /** Every deploy inside the activity window owned by `owned`, ungrouped, newest
+   *  first, capped at `MAX_ACTIVITY_ROWS` — the Activity feed's deploy log. */
+  readDeployEvents(sinceMs: number, owned: OwnedProjects): Promise<DeployFact[]>;
+  /** Issues that opened OR closed inside the window, newest-event-first, capped. */
+  readIssueEvents(sinceMs: number): Promise<IssueEvent[]>;
+  /** Every currently-open issue's target + onset — the ledger continuity floor. */
+  readOpenIssueTargets(): Promise<LedgerEntry[]>;
+  /** The platform-health mirror, one row per polled platform. */
+  readPlatformFacts(): Promise<PlatformFact[]>;
+  /** Vercel projects whose live production deploy is stale. */
+  readStaleProdFacts(): Promise<StaleProdFact[]>;
+  /** Unresolved GlitchTip error groups, newest activity first, capped at `MAX_ERROR_FACTS`. */
+  readErrorFacts(): Promise<ErrorFact[]>;
+
+  /** One page of the deploy-activity feed, owned-narrowed. */
+  readDeployActivityPage(cursor: PageCursor, owned: OwnedProjects): Promise<SourcePage<DeployFact>>;
+  /** One page of issues by `openedAt`, narrowed to `targets`. */
+  readIssueOpenedPage(cursor: PageCursor, targets: string[]): Promise<SourcePage<IssueEvent>>;
+  /** One page of issues by `resolvedAt`, narrowed to `targets`. */
+  readIssueResolvedPage(cursor: PageCursor, targets: string[]): Promise<SourcePage<IssueEvent>>;
+}
+
+// --- history: health-check aggregations for /history, /uptime, /response-history --
+
+/** One health-check sample, for the `/history` payload. */
+export interface HistoryCheckRow {
+  status: string;
+  responseTimeMs: number | null;
+  statusCode: number | null;
+  error: string | null;
+  checkedAt: Date;
+}
+
+/** One UTC day's check counts, for `/uptime`. */
+export interface DailyCountsRow {
+  day: string;
+  total: number;
+  healthy: number;
+  degraded: number;
+  down: number;
+}
+
+export interface HistoryStore {
+  /** The newest `checked_at` across ALL history, or null when nothing has ever
+   *  been probed — the poller's "last ran" clock. */
+  newestCheckAt(): Promise<Date | null>;
+  /** One endpoint's samples within the last `hours`, ascending. */
+  checksFor(slug: string, hours: number): Promise<HistoryCheckRow[]>;
+  /** One endpoint's per-UTC-day counts over the last `days`, ascending. */
+  dailyCounts(slug: string, days: number): Promise<DailyCountsRow[]>;
+  /** Portfolio-wide response-time sparkline: `buckets` buckets over the last
+   *  `hours` (oldest → newest), each the avg response of UP checks, null where no
+   *  data — see the libsql implementation for the fine-window/rollup split. */
+  responseBuckets(hours: number, buckets: number): Promise<(number | null)[]>;
+}
+
+// --- peers: fleet peer polling + snapshot mirror ----------------------------
+
+/** The freshly-polled (or failed) state of one peer, as `PeerStore.upsertSnapshot`
+ *  persists it. */
+export interface PeerSnapshotUpsert {
+  peerId: string;
+  fetchedAt: Date;
+  payload: unknown;
+  overall: string | null;
+  reachable: boolean;
+  error: string | null;
+}
+
+/** A `peer_snapshots` row, as a plain domain type. */
+export interface PeerSnapshotRow {
+  peerId: string;
+  overall: string | null;
+  reachable: boolean;
+  fetchedAt: Date;
+  payload: unknown;
+}
+
+export interface PeerStore {
+  /** Active peers only — the same roster both the poller and the fleet reader use. */
+  listActive(): Promise<PeerRow[]>;
+  /** Upsert one peer's freshly-polled (or failed) snapshot, keyed by peerId. */
+  upsertSnapshot(row: PeerSnapshotUpsert): Promise<void>;
+  /** Every stored peer snapshot, one row per peer. */
+  listSnapshots(): Promise<PeerSnapshotRow[]>;
+}
+
+// --- telemetry: GlitchTip errors + PostHog analytics trend stores -----------
+
+/** The persisted telemetry streams — one `Store<T>` per stream, named for what
+ *  it holds rather than the provider that feeds it (a store outlives its
+ *  fetcher). */
+export interface TelemetryStore {
+  errors: Store<ErrorDTO>;
+  analytics: Store<AnalyticsMetricDTO>;
+}
+
 // --- composed storage ---------------------------------------------------------
 
 /** Everything a host builds once and threads through `createApp`. Composed from
@@ -642,4 +879,9 @@ export interface Storage {
   issues: IssueStore;
   observations: ObservationStore;
   maintenance: MaintenanceStore;
+  board: BoardStore;
+  history: HistoryStore;
+  device: DeviceStore;
+  peers: PeerStore;
+  telemetry: TelemetryStore;
 }

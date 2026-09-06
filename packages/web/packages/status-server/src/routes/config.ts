@@ -1,18 +1,8 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { createInsertSchema } from 'drizzle-zod';
 import { z } from 'zod';
-import type { Db } from '../libsql/client';
 import type { StatusConfig, StatusCredentialName } from '../config/port';
 import type { SeedEnvironment, SeedRoster } from '../config/seed';
-import {
-  siteGroups,
-  monitoredSites,
-  monitoredEndpoints,
-  deployIntegrations,
-  ignoredDeployProjects,
-  peers,
-} from '../libsql/schema';
 import { reconcileBoardLedger } from '../board';
 import {
   DUPLICATE_PEER_MESSAGE,
@@ -25,39 +15,86 @@ import type { Tier } from '../middleware/auth';
 import { redactPeer, type Storage } from '../storage/ports';
 
 // ---------------------------------------------------------------------------
-// Zod insert schemas (server-managed cols omitted via .omit)
+// Zod insert schemas — plain shapes matching each ConfigStore write's input type
+// (../storage/ports.ts). They used to be derived from the drizzle tables; this
+// module sits above the storage boundary and may not import `../libsql/schema`,
+// so the shapes are spelled out, in the tables' column order and with the same
+// optionality, and the committed openapi.json (pinned by test/openapi.test.ts)
+// proves the public contract did not move.
 // ---------------------------------------------------------------------------
 
-export const siteGroupInsert = createInsertSchema(siteGroups).omit({ id: true, createdAt: true, updatedAt: true });
+/** What a `{ mode: 'json' }` column accepts: any JSON value. */
+const jsonValue = z.union([
+  z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  z.record(z.string(), z.unknown()),
+  z.array(z.unknown()),
+]);
+
+export const siteGroupInsert = z.object({
+  slug: z.string(),
+  name: z.string(),
+  retentionDays: z.number().int().optional(),
+});
 export const siteGroupPatch = siteGroupInsert.partial();
 
-export const monitoredSiteInsert = createInsertSchema(monitoredSites).omit({ id: true, createdAt: true, updatedAt: true });
+export const monitoredSiteInsert = z.object({
+  siteGroupId: z.string(),
+  slug: z.string(),
+  name: z.string(),
+});
 export const monitoredSitePatch = monitoredSiteInsert.partial();
 
-export const monitoredEndpointInsert = createInsertSchema(monitoredEndpoints).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
+export const monitoredEndpointInsert = z.object({
+  siteId: z.string(),
+  url: z.string(),
+  kind: z.string().optional(),
+  environment: z.string().nullable().optional(),
+  platform: z.string().nullable().optional(),
+  deployProject: z.string().nullable().optional(),
+  deployProjectId: z.string().nullable().optional(),
+  ignoreProjectWarning: z.boolean().optional(),
+  expectedStatus: z.number().int().optional(),
+  expectBody: z.string().nullable().optional(),
+  dnsCheckA: z.boolean().optional(),
+  dnsCheckAaaa: z.boolean().optional(),
+  dnsCheckCname: z.boolean().optional(),
+  checkIntervalSeconds: z.number().int().optional(),
+  isActive: z.boolean().optional(),
+  monitorHttp: z.boolean().optional(),
+  monitorDeploys: z.boolean().optional(),
 });
 export const monitoredEndpointPatch = monitoredEndpointInsert.partial();
 
-export const deployIntegrationInsert = createInsertSchema(deployIntegrations).omit({ id: true, createdAt: true, updatedAt: true });
+export const deployIntegrationInsert = z.object({
+  platform: z.string(),
+  label: z.string(),
+  config: jsonValue.optional(),
+  tokenEnvVar: z.string().nullable().optional(),
+  secretRef: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
 export const deployIntegrationPatch = deployIntegrationInsert.partial();
 
-export const ignoredProjectInsert = createInsertSchema(ignoredDeployProjects).omit({ id: true, createdAt: true });
+export const ignoredProjectInsert = z.object({
+  platform: z.string(),
+  projectName: z.string(),
+});
 
-/** A peer's base URL: an absolute http(s) origin (drizzle-zod only knows it is `text`).
- *  This schema stays STATIC (no config dependency) because it is also read as a bare
- *  shape — by `mcp/tools.ts`'s `inputSchema` and `openapi/paths/config.ts`'s
- *  `zodJson(...)` — at module-registration time, well before any request (and any
- *  config) exists. The "never this monitor's own URL" rule needs runtime config, so
- *  it is a separate, explicit check (`assertNotSelfPeerUrl` below) run by each write
- *  handler AFTER this shape validates, not folded into the shape itself. */
+/** A peer's base URL: an absolute http(s) origin. This schema stays STATIC (no config
+ *  dependency) because it is also read as a bare shape — by `mcp/tools.ts`'s
+ *  `inputSchema` and `openapi/paths/config.ts`'s `zodJson(...)` — at module-registration
+ *  time, well before any request (and any config) exists. The "never this monitor's own
+ *  URL" rule needs runtime config, so it is a separate, explicit check
+ *  (`assertNotSelfPeerUrl` below) run by each write handler AFTER this shape validates,
+ *  not folded into the shape itself. */
 const peerBaseUrl = z.string().refine(isValidPeerBaseUrl, 'baseUrl must be an absolute http(s) URL');
 
-export const peerInsert = createInsertSchema(peers)
-  .omit({ id: true, createdAt: true, updatedAt: true })
-  .extend({ baseUrl: peerBaseUrl });
+export const peerInsert = z.object({
+  label: z.string(),
+  baseUrl: peerBaseUrl,
+  token: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
 export const peerPatch = peerInsert.partial();
 
 /** Reject a peer write whose `baseUrl` is this monitor's own URL — the two sibling
@@ -187,7 +224,7 @@ async function runSeed(
 // Router factory
 // ---------------------------------------------------------------------------
 
-export function configRoutes(db: Db, storage: Storage, config: StatusConfig, seed: SeedRoster): Hono<{ Variables: { tier: Tier } }> {
+export function configRoutes(storage: Storage, config: StatusConfig, seed: SeedRoster): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
 
   // All /config/* is admin-gated (requireAuth already applied app-wide)
@@ -225,7 +262,7 @@ export function configRoutes(db: Db, storage: Storage, config: StatusConfig, see
     await storage.config.deleteGroup(id);
     // Same inline sweep as DELETE /sites/:id — clear deploy-target issues the deleted
     // group's endpoints owned so Problems empties in this request, not next cycle.
-    await reconcileBoardLedger(db, storage, config);
+    await reconcileBoardLedger(storage, config);
     return c.json({ ok: true });
   });
 
@@ -261,7 +298,7 @@ export function configRoutes(db: Db, storage: Storage, config: StatusConfig, see
     await storage.config.deleteSite(id);
     // Clear deploy-target issues that only this site owned — same sweep the monitor
     // cycle runs, done inline so Problems empties in this request, not next cycle.
-    await reconcileBoardLedger(db, storage, config);
+    await reconcileBoardLedger(storage, config);
     return c.json({ ok: true });
   });
 
@@ -296,7 +333,7 @@ export function configRoutes(db: Db, storage: Storage, config: StatusConfig, see
     // LEDGER row and its alert-dedup state would lag a whole cycle — long enough for a
     // recovery on a monitor the operator just disabled to page on-call. Same inline
     // sweep the delete paths run.
-    await reconcileBoardLedger(db, storage, config);
+    await reconcileBoardLedger(storage, config);
     return c.json(row);
   });
 
@@ -309,7 +346,7 @@ export function configRoutes(db: Db, storage: Storage, config: StatusConfig, see
     const result = await storage.config.retireEndpoint(id);
     // Same inline sweep as DELETE /sites/:id — resolve deploy-target issues the retired
     // endpoint owned so Problems empties in this request, not next cycle.
-    await reconcileBoardLedger(db, storage, config);
+    await reconcileBoardLedger(storage, config);
     return c.json({ ok: true, ...result });
   });
 
@@ -350,7 +387,7 @@ export function configRoutes(db: Db, storage: Storage, config: StatusConfig, see
     // Un-configured platform ⇒ every platform-health problem it raised (and every deploy
     // problem for projects only it could poll) stops being derivable. Sweep now, or those
     // rows sit open — and alert-deduped — until the next cycle.
-    await reconcileBoardLedger(db, storage, config);
+    await reconcileBoardLedger(storage, config);
     return c.json({ ok: true });
   });
 

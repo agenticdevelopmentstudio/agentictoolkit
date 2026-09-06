@@ -1,4 +1,3 @@
-import type { Db } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
 import type { Storage } from "../storage/ports";
 import { runCycle } from "./sync";
@@ -20,21 +19,20 @@ import { flushAlerts } from "./alerts";
  * stays behind `storage` — `runMonitorCycle` never threads it through.
  */
 export async function runMonitorCycle(
-  db: Db,
   storage: Storage,
   opts: { fullSync: boolean; config: StatusConfig },
 ): Promise<void> {
   const { config } = opts;
   try {
-    await runCycle(db, storage, config, { skipDeploys: !opts.fullSync });
+    await runCycle(storage, config, { skipDeploys: !opts.fullSync });
   } finally {
     // Deliver whatever the recorders queued even when a later phase of the
     // cycle throws — an outage alert must not be lost to an unrelated failure.
     await flushAlerts(config.alertWebhookUrl);
   }
   if (opts.fullSync) {
-    await fetchPeers(db);
-    await collectTelemetry(db, storage, config); // guarded + fail-soft; no-op when GlitchTip/PostHog unset
+    await fetchPeers(storage);
+    await collectTelemetry(storage, config); // guarded + fail-soft; no-op when GlitchTip/PostHog unset
     // Bound every accruing table (health_checks, metrics_hourly, analytics_metrics,
     // expired sessions). THIS is the only caller in the running process — the
     // `POST /cron/maintenance` route needs an external cron that Railway never had, so

@@ -1,4 +1,3 @@
-import type { Db } from "../libsql/client";
 import type { TelemetrySnapshot } from "./types";
 
 // The PORTS of the telemetry subsystem. Every concrete piece — a GlitchTip
@@ -8,8 +7,9 @@ import type { TelemetrySnapshot } from "./types";
 // match by swapping adapters at the composition root (server.ts) — nothing above
 // the port moves.
 //
-// This backend has no db singleton, so the Store methods take the `db` handle
-// explicitly (dependency injection) rather than closing over an imported client.
+// A Store is a storage-boundary port: it closes over its own connection inside
+// the libsql adapter (`../libsql/stores/telemetry-store.ts`), so nothing above it
+// ever sees a db handle.
 
 export interface FetchResult<T> {
   /** False → the provider poll failed. Callers must NOT treat an empty list as
@@ -35,15 +35,15 @@ export interface Fetcher<T> {
   fetch(): Promise<FetchResult<T>>;
 }
 
-/** Server-side persistence for one telemetry stream. Knows no provider/trigger.
- *  Takes the db handle explicitly (this backend has no db singleton). */
+/** Server-side persistence for one telemetry stream. Knows no provider/trigger,
+ *  and no connection — the adapter behind this port owns that. */
 export interface Store<T> {
   /** Persist a freshly-fetched set (upsert or append per the stream's semantics).
    *  `opts.complete` is the fetcher's `FetchResult.complete`, threaded through by
    *  `collect` — an APPENDING store ignores it; a RECONCILING one must not. */
-  save(db: Db, items: T[], opts?: { complete?: boolean }): Promise<void>;
+  save(items: T[], opts?: { complete?: boolean }): Promise<void>;
   /** Read the current set for surfacing. */
-  load(db: Db): Promise<T[]>;
+  load(): Promise<T[]>;
 }
 
 /** Where a client reads a snapshot from — an HTTP boundary hides the server

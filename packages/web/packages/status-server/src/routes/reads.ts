@@ -1,18 +1,12 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
-import type { Db } from '../libsql/client';
 import type { Tier } from '../middleware/auth';
 import {
-  healthChecks,
-  deployments as deploymentsTable,
-} from '../libsql/schema';
-import {
-  deriveBoard, matchRosterEntry, ownedDeploysWhere, ownsDeployProject, parseErrorsTarget, parsePlatformHealthTarget,
-  readBoardFacts, readRoster, rosterDeployProjects, rosterTargets,
+  deriveBoard, matchRosterEntry, ownsDeployProject, parseErrorsTarget, parsePlatformHealthTarget,
+  readBoardFacts, rosterDeployProjects, rosterTargets,
   type DeployIdentity, type Problem,
 } from '../board';
-import type { ConfiguredEndpoint, Storage } from '../storage/ports';
+import type { ConfiguredEndpoint, DeploymentRow, Storage } from '../storage/ports';
 import { computeOverall, publicOverall, type OverallStatus } from '../monitor/overall';
 import type { HealthStatus } from '../monitor/health';
 import type { BuildPhase, DeployPhase } from '../monitor/deploy-status';
@@ -24,9 +18,9 @@ import { hostOf } from '../monitor/url';
 import type { StatusConfig } from '../config/port';
 import { siteLinks, type PlatformMeta } from '../lib/links';
 import { cachedSingleFlight } from '@agentic-toolkit/deploy-platform/util';
-import { providerConnFromConfig } from '@agentic-toolkit/deploy-platform/conn';
+import { enumerateDeployProjects, providerConn } from '../monitor/provider-conn';
 import { refreshVercelProjectMetaFromConfig, type VercelRefreshResult } from '../monitor/refresh-project-meta';
-import { enumerateDeployProjects, enumerateDeployProjectsVerified, type EnumeratedProject } from '@agentic-toolkit/deploy-platform/enumerate';
+import type { EnumeratedProject } from '@agentic-toolkit/deploy-platform/enumerate';
 import { partitionPending, endpointUnconfigured } from '@agentic-toolkit/deploy-platform/engine';
 import { uptimePercent, dayStatus, type Counts } from '../monitor/uptime';
 import { runIntegrationsCheck } from '../monitor/integrations';
@@ -94,17 +88,6 @@ async function latestCheckBySlug(
   return map;
 }
 
-/** The newest checked_at across ALL history (one MAX index seek on
- *  idx_health_checked). The poller's "last ran" clock must read the whole table,
- *  NOT the active-slug map: during an endpoint-roster swap the active slugs may
- *  have no rows yet, and retired slugs' rows are exactly the evidence of when the
- *  poller last completed — a map-derived clock reads "fresh" while it is wedged. */
-async function newestCheckAt(db: Db): Promise<Date | null> {
-  const rows = await db.all<{ last: number | null }>(sql`select max(checked_at) as last from health_checks`);
-  const last = rows[0]?.last;
-  return last == null ? null : new Date(Number(last) * 1000);
-}
-
 /** A ServiceStatusDTO per active endpoint, from its config + latest check. */
 function serviceDtos(
   endpoints: ConfiguredEndpoint[],
@@ -147,7 +130,7 @@ function ownerHostFor(d: DeployIdentity, owners: Owners): string | null {
 }
 
 /** A persisted deployments row → the in-memory ProviderDeploy the DTO mapper takes. */
-function rowToProviderDeploy(d: typeof deploymentsTable.$inferSelect): ProviderDeploy {
+function rowToProviderDeploy(d: DeploymentRow): ProviderDeploy {
   return {
     id: d.id,
     platform: d.platform,
@@ -178,7 +161,7 @@ function rowToProviderDeploy(d: typeof deploymentsTable.$inferSelect): ProviderD
  *  independent way a dead project's build re-enters the board, so gating only the
  *  persisted rows would let every provider retry put the Problem straight back. */
 function deploymentDtos(
-  rows: (typeof deploymentsTable.$inferSelect)[],
+  rows: DeploymentRow[],
   owners: Owners,
   bufferSince: number,
   keep: (d: DeployIdentity) => boolean = () => true,
@@ -217,9 +200,9 @@ function deploymentDtos(
  * shrug at), the deploy reads are grouped over the retention window, and the ledger reads
  * are bounded. So the fold's cost grows with the SIZE OF THE ROSTER, not with history.
  */
-export async function boardProblems(db: Db, storage: Storage, config: StatusConfig): Promise<Problem[]> {
+export async function boardProblems(storage: Storage, config: StatusConfig): Promise<Problem[]> {
   const nowMs = Date.now();
-  return deriveBoard(await readBoardFacts(db, storage, nowMs, config), nowMs).problems;
+  return deriveBoard(await readBoardFacts(storage, nowMs, config), nowMs).problems;
 }
 
 /**
@@ -247,10 +230,11 @@ function staleProdFromBoard(problems: Problem[]): StaleProdDTO[] {
  *  platformHealthState.reachable directly, which is the raw last-poll flag and would flip
  *  the provider pill on a single 429). */
 async function providerHealth(
-  db: Db,
+  storage: Storage,
+  config: StatusConfig,
   problems: Problem[],
 ): Promise<Record<ProviderKey, { configured: boolean; ok: boolean }>> {
-  const conn = await providerConnFromConfig(db);
+  const conn = await providerConn(storage, config);
   // `platformProblems` applies the PLATFORM_UNREACHABLE_POLLS debounce, so this set means
   // the same thing it always did: repeatedly unreachable, not momentarily unlucky. Do NOT
   // shortcut to platformHealthState.reachable — that is the raw last-poll flag.
@@ -282,10 +266,10 @@ export function platformMetaFromConfig(config: StatusConfig): PlatformMeta {
 }
 
 /** Build the full LiveSnapshot from the persisted last-cycle state. */
-export async function buildLiveSnapshot(db: Db, storage: Storage, config: StatusConfig): Promise<LiveSnapshot> {
+export async function buildLiveSnapshot(storage: Storage, config: StatusConfig): Promise<LiveSnapshot> {
   const [endpoints, roster, liveVercel] = await Promise.all([
     storage.config.listActiveEndpoints(),
-    readRoster(db),
+    storage.board.readRoster(),
     storage.deploy.listProjectMetaNames('vercel'),
   ]);
   // ONE resolution of "which deploy projects does a live site monitor", shared with the
@@ -321,14 +305,9 @@ export async function buildLiveSnapshot(db: Db, storage: Storage, config: Status
   // been probed (a brand-new monitor → no false alarm).
   const [latest, deployRows, problems, lastCheckAt] = await Promise.all([
     latestCheckBySlug(storage, endpoints.map((ep) => ep.slug)),
-    db
-      .select()
-      .from(deploymentsTable)
-      .where(ownedDeploysWhere(projects))
-      .orderBy(desc(deploymentsTable.createdAt))
-      .limit(MAX_DEPLOYS),
-    boardProblems(db, storage, config),
-    newestCheckAt(db),
+    storage.deploy.listRecentOwned(projects, MAX_DEPLOYS),
+    boardProblems(storage, config),
+    storage.history.newestCheckAt(),
   ]);
 
   const generatedAt = new Date().toISOString();
@@ -369,7 +348,7 @@ export async function buildLiveSnapshot(db: Db, storage: Storage, config: Status
   // webhook-buffer overlay, which never passed through ownedDeploysWhere.
   const deployments = deploymentDtos(deployRows, owners, 0, keepDeploy);
   const staleProd = staleProdFromBoard(problems);
-  const providers = await providerHealth(db, problems);
+  const providers = await providerHealth(storage, config, problems);
 
   return {
     generatedAt,
@@ -414,11 +393,11 @@ export interface CompactSnapshot {
 /** The compact per-monitor unit a fleet aggregator consumes — overall rollup +
  *  the per-service statuses + the open-issue list. SINGLE source of truth for the
  *  /snapshot payload (the /fleet route reuses this in a later task). */
-export async function buildSnapshot(db: Db, storage: Storage, config: StatusConfig): Promise<CompactSnapshot> {
+export async function buildSnapshot(storage: Storage, config: StatusConfig): Promise<CompactSnapshot> {
   const endpoints = await storage.config.listActiveEndpoints();
   const [latest, allProblems] = await Promise.all([
     latestCheckBySlug(storage, endpoints.map((ep) => ep.slug)),
-    boardProblems(db, storage, config),
+    boardProblems(storage, config),
   ]);
   const services = serviceDtos(endpoints, latest);
 
@@ -483,133 +462,6 @@ const intParam = (raw: string | undefined, fallback: number): number => {
   return Number.isFinite(n) && n !== 0 ? n : fallback;
 };
 
-/** One endpoint's health-check samples within the last `hours`, ascending. */
-async function historyFor(
-  db: Db,
-  slug: string,
-  hours: number,
-): Promise<{ status: string; responseTimeMs: number | null; statusCode: number | null; error: string | null; checkedAt: Date }[]> {
-  const cutoff = new Date(Date.now() - hours * 3_600_000);
-  const rows = await db
-    .select({
-      status: healthChecks.status,
-      responseTimeMs: healthChecks.responseTimeMs,
-      statusCode: healthChecks.statusCode,
-      error: healthChecks.error,
-      checkedAt: healthChecks.checkedAt,
-    })
-    .from(healthChecks)
-    .where(and(eq(healthChecks.serviceSlug, slug), gte(healthChecks.checkedAt, cutoff)))
-    .orderBy(healthChecks.checkedAt);
-  return rows;
-}
-
-/** One endpoint's per-UTC-day check counts over the last `days`, ascending. */
-async function uptimeDaily(db: Db, slug: string, days: number): Promise<(Counts & { day: string })[]> {
-  const cutoff = new Date(Date.now() - days * 86_400_000);
-  const rows = await db.all<{
-    day: string;
-    total: number;
-    healthy: number;
-    degraded: number;
-    down: number;
-  }>(sql`
-    select
-      strftime('%Y-%m-%d', checked_at, 'unixepoch') as day,
-      count(*) as total,
-      sum(case when status = 'healthy' then 1 else 0 end) as healthy,
-      sum(case when status = 'degraded' then 1 else 0 end) as degraded,
-      sum(case when status = 'down' then 1 else 0 end) as down
-    from health_checks
-    where service_slug = ${slug} and checked_at >= ${Math.floor(cutoff.getTime() / 1000)}
-    group by day
-    order by day asc
-  `);
-  return rows.map((r) => ({
-    day: r.day,
-    total: Number(r.total),
-    healthy: Number(r.healthy),
-    degraded: Number(r.degraded),
-    down: Number(r.down),
-  }));
-}
-
-/** Portfolio-wide response-time sparkline: `buckets` buckets over the last `hours`
- *  (oldest → newest), each the avg response of UP checks, null where no data.
- *
- *  Aggregation happens IN SQL, and the SOURCE depends on the window:
- *
- *  - Fine windows (bucket span < 1h) group the raw `health_checks` range. The
- *    two-sided range on the bare column keeps it an idx_health_checked range seek,
- *    and SQLite reduces it to at most `buckets` rows before JS sees it — the
- *    previous form hydrated every row of the span (millions, at the 7-day default)
- *    into JS objects first, burning seconds of event-loop CPU per call, refetched
- *    every 60s per open dashboard.
- *  - Long windows (bucket span >= 1h — e.g. the 90-day sparkline) read the hourly
- *    rollup instead, whose row count is bounded by hours x fleet no matter how
- *    fast we probe; the raw range for those spans is unbounded by cadence. Each
- *    hour's avg is weighted by its UP-check count, so a down-only hour (zero
- *    weight) can't drag a bucket. Caveat: the rollup's avg spans ALL checks in
- *    the hour, so a long-window bucket is a trend line where an outage-hour skew
- *    is signal, not noise.
- */
-async function responseBuckets(db: Db, hours: number, buckets: number): Promise<(number | null)[]> {
-  const nowMs = Date.now();
-  const spanMs = hours * 3_600_000;
-  const bucketMs = Math.max(1, Math.round(spanMs / buckets));
-  // The range is the exact SQL image of the old JS `age < 0 || age >= spanMs` skip
-  // for integer checked_at: `> cutoff` (not >=) excludes the floored-cutoff second,
-  // whose rows are all age >= spanMs; `<= nowSec` excludes future-dated rows.
-  const cutoff = Math.floor((nowMs - spanMs) / 1000);
-  const nowSec = Math.floor(nowMs / 1000);
-
-  // Long windows: read the bounded hourly rollup rather than the raw range (see
-  // the doc comment). The bucket index math is identical — bucket 0 = newest.
-  if (bucketMs >= 3_600_000) {
-    const rows = await db.all<{ hour: number; ups: number; weighted: number }>(sql`
-      select hour,
-             sum(case when avg_response_time_ms is not null then healthy_checks + degraded_checks else 0 end) as ups,
-             sum(case when avg_response_time_ms is not null then avg_response_time_ms * (healthy_checks + degraded_checks) else 0 end) as weighted
-      from metrics_hourly
-      where hour > ${cutoff} and hour <= ${nowSec}
-      group by hour
-    `);
-    const sums = new Array<number>(buckets).fill(0);
-    const counts = new Array<number>(buckets).fill(0);
-    for (const r of rows) {
-      const idx = Math.min(buckets - 1, Math.floor((nowMs - Number(r.hour) * 1000) / bucketMs));
-      sums[idx]! += Number(r.weighted);
-      counts[idx]! += Number(r.ups);
-    }
-    return Array.from({ length: buckets }, (_, i) => {
-      const b = buckets - 1 - i;
-      return counts[b]! > 0 ? Math.round(sums[b]! / counts[b]!) : null;
-    });
-  }
-
-  // bucket 0 = newest; min() clamps the rounding edge where bucketMs·buckets < spanMs.
-  // The cast is LOAD-BEARING on remote (hrana) connections, which bind JS numbers as
-  // REAL — without it the division yields fractional buckets and GROUP BY fragments.
-  const rows = await db.all<{ bucket: number; s: number; n: number }>(sql`
-    select min(cast((${nowMs} - checked_at * 1000) / ${bucketMs} as integer), ${buckets - 1}) as bucket,
-           sum(response_time_ms) as s, count(*) as n
-    from health_checks
-    where checked_at > ${cutoff}
-      and checked_at <= ${nowSec}
-      and status in ('healthy', 'degraded')
-      and response_time_ms is not null
-    group by bucket
-  `);
-  // Number() like uptimeDaily above: under a bigint intMode, raw aggregates would
-  // silently miss the numeric Map keys (blank sparkline) or throw in Math.round.
-  const byBucket = new Map(rows.map((r) => [Number(r.bucket), { s: Number(r.s), n: Number(r.n) }]));
-  // oldest → newest (left → right); empty buckets stay null (a group always has n >= 1).
-  return Array.from({ length: buckets }, (_, i) => {
-    const r = byBucket.get(buckets - 1 - i);
-    return r ? Math.round(r.s / r.n) : null;
-  });
-}
-
 // --- read services (shared by the HTTP routes AND the /mcp tools) ------------
 // These own the reshape a read exposes, so GET /history, GET /uptime,
 // GET /deploy-projects/unconfigured and their read-only MCP-tool twins can never
@@ -618,7 +470,7 @@ async function responseBuckets(db: Db, hours: number, buckets: number): Promise<
 
 /** One endpoint's recent checks, shaped for the /history payload. */
 export async function queryHistory(
-  db: Db,
+  storage: Storage,
   slug: string,
   hours: number,
 ): Promise<{
@@ -626,7 +478,7 @@ export async function queryHistory(
   hours: number;
   checks: { status: string; responseTimeMs: number | null; statusCode: number | null; error: string | null; checkedAt: string }[];
 }> {
-  const checks = await historyFor(db, slug, hours);
+  const checks = await storage.history.checksFor(slug, hours);
   return {
     service: slug,
     hours,
@@ -641,11 +493,11 @@ export async function queryHistory(
 }
 
 /** Per-endpoint daily uptime over the last `days`. */
-export async function buildUptime(db: Db, storage: Storage, days: number): Promise<UptimeResponse> {
+export async function buildUptime(storage: Storage, days: number): Promise<UptimeResponse> {
   const endpoints = await storage.config.listActiveEndpoints();
   const services: UptimeService[] = await Promise.all(
     endpoints.map(async (svc): Promise<UptimeService> => {
-      const rows = await uptimeDaily(db, svc.slug, days);
+      const rows = await storage.history.dailyCounts(svc.slug, days);
       const daily = rows.map((r) => {
         const c2: Counts = { total: r.total, healthy: r.healthy, degraded: r.degraded, down: r.down };
         return { day: r.day, status: dayStatus(c2), uptimePercent: uptimePercent(c2) };
@@ -667,7 +519,7 @@ export async function buildUptime(db: Db, storage: Storage, days: number): Promi
 
 /** The configuration-gap partition: pending/addable deploy projects + endpoints that
  *  aren't wired to one. Takes the already-enumerated list (the caller owns cache-vs-fresh). */
-export async function findUnconfiguredSites(db: Db, storage: Storage, enumerated: EnumeratedProject[]) {
+export async function findUnconfiguredSites(storage: Storage, enumerated: EnumeratedProject[]) {
   const projects = await buildDeployProjects(storage, enumerated);
   const { pending, addable } = partitionPending(projects);
   const noDomain = pending.filter((p) => !p.domain);
@@ -710,11 +562,11 @@ const PROVIDER_READ_CACHE_MS = 30_000;
  * routes below go through the cache rather than calling this per request.
  */
 export async function refreshAndEnumerateDeployProjects(
-  db: Db,
   storage: Storage,
+  config: StatusConfig,
 ): Promise<{ vercel: VercelRefreshResult; enumerated: EnumeratedProject[]; verifiedPlatforms: string[] }> {
-  const vercel = await refreshVercelProjectMetaFromConfig(db, storage);
-  const { projects, verifiedPlatforms } = await enumerateDeployProjectsVerified(db);
+  const vercel = await refreshVercelProjectMetaFromConfig(storage, config);
+  const { projects, verifiedPlatforms } = await enumerateDeployProjects(storage, config);
   // The enumeration vouches for the platforms it polls live (Railway, Cloudflare); Vercel's
   // projects come from `deploy_project_meta`, and only THIS function knows whether the
   // refresh that just reconciled that table was a complete, authenticated account read.
@@ -723,18 +575,18 @@ export async function refreshAndEnumerateDeployProjects(
   return { vercel, enumerated: projects, verifiedPlatforms: vercel.ok ? [...verifiedPlatforms, 'vercel'] : verifiedPlatforms };
 }
 
-export function readsRoutes(db: Db, storage: Storage, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
+export function readsRoutes(storage: Storage, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
   // Only the PROVIDER-facing halves are cached; the DB reads (wired/ignored
   // flags) stay live so a config edit shows immediately.
   // SHARED by both deploy-project routes so a burst (the badge loop + an open modal +
   // several tabs) coalesces onto ONE account scan — and so `fresh=1` on either route
   // means fresh all the way down, refresh included.
-  const cachedEnumerate = cachedSingleFlight(PROVIDER_READ_CACHE_MS, () => refreshAndEnumerateDeployProjects(db, storage));
+  const cachedEnumerate = cachedSingleFlight(PROVIDER_READ_CACHE_MS, () => refreshAndEnumerateDeployProjects(storage, config));
   const cachedIntegrations = cachedSingleFlight(PROVIDER_READ_CACHE_MS, () => runIntegrationsCheck(storage, config));
   const platformMeta = platformMetaFromConfig(config);
 
-  app.get('/live', async (c) => c.json(await buildLiveSnapshot(db, storage, config)));
+  app.get('/live', async (c) => c.json(await buildLiveSnapshot(storage, config)));
 
   app.get('/status', async (c) => {
     const endpoints = await storage.config.listActiveEndpoints();
@@ -756,7 +608,7 @@ export function readsRoutes(db: Db, storage: Storage, config: StatusConfig): Hon
     return c.json({ overall, services, checkedAt: new Date().toISOString() });
   });
 
-  app.get('/snapshot', async (c) => c.json(await buildSnapshot(db, storage, config)));
+  app.get('/snapshot', async (c) => c.json(await buildSnapshot(storage, config)));
 
   app.get('/history', async (c) => {
     // The source param was `service`; the standalone backend uses `slug` (also
@@ -766,18 +618,18 @@ export function readsRoutes(db: Db, storage: Storage, config: StatusConfig): Hon
     // envelope, matching the 400 the OpenAPI spec declares for this route.
     if (!slug) throw new HTTPException(400, { message: 'Missing required parameter: slug' });
     const hours = clamp(intParam(c.req.query('hours'), 24), 1, 168);
-    return c.json(await queryHistory(db, slug, hours));
+    return c.json(await queryHistory(storage, slug, hours));
   });
 
   app.get('/uptime', async (c) => {
     const days = clamp(intParam(c.req.query('days'), 90), 1, 365);
-    return c.json(await buildUptime(db, storage, days));
+    return c.json(await buildUptime(storage, days));
   });
 
   app.get('/response-history', async (c) => {
     const hours = clamp(intParam(c.req.query('hours'), 24), 1, 24 * 90);
     const buckets = clamp(intParam(c.req.query('buckets'), RESPONSE_BUCKETS), 1, 240);
-    const points = await responseBuckets(db, hours, buckets);
+    const points = await storage.history.responseBuckets(hours, buckets);
     return c.json({ hours, points });
   });
 
@@ -811,7 +663,7 @@ export function readsRoutes(db: Db, storage: Storage, config: StatusConfig): Hon
   // TTL, identical semantics to /deploy-projects?fresh=1. View tier — sits with the reads.
   app.get('/deploy-projects/unconfigured', async (c) => {
     const { enumerated } = await cachedEnumerate(c.req.query('fresh') === '1');
-    return c.json(await findUnconfiguredSites(db, storage, enumerated));
+    return c.json(await findUnconfiguredSites(storage, enumerated));
   });
 
   app.get('/integrations', async (c) => c.json(await cachedIntegrations(c.req.query('fresh') === '1')));
@@ -819,10 +671,12 @@ export function readsRoutes(db: Db, storage: Storage, config: StatusConfig): Hon
   return app;
 }
 
-// enumerateDeployProjects (with its EnumeratedProject shape and the internal
-// resolveRailwayDomains helper) now lives in @agentic-toolkit/deploy-platform/enumerate.
-// Imported above for use in readsRoutes; re-exported here so this module's public surface
-// (the enumerate function + its type) is unchanged for any downstream importer.
+// `enumerateDeployProjects` (with its `EnumeratedProject` shape and the internal
+// resolveRailwayDomains helper) is implemented in @agentic-toolkit/deploy-platform/enumerate;
+// `../monitor/provider-conn` is this package's storage-port wrapper around it (the DB-based
+// `enumerateDeployProjectsVerified` may not leave `src/libsql/`). Re-exported here so this
+// module's public surface (the enumerate function + its type) is unchanged for any
+// downstream importer.
 export { enumerateDeployProjects };
 export type { EnumeratedProject } from '@agentic-toolkit/deploy-platform/enumerate';
 

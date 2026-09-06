@@ -1,5 +1,5 @@
 import { mapLimit, withTimeout } from "../util/index.js";
-import { providerConnFromConfig, type DeployDb } from "../conn/index.js";
+import { providerConnFromConfig, type DeployDb, type ProviderConn } from "../conn/index.js";
 import { deployProjectMeta } from "../schema/index.js";
 import { platformCanon } from "../canon/index.js";
 import {

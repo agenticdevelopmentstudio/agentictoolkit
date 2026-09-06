@@ -1,11 +1,9 @@
-import { eq } from 'drizzle-orm';
-import type { Db } from '../libsql/client';
-import { peers, peerSnapshots } from '../libsql/schema';
+import type { Storage } from '../storage/ports';
 
 /** Pull each active peer's /snapshot and upsert peer_snapshots. Fail-soft: an
  *  unreachable peer is recorded as reachable=false and never throws. */
-export async function fetchPeers(db: Db, fetchImpl: typeof fetch = fetch): Promise<void> {
-  const rows = await db.select().from(peers).where(eq(peers.isActive, true));
+export async function fetchPeers(storage: Storage, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const rows = await storage.peers.listActive();
   await Promise.all(
     rows.map(async (peer) => {
       const base = { peerId: peer.id, fetchedAt: new Date() };
@@ -16,7 +14,7 @@ export async function fetchPeers(db: Db, fetchImpl: typeof fetch = fetch): Promi
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const payload = (await res.json()) as { overall?: string };
-        await upsert(db, {
+        await storage.peers.upsertSnapshot({
           ...base,
           payload: payload as unknown,
           overall: payload.overall ?? null,
@@ -24,7 +22,7 @@ export async function fetchPeers(db: Db, fetchImpl: typeof fetch = fetch): Promi
           error: null,
         });
       } catch (err) {
-        await upsert(db, {
+        await storage.peers.upsertSnapshot({
           ...base,
           payload: null,
           overall: null,
@@ -34,11 +32,4 @@ export async function fetchPeers(db: Db, fetchImpl: typeof fetch = fetch): Promi
       }
     }),
   );
-}
-
-async function upsert(db: Db, row: typeof peerSnapshots.$inferInsert): Promise<void> {
-  await db
-    .insert(peerSnapshots)
-    .values(row)
-    .onConflictDoUpdate({ target: peerSnapshots.peerId, set: row });
 }

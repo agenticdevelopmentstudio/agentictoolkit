@@ -2,7 +2,6 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { RESPONSE_ALREADY_SENT } from '@hono/node-server/utils/response';
 import type { HttpBindings } from '@hono/node-server';
 import type { OpenAPIHono } from '@hono/zod-openapi';
-import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
 import type { AuthVars } from '../middleware/auth';
 import type { Storage } from '../storage/ports';
@@ -30,11 +29,11 @@ function allowedHosts(config: StatusConfig): string[] {
  * RESPONSE_ALREADY_SENT to tell Hono the response is handled. Hono has already
  * consumed the request stream, so the pre-parsed body is passed through.
  */
-export function mountMcp(app: OpenAPIHono<{ Variables: AuthVars }>, db: Db, storage: Storage, config: StatusConfig): void {
+export function mountMcp(app: OpenAPIHono<{ Variables: AuthVars }>, storage: Storage, config: StatusConfig): void {
   app.on(['POST', 'GET', 'DELETE'], MCP_PATH, async (c) => {
     const { incoming, outgoing } = c.env as unknown as HttpBindings;
     const body = await c.req.json().catch(() => undefined);
-    const server = buildMcpServer(db, storage, c.get('tier'), config);
+    const server = buildMcpServer(storage, c.get('tier'), config);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableDnsRebindingProtection: true,

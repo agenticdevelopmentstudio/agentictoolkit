@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
 import type { Storage } from '../storage/ports';
 import type { Tier } from '../middleware/auth';
@@ -62,13 +61,13 @@ function overallFromSnapshot(snap: Awaited<ReturnType<typeof buildSnapshot>>): O
   }
 }
 
-export function badgeRoutes(db: Db, storage: Storage, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
+export function badgeRoutes(storage: Storage, config: StatusConfig): Hono<{ Variables: { tier: Tier } }> {
   const app = new Hono<{ Variables: { tier: Tier } }>();
 
   app.get('/status/badge.svg', async (c) => {
     let overall: OverallStatus;
     try {
-      const snap = await buildSnapshot(db, storage, config);
+      const snap = await buildSnapshot(storage, config);
       overall = overallFromSnapshot(snap);
     } catch {
       overall = 'unknown';

@@ -43,8 +43,8 @@ async function appWithSeed(tier: Tier = "admin") {
   const storage = createLibsqlStorage(db);
   const app = new Hono<{ Variables: { tier: Tier } }>();
   app.use("*", async (c, next) => { c.set("tier", tier); return next(); });
-  app.route("/", boardRoutes(db, storage, testConfig()));
-  app.route("/", readsRoutes(db, storage, testConfig()));
+  app.route("/", boardRoutes(storage, testConfig()));
+  app.route("/", readsRoutes(storage, testConfig()));
   return { db, storage, app };
 }
 
@@ -55,7 +55,7 @@ async function appWithoutRoster() {
   const storage = createLibsqlStorage(db);
   const app = new Hono<{ Variables: { tier: Tier } }>();
   app.use("*", async (c, next) => { c.set("tier", "admin"); return next(); });
-  app.route("/", boardRoutes(db, storage, testConfig()));
+  app.route("/", boardRoutes(storage, testConfig()));
   return { db, storage, app };
 }
 
@@ -183,7 +183,7 @@ describe("GET /board", () => {
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(),
     });
     const nowMs = Date.now();
-    const expected = deriveBoard(await readBoardFacts(db, storage, nowMs, testConfig()), nowMs);
+    const expected = deriveBoard(await readBoardFacts(storage, nowMs, testConfig()), nowMs);
     const body = (await (await app.request("/board")).json()) as Board;
     // The two CLOCK-DERIVED fields are the only ones that legitimately differ — two clock
     // reads, ms apart. `activityFromMs` is `nowMs` minus a constant, so it carries the same
@@ -466,7 +466,7 @@ describe("MCP get_problems/get_issue read the SAME board GET /board does", () =>
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(),
     });
     const board = (await (await app.request("/board")).json()) as Board;
-    const out = (await tool("get_problems").execute(db, storage, {}, testConfig())) as Problem[];
+    const out = (await tool("get_problems").execute(storage, {}, testConfig())) as Problem[];
     expect(out.map((p) => p.target).sort()).toEqual(board.problems.map((p) => p.target).sort());
   });
 
@@ -476,7 +476,7 @@ describe("MCP get_problems/get_issue read the SAME board GET /board does", () =>
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(),
     });
-    const out = (await tool("get_issue").execute(db, storage, { target: "vercel|hub-help-testing|" }, testConfig())) as Problem | null;
+    const out = (await tool("get_issue").execute(storage, { target: "vercel|hub-help-testing|" }, testConfig())) as Problem | null;
     expect(out?.target).toBe("vercel|hub-help-testing|");
   });
 
@@ -489,7 +489,7 @@ describe("MCP get_problems/get_issue read the SAME board GET /board does", () =>
       target: "vercel|long-deleted-site|", source: "vercel", name: "long-deleted-site",
       severity: "major", state: "failed", openedAt: new Date(),
     });
-    const out = await tool("get_issue").execute(db, storage, { target: "vercel|long-deleted-site|" }, testConfig());
+    const out = await tool("get_issue").execute(storage, { target: "vercel|long-deleted-site|" }, testConfig());
     expect(out).toBeNull();
   });
 });

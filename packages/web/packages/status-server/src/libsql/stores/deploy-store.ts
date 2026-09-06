@@ -8,13 +8,18 @@ import {
   collapseInFlightBuildSql,
   collapseInFlightDeploySql,
 } from "../../monitor/deploy-status";
+import { ownedDeploysWhere } from "./owned-deploys";
 import type {
   DeployStore,
   DeployUpsertInput,
   DeployHostRow,
   DeployPhases,
   DeployIdPlatformRow,
+  DeployLogRow,
+  DeploymentRow,
+  OwnedProjects,
   ProjectMetaInput,
+  ProjectMetaRow,
 } from "../../storage/ports";
 
 // ---------------------------------------------------------------------------
@@ -319,6 +324,21 @@ export function createDeployStore(db: Db): DeployStore {
       return rows.map((r) => r.projectName);
     },
 
+    async listProjectMeta(): Promise<ProjectMetaRow[]> {
+      const rows = await db
+        .select({
+          platform: deployProjectMeta.platform,
+          projectName: deployProjectMeta.projectName,
+          domain: deployProjectMeta.domain,
+          gitRepo: deployProjectMeta.gitRepo,
+          gitBranch: deployProjectMeta.gitBranch,
+          rootDirectory: deployProjectMeta.rootDirectory,
+          framework: deployProjectMeta.framework,
+        })
+        .from(deployProjectMeta);
+      return rows;
+    },
+
     /** Chunked delete — see {@link DELETE_CHUNK_NAMES}. */
     async deleteProjectMeta(platform: string, names: string[]): Promise<void> {
       const isPlatform = eq(deployProjectMeta.platform, platform);
@@ -327,6 +347,32 @@ export function createDeployStore(db: Db): DeployStore {
           .delete(deployProjectMeta)
           .where(and(isPlatform, inArray(deployProjectMeta.projectName, names.slice(i, i + DELETE_CHUNK_NAMES))));
       }
+    },
+
+    /** The most recent `limit` deploys some live site monitors (see `ownedDeploysWhere`),
+     *  newest-created first — the Deployments-tab feed. */
+    async listRecentOwned(owned: OwnedProjects, limit: number): Promise<DeploymentRow[]> {
+      return db
+        .select()
+        .from(deployments)
+        .where(ownedDeploysWhere(owned))
+        .orderBy(desc(deployments.createdAt))
+        .limit(limit);
+    },
+
+    async findById(id: string): Promise<DeployLogRow | null> {
+      const [row] = await db
+        .select({
+          id: deployments.id,
+          platform: deployments.platform,
+          projectName: deployments.projectName,
+          environment: deployments.environment,
+          errorText: deployments.errorText,
+        })
+        .from(deployments)
+        .where(eq(deployments.id, id))
+        .limit(1);
+      return row ?? null;
     },
   };
 }

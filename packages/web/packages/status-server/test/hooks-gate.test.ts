@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { createHmac } from 'node:crypto';
-import type { Db } from '../src/libsql/client';
 import type { Storage } from '../src/storage/ports';
 
 // Both behaviours below are about the ROUTE's control flow — what it answers when the
 // roster cannot be read, and how many reconciles a burst of webhooks costs — not about
-// SQL. So `../src/board` is stubbed and `db` is a sentinel: a real database would only
-// make an unreadable roster and a countable reconcile harder to arrange.
+// SQL. So `../src/board` is stubbed: a real database would only make an unreadable
+// roster and a countable reconcile harder to arrange.
 const { readRoster, reconcileBoardLedger, ownsDeployProject, upsertDeployments } = vi.hoisted(
   () => ({
     readRoster: vi.fn<() => Promise<unknown[]>>(),
@@ -29,10 +28,10 @@ import { hooksRoutes } from '../src/routes/hooks';
 import { testConfig } from './helpers/config';
 
 const SECRET = 's3cr3t';
-const db = {} as Db;
-// The route persists through the storage port, so the stub IS the port: only the one
-// method the webhook path touches, counted like the old module mock was.
-const storage = { deploy: { upsertDeployments } } as unknown as Storage;
+// The route reads the roster and persists through the storage port, so the stub IS
+// the port: only the two methods the webhook path touches, counted like the old
+// module mocks were.
+const storage = { board: { readRoster }, deploy: { upsertDeployments } } as unknown as Storage;
 
 /** A distinct deployment per call, so nothing can be coalesced by deploy id. */
 function vercelBody(n: number): string {
@@ -77,7 +76,7 @@ afterAll(() => {
 describe('the webhook ownership gate separates a verdict from an unreadable roster', () => {
   it('drops a project no site owns with 2xx — a final answer, nothing to retry', async () => {
     ownsDeployProject.mockReturnValue(false);
-    const res = await post(hooksRoutes(db, storage, testConfig()), vercelBody(1));
+    const res = await post(hooksRoutes(storage, testConfig()), vercelBody(1));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, ignored: 'not owned by a site' });
     expect(upsertDeployments).not.toHaveBeenCalled();
@@ -87,7 +86,7 @@ describe('the webhook ownership gate separates a verdict from an unreadable rost
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       readRoster.mockRejectedValue(new Error('database is locked'));
-      const res = await post(hooksRoutes(db, storage, testConfig()), vercelBody(2));
+      const res = await post(hooksRoutes(storage, testConfig()), vercelBody(2));
       // Answering 2xx here told the provider we had accepted an event we then discarded:
       // one DB blip during a deploy burst silently lost the fastest failure signal the
       // monitor gets, for every event in the burst.
@@ -112,7 +111,7 @@ describe('webhook reconciles are single-flight with one coalesced follow-up', ()
     // whole-board folds on the API thread.
     reconcileBoardLedger.mockImplementation(() => gate);
 
-    const app = hooksRoutes(db, storage, testConfig());
+    const app = hooksRoutes(storage, testConfig());
     const burst = Array.from({ length: 10 }, (_, i) => post(app, vercelBody(100 + i)));
     // Every request writes its row before it asks for a reconcile, so ten upserts means
     // all ten have reached the gate — no tick-counting, no sleep.
@@ -128,7 +127,7 @@ describe('webhook reconciles are single-flight with one coalesced follow-up', ()
   });
 
   it('reconciles again for an event that arrives after the gate has drained', async () => {
-    const app = hooksRoutes(db, storage, testConfig());
+    const app = hooksRoutes(storage, testConfig());
     await post(app, vercelBody(300));
     await post(app, vercelBody(301));
     expect(reconcileBoardLedger).toHaveBeenCalledTimes(2);

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as schema from '../src/libsql/schema';
 import { fetchPeers } from '../src/peers/fetch';
+import { createLibsqlStorage } from '../src/libsql';
 import { freshDb } from './helpers/db';
 
 describe('fetchPeers', () => {
@@ -8,7 +9,7 @@ describe('fetchPeers', () => {
     const db = await freshDb();
     await db.insert(schema.peers).values({ label: 'B', baseUrl: 'https://b.example.com', token: 't' });
     const fakeFetch = async () => new Response(JSON.stringify({ overall: 'healthy' }), { status: 200 });
-    await fetchPeers(db, fakeFetch as unknown as typeof fetch);
+    await fetchPeers(createLibsqlStorage(db), fakeFetch as unknown as typeof fetch);
     const snap = await db.select().from(schema.peerSnapshots);
     expect(snap[0].reachable).toBe(true);
     expect(snap[0].overall).toBe('healthy');
@@ -20,7 +21,7 @@ describe('fetchPeers', () => {
     const failFetch = async () => {
       throw new Error('ECONNREFUSED');
     };
-    await fetchPeers(db, failFetch as unknown as typeof fetch);
+    await fetchPeers(createLibsqlStorage(db), failFetch as unknown as typeof fetch);
     const snap = await db.select().from(schema.peerSnapshots);
     expect(snap[0].reachable).toBe(false);
     expect(snap[0].error).toContain('ECONNREFUSED');

@@ -447,6 +447,7 @@ export function createConfigStore(db: Db): ConfigStore {
           // unchanged — an object or the `{}` default).
           config: (input.config ?? {}) as Record<string, unknown>,
           tokenEnvVar: input.tokenEnvVar,
+          secretRef: input.secretRef,
           isActive: input.isActive,
         })
         .returning();

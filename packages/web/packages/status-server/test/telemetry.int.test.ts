@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as schema from '../src/libsql/schema';
 import { createApp } from '../src/app';
 import type { Db } from '../src/libsql/client';
+import { createLibsqlStorage } from '../src/libsql';
 import { telemetryRoutes } from '../src/routes/telemetry';
 import type { Fetcher } from '../src/telemetry/ports';
 import type { ErrorDTO, AnalyticsMetricDTO } from '../src/telemetry/types';
@@ -134,7 +135,7 @@ describe('telemetry live snapshot — single-flight + stale fallback', () => {
       }),
     };
     const analyticsFetcher: Fetcher<AnalyticsMetricDTO> = { fetch: vi.fn(async () => ({ ok: true as const, items: [] })) };
-    const routes = telemetryRoutes(db, testConfig(), { errorsFetcher, analyticsFetcher });
+    const routes = telemetryRoutes(createLibsqlStorage(db), testConfig(), { errorsFetcher, analyticsFetcher });
 
     const [a, b] = [routes.request('/telemetry'), routes.request('/telemetry?fresh=1')];
     release();
@@ -153,7 +154,7 @@ describe('telemetry live snapshot — single-flight + stale fallback', () => {
       fetch: async () => (fail ? { ok: false as const, items: [] } : { ok: true as const, items: [errItem] }),
     };
     const analyticsFetcher: Fetcher<AnalyticsMetricDTO> = { fetch: async () => ({ ok: true as const, items: [] }) };
-    const routes = telemetryRoutes(db, testConfig(), { errorsFetcher, analyticsFetcher });
+    const routes = telemetryRoutes(createLibsqlStorage(db), testConfig(), { errorsFetcher, analyticsFetcher });
 
     const first = (await (await routes.request('/telemetry?fresh=1')).json()) as { errors: { issueKey: string }[] };
     expect(first.errors.map((e) => e.issueKey)).toEqual(['gt-1']);

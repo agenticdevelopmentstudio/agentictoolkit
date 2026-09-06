@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
 import type { Storage } from '../storage/ports';
 import { createActivityPageReader, MAX_ACTIVITY_ROWS, type ActivityCursor } from '../board';
@@ -12,9 +11,9 @@ import { createActivityPageReader, MAX_ACTIVITY_ROWS, type ActivityCursor } from
  */
 const MAX_CURSOR_MS = 8.64e15;
 
-export function activityRoutes(db: Db, storage: Storage, config: StatusConfig) {
+export function activityRoutes(storage: Storage, config: StatusConfig) {
   const app = new Hono();
-  const readPage = createActivityPageReader(db, storage, config);
+  const readPage = createActivityPageReader(storage, config);
 
   /**
    * One page of the activity feed, older than the given cursor.

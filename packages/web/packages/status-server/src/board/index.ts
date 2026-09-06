@@ -2,7 +2,7 @@ export * from "./types";
 export { boardTargetKey, parseBoardTarget } from "./target-key";
 export { deriveBoard } from "./derive";
 export { deriveActivity, indicatorFor, ISSUE_VERB, pageActivity } from "./derive-activity";
-export { createActivityPageReader, ownedDeploysWhere, readActivityPage, readBoardFacts, readRoster } from "./facts";
+export { createActivityPageReader, readActivityPage, readBoardFacts } from "./facts";
 // The ownership rule, for the surfaces OUTSIDE the fold that must agree with it about
 // which deploy targets exist — the webhook door, the Deployments tab, the live-host stamp.
 export {

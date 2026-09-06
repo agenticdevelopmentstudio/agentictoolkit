@@ -79,6 +79,11 @@ export interface StatusConfig {
   readonly glitchtipProjects: readonly string[] | null;
   /** Provider credentials and settings, by name. See STATUS_CREDENTIAL_NAMES. */
   readonly credentials: Readonly<Record<StatusCredentialName, string | undefined>>;
+  /** A secret by ANY name — the name a `deploy_integrations` row stores in `tokenEnvVar`.
+   *  An integration names its own secret, so the lookup cannot be limited to
+   *  STATUS_CREDENTIAL_NAMES; this is the one place status-server resolves such a name,
+   *  and the host decides what a name means (the env adapter: that env var). */
+  credential(name: string): string | undefined;
 }
 
 /** How often (ms) the EXPENSIVE deploy-provider poll + peer/telemetry fetch runs,

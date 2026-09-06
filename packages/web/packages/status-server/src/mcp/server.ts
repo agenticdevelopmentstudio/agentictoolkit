@@ -1,6 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import type { Db } from '../libsql/client';
 import type { StatusConfig } from '../config/port';
 import type { Tier } from '../middleware/auth';
 import type { Storage } from '../storage/ports';
@@ -27,17 +26,17 @@ function fail(error: string, code: string): CallToolResult {
  *     it runs, so even a mis-selected admin tool refuses under `'view'` (returns isError)
  *     rather than executing.
  */
-export function buildMcpServer(db: Db, storage: Storage, tier: Tier, config: StatusConfig): McpServer {
+export function buildMcpServer(storage: Storage, tier: Tier, config: StatusConfig): McpServer {
   const server = new McpServer({ name: 'status-backend', version: '1.0.0' });
 
   for (const tool of selectTools(tier)) {
-    registerTool(server, db, storage, tier, tool, config);
+    registerTool(server, storage, tier, tool, config);
   }
 
   return server;
 }
 
-function registerTool(server: McpServer, db: Db, storage: Storage, tier: Tier, tool: McpTool, config: StatusConfig): void {
+function registerTool(server: McpServer, storage: Storage, tier: Tier, tool: McpTool, config: StatusConfig): void {
   server.registerTool(
     tool.name,
     {
@@ -57,7 +56,7 @@ function registerTool(server: McpServer, db: Db, storage: Storage, tier: Tier, t
         return fail('admin tier required', 'forbidden_tier');
       }
       try {
-        return ok(await tool.execute(db, storage, args ?? {}, config));
+        return ok(await tool.execute(storage, args ?? {}, config));
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e), 'execution_error');
       }

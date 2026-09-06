@@ -3,11 +3,8 @@ import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
-import { and, eq, lt } from 'drizzle-orm';
-import type { Db } from '../libsql/client';
 import type { AuthVars } from '../middleware/auth';
-import type { AuthUser, Storage } from '../storage/ports';
-import { deviceAuthorizations, apiTokens } from '../libsql/schema';
+import type { AuthUser, DeviceGrantRow, Storage } from '../storage/ports';
 import { rateLimit } from '../middleware/rate-limit';
 import { readValidatedBody } from './read-body';
 
@@ -73,7 +70,7 @@ export const userCodeSchema = z.object({ user_code: z.string().min(1) });
  * (max 10/window), mirroring /auth/login: a request-flood or a poll-flood is an
  * unauthenticated cost the container must bound.
  */
-export function devicePublicRoutes(db: Db): Hono<{ Variables: AuthVars }> {
+export function devicePublicRoutes(storage: Storage): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
 
   app.use('/auth/device', rateLimit({ max: 10 }));
@@ -89,12 +86,12 @@ export function devicePublicRoutes(db: Db): Hono<{ Variables: AuthVars }> {
   // accumulates dead grants (and a recycled user_code can't collide with a stale one).
   app.post('/auth/device', async (c) => {
     const { label } = await readValidatedBody(c, requestSchema);
-    await db.delete(deviceAuthorizations).where(lt(deviceAuthorizations.expiresAt, new Date()));
+    await storage.device.purgeExpired();
 
     const deviceCode = generateDeviceCode();
     const userCode = generateUserCode();
     const expiresAt = new Date(Date.now() + DEVICE_TTL_MS);
-    await db.insert(deviceAuthorizations).values({
+    await storage.device.create({
       deviceCodeHash: sha256Hex(deviceCode),
       userCodeHash: hashUserCode(userCode),
       cliLabel: label?.trim() || '',
@@ -121,39 +118,32 @@ export function devicePublicRoutes(db: Db): Hono<{ Variables: AuthVars }> {
   // or the minted token EXACTLY ONCE on the approved path (row deleted after).
   app.post('/auth/device/token', async (c) => {
     const { device_code } = await readValidatedBody(c, tokenSchema);
-    const [row] = await db
-      .select()
-      .from(deviceAuthorizations)
-      .where(eq(deviceAuthorizations.deviceCodeHash, sha256Hex(device_code)))
-      .limit(1);
+    const row = await storage.device.findByDeviceCodeHash(sha256Hex(device_code));
 
     // Unknown code, or a grant already consumed by an earlier successful poll.
     if (!row) return c.json({ error: 'expired' as const });
 
     const now = Date.now();
     if (row.expiresAt.getTime() <= now) {
-      await db.delete(deviceAuthorizations).where(eq(deviceAuthorizations.id, row.id));
+      await storage.device.deleteById(row.id);
       return c.json({ error: 'expired' as const });
     }
     if (row.status === 'denied') {
-      await db.delete(deviceAuthorizations).where(eq(deviceAuthorizations.id, row.id));
+      await storage.device.deleteById(row.id);
       return c.json({ error: 'denied' as const });
     }
     if (row.status === 'approved') {
-      // SINGLE-USE, atomic: delete-returning both reads the held secret AND
+      // SINGLE-USE, atomic: `consumeApproved` both reads the held secret AND
       // consumes the row in one statement — a second concurrent poll's delete
       // matches zero rows and falls through to `expired`. This is the "null +
       // delete" the secret's at-rest exception requires: the row (and its
       // token_raw) ceases to exist here, so no separate null is needed.
       c.header('Cache-Control', 'no-store');
-      const [consumed] = await db
-        .delete(deviceAuthorizations)
-        .where(eq(deviceAuthorizations.id, row.id))
-        .returning();
-      if (!consumed?.tokenRaw || !consumed.tokenId) return c.json({ error: 'expired' as const });
+      const consumed = await storage.device.consumeApproved(row.id);
+      if (!consumed) return c.json({ error: 'expired' as const });
       // role + expiry come from the minted token row (still live — only the grant
       // was consumed). token_raw itself is never selected from a list path.
-      const [tok] = await db.select().from(apiTokens).where(eq(apiTokens.id, consumed.tokenId)).limit(1);
+      const tok = await storage.device.tokenRoleAndExpiry(consumed.tokenId);
       if (!tok) return c.json({ error: 'expired' as const });
       return c.json({ token: consumed.tokenRaw, role: tok.role, expires_at: tok.expiresAt?.toISOString() ?? null });
     }
@@ -164,10 +154,7 @@ export function devicePublicRoutes(db: Db): Hono<{ Variables: AuthVars }> {
     if (row.lastPollAt && now - row.lastPollAt.getTime() < POLL_INTERVAL_SEC * 1000) {
       return c.json({ error: 'slow_down' as const });
     }
-    await db
-      .update(deviceAuthorizations)
-      .set({ lastPollAt: new Date() })
-      .where(eq(deviceAuthorizations.id, row.id));
+    await storage.device.markPolled(row.id);
     return c.json({ error: 'authorization_pending' as const });
   });
 
@@ -187,20 +174,16 @@ function requireSessionUser(c: Context<{ Variables: AuthVars }>): AuthUser {
  * BEFORE usersRoutes so that router's `use('*', requireAdmin)` never leaks onto
  * these (a viewer must be able to approve a `user`-role token). NOT admin-gated.
  */
-export function deviceApprovalRoutes(db: Db, storage: Storage): Hono<{ Variables: AuthVars }> {
+export function deviceApprovalRoutes(storage: Storage): Hono<{ Variables: AuthVars }> {
   const app = new Hono<{ Variables: AuthVars }>();
 
   // Look up a still-valid grant by its user_code, reaping it if expired. Returns
   // the row, or null (missing / expired) so callers answer 404 uniformly.
-  async function findLiveByUserCode(userCode: string): Promise<typeof deviceAuthorizations.$inferSelect | null> {
-    const [row] = await db
-      .select()
-      .from(deviceAuthorizations)
-      .where(eq(deviceAuthorizations.userCodeHash, hashUserCode(userCode)))
-      .limit(1);
+  async function findLiveByUserCode(userCode: string): Promise<DeviceGrantRow | null> {
+    const row = await storage.device.findByUserCodeHash(hashUserCode(userCode));
     if (!row) return null;
     if (row.expiresAt.getTime() <= Date.now()) {
-      await db.delete(deviceAuthorizations).where(eq(deviceAuthorizations.id, row.id));
+      await storage.device.deleteById(row.id);
       return null;
     }
     return row;
@@ -243,12 +226,8 @@ export function deviceApprovalRoutes(db: Db, storage: Storage): Hono<{ Variables
     });
     // Guard the write on still-pending status, so two racing approvers can't both
     // mint-and-stash onto the same grant (only the first update matches).
-    const updated = await db
-      .update(deviceAuthorizations)
-      .set({ status: 'approved', tokenId: meta.id, tokenRaw: raw, approvedBy: user.id })
-      .where(and(eq(deviceAuthorizations.id, row.id), eq(deviceAuthorizations.status, 'pending')))
-      .returning({ id: deviceAuthorizations.id });
-    if (updated.length === 0) {
+    const approved = await storage.device.approve(row.id, { tokenId: meta.id, tokenRaw: raw, approvedBy: user.id });
+    if (!approved) {
       // Lost the race: the just-minted token was never disclosed (this update's
       // stash never landed), so it's dead on arrival — delete it rather than
       // leave an orphaned api_tokens row behind.
@@ -265,12 +244,8 @@ export function deviceApprovalRoutes(db: Db, storage: Storage): Hono<{ Variables
     const row = await findLiveByUserCode(user_code);
     if (!row) throw new HTTPException(404, { message: 'code not found or expired' });
     if (row.status !== 'pending') throw new HTTPException(409, { message: 'This request has already been handled' });
-    const updated = await db
-      .update(deviceAuthorizations)
-      .set({ status: 'denied' })
-      .where(and(eq(deviceAuthorizations.id, row.id), eq(deviceAuthorizations.status, 'pending')))
-      .returning({ id: deviceAuthorizations.id });
-    if (updated.length === 0) throw new HTTPException(409, { message: 'This request has already been handled' });
+    const denied = await storage.device.deny(row.id);
+    if (!denied) throw new HTTPException(409, { message: 'This request has already been handled' });
     return c.json({ status: 'denied' as const });
   });
 

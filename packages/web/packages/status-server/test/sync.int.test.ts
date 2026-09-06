@@ -36,7 +36,7 @@ describe('runCycle', () => {
     await seedOneEndpoint(db, 'https://example.com');
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await runCycle(db, storage, testConfig()); // must not throw even though no VERCEL/RAILWAY/CLOUDFLARE tokens are set
+    await runCycle(storage, testConfig()); // must not throw even though no VERCEL/RAILWAY/CLOUDFLARE tokens are set
 
     const checks = await db.select().from(schema.healthChecks);
     expect(checks.length).toBeGreaterThanOrEqual(1);
@@ -79,12 +79,12 @@ describe('runCycle', () => {
 
     try {
       // skipDeploys → poll + prune never run → aged row survives, probe still recorded.
-      await runCycle(db, storage, testConfig(), { skipDeploys: true });
+      await runCycle(storage, testConfig(), { skipDeploys: true });
       expect((await db.select().from(schema.deployments)).map((d) => d.id)).toContain('old');
       expect((await db.select().from(schema.healthChecks)).length).toBeGreaterThanOrEqual(1);
 
       // Full cycle → Railway ok:true → step 7 prune deletes the aged row.
-      await runCycle(db, storage, testConfig());
+      await runCycle(storage, testConfig());
       expect((await db.select().from(schema.deployments)).map((d) => d.id)).not.toContain('old');
     } finally {
       delete process.env.TEST_RAILWAY_TOKEN;
@@ -97,8 +97,8 @@ describe('runCycle', () => {
     const slug = await seedOneEndpoint(db, 'https://example.com');
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await runCycle(db, storage, testConfig());
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
+    await runCycle(storage, testConfig());
 
     const metrics = await db.select().from(schema.metricsHourly);
     expect(metrics).toHaveLength(1); // two cycles, same hour → upserted, not duplicated
@@ -114,7 +114,7 @@ describe('runCycle', () => {
 
     // Down: a 500 is not the expected 200.
     vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
     let open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open).toHaveLength(1);
     expect(open[0]!.source).toBe('http');
@@ -122,7 +122,7 @@ describe('runCycle', () => {
     vi.unstubAllGlobals();
     // Recovered.
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
     open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open).toHaveLength(0); // the open issue was resolved
   });
@@ -131,7 +131,7 @@ describe('runCycle', () => {
     const db = await bootDb();
     const storage = createLibsqlStorage(db);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await expect(runCycle(db, storage, testConfig())).resolves.toBeUndefined();
+    await expect(runCycle(storage, testConfig())).resolves.toBeUndefined();
     expect(await db.select().from(schema.healthChecks)).toHaveLength(0);
   });
 
@@ -152,7 +152,7 @@ describe('runCycle', () => {
     await db.delete(schema.monitoredSites).where(eq(schema.monitoredSites.id, s2!.id)); // strand the ghost endpoint
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     // The ghost endpoint row is gone (only the live one remains)…
     const eps = await db.select().from(schema.monitoredEndpoints);
@@ -182,7 +182,7 @@ describe('runCycle', () => {
     ]);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open.filter((i) => i.target === 'vercel|web-prod|')).toHaveLength(0);
@@ -211,7 +211,7 @@ describe('runCycle', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open.filter((i) => i.target === 'vercel|web-prod|')).toHaveLength(0);
@@ -233,7 +233,7 @@ describe('runCycle', () => {
     ]);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open.filter((i) => i.target === 'vercel|web-prod|')).toHaveLength(1);
@@ -257,7 +257,7 @@ describe('runCycle', () => {
     ]);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open.filter((i) => i.target === 'vercel|web-prod|')).toHaveLength(1);
@@ -287,7 +287,7 @@ describe('runCycle', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
 
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     const open = await db.select().from(schema.issues).where(isNull(schema.issues.resolvedAt));
     expect(open).toHaveLength(1); // survived — the empty-endpoints guard held
@@ -318,7 +318,7 @@ describe('runCycle', () => {
     );
     try {
       // First cycle must not throw despite every provider fetch throwing.
-      await expect(runCycle(db, storage, testConfig())).resolves.toBeUndefined();
+      await expect(runCycle(storage, testConfig())).resolves.toBeUndefined();
       // The endpoint was still probed + recorded (as down, since fetch threw).
       const checks = await db.select().from(schema.healthChecks);
       expect(checks.length).toBeGreaterThanOrEqual(1);
@@ -329,7 +329,7 @@ describe('runCycle', () => {
 
       // Second consecutive failed poll crosses the debounce threshold → the
       // platform-health issue opens for the unreachable vercel provider.
-      await expect(runCycle(db, storage, testConfig())).resolves.toBeUndefined();
+      await expect(runCycle(storage, testConfig())).resolves.toBeUndefined();
       const platformIssues = await db
         .select()
         .from(schema.issues)

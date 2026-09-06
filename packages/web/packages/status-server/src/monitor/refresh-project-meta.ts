@@ -1,7 +1,7 @@
-import type { Db } from "../libsql/client";
+import type { StatusConfig } from "../config/port";
 import type { Storage } from "../storage/ports";
-import { providerConnFromConfig } from "@agentic-toolkit/deploy-platform/conn";
 import { fetchVercelProductionStates, type VercelProjectMeta } from "./fetch-vercel-projects";
+import { providerConn } from "./provider-conn";
 
 // ---------------------------------------------------------------------------
 // `deploy_project_meta` is the ONLY source of "which VERCEL projects exist":
@@ -116,13 +116,11 @@ export async function refreshVercelProjectMeta(
   return { ok: res.ok, configured, pruned };
 }
 
-/** {@link refreshVercelProjectMeta} with the credentials taken from the DB integration
- *  config (non-secret config there, token from env by name) — what the request-path
- *  callers want, since only the monitor cycle already holds a resolved connection.
- *  `db` is a residual, deliberate exception: `providerConnFromConfig` is an
- *  out-of-scope `@agentic-toolkit/deploy-platform` collaborator that still takes the
- *  real driver type, not a plain port. */
-export async function refreshVercelProjectMetaFromConfig(db: Db, storage: Storage): Promise<VercelRefreshResult> {
-  const conn = await providerConnFromConfig(db);
+/** {@link refreshVercelProjectMeta} with the credentials taken from the storage-port
+ *  integration rows (non-secret config there, token from `config.credentials` by name) —
+ *  what the request-path callers want, since only the monitor cycle already holds a
+ *  resolved connection. */
+export async function refreshVercelProjectMetaFromConfig(storage: Storage, config: StatusConfig): Promise<VercelRefreshResult> {
+  const conn = await providerConn(storage, config);
   return refreshVercelProjectMeta(storage, { VERCEL_API_TOKEN: conn.vercel.token, VERCEL_TEAM_ID: conn.vercel.teamId });
 }

@@ -34,7 +34,7 @@ describe("readBoardFacts", () => {
       { ...base, id: "vc_d2", buildPhase: "built", deployPhase: "deployed", createdAt: new Date(2000) },
       { ...base, id: "vc_d3", buildPhase: "canceled", deployPhase: "none", createdAt: new Date(3000) },
     ]);
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),4000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),4000, config);
     expect(facts.deploys).toHaveLength(1);
     expect(facts.deploys[0]).toMatchObject({ buildPhase: "built", createdAtMs: 2000 });
     expect(facts.inFlightDeploys).toEqual([]);
@@ -48,7 +48,7 @@ describe("readBoardFacts", () => {
       { ...base, id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(1000) },
       { ...base, id: "vc_d2", buildPhase: "building", deployPhase: "none", createdAt: new Date(2000) },
     ]);
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),3000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),3000, config);
     // The newest row is the retry, but it is NOT the verdict — that stays the failure.
     expect(facts.deploys).toMatchObject([{ buildPhase: "failed", createdAtMs: 1000 }]);
     expect(facts.inFlightDeploys).toMatchObject([{ buildPhase: "building", createdAtMs: 2000 }]);
@@ -69,7 +69,7 @@ describe("readBoardFacts", () => {
       { platform: "vercel", projectName: "hub-help", providerProjectId: "prj_abc", environment: "production",
         id: "vc_new", buildPhase: "built", deployPhase: "deployed", createdAt: new Date(2000) },
     ]);
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),3000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),3000, config);
     // SQL cannot tell they are one target: two rows come back.
     expect(facts.deploys).toHaveLength(2);
     // The fold can, and the newer row — the successful rebuild — wins.
@@ -78,7 +78,7 @@ describe("readBoardFacts", () => {
     // Flip which spelling is newer: now the failure is current, and it is still ONE row,
     // keyed by the roster entry's identity rather than either project name.
     await db.update(deployments).set({ createdAt: new Date(4000) }).where(eq(deployments.id, "vc_old"));
-    const board = deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),5000, config), 5000);
+    const board = deriveBoard(await readBoardFacts(createLibsqlStorage(db),5000, config), 5000);
     expect(board.problems).toHaveLength(1);
     expect(board.problems[0].target).toBe("vercel|prj_abc|");
   });
@@ -90,7 +90,7 @@ describe("readBoardFacts", () => {
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "built", deployPhase: "deployed", createdAt: new Date(2000),
     });
-    const board = deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),3000, config), 3000);
+    const board = deriveBoard(await readBoardFacts(createLibsqlStorage(db),3000, config), 3000);
     expect(board.problems).toEqual([]);
     expect(board.indicator).toBe("operational");
   });
@@ -102,7 +102,7 @@ describe("readBoardFacts", () => {
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(2000),
     });
-    const board = deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),3000, config), 3000);
+    const board = deriveBoard(await readBoardFacts(createLibsqlStorage(db),3000, config), 3000);
     expect(board.problems).toHaveLength(1);
     expect(board.problems[0].target).toBe("vercel|hub-help-testing|");
   });
@@ -114,14 +114,14 @@ describe("readBoardFacts", () => {
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(2000),
     });
-    expect(deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),3000, config), 3000).problems).toHaveLength(1);
+    expect(deriveBoard(await readBoardFacts(createLibsqlStorage(db),3000, config), 3000).problems).toHaveLength(1);
     await db.update(monitoredEndpoints).set({ isActive: false });
-    expect(deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),3000, config), 3000).problems).toEqual([]);
+    expect(deriveBoard(await readBoardFacts(createLibsqlStorage(db),3000, config), 3000).problems).toEqual([]);
   });
 
   it("an endpoint with no site row contributes no roster entry", async () => {
     const db = await freshDb();
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),1000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),1000, config);
     expect(facts.roster).toEqual([]);
   });
 
@@ -132,12 +132,12 @@ describe("readBoardFacts", () => {
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(2000),
     });
-    expect(deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),3000, config), 3000).problems).toHaveLength(1);
+    expect(deriveBoard(await readBoardFacts(createLibsqlStorage(db),3000, config), 3000).problems).toHaveLength(1);
     // Reading this column rather than hardcoding false is the whole point: the fold and
     // every deploy surface outside it now share one ownership rule (`board/ownership.ts`),
     // so the operator's opt-out has to reach the roster to be honoured anywhere.
     await db.update(monitoredEndpoints).set({ ignoreProjectWarning: true });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),3000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),3000, config);
     expect(facts.roster[0].ignoreProjectWarning).toBe(true);
     expect(deriveBoard(facts, 3000).problems).toEqual([]);
   });
@@ -150,7 +150,7 @@ describe("readBoardFacts", () => {
     await db.insert(platformHealthState).values({
       source: "vercel", consecutiveFailures: 3, configured: true, reachable: false, updatedAt: new Date(1000),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),2000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),2000, config);
     // `sampledAtMs` is `updated_at`, which `recordPlatformObservations` rewrites every cycle
     // whether or not the verdict changed — that is what makes it the monitor's heartbeat and
     // the board's data clock (`dataAsOf`). Reading `nowMs` here instead would make the clock
@@ -167,7 +167,7 @@ describe("readBoardFacts", () => {
       projectName: "hub-help-testing", stale: true, detail: "live deploy errored",
       sourceUrl: "https://vercel.com/x/y", liveUrl: "https://testing.help.example.com", updatedAt: new Date(1000),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),2000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),2000, config);
     expect(facts.staleProd).toEqual([{
       platform: "vercel", providerProjectId: null, projectName: "hub-help-testing", environment: null,
       // No `deploy_project_meta` row was seeded, so there is no branch to read. NULL is
@@ -193,7 +193,7 @@ describe("readBoardFacts", () => {
       projectName: "hub-help-testing", stale: true, detail: "live deploy errored",
       sourceUrl: null, liveUrl: null, updatedAt: new Date(1000),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),2000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),2000, config);
     expect(facts.staleProd).toHaveLength(1);
     expect(facts.staleProd[0]!.branch).toBe("prepared");
   });
@@ -209,7 +209,7 @@ describe("readBoardFacts", () => {
       projectName: "hub-help-testing", stale: true, detail: "live deploy errored",
       sourceUrl: null, liveUrl: null, updatedAt: new Date(1000),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),2000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),2000, config);
     expect(facts.staleProd).toHaveLength(1);
     expect(facts.staleProd[0]!.branch).toBeNull();
   });
@@ -228,7 +228,7 @@ describe("readBoardFacts", () => {
       projectName: "hub-help-testing", stale: true, detail: "live deploy errored",
       sourceUrl: null, liveUrl: null, updatedAt: new Date(1000),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),2000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),2000, config);
     expect(facts.staleProd).toHaveLength(1);
     expect(facts.staleProd[0]!.branch).toBeNull();
   });
@@ -243,7 +243,7 @@ describe("readBoardFacts", () => {
       id: "vc_d1", branch: "prepared", buildPhase: "built", deployPhase: "deployed",
       createdAt: new Date(1000),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),2000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),2000, config);
     expect(facts.deploys[0]!.branch).toBe("prepared");
     expect(facts.deployEvents[0]!.branch).toBe("prepared");
   });
@@ -259,7 +259,7 @@ describe("readBoardFacts", () => {
       errorText: '[buildStep] Command "next build" exited with 1',
       createdAt: new Date(1000),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),2000, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),2000, config);
     expect(facts.deploys[0]!.errorText).toBe('[buildStep] Command "next build" exited with 1');
     expect(facts.deployEvents[0]!.errorText).toBe('[buildStep] Command "next build" exited with 1');
   });
@@ -270,7 +270,7 @@ describe("readBoardFacts", () => {
     await db.insert(vercelProdState).values({
       projectName: "hub-help-testing", stale: false, detail: null, sourceUrl: null, liveUrl: null, updatedAt: new Date(1000),
     });
-    expect((await readBoardFacts(db, createLibsqlStorage(db),2000, config)).staleProd).toEqual([]);
+    expect((await readBoardFacts(createLibsqlStorage(db),2000, config)).staleProd).toEqual([]);
   });
 
   it("reads the live Vercel project list from the deploy_project_meta mirror", async () => {
@@ -279,7 +279,7 @@ describe("readBoardFacts", () => {
       { platform: "vercel", projectName: "hub-help-testing" },
       { platform: "railway", projectName: "adh-backend" },
     ]);
-    expect((await readBoardFacts(db, createLibsqlStorage(db),2000, config)).liveVercelProjects).toEqual(["hub-help-testing"]);
+    expect((await readBoardFacts(createLibsqlStorage(db),2000, config)).liveVercelProjects).toEqual(["hub-help-testing"]);
   });
 
   // `deploys` and `deployEvents` select the same table differently, and the difference IS
@@ -294,7 +294,7 @@ describe("readBoardFacts", () => {
       { ...base, id: "vc_d2", buildPhase: "built", deployPhase: "deployed", createdAt: new Date(now - 2_000) },
       { ...base, id: "vc_d3", buildPhase: "canceled", deployPhase: "none", createdAt: new Date(now - 1_000) },
     ]);
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),now, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),now, config);
     expect(facts.deploys).toHaveLength(1);
     expect(facts.deployEvents.map((d) => d.buildPhase)).toEqual(["canceled", "built", "failed"]);
   });
@@ -322,7 +322,7 @@ describe("readBoardFacts", () => {
       })),
     );
 
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),now, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),now, config);
     // The previews never reach the fold at all — the budget holds only real deploys.
     expect(facts.deployEvents).toHaveLength(1);
     expect(facts.deployEvents[0]).toMatchObject({ environment: "production", createdAtMs: now - 600_000 });
@@ -351,7 +351,7 @@ describe("readBoardFacts", () => {
       })),
     );
 
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),now, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),now, config);
     expect(facts.deployEvents.map((d) => d.projectName)).toEqual(["hub-help-testing"]);
   });
 
@@ -366,7 +366,7 @@ describe("readBoardFacts", () => {
       platform: "crunchy", projectName: "prod-cluster", environment: null,
       id: "cr_1", buildPhase: null, deployPhase: "failed", createdAt: new Date(now - 60_000),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),now, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),now, config);
     expect(facts.deployEvents.map((d) => d.projectName)).toEqual(["prod-cluster"]);
   });
 
@@ -379,7 +379,7 @@ describe("readBoardFacts", () => {
       id: "vc_old", buildPhase: "built", deployPhase: "deployed",
       createdAt: new Date(now - ACTIVITY_WINDOW_MS - 1),
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),now, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),now, config);
     expect(facts.deployEvents).toEqual([]);
     // Still the current state, though — Problems are not windowed.
     expect(facts.deploys).toHaveLength(1);
@@ -397,7 +397,7 @@ describe("readBoardFacts", () => {
       { target: "ep-2", source: "http", name: "Other", state: "down", severity: "critical",
         openedAt: new Date(now - ACTIVITY_WINDOW_MS - 10_000) },
     ]);
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),now, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),now, config);
     expect(facts.issueEvents.map((e) => e.target)).toEqual(["ep-1"]);
     expect(facts.issueEvents[0]).toMatchObject({ resolvedReason: "recovered", openedAtMs: now - 3600_000 });
   });
@@ -409,7 +409,7 @@ describe("readBoardFacts", () => {
       target: "ep-1", source: "http", name: "Hub Help", state: "down", severity: "critical",
       openedAt: new Date(now - 3600_000), resolvedAt: new Date(now - 60_000), resolvedReason: "something-else",
     });
-    expect((await readBoardFacts(db, createLibsqlStorage(db),now, config)).issueEvents[0].resolvedReason).toBeNull();
+    expect((await readBoardFacts(createLibsqlStorage(db),now, config)).issueEvents[0].resolvedReason).toBeNull();
   });
 
   it("END TO END: a persisted unreachable provider becomes a platform-health problem", async () => {
@@ -418,7 +418,7 @@ describe("readBoardFacts", () => {
       source: "vercel", consecutiveFailures: PLATFORM_UNREACHABLE_POLLS, configured: true, reachable: false,
       updatedAt: new Date(1000),
     });
-    const board = deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),2000, config), 2000);
+    const board = deriveBoard(await readBoardFacts(createLibsqlStorage(db),2000, config), 2000);
     expect(board.problems.map((p) => p.target)).toEqual(["platform-health|vercel"]);
   });
 
@@ -431,8 +431,8 @@ describe("readBoardFacts", () => {
     const prev = process.env.PROBE_INTERVAL_SECONDS;
     process.env.PROBE_INTERVAL_SECONDS = "3600";
     try {
-      expect((await readBoardFacts(db, createLibsqlStorage(db),2000, config)).probeIntervalMs).toBe(3_600_000);
-      expect(deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),2000, config), 2000).probeIntervalMs).toBe(3_600_000);
+      expect((await readBoardFacts(createLibsqlStorage(db),2000, config)).probeIntervalMs).toBe(3_600_000);
+      expect(deriveBoard(await readBoardFacts(createLibsqlStorage(db),2000, config), 2000).probeIntervalMs).toBe(3_600_000);
     } finally {
       if (prev === undefined) delete process.env.PROBE_INTERVAL_SECONDS;
       else process.env.PROBE_INTERVAL_SECONDS = prev;
@@ -442,7 +442,7 @@ describe("readBoardFacts", () => {
   it("publishes the activity window's own lower boundary", async () => {
     const db = await freshDb();
     const nowMs = 9_000_000;
-    expect(deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),nowMs, config), nowMs).activityFromMs)
+    expect(deriveBoard(await readBoardFacts(createLibsqlStorage(db),nowMs, config), nowMs).activityFromMs)
       .toBe(nowMs - ACTIVITY_WINDOW_MS);
   });
 
@@ -456,7 +456,7 @@ describe("readBoardFacts", () => {
       await db.insert(healthChecks).values({
         serviceSlug: "ep-1", status: "healthy", statusCode: 200, dnsOk: true, checkedAt: new Date(1_000_000),
       });
-      const facts = await readBoardFacts(db, createLibsqlStorage(db),2_000_000, config);
+      const facts = await readBoardFacts(createLibsqlStorage(db),2_000_000, config);
       expect(facts.endpoints).toHaveLength(1);
       expect(facts.endpoints[0]).toMatchObject({ endpointId: "ep-1", status: "healthy", badSinceMs: null });
     });
@@ -475,7 +475,7 @@ describe("readBoardFacts", () => {
         { serviceSlug: "ep-1", status: "down", statusCode: 500, dnsOk: true, checkedAt: new Date(t0 + 180_000) },
         { serviceSlug: "ep-1", status: "down", statusCode: 500, dnsOk: true, checkedAt: new Date(t0 + 240_000) },
       ]);
-      const facts = await readBoardFacts(db, createLibsqlStorage(db),t0 + 300_000, config);
+      const facts = await readBoardFacts(createLibsqlStorage(db),t0 + 300_000, config);
       expect(facts.endpoints).toHaveLength(1);
       expect(facts.endpoints[0]).toMatchObject({ status: "down", badSinceMs: t0 + 180_000 });
     });
@@ -502,7 +502,7 @@ describe("readBoardFacts", () => {
         { serviceSlug: "ep-2", status: "down", statusCode: 503, dnsOk: true, checkedAt: new Date(t0 + 180_000) },
         { serviceSlug: "ep-2", status: "down", statusCode: 503, dnsOk: true, checkedAt: new Date(t0 + 240_000) },
       ]);
-      const facts = await readBoardFacts(db, createLibsqlStorage(db),t0 + 300_000, config);
+      const facts = await readBoardFacts(createLibsqlStorage(db),t0 + 300_000, config);
       const bySlug = new Map(facts.endpoints.map((e) => [e.endpointId, e]));
       expect(bySlug.get("ep-1")).toMatchObject({ status: "down", badSinceMs: t0 + 60_000 });
       expect(bySlug.get("ep-2")).toMatchObject({ status: "down", badSinceMs: t0 + 180_000 });
@@ -522,7 +522,7 @@ describe("readBoardFacts", () => {
         { serviceSlug: "ep-1", status: "down", statusCode: 500, dnsOk: true, checkedAt: new Date(t0) },
         { serviceSlug: "ep-2", status: "healthy", statusCode: 200, dnsOk: true, checkedAt: new Date(t0) },
       ]);
-      const facts = await readBoardFacts(db, createLibsqlStorage(db),t0 + 60_000, config);
+      const facts = await readBoardFacts(createLibsqlStorage(db),t0 + 60_000, config);
       const bySlug = new Map(facts.endpoints.map((e) => [e.endpointId, e]));
       expect(bySlug.get("ep-1")).toMatchObject({ badSinceMs: t0 });
       expect(bySlug.get("ep-2")).toMatchObject({ status: "healthy", badSinceMs: null });
@@ -534,7 +534,7 @@ describe("readBoardFacts", () => {
       await db.insert(healthChecks).values({
         serviceSlug: "ep-1", status: "down", statusCode: null, dnsOk: false, checkedAt: new Date(1_000_000),
       });
-      const facts = await readBoardFacts(db, createLibsqlStorage(db),2_000_000, config);
+      const facts = await readBoardFacts(createLibsqlStorage(db),2_000_000, config);
       expect(facts.endpoints[0]).toMatchObject({ dnsOk: false });
     });
 
@@ -547,7 +547,7 @@ describe("readBoardFacts", () => {
       await db.insert(healthChecks).values({
         serviceSlug: "ep-1", status: "healthy", statusCode: 200, dnsOk: true, checkedAt: new Date(checkedAtMs),
       });
-      const facts = await readBoardFacts(db, createLibsqlStorage(db),checkedAtMs + 1000, config);
+      const facts = await readBoardFacts(createLibsqlStorage(db),checkedAtMs + 1000, config);
       expect(facts.endpoints[0].checkedAtMs).toBe(checkedAtMs);
     });
 
@@ -567,7 +567,7 @@ describe("readBoardFacts", () => {
         // History for an endpoint row that is gone from config entirely.
         { serviceSlug: "ep-deleted", status: "down", statusCode: 500, dnsOk: true, checkedAt: new Date(1_000_000) },
       ]);
-      const facts = await readBoardFacts(db, createLibsqlStorage(db),2_000_000, config);
+      const facts = await readBoardFacts(createLibsqlStorage(db),2_000_000, config);
       expect(facts.endpoints.map((e) => e.endpointId)).toEqual(["ep-1"]);
     });
 
@@ -587,7 +587,7 @@ describe("readBoardFacts", () => {
         serviceSlug: "ep-1", status: "healthy", statusCode: 200, dnsOk: true, checkedAt: t,
       });
 
-      const facts = await readBoardFacts(db, createLibsqlStorage(db),2_000_000, config);
+      const facts = await readBoardFacts(createLibsqlStorage(db),2_000_000, config);
       const live = await db.all<{ service_slug: string; status: string }>(latestCheckBySlugSql(["ep-1"]));
       expect(facts.endpoints[0].status).toBe("healthy"); // the later INSERT, deterministically
       expect(facts.endpoints[0].status).toBe(live[0]!.status);
@@ -606,7 +606,7 @@ describe("readBoardFacts", () => {
       // half of that `or` makes this issue silently vanish from the feed.
       openedAt: new Date(now - 3 * 24 * 3600_000), resolvedAt: new Date(now - 5 * 60_000), resolvedReason: "recovered",
     });
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),now, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),now, config);
     expect(facts.issueEvents.map((e) => e.target)).toEqual(["ep-1"]);
   });
 
@@ -619,7 +619,7 @@ describe("readBoardFacts", () => {
       { target: "ep-2", source: "http", name: "Other", state: "down", severity: "critical",
         openedAt: new Date(now - 3600_000), resolvedAt: new Date(now - 60_000), resolvedReason: "recovered" },
     ]);
-    const facts = await readBoardFacts(db, createLibsqlStorage(db),now, config);
+    const facts = await readBoardFacts(createLibsqlStorage(db),now, config);
     expect(facts.ledger.map((l) => l.target)).toEqual(["ep-1"]);
   });
 });
@@ -635,10 +635,10 @@ describe("per-signal monitoring switches", () => {
       platform: "vercel", projectName: "hub-help-testing", environment: "production",
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(2000),
     });
-    expect(deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),3000, config), 3000).problems).toHaveLength(2);
+    expect(deriveBoard(await readBoardFacts(createLibsqlStorage(db),3000, config), 3000).problems).toHaveLength(2);
 
     await db.update(monitoredEndpoints).set({ monitorHttp: false });
-    const p = deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),3000, config), 3000).problems;
+    const p = deriveBoard(await readBoardFacts(createLibsqlStorage(db),3000, config), 3000).problems;
     expect(p).toHaveLength(1);
     expect(p[0].state).toBe("failed");
   });
@@ -651,7 +651,7 @@ describe("per-signal monitoring switches", () => {
       id: "vc_d1", buildPhase: "failed", deployPhase: "none", createdAt: new Date(2000),
     });
     await db.update(monitoredEndpoints).set({ monitorDeploys: false });
-    expect(deriveBoard(await readBoardFacts(db, createLibsqlStorage(db),3000, config), 3000).problems).toEqual([]);
+    expect(deriveBoard(await readBoardFacts(createLibsqlStorage(db),3000, config), 3000).problems).toEqual([]);
   });
 
   it("both switches default to ON so existing rows keep monitoring", async () => {

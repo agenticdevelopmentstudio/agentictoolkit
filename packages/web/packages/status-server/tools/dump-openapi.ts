@@ -11,6 +11,6 @@ import { envConfig } from '../src/config/env';
 const db = drizzle(createClient({ url: ':memory:' }), { schema });
 const config = envConfig(process.env);
 const storage = createLibsqlStorage(db);
-const spec = buildOpenApiSpec(createApp({ db, storage, config, auth: createDefaultAuthGate(storage, config) }), config.appVersion);
+const spec = buildOpenApiSpec(createApp({ storage, config, auth: createDefaultAuthGate(storage, config) }), config.appVersion);
 writeFileSync('openapi.json', JSON.stringify(spec, null, 2));
 console.log('wrote openapi.json');

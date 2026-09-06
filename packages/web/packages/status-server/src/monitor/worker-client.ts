@@ -1,7 +1,6 @@
 import { Worker } from "node:worker_threads";
 import { createRequire } from "node:module";
 import { cooldownState } from "@agentic-toolkit/deploy-platform/cooldown";
-import type { LibsqlConnection } from "../libsql/client";
 import type { StatusConfig } from "../config/port";
 
 // Main-thread handle to the monitor worker (worker.ts). The scheduler stays on the
@@ -29,9 +28,11 @@ export interface CycleReply {
 /** The `workerData` a monitor worker boots with — plain, structured-clone-safe data
  *  only (it crosses the `worker_threads` boundary), never a live connection or
  *  function. `cooldowns` is attached by the client at spawn time, not supplied by
- *  the host — see {@link MonitorWorkerClient.spawn}. */
-export interface MonitorWorkerData {
-  db: LibsqlConnection;
+ *  the host — see {@link MonitorWorkerClient.spawn}. Generic over the connection
+ *  shape so this module never has to name `LibsqlConnection` (it lives under
+ *  `../libsql/`, which this file — unlike `worker.ts` — may not import). */
+export interface MonitorWorkerData<Conn = unknown> {
+  db: Conn;
   config: StatusConfig;
   cooldowns?: SharedArrayBuffer;
 }
@@ -42,7 +43,7 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export class MonitorWorkerClient {
+export class MonitorWorkerClient<Conn = unknown> {
   private worker: Worker | null = null;
   private readonly pending = new Map<number, Pending>();
   private seq = 0;
@@ -50,7 +51,7 @@ export class MonitorWorkerClient {
   constructor(
     private readonly opts: {
       cycleTimeoutMs: number;
-      workerData: { db: LibsqlConnection; config: StatusConfig };
+      workerData: { db: Conn; config: StatusConfig };
     },
   ) {}
 
@@ -92,7 +93,7 @@ export class MonitorWorkerClient {
       workerData: {
         ...this.opts.workerData,
         cooldowns: cooldownState(),
-      } satisfies MonitorWorkerData,
+      } satisfies MonitorWorkerData<Conn>,
     });
     worker.on("message", (msg: CycleReply) => {
       const entry = this.pending.get(msg.seq);

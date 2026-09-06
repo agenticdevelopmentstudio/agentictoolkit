@@ -47,8 +47,8 @@ async function seedApp() {
     return c.json({ error: { message: isHttp ? err.message : "Internal Server Error" } }, isHttp ? err.status : 500);
   });
   const storage = createLibsqlStorage(db);
-  app.route("/", activityRoutes(db, storage, testConfig()));
-  app.route("/", boardRoutes(db, storage, testConfig()));
+  app.route("/", activityRoutes(storage, testConfig()));
+  app.route("/", boardRoutes(storage, testConfig()));
   return { app, db, nowMs };
 }
 

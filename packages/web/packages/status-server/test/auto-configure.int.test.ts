@@ -337,7 +337,7 @@ describe('server-side auto-configure', () => {
     vercel.remove('docs-old');
     vercel.failHost('docs.example.test');
 
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     // The dead monitor is GONE — and so is the site it was the last monitor of, so nothing
     // is left on the board describing a project that no longer exists. Nothing surfaces it
@@ -357,7 +357,7 @@ describe('server-side auto-configure', () => {
 
     vercel.setBroken(true);
     vercel.failHost('docs.example.test'); // down as well as unreadable — still not deletable
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     expect(await storage.config.listEndpoints()).toHaveLength(1);
     expect(await storage.config.listSites()).toHaveLength(1);
@@ -380,7 +380,7 @@ describe('server-side auto-configure', () => {
     vercel.remove('docs-old');
     vercel.failHost('docs.example.test');
 
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     expect(await storage.config.listEndpoints()).toHaveLength(1);
     expect(await storage.config.listSites()).toHaveLength(1);
@@ -401,7 +401,7 @@ describe('server-side auto-configure', () => {
     vercel.failHost('docs.example.test'); // dark, so only the guard can be what saves it
     seedProject('someone-elses', 'elsewhere.example.test'); // a full, healthy read of the WRONG scope
 
-    await runCycle(db, storage, testConfig());
+    await runCycle(storage, testConfig());
 
     expect(await storage.config.listEndpoints()).toHaveLength(1);
     expect(await storage.config.listSites()).toHaveLength(1);
