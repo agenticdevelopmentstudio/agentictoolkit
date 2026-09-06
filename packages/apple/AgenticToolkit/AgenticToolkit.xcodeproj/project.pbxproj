@@ -64,6 +64,22 @@
 			);
 			productName = AgenticToolkitMacOSAll;
 		};
+		BA70816C80A8567430E37CE2 /* AgenticToolkitiOSAll */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = B8D14435C46902B8DEC49F3C /* Build configuration list for PBXAggregateTarget "AgenticToolkitiOSAll" */;
+			buildPhases = (
+			);
+			dependencies = (
+				B99463B5AA6D15C09ADE61D3 /* PBXTargetDependency */,
+				246E6614B52F327F7D378E36 /* PBXTargetDependency */,
+				6B854643D4EE91AEC54AD28B /* PBXTargetDependency */,
+				92A9C6AEBC58950D2C7C5339 /* PBXTargetDependency */,
+			);
+			name = AgenticToolkitiOSAll;
+			packageProductDependencies = (
+			);
+			productName = AgenticToolkitiOSAll;
+		};
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
@@ -830,6 +846,13 @@
 			remoteGlobalIDString = 003F8A478BDB5243DE76FA9E;
 			remoteInfo = AgenticToolkitCore;
 		};
+		243EAEDBCCAAA1F379434F53 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6A71EB2C6DC17306BA11D328;
+			remoteInfo = "AgenticToolkitMarkdown-iOS";
+		};
 		282446023D6BAE8209CF21D9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
@@ -866,6 +889,13 @@
 			remoteInfo = AgenticToolkitCore;
 		};
 		371FE205468A6EB2F1CAD25F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5BFCF4EF9B6A3F62F3599C61;
+			remoteInfo = AgenticToolkitDatabase;
+		};
+		379213A8B84D3981E67CA3CA /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
 			proxyType = 1;
@@ -1068,6 +1098,13 @@
 			remoteGlobalIDString = B452E553B9BD748458B4BFA3;
 			remoteInfo = "AgenticToolkitMarkdown-macOS";
 		};
+		8E4C455643FF7B19BD57F94D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D16F6F7043E42BA04AC3D772;
+			remoteInfo = AgenticToolkitSync;
+		};
 		8F653228DC30B36398048C4C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
@@ -1200,6 +1237,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = D16F6F7043E42BA04AC3D772;
 			remoteInfo = AgenticToolkitSync;
+		};
+		C7B343E84F8B244B90F00398 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BE1545B532AE0D9C7323F3C1;
+			remoteInfo = AgenticToolkitSyncGRDB;
 		};
 		C7D164D9254C2065EDEAADCD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -4576,6 +4620,7 @@
 				BE1545B532AE0D9C7323F3C1 /* AgenticToolkitSyncGRDB */,
 				B7D8CB8EEDBFACE7A9361949 /* AgenticToolkitSyncGRDBTests */,
 				D1D367DCD7971BF68EA2F2A2 /* AgenticToolkitSyncTests */,
+				BA70816C80A8567430E37CE2 /* AgenticToolkitiOSAll */,
 			);
 		};
 /* End PBXProject section */
@@ -5905,6 +5950,11 @@
 			name = "AgenticDeveloperToolkit-macOS";
 			targetProxy = 5A5A0D000418BC6DB0F010FF /* PBXContainerItemProxy */;
 		};
+		246E6614B52F327F7D378E36 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D16F6F7043E42BA04AC3D772 /* AgenticToolkitSync */;
+			targetProxy = 8E4C455643FF7B19BD57F94D /* PBXContainerItemProxy */;
+		};
 		268C716D568797F56AB578B0 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 2EFC363C175DD44B5CD8E0E4 /* AgenticToolkitPermissions */;
@@ -6030,6 +6080,11 @@
 			target = 5BFCF4EF9B6A3F62F3599C61 /* AgenticToolkitDatabase */;
 			targetProxy = 83FC2AB46BE1BF2DDC9CFA0F /* PBXContainerItemProxy */;
 		};
+		6B854643D4EE91AEC54AD28B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BE1545B532AE0D9C7323F3C1 /* AgenticToolkitSyncGRDB */;
+			targetProxy = C7B343E84F8B244B90F00398 /* PBXContainerItemProxy */;
+		};
 		6C577A0C913CC8818C267FED /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = D16F6F7043E42BA04AC3D772 /* AgenticToolkitSync */;
@@ -6090,6 +6145,11 @@
 			target = B7D8CB8EEDBFACE7A9361949 /* AgenticToolkitSyncGRDBTests */;
 			targetProxy = 1162CB6C85E6653ED6373F85 /* PBXContainerItemProxy */;
 		};
+		92A9C6AEBC58950D2C7C5339 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6A71EB2C6DC17306BA11D328 /* AgenticToolkitMarkdown-iOS */;
+			targetProxy = 243EAEDBCCAAA1F379434F53 /* PBXContainerItemProxy */;
+		};
 		9592D41ACB112AF3C52F293E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 5BFCF4EF9B6A3F62F3599C61 /* AgenticToolkitDatabase */;
@@ -6114,6 +6174,11 @@
 			isa = PBXTargetDependency;
 			target = D16F6F7043E42BA04AC3D772 /* AgenticToolkitSync */;
 			targetProxy = EBBF9ED807B4BD433DA83186 /* PBXContainerItemProxy */;
+		};
+		B99463B5AA6D15C09ADE61D3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5BFCF4EF9B6A3F62F3599C61 /* AgenticToolkitDatabase */;
+			targetProxy = 379213A8B84D3981E67CA3CA /* PBXContainerItemProxy */;
 		};
 		BA5C65FC4E28250080953E07 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -6370,6 +6435,12 @@
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Debug;
+		};
+		235FCBEC39627293DFBCBA08 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Release;
 		};
 		2AE6FF882CC10F7E3985C710 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -6854,6 +6925,12 @@
 				SDKROOT = macosx;
 			};
 			name = Release;
+		};
+		9ED5FBBA4A3764F138DF86EB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Debug;
 		};
 		A664B8253940B7EC009EF932 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -7486,6 +7563,15 @@
 			buildConfigurations = (
 				39AB9F88ED912DAB566A6CA0 /* Debug */,
 				7E40978C5564E6E4E5A11D79 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B8D14435C46902B8DEC49F3C /* Build configuration list for PBXAggregateTarget "AgenticToolkitiOSAll" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9ED5FBBA4A3764F138DF86EB /* Debug */,
+				235FCBEC39627293DFBCBA08 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

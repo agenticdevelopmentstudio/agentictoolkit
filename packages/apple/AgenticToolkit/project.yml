@@ -521,6 +521,20 @@ aggregateTargets:
       - AgenticToolkitSyncGRDB
       - AgenticToolkitMarkdown-macOS
 
+  # The spec files this store under "macOS, iOS", and `AgenticToolkitMarkdown-iOS`
+  # existed but was reachable from no aggregate and no scheme — so nothing ever
+  # compiled it and the iOS half of that claim was untested. This aggregate is
+  # what makes the claim checkable: it builds every target the spec says runs on
+  # iOS. There is no iOS test bundle yet; the tests are macOS-only, and this
+  # target proves the *library* compiles for iOS, which is the part that silently
+  # rotted before.
+  AgenticToolkitiOSAll:
+    targets:
+      - AgenticToolkitDatabase
+      - AgenticToolkitSync
+      - AgenticToolkitSyncGRDB
+      - AgenticToolkitMarkdown-iOS
+
   AgenticToolkitMacOSTestsAll:
     targets:
       - AIPluginKit
@@ -608,6 +622,19 @@ schemes:
       config: Debug
       targets:
         - AgenticToolkitMarkdownTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitMarkdown-iOS:
+    build:
+      targets:
+        AgenticToolkitMarkdown-iOS: all
+    run:
+      config: Debug
     profile:
       config: Release
     analyze:
