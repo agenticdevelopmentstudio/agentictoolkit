@@ -112,12 +112,15 @@ public actor MCPClient: MCPClientProtocol {
     /// one `SubprocessChannel.terminate()`, whose own SIGTERM-then-SIGKILL and
     /// pump-drain graces total 2.5 s: `disconnect()` returns in roughly 3.5 s
     /// even in the ordering where the budget is spent in full, and even if the
-    /// child sits out its whole SIGTERM grace. (Three calls here can reach the
-    /// transport — step 2, step 5 and the one inside step 6 — but a given
-    /// transport is terminated exactly once: whichever call finds it live pays
-    /// the 2.5 s, and the rest find it `.idle` and return at once. A child that
-    /// dies on SIGTERM leaves the budget as almost the whole cost: measured on
-    /// the ordering that spends it, `disconnect()` returned in 1.01-1.03 s.)
+    /// child sits out its whole SIGTERM grace. (Four calls here can reach the
+    /// transport — step 2, step 3, step 5 and the one inside step 6 — but a
+    /// given transport is terminated exactly once: whichever call finds it live
+    /// pays the 2.5 s, and the rest find it `.idle` and return at once. Step 3
+    /// is never that call: it runs immediately after step 2, which has already
+    /// disconnected the same transport, so step 3 always finds it `.idle` and
+    /// spends nothing. A child that dies on SIGTERM leaves the budget as almost
+    /// the whole cost: measured on the ordering that spends it, `disconnect()`
+    /// returned in 1.01-1.03 s.)
     private static let abandonedConnectBudgetSeconds: TimeInterval = 1.0
 
     /// The two suspension points inside `establishConnection()` that decide a
@@ -418,9 +421,14 @@ public actor MCPClient: MCPClientProtocol {
     ///    holds, not about the process.
     ///
     /// Awaiting the task *before* touching the transport — the obvious
-    /// ordering, and the one this method used first — is the version that
-    /// hangs: it is step 4 with none of step 2's protection, waiting on a
-    /// connect that can no longer be resumed by anything.
+    /// ordering, and the one this method used first — no longer hangs: step
+    /// 4's wall-clock budget bounds that same await regardless of where it
+    /// sits, so a connect wedged on `initialize`'s bare continuation is
+    /// abandoned after `abandonedConnectBudgetSeconds` rather than waited on
+    /// forever. What it costs instead is speed: it is step 4 with none of
+    /// step 2's protection, so it pays the budget in every ordering step 2
+    /// exists to end in microseconds, not only the one ordering step 2 cannot
+    /// reach.
     private func teardown() async {
         connectTask?.cancel()
         await transport?.disconnect()
