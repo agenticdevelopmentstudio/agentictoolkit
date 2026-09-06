@@ -111,9 +111,13 @@ public actor MCPClient: MCPClientProtocol {
     /// forever. What a caller pays in the worst case is this second on top of
     /// one `SubprocessChannel.terminate()`, whose own SIGTERM-then-SIGKILL and
     /// pump-drain graces total 2.5 s: `disconnect()` returns in roughly 3.5 s
-    /// even when the connect it raced can never be freed. (Only one of the two
-    /// `transport.disconnect()` calls can pay that 2.5 s; the other finds the
-    /// transport already idle and returns at once.)
+    /// even in the ordering where the budget is spent in full, and even if the
+    /// child sits out its whole SIGTERM grace. (Three calls here can reach the
+    /// transport — step 2, step 5 and the one inside step 6 — but a given
+    /// transport is terminated exactly once: whichever call finds it live pays
+    /// the 2.5 s, and the rest find it `.idle` and return at once. A child that
+    /// dies on SIGTERM leaves the budget as almost the whole cost: measured on
+    /// the ordering that spends it, `disconnect()` returned in 1.01-1.03 s.)
     private static let abandonedConnectBudgetSeconds: TimeInterval = 1.0
 
     /// The two suspension points inside `establishConnection()` that decide a
@@ -132,11 +136,15 @@ public actor MCPClient: MCPClientProtocol {
     /// Widens one of the two connect suspension points so a test can land a
     /// `disconnect()` inside it deterministically.
     ///
-    /// `nil` in production and unreachable from outside the module: the hook
-    /// is `internal`, nothing in this module ever sets it, and a release build
-    /// has no `@testable` importer that could. The two call sites are optional
-    /// chains, so with no hook installed no call is made and no suspension
-    /// happens.
+    /// `nil` in production, and the guarantee behind that is *"nothing sets
+    /// it"* rather than *"nothing could"*. The hook is `internal`, and the
+    /// only assignments anywhere are the two tests that install it — but
+    /// `ENABLE_TESTABILITY: YES` sits in `project.yml`'s `settings.base`, i.e.
+    /// in every configuration, so a `@testable import` compiles in a release
+    /// build just as it does in a debug one. What a shipping build actually
+    /// costs is therefore one nil check at each of the two call sites: they
+    /// are optional chains, so with no hook installed no call is made and no
+    /// suspension happens.
     ///
     /// It exists because two of this file's timing guarantees were otherwise
     /// unfalsifiable — step 4's bound, and step 1's cancel. The only way
@@ -263,12 +271,13 @@ public actor MCPClient: MCPClientProtocol {
     /// has been reached, so a failure between spawning and connecting would
     /// otherwise leave the child running. Calling both is safe because a
     /// second disconnect is a *no-op*, not a wait: `SubprocessTransport`
-    /// returns immediately once it is `.idle` (step 3 and step 5 below both
-    /// rely on that), and `MCP.Client.disconnect()` on a client whose
-    /// `connection` is already nil has no transport to disconnect and no
-    /// pending request left to drain.
+    /// returns immediately once it is `.idle` (steps 3, 5 and 6 below all rely
+    /// on that), and `MCP.Client.disconnect()` on a client whose `connection`
+    /// is already nil has no transport to disconnect, no pending request left
+    /// to drain and no message loop left to cancel — which is what makes step
+    /// 6 free in every ordering except the one it exists for.
     ///
-    /// The ownership fix is the five numbered steps below, and their order is
+    /// The ownership fix is the six numbered steps below, and their order is
     /// the whole argument. Both transport disconnects are needed, and each
     /// closes a hazard the other opens:
     ///
@@ -280,10 +289,18 @@ public actor MCPClient: MCPClientProtocol {
     ///    Since step 4 grew a budget this is about *promptness*, not
     ///    ownership: a teardown that skips it still reaps the child, because
     ///    step 5 runs unconditionally — it just spends the whole budget
-    ///    getting there first. Deleting this line makes every racing teardown
-    ///    cost `abandonedConnectBudgetSeconds` (measured: the race suite goes
-    ///    from 0.04 s to 1.08 s) while still passing, which is exactly the
-    ///    kind of silent regression the budget is not meant to hide.
+    ///    getting there first. Deleting this line costs
+    ///    `abandonedConnectBudgetSeconds` per teardown that lands in the
+    ///    window this cancel covers, and nothing at all for any other — a
+    ///    teardown that beats the connect to `isShutDown`, or that arrives
+    ///    after the transport is published, is unaffected. How many land there
+    ///    is a scheduling accident, so the cost is not "every racing
+    ///    teardown": measured with the line deleted, the twenty-iteration race
+    ///    test went from 0.041 s to 2.077 s — two of its twenty iterations
+    ///    paying — while the seam-driven test that lands in the window on
+    ///    purpose went from 0.293 s to 1.052 s, exactly one budget, every run.
+    ///    The race suite stays green throughout, which is exactly the kind of
+    ///    silent regression the budget is not meant to hide.
     /// 2. `await transport?.disconnect()` is what lets step 4 end for the
     ///    right reason — the connect actually finished — rather than by
     ///    running out of budget. `MCP.Client.send` reads `connection`
@@ -291,16 +308,16 @@ public actor MCPClient: MCPClientProtocol {
     ///    task* it spawns — so a `Client.disconnect()` that drains
     ///    `pendingRequests` in between drains a dictionary the request has not
     ///    joined yet, and the request is then registered with nothing left to
-    ///    answer it. Nothing can resume it afterwards: the continuation is
-    ///    bare, with no cancellation handler, so `cancel()` cannot reach it
-    ///    either, and an `initialize` that parks that way parks for the life
-    ///    of the process — taking step 4, and therefore `disconnect()`, with
-    ///    it. Killing the transport *first* removes the way in: after this
-    ///    line `SubprocessTransport.send` throws `ENOTCONN`, and the SDK's own
-    ///    `catch` around the send resumes the continuation with that error. A
-    ///    request that got out before this line is instead in
-    ///    `pendingRequests`, where step 3 finds it. Between them there is no
-    ///    third case.
+    ///    answer it. Neither cancellation nor step 3 can reach it afterwards:
+    ///    the continuation is bare, with no cancellation handler, and step 3
+    ///    has already run — so an `initialize` that parks that way sits out
+    ///    step 4's entire budget and is freed only by step 6, at the end.
+    ///    Killing the transport *first* removes the way in: after this line
+    ///    `SubprocessTransport.send` throws `ENOTCONN`, and the SDK's own
+    ///    `catch` around the send resumes the continuation with that error, so
+    ///    step 4 ends in microseconds. A request that got out before this line
+    ///    is instead in `pendingRequests`, where step 3 finds it. Between them
+    ///    there is no third case.
     ///
     ///    That window has not been observed to open — 200 sweeps of the
     ///    disconnect across the spawn/`initialize` boundary produced no hang.
@@ -324,14 +341,15 @@ public actor MCPClient: MCPClientProtocol {
     ///    `client.connect(transport:)` has published no connection for step 2
     ///    to kill and registered no request for step 3 to drain, so when it
     ///    resumes it finds an idle transport, spawns, and parks in
-    ///    `initialize` with the one `Client.disconnect()` that could have
-    ///    freed it already spent. An unbounded wait there never returns —
-    ///    and step 5, the line written to reap that exact child, is never
-    ///    reached. The budget makes that ordering cost
+    ///    `initialize` with step 3's `Client.disconnect()` already spent. An
+    ///    unbounded wait there never returns — and steps 5 and 6, the lines
+    ///    written to reap that exact child and to free that exact task, are
+    ///    never reached. The budget makes that ordering cost
     ///    `abandonedConnectBudgetSeconds` instead of forever: the wait is
-    ///    abandoned and step 5 runs. A connect still in flight when teardown
-    ///    runs is abandoned by definition, so cutting it short costs it
-    ///    nothing real; the bound exists only so that step 5 runs.
+    ///    abandoned and steps 5 and 6 run. A connect still in flight when
+    ///    teardown runs is abandoned by definition, so cutting it short costs
+    ///    it nothing real; the bound exists only so that the two steps after
+    ///    it run.
     ///
     ///    A connect that *fails* here is not this method's business either:
     ///    the error is swallowed with `try?`, along with the budget's own
@@ -348,11 +366,9 @@ public actor MCPClient: MCPClientProtocol {
     ///    That task has never been cancelled and is about to have its
     ///    transport killed underneath it by step 5.
     ///
-    ///    What the budget does not fix is the parked connect itself: a task
-    ///    wedged on `initialize`'s bare continuation stays wedged for the life
-    ///    of the process, and is leaked rather than freed. What is *bounded*
-    ///    here is `disconnect()`, and what is *guaranteed* is that the child
-    ///    dies.
+    ///    What the budget does not do is free the connect it walks away from.
+    ///    A task wedged on `initialize`'s bare continuation cannot be resumed
+    ///    by anything this step leaves behind. Step 6 is what resumes it.
     /// 5. The second `await transport?.disconnect()` reaps what step 2 could
     ///    not have, and runs unconditionally — including when step 4 gave up.
     ///    A connect task suspended between `self.transport = …` and
@@ -360,6 +376,46 @@ public actor MCPClient: MCPClientProtocol {
     ///    sees an idle transport when it resumes, and an idle transport
     ///    spawns. This line stops the child it produced. It is a no-op in
     ///    every other ordering.
+    /// 6. The second `await client.disconnect()` cleans up after the connect
+    ///    step 4 abandoned, and it is not a tidiness measure — without it that
+    ///    connect **pins a CPU core for the life of the process**.
+    ///
+    ///    The mechanism is entirely inside the SDK. `MCP.Client.connect` starts
+    ///    an unstructured message-handling task shaped
+    ///    `repeat { if Task.isCancelled { break }; for try await data in await
+    ///    connection.receive() { … } } while true`.
+    ///    `SubprocessTransport.receive()` hands back the *same* `messageStream`
+    ///    every time, and step 5 has just finished it — so every iteration of
+    ///    that `for` returns immediately without throwing, and the `repeat`
+    ///    spins flat out. `Task.isCancelled` is its only exit, and
+    ///    `MCP.Client.disconnect()` is the only caller that sets it: step 3's
+    ///    was spent before this connect had a message loop to cancel.
+    ///
+    ///    Measured on the ordering step 4 exists for, over a 2 s wall-clock
+    ///    window against an idle baseline of 0.002 CPU-seconds: **2.093
+    ///    CPU-seconds without this line, 0.002 with it.** In a menu-bar app
+    ///    that runs for days, one lost connect race would otherwise burn one
+    ///    core until the user quits. The same line also resumes the wedged
+    ///    `initialize` — `pendingRequests` is drained with `Client
+    ///    disconnected`, so the abandoned connect task actually completes
+    ///    rather than leaking.
+    ///
+    ///    It cannot hang and it costs nothing in the orderings step 3 already
+    ///    covered. On a client whose `connection`, `task` and `pendingRequests`
+    ///    step 3 has already nil'd and emptied, every branch of
+    ///    `MCP.Client.disconnect()` is a no-op, and its `logger` is a computed
+    ///    property over that same nil `connection`, so there is not even a
+    ///    suspension to wait on. In the ordering it exists for, the loop it
+    ///    cancels is spinning rather than blocked, so the `await task.value`
+    ///    inside it returns at once — and a loop that *were* blocked on a live
+    ///    stream would still be released, because `MCP.Client.disconnect()`
+    ///    disconnects its transport before it awaits that task. Measured:
+    ///    `disconnect()` returns in 1.01-1.02 s on the budget-spending
+    ///    ordering, against 1.03 s without this line.
+    ///
+    ///    It goes last rather than before step 5 because reaping the child is
+    ///    step 5's job and stays ours; this step is about what `MCP.Client`
+    ///    holds, not about the process.
     ///
     /// Awaiting the task *before* touching the transport — the obvious
     /// ordering, and the one this method used first — is the version that
@@ -378,6 +434,7 @@ public actor MCPClient: MCPClientProtocol {
         connectTask = nil
         await transport?.disconnect()
         transport = nil
+        await client.disconnect()
     }
 
     private func registerToolListChangedHandler() async {

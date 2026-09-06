@@ -149,10 +149,10 @@ struct MCPClientRaceTests {
     /// `MCP.Client.connect(transport:)`. Step 2 finds that transport still
     /// idle and step 3 a client with no connection, so neither leaves a mark
     /// the connect will notice; the connect then resumes, spawns, and parks on
-    /// `initialize`'s bare continuation, which the one `Client.disconnect()`
-    /// that could have resumed it has already been spent. Unbounded, step 4's
-    /// wait on that task never returns — so `disconnect()` never returns, and
-    /// step 5, the line written to reap this exact child, is never reached.
+    /// `initialize`'s bare continuation, with step 3's `Client.disconnect()`
+    /// already spent. Unbounded, step 4's wait on that task never returns — so
+    /// `disconnect()` never returns, and steps 5 and 6, the lines written to
+    /// reap this exact child and to free this exact task, are never reached.
     ///
     /// The seam is what makes the window addressable. It is a single
     /// cross-actor hop, closing in microseconds, and every reproduction of
@@ -214,8 +214,9 @@ struct MCPClientRaceTests {
     /// never spawns; step 4 then waits for that to take effect. `isShutDown`
     /// cannot reach this ordering — the connect is already past that guard —
     /// and steps 2, 3 and 5 all find `self.transport` still nil at the moment
-    /// they run, so with neither `connectTask` statement present nothing in
-    /// `teardown()` is left that could reap what the connect goes on to spawn.
+    /// they run, while step 6 finds a client with no connection. So with
+    /// neither `connectTask` statement present nothing in `teardown()` is left
+    /// that could reap what the connect goes on to spawn.
     ///
     /// What this pins is therefore the **pair**, which is the deletion that
     /// strands a child permanently. Removing only the `cancel()` no longer
