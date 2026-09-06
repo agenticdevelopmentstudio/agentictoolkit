@@ -59,6 +59,35 @@ struct MarkdownProjectionTests {
         }
     }
 
+    /// The final review asked for `owner_kind`/`owner_id` to be added to the
+    /// drift guard "or documented as deliberately local-only". Neither applies:
+    /// they are already in `specificColumns["content.markdown"]`, so
+    /// `columnListsMatchTheRealSchema`'s set *equality* covers them the way it
+    /// covers every other column — and they are not local-only either, they
+    /// are adh's own columns. What is true is that they never appear in a
+    /// staged wire payload, and the reason is structural rather than a
+    /// decision about these two fields: `content.markdown` is pull-only, so
+    /// `GRDBSyncStore.stage` refuses it outright and *no* markdown column is
+    /// ever staged. Both halves are asserted here so the question is not
+    /// re-raised from prose.
+    @Test("owner columns are covered by the drift guard, and no markdown column is ever staged")
+    func ownerColumnsAreCoveredAndMarkdownIsNeverStaged() throws {
+        #expect(MarkdownProjection.knownColumns(for: "content.markdown")
+            .isSuperset(of: ["owner_kind", "owner_id"]))
+        #expect(MarkdownProjection.pullOnlyResources.contains("content.markdown"))
+
+        let store = try store()
+        #expect(throws: SyncStoreFailure.pullOnlyResource("content.markdown")) {
+            try store.database.write { conn in
+                try store.syncStore.stage(
+                    LocalMutation(
+                        resource: "content.markdown", rowId: "m1", type: .upsert,
+                        data: ["owner_id": .string("cust-1")]),
+                    in: conn)
+            }
+        }
+    }
+
     @Test("a pulled document lands in typed columns and reads back as a document")
     func pulledDocumentIsTyped() async throws {
         let store = try store()
@@ -801,5 +830,238 @@ struct MarkdownProjectionTests {
             #expect(isDeleted == 1)
             #expect(deletedAt == nil)
         }
+    }
+
+    // MARK: - A full row clears what it omits (final-review H1)
+
+    /// adh's wire format *omits* a key whose new value is null, so on a full
+    /// row an absent column means NULL — not "unchanged". Before the fix
+    /// `bound` was built from the keys `data` actually carried, so an omitted
+    /// nullable column was neither inserted nor assigned and simply kept its
+    /// previous value: a document unpublished upstream kept its
+    /// `public_route` locally, and forever.
+    @Test("a full-row pull that omits a nullable column clears it")
+    func fullRowPullClearsOmittedNullableColumns() async throws {
+        let store = try store()
+        try await store.syncStore.apply([
+            SyncChange(
+                resource: "content.markdown", id: "m1", op: .upsert, syncVersion: "1",
+                data: [
+                    "title": .string("Published"), "content": .string("Body."),
+                    "visibility": .string("public"), "public_route": .string("/notes/one"),
+                    "frontmatter": .string("{\"adh_source\":\"x\"}"),
+                    "latest_version_id": .string("v-1"),
+                    "sync_stamped_at": .string("2026-01-01T00:00:00.000Z"),
+                    "created_at": .string("2026-01-01T00:00:00Z"),
+                    "updated_at": .string("2026-01-01T00:00:00Z")
+                ])
+        ], advancingTo: nil)
+        try store.database.read { conn in
+            let route = try String.fetchOne(
+                conn, sql: "SELECT public_route FROM markdown WHERE id = 'm1'")
+            #expect(route == "/notes/one")
+        }
+
+        // The same document, unpublished upstream: adh sends the row with the
+        // four now-null keys simply missing.
+        try await store.syncStore.apply([
+            SyncChange(
+                resource: "content.markdown", id: "m1", op: .upsert, syncVersion: "2",
+                data: [
+                    "title": .string("Published"), "content": .string("Body."),
+                    "visibility": .string("private"),
+                    "created_at": .string("2026-01-01T00:00:00Z"),
+                    "updated_at": .string("2026-01-02T00:00:00Z")
+                ])
+        ], advancingTo: nil)
+
+        try store.database.read { conn in
+            let row = try #require(try Row.fetchOne(
+                conn,
+                sql: """
+                    SELECT public_route, frontmatter, latest_version_id, sync_stamped_at
+                    FROM markdown WHERE id = 'm1'
+                    """))
+            #expect(row["public_route"] as String? == nil)
+            #expect(row["frontmatter"] as String? == nil)
+            #expect(row["latest_version_id"] as String? == nil)
+            #expect(row["sync_stamped_at"] as String? == nil)
+        }
+    }
+
+    /// The consequence the omission actually had. `uq_markdown_author_route`
+    /// is `UNIQUE (customer_id, public_route) WHERE public_route IS NOT NULL`,
+    /// so a stale route on the first document makes the second document's
+    /// pull fail — sync wedges on the same batch every time, and no amount of
+    /// retrying clears it.
+    @Test("a route freed upstream can be claimed by another document")
+    func aRouteFreedUpstreamIsAvailableAgain() async throws {
+        let store = try store()
+        func pull(id: String, route: String?, version: String) async throws {
+            var data: [String: JSONValue] = [
+                "title": .string(id), "content": .string("Body."),
+                "customer_id": .string("cust-1"),
+                "created_at": .string("2026-01-01T00:00:00Z"),
+                "updated_at": .string("2026-01-01T00:00:00Z")
+            ]
+            if let route {
+                data["public_route"] = .string(route)
+                data["visibility"] = .string("public")
+            }
+            try await store.syncStore.apply([
+                SyncChange(
+                    resource: "content.markdown", id: id, op: .upsert,
+                    syncVersion: version, data: data)
+            ], advancingTo: nil)
+        }
+
+        try await pull(id: "m1", route: "/shared", version: "1")
+        try await pull(id: "m1", route: nil, version: "2")
+        // Before the fix this threw `SQLITE_CONSTRAINT_UNIQUE`, because m1
+        // still held `/shared`.
+        try await pull(id: "m2", route: "/shared", version: "3")
+
+        try store.database.read { conn in
+            let route = try String.fetchOne(
+                conn, sql: "SELECT public_route FROM markdown WHERE id = 'm2'")
+            #expect(route == "/shared")
+        }
+    }
+
+    /// `nullableColumns(for:)` is the hand-maintained list the fix above binds
+    /// as explicit NULLs, and it is exactly as capable of drifting from the
+    /// DDL as `knownColumns(for:)` was. `PRAGMA table_info`'s `notnull` flag
+    /// is the authority; a column made nullable upstream and not added here
+    /// would silently go back to "absence means unchanged".
+    @Test("the nullable column lists match the real schema")
+    func nullableColumnListsMatchTheRealSchema() throws {
+        let store = try store()
+        try store.database.read { conn in
+            for resource in MarkdownProjection().resources.sorted() {
+                let table = String(resource.dropFirst("content.".count))
+                let rows = try Row.fetchAll(conn, sql: "PRAGMA table_info(\(table))")
+                let actual = Set(rows.filter { ($0["notnull"] as Int) == 0 }
+                    .map { $0["name"] as String })
+                let declared = MarkdownProjection.nullableColumns(for: resource)
+                #expect(actual == declared,
+                        "\(resource): schema nullable \(actual), projection declares \(declared)")
+            }
+        }
+    }
+
+    // MARK: - A pulled id is resolved through the local pairing (final-review M2)
+
+    /// A document created here gets a client-minted id; adh answers its
+    /// `create` with an id of its own, and `_markdown_remote_id` records the
+    /// pairing. Nothing consulted that pairing on the way *in*, so the first
+    /// pull of the document this client had just created inserted a second
+    /// row under adh's id — the same note twice in the list, and every later
+    /// local edit landing on the copy the server would never hear about.
+    @Test("a pulled row under adh's id updates the local row it is paired with")
+    func aPulledRowResolvesThroughTheRemoteIDPairing() async throws {
+        let store = try store()
+        let created = try store.createDocument(content: "# Local\n\nMine.", markers: [.note])
+        let writer = RemoteIDMintingWriter(minting: "adh-99")
+        try await store.drainRemoteQueue(into: writer, limit: 10)
+        #expect(try store.remoteID(forDocument: created.id) == "adh-99")
+
+        try await store.syncStore.apply([
+            SyncChange(
+                resource: "content.markdown", id: "adh-99", op: .upsert, syncVersion: "7",
+                data: [
+                    "title": .string("Local"), "content": .string("# Local\n\nServer said so."),
+                    "created_at": .string("2026-01-01T00:00:00Z"),
+                    "updated_at": .string("2026-01-03T00:00:00Z")
+                ])
+        ], advancingTo: nil)
+
+        try store.database.read { conn in
+            let rowCount = try Int.fetchOne(conn, sql: "SELECT COUNT(*) FROM markdown")
+            #expect(rowCount == 1)
+        }
+        let reloaded = try #require(try store.document(id: created.id))
+        #expect(reloaded.content == "# Local\n\nServer said so.")
+    }
+
+    /// The marker tables reference the document by id too, so resolving only
+    /// the `content.markdown` row would leave `notes.markdown_id` pointing at
+    /// an id no row has — a foreign key violation, or a silently orphaned
+    /// marker.
+    @Test("a pulled marker's markdown_id is resolved through the same pairing")
+    func aPulledMarkerResolvesItsDocumentReference() async throws {
+        let store = try store()
+        let created = try store.createDocument(content: "# Local", markers: [])
+        let writer = RemoteIDMintingWriter(minting: "adh-100")
+        try await store.drainRemoteQueue(into: writer, limit: 10)
+
+        try await store.syncStore.apply([
+            SyncChange(
+                resource: "content.notes", id: "note-1", op: .upsert, syncVersion: "1",
+                data: [
+                    "markdown_id": .string("adh-100"),
+                    "created_at": .string("2026-01-01T00:00:00Z"),
+                    "updated_at": .string("2026-01-01T00:00:00Z")
+                ])
+        ], advancingTo: nil)
+
+        try store.database.read { conn in
+            let reference = try String.fetchOne(
+                conn, sql: "SELECT markdown_id FROM notes WHERE id = 'note-1'")
+            #expect(reference == created.id)
+        }
+    }
+
+    /// `markDeleted` is the other half of the pull path; a tombstone arriving
+    /// under adh's id has to land on the same local row an upsert would.
+    @Test("a tombstone under adh's id deletes the local row it is paired with")
+    func aTombstoneResolvesThroughTheRemoteIDPairing() async throws {
+        let store = try store()
+        let created = try store.createDocument(content: "# Local", markers: [])
+        let writer = RemoteIDMintingWriter(minting: "adh-101")
+        try await store.drainRemoteQueue(into: writer, limit: 10)
+
+        try await store.syncStore.apply([
+            SyncChange(
+                resource: "content.markdown", id: "adh-101", op: .delete,
+                syncVersion: "9", data: nil)
+        ], advancingTo: nil)
+
+        #expect(try store.document(id: created.id) == nil)
+    }
+
+    // MARK: - A value that cannot be encoded says so (final-review L4)
+
+    /// `value(_:column:)` used to fall back to `""` for an array or object it
+    /// could not turn into JSON text, which writes an empty string into a
+    /// column whose whole content is structured — the failure surfaced later,
+    /// somewhere else, as a document with no frontmatter.
+    @Test("a value that cannot be encoded throws rather than writing an empty string")
+    func unencodableValueThrows() throws {
+        let store = try store()
+        try store.database.write { conn in
+            #expect(throws: MarkdownProjectionError.unencodableValue(column: "frontmatter")) {
+                try MarkdownProjection().upsert(
+                    resource: "content.markdown", id: "m1", syncVersion: 1,
+                    data: [
+                        "title": .string("t"), "content": .string("c"),
+                        "frontmatter": .object(["bad": .number(.infinity)]),
+                        "created_at": .string("2026-01-01T00:00:00Z"),
+                        "updated_at": .string("2026-01-01T00:00:00Z")
+                    ],
+                    isFullRow: true, in: conn)
+            }
+        }
+    }
+}
+
+/// Answers a `create` with the id adh would have minted, so a test can watch
+/// the pairing it produces be consulted on the way back in.
+private actor RemoteIDMintingWriter: MarkdownRemoteWriter {
+    private let mintedID: String
+
+    init(minting mintedID: String) { self.mintedID = mintedID }
+
+    func send(_ remoteOp: MarkdownRemoteOp) async throws -> String? {
+        remoteOp.intent == .create ? mintedID : nil
     }
 }

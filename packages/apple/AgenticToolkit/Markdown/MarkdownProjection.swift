@@ -32,6 +32,14 @@ public enum MarkdownProjectionError: Error, Equatable {
     /// normalise; a partial patch that contradicts itself has no half to
     /// prefer, so it is refused rather than half-written.
     case partialPatchDeleteStateDisagrees(resource: String, id: String)
+
+    /// A wire value arrived as a JSON array or object and could not be
+    /// re-encoded to the JSON text the column stores. Binding NULL instead —
+    /// what this used to do — is a silent partial write on a path where every
+    /// other failure in this file is a thrown typed error, and the column it
+    /// silently blanks is `frontmatter`, whose absence changes what
+    /// `MarkdownNoteStorage` shows the user.
+    case unencodableValue(column: String)
 }
 
 public struct MarkdownProjection: SyncMirrorProjection {
@@ -69,6 +77,32 @@ public struct MarkdownProjection: SyncMirrorProjection {
     /// the `ON CONFLICT` `SET` clause unless `data` actually supplied them,
     /// so that throwaway value can never land on an existing row.
     private static let requiredWithNoDefault: Set<String> = ["created_at", "updated_at"]
+
+    /// The nullable columns every projected table carries — the ones whose DDL
+    /// has no `NOT NULL`. See `nullableColumns(for:)` for why the set matters.
+    private static let nullableCommonColumns: Set<String> = ["deleted_at", "sync_stamped_at"]
+
+    /// The nullable columns a single resource adds on top of
+    /// `nullableCommonColumns`. Only `content.markdown` has any: the five
+    /// taxonomy tables and the three marker tables declare every column of
+    /// their own `NOT NULL` with a default.
+    private static let nullableSpecificColumns: [String: Set<String>] = [
+        "content.markdown": ["frontmatter", "latest_version_id", "public_route"]
+    ]
+
+    /// Which of a resource's columns a full-row pull may have to write NULL
+    /// into.
+    ///
+    /// adh's wire format *omits* a key whose new value is null, so on a full
+    /// row an absent column means "this is now NULL", not "leave it alone" —
+    /// and the only way to know which absences mean that is to know which
+    /// columns can hold NULL at all. Hand-maintained prose like
+    /// `specificColumns`, and cross-checked against `PRAGMA table_info`'s
+    /// `notnull` flag by `MarkdownProjectionTests.nullableColumnListsMatchTheRealSchema`
+    /// for the same reason.
+    static func nullableColumns(for resource: String) -> Set<String> {
+        nullableCommonColumns.union(nullableSpecificColumns[resource] ?? [])
+    }
 
     private static let specificColumns: [String: [String]] = [
         "content.markdown": [
@@ -249,6 +283,8 @@ public struct MarkdownProjection: SyncMirrorProjection {
         resource: String, id: String, syncVersion: Int,
         data: [String: JSONValue], isFullRow: Bool, in conn: Database
     ) throws {
+        let id = try Self.localID(for: resource, id: id, in: conn)
+        let data = try Self.resolvingMarkdownReference(in: data, resource: resource, in: conn)
         let present = Set(columns(for: resource).filter { data[$0] != nil })
         try Self.rejectPartialDeleteStateDisagreement(
             resource: resource, id: id, data: data, present: present, isFullRow: isFullRow)
@@ -262,8 +298,33 @@ public struct MarkdownProjection: SyncMirrorProjection {
             data[$0] != nil || Self.requiredWithNoDefault.contains($0)
         }
         var assignmentColumns = present
+        // adh omits a wire key whose new value is null, so on a full row an
+        // absent *nullable* column means "set it to NULL", not "leave it
+        // alone". Round 1 acted on that premise for `deleted_at`/`is_deleted`
+        // alone and left `public_route`, `frontmatter`, `latest_version_id`
+        // and `sync_stamped_at` to survive the pull unchanged — which is not
+        // merely a stale value: a document unpublished server-side kept its
+        // local `public_route`, and the next pull carrying a *different*
+        // document at the now-free route violated `uq_markdown_author_route`,
+        // rolled the batch back, and left the cursor unadvanced, so every
+        // later pull replayed and failed the same way forever.
+        //
+        // Absent nullable columns are added to `bound` and bound explicitly as
+        // NULL rather than left to `excluded.*`. `excluded.<column>` resolves
+        // for a column the INSERT never names — SQLite materialises the row
+        // the statement *would* have inserted — but it resolves to that
+        // column's DEFAULT, and several of these have a non-NULL one (`''`),
+        // where the pull would write an empty string in place of NULL. The
+        // plain-INSERT branch has the same problem with no `excluded.*` at all.
+        //
+        // The partial-patch path (`isFullRow: false`) is deliberately
+        // untouched: there, absence genuinely means "unchanged".
         if isFullRow {
-            assignmentColumns.insert("deleted_at")
+            let nullable = Self.nullableColumns(for: resource)
+            assignmentColumns.formUnion(nullable)
+            // Sorted, so the generated SQL text is stable across runs and
+            // SQLite's statement cache can actually hit.
+            for column in nullable.sorted() where !bound.contains(column) { bound.append(column) }
             if resource == "content.markdown" { assignmentColumns.insert("is_deleted") }
         }
         // `deleted_at` and `is_deleted` are one fact — "has this document been
@@ -307,8 +368,8 @@ public struct MarkdownProjection: SyncMirrorProjection {
         // both be true, and writing either of them would be picking a winner
         // on the caller's behalf.
         let normalisesDeleteState = isFullRow && resource == "content.markdown"
-        let suppliedDeletedAt = Self.value(data["deleted_at"], column: "deleted_at")
-        let isDeleted = suppliedDeletedAt != nil
+        let suppliedDeletedAt = try Self.value(data["deleted_at"], column: "deleted_at")
+        let isDeleted = try suppliedDeletedAt != nil
             || (present.contains("is_deleted")
                 && Self.isTruthy(Self.value(data["is_deleted"], column: "is_deleted")))
         if normalisesDeleteState {
@@ -321,7 +382,7 @@ public struct MarkdownProjection: SyncMirrorProjection {
             .map { "\($0) = excluded.\($0)" }
             .joined(separator: ", ")
         var arguments: [(any DatabaseValueConvertible)?] = [id, syncVersion]
-        arguments += bound.map { column -> (any DatabaseValueConvertible)? in
+        arguments += try bound.map { column -> (any DatabaseValueConvertible)? in
             // The two halves of the one delete fact, written together. A
             // deleted row with no stamp of its own is stamped now rather than
             // left NULL; a live row clears both, which is what a pulled
@@ -331,7 +392,14 @@ public struct MarkdownProjection: SyncMirrorProjection {
                 guard isDeleted else { return nil }
                 return suppliedDeletedAt ?? MarkdownTimestamp.string(Date())
             }
-            return data[column] != nil ? Self.value(data[column], column: column) : MarkdownTimestamp.string(Date())
+            if data[column] != nil { return try Self.value(data[column], column: column) }
+            // Absent. On a full row that means NULL for a nullable column (see
+            // the `isFullRow` block above); the only other way a column
+            // reaches `bound` without a value is `requiredWithNoDefault`,
+            // whose throwaway stamp never lands on an existing row because it
+            // is not in `assignmentColumns` unless `data` supplied it.
+            if isFullRow, Self.nullableColumns(for: resource).contains(column) { return nil }
+            return MarkdownTimestamp.string(Date())
         }
         try conn.execute(
             sql: """
@@ -363,8 +431,8 @@ public struct MarkdownProjection: SyncMirrorProjection {
               present.contains("deleted_at"), present.contains("is_deleted") else { return }
         // A key present as JSON `null` is a deliberate clear, not an omission —
         // that is why `present` is membership rather than non-nullness.
-        let tombstoned = Self.value(data["deleted_at"], column: "deleted_at") != nil
-        let flagged = Self.isTruthy(Self.value(data["is_deleted"], column: "is_deleted"))
+        let tombstoned = try Self.value(data["deleted_at"], column: "deleted_at") != nil
+        let flagged = try Self.isTruthy(Self.value(data["is_deleted"], column: "is_deleted"))
         guard tombstoned != flagged else { return }
         throw MarkdownProjectionError.partialPatchDeleteStateDisagrees(resource: resource, id: id)
     }
@@ -423,9 +491,57 @@ public struct MarkdownProjection: SyncMirrorProjection {
         }
     }
 
+    /// Resolves an incoming adh id back to the local id this client filed the
+    /// document under, so a pulled row lands on the row it already has.
+    ///
+    /// `POST /content/markdown` takes no id, so adh mints its own and
+    /// `MarkdownStore` records the pairing in `_markdown_remote_id` rather
+    /// than rewriting the local id (which `MarkdownNoteStorage` derives from
+    /// `Note.id` and the taxonomy link rows cite as `target_id`). Without this
+    /// lookup the echo of the client's own create — the same document coming
+    /// back under adh's id — inserts a *second* row: the user sees the note
+    /// twice, and every edit made against the local id is invisible to the
+    /// server's copy.
+    ///
+    /// Only `content.markdown` is paired, and `content.markdown` is in
+    /// `pullOnlyResources` — `GRDBSyncStore.stage(_:in:)` refuses it — so
+    /// every id that reaches this is a pulled one. `_markdown_remote_id` is
+    /// created by migration `markdown-v2-outbox-order`, not by
+    /// `createTables(in:)`, so a host running a bare `GRDBSyncStore` on this
+    /// projection has no such table and must not fail its pull for it.
+    ///
+    /// The mapping is *not* applied to `category_items`/`keyword_items`
+    /// `target_id`: those rows are authored locally and pushed carrying the
+    /// local id, so adh already holds the local id there and remapping would
+    /// invert a pairing that was never made.
+    private static func localID(for resource: String, id: String, in conn: Database) throws -> String {
+        guard resource == "content.markdown",
+              try conn.tableExists("_markdown_remote_id") else { return id }
+        return try String.fetchOne(
+            conn, sql: "SELECT local_id FROM _markdown_remote_id WHERE remote_id = ?",
+            arguments: [id]) ?? id
+    }
+
+    /// The same remapping for the marker tables' `markdown_id`, which is a
+    /// real foreign key into `markdown` — left as adh's id it points at a row
+    /// that does not exist locally, and the pull fails on the constraint at
+    /// commit rather than on the statement.
+    private static func resolvingMarkdownReference(
+        in data: [String: JSONValue], resource: String, in conn: Database
+    ) throws -> [String: JSONValue] {
+        guard ["content.notes", "content.docs", "content.papers"].contains(resource),
+              case .string(let referenced) = data["markdown_id"] else { return data }
+        let local = try localID(for: "content.markdown", id: referenced, in: conn)
+        guard local != referenced else { return data }
+        var data = data
+        data["markdown_id"] = .string(local)
+        return data
+    }
+
     public func markDeleted(
         resource: String, id: String, syncVersion: Int?, in conn: Database
     ) throws {
+        let id = try Self.localID(for: resource, id: id, in: conn)
         let stamp = MarkdownTimestamp.string(Date())
         // `content.markdown` alone carries both tombstones, and every one of
         // its indexes filters on `is_deleted`, so setting only `deleted_at`
@@ -547,7 +663,7 @@ public struct MarkdownProjection: SyncMirrorProjection {
     /// `idx_markdown_updated`, silently inverting order within the same
     /// second. A value that fails to parse is stored verbatim rather than
     /// dropped — it is unexpected, not proof the row is worthless.
-    private static func value(_ json: JSONValue?, column: String) -> (any DatabaseValueConvertible)? {
+    private static func value(_ json: JSONValue?, column: String) throws -> (any DatabaseValueConvertible)? {
         if timestampColumns.contains(column), case .string(let text) = json {
             return normalizedTimestamp(text)
         }
@@ -578,8 +694,22 @@ public struct MarkdownProjection: SyncMirrorProjection {
             // Only `frontmatter` is structured, and adh sends it as a JSON
             // string, not an object. Anything else structured is stored as its
             // JSON text rather than dropped.
-            guard let encoded = try? JSONEncoder().encode(json) else { return nil }
-            return String(bytes: encoded, encoding: .utf8)
+            //
+            // A failed encode throws rather than binding NULL. `try?` here
+            // turned an unrepresentable value (a non-finite number nested in
+            // an array, say) into a silent partial write — the row landed with
+            // that column blanked and no one told, on a path where every other
+            // failure in this file is a loud typed error.
+            let encoded: Data
+            do {
+                encoded = try JSONEncoder().encode(json)
+            } catch {
+                throw MarkdownProjectionError.unencodableValue(column: column)
+            }
+            guard let text = String(bytes: encoded, encoding: .utf8) else {
+                throw MarkdownProjectionError.unencodableValue(column: column)
+            }
+            return text
         }
     }
 
