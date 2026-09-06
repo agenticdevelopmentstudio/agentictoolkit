@@ -267,4 +267,126 @@ final class NotesWindowToolbarTests: XCTestCase {
 
         XCTAssertGreaterThan(folderVC.outline.numberOfRows, before)
     }
+
+    // MARK: - The ⋯ menu (Task 8, spec §3)
+
+    /// `notesListDidRequestNewNote()` used elsewhere fires an unstructured
+    /// `Task`; several of these actions do too (task-8-grounding G4), so
+    /// assertions against `NotesManager` state have to poll rather than
+    /// assume one runloop turn is enough.
+    private func pollUntil(
+        attempts: Int = 200,
+        intervalNanoseconds: UInt64 = 10_000_000,
+        _ condition: () -> Bool
+    ) async throws -> Bool {
+        for _ in 0..<attempts {
+            if condition() { return true }
+            try await Task.sleep(nanoseconds: intervalNanoseconds)
+        }
+        return condition()
+    }
+
+    func testMoreMenuTitlesAreInTheSpecOrder() async throws {
+        let split = try await makeSplitWithASelectedNote()
+        let toolbar = NotesWindowToolbar(splitViewController: split)
+
+        let menu = toolbar.buildMoreMenu()
+
+        XCTAssertEqual(menu.items.count, 7)
+        XCTAssertEqual(menu.items[0].title, "Pin Note")
+        XCTAssertEqual(menu.items[1].title, "Find in Note")
+        XCTAssertEqual(menu.items[2].title, "Move to")
+        XCTAssertEqual(menu.items[3].title, "Duplicate Note")
+        XCTAssertEqual(menu.items[4].title, "Share…")
+        XCTAssertTrue(menu.items[5].isSeparatorItem)
+        XCTAssertEqual(menu.items[6].title, "Delete Note")
+    }
+
+    /// task-8-grounding G7: words, not a pin icon, and recomputed at open
+    /// time rather than fixed at construction.
+    func testPinItemTitleTracksTheSelectedNotesPinnedState() async throws {
+        let split = try await makeSplitWithASelectedNote()
+        let toolbar = NotesWindowToolbar(splitViewController: split)
+        XCTAssertEqual(toolbar.buildMoreMenu().items[0].title, "Pin Note")
+
+        split.togglePinOnSelectedNote()
+        let pinned = try await pollUntil { split.selectedNote()?.isPinned == true }
+        XCTAssertTrue(pinned)
+
+        XCTAssertEqual(toolbar.buildMoreMenu().items[0].title, "Unpin Note")
+    }
+
+    func testEveryMoreMenuItemIsDisabledWithNoSelection() throws {
+        let toolbar = NotesWindowToolbar(splitViewController: try makeSplit())
+
+        let menu = toolbar.buildMoreMenu()
+
+        for item in menu.items where !item.isSeparatorItem {
+            XCTAssertFalse(item.isEnabled, "\(item.title) should be disabled with no note selected")
+        }
+    }
+
+    func testEveryMoreMenuItemIsEnabledWithASelection() async throws {
+        let split = try await makeSplitWithASelectedNote()
+        let toolbar = NotesWindowToolbar(splitViewController: split)
+
+        let menu = toolbar.buildMoreMenu()
+
+        for item in menu.items where !item.isSeparatorItem {
+            XCTAssertTrue(item.isEnabled, "\(item.title) should be enabled with a note selected")
+        }
+    }
+
+    /// task-8-grounding G5: the folder tree plus "None", with a checkmark on
+    /// every folder the selected note already belongs to.
+    func testMoveToSubmenuListsNoneAndTheFolderTreeWithCurrentMembershipChecked() async throws {
+        let store = try MarkdownStore(path: ":memory:", customerID: "cust-1", ecosystemID: "eco-1")
+        let recipes = try store.createCategory(name: "Recipes")
+        let doc = try store.createDocument(content: "a recipe", markers: [.note])
+        try store.assignCategory(recipes.id, toDocument: doc.id)
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        let listVC = try XCTUnwrap(split.splitViewItems[1].viewController as? NotesListViewController)
+        let note = try XCTUnwrap(notesManager.notes.first)
+        listVC.reload(notes: notesManager.notes, keepingSelectedID: note.id)
+        let toolbar = NotesWindowToolbar(splitViewController: split)
+
+        let moveTo = try XCTUnwrap(toolbar.buildMoreMenu().items[2].submenu)
+
+        XCTAssertEqual(moveTo.items[0].title, "None")
+        XCTAssertEqual(moveTo.items[0].state, .off)
+        let recipesItem = try XCTUnwrap(moveTo.items.first { $0.title == "Recipes" })
+        XCTAssertEqual(recipesItem.state, .on)
+    }
+
+    /// task-8-grounding G5: "with no store the Move to submenu is disabled,
+    /// not crashing." A note *is* selected here — this isolates the missing
+    /// store as the reason, distinct from `testEveryMoreMenuItemIsDisabled
+    /// WithNoSelection` above.
+    private struct OneNoteStorage: NoteStorage {
+        let note: Note
+        func fetchAllNotes() throws -> [Note] { [note] }
+        func insertNote(_ note: Note) throws {}
+        func updateNote(_ note: Note) throws {}
+        func deleteNote(id: UUID) throws {}
+    }
+
+    func testMoveToIsDisabledWithNoMarkdownStore() async throws {
+        let note = Note.new(content: "hello")
+        let notesManager = NotesManager(storage: OneNoteStorage(note: note))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: nil, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        let listVC = try XCTUnwrap(split.splitViewItems[1].viewController as? NotesListViewController)
+        listVC.reload(notes: notesManager.notes, keepingSelectedID: note.id)
+        let toolbar = NotesWindowToolbar(splitViewController: split)
+
+        let moveToItem = toolbar.buildMoreMenu().items[2]
+
+        XCTAssertFalse(moveToItem.isEnabled)
+    }
 }

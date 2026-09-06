@@ -282,25 +282,21 @@ final class NotesSplitViewControllerTests: XCTestCase {
         XCTAssertEqual(listRowCount(split), 2)
     }
 
-    /// task-7-grounding G8, Test 1 — corrected. The grounding document's own
-    /// text describes the settled list count as `2` (the filtered note plus
-    /// the new one), but that contradicts the production code it is meant to
-    /// pin: `notesListDidRequestNewNote()` already carries a task-6-grounding
-    /// G9 comment stating that a note created inside a filtered folder has no
-    /// category yet, so it is correctly *excluded* from that filtered view.
-    /// `NotesManager.createNote(content:)` confirms this — it never assigns a
-    /// category. So the actually-correct, already-implemented settled count is
-    /// `1`, not `2`; this test pins that instead of the grounding's literal
-    /// (and, for this codebase, incorrect) claim.
+    /// task-8-grounding G10 (Ruling 39) — supersedes the earlier
+    /// task-7-grounding G8, Test 1 pin. Apple Notes, the reference for this
+    /// whole rework, creates a new note *inside* the selected folder rather
+    /// than leaving it unfiled and hidden from the very list the user is
+    /// looking at. `notesListDidRequestNewNote()` now files the note under
+    /// `selectedFolderID` (when one is selected) before reloading, so the
+    /// filtered list settles at 2 — the pre-existing "a recipe" plus the new
+    /// note — and the new note is a member of the Recipes folder.
     ///
-    /// What this still has to distinguish from the historical bug
-    /// `notesListDidRequestNewNote()` used to have — reloading from *all*
-    /// notes and silently dropping the folder filter — is that the bug would
-    /// have settled at the unfiltered `3`, not `1`. Asserting the manager
-    /// actually grew to 3 notes *and* that the filtered list still shows only
-    /// 1 is what tells "the note was created but correctly hidden" apart from
-    /// "the note was never created."
-    func testANewNoteCreatedInAFilteredFolderDoesNotWidenTheListsFilter() async throws {
+    /// The manager-count assertion at 3 still distinguishes this from the
+    /// historical regression, where `notesListDidRequestNewNote()` reloaded
+    /// from *all* notes and dropped the folder filter entirely — that bug
+    /// would also have settled the filtered list at the unfiltered total, not
+    /// specifically at 2.
+    func testANewNoteCreatedInAFilteredFolderJoinsThatFolder() async throws {
         let store = try store()
         let recipes = try store.createCategory(name: "Recipes")
         let inFolder = try store.createDocument(content: "a recipe", markers: [.note])
@@ -323,9 +319,201 @@ final class NotesSplitViewControllerTests: XCTestCase {
 
         split.notesListDidRequestNewNote()
 
-        let settled = try await pollUntil { notesManager.notes.count == 3 }
-        XCTAssertTrue(settled, "expected the new note to be created")
-        XCTAssertEqual(listRowCount(split), 1, "a new note with no category must not widen an active folder filter")
+        let settled = try await pollUntil { listRowCount(split) == 2 }
+        XCTAssertTrue(settled, "expected the new note to join the selected folder and appear in the filtered list")
+        XCTAssertEqual(notesManager.notes.count, 3, "expected the new note to actually be created")
+
+        let newNote = try XCTUnwrap(notesManager.notes.first { $0.content.isEmpty })
+        let categories = try store.categories(forDocument: newNote.id.uuidString.lowercased())
+        XCTAssertTrue(
+            categories.contains { $0.id == recipes.id },
+            "the new note must be a member of the folder it was created in")
+    }
+
+    // MARK: - The ⋯ menu's actions (Task 8)
+
+    /// Selects the store's first (and only) note by loading it into the
+    /// list pane, the same shortcut `NotesWindowToolbarTests.
+    /// makeSplitWithASelectedNote()` uses — `selectedNote()` reads the id
+    /// back off `listVC.selectedNoteID`, so a note has to actually be
+    /// "selected" through the list pane rather than just existing in the
+    /// manager. Returns the manager too: it is `private` on the controller,
+    /// so a test that needs to observe the mutation itself (not just
+    /// `selectedNote()`, which only sees whichever note the list still has
+    /// selected) has to hold its own reference.
+    private func makeSplitWithASelectedNote(
+        store: MarkdownStore
+    ) async throws -> (split: NotesSplitViewController, note: Note, notesManager: NotesManager) {
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        let note = try XCTUnwrap(notesManager.notes.first)
+        let listVC = try XCTUnwrap(split.splitViewItems[1].viewController as? NotesListViewController)
+        listVC.reload(notes: notesManager.notes, keepingSelectedID: note.id)
+        return (split, note, notesManager)
+    }
+
+    func testTogglePinOnSelectedNoteFlipsThePinnedFlag() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "hello", markers: [.note])
+        let (split, note, _) = try await makeSplitWithASelectedNote(store: store)
+        XCTAssertFalse(note.isPinned)
+
+        split.togglePinOnSelectedNote()
+
+        let pinned = try await pollUntil { split.selectedNote()?.isPinned == true }
+        XCTAssertTrue(pinned)
+    }
+
+    func testTogglePinOnSelectedNoteDoesNothingWithNoSelection() {
+        let split = makeSplit(autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+
+        split.togglePinOnSelectedNote() // must not crash
+    }
+
+    func testDuplicateSelectedNoteCreatesANoteWithIdenticalContent() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "hello world", markers: [.note])
+        let (split, note, notesManager) = try await makeSplitWithASelectedNote(store: store)
+
+        split.duplicateSelectedNote()
+
+        let settled = try await pollUntil { notesManager.notes.count == 2 }
+        XCTAssertTrue(settled)
+        XCTAssertTrue(notesManager.notes.allSatisfy { $0.content == "hello world" })
+        let duplicate = try XCTUnwrap(notesManager.notes.first { $0.id != note.id })
+        XCTAssertNotEqual(duplicate.id, note.id, "the duplicate must be a distinct note")
+    }
+
+    /// Apple Notes keeps a duplicate in whatever folder the original was
+    /// in — not spelled out in the brief's one-line "creates a new note with
+    /// the same content," but leaving the duplicate unfiled reproduces
+    /// exactly the surprise task-8-grounding G10 (Ruling 39) just closed for
+    /// brand-new notes: a note the user is looking at (because it is in the
+    /// filtered folder) that vanishes the moment it is duplicated.
+    func testDuplicateSelectedNotePreservesFolderMembership() async throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let doc = try store.createDocument(content: "hello", markers: [.note])
+        try store.assignCategory(recipes.id, toDocument: doc.id)
+        let (split, note, notesManager) = try await makeSplitWithASelectedNote(store: store)
+
+        split.duplicateSelectedNote()
+
+        let settled = try await pollUntil { notesManager.notes.count == 2 }
+        XCTAssertTrue(settled)
+        let duplicate = try XCTUnwrap(notesManager.notes.first { $0.id != note.id })
+        let categories = try store.categories(forDocument: duplicate.id.uuidString.lowercased())
+        XCTAssertTrue(categories.contains { $0.id == recipes.id })
+    }
+
+    func testMoveSelectedNoteAssignsTheGivenFolder() async throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let doc = try store.createDocument(content: "hello", markers: [.note])
+        let (split, _, _) = try await makeSplitWithASelectedNote(store: store)
+
+        split.moveSelectedNote(toFolder: recipes.id)
+
+        let settled = try await pollUntil {
+            (try? store.categories(forDocument: doc.id).contains { $0.id == recipes.id }) == true
+        }
+        XCTAssertTrue(settled)
+    }
+
+    /// task-8-grounding G5: picking an already-checked folder unassigns it —
+    /// "Move to" reassigns rather than enforcing single membership, and this
+    /// is the toggle-off half of that.
+    func testMoveSelectedNoteTogglesOffAnAlreadyAssignedFolder() async throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let doc = try store.createDocument(content: "hello", markers: [.note])
+        try store.assignCategory(recipes.id, toDocument: doc.id)
+        let (split, _, _) = try await makeSplitWithASelectedNote(store: store)
+
+        split.moveSelectedNote(toFolder: recipes.id)
+
+        let settled = try await pollUntil {
+            (try? store.categories(forDocument: doc.id).isEmpty) == true
+        }
+        XCTAssertTrue(settled)
+    }
+
+    /// task-8-grounding G5: "'None' unassigns every current category."
+    func testMoveSelectedNoteToNoneUnassignsEveryFolder() async throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let chores = try store.createCategory(name: "Chores")
+        let doc = try store.createDocument(content: "hello", markers: [.note])
+        try store.assignCategory(recipes.id, toDocument: doc.id)
+        try store.assignCategory(chores.id, toDocument: doc.id)
+        let (split, _, _) = try await makeSplitWithASelectedNote(store: store)
+
+        split.moveSelectedNote(toFolder: "")
+
+        let settled = try await pollUntil {
+            (try? store.categories(forDocument: doc.id).isEmpty) == true
+        }
+        XCTAssertTrue(settled)
+    }
+
+    /// The underlying mutation, called directly the same way
+    /// `NotesFolderListViewControllerTests` calls `deleteFolder(_:)` directly
+    /// rather than driving `presentDeleteConfirmation(for:)`'s sheet — an
+    /// `NSAlert` sheet cannot be answered from a headless XCTest run.
+    /// `deleteSelectedNote()` itself is covered below for its no-window guard.
+    func testPerformDeleteRemovesTheNote() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "hello", markers: [.note])
+        let (split, note, notesManager) = try await makeSplitWithASelectedNote(store: store)
+
+        split.performDelete(note)
+
+        let settled = try await pollUntil { notesManager.notes.isEmpty }
+        XCTAssertTrue(settled)
+    }
+
+    /// task-8-grounding G3/G9's recovered guard: `guard let window =
+    /// view.window else { return }`, checked *before* the alert — a delete
+    /// requested with no window silently does nothing rather than trapping.
+    func testDeleteSelectedNoteWithNoWindowDoesNothing() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "hello", markers: [.note])
+        let (split, _, notesManager) = try await makeSplitWithASelectedNote(store: store)
+
+        split.deleteSelectedNote()
+
+        XCTAssertEqual(notesManager.notes.count, 1, "no window means no sheet, and no deletion")
+    }
+
+    func testShareSelectedNoteDoesNothingWithNoSelection() {
+        let split = makeSplit(autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+
+        split.shareSelectedNote(from: split.view) // must not crash
+    }
+
+    /// `focusEditor()`'s own test (ADT's `MarkdownTextPaneInputTests`) already
+    /// pins that it reaches a real `NSTextView`; this pins that
+    /// `findInNote()` actually calls it, which needs a real window because
+    /// `NSView.window?.makeFirstResponder(_:)` is a no-op off screen.
+    func testFindInNoteMakesTheEditorsTextViewFirstResponder() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "hello", markers: [.note])
+        let (split, _, _) = try await makeSplitWithASelectedNote(store: store)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentViewController = split
+        window.makeKeyAndOrderFront(nil)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        split.findInNote()
+
+        XCTAssertTrue(window.firstResponder is NSTextView)
     }
 
     // MARK: - Help pane persistence (task-7-grounding G8, Test 2)

@@ -336,6 +336,137 @@ public final class NotesSplitViewController: ThemedSplitViewController {
         folderVC.presentDeleteConfirmation(for: folder)
     }
 
+    // MARK: - The ⋯ menu's actions (Task 8)
+
+    /// Pin/Unpin (task-8-grounding G7's title, not a pin icon) — the button
+    /// removed in Task 4 is back where Apple Notes keeps it, in the overflow
+    /// menu.
+    public func togglePinOnSelectedNote() {
+        guard let note = selectedNote() else { return }
+        Task { @MainActor in
+            await notesManager.togglePin(note: note)
+            listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: note.id)
+            onToolbarRelevantStateChange?()
+        }
+    }
+
+    /// A new note with the selected note's content, unchanged — its title
+    /// follows from that content, so the copy is named the same, which is
+    /// correct and matches Apple Notes.
+    ///
+    /// Also carries over the original's folder memberships. The brief's own
+    /// wording only asks for identical content, but leaving the duplicate
+    /// unfiled would reproduce, for a duplicate, exactly the surprise
+    /// task-8-grounding G10 (Ruling 39) just closed for brand-new notes: a
+    /// note the user is looking at because it is in the filtered folder that
+    /// vanishes the moment it is duplicated.
+    public func duplicateSelectedNote() {
+        guard let note = selectedNote() else { return }
+        Task { @MainActor in
+            guard let newID = await notesManager.createNote(content: note.content) else { return }
+            if let markdownStore {
+                let documentID = note.id.uuidString.lowercased()
+                let newDocumentID = newID.uuidString.lowercased()
+                let categories = (try? markdownStore.categories(forDocument: documentID)) ?? []
+                for category in categories {
+                    try? markdownStore.assignCategory(category.id, toDocument: newDocumentID)
+                }
+                if !categories.isEmpty { folderMembership = nil }
+            }
+            let newNote = notesManager.notes.first(where: { $0.id == newID })
+            listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: newID)
+            editorVC.show(note: newNote)
+        }
+    }
+
+    /// The underlying mutation, split out of `deleteSelectedNote()` so a test
+    /// can drive it directly — the same shape
+    /// `NotesFolderListViewController.deleteFolder(_:)` already uses, since
+    /// an `NSAlert` sheet cannot be answered from a headless test run.
+    func performDelete(_ note: Note) {
+        Task { @MainActor in
+            await notesManager.deleteNote(id: note.id)
+            listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: nil)
+            editorVC.show(note: nil)
+            onToolbarRelevantStateChange?()
+        }
+    }
+
+    /// Asks first, with the wording recovered from `NoteEditorViewController
+    /// .deleteTapped` before Task 4 removed it and then corrected again by
+    /// task-8-grounding G9 (Ruling 38) to match Task 5's folder-delete
+    /// alert. A delete with no window silently does nothing rather than
+    /// trapping — the same guard G3/G9 call out explicitly.
+    public func deleteSelectedNote() {
+        guard let note = selectedNote(), let window = view.window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete “\(note.title)”?"
+        alert.informativeText = "This cannot be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.performDelete(note)
+        }
+        alert.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated { finish(response) }
+        }
+    }
+
+    /// "Move to" (task-8-grounding G5): a note may sit in several folders at
+    /// once (spec §6.1), so this reassigns rather than enforcing single
+    /// membership — picking a folder the note is not already in adds it;
+    /// picking one it is already in removes it; `id.isEmpty` ("None")
+    /// removes every current membership. With no store this is a no-op — the
+    /// menu already disables the whole submenu in that case.
+    public func moveSelectedNote(toFolder id: String) {
+        guard let note = selectedNote(), let markdownStore else { return }
+        let documentID = note.id.uuidString.lowercased()
+        do {
+            let current = try markdownStore.categories(forDocument: documentID)
+            if id.isEmpty {
+                for category in current {
+                    try markdownStore.unassignCategory(category.id, fromDocument: documentID)
+                }
+            } else if current.contains(where: { $0.id == id }) {
+                try markdownStore.unassignCategory(id, fromDocument: documentID)
+            } else {
+                try markdownStore.assignCategory(id, toDocument: documentID)
+            }
+        } catch {
+            return
+        }
+        folderMembership = nil
+        Task { @MainActor in
+            await notesManager.loadNotes()
+            listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: note.id)
+        }
+    }
+
+    /// `NSSharingServicePicker(items: [note.content])` — markdown as-is, no
+    /// format conversion, no "Export as" submenu (spec §7).
+    public func shareSelectedNote(from view: NSView) {
+        guard let note = selectedNote() else { return }
+        let picker = NSSharingServicePicker(items: [note.content])
+        picker.show(relativeTo: view.bounds, of: view, preferredEdge: .maxY)
+    }
+
+    /// Dispatches through the responder chain (task-8-grounding G2) rather
+    /// than adding a `showFindInterface()` forwarder to
+    /// `MarkdownEditorController`: `NSTextView` reads the requested action off
+    /// the sender's `tag`, so a tagged, target-less `NSMenuItem` is enough to
+    /// ask for it. `focusEditor()` (ADT's Task 4 fix round, Ruling 20) makes
+    /// the pane's text view first responder first — `performTextFinderAction`
+    /// dispatches to whichever view is first responder, not to a specific one.
+    public func findInNote() {
+        editorVC.editorController.focusEditor()
+        let item = NSMenuItem()
+        item.tag = NSTextFinder.Action.showFindInterface.rawValue
+        NSApp.sendAction(#selector(NSTextView.performTextFinderAction(_:)), to: nil, from: item)
+    }
+
     // MARK: - Reload
 
     public func reload() {
@@ -424,12 +555,28 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
             // No id means the insert failed and the note was discarded; the
             // sheet is already on its way, and selecting nothing is right.
             guard let newID = await notesManager.createNote(content: "") else { return }
+            // task-8-grounding G10 (Ruling 39): a new note lands in whatever
+            // folder is selected, the way Apple Notes does — leaving it
+            // unfiled put it in the editor while the filtered list beside it
+            // excluded it, so the user typed into a note they could not see.
+            // `selectedFolderID` is empty for "All Notes", which is exactly
+            // the "leave it unfiled" case and needs no special handling.
+            if let markdownStore, !selectedFolderID.isEmpty {
+                try? markdownStore.assignCategory(
+                    selectedFolderID, toDocument: newID.uuidString.lowercased())
+                // Invalidates the cached membership set (`notesForCurrentFolder()`
+                // would otherwise still exclude the note this call just filed)
+                // and reloads the folder pane's own counts — both are beyond
+                // G10's literal snippet, which only calls
+                // `notesManager.loadNotes()`, but that alone leaves this
+                // controller's own membership cache stale and leaves the
+                // folder outline's count wrong, since `NotesFolderListView
+                // Controller` does not observe `notesDidChangeNotification`.
+                folderMembership = nil
+                await notesManager.loadNotes()
+                folderVC.reload()
+            }
             let newNote = notesManager.notes.first(where: { $0.id == newID })
-            // task-6-grounding G9: a new note created inside a filtered
-            // (non-"All Notes") folder view has no category yet, so it is not
-            // a member of the selected folder and correctly does not appear
-            // here — filtering through the same funnel as `reload()` avoids
-            // showing it and then losing it on the very next reload.
             listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: newID)
             editorVC.show(note: newNote)
         }

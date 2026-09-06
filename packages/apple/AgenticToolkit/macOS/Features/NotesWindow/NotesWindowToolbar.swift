@@ -1,5 +1,6 @@
 import AppKit
 import AgenticToolkitCoreMacOS
+import AgenticToolkitMarkdown
 
 /// The window toolbar's item identifiers (task-7 spec §3), private to this
 /// file the same way `SettingsWindow.swift` keeps its own — nothing outside
@@ -233,11 +234,152 @@ public final class NotesWindowToolbar: NSObject, NSToolbarDelegate {
     }
 
     @objc private func moreTapped(_ sender: NSButton) {
-        // Task 8 populates this menu's contents (move to folder, lock,
-        // delete, ...); Task 7's job is the button, its enabled state, and
-        // somewhere for that content to land.
-        let menu = NSMenu(title: "More")
+        let menu = buildMoreMenu()
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender)
+    }
+
+    // MARK: - The ⋯ menu (Task 8, spec §3)
+
+    /// Built fresh on every open rather than kept as a persistent `NSMenu`
+    /// refreshed through `NSMenuDelegate.menuNeedsUpdate(_:)` (the shape
+    /// task-8-grounding G7 sketches). Both guarantee the pin item's title and
+    /// the Move to checkmarks are current the moment the menu opens; building
+    /// fresh is the one a plain XCTest can drive directly — the same reason
+    /// `NotesFolderListViewControllerTests` exercises `deleteFolder(_:)`
+    /// itself rather than a live `NSMenu` tracking session. `internal`, not
+    /// `private`, so those tests can call it.
+    ///
+    /// Order matches spec §3: Pin/Unpin · Find in Note · Move to ▸ · Duplicate
+    /// Note · Share… · separator · Delete Note. Every item requires a
+    /// selected note, so enablement is a single `hasSelection` check; Move to
+    /// additionally needs a store (task-8-grounding G5).
+    func buildMoreMenu() -> NSMenu {
+        let menu = NSMenu(title: "More")
+        let note = splitViewController?.selectedNote()
+        let hasSelection = note != nil
+
+        let pinItem = NSMenuItem(
+            title: (note?.isPinned == true) ? "Unpin Note" : "Pin Note",
+            action: #selector(pinMenuItemClicked), keyEquivalent: "")
+        pinItem.target = self
+        pinItem.isEnabled = hasSelection
+        pinItem.accessibilityID("notes.menu.pin")
+        menu.addItem(pinItem)
+
+        let findItem = NSMenuItem(
+            title: "Find in Note", action: #selector(findMenuItemClicked), keyEquivalent: "")
+        findItem.target = self
+        findItem.isEnabled = hasSelection
+        findItem.accessibilityID("notes.menu.find")
+        menu.addItem(findItem)
+
+        let moveToItem = NSMenuItem(title: "Move to", action: nil, keyEquivalent: "")
+        moveToItem.isEnabled = hasSelection && splitViewController?.markdownStore != nil
+        moveToItem.submenu = buildMoveToSubmenu(for: note)
+        moveToItem.accessibilityID("notes.menu.move-to")
+        menu.addItem(moveToItem)
+
+        let duplicateItem = NSMenuItem(
+            title: "Duplicate Note", action: #selector(duplicateMenuItemClicked), keyEquivalent: "")
+        duplicateItem.target = self
+        duplicateItem.isEnabled = hasSelection
+        duplicateItem.accessibilityID("notes.menu.duplicate")
+        menu.addItem(duplicateItem)
+
+        let shareItem = NSMenuItem(
+            title: "Share…", action: #selector(shareMenuItemClicked), keyEquivalent: "")
+        shareItem.target = self
+        shareItem.isEnabled = hasSelection
+        shareItem.accessibilityID("notes.menu.share")
+        menu.addItem(shareItem)
+
+        menu.addItem(.separator())
+
+        let deleteItem = NSMenuItem(
+            title: "Delete Note", action: #selector(deleteMenuItemClicked), keyEquivalent: "")
+        deleteItem.target = self
+        deleteItem.isEnabled = hasSelection
+        deleteItem.accessibilityID("notes.menu.delete")
+        menu.addItem(deleteItem)
+
+        return menu
+    }
+
+    /// "None" plus the folder tree (task-8-grounding G5), flattened into one
+    /// indented list — the same shape Apple Notes' own Move to menu uses —
+    /// rather than folders nested in cascading submenus of their own: an
+    /// `NSMenuItem` that owns a submenu does not fire its own action on
+    /// click, so a folder with children would have no way to be picked
+    /// directly if it were also the item that opens its children's submenu.
+    /// A checkmark marks every folder the note already belongs to; picking a
+    /// checked folder or an unchecked one is `moveSelectedNote(toFolder:)`'s
+    /// call to make, not this menu's.
+    private func buildMoveToSubmenu(for note: Note?) -> NSMenu {
+        let submenu = NSMenu(title: "Move to")
+        guard let store = splitViewController?.markdownStore else { return submenu }
+
+        let currentCategoryIDs: Set<String>
+        if let note {
+            currentCategoryIDs = Set(
+                (try? store.categories(forDocument: note.id.uuidString.lowercased()))?.map(\.id) ?? [])
+        } else {
+            currentCategoryIDs = []
+        }
+
+        let noneItem = NSMenuItem(title: "None", action: #selector(moveToFolderClicked(_:)), keyEquivalent: "")
+        noneItem.target = self
+        noneItem.representedObject = ""
+        noneItem.state = currentCategoryIDs.isEmpty ? .on : .off
+        submenu.addItem(noneItem)
+        submenu.addItem(.separator())
+
+        let categories = (try? store.categories()) ?? []
+        let counts = (try? store.categoryNoteCounts()) ?? [:]
+        let edges = (try? store.categoryEdges()) ?? []
+        let total = (try? store.documents(marker: .note).count) ?? 0
+        let tree = NoteFolder.tree(from: categories, counts: counts, edges: edges, total: total)
+
+        func addItems(_ folders: [NoteFolder], depth: Int) {
+            for folder in folders {
+                let item = NSMenuItem(
+                    title: folder.name, action: #selector(moveToFolderClicked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = folder.id
+                item.indentationLevel = depth
+                item.state = currentCategoryIDs.contains(folder.id) ? .on : .off
+                submenu.addItem(item)
+                addItems(folder.children, depth: depth + 1)
+            }
+        }
+        addItems(tree, depth: 0)
+
+        return submenu
+    }
+
+    @objc private func pinMenuItemClicked() {
+        splitViewController?.togglePinOnSelectedNote()
+    }
+
+    @objc private func findMenuItemClicked() {
+        splitViewController?.findInNote()
+    }
+
+    @objc private func duplicateMenuItemClicked() {
+        splitViewController?.duplicateSelectedNote()
+    }
+
+    @objc private func shareMenuItemClicked() {
+        guard let button = moreButton else { return }
+        splitViewController?.shareSelectedNote(from: button)
+    }
+
+    @objc private func deleteMenuItemClicked() {
+        splitViewController?.deleteSelectedNote()
+    }
+
+    @objc private func moveToFolderClicked(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        splitViewController?.moveSelectedNote(toFolder: id)
     }
 
     @objc private func helpTapped() {
