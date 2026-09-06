@@ -100,6 +100,21 @@ const TMP_SWEEP_AGE_MS = 3_600_000;
  *  a host with no live connection (e.g. `POST /cron/maintenance`'s AppDeps) gets the prune
  *  with the checkpoint skipped, and snapshotting simply refuses (no connection to vacuum). */
 export function createMaintenanceStore(db: Db, conn?: LibsqlConnection): MaintenanceStore {
+  // A host that builds its storage as `createLibsqlStorage(db)` — no connection
+  // descriptor — silently loses BOTH the WAL checkpoint and the DB snapshots, and
+  // nothing else in the cycle would ever say so: the prune still reports its count and
+  // `snapshotIfDue` returns `{ created: false }` exactly as it does for `:memory:`. Say
+  // it once per store, on the first skipped step, so the miswiring is visible in the
+  // logs of the deployment that has it rather than discovered from a missing backup.
+  let warnedNoConn = false;
+  const warnNoConn = (step: string): void => {
+    if (warnedNoConn) return;
+    warnedNoConn = true;
+    console.warn(
+      `[maintenance] ${step} skipped: storage was built without a connection descriptor ` +
+        `(createLibsqlStorage(db, conn)) — WAL checkpoint and DB snapshots are disabled`,
+    );
+  };
   return {
     /** Roll up `metrics_hourly` for the hour buckets touched by this cycle's checks.
      *  Recomputes each (service, hour) bucket from `health_checks` and upserts it, so
@@ -170,6 +185,8 @@ export function createMaintenanceStore(db: Db, conn?: LibsqlConnection): Mainten
         } catch (err) {
           console.error(`[maintenance] wal checkpoint failed: ${err instanceof Error ? err.message : String(err)}`);
         }
+      } else {
+        warnNoConn("wal checkpoint");
       }
 
       return { deleted, done };
@@ -181,7 +198,11 @@ export function createMaintenanceStore(db: Db, conn?: LibsqlConnection): Mainten
      *  only) — the host never has to thread its own connection url through. */
     async snapshotIfDue(opts: SnapshotOptions = {}): Promise<{ created: boolean; path?: string }> {
       const url = opts.dbUrl ?? conn?.url;
-      if (!url || !url.startsWith("file:")) return { created: false }; // remote/memory DBs manage their own durability
+      if (!url) {
+        warnNoConn("db snapshot");
+        return { created: false };
+      }
+      if (!url.startsWith("file:")) return { created: false }; // remote/memory DBs manage their own durability
       const now = opts.now ?? Date.now;
       const intervalMs = opts.intervalMs ?? SNAPSHOT_INTERVAL_MS;
       const keep = opts.keep ?? SNAPSHOT_KEEP;

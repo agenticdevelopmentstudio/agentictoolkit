@@ -2,7 +2,10 @@
 // A Next host mounts these in its own pages and layouts; everything else in this
 // package is reached through the `./components/*`, `./lib/*` and `./header-auth`
 // subpaths. Every component here is a Client Component (the panels are
-// interactive), so this barrel carries "use client" through the build.
+// interactive): each module carries its OWN "use client", which the build's
+// preserve-directives plugin keeps on that module's dist file. The barrel itself
+// carries no directive — it only re-exports — so importing it from a Server
+// Component is fine, and the boundary sits on the component that needs it.
 export { StatusSign } from "./components/StatusSign";
 export { StatusDot } from "./components/StatusDot";
 export { HomeGate } from "./components/HomeGate";

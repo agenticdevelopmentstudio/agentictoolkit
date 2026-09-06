@@ -2,11 +2,23 @@
 // CLI, no loader flags in execArgv — the exact conditions of the prod worker thread
 // that crash-looped lewis. Run by worker-boot.int.test.ts as a child process; prints
 // REPLY:<json> on a completed cycle round-trip, exits non-zero on worker error.
+//
+// The workerData JSON arrives on STDIN, not argv: it carries the resolved config —
+// `config.secrets` is the whole process env — and a command-line argument is world-
+// readable through `ps` for the life of the process, and would be echoed back into
+// any error the test throws. Stdin is neither.
 import { Worker } from "node:worker_threads";
 
-const [entry, workerDataJson] = process.argv.slice(2);
-if (!entry || !workerDataJson) {
-  console.error("usage: node worker-boot-driver.mjs <resolved-worker-entry> <workerData-json>");
+const [entry] = process.argv.slice(2);
+if (!entry) {
+  console.error("usage: node worker-boot-driver.mjs <resolved-worker-entry>  < workerData-json");
+  process.exit(2);
+}
+
+let workerDataJson = "";
+for await (const chunk of process.stdin) workerDataJson += chunk;
+if (!workerDataJson.trim()) {
+  console.error("usage: workerData JSON expected on stdin");
   process.exit(2);
 }
 

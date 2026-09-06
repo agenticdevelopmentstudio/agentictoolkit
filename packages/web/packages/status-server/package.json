@@ -80,18 +80,21 @@
   "dependencies": {
     "@agentic-toolkit/deploy-platform": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "bcryptjs": "^2.4.3",
-    "drizzle-zod": "^0.8.3"
+    "bcryptjs": "^2.4.3"
   },
   "peerDependencies": {
+    "@hono/node-server": "^2.0.4",
     "@hono/zod-openapi": "^1.4.0",
     "@libsql/client": "^0.14.0",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.23",
     "zod": "^4.4.3"
   },
-  "comment:peers": "Every peer is OPTIONAL for the same reason deploy-platform's drizzle-orm peer is: a backend host (websites/main) declares hono, @hono/zod-openapi, drizzle-orm, @libsql/client and zod itself, while the dashboard host vendors this package only for status-web's type-only import and the two board/deploy-status parity tests, which reach the pure ./activity and ./deploy-status subpaths. A required peer would make pnpm's auto-install-peers drag the ORM and the native libsql driver into a browser install that never imports them.",
+  "comment:peers": "Every peer is OPTIONAL for the same reason deploy-platform's drizzle-orm peer is: a backend host (websites/main) declares hono, @hono/zod-openapi, drizzle-orm, @libsql/client and zod itself, while the dashboard host vendors this package only for status-web's type-only import and the two board/deploy-status parity tests, which reach the pure ./activity and ./deploy-status subpaths. A required peer would make pnpm's auto-install-peers drag the ORM and the native libsql driver into a browser install that never imports them. @hono/node-server is a peer for the same reason hono is: ./mcp reads its HttpBindings and RESPONSE_ALREADY_SENT off the host's node adapter, so it must be the host's ONE copy — as a dependency it would be inlined into dist and a second copy would sit beside the host's.",
   "peerDependenciesMeta": {
+    "@hono/node-server": {
+      "optional": true
+    },
     "@hono/zod-openapi": {
       "optional": true
     },

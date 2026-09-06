@@ -12,7 +12,7 @@ import {
 // The admin configuration CRUD (src/routes/config.ts), mounted at /config and
 // gated by a router-wide requireAdmin behind the app-wide requireAuth seam — so
 // every op carries the bearer scheme + 401 + 403. Request bodies REUSE the route's
-// own drizzle-zod insert/patch schemas (exported from config.ts). Each persisted
+// own hand-written zod insert/patch schemas (exported from config.ts). Each persisted
 // row's response shape is the insert schema plus the server-managed columns.
 // ---------------------------------------------------------------------------
 

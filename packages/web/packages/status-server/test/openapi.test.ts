@@ -75,7 +75,7 @@ describe('OpenAPI spec stays in sync with the routes', () => {
   });
 
   it('the committed openapi.json matches a fresh build (re-run: pnpm openapi:dump)', () => {
-    // The tracked websites/main/openapi.json is what `pnpm openapi:dump` writes;
+    // The package's tracked openapi.json is what its `pnpm openapi:dump` writes;
     // this pins it to the code so it can never silently drift. dump-openapi.ts builds
     // with NO scheduler (createApp({ storage, config })), so the committed artifact omits the
     // scheduler-gated /cron/* routes — build it the SAME way here for an apples-to-
@@ -92,7 +92,7 @@ describe('OpenAPI spec stays in sync with the routes', () => {
     });
     expect(
       pinVersion(committed),
-      'websites/main/openapi.json is out of date — re-run: pnpm openapi:dump (and commit).',
+      'status-server/openapi.json is out of date — re-run: pnpm openapi:dump in packages/web/packages/status-server (and commit).',
     ).toEqual(pinVersion(dumpSpec as { info: Record<string, unknown> }));
   });
 });

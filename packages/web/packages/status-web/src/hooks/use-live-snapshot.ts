@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createStatusApiClient, useStatusApi, type StatusApiClient } from "../api/client";
+import { useStatusApi, type StatusApiClient } from "../api/client";
 import type { LiveSnapshot } from "../lib/live-types";
 
 export const POLL_INTERVAL_MS = 60_000;
@@ -22,14 +22,17 @@ const CHECK_SAFETY_MS = 200_000;
 const STREAM_REOPEN_MS = 3_000;
 
 // ---------------------------------------------------------------------------
-// ONE module-scope store. The hook is mounted by the header pill AND OverviewTab
-// (sections) — a per-component useState would fork the store. All shared state
-// lives here.
+// ONE store PER API CLIENT. The hook is mounted by the header pill AND OverviewTab
+// (sections) — a per-component useState would fork the store — so every mount
+// that talks through the same `StatusApiClient` shares one store: one ref-counted
+// EventSource, one ingested-snapshot ledger, one pending-check flag. A host that
+// mounts two providers (two backends on one page) gets two stores, never a store
+// whose transport is re-pointed at whichever provider rendered last.
 //
-// This is the TRANSPORT half only: one ref-counted EventSource (/api/live/stream)
-// as the PRIMARY feed — the backend pushes a snapshot on every cycle and on each
-// webhook — with the React Query poll as the FALLBACK, gated off while the stream
-// is connected. It answers "what did the last probe cycle see" (services,
+// This is the TRANSPORT half only: one EventSource (/live/stream on the client's
+// base) as the PRIMARY feed — the backend pushes a snapshot on every cycle and on
+// each webhook — with the React Query poll as the FALLBACK, gated off while the
+// stream is connected. It answers "what did the last probe cycle see" (services,
 // deployments, lastCycleAt, probeIntervalMs, monitorVersion, configDegraded).
 //
 // It does NOT fold frames into a durable model any more — that was the defect
@@ -66,66 +69,15 @@ const freshView = (): StoreView => ({
   snapshot: null, streamConnected: false, nextCheckAt: null, awaitingCheck: false, liveError: null,
 });
 
-// The store's transport functions (openStream, fetchLive, refresh) run at module scope,
-// outside any component render, so they can't call `useStatusApi()` themselves. Each
-// `useLiveSnapshot()` call resolves the host's client and assigns it here BEFORE
-// `useSyncExternalStore` runs, so the transport always talks through the host's port
-// rather than naming `/api` itself. Defaults to the same-origin client for the sliver of
-// module-load time before any component has mounted.
-let apiClient: StatusApiClient = createStatusApiClient();
-
-let view: StoreView = freshView();
-const SERVER_VIEW: StoreView = view; // stable ref for SSR — first client paint matches
-let lastIngested: LiveSnapshot | null = null;
-/** When the user's in-flight manual check was requested (ms). The spinner clears
- *  only once a snapshot BUILT AFTER this lands — an unrelated earlier push doesn't
- *  count as "their check finished". Null when no check is pending. */
-let awaitingCheckSince: number | null = null;
-let checkSafetyTimer: ReturnType<typeof setTimeout> | null = null;
-const listeners = new Set<() => void>();
-
-function notify(): void {
-  for (const l of listeners) l();
-}
-
-/** Replace `view` with a patched copy and notify — but only if something actually
- *  changed, so a no-op patch (e.g. repeated stream-error events) doesn't re-render. */
-function patch(next: Partial<StoreView>): void {
-  let changed = false;
-  for (const k of Object.keys(next) as (keyof StoreView)[]) {
-    if (view[k] !== next[k]) {
-      changed = true;
-      break;
-    }
-  }
-  if (!changed) return;
-  view = { ...view, ...next };
-  notify();
-}
-
-function subscribe(cb: () => void): () => void {
-  listeners.add(cb);
-  acquireStream(); // open the SSE stream while at least one component is mounted
-  return () => {
-    listeners.delete(cb);
-    releaseStream();
-  };
-}
-
-function getView(): StoreView {
-  return view;
-}
-
-function getServerView(): StoreView {
-  return SERVER_VIEW;
-}
-
 /** Two snapshots are the SAME delivery iff identical object OR identical build
  *  clock — a cheap skip for a re-delivered frame. */
 export function isSameSnapshot(a: LiveSnapshot | null, b: LiveSnapshot): boolean {
   return a !== null && (a === b || a.generatedAt === b.generatedAt);
 }
 
+// Frame subscribers are MODULE-wide, not per store: `useBoard` subscribes once and
+// refetches on any ingested frame, whichever client's feed it came from — the board
+// query it refetches is keyed by the same React Query client either way.
 const frameSubscribers = new Set<() => void>();
 
 /**
@@ -133,145 +85,266 @@ const frameSubscribers = new Set<() => void>();
  * opening a SECOND EventSource: the board and the snapshot answer different questions but
  * they change at the same moments, and one connection per tab is the existing contract.
  *
- * Deliberately NOT the `listeners` set above — that fires on every connection-state change.
+ * Deliberately NOT a store's `listeners` set — that fires on every connection-state change.
  */
 export function subscribeLiveFrames(cb: () => void): () => void {
   frameSubscribers.add(cb);
   return () => frameSubscribers.delete(cb);
 }
 
-/** Fold a snapshot exactly once and notify. Module-level so N mounted hooks (and
- *  StrictMode double-effects) can't double-ingest. */
-function ingestOnce(snap: LiveSnapshot): void {
-  if (isSameSnapshot(lastIngested, snap)) return;
-  lastIngested = snap;
-  // Clear the spinner only for a snapshot built AT/AFTER the user's own check
-  // request — not for an unrelated push that happened to be in flight.
-  const resolvesCheck = awaitingCheckSince != null && Date.parse(snap.generatedAt) >= awaitingCheckSince;
-  if (resolvesCheck) {
-    awaitingCheckSince = null;
-    clearCheckSafety();
-  }
-  patch(resolvesCheck ? { snapshot: snap, awaitingCheck: false } : { snapshot: snap });
-  for (const cb of frameSubscribers) cb();
+/** The transport store behind one `StatusApiClient`. Everything that used to be a
+ *  module-scope `let` lives in this closure, so the client it talks through is fixed
+ *  at construction — never reassigned by a render. */
+interface LiveStore {
+  subscribe(cb: () => void): () => void;
+  getView(): StoreView;
+  getServerView(): StoreView;
+  /** The poll's queryFn: GET /live, recording the outcome in `liveError`. */
+  fetchLive(): Promise<LiveSnapshot>;
+  /** Fold a snapshot exactly once and notify frame subscribers. Idempotent, so N mounted
+   *  hooks (and StrictMode double-effects) can't double-ingest. */
+  ingestOnce(snap: LiveSnapshot): void;
+  /** POST /live/check and hold the spinner until the user's OWN result lands (or the
+   *  safety timer fires). `refetchLive` is the poll's re-read, for the paths where no
+   *  fresh cycle is coming. */
+  requestCheck(refetchLive: () => void): void;
+  /** Close the stream, drop every listener and timer, and return to `freshView()`. */
+  reset(): void;
 }
 
-function clearCheckSafety(): void {
-  if (checkSafetyTimer != null) {
-    clearTimeout(checkSafetyTimer);
-    checkSafetyTimer = null;
+function createLiveStore(apiClient: StatusApiClient): LiveStore {
+  let view: StoreView = freshView();
+  const serverView: StoreView = view; // stable ref for SSR — first client paint matches
+  let lastIngested: LiveSnapshot | null = null;
+  /** When the user's in-flight manual check was requested (ms). The spinner clears
+   *  only once a snapshot BUILT AFTER this lands — an unrelated earlier push doesn't
+   *  count as "their check finished". Null when no check is pending. */
+  let awaitingCheckSince: number | null = null;
+  let checkSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+  const listeners = new Set<() => void>();
+
+  // --- SSE stream, ref-counted by the N mounted hooks (header pill + OverviewTab).
+  // The browser auto-reconnects on a NETWORK drop; a non-200 response (auth expiry,
+  // 5xx) permanently CLOSES it, so we detect readyState=CLOSED and recreate after a
+  // backoff — otherwise the tab is stuck on the poll forever.
+  let es: EventSource | null = null;
+  let streamRefs = 0;
+  let reopenTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function notify(): void {
+    for (const l of listeners) l();
   }
-}
 
-// --- SSE stream singleton ----------------------------------------------------
-// One EventSource per tab, ref-counted by the N mounted hooks (header pill +
-// OverviewTab). The browser auto-reconnects on a NETWORK drop; a non-200 response
-// (auth expiry, 5xx) permanently CLOSES it, so we detect readyState=CLOSED and
-// recreate after a backoff — otherwise the tab is stuck on the poll forever.
-
-let es: EventSource | null = null;
-let streamRefs = 0;
-let reopenTimer: ReturnType<typeof setTimeout> | null = null;
-
-function openStream(): void {
-  if (es || typeof window === "undefined" || typeof EventSource === "undefined") return;
-  const source = apiClient.eventSource("/live/stream");
-  es = source;
-  source.addEventListener("open", () => patch({ streamConnected: true }));
-  source.addEventListener("snapshot", (e) => onSnapshotFrame((e as MessageEvent).data));
-  source.addEventListener("schedule", (e) => onScheduleFrame((e as MessageEvent).data));
-  source.addEventListener("error", () => {
-    // CONNECTING → the browser is auto-retrying a transient drop; just reflect the
-    // gap. CLOSED → a permanent failure the browser won't retry; recreate ourselves.
-    if (source.readyState === EventSource.CLOSED) {
-      if (es === source) es = null;
-      source.close();
-      patch({ streamConnected: false, nextCheckAt: null });
-      scheduleReopen();
-    } else {
-      patch({ streamConnected: false });
+  /** Replace `view` with a patched copy and notify — but only if something actually
+   *  changed, so a no-op patch (e.g. repeated stream-error events) doesn't re-render. */
+  function patch(next: Partial<StoreView>): void {
+    let changed = false;
+    for (const k of Object.keys(next) as (keyof StoreView)[]) {
+      if (view[k] !== next[k]) {
+        changed = true;
+        break;
+      }
     }
-  });
-}
-
-function scheduleReopen(): void {
-  if (reopenTimer != null || streamRefs <= 0) return;
-  reopenTimer = setTimeout(() => {
-    reopenTimer = null;
-    if (streamRefs > 0) openStream();
-  }, STREAM_REOPEN_MS);
-}
-
-function onSnapshotFrame(data: string): void {
-  try {
-    ingestOnce(JSON.parse(data) as LiveSnapshot);
-  } catch {
-    // a malformed frame is dropped; the next frame (or the poll fallback) recovers
+    if (!changed) return;
+    view = { ...view, ...next };
+    notify();
   }
-}
 
-function onScheduleFrame(data: string): void {
-  try {
-    const { nextCheckAt } = JSON.parse(data) as { nextCheckAt: string | null };
-    patch({ nextCheckAt: nextCheckAt ? Date.parse(nextCheckAt) : null });
-  } catch {
-    // ignore — the countdown falls back to the client estimate
+  function clearCheckSafety(): void {
+    if (checkSafetyTimer != null) {
+      clearTimeout(checkSafetyTimer);
+      checkSafetyTimer = null;
+    }
   }
-}
 
-function acquireStream(): void {
-  streamRefs += 1;
-  openStream();
-}
-
-/** Test hook — reset the module singleton between cases (it persists across renders
- *  by design, so tests must clear it to stay isolated). Deliberately leaves
- *  `frameSubscribers` alone — clearing it would silently unsubscribe a mounted
- *  `useBoard` out from under a test's store reset. */
-export function __resetStoreForTests(): void {
-  view = freshView();
-  lastIngested = null;
-  awaitingCheckSince = null;
-  clearCheckSafety();
-  listeners.clear();
-  if (reopenTimer != null) {
-    clearTimeout(reopenTimer);
-    reopenTimer = null;
-  }
-  es?.close();
-  es = null;
-  streamRefs = 0;
-}
-
-function releaseStream(): void {
-  streamRefs -= 1;
-  if (streamRefs <= 0) {
-    streamRefs = 0;
+  function clearReopen(): void {
     if (reopenTimer != null) {
       clearTimeout(reopenTimer);
       reopenTimer = null;
     }
-    es?.close();
-    es = null;
-    patch({ streamConnected: false, nextCheckAt: null });
   }
+
+  function ingestOnce(snap: LiveSnapshot): void {
+    if (isSameSnapshot(lastIngested, snap)) return;
+    lastIngested = snap;
+    // Clear the spinner only for a snapshot built AT/AFTER the user's own check
+    // request — not for an unrelated push that happened to be in flight.
+    const resolvesCheck = awaitingCheckSince != null && Date.parse(snap.generatedAt) >= awaitingCheckSince;
+    if (resolvesCheck) {
+      awaitingCheckSince = null;
+      clearCheckSafety();
+    }
+    patch(resolvesCheck ? { snapshot: snap, awaitingCheck: false } : { snapshot: snap });
+    for (const cb of frameSubscribers) cb();
+  }
+
+  function onSnapshotFrame(data: string): void {
+    try {
+      ingestOnce(JSON.parse(data) as LiveSnapshot);
+    } catch {
+      // a malformed frame is dropped; the next frame (or the poll fallback) recovers
+    }
+  }
+
+  function onScheduleFrame(data: string): void {
+    try {
+      const { nextCheckAt } = JSON.parse(data) as { nextCheckAt: string | null };
+      patch({ nextCheckAt: nextCheckAt ? Date.parse(nextCheckAt) : null });
+    } catch {
+      // ignore — the countdown falls back to the client estimate
+    }
+  }
+
+  function openStream(): void {
+    if (es || typeof window === "undefined" || typeof EventSource === "undefined") return;
+    const source = apiClient.eventSource("/live/stream");
+    es = source;
+    source.addEventListener("open", () => patch({ streamConnected: true }));
+    source.addEventListener("snapshot", (e) => onSnapshotFrame((e as MessageEvent).data));
+    source.addEventListener("schedule", (e) => onScheduleFrame((e as MessageEvent).data));
+    source.addEventListener("error", () => {
+      // CONNECTING → the browser is auto-retrying a transient drop; just reflect the
+      // gap. CLOSED → a permanent failure the browser won't retry; recreate ourselves.
+      if (source.readyState === EventSource.CLOSED) {
+        if (es === source) es = null;
+        source.close();
+        patch({ streamConnected: false, nextCheckAt: null });
+        scheduleReopen();
+      } else {
+        patch({ streamConnected: false });
+      }
+    });
+  }
+
+  function scheduleReopen(): void {
+    if (reopenTimer != null || streamRefs <= 0) return;
+    reopenTimer = setTimeout(() => {
+      reopenTimer = null;
+      if (streamRefs > 0) openStream();
+    }, STREAM_REOPEN_MS);
+  }
+
+  function acquireStream(): void {
+    streamRefs += 1;
+    openStream();
+  }
+
+  function releaseStream(): void {
+    streamRefs -= 1;
+    if (streamRefs <= 0) {
+      streamRefs = 0;
+      clearReopen();
+      es?.close();
+      es = null;
+      patch({ streamConnected: false, nextCheckAt: null });
+    }
+  }
+
+  return {
+    subscribe(cb) {
+      listeners.add(cb);
+      acquireStream(); // open the SSE stream while at least one component is mounted
+      return () => {
+        listeners.delete(cb);
+        releaseStream();
+      };
+    },
+    getView: () => view,
+    getServerView: () => serverView,
+    ingestOnce,
+
+    async fetchLive() {
+      // The poll is a plain re-read of the latest DB snapshot (the check runs on the
+      // backend; ?fresh had no effect on /live, so it's gone — see /live/check).
+      // Every outcome is recorded in `liveError` — this is the single place the read
+      // happens, so it is the honest place to say whether the backend is answering.
+      try {
+        const r = await apiClient.fetch("/live");
+        if (!r.ok) throw new Error(`live ${r.status}`);
+        const snapshot = (await r.json()) as LiveSnapshot;
+        patch({ liveError: null });
+        return snapshot;
+      } catch (e) {
+        patch({ liveError: e instanceof Error ? e.message : String(e) });
+        throw e;
+      }
+    },
+
+    requestCheck(refetchLive) {
+      clearCheckSafety();
+      awaitingCheckSince = Date.now();
+      patch({ awaitingCheck: true });
+      void (async () => {
+        let ran = false;
+        try {
+          const r = await apiClient.fetch("/live/check", { method: "POST" });
+          if (r.ok) {
+            const body = (await r.json().catch(() => null)) as { ran?: boolean } | null;
+            ran = body?.ran !== false; // explicit ran:false = debounced/coalesced
+          }
+        } catch {
+          // network error — treated as "no fresh cycle coming"
+        }
+        if (!ran) {
+          // Debounced, coalesced, or failed: NO new cycle is coming, so the freshest
+          // truth is whatever already landed in the DB — re-read it now (the stream
+          // isn't going to push anything for this click).
+          if (!view.streamConnected) refetchLive();
+          awaitingCheckSince = null;
+          patch({ awaitingCheck: false });
+          return;
+        }
+        // A cycle STARTED. The backend answers immediately (detached), so re-reading
+        // /live right now would just fetch the PRE-cycle snapshot — stale by
+        // construction, and unable to resolve the check. The result arrives when the
+        // cycle finishes: pushed over the stream, or picked up by the fallback poll
+        // (which keeps running on its own cadence while the stream is down).
+        checkSafetyTimer = setTimeout(() => {
+          checkSafetyTimer = null;
+          awaitingCheckSince = null;
+          patch({ awaitingCheck: false });
+          // Last-ditch re-read: if we never saw the cycle's snapshot within the
+          // budget, pull whatever the backend has rather than sitting on stale data.
+          refetchLive();
+        }, CHECK_SAFETY_MS);
+      })();
+    },
+
+    reset() {
+      view = freshView();
+      lastIngested = null;
+      awaitingCheckSince = null;
+      clearCheckSafety();
+      listeners.clear();
+      clearReopen();
+      es?.close();
+      es = null;
+      streamRefs = 0;
+    },
+  };
 }
 
-async function fetchLive(): Promise<LiveSnapshot> {
-  // The poll is a plain re-read of the latest DB snapshot (the check runs on the
-  // backend; ?fresh had no effect on /live, so it's gone — see /live/check).
-  // Every outcome is recorded in `liveError` — this is the single place the read
-  // happens, so it is the honest place to say whether the backend is answering.
-  try {
-    const r = await apiClient.fetch("/live");
-    if (!r.ok) throw new Error(`live ${r.status}`);
-    const snapshot = (await r.json()) as LiveSnapshot;
-    patch({ liveError: null });
-    return snapshot;
-  } catch (e) {
-    patch({ liveError: e instanceof Error ? e.message : String(e) });
-    throw e;
+// Keyed by client IDENTITY: `useStatusApi()` hands back the provider's memoised client
+// (or the module default when no provider is mounted), so every hook under one provider
+// lands on the same store, and the default-client store is the one the tests reach.
+const stores = new Map<StatusApiClient, LiveStore>();
+
+function storeFor(client: StatusApiClient): LiveStore {
+  let store = stores.get(client);
+  if (!store) {
+    store = createLiveStore(client);
+    stores.set(client, store);
   }
+  return store;
+}
+
+/** Test hook — reset every store between cases (they persist across renders by
+ *  design, so tests must clear them to stay isolated). Deliberately leaves
+ *  `frameSubscribers` alone — clearing it would silently unsubscribe a mounted
+ *  `useBoard` out from under a test's store reset. */
+export function __resetStoreForTests(): void {
+  for (const store of stores.values()) store.reset();
+  stores.clear();
 }
 
 export interface LiveSnapshotStore {
@@ -306,15 +379,15 @@ export interface LiveSnapshotStore {
 }
 
 export function useLiveSnapshot(): LiveSnapshotStore {
-  // Resolve the host's client before the store's transport can touch the network —
-  // `subscribe` (called synchronously by useSyncExternalStore below) may open the SSE
-  // stream on this same tick.
-  apiClient = useStatusApi();
+  // The store is looked up by the host's client BEFORE useSyncExternalStore runs —
+  // `subscribe` (called synchronously below) may open the SSE stream on this same tick,
+  // and it opens it through the client the store was built with.
+  const store = storeFor(useStatusApi());
   const queryClient = useQueryClient();
   const { snapshot, streamConnected, nextCheckAt, awaitingCheck, liveError } = useSyncExternalStore(
-    subscribe,
-    getView,
-    getServerView,
+    store.subscribe,
+    store.getView,
+    store.getServerView,
   );
 
   // The poll is the FALLBACK: every auto-refetch trigger stands down while the
@@ -322,7 +395,7 @@ export function useLiveSnapshot(): LiveSnapshotStore {
   // no reason to do the redundant work / provider fan-out).
   const query = useQuery<LiveSnapshot>({
     queryKey: ["live"],
-    queryFn: fetchLive,
+    queryFn: store.fetchLive,
     refetchInterval: streamConnected ? false : POLL_INTERVAL_MS,
     refetchOnWindowFocus: !streamConnected,
     refetchOnMount: !streamConnected,
@@ -333,56 +406,16 @@ export function useLiveSnapshot(): LiveSnapshotStore {
   const { data, dataUpdatedAt } = query;
   useEffect(() => {
     // External-store sync (the sanctioned exception): hand each poll result to the
-    // singleton. ingestOnce is idempotent, so this is safe even if it races a
-    // stream push of the same cycle.
-    if (data) ingestOnce(data);
-  }, [data]);
+    // store. ingestOnce is idempotent, so this is safe even if it races a stream push
+    // of the same cycle.
+    if (data) store.ingestOnce(data);
+  }, [data, store]);
 
   useEffect(() => {
     // On losing the stream, re-read immediately so `offline` and the data reflect
     // CURRENT backend health rather than a stale, possibly hours-old, poll error.
     if (!streamConnected) void queryClient.refetchQueries({ queryKey: ["live"] });
   }, [streamConnected, queryClient]);
-
-  const refresh = useCallback(() => {
-    clearCheckSafety();
-    awaitingCheckSince = Date.now();
-    patch({ awaitingCheck: true });
-    void (async () => {
-      let ran = false;
-      try {
-        const r = await apiClient.fetch("/live/check", { method: "POST" });
-        if (r.ok) {
-          const body = (await r.json().catch(() => null)) as { ran?: boolean } | null;
-          ran = body?.ran !== false; // explicit ran:false = debounced/coalesced
-        }
-      } catch {
-        // network error — treated as "no fresh cycle coming"
-      }
-      if (!ran) {
-        // Debounced, coalesced, or failed: NO new cycle is coming, so the freshest
-        // truth is whatever already landed in the DB — re-read it now (the stream
-        // isn't going to push anything for this click).
-        if (!view.streamConnected) void queryClient.refetchQueries({ queryKey: ["live"] });
-        awaitingCheckSince = null;
-        patch({ awaitingCheck: false });
-        return;
-      }
-      // A cycle STARTED. The backend answers immediately (detached), so re-reading
-      // /live right now would just fetch the PRE-cycle snapshot — stale by
-      // construction, and unable to resolve the check. The result arrives when the
-      // cycle finishes: pushed over the stream, or picked up by the fallback poll
-      // (which keeps running on its own cadence while the stream is down).
-      checkSafetyTimer = setTimeout(() => {
-        checkSafetyTimer = null;
-        awaitingCheckSince = null;
-        patch({ awaitingCheck: false });
-        // Last-ditch re-read: if we never saw the cycle's snapshot within the
-        // budget, pull whatever the backend has rather than sitting on stale data.
-        void queryClient.refetchQueries({ queryKey: ["live"] });
-      }, CHECK_SAFETY_MS);
-    })();
-  }, [queryClient]);
 
   // A cheap reachability re-read for the reconnect overlay's retry: just re-fetch the
   // ["live"] snapshot (GET /api/live). Unlike `refresh` this does NOT POST /live/check,
@@ -391,6 +424,10 @@ export function useLiveSnapshot(): LiveSnapshotStore {
   const reconnect = useCallback(() => {
     void queryClient.refetchQueries({ queryKey: ["live"] });
   }, [queryClient]);
+
+  const refresh = useCallback(() => {
+    store.requestCheck(reconnect);
+  }, [store, reconnect]);
 
   // Offline only when every feed is dark AND we're not mid re-read: the last read
   // failed, the stream isn't connected, and no fetch is in flight to refute it.

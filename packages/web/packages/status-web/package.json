@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "A status monitor's operator dashboard: React panels, hooks and the browser-side API client. A Next host mounts these in its own pages, providers and proxy.",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "**/*.css"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -37,6 +39,7 @@
       "import": "./dist/lib/*.js",
       "default": "./dist/lib/*.js"
     },
+    "./styles/panels.css": "./src/styles/panels.css",
     "./package.json": "./package.json"
   },
   "files": [

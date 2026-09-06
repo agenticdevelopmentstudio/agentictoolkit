@@ -15,7 +15,10 @@ import type { Problem } from "./board-types";
 // field, a widened nullability, a union member added on one side only — the board silently
 // mis-renders with no compile error to catch it, because `pnpm test` transpiles without
 // typechecking. So the type half below is what makes the drift visible: it is real code that
-// only compiles when both sides still agree, checked by `pnpm typecheck` (Step 11).
+// only compiles when both sides still agree. TWO typechecks compile it: this package's own
+// `pnpm typecheck`, and the dashboard host's `web` typecheck, whose tsconfig names this file
+// (and deploy-status-parity.test.ts) under `files` so the vendored copy is checked against
+// the vendored status-server — the pair that actually ships together.
 
 /** Mutual assignability. Drift a field name, a nullability, or a union member on either
  *  side and this stops resolving to `true`. */

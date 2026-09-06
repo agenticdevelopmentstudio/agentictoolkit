@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -75,5 +75,28 @@ describe('storage.maintenance.snapshotIfDue', () => {
     const memStorage = createLibsqlStorage(mem);
     const res = await memStorage.maintenance.snapshotIfDue({ dbUrl: ':memory:' });
     expect(res.created).toBe(false);
+  });
+
+  it('snapshots through the connection the storage was built with (no dbUrl override)', async () => {
+    // The production wiring: the monitor cycle owns the connection descriptor and hands
+    // it to `createLibsqlStorage(db, conn)`, and `snapshotIfDue` reads the file path
+    // from it — the override the tests above pass is NOT the path prod takes.
+    const wired = createLibsqlStorage(db, { url: `file:${dbPath}` });
+    const res = await wired.maintenance.snapshotIfDue({ now: () => Date.now() });
+    expect(res.created).toBe(true);
+    expect(listSnapshots()).toHaveLength(1);
+  });
+
+  it('warns ONCE when the storage has no connection descriptor, so the silent skip is visible', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // `storage` (from beforeEach) is built with no conn — the miswiring under test.
+      expect((await storage.maintenance.snapshotIfDue()).created).toBe(false);
+      expect((await storage.maintenance.snapshotIfDue()).created).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toMatch(/without a connection descriptor/);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

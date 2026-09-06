@@ -72,8 +72,9 @@ const clampInt = (v: number, lo: number, hi: number): number => Math.min(Math.ma
 
 // Write-tool argument schemas defined ONCE — `.shape` feeds the MCP inputSchema and
 // `.parse` produces the typed value the store function takes (single source of truth,
-// so the wire contract and the store call can't disagree). Patches reuse Task 6's
-// drizzle-zod schemas verbatim; an `id` is prepended for the update/delete targets.
+// so the wire contract and the store call can't disagree). Patches reuse the config
+// route's own hand-written zod patch schemas verbatim; an `id` is prepended for the
+// update/delete targets.
 const groupUpdateArgs = z.object({ id: z.string(), ...siteGroupPatch.shape });
 const siteUpdateArgs = z.object({ id: z.string(), ...monitoredSitePatch.shape });
 const platformUpdateArgs = z.object({ id: z.string(), ...deployIntegrationPatch.shape });

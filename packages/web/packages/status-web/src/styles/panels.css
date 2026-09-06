@@ -1,0 +1,150 @@
+/* @agentic-toolkit/status-web — the dashboard panels' own hand-written rules.
+   Everything the panels need that is NOT a Tailwind utility lives here: the
+   container-query header collapse, the indicator glows and spinner, the project
+   links, the range/checkbox controls and the snap-scroll hero. A host imports it
+   ONCE from its global stylesheet:
+
+       @import "@agentic-toolkit/status-web/styles/panels.css";
+
+   It ships from `src/styles/` (the package's `files` includes `src`, and the
+   export path points there — the same arrangement as @agentic-toolkit/ui's
+   globals.css) so no build step has to mirror it. Only the neutral `--color-apt-*`
+   tokens are named; the host's theme supplies their values. */
+
+/* The activity panel headers are three-up — title+copy | poll controls | clear,
+   filter, gear — inside a panel that is only half the board wide. When the panel
+   is too narrow for all of it the header does NOT clip gracefully: the centre slot
+   is `flex-1 min-w-0`, so it collapses to zero width and paints its refresh icon
+   *over* the filter box (unclickable), and the options gear is pushed outside the
+   panel's `overflow-hidden` edge (invisible).
+
+   What decides that is the PANEL's width, not the viewport's — a 1440px board with
+   the rail open still leaves each panel ~390px — so this is a container query on
+   the panel itself (`.adh-panel-cq`), not the media query it replaces. Below the
+   threshold the optional poll telemetry (countdown, monitor sha, build bar) stands
+   down and the filter box narrows, which is exactly enough for the refresh icon and
+   the gear to stay laid out and reachable. Above it, nothing changes. */
+.adh-panel-cq { container-type: inline-size; }
+/* Base display lives in CSS (not an inline style) so the container query can hide it
+   without !important — overriding an inline style is the only thing that needs it. */
+.adh-panel-optional { display: inline-flex; align-items: center; }
+/* The build bar SHRINKS instead of standing down — an in-flight build is the one
+   thing this header exists to report. Its max-width lives here, not inline, so the
+   container query can override it. */
+.adh-panel-progress { display: inline-flex; align-items: center; max-width: 220px; }
+.adh-panel-clear__icon { display: none; }
+@container (max-width: 460px) {
+  .adh-panel-optional { display: none; }
+  .adh-panel-progress { max-width: 96px; }
+  .adh-panel-filter { width: 60px; }
+  .adh-panel-clear__label { display: none; }
+  .adh-panel-clear__icon { display: inline-flex; }
+}
+
+/* The last of the shortfall comes off the TITLE, which is the only header content
+   that degrades without losing a control: the vendored InfoPanel header pins its
+   title block `shrink-0` + `whitespace-nowrap`, so below ~1280px it would rather
+   shove the gear out of the panel than shorten "Recent Activity". Let it shrink and
+   ellipsize instead. This reaches into the vendored header's own DOM (its first
+   child is the header row; that row's first child is the title block), which is why
+   it is scoped to `.adh-panel-cq` — OUR panels — and matches the title span by its
+   `font-semibold` class rather than a position. If the toolkit ever restyles that
+   header the rule stops matching and the layout is merely back to what it is
+   today — it can't break anything that isn't already broken. */
+.adh-panel-cq > div:first-child > div:first-child { min-width: 0; flex-shrink: 1; }
+.adh-panel-cq > div:first-child > div:first-child > [class*="font-semibold"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* …and the centre slot keeps its content's width instead of collapsing to zero under
+   it. `flex-1` still centres the refresh icon when there is room; the `min-w-0` that
+   ships with it is what let the slot shrink BELOW its content and paint the icon over
+   the filter box, so restore a min-content floor. (On the Problems panel, whose header
+   has no centre, this second child is the actions cluster — already content-sized, so
+   the rule is a no-op there.) */
+.adh-panel-cq > div:first-child > div:nth-child(2) { min-width: fit-content; }
+
+/* Big-indicator atmosphere (Overview tab). Glows use the semantic state tokens
+   (down=red, ok=green, warn=gold) via color-mix so they track the theme. */
+@keyframes adh-stop-glow {
+  0%, 100% { filter: drop-shadow(0 0 14px color-mix(in srgb, var(--color-apt-red) 40%, transparent)); }
+  50%      { filter: drop-shadow(0 0 32px color-mix(in srgb, var(--color-apt-red) 85%, transparent)); }
+}
+@keyframes adh-ok-glow {
+  0%, 100% { filter: drop-shadow(0 0 16px color-mix(in srgb, var(--color-apt-green) 32%, transparent)); }
+  50%      { filter: drop-shadow(0 0 28px color-mix(in srgb, var(--color-apt-green) 55%, transparent)); }
+}
+.adh-indicator-down { animation: adh-stop-glow 1.7s ease-in-out infinite; }
+.adh-indicator-ok   { animation: adh-ok-glow 3.6s ease-in-out infinite; }
+.adh-indicator-warn { filter: drop-shadow(0 0 16px color-mix(in srgb, var(--color-apt-gold) 45%, transparent)); }
+
+@keyframes adh-spin { to { transform: rotate(360deg); } }
+.adh-spin { animation: adh-spin 0.8s linear infinite; }
+
+/* No underline at rest; underline on hover (works only because the inline
+   text-decoration override was removed from the links/badges that use this). */
+.adh-projlink { transition: color 0.12s; text-decoration: none; }
+.adh-projlink:hover { text-decoration: underline; }
+
+.adh-range { accent-color: var(--color-apt-blue); cursor: pointer; height: 18px; }
+
+.adh-check { accent-color: var(--color-apt-blue); cursor: pointer; width: 13px; height: 13px; }
+.adh-check:disabled { cursor: not-allowed; opacity: 0.5; }
+
+/* Owner directive (2026-06-13): IGNORE prefers-reduced-motion until further
+   notice — every animation runs regardless of the OS "Reduce Motion" setting.
+   To re-honor it, un-comment the rule below.
+@media (prefers-reduced-motion: reduce) {
+  .adh-indicator-down, .adh-indicator-ok, .adh-spin { animation: none; }
+} */
+
+/* iPhone/mobile Overview: 4 full-viewport panes that snap into view as you
+   scroll between them. The scroll container is the snap viewport; each pane
+   fills it exactly (height:100%) and is a mandatory snap stop. */
+.adh-snap-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.adh-snap-scroll::-webkit-scrollbar { display: none; }
+
+.adh-snap-pane {
+  height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 1px solid var(--color-apt-border);
+}
+
+/* Hero pane: the big indicator centered, with a nudge to scroll on. */
+.adh-snap-hero {
+  justify-content: center;
+  gap: 20px;
+  padding: 24px 18px;
+  position: relative;
+}
+.adh-snap-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 20px;
+  text-align: center;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--color-apt-text-dim);
+  animation: adh-bob 1.7s ease-in-out infinite;
+}
+@keyframes adh-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(5px); }
+}
+/* Ignore prefers-reduced-motion (owner directive 2026-06-13) — un-comment to re-honor:
+@media (prefers-reduced-motion: reduce) {
+  .adh-snap-hint { animation: none; }
+} */
