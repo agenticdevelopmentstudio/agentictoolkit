@@ -38,6 +38,16 @@ public final class NotesCoordinator: AppFeature {
 
         super.init()
 
+        // One predicate for all four File-menu items: they mean the same
+        // thing by "this action applies right now" — the Notes window is key —
+        // and would have to change together if that ever stopped being the
+        // whole story (a notes pane inside a project window, say). The
+        // `NewItemProvider` below means it too but cannot share this constant;
+        // the comment there says why.
+        let notesWindowIsKey: () -> Bool = { [weak self] in
+            self?.notesWindowController.window?.isKeyWindow == true
+        }
+
         self.menuContributions = [
             MenuContribution(slot: .window, title: "Notes", order: 40, key: "4") { [weak self] in
                 self?.showNotesWindow()
@@ -50,14 +60,14 @@ public final class NotesCoordinator: AppFeature {
             },
             MenuContribution(
                 slot: .file, title: "New Folder", order: 10, key: "n", modifiers: [.command, .shift],
-                isEnabled: { [weak self] in self?.notesWindowController.window?.isKeyWindow == true },
+                isEnabled: notesWindowIsKey,
                 action: { [weak self] in
                     self?.notesWindowController.viewController?.createFolderUnderSelection()
                 }
             ),
             MenuContribution(
                 slot: .file, title: "Import Markdown File…", order: 20,
-                isEnabled: { [weak self] in self?.notesWindowController.window?.isKeyWindow == true },
+                isEnabled: notesWindowIsKey,
                 action: { [weak self] in
                     guard let self, let presenter = self.notesWindowController.contentViewController else { return }
                     MarkdownFileImporter.present(from: presenter) { [weak self] text in
@@ -68,14 +78,14 @@ public final class NotesCoordinator: AppFeature {
             ),
             MenuContribution(
                 slot: .file, title: "Delete Note", order: 30,
-                isEnabled: { [weak self] in self?.notesWindowController.window?.isKeyWindow == true },
+                isEnabled: notesWindowIsKey,
                 action: { [weak self] in
                     self?.notesWindowController.viewController?.deleteSelectedNote()
                 }
             ),
             MenuContribution(
                 slot: .file, title: "Delete Folder", order: 40,
-                isEnabled: { [weak self] in self?.notesWindowController.window?.isKeyWindow == true },
+                isEnabled: notesWindowIsKey,
                 action: { [weak self] in
                     self?.notesWindowController.viewController?.deleteSelectedFolder()
                 }
@@ -84,6 +94,12 @@ public final class NotesCoordinator: AppFeature {
 
         self.newItemProviders = [
             NewItemProvider(
+                // Spelled out rather than reusing `notesWindowIsKey` above:
+                // this parameter is `@MainActor @Sendable () -> Bool` while
+                // `MenuContribution.isEnabled` is a plain `() -> Bool`, and
+                // Swift 6 converts between them in neither direction. A closure
+                // literal takes its type from context, so the two contexts each
+                // get one; a shared constant can only satisfy one of them.
                 claimsKeyWindow: { [weak self] in
                     self?.notesWindowController.window?.isKeyWindow == true
                 },
