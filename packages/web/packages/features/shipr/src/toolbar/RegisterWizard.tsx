@@ -349,7 +349,7 @@ export function RegisterWizard({
           e.preventDefault();
           if (picked && !busy) run();
         }}
-        className="flex min-h-0 min-w-0 flex-col gap-3"
+        className="flex min-h-0 min-w-0 flex-1 flex-col gap-3"
       >
         <Select
           aria-label="Organization"
@@ -376,9 +376,9 @@ export function RegisterWizard({
         />
 
         {repos === null ? (
-          <p className="text-sm text-apt-text-muted">Reading your repositories…</p>
+          <p className="min-h-0 flex-1 text-sm text-apt-text-muted">Reading your repositories…</p>
         ) : repos.length === 0 ? (
-          <div className="flex flex-col items-start gap-2">
+          <div className="flex min-h-0 flex-1 flex-col items-start gap-2">
             <p className="text-sm text-apt-text-muted">{emptySentence}</p>
             {onManageConnections ? (
               <Button type="button" variant="ghost" onClick={onManageConnections}>
@@ -387,7 +387,7 @@ export function RegisterWizard({
             ) : null}
           </div>
         ) : (
-          <List aria-label="Repositories" className="max-h-72 overflow-auto">
+          <List aria-label="Repositories" className="min-h-0 flex-1 overflow-auto">
             {shown.length === 0 ? (
               // In the list's own frame rather than instead of it: an empty bordered box reads
               // as a control that failed to draw.
@@ -442,7 +442,7 @@ export function RegisterWizard({
           inside a form with no explicit `type` submits it — so OK would run once on its own
           click and once again on the submit it caused. The form still owns Enter: pressing it
           in the filter submits, which is the same run. */}
-      <div ref={footerRef}>
+      <div ref={footerRef} className="shrink-0">
         <DialogActions
           cancelLabel="Cancel"
           onCancel={onClose}

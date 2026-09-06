@@ -121,6 +121,30 @@ describe('RegisterWizard — the screen asks one question', () => {
     }
   });
 
+  it('pins OK and Cancel to the bottom, and lets the list have the rest', async () => {
+    // A modal's buttons live on its bottom edge. They rode up under a list that was capped at
+    // `max-h-72` — 288px of list inside a 1470px pane, with a thousand pixels of nothing under
+    // the buttons.
+    //
+    // jsdom lays nothing out, so what is asserted here is the STRUCTURE that makes the layout
+    // possible: the footer is the last thing in the pane (so it sits on the bottom edge), it is
+    // outside the form (so OK cannot both click and submit), and the list is told to take the
+    // slack rather than to stop at a fixed height. The pixels themselves are checked in a
+    // browser — this is the part that would silently regress in an edit.
+    draw();
+    await screen.findByRole('button', { name: 'acme/site' });
+
+    const footer = document.querySelector('[data-slot="dialog-actions"]')!;
+    const form = document.querySelector('form')!;
+    expect(form.parentElement!.lastElementChild!.contains(footer)).toBe(true);
+    expect(form.contains(footer)).toBe(false);
+    expect(form.className).toContain('flex-1');
+
+    const list = repoList();
+    expect(list.className).toContain('flex-1');
+    expect(list.className).not.toMatch(/max-h-/);
+  });
+
   it('never asks which installation to look in', async () => {
     // The dropdown, and the four alternative prose panels that hung under it explaining why it
     // was empty, are what an operator used to meet before their own repositories.
