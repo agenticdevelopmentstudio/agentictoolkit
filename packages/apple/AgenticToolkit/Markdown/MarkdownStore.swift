@@ -203,11 +203,20 @@ public final class MarkdownStore: @unchecked Sendable {
     /// The frontmatter keys this client wrote into `documentID`.
     public func ownedFrontmatterKeys(forDocument documentID: String) throws -> Set<String> {
         try database.read { conn in
-            Set(try String.fetchAll(
-                conn,
-                sql: "SELECT key FROM _markdown_frontmatter_owner WHERE document_id = ?",
-                arguments: [documentID]))
+            try Self.ownedFrontmatterKeys(for: documentID, in: conn)
         }
+    }
+
+    /// The same, on a caller's connection — the read half of the pair whose
+    /// write half is `writeOwnedFrontmatterKeys(_:for:in:)`. One place knows
+    /// the owner table's shape.
+    private static func ownedFrontmatterKeys(
+        for documentID: String, in conn: Database
+    ) throws -> Set<String> {
+        Set(try String.fetchAll(
+            conn,
+            sql: "SELECT key FROM _markdown_frontmatter_owner WHERE document_id = ?",
+            arguments: [documentID]))
     }
 
     /// The same, for every document at once — one read instead of one per row
@@ -341,19 +350,24 @@ public final class MarkdownStore: @unchecked Sendable {
     /// things in three separate transactions, and a second writer that lands
     /// between the read and the write loses its change with no error: the
     /// merged row is written whole, so it carries the *first* writer's view
-    /// of every field it did not itself set. That is a lost update, and it is
-    /// reachable from one process — two `NotesManager`s (Quick Note and the
-    /// notes window) over one store, a debounced content save landing beside
-    /// a pin toggle — not only from a future background sync.
+    /// of every field it did not itself set. So a caller whose write depends
+    /// on what it just read uses this instead.
     ///
-    /// So a caller whose write depends on what it just read uses this instead.
-    /// Last-writer-wins across *whole* transactions is still the model (adh's
-    /// head is last-writer-wins too, and there is no concurrency token on the
-    /// wire); what this removes is the torn read-merge-write inside one.
+    /// What this buys is **atomicity, not ordering**. Two concurrent
+    /// `mutateDocument` calls still run in an arbitrary order, and the later
+    /// one wins the whole row — last-writer-wins across whole transactions is
+    /// deliberately the model, matching adh's head, which carries no
+    /// concurrency token on the wire. A caller that needs its writes to land
+    /// in the order it issued them has to arrange that itself; `NotesManager`
+    /// does, in `performStorage(_:)`.
     ///
-    /// `merge` runs on the writer connection and must not call back into this
-    /// store — every public method here takes the same lock, so a re-entrant
-    /// call deadlocks.
+    /// `merge` runs synchronously on the writer connection, inside the open
+    /// transaction, and must confine itself to mutating the two `inout`
+    /// parameters. Calling back into this store from it does **not** deadlock
+    /// — `BoundedDatabase` is deliberately reentrant, so a nested `read`/
+    /// `write` runs inline on this same connection and appears to work. It
+    /// then loses: the whole-row `store(...)` below overwrites whatever the
+    /// nested call wrote, and a second `.update` is enqueued for one edit.
     public func mutateDocument(
         id: String,
         now: Date = Date(),
@@ -367,10 +381,7 @@ public final class MarkdownStore: @unchecked Sendable {
                 throw MarkdownStoreError.notFound(id)
             }
             var document = try Self.document(from: stored)
-            var owned = try Set(String.fetchAll(
-                conn,
-                sql: "SELECT key FROM _markdown_frontmatter_owner WHERE document_id = ?",
-                arguments: [id]))
+            var owned = try Self.ownedFrontmatterKeys(for: id, in: conn)
 
             try merge(&document, &owned)
 

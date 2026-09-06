@@ -143,19 +143,22 @@ public final class MarkdownNoteStorage: NoteStorage, Sendable {
     /// The read, the merge and the write are **one** transaction
     /// (`MarkdownStore.mutateDocument`), not three calls.
     ///
-    /// It has to be. The merge below writes the whole row back, so a second
-    /// writer landing between a separate read and write would have its change
-    /// overwritten with no error — and there are two writers within one
-    /// process, not just the hypothetical background sync: Quick Note and the
-    /// notes window each hold a `NotesManager` over this storage, and a single
-    /// manager now runs its storage calls off the main actor, so a debounced
-    /// content save and a pin toggle on the same note are genuinely
-    /// concurrent. Nothing above this class serializes them; this is the layer
-    /// that can, because it is the layer that reads and writes together.
+    /// The merge below writes the whole row back, so a writer landing between
+    /// a separate read and write would have its change overwritten with no
+    /// error. Today nothing can: `NotesCoordinator` builds one `NotesManager`
+    /// and hands the same instance to both the notes window and Quick Note,
+    /// and that manager issues its storage calls one at a time. This is
+    /// defence for the writer that is not here yet — a background sync pull,
+    /// a second coordinator — and it is cheap enough to be worth having
+    /// before that writer arrives, because the layer that reads and writes
+    /// together is the only layer that can make the pair indivisible.
     ///
-    /// Across whole transactions the model is still last-writer-wins, matching
-    /// adh (whose head has no concurrency token either). A compare-and-swap
-    /// would be a different feature, and would need a token adh does not send.
+    /// It buys atomicity, not ordering. Two concurrent writers still resolve
+    /// last-writer-wins over the whole note, matching adh (whose head has no
+    /// concurrency token either): the merge assigns `document.content =
+    /// note.content` outright, so a stale snapshot still clobbers a newer one
+    /// — atomically. A compare-and-swap would be a different feature, and
+    /// would need a token adh does not send.
     public func updateNote(_ note: Note) throws {
         let id = note.id.uuidString.lowercased()
         try store.mutateDocument(id: id, now: note.modifiedDate) { document, owned in

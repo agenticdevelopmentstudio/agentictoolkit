@@ -134,11 +134,14 @@ public final class NotesManager {
     /// issued, and only one of them is ever in flight.
     ///
     /// This orders *this manager's* calls, which is the whole scope of the
-    /// snapshot problem — a snapshot only races the writes made from the same
-    /// `notes` array. A second manager over the same storage (Quick Note
-    /// beside the notes window) is ordered by the storage instead, where
-    /// `MarkdownStore.mutateDocument` makes each read-merge-write one
-    /// transaction.
+    /// snapshot problem today: a snapshot only races writes made from the same
+    /// `notes` array, and there is one manager in the process —
+    /// `NotesCoordinator` builds it once and gives the same instance to the
+    /// notes window and to Quick Note. Should a second writer ever appear, the
+    /// chain would not reach it, and neither would fix it: storage makes each
+    /// read-merge-write one transaction
+    /// (`MarkdownStore.mutateDocument`), which is atomicity, not ordering —
+    /// two writers there resolve last-writer-wins over the whole note.
     private func performStorage<Value: Sendable>(
         _ operation: @escaping @Sendable (NoteStorage) throws -> Value
     ) async throws -> Value {

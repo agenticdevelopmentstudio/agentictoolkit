@@ -52,6 +52,52 @@ struct MarkdownNoteStorageTests {
         #expect(afterEdit.frontmatter.isEmpty)
     }
 
+    /// `updateNote` is documented as doing its read, merge and write in one
+    /// transaction. Nothing else here would notice if it went back to
+    /// `document(id:)` + edit + `updateDocument(_:)`, because every other test
+    /// drives it from one thread.
+    ///
+    /// `ownerID` is the probe precisely because `updateNote`'s merge never
+    /// reads or writes it: the whole row is written back either way, so
+    /// whether another writer's `ownerID` survives is purely a question of
+    /// whether the read and the write are indivisible. The other writer
+    /// *appends*, inside one transaction, so every one of its marks must
+    /// survive; an `updateNote` that read before a mark and wrote after it
+    /// erases that mark permanently, with no error. Asserting on the final
+    /// value alone would not do — a split `updateNote` still ends on the
+    /// right value whenever the last write to commit happens to be the other
+    /// writer's.
+    ///
+    /// Content is deliberately not the probe. A concurrent content change
+    /// *is* clobbered by a stale `Note` snapshot — atomically — and that is
+    /// the documented last-writer-wins model, not a defect.
+    @Test("updateNote's read-merge-write is one transaction, not three")
+    func updateNoteIsAtomicAgainstAnotherWriter() async throws {
+        let storage = try storage()
+        let seed = note(content: "body")
+        try storage.insertNote(seed)
+        let id = seed.id.uuidString.lowercased()
+
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<30 {
+                // A merge that changes nothing, and so writes back exactly
+                // what it read — the purest form of the revert.
+                group.addTask { try? storage.updateNote(seed) }
+                group.addTask {
+                    try? storage.store.mutateDocument(id: id) { document, _ in
+                        document.ownerID += "|\(index)"
+                    }
+                }
+            }
+        }
+
+        let document = try #require(try storage.store.document(id: id))
+        for index in 0..<30 {
+            #expect(document.ownerID.contains("|\(index)"),
+                    "updateNote erased concurrent mark \(index) — its read and write are not one transaction")
+        }
+    }
+
     @Test("a pin round-trips through frontmatter")
     func pinRoundTrips() throws {
         let storage = try storage()
