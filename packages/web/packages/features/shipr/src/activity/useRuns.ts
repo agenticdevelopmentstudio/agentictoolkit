@@ -129,3 +129,110 @@ export function isFinished(runs: Runs, runId: string): boolean {
   const state = runs.stateOf(runId);
   return state !== null && TERMINAL_STATES.includes(state);
 }
+
+/**
+ * HOW MANY PAGES OF LOG A POST-MORTEM READS BEFORE IT GIVES UP.
+ *
+ * A `register` writes tens of lines, so one page is the whole story; the cap is here
+ * because the loop advances on a cursor the server hands back, and a server that stopped
+ * advancing it would otherwise be read forever by a browser nobody is watching.
+ */
+const MAX_POST_MORTEM_PAGES = 20;
+
+/**
+ * WAIT FOR A RUN TO FINISH, AND THROW WHAT IT SAID IF IT DID NOT.
+ *
+ * A press that starts a run gets a 202 back in a few milliseconds, and 202 means QUEUED,
+ * not done. A button that resolved on it therefore reported success for every run — the
+ * ones that went on to fail included — and the failure landed in the run queue, behind
+ * whatever modal the operator pressed the button in. From the front of that dialog the
+ * button had done nothing at all (Mike: "the provision button did nothing").
+ *
+ * So the press owns the whole run. This resolves when the run reaches `succeeded`, and
+ * REJECTS with the run's own last words otherwise — which is the shape every button in
+ * this feature already handles, because they all already catch and draw the rejection of
+ * the call that started the run.
+ *
+ * IT WATCHES THE LIST, IT DOES NOT POLL. `useRuns` is already subscribed to the workspace
+ * channel and already re-reads on a tick naming a run it has not seen; a second poller per
+ * pressed button would be one more subscription per press for a fact already on screen.
+ * The effect below has NO dependency array on purpose: every render of the console is a
+ * chance that the state changed, and when nothing is waiting it costs a map lookup.
+ */
+export function useSettle(
+  client: ShiprClient,
+  runs: Runs,
+): (runId: string) => Promise<void> {
+  const clientRef = React.useRef(client);
+  clientRef.current = client;
+  const runsRef = React.useRef(runs);
+  runsRef.current = runs;
+
+  const waiting = React.useRef(new Map<string, (state: Run['state']) => void>());
+
+  React.useEffect(() => {
+    if (waiting.current.size === 0) return;
+    // Copied before walking: settling one drops it from the map being iterated.
+    for (const [runId, settle] of [...waiting.current]) {
+      const state = runs.stateOf(runId);
+      if (state === null || !TERMINAL_STATES.includes(state)) continue;
+      waiting.current.delete(runId);
+      settle(state);
+    }
+  });
+
+  return React.useCallback(async (runId: string) => {
+    // Asked BEFORE waiting, because a promise parked in the map is only ever settled by a
+    // render, and a run that is already terminal may not cause another one.
+    const known = runsRef.current.stateOf(runId);
+    const state =
+      known !== null && TERMINAL_STATES.includes(known)
+        ? known
+        : await new Promise<Run['state']>((resolve) => {
+            waiting.current.set(runId, resolve);
+          });
+    if (state === 'succeeded') return;
+    throw new Error(await verdictText(clientRef.current, runId, state));
+  }, []);
+}
+
+/** What to put in front of the operator when a run they started did not succeed. */
+async function verdictText(
+  client: ShiprClient,
+  runId: string,
+  state: Run['state'],
+): Promise<string> {
+  if (state === 'cancelled') return 'The run was cancelled before it finished.';
+  const said = await lastError(client, runId);
+  // The generic sentence points somewhere rather than apologising: a run whose log this
+  // read could not fetch is still a run with a log.
+  return said ?? 'The run failed. Its log says why — open it in the activity list.';
+}
+
+/**
+ * The LAST thing a run wrote to `err`.
+ *
+ * The last and not the first: a failing step's own message is what the runner writes as it
+ * gives up, and the lines before it are the ones it wrote on the way there. Reading the
+ * log rather than the run's `summary` is what makes the sentence specific — the 403 that
+ * started all this named the endpoint and the organisation, and no status field does.
+ */
+async function lastError(
+  client: ShiprClient,
+  runId: string,
+): Promise<string | null> {
+  let after = 0;
+  let found: string | null = null;
+  for (let page = 0; page < MAX_POST_MORTEM_PAGES; page += 1) {
+    const got = await client.events(runId, after).catch(() => null);
+    if (!got) break;
+    for (const event of got.events) {
+      const text = event.stream === 'err' ? event.text.trim() : '';
+      if (text) found = text;
+    }
+    // `nextSeq` not advancing is the one way this loop could spin without the cap.
+    if (got.done || got.events.length === 0 || got.nextSeq <= after) break;
+    after = got.nextSeq;
+  }
+  return found;
+}

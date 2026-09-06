@@ -6,7 +6,7 @@ import { HierarchicalTopicDetail } from '@agenticdevelopertoolkit/ui/blocks';
 import { AlertModal } from '@agenticdevelopertoolkit/ui/components/alert-modal';
 
 import { useRunningRepos } from './activity/useRunningRepos';
-import { isFinished, useRuns } from './activity/useRuns';
+import { isFinished, useRuns, useSettle } from './activity/useRuns';
 import { ConfigureDialog } from './configure/ConfigureDialog';
 import { useForgeCatalogue } from './forge/useForgeCatalogue';
 import { STATUS_MAX_AGE_MS, statusIsStale } from './freshness';
@@ -155,6 +155,8 @@ function Console({
    */
   const [paneNonce, setPaneNonce] = React.useState(0);
   const runs = useRuns(client);
+  /** Wait on a run this console started — the same live list, no second subscription. */
+  const settle = useSettle(client, runs);
 
   const [path, setPath] = React.useState<string[]>([]);
   const [selection, setSelection] = React.useState<Selection>(EMPTY_SELECTION);
@@ -463,8 +465,18 @@ function Console({
       });
       queueRegistrations([runId]);
       refreshAll();
+      // THE PRESS OWNS THE WHOLE RUN, not the 202 that queued it. Resolving here used to
+      // mean the button reported success for a run that went on to 403 against the
+      // deployment org, and the failure surfaced in the run queue BEHIND the modal the
+      // button lives in — so from in front of that dialog, pressing it did nothing.
+      // `settle` rejects with the run's own last error line, which is what the button
+      // already knows how to draw.
+      await settle(runId);
+      // The second read is the one that matters to the dialog: `registeredAt` is written
+      // by the run, so this is what turns Provision into Doctor without a manual refresh.
+      refreshAll();
     },
-    [client, queueRegistrations, refreshAll],
+    [client, queueRegistrations, refreshAll, settle],
   );
 
   /**

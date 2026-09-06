@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import * as React from 'react';
 
@@ -453,5 +453,44 @@ describe('a bar button pressed before the verbs have been read', () => {
       await screen.findByText('You cannot register repositories here.'),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText('Filter repositories')).toBeNull();
+  });
+});
+
+/**
+ * THE PROVISION PRESS, from the front of the dialog it is pressed in.
+ *
+ * `useSettle.test.tsx` pins the waiting and `ProvisionButton.test.tsx` pins the button;
+ * this pins the thing that was actually reported — that the dialog does not swallow the
+ * verdict. The failure used to land in the run queue BEHIND this modal, which stays open,
+ * so from in front of it the press did nothing at all.
+ */
+describe('the Configure dialog — Provision reports back', () => {
+  it('holds the press open for the run, then draws what the run said', async () => {
+    let fail: (e: Error) => void = () => {};
+    const onProvision = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    draw([mirror({})], { onProvision });
+    await openRepo();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Provision' }));
+    expect(onProvision).toHaveBeenCalledWith(DEV_REPO.id);
+    // Still out. Nothing has been said yet, because nothing is known yet.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Provisioning…' })).toBeDisabled(),
+    );
+
+    const said =
+      'POST /orgs/DeploymentRepos/repos — the forge answered 403: Resource not accessible by integration';
+    await act(async () => {
+      fail(new Error(said));
+    });
+
+    // In the dialog, not behind it — which is the whole report. The Configure dialog stays
+    // open across the run, so a verdict drawn anywhere else is a verdict nobody can see.
+    expect(within(dialog('Configure')).getByText(said)).toBeInTheDocument();
   });
 });

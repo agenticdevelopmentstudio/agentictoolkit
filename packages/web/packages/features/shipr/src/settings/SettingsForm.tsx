@@ -350,6 +350,12 @@ export interface SettingsFormProps {
  * acts on what the server holds, and a press that silently wrote three fields and then
  * created a repository from them is the failure mode this whole configure-then-provision
  * split exists to prevent.
+ *
+ * THE PRESS IS THE WHOLE RUN. `onProvision` resolves only once the run has settled and
+ * rejects with what it said if it failed, so this button stays busy for the duration and
+ * the verdict lands HERE — under the button that was pressed. It used to resolve on the
+ * 202: the run then failed in the queue, behind this modal, and the button looked like it
+ * had done nothing at all.
  */
 function ProvisionButton({
   devRepo,
@@ -380,7 +386,16 @@ function ProvisionButton({
               .finally(() => setBusy(false));
           }}
         >
-          {busy ? 'Starting…' : provisioned ? 'Doctor' : 'Provision'}
+          {/* The label covers the RUN, not the request that queued it: `onProvision`
+              resolves when the run settles, so "Starting…" would have gone back to
+              "Provision" while the forge was still being written to. */}
+          {busy
+            ? provisioned
+              ? 'Checking…'
+              : 'Provisioning…'
+            : provisioned
+              ? 'Doctor'
+              : 'Provision'}
         </Button>
         <span className="text-xs text-apt-text-muted">
           {unsaved
