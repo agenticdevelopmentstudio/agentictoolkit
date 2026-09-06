@@ -949,6 +949,38 @@ struct MarkdownProjectionTests {
         }
     }
 
+    /// The companion to the test above, and the one that would have caught
+    /// the required list being short by eleven columns.
+    ///
+    /// `requiredColumns(for:)` names the columns `upsert` must bind even when
+    /// the patch omits them, because SQLite validates `NOT NULL` while
+    /// building the candidate row of an `INSERT … ON CONFLICT` — before it
+    /// discovers the conflict and switches to `UPDATE`. The authority is
+    /// `PRAGMA table_info`'s `notnull`/`dflt_value` pair: not-null with no
+    /// default is a column nothing can fall back to. `id` and `sync_version`
+    /// are excluded because the store passes both separately and
+    /// `columns(for:)` does not list them.
+    @Test("the required column lists match the real schema")
+    func requiredColumnListsMatchTheRealSchema() throws {
+        let store = try store()
+        try store.database.read { conn in
+            for resource in MarkdownProjection().resources.sorted() {
+                let table = String(resource.dropFirst("content.".count))
+                let rows = try Row.fetchAll(conn, sql: "PRAGMA table_info(\(table))")
+                let actual = Set(
+                    rows.filter {
+                        ($0["notnull"] as Int) == 1
+                            && ($0["dflt_value"] as String?) == nil
+                            && !["id", "sync_version"].contains($0["name"] as String)
+                    }
+                    .map { $0["name"] as String })
+                let declared = MarkdownProjection.requiredColumns(for: resource)
+                #expect(actual == declared,
+                        "\(resource): schema requires \(actual), projection declares \(declared)")
+            }
+        }
+    }
+
     // MARK: - A pulled id is resolved through the local pairing (final-review M2)
 
     /// A document created here gets a client-minted id; adh answers its

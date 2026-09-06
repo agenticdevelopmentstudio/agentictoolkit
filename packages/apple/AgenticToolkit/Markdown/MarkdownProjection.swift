@@ -40,6 +40,15 @@ public enum MarkdownProjectionError: Error, Equatable {
     /// silently blanks is `frontmatter`, whose absence changes what
     /// `MarkdownNoteStorage` shows the user.
     case unencodableValue(column: String)
+
+    /// A patch omitted a column the table declares `NOT NULL` with no
+    /// `DEFAULT`, and there is no existing row for the `INSERT … ON CONFLICT`
+    /// to fall back to — so the omission would have to be filled with an
+    /// invention that then *becomes* the row. Refused, naming the resource,
+    /// the id and the columns, because the alternative SQLite offers is
+    /// `NOT NULL constraint failed: markdown.title` from a statement the
+    /// caller never wrote.
+    case missingRequiredColumns(resource: String, id: String, columns: [String])
 }
 
 public struct MarkdownProjection: SyncMirrorProjection {
@@ -63,20 +72,57 @@ public struct MarkdownProjection: SyncMirrorProjection {
         "created_at", "updated_at", "deleted_at", "sync_stamped_at"
     ]
 
-    /// `created_at`/`updated_at` are `NOT NULL` with no schema `DEFAULT` on
-    /// every projected table, yet a local `stage(_:)` mutation never carries
-    /// them — `MarkdownTaxonomy`'s `LocalMutation` payloads only ever hold
-    /// the pushable fields, because the row's audit columns were already
-    /// written moments earlier by the direct `INSERT` that preceded the
-    /// `stage(_:)` call in the same transaction. SQLite validates `NOT NULL`
-    /// on the row an `INSERT … ON CONFLICT` statement would build *before*
-    /// it discovers the conflict and switches to `UPDATE`, so simply
-    /// omitting these two columns (as every other absent column is) makes
-    /// even the update-only path throw. They are therefore always bound —
-    /// with a throwaway value when `data` omits them — but never listed in
-    /// the `ON CONFLICT` `SET` clause unless `data` actually supplied them,
-    /// so that throwaway value can never land on an existing row.
-    private static let requiredWithNoDefault: Set<String> = ["created_at", "updated_at"]
+    /// Every column a projected table declares `NOT NULL` with no schema
+    /// `DEFAULT`, per resource.
+    ///
+    /// SQLite validates `NOT NULL` on the row an `INSERT … ON CONFLICT`
+    /// statement would build *before* it discovers the conflict and switches
+    /// to `UPDATE`, so omitting one of these (as every other absent column is
+    /// omitted) makes even the update-only path throw. They are therefore
+    /// always bound — with a throwaway when `data` omits them — but never
+    /// listed in the `ON CONFLICT` `SET` clause unless `data` actually
+    /// supplied them, so a throwaway can never land on an existing row.
+    ///
+    /// This used to hold `created_at`/`updated_at` alone, on the reasoning
+    /// that a local `stage(_:)` mutation carries only pushable fields while
+    /// the row's audit columns were written moments earlier by the direct
+    /// `INSERT` in the same transaction. The reasoning was right and the list
+    /// was short by eleven: `markdown.title`/`.content`, the three marker
+    /// tables' `markdown_id`, `categories.name`, `keywords.label`,
+    /// `category_edges.parent_id`/`.child_id`,
+    /// `category_items.category_id`/`.target_kind`/`.target_id` and
+    /// `keyword_items.keyword_id`/`.target_kind`/`.target_id` are all
+    /// `NOT NULL` with no default too, and every one of them turns a patch
+    /// that means "bump this row's version" into a constraint failure inside
+    /// `apply`'s batch transaction — which rolls back the cursor with the
+    /// rows, so the next pull re-requests the same page and wedges there.
+    ///
+    /// Per-resource rather than one flat set, because binding
+    /// `category_items.target_kind` on a `content.markdown` insert would name
+    /// a column that table does not have. Cross-checked against
+    /// `PRAGMA table_info`'s `notnull`/`dflt_value` pair by
+    /// `MarkdownProjectionTests.requiredColumnListsMatchTheRealSchema`, for
+    /// exactly the reason this list was wrong to begin with.
+    private static let requiredWithNoDefault: [String: Set<String>] = [
+        "content.markdown": ["title", "content"],
+        "content.notes": ["markdown_id"],
+        "content.docs": ["markdown_id"],
+        "content.papers": ["markdown_id"],
+        "content.categories": ["name"],
+        "content.category_edges": ["parent_id", "child_id"],
+        "content.category_items": ["category_id", "target_kind", "target_id"],
+        "content.keywords": ["label"],
+        "content.keyword_items": ["keyword_id", "target_kind", "target_id"]
+    ]
+
+    /// The two `commonTail` declares on every projected table.
+    private static let requiredCommonColumns: Set<String> = ["created_at", "updated_at"]
+
+    /// Which of a resource's columns must be bound even when `data` omits
+    /// them. See `requiredWithNoDefault`.
+    static func requiredColumns(for resource: String) -> Set<String> {
+        requiredCommonColumns.union(requiredWithNoDefault[resource] ?? [])
+    }
 
     /// The nullable columns every projected table carries — the ones whose DDL
     /// has no `NOT NULL`. See `nullableColumns(for:)` for why the set matters.
@@ -294,8 +340,24 @@ public struct MarkdownProjection: SyncMirrorProjection {
         if isFullRow, resource == "content.markdown", case .string(let incoming) = data["content"] {
             try Self.releaseFrontmatterClaimsInvalidated(by: incoming, documentID: id, in: conn)
         }
+        let required = Self.requiredColumns(for: resource)
+        // The throwaway below is only ever harmless because the statement
+        // conflicts and switches to `DO UPDATE`, leaving the existing row's
+        // value in place. With no row to conflict with there is nothing to
+        // fall back to and the invention *is* the row — a note titled with a
+        // timestamp, an edge pointing at "". So that case is refused here,
+        // naming what was missing, rather than written or left to SQLite to
+        // report as a constraint failure on a statement the caller never saw.
+        let missing = required.filter { data[$0] == nil }
+        if !missing.isEmpty {
+            let exists = try rowExists(resource: resource, id: id, in: conn)
+            guard exists else {
+                throw MarkdownProjectionError.missingRequiredColumns(
+                    resource: resource, id: id, columns: missing.sorted())
+            }
+        }
         var bound = columns(for: resource).filter {
-            data[$0] != nil || Self.requiredWithNoDefault.contains($0)
+            data[$0] != nil || required.contains($0)
         }
         var assignmentColumns = present
         // adh omits a wire key whose new value is null, so on a full row an
@@ -395,11 +457,16 @@ public struct MarkdownProjection: SyncMirrorProjection {
             if data[column] != nil { return try Self.value(data[column], column: column) }
             // Absent. On a full row that means NULL for a nullable column (see
             // the `isFullRow` block above); the only other way a column
-            // reaches `bound` without a value is `requiredWithNoDefault`,
-            // whose throwaway stamp never lands on an existing row because it
-            // is not in `assignmentColumns` unless `data` supplied it.
+            // reaches `bound` without a value is `requiredColumns(for:)`,
+            // whose throwaway never lands on an existing row because it is not
+            // in `assignmentColumns` unless `data` supplied it — and never
+            // lands on a new one because the guard above refused that case.
+            // Typed to the column so the candidate row satisfies `CHECK`
+            // constraints as well as `NOT NULL`: a timestamp column gets a
+            // stamp, everything else the empty string its `TEXT` column can
+            // hold.
             if isFullRow, Self.nullableColumns(for: resource).contains(column) { return nil }
-            return MarkdownTimestamp.string(Date())
+            return Self.timestampColumns.contains(column) ? MarkdownTimestamp.string(Date()) : ""
         }
         try conn.execute(
             sql: """
@@ -408,6 +475,13 @@ public struct MarkdownProjection: SyncMirrorProjection {
                 ON CONFLICT(id) DO UPDATE SET \(assignments)
                 """,
             arguments: StatementArguments(arguments))
+    }
+
+    private func rowExists(resource: String, id: String, in conn: Database) throws -> Bool {
+        try Bool.fetchOne(
+            conn,
+            sql: "SELECT EXISTS(SELECT 1 FROM \(table(for: resource)) WHERE id = ?)",
+            arguments: [id]) ?? false
     }
 
     /// Refuses a partial patch whose two delete columns contradict each other.
@@ -598,6 +672,38 @@ public struct MarkdownProjection: SyncMirrorProjection {
         }
     }
 
+    /// The local-only tables `MarkdownStore` keeps beside this projection, in
+    /// the same database file, and which no `resources` entry names.
+    ///
+    /// Each one is a statement about the *account that wrote it*, which is
+    /// exactly what an identity change invalidates:
+    ///
+    ///   * `_markdown_outbox` — note bodies typed offline and not yet pushed.
+    ///     Drained under the next identity, they POST the previous user's
+    ///     text into the new user's account.
+    ///   * `_markdown_remote_id` — "this local id is that document upstream",
+    ///     true only in the account that created it. Kept, an update is
+    ///     addressed to another tenant's document id.
+    ///   * `_markdown_frontmatter_owner` — which frontmatter keys the app
+    ///     wrote, keyed by document id. The documents are gone with the
+    ///     mirror rows, so the claims are about rows that no longer exist,
+    ///     and an id the next identity happens to reuse would inherit them.
+    ///
+    /// Guarded by `tableExists` for the same reason `applyOwnedFrontmatter`
+    /// is: these tables come from `MarkdownStore`'s migrations, and a host
+    /// that builds a bare `GRDBSyncStore` on this projection has the mirror
+    /// tables and none of them.
+    private static let identityScopedTables = [
+        "_markdown_outbox", "_markdown_remote_id", "_markdown_frontmatter_owner"
+    ]
+
+    public func purgeIdentityState(in conn: Database) throws {
+        for table in Self.identityScopedTables {
+            guard try conn.tableExists(table) else { continue }
+            try conn.execute(sql: "DELETE FROM \(table)")
+        }
+    }
+
     /// Which of this projection's resources hold rows referencing each
     /// foreign-key parent among them. `category_items`/`keyword_items` name
     /// their *target* polymorphically (`target_kind`, `target_id`) with no
@@ -667,6 +773,9 @@ public struct MarkdownProjection: SyncMirrorProjection {
         if timestampColumns.contains(column), case .string(let text) = json {
             return normalizedTimestamp(text)
         }
+        if jsonTextColumns.contains(column), case .string(let text) = json {
+            return try validJSONText(text, column: column)
+        }
         switch json {
         case .string(let text): return text
         // `Int(number)` traps on anything `Int` cannot hold, and there are two
@@ -715,6 +824,50 @@ public struct MarkdownProjection: SyncMirrorProjection {
 
     private static func normalizedTimestamp(_ text: String) -> String {
         MarkdownTimestamp.date(text).map(MarkdownTimestamp.string) ?? text
+    }
+
+    /// Columns whose stored text is read back by SQLite's own JSON functions,
+    /// and which therefore cannot hold arbitrary text.
+    ///
+    /// `frontmatter` is the only one, and it is not merely read: it is
+    /// *indexed*, by `uq_markdown_adh_source ON markdown(customer_id,
+    /// json_extract(frontmatter, '$.adh_source'))`. SQLite evaluates that
+    /// expression on every insert and update of the row, and `json_extract`
+    /// over text that is not JSON raises `malformed JSON` — from the index,
+    /// not from the statement — which propagates out of `GRDBSyncStore
+    /// .apply()`'s single batch transaction and rolls back the cursor advance
+    /// along with the rows. The next pull then requests the identical page,
+    /// hits the identical row, and throws again: sync wedged permanently,
+    /// with no path forward short of deleting the database.
+    private static let jsonTextColumns: Set<String> = ["frontmatter"]
+
+    /// `text` if it is already JSON, and otherwise `text` encoded *as* a JSON
+    /// string literal.
+    ///
+    /// adh sends `frontmatter` as JSON text, so the first branch is the whole
+    /// story on every well-formed row. The second is for a row that is not:
+    /// raw YAML, a truncated write, anything. Wrapping keeps the bytes — the
+    /// row still says what it arrived saying, recoverable with
+    /// `json_extract(frontmatter, '$')` — while making the value legal JSON,
+    /// so the expression index evaluates to NULL (a scalar has no
+    /// `$.adh_source`) instead of raising. Dropping the column to NULL would
+    /// also unwedge the pull and would silently discard the user's
+    /// frontmatter; refusing the row would wedge it, which is the defect.
+    ///
+    /// `.fragmentsAllowed` because a top-level scalar is valid JSON to
+    /// SQLite, so it must be valid here too — otherwise a legitimate
+    /// `"draft"` would be re-wrapped as `"\"draft\""` on every pull, growing
+    /// a pair of quotes each time.
+    private static func validJSONText(_ text: String, column: String) throws -> String {
+        let data = Data(text.utf8)
+        if (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil {
+            return text
+        }
+        guard let encoded = try? JSONEncoder().encode(text),
+              let literal = String(bytes: encoded, encoding: .utf8) else {
+            throw MarkdownProjectionError.unencodableValue(column: column)
+        }
+        return literal
     }
 
     /// Whether a value already bound through `value(_:column:)` reads as

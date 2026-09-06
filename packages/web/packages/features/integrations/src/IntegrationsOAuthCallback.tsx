@@ -214,8 +214,9 @@ export function IntegrationsOAuthCallback({
       // CORS), so the installation is still unfiled and the credential is still good. Setting
       // it beforehand destroyed the stash on exactly those failures, and the retry the error
       // message invites then reports an expired link — `redirectUri` lives nowhere but the
-      // stash, and nothing can invent one. A status means the backend answered, and an
-      // answered connect may well have written before it failed, so that one is spent.
+      // stash, and nothing can invent one. Which statuses count is `consumesCredential`'s
+      // question, not "any status at all" — see it for why a 503 is the same situation as a
+      // dropped connection wearing a number.
       let spent = false;
       try {
         const missing = (what: string) =>
@@ -266,10 +267,10 @@ export function IntegrationsOAuthCallback({
         markPendingConnectConsumed(state, ctx.returnTo);
         if (alive.current) router.replace(ctx.returnTo);
       } catch (err) {
-        // A response, of any status, means the backend read the credential. Never DOWNgraded:
-        // the success path has already set it before anything that can throw after the connect
-        // returned, and such a throw is not evidence the credential went unspent.
-        spent = spent || httpStatus(err) !== undefined;
+        // Never DOWNgraded: the success path has already set it before anything that can
+        // throw after the connect returned, and such a throw is not evidence the credential
+        // went unspent.
+        spent = spent || consumesCredential(httpStatus(err));
         if (isAlreadyConnectedConflict(err, ctx.providerId)) {
           // The connect that this callback was going to make has ALREADY HAPPENED, and
           // succeeded — this document just is not the one that made it. Two tabs on the same
@@ -303,7 +304,20 @@ export function IntegrationsOAuthCallback({
         // the operator to try again from here. A blanket clear took the stash away on all
         // four, so the retry the message invited then reported an expired link: `redirectUri`
         // exists nowhere but the stash, and the recovery path cannot invent one.
-        if (spent) clearPendingConnect(state);
+        if (spent) {
+          // The tombstone goes down BEFORE the stash goes away, and on every spending exit
+          // rather than only on the two that file one of their own. After
+          // `clearPendingConnect` there is nothing left for a reload of this document to
+          // recognize itself by — the state is out of the stash and unspendable at the
+          // backend — so a spent-but-untombstoned replay reports "expired or was already
+          // used" as if the link had never worked, for a credential that was in fact
+          // redeemed. The tombstone is what turns that into the true sentence, and it
+          // carries `returnTo` so the replay lands where the operator started rather than on
+          // the family fallback. A plain overwrite, so the success and already-connected
+          // paths filing it first costs nothing.
+          markPendingConnectConsumed(state, ctx.returnTo);
+          clearPendingConnect(state);
+        }
       }
     })();
   }, [isLoading, isAuthenticated, userId, router, fallbackReturnTo]);
@@ -430,6 +444,32 @@ function recoverFromState(params: {
  * exactly where they were before this existed. The alternative, a broad "already connected"
  * match, fails the other way.
  */
+/**
+ * Whether a failed connect actually redeemed the one-shot credential — the only thing that
+ * makes the state safe to burn and the stash safe to destroy.
+ *
+ * This used to be "any status at all", on the reasoning that a response means the backend read
+ * the credential. It does not. `httpStatus` is `undefined` only for a rejection that never
+ * became a response — offline, DNS, a dropped connection, CORS — and a 502 from a proxy in
+ * front of the backend, a 503 while it restarts, a 504 on a slow provider exchange and a 500
+ * from a handler that threw on its first line are all of them numbers on the same situation:
+ * nothing was filed, and the credential is still good. Burning the state on one of those made
+ * the retry the error UI invites impossible — the state was spent and the stash cleared, so
+ * the retry failed the freshness/stash guard instead of replaying, and the only way forward
+ * was to start the whole flow again at the provider. 408 and 429 are the same answer for the
+ * same reason: both mean "not now", not "not again".
+ *
+ * The asymmetry is deliberate and it is the safe direction. Guessing "unspent" for a connect
+ * that did write costs a retry that meets a 409, which `isAlreadyConnectedConflict` below
+ * already turns into "this connection is already set up". Guessing "spent" for one that did
+ * not costs the operator the entire flow.
+ */
+function consumesCredential(status: number | undefined): boolean {
+  if (status === undefined) return false;
+  if (status === 408 || status === 429) return false;
+  return status < 500;
+}
+
 function isAlreadyConnectedConflict(err: unknown, providerId: string): boolean {
   if (httpStatus(err) !== 409) return false;
   const message = err instanceof Error ? err.message : "";

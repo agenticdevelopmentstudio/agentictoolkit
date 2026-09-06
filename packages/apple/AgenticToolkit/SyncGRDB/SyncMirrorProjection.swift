@@ -65,6 +65,28 @@ public protocol SyncMirrorProjection: Sendable {
     /// Empties the projection's storage for the given resources.
     func truncate(resources: [String], in conn: Database) throws
 
+    /// Discards whatever *local-only* state the projection keeps that belongs
+    /// to the identity now signing out.
+    ///
+    /// This is deliberately not `truncate(resources:)`. That method is shared
+    /// with `resetForResync()` and `purgeResources(_:)`, where a queued local
+    /// write must survive — a resync re-pulls the server's rows and then
+    /// still owes the server everything the user typed offline. An identity
+    /// change owes the *next* account nothing at all, so the two need
+    /// different answers and cannot share one method.
+    ///
+    /// A projection may keep its own outbox, its own local-to-remote id
+    /// pairings, or any other table that names the departing account's data
+    /// but is not a mirror of a synced resource. `GRDBSyncStore` cannot know
+    /// those tables exist, so it asks. Called inside
+    /// `purgeForIdentityChange`'s transaction, alongside the store's own
+    /// `_sync_state`/`_sync_outbox` deletes.
+    ///
+    /// Defaulted to a no-op below, so a projection with no local-only state
+    /// (and every projection written before this requirement existed) needs
+    /// no change.
+    func purgeIdentityState(in conn: Database) throws
+
     /// Live rows as the generic mirror would have returned them — including
     /// an `"id"` key — so `liveRows`/`liveRow` have one return contract.
     func rows(resource: String, limit: Int, offset: Int, in conn: Database) throws -> [[String: JSONValue]]
@@ -89,4 +111,10 @@ public extension SyncMirrorProjection {
     ) throws {
         try upsert(resource: resource, id: id, syncVersion: syncVersion, data: data, in: conn)
     }
+
+    /// Default for `purgeIdentityState(in:)`: nothing to discard. A
+    /// projection whose only storage is its mirror tables is already emptied
+    /// by the store's own `deleteMirrorRows`, so the honest default is to do
+    /// nothing rather than to guess at table names.
+    func purgeIdentityState(in conn: Database) throws {}
 }

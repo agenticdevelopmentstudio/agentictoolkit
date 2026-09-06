@@ -45,26 +45,7 @@ public final class NotesListViewController: NSViewController {
     /// Reload the displayed notes. Call on main thread after notes array changes.
     public func reload(notes: [Note], keepingSelectedID: UUID?) {
         allNotes = notes
-        applySearch()
-        if let id = keepingSelectedID,
-           let idx = filteredNotes.firstIndex(where: { $0.id == id }) {
-            tableView.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
-            tableView.scrollRowToVisible(idx)
-        } else {
-            tableView.deselectAll(nil)
-        }
-        // `applySearch()`'s `reloadData()` can itself invalidate a selection
-        // that no longer has a row to sit on (e.g. the list shrinking to zero
-        // rows) as a side effect, silently, before this method ever calls
-        // `selectRowIndexes`/`deselectAll` — so by the time `deselectAll(nil)`
-        // above runs, the selection may already read empty, making that call a
-        // no-op AppKit has nothing to notify about. Relying solely on
-        // `tableViewSelectionDidChange` to report a selection change is
-        // therefore not reliable across every `reload` outcome (task-7-
-        // grounding G5 needs a real, current answer — not one that can go
-        // stale on exactly this path), so this always double-checks and
-        // reports directly.
-        reportSelectionIfChanged()
+        applySearch(keeping: keepingSelectedID)
     }
 
     public var selectedNoteID: UUID? {
@@ -77,9 +58,16 @@ public final class NotesListViewController: NSViewController {
     /// now that this pane no longer hosts one of its own. Normalises the same
     /// way `applySearch()` itself used to read a live `NSSearchField`: trimmed
     /// and lowercased, so callers can pass the field's raw text unmodified.
+    ///
+    /// The current selection is carried through the re-filter rather than
+    /// left to `NSTableView`, which preserves `selectedRow` as an *integer*:
+    /// with row 3 selected, narrowing the list to four different notes leaves
+    /// row 3 selected and `selectedNoteID` silently answering with whichever
+    /// note now occupies it — the note Delete, Pin, Duplicate and Move to…
+    /// would then act on.
     public func setSearchQuery(_ query: String) {
         searchQuery = query.trimmingCharacters(in: .whitespaces).lowercased()
-        applySearch()
+        applySearch(keeping: selectedNoteID)
     }
 
     // MARK: - Properties
@@ -191,15 +179,45 @@ public final class NotesListViewController: NSViewController {
 
     // MARK: - Filtering
 
-    private func applySearch() {
+    /// Filters, reloads, and then puts the selection back on `id` — the three
+    /// as one step, because a table whose rows changed underneath a preserved
+    /// integer `selectedRow` is answering about a note nobody chose.
+    ///
+    /// `id` also survives the filter itself. A note the user has open is a
+    /// note they are working in, and it is normal to edit the very word that
+    /// matched the query: without this clause the note drops out of the list
+    /// mid-keystroke, the selection goes empty, the editor is cleared, and
+    /// every character typed after that is dropped on the floor by the
+    /// split view's `guard let note = ...` — the user watches their text
+    /// disappear from under the cursor. It comes back into the ordinary
+    /// filter as soon as the query changes or another note is selected.
+    private func applySearch(keeping id: UUID?) {
         if searchQuery.isEmpty {
             filteredNotes = allNotes
         } else {
             filteredNotes = allNotes.filter {
-                $0.title.lowercased().contains(searchQuery) || $0.content.lowercased().contains(searchQuery)
+                $0.id == id
+                    || $0.title.lowercased().contains(searchQuery)
+                    || $0.content.lowercased().contains(searchQuery)
             }
         }
         tableView.reloadData()
+        if let id, let idx = filteredNotes.firstIndex(where: { $0.id == id }) {
+            tableView.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
+            tableView.scrollRowToVisible(idx)
+        } else {
+            tableView.deselectAll(nil)
+        }
+        // `reloadData()` can invalidate a selection that no longer has a row
+        // to sit on (a list shrinking to zero rows) as a silent side effect,
+        // before the lines above run — so by the time `deselectAll(nil)` is
+        // reached the selection may already read empty, making that call a
+        // no-op AppKit has nothing to notify about. Relying solely on
+        // `tableViewSelectionDidChange` is therefore not reliable across every
+        // outcome (task-7-grounding G5 needs a real, current answer — not one
+        // that can go stale on exactly this path), so this always
+        // double-checks and reports directly.
+        reportSelectionIfChanged()
     }
 }
 

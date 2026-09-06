@@ -122,11 +122,17 @@ public final class MarkdownNoteStorage: NoteStorage, Sendable {
             content = Frontmatter.setting(Self.pinnedKey, to: .bool(true), in: content)
             owned.insert(Self.pinnedKey)
         }
+        // Both stamps, separately. `now:` dates the write; `createdAt:` is the
+        // note's own birthday, which `Note` already carries and which nothing
+        // else in the row records — passing only `now:` stamped `created_at`
+        // with the modification date, so every note appeared to have been
+        // created when it was last edited, irrecoverably.
         _ = try store.createDocument(
             content: content,
             markers: [.note],
             id: note.id.uuidString.lowercased(),
             now: note.modifiedDate,
+            createdAt: note.createdDate,
             ownedFrontmatterKeys: owned)
     }
 

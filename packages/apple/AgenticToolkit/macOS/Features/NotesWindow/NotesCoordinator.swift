@@ -39,13 +39,24 @@ public final class NotesCoordinator: AppFeature {
         super.init()
 
         // One predicate for all four File-menu items: they mean the same
-        // thing by "this action applies right now" — the Notes window is key —
-        // and would have to change together if that ever stopped being the
-        // whole story (a notes pane inside a project window, say). The
-        // `NewItemProvider` below means it too but cannot share this constant;
-        // the comment there says why.
-        let notesWindowIsKey: () -> Bool = { [weak self] in
-            self?.notesWindowController.window?.isKeyWindow == true
+        // thing by "this action applies right now" — there is a notes view in
+        // front of the user — and they would have to change together if that
+        // ever stopped being the whole story. The `NewItemProvider` below
+        // means it too but cannot share this constant; the comment there says
+        // why.
+        //
+        // The predicate used to read `notesWindowController.window?.isKeyWindow`,
+        // which is a narrower question than the items mean. Hosts mount the
+        // very same `NotesSplitViewController` inside a project window's pane
+        // (Whippet's `WhippetDocumentPanes`), and with that window key the
+        // standalone window is not — so New Folder, Import Markdown File…,
+        // Delete Note, Delete Folder and ⌘N all greyed out over a notes view
+        // the user was working in, and the keyboard shortcuts did nothing.
+        // `activeNotesViewController` answers the real question, and every
+        // action below is routed through it so the command lands on the view
+        // that enabled it rather than on a window that may not even be open.
+        let hasNotesTarget: () -> Bool = { [weak self] in
+            self?.activeNotesViewController != nil
         }
 
         self.menuContributions = [
@@ -60,34 +71,39 @@ public final class NotesCoordinator: AppFeature {
             },
             MenuContribution(
                 slot: .file, title: "New Folder", order: 10, key: "n", modifiers: [.command, .shift],
-                isEnabled: notesWindowIsKey,
+                isEnabled: hasNotesTarget,
                 action: { [weak self] in
-                    self?.notesWindowController.viewController?.createFolderUnderSelection()
+                    self?.activeNotesViewController?.createFolderUnderSelection()
                 }
             ),
             MenuContribution(
                 slot: .file, title: "Import Markdown File…", order: 20,
-                isEnabled: notesWindowIsKey,
+                isEnabled: hasNotesTarget,
                 action: { [weak self] in
-                    guard let self, let presenter = self.notesWindowController.contentViewController else { return }
-                    MarkdownFileImporter.present(from: presenter) { [weak self] text in
+                    // The presenter is the notes view itself, so the open
+                    // panel is a sheet on whichever window is showing notes —
+                    // and, because the same view receives the text, an import
+                    // started from a project window's notes pane lands there
+                    // instead of in a standalone window the user cannot see.
+                    guard let presenter = self?.activeNotesViewController else { return }
+                    MarkdownFileImporter.present(from: presenter) { [weak presenter] text in
                         guard let text else { return } // cancel or undecodable — no dialog
-                        self?.notesWindowController.viewController?.createNote(content: text)
+                        presenter?.createNote(content: text)
                     }
                 }
             ),
             MenuContribution(
                 slot: .file, title: "Delete Note", order: 30,
-                isEnabled: notesWindowIsKey,
+                isEnabled: hasNotesTarget,
                 action: { [weak self] in
-                    self?.notesWindowController.viewController?.deleteSelectedNote()
+                    self?.activeNotesViewController?.deleteSelectedNote()
                 }
             ),
             MenuContribution(
                 slot: .file, title: "Delete Folder", order: 40,
-                isEnabled: notesWindowIsKey,
+                isEnabled: hasNotesTarget,
                 action: { [weak self] in
-                    self?.notesWindowController.viewController?.deleteSelectedFolder()
+                    self?.activeNotesViewController?.deleteSelectedFolder()
                 }
             )
         ]
@@ -101,16 +117,56 @@ public final class NotesCoordinator: AppFeature {
                 // literal takes its type from context, so the two contexts each
                 // get one; a shared constant can only satisfy one of them.
                 claimsKeyWindow: { [weak self] in
-                    self?.notesWindowController.window?.isKeyWindow == true
+                    self?.activeNotesViewController != nil
                 },
                 title: { "New Note" },
                 action: { [weak self] in
-                    self?.notesWindowController.viewController?.createNote()
+                    self?.activeNotesViewController?.createNote()
                 }
             )
         ]
 
         self.scriptingKeys.insert("scriptingNotesVisible")
+    }
+
+    // MARK: - Where the notes commands act
+
+    /// The notes view the File-menu commands and ⌘N apply to right now, or
+    /// `nil` when nothing in front of the user is showing notes.
+    ///
+    /// `NotesSplitViewController` is not owned solely by
+    /// `notesWindowController`: a host can mount it as a pane inside any
+    /// window, so "is the Notes window key" and "is the user looking at notes"
+    /// are different questions and only the second one is what a menu item
+    /// means.
+    ///
+    /// Resolution goes through the key window, because a menu command acts on
+    /// what has focus. Inside it the first responder's chain is walked before
+    /// the view hierarchy, so a window holding two notes panes routes the
+    /// command to the one being typed in rather than to whichever the tree
+    /// happens to reach first. The hierarchy walk is the fallback for a window
+    /// whose focus sits somewhere else entirely (a sidebar, the toolbar's
+    /// search field), where "the notes view in this window" is still an
+    /// unambiguous answer.
+    private var activeNotesViewController: NotesSplitViewController? {
+        guard let window = NSApp.keyWindow else { return nil }
+        if window === notesWindowController.window { return notesWindowController.viewController }
+        var responder: NSResponder? = window.firstResponder
+        while let current = responder {
+            if let notes = current as? NotesSplitViewController { return notes }
+            responder = current.nextResponder
+        }
+        return window.contentViewController.flatMap(Self.firstNotesView(under:))
+    }
+
+    /// Depth-first search for a `NotesSplitViewController` in a view
+    /// controller subtree.
+    private static func firstNotesView(under root: NSViewController) -> NotesSplitViewController? {
+        if let notes = root as? NotesSplitViewController { return notes }
+        for child in root.children {
+            if let found = firstNotesView(under: child) { return found }
+        }
+        return nil
     }
 
     // MARK: - AppFeature

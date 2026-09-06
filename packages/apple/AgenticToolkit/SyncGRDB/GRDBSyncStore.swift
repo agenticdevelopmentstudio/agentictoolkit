@@ -610,6 +610,17 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     /// historical record, not live sync state, and isn't read back into any
     /// sync decision.
     ///
+    /// A mirror projection is asked to discard its own local-only state
+    /// (`purgeIdentityState(in:)`) in the same transaction. Emptying the
+    /// mirror tables is not enough for a projection that keeps sidecars this
+    /// store has never heard of: `MarkdownProjection` shares its database
+    /// with `MarkdownStore`, whose `_markdown_outbox` holds the departing
+    /// account's unsent note bodies and whose `_markdown_remote_id` pairs
+    /// their local ids with rows in *their* account. Left behind, the next
+    /// identity's first drain pushes the previous user's text into the new
+    /// user's account and addresses updates to document ids that are not
+    /// theirs.
+    ///
     /// Like `resetForResync()`, this never touches the database file itself
     /// — only rows within it, in one transaction.
     public func purgeForIdentityChange() async throws {
@@ -620,6 +631,7 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
                 try store.deleteMirrorRows(for: tables, in: conn)
                 try conn.execute(sql: "DELETE FROM _sync_state")
                 try conn.execute(sql: "DELETE FROM _sync_outbox")
+                try store.mirrorProjection?.purgeIdentityState(in: conn)
             }
         }
     }

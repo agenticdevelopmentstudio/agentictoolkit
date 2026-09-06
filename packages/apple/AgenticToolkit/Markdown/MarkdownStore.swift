@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import GRDB
 // `AgenticDeveloperToolkit` is re-exported from `MarkdownReExports.swift`, so
 // every type it defines (`MarkdownDocument`, `MarkdownText`, `Frontmatter`,
@@ -98,6 +99,14 @@ public enum MarkdownStoreError: Error, Equatable {
 /// nothing on a path that is about to touch the disk.
 public final class MarkdownStore: @unchecked Sendable {
 
+    /// Spelled out rather than reached through `Core`'s `Loggable`: this target
+    /// links `AgenticToolkitDatabase`, `AgenticToolkitSync`,
+    /// `AgenticToolkitSyncGRDB` and `AgenticDeveloperToolkit` and deliberately
+    /// not `AgenticToolkitCore`, so the protocol is not in scope here. The
+    /// subsystem and category are the same two values `Loggable` derives.
+    nonisolated static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "nil", category: "MarkdownStore")
+
     public let database: BoundedDatabase
 
     /// Exposed so a host can pull into it; documents are pull-only, taxonomy
@@ -162,11 +171,21 @@ public final class MarkdownStore: @unchecked Sendable {
     /// which frontmatter keys in `content` this client wrote rather than the
     /// author. See `MarkdownSchema.frontmatterOwnerDDL`; the default is the
     /// honest answer for every caller that did not write any.
+    ///
+    /// `createdAt` exists because `now` cannot answer for both stamps. It is
+    /// the *write* time — it dates the row, the marker and the outbox op — and
+    /// defaulting `created_at` to it is right only for a document being
+    /// authored right now. A caller re-inserting a document that already has a
+    /// birthday (an import, a restore, `MarkdownNoteStorage.insertNote`
+    /// carrying a `Note.createdDate`) has to say so, or the original date is
+    /// overwritten with the write time and is gone: nothing else in the row
+    /// records it, and adh takes whatever `created_at` we first push.
     public func createDocument(
         content: String,
         markers: [MarkdownMarker],
         id: String = UUID().uuidString.lowercased(),
         now: Date = Date(),
+        createdAt: Date? = nil,
         ownedFrontmatterKeys: Set<String> = []
     ) throws -> MarkdownDocument {
         // `now` is normalized to string-round-trip precision *before* it goes
@@ -177,12 +196,17 @@ public final class MarkdownStore: @unchecked Sendable {
         // millisecond. Normalizing here means the value this method returns is
         // bit-for-bit what a caller gets back from `document(id:)` afterward.
         let now = Self.normalizedTimestamp(now)
-        let document = MarkdownDocument.new(
+        // Normalized by the same rule as `now`, and for the same reason: the
+        // value this method returns has to be bit-for-bit what `document(id:)`
+        // hands back afterward, on both stamps.
+        let createdAt = createdAt.map(Self.normalizedTimestamp) ?? now
+        let document = MarkdownDocument(
             id: id,
             content: content,
             ownerKind: .customer,
             ownerID: customerID,
-            now: now)
+            createdAt: createdAt,
+            updatedAt: now)
         try database.write { conn in
             try insert(document, in: conn)
             for marker in markers {
@@ -257,6 +281,23 @@ public final class MarkdownStore: @unchecked Sendable {
         }
     }
 
+    /// Every readable document carrying `marker`, newest first.
+    ///
+    /// A row whose timestamps will not parse is **skipped and logged**, not
+    /// thrown on — and that is a different answer from `document(id:)`'s
+    /// deliberately, because the two questions are different. `document(id:)`
+    /// is asked about one named row: the caller wants *that* document, so
+    /// failing loudly is the only true answer (see `document(from:)`'s note on
+    /// why the two quieter answers lie). This is asked for a list, where
+    /// throwing does not report the bad row to the person who could act on it
+    /// — it deletes the other nine hundred from the screen. A user whose notes
+    /// list is suddenly, silently empty concludes their work is gone, which is
+    /// the very failure that note argues against, one row wider.
+    ///
+    /// So the row is dropped *and said out loud*: the id and the column reach
+    /// the log, which is the "something anywhere saying why" the quiet
+    /// `compactMap` lacked. `noteCount(marker:)` applies the same two filters
+    /// so a badge and its list still agree by construction.
     public func documents(marker: MarkdownMarker) throws -> [MarkdownDocument] {
         try database.read { conn in
             try Row.fetchAll(
@@ -267,8 +308,28 @@ public final class MarkdownStore: @unchecked Sendable {
                     WHERE m.is_deleted = 0
                     ORDER BY m.updated_at DESC
                     """
-            ).map(Self.document(from:))
+            ).compactMap { row in
+                do {
+                    return try Self.document(from: row)
+                } catch {
+                    Self.logger.error(
+                        """
+                        skipping unreadable markdown row in \
+                        \(marker.table, privacy: .public) list: \
+                        \(String(describing: error), privacy: .public)
+                        """)
+                    return nil
+                }
+            }
         }
+    }
+
+    /// Whether `document(from:)` can read this row — the timestamp half of the
+    /// pair of filters `documents(marker:)` applies. Kept beside the count so
+    /// the two can never drift apart in the way this exists to prevent.
+    private static func isReadable(_ row: Row) -> Bool {
+        MarkdownTimestamp.date(row["created_at"]) != nil
+            && MarkdownTimestamp.date(row["updated_at"]) != nil
     }
 
     /// The count `documents(marker:)` would return, without reading a single
@@ -282,17 +343,25 @@ public final class MarkdownStore: @unchecked Sendable {
     /// filter here — on the id column alone, never the row's content — is what
     /// keeps a folder's badge and its list agreeing by construction instead of
     /// by coincidence.
+    ///
+    /// The second filter is `isReadable`, for the same reason: since
+    /// `documents(marker:)` drops a row whose timestamps will not parse, a
+    /// count that did not would report a note the list cannot show. Three
+    /// narrow columns are selected rather than `m.*` — the id to filter on and
+    /// the two stamps to test — so the no-bodies promise above still holds.
     public func noteCount(marker: MarkdownMarker) throws -> Int {
         try database.read { conn in
-            let ids = try String.fetchAll(
+            let rows = try Row.fetchAll(
                 conn,
                 sql: """
-                    SELECT m.id FROM markdown m
+                    SELECT m.id, m.created_at, m.updated_at FROM markdown m
                     JOIN \(marker.table) k ON k.markdown_id = m.id AND k.deleted_at IS NULL
                     WHERE m.is_deleted = 0
                     """
             )
-            return ids.lazy.filter { UUID(uuidString: $0) != nil }.count
+            return rows.lazy.filter {
+                UUID(uuidString: $0["id"]) != nil && Self.isReadable($0)
+            }.count
         }
     }
 
@@ -552,9 +621,22 @@ public final class MarkdownStore: @unchecked Sendable {
             // for an id the server never minted is a 404, so the whole
             // create/delete pair simply drops. Otherwise the delete is real
             // and is queued.
+            //
+            // "Still queued" has to mean *unclaimed*, not merely present:
+            // `drainRemoteQueue` deletes a row only after its send returns,
+            // so an in-flight `create` is still a row here. Read as pending,
+            // it dropped the `delete` for a document adh was in the middle of
+            // creating — the row vanishes locally, the document stays
+            // upstream forever, and nothing is left to re-derive the delete
+            // from. `claimed_at IS NULL` is the question this actually meant
+            // to ask.
             let hasPendingCreate = try Bool.fetchOne(
                 conn,
-                sql: "SELECT EXISTS(SELECT 1 FROM _markdown_outbox WHERE document_id = ? AND intent = 'create')",
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1 FROM _markdown_outbox
+                        WHERE document_id = ? AND intent = 'create' AND claimed_at IS NULL)
+                    """,
                 arguments: [id]) ?? false
             try conn.execute(
                 sql: "DELETE FROM _markdown_outbox WHERE document_id = ?", arguments: [id])
@@ -642,6 +724,21 @@ public final class MarkdownStore: @unchecked Sendable {
         }
     }
 
+    /// Stamps or clears `claimed_at` — for one op when `opID` is given, for
+    /// every row when it is `nil`.
+    private func setClaim(_ stamp: String?, forOpMatching opID: String?) throws {
+        try database.write { conn in
+            if let opID {
+                try conn.execute(
+                    sql: "UPDATE _markdown_outbox SET claimed_at = ? WHERE op_id = ?",
+                    arguments: [stamp, opID])
+            } else {
+                try conn.execute(
+                    sql: "UPDATE _markdown_outbox SET claimed_at = ?", arguments: [stamp])
+            }
+        }
+    }
+
     /// Sends queued ops oldest-first, clearing each as the writer accepts it.
     /// A throw stops the drain with the failing op still queued — order matters
     /// (a `create` before its `update`), so skipping past a failure would push
@@ -655,7 +752,17 @@ public final class MarkdownStore: @unchecked Sendable {
     /// in-progress write and the next nested `database.write`/`.read` call
     /// blocks forever waiting on a writer this thread already (invisibly)
     /// holds.
+    ///
+    /// One drain at a time. Each op is *claimed* (`_markdown_outbox.claimed_at`)
+    /// for the width of its send, which is what tells a concurrent
+    /// `enqueue`/`deleteDocument` that the row is no longer theirs to merge
+    /// into or read as unsent. A claim is released if the send throws, and
+    /// every claim still standing when a drain begins is released first:
+    /// nothing was in flight before this call, so a leftover claim can only
+    /// be a pass that was killed mid-send, and leaving it would make the op
+    /// permanently invisible to the two callers above.
     public func drainRemoteQueue(into writer: any MarkdownRemoteWriter, limit: Int = 100) async throws {
+        try setClaim(nil, forOpMatching: nil)
         for queued in try pendingRemoteOps(limit: limit) {
             // The remote id is re-read immediately before each send rather
             // than trusted from the batch snapshot: an `update` queued behind
@@ -669,7 +776,19 @@ public final class MarkdownStore: @unchecked Sendable {
                 intent: queued.intent,
                 payload: queued.payload,
                 createdAt: queued.createdAt)
-            let assigned = try await writer.send(remoteOp)
+            try setClaim(MarkdownTimestamp.string(Date()), forOpMatching: remoteOp.opID)
+            let assigned: String?
+            do {
+                assigned = try await writer.send(remoteOp)
+            } catch {
+                // Back to exactly the state before the claim. The op stays
+                // queued (that is this method's contract for a failed send),
+                // and staying queued has to mean staying *mergeable* — a
+                // claim left on a failed op would silently split the next
+                // edit of that document into a second row.
+                try setClaim(nil, forOpMatching: remoteOp.opID)
+                throw error
+            }
             // adh mints the id — `POST /content/markdown` takes none — so a
             // create's response is the only place the document's upstream
             // identity ever appears. Recording it here, before any later op
@@ -837,13 +956,11 @@ public final class MarkdownStore: @unchecked Sendable {
     /// The new op is still queued rather than dropped, because the server may
     /// already be in the opposite state from an *earlier*, already-drained op.
     ///
-    /// The cancel is unconditional, and `_markdown_outbox` has no status
-    /// column: a row exists from here until `complete(opID:)` deletes it,
-    /// which happens only after `await writer.send(...)` returns. So this
-    /// `DELETE` can remove a row whose op is already in flight, and
-    /// `complete`'s own delete then becomes a no-op. That is safe on two
-    /// invariants, and only on them — a `MarkdownRemoteWriter` that breaks
-    /// either one needs a real in-flight marker here, not a comment:
+    /// The cancel is unconditional: a row exists from here until
+    /// `complete(opID:)` deletes it, which happens only after
+    /// `await writer.send(...)` returns. So this `DELETE` can remove a row
+    /// whose op is already in flight, and `complete`'s own delete then
+    /// becomes a no-op. That is safe on two invariants, and only on them:
     ///
     /// 1. **Sends are idempotent.** An op that was cancelled locally may
     ///    still reach the server, so the server must tolerate being told
@@ -854,6 +971,16 @@ public final class MarkdownStore: @unchecked Sendable {
     ///
     /// Both hold today: no remote writer exists yet, and the drain is
     /// strictly ordered by `seq`.
+    ///
+    /// Everything *below* the cancel asks a narrower question — not "is there
+    /// a row" but "is there a row still ours to change" — and filters on
+    /// `claimed_at IS NULL` accordingly. Cancelling an in-flight op is a new
+    /// instruction that supersedes it; *merging into* one is not, because the
+    /// merge keeps the in-flight row's `op_id` and `complete` deletes by
+    /// `op_id`, so the merged fields would be dropped the moment the send
+    /// returns. An in-flight row is therefore left alone and the new op is
+    /// inserted at the tail, where the ordering guarantee already puts it
+    /// after the op it supersedes.
     private func enqueue(
         _ intent: MarkdownRemoteIntent, for documentID: String,
         payload: [String: JSONValue], at now: Date, in conn: Database
@@ -864,18 +991,32 @@ public final class MarkdownStore: @unchecked Sendable {
                 arguments: [documentID, opposing.rawValue])
         }
 
+        // An *unclaimed* create still carries the document's body, so an
+        // update folds into it and one POST sends both. A claimed one is
+        // already on the wire: folding into it would either lose the fields
+        // (`complete` deletes that `op_id`) or, if it had been cancelled
+        // meanwhile, insert a second `create` and mint a second document
+        // upstream. So the update stays an update, and the remote id the
+        // in-flight create is about to record is what it addresses.
         var target = intent
         if intent == .update {
             let hasPendingCreate = try Bool.fetchOne(
                 conn,
-                sql: "SELECT EXISTS(SELECT 1 FROM _markdown_outbox WHERE document_id = ? AND intent = 'create')",
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1 FROM _markdown_outbox
+                        WHERE document_id = ? AND intent = 'create' AND claimed_at IS NULL)
+                    """,
                 arguments: [documentID]) ?? false
             if hasPendingCreate { target = .create }
         }
 
         let existing = try Row.fetchOne(
             conn,
-            sql: "SELECT op_id, payload FROM _markdown_outbox WHERE document_id = ? AND intent = ?",
+            sql: """
+                SELECT op_id, payload FROM _markdown_outbox
+                WHERE document_id = ? AND intent = ? AND claimed_at IS NULL
+                """,
             arguments: [documentID, target.rawValue])
 
         if let existing {

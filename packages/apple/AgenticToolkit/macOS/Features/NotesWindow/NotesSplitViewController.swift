@@ -510,8 +510,19 @@ public final class NotesSplitViewController: ThemedSplitViewController {
     /// `notesForCurrentFolder()` filters against it; `NotesFolderListView
     /// Controller` observes no notifications, so its counts only move when
     /// something calls `reload()` on it.
+    ///
+    /// The flush is first and is not optional. `loadNotes()` replaces the
+    /// in-memory notes wholesale from disk, and `NotesManager.updateNote`
+    /// only *arms* a save — so a paragraph typed half a second before the
+    /// user hits Delete on some other note is still sitting in the debounce
+    /// when the reload overwrites it with the pre-edit copy from disk. Worse
+    /// than losing it: the debounce then fires, re-reads `notes.first(where:)`
+    /// — now the stale copy — and writes that back over the row it was
+    /// supposed to update. Flushing turns the pending edit into a completed
+    /// write before anything reads disk, so the reload picks it up.
     private func reloadAfterFolderMembershipChange(keepingSelectedID id: UUID?) async {
         folderMembership = nil
+        await notesManager.flushPendingSaves()
         await notesManager.loadNotes()
         folderVC.reload()
         listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: id)
@@ -534,15 +545,24 @@ public final class NotesSplitViewController: ThemedSplitViewController {
             // excluded it, so the user typed into a note they could not see.
             // `selectedFolderID` is empty for "All Notes", which is exactly
             // the "leave it unfiled" case and needs no special handling.
-            if let markdownStore, !selectedFolderID.isEmpty {
+            //
+            // Read *before* the await, the way `performDelete(_:)` reads its
+            // selection: `selectedFolderID` is mutable and the sidebar is
+            // live, so a folder clicked while the insert is in flight would
+            // otherwise decide where the note lands — filing it under a
+            // folder the user was not in when they asked for it, or, if they
+            // landed on "All Notes", skipping the filing entirely and leaving
+            // the note unfiled while the editor shows it.
+            let folderID = selectedFolderID
+            if let markdownStore, !folderID.isEmpty {
                 let newDocumentID = newID.uuidString.lowercased()
                 do {
-                    try markdownStore.assignCategory(selectedFolderID, toDocument: newDocumentID)
+                    try markdownStore.assignCategory(folderID, toDocument: newDocumentID)
                 } catch {
                     Self.logger.error(
                         """
                         Failed to file new document \(newDocumentID, privacy: .public) \
-                        under category \(self.selectedFolderID, privacy: .public): \
+                        under category \(folderID, privacy: .public): \
                         \(error, privacy: .public)
                         """)
                 }

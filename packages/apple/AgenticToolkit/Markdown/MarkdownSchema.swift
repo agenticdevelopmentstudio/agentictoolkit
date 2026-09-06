@@ -134,6 +134,28 @@ public enum MarkdownSchema {
             try conn.execute(
                 sql: "DELETE FROM _markdown_frontmatter_owner WHERE key = 'title'")
         }
+        // `markdown-v5-outbox-claim`: separates "queued" from "in flight".
+        //
+        // A row in `_markdown_outbox` used to mean only "not drained yet",
+        // and `drainRemoteQueue` deletes a row (via `complete`) *after* its
+        // `await writer.send(...)` returns — so between those two moments a
+        // row that had already been handed to the network was
+        // indistinguishable from one still waiting. Two writers read that
+        // gap and got the wrong answer: `enqueue` merged a new payload into
+        // an already-sent row, whose `op_id` `complete` then deleted, losing
+        // the merge outright; and `deleteDocument` read an in-flight `create`
+        // as "adh has never seen this document" and dropped the `delete`,
+        // leaving the document on the server with nothing left locally to
+        // re-derive it from.
+        //
+        // `claimed_at` is stamped immediately before the send and cleared if
+        // the send throws, so `claimed_at IS NULL` is exactly "still ours to
+        // change". Nullable with no default, so every existing row migrates
+        // to unclaimed, which is what a row in a database with no drain in
+        // progress is.
+        migrator.registerMigration("markdown-v5-outbox-claim") { conn in
+            try conn.execute(sql: "ALTER TABLE _markdown_outbox ADD COLUMN claimed_at TEXT")
+        }
         return migrator
     }
 

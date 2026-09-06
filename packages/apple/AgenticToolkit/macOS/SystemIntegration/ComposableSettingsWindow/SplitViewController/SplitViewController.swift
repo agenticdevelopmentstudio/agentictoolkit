@@ -314,18 +314,7 @@ extension ComposableSettings {
             history.reset()
             listViewController.setPanels(panels)
             updateSidebarLayout()
-            // A panel that is no longer in the list must not stay on screen: no
-            // row names it any more, so it would sit in the detail pane
-            // unreachable and unhighlighted. One that survived the swap keeps
-            // its place, and its row is re-selected in the rebuilt list.
-            if let current = currentPanel {
-                if let index = panels.firstIndex(where: { $0 === current }) {
-                    history.record(index)
-                    listViewController.selectPanel(at: index)
-                } else {
-                    show(nil)
-                }
-            }
+            restoreSelectionAfterRebuild()
             notifyNavigationChange()
         }
 
@@ -346,8 +335,47 @@ extension ComposableSettings {
             history.reset()
             listViewController.setPanels(panels)
             updateSidebarLayout()
-            if currentPanel === panel { show(nil) }
+            // Removing the panel on screen used to be the only case handled
+            // here, and it is the *rarer* one. Removing any panel above it in
+            // the list shifts every row below by one — the sidebar's row ids
+            // are positions in `panels` — so the id `setSections` preserves
+            // across the rebuild now names the panel *after* the one the user
+            // was reading: the highlight sits on Advanced while the detail
+            // pane shows Themes, and `history.reset()` above has already
+            // emptied the trail the arrows would have used to get back. The
+            // shared restore below covers both cases.
+            restoreSelectionAfterRebuild()
             notifyNavigationChange()
+        }
+
+        /// Puts the sidebar highlight and the navigation trail back onto the
+        /// panel that is still in the detail pane, after a rebuild that
+        /// renumbered the rows — or empties the detail pane when that panel is
+        /// no longer in the list.
+        ///
+        /// A panel that is gone must not stay on screen: no row names it any
+        /// more, so it would sit there unreachable and unhighlighted. One that
+        /// survived keeps its place, and its row is re-selected at its *new*
+        /// index — which is the whole point, since `setSections` restores the
+        /// old selection by id and those ids are positions.
+        ///
+        /// The trail is re-seeded with that index because the callers reset it
+        /// (a list that changed shape makes every recorded position mean
+        /// something else); without the re-record, Back and Forward are dead
+        /// until the user clicks a row.
+        private func restoreSelectionAfterRebuild() {
+            guard let current = currentPanel else { return }
+            guard let index = panels.firstIndex(where: { $0 === current }) else {
+                show(nil)
+                return
+            }
+            history.record(index)
+            // A filter that hides the surviving panel would make the selection
+            // a silent no-op and leave the stale highlight in place, so the
+            // query goes — the same trade `navigate(to:)` makes, and only when
+            // it is actually needed.
+            if !listViewController.isPanelVisible(at: index) { clearSidebarSearch() }
+            listViewController.selectPanel(at: index)
         }
 
         public func clear() {

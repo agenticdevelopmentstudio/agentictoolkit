@@ -267,6 +267,7 @@ public final class ComposableTabsActivePane {
     /// candidate gets its turn.
     @discardableResult
     private func takeFocus(within chain: [NSView], in window: NSWindow) -> FocusOutcome {
+        let original = window.firstResponder
         for view in chain where view.acceptsFirstResponder {
             guard window.firstResponder !== view else { return .taken }
             if window.makeFirstResponder(view) { return .taken }
@@ -278,7 +279,22 @@ public final class ComposableTabsActivePane {
             // every candidate the same way.
             guard window.firstResponder === window else { return .refused }
         }
-        return .nowhereToPut
+        // Nowhere to put them — but the offers made on the way here were not
+        // free. Every declined candidate cost the *outgoing* responder its
+        // claim (that is exactly what the `=== window` check above reads), so
+        // an exhausted walk can end with the keys on the window rather than
+        // where they started: the user's text cursor gone from the field they
+        // were typing in, taken by a pointer that merely crossed a pane with
+        // nothing to type in. `.nowhereToPut` promises the caller the opposite
+        // — "the first responder stays where it was" — so make that true
+        // before saying it.
+        guard window.firstResponder !== original else { return .nowhereToPut }
+        // Restored: nothing moved after all, and the pointer may take the
+        // outline. Not restored: the window holds the keys and no pane has
+        // them, so the outline must not move either — the caller reads
+        // `.refused` as "leave both where they were", which is the closest
+        // this can get to honest.
+        return window.makeFirstResponder(original) ? .nowhereToPut : .refused
     }
 }
 

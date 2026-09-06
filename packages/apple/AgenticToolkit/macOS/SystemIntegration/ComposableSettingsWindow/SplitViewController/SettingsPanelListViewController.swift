@@ -53,6 +53,18 @@ extension ComposableSettings {
             selectItem(withId: String(index))
         }
 
+        /// Whether the current query admits the panel at `index` — that is,
+        /// whether `selectPanel(at:)` has a row to land on at all.
+        ///
+        /// `selectItem(withId:)` is a silent no-op for a row the filter has
+        /// hidden, so a caller that must end up with a highlight has to know
+        /// beforehand whether it will get one. Asked rather than assumed,
+        /// because clearing the search on the caller's behalf when it was not
+        /// needed throws away a filter the user is still reading by.
+        public func isPanelVisible(at index: Int) -> Bool {
+            visiblePanels().contains { $0.index == index }
+        }
+
         // MARK: - Internals
 
         private func rebuildSections() {
