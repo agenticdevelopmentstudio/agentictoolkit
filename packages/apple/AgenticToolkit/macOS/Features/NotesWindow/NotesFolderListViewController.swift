@@ -53,7 +53,18 @@ import AgenticToolkitMarkdown
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     public var selectedFolderID: String? {
-        (outline.item(atRow: outline.selectedRow) as? NoteFolder)?.id
+        selectedFolder?.id
+    }
+
+    /// The folder behind the current selection, or `nil` when nothing is
+    /// selected. Internal rather than public: `selectedFolderID` is the
+    /// published surface (Task 4's shape), and this exists so the split
+    /// controller's folder-CRUD forwarding (task-6-grounding G10) can hand a
+    /// real `NoteFolder` to `createFolder(under:)` and
+    /// `presentDeleteConfirmation(for:)` without widening either past this
+    /// module.
+    var selectedFolder: NoteFolder? {
+        outline.item(atRow: outline.selectedRow) as? NoteFolder
     }
 
     /// Rebuilds the tree from `store` and redraws. Safe to call at any time,
@@ -290,7 +301,11 @@ import AgenticToolkitMarkdown
         presentDeleteConfirmation(for: folder)
     }
 
-    private func presentDeleteConfirmation(for folder: NoteFolder) {
+    /// Not private: `NotesSplitViewController.deleteSelectedFolder()`
+    /// (task-6-grounding G10) routes the File menu's "Delete Folder" through
+    /// this same confirmation sheet, so a menu delete and a right-click delete
+    /// behave identically rather than one skipping the prompt.
+    func presentDeleteConfirmation(for folder: NoteFolder) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Delete “\(folder.name)”?"

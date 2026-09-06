@@ -5,7 +5,7 @@ import AgenticToolkitCoreUI
 import AgenticToolkitCoreMacOS
 
 /// Manages the Notes window lifecycle. Hosts a `NotesSplitViewController`
-/// with list + editor panes.
+/// with folders, list, editor and help panes.
 @MainActor
 public final class NotesWindowController: WindowController<NotesSplitViewController> {
 
@@ -21,14 +21,14 @@ public final class NotesWindowController: WindowController<NotesSplitViewControl
                 notesManager: notesManager, markdownStore: notesManager.markdownStore)
         )
         self.windowSpec = WindowSpec(
-            defaultSize: NSSize(width: 700, height: 500),
-            minSize: NSSize(width: 480, height: 300),
+            defaultSize: NSSize(width: 900, height: 600),
+            minSize: NSSize(width: 640, height: 400),
             defaultPosition: .center,
             persistsFrame: true
         )
         self.windowTitle = "Notes"
         self.windowStyleMask = [.titled, .closable, .miniaturizable, .resizable]
-        self.minSize = NSSize(width: 480, height: 300)
+        self.minSize = NSSize(width: 640, height: 400)
     }
 
     /// Shows (or brings forward) the notes window, loading notes if needed.

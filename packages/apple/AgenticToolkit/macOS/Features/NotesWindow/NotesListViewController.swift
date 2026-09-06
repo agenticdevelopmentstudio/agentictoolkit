@@ -50,43 +50,25 @@ public final class NotesListViewController: NSViewController {
         return filteredNotes[row].id
     }
 
+    /// Drives `applySearch()` from the window toolbar's search field (Task 7)
+    /// now that this pane no longer hosts one of its own. Normalises the same
+    /// way `applySearch()` itself used to read a live `NSSearchField`: trimmed
+    /// and lowercased, so callers can pass the field's raw text unmodified.
+    public func setSearchQuery(_ query: String) {
+        searchQuery = query.trimmingCharacters(in: .whitespaces).lowercased()
+        applySearch()
+    }
+
     // MARK: - Properties
 
     private var allNotes: [Note] = []
     private var filteredNotes: [Note] = []
 
-    private lazy var searchField: NSSearchField = {
-        let field = NSSearchField()
-        field.placeholderString = "Search notes"
-        field.delegate = self
-        field.translatesAutoresizingMaskIntoConstraints = false
-        field.accessibilityID("notes.search")
-        // The magnifier and the clear "x" are cells of their own in the
-        // accessibility tree, and they do not inherit the field's identifier.
-        let cell = field.cell as? NSSearchFieldCell
-        cell?.searchButtonCell?.setAccessibilityIdentifier("notes.search.magnifier")
-        cell?.cancelButtonCell?.setAccessibilityIdentifier("notes.search.clear")
-        return field
-    }()
-
-    private lazy var newNoteButton: NSButton = {
-        let btn = NSButton()
-        btn.isBordered = false
-        btn.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "New Note")
-        btn.image?.isTemplate = true
-        btn.toolTip = "New note"
-        btn.target = self
-        btn.action = #selector(newNoteTapped)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.accessibilityID("notes.new-note-button")
-        return btn
-    }()
-
-    private lazy var headerLabel: NSTextField = {
-        let label = ThemedLabel(string: "Notes", role: .primaryText, textRole: .heading)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
+    /// The normalized search text `applySearch()` filters against. Replaces
+    /// the `NSSearchField` this pane used to own — the field itself moved to
+    /// the window toolbar in Task 7, but something still has to hold the
+    /// query between keystrokes and a reload.
+    private var searchQuery = ""
 
     private lazy var scrollView: NSScrollView = {
         let scroll = ThemedScrollView(frame: .zero)
@@ -100,6 +82,7 @@ public final class NotesListViewController: NSViewController {
         let table = ThemedTableView(role: .surface)
         table.headerView = nil
         table.rowHeight = 60
+        table.style = .inset
         table.selectionHighlightStyle = .regular
         table.delegate = self
         table.dataSource = self
@@ -123,25 +106,13 @@ public final class NotesListViewController: NSViewController {
         super.viewDidLoad()
 
         scrollView.documentView = tableView
-        view.addSubview(headerLabel)
-        view.addSubview(newNoteButton)
-        view.addSubview(searchField)
         view.addSubview(scrollView)
 
+        // The header, new-note button and search field that used to live here
+        // moved to the window toolbar (Task 7) — this pane is now just the
+        // scroll view, filling the whole item.
         NSLayoutConstraint.activate([
-            headerLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            headerLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-
-            newNoteButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            newNoteButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            newNoteButton.widthAnchor.constraint(equalToConstant: 24),
-            newNoteButton.heightAnchor.constraint(equalToConstant: 24),
-
-            searchField.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
-            searchField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
-            searchField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
-
-            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 4),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -178,32 +149,17 @@ public final class NotesListViewController: NSViewController {
         reload(notes: notesManager.notes, keepingSelectedID: selectedNoteID)
     }
 
-    // MARK: - Actions
-
-    @objc private func newNoteTapped() {
-        delegate?.notesListDidRequestNewNote()
-    }
-
     // MARK: - Filtering
 
     private func applySearch() {
-        let query = searchField.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
-        if query.isEmpty {
+        if searchQuery.isEmpty {
             filteredNotes = allNotes
         } else {
             filteredNotes = allNotes.filter {
-                $0.title.lowercased().contains(query) || $0.content.lowercased().contains(query)
+                $0.title.lowercased().contains(searchQuery) || $0.content.lowercased().contains(searchQuery)
             }
         }
         tableView.reloadData()
-    }
-}
-
-// MARK: - NSSearchFieldDelegate
-
-extension NotesListViewController: NSSearchFieldDelegate {
-    public func controlTextDidChange(_ obj: Notification) {
-        applySearch()
     }
 }
 
