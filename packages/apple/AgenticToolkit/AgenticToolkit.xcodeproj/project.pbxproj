@@ -187,6 +187,7 @@
 		2125F6B2452D2F4219527E71 /* PaneSpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144A2EACA59A6D6F77EE1E93 /* PaneSpacing.swift */; };
 		219BAC26897C034850C48212 /* ProjectReconcilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC74E3CD9ADAEEFAA40964A9 /* ProjectReconcilerTests.swift */; };
 		220A22CD447935610FE1745D /* ComposableTabsAddPaneViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A415A4602A9DA05E4A6F175 /* ComposableTabsAddPaneViewController.swift */; };
+		222D84EA5B4C2490AAD3C856 /* HTDVController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C8EA09F59EA16290707027 /* HTDVController.swift */; };
 		2264E445C9A1259625CD7185 /* NotesCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86FEFB54F5560AB6533F4379 /* NotesCommands.swift */; };
 		234CEE167B9D43140A2EC2A6 /* SystemWindowContextsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71138CCA6F7155839D93DE12 /* SystemWindowContextsSettings.swift */; };
 		237804904D4F7A58F500FF25 /* DaemonAIChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD8F8CA7B88AC3A53AB9785 /* DaemonAIChatTests.swift */; };
@@ -388,6 +389,7 @@
 		6792C8B002C89B0D0C3A35A4 /* ProjectDatabaseLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E7F82199DFFB1E7E91807D5 /* ProjectDatabaseLayoutTests.swift */; };
 		67CE8AA8890DE018AE6023B8 /* MockScreenSetStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCA15777FD54529C185F0B59 /* MockScreenSetStorage.swift */; };
 		682A0177AA57196EB999C4A1 /* SecretStoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F936C990586064FBEEDBA5 /* SecretStoring.swift */; };
+		683929C8077F3AB2F3CC8DD4 /* HTDVControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74C92B38CFF2B10315FC31EF /* HTDVControllerTests.swift */; };
 		684F6017CF23B82D8F696159 /* LanguageDetectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C85ABE851B5CCFC3FBFC8591 /* LanguageDetectionTests.swift */; };
 		6884876D45C60E06E6E89F97 /* SystemMemoryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F51B6A714769AB256122155 /* SystemMemoryMonitor.swift */; };
 		6896BC5559FFE5093EE00AA6 /* FileTreeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A9343C36100629E2F39BDF /* FileTreeManager.swift */; };
@@ -1688,6 +1690,7 @@
 		02F0C1AE564F98FA8F54A978 /* MCPSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSettingsTests.swift; sourceTree = "<group>"; };
 		03206DE5EF36CF23046AB0B4 /* LayoutNodeThicknessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutNodeThicknessTests.swift; sourceTree = "<group>"; };
 		03EEC3A2E6215C4FE7F2F56D /* TerminalTextInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTextInjector.swift; sourceTree = "<group>"; };
+		04C8EA09F59EA16290707027 /* HTDVController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVController.swift; sourceTree = "<group>"; };
 		058A27D7B07D396EBF7A45E1 /* WindowDiscoveryMatchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDiscoveryMatchingTests.swift; sourceTree = "<group>"; };
 		05BD9A0A3BC969FF0031625D /* SwatchGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwatchGridView.swift; sourceTree = "<group>"; };
 		05E75E64F22CB5A59C9C2987 /* TerminalSettingsPanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsPanelViewController.swift; sourceTree = "<group>"; };
@@ -1974,6 +1977,7 @@
 		7384AD8B1E1C9D20C362EFAA /* SettingsWindowCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowCommands.swift; sourceTree = "<group>"; };
 		74058B27121A2773814462AA /* HeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderView.swift; sourceTree = "<group>"; };
 		74925FD9DA16DA1C1650F4CE /* MCPChipsBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPChipsBarView.swift; sourceTree = "<group>"; };
+		74C92B38CFF2B10315FC31EF /* HTDVControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVControllerTests.swift; sourceTree = "<group>"; };
 		75045910C87AC7E5A13907F2 /* HTDVModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVModelTests.swift; sourceTree = "<group>"; };
 		754CFEB31E6960AC89F45BF4 /* AIProviderResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderResolver.swift; sourceTree = "<group>"; };
 		7557A62B9C5215425A6F65AC /* ADHSyncCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ADHSyncCatalog.swift; sourceTree = "<group>"; };
@@ -2650,6 +2654,14 @@
 				9319B761DD5270D28B8481E2 /* ViewLayout.swift */,
 			);
 			path = ComposableSettingsWindow;
+			sourceTree = "<group>";
+		};
+		1639ED6480979381FA85B2A7 /* Controller */ = {
+			isa = PBXGroup;
+			children = (
+				04C8EA09F59EA16290707027 /* HTDVController.swift */,
+			);
+			path = Controller;
 			sourceTree = "<group>";
 		};
 		19C1C0077AC22166E76E955F /* SystemWindows */ = {
@@ -3813,6 +3825,7 @@
 		BCF113B505280D5B5484D03A /* AgenticToolkitHTDVTests */ = {
 			isa = PBXGroup;
 			children = (
+				74C92B38CFF2B10315FC31EF /* HTDVControllerTests.swift */,
 				75045910C87AC7E5A13907F2 /* HTDVModelTests.swift */,
 			);
 			name = AgenticToolkitHTDVTests;
@@ -3874,6 +3887,7 @@
 		C5BF2E16AC296E40CD931EF6 /* HTDV */ = {
 			isa = PBXGroup;
 			children = (
+				1639ED6480979381FA85B2A7 /* Controller */,
 				D8D2E2854F058E65AB16E95D /* Model */,
 			);
 			path = HTDV;
@@ -5998,6 +6012,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				683929C8077F3AB2F3CC8DD4 /* HTDVControllerTests.swift in Sources */,
 				A0DC397F246D1AC1953E84EB /* HTDVModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -6277,6 +6292,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AF65081791830C96E9A3264F /* HTDVCellContent.swift in Sources */,
+				222D84EA5B4C2490AAD3C856 /* HTDVController.swift in Sources */,
 				520FD4FCCB07D9A929A98C31 /* HTDVModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
