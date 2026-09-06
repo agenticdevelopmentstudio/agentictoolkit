@@ -145,7 +145,7 @@ public final class QuickNoteWindowController: NSWindowController {
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        window.makeFirstResponder(editorController.view)
+        editorController.focusEditor()
         logger.debug("Quick note window shown")
     }
 

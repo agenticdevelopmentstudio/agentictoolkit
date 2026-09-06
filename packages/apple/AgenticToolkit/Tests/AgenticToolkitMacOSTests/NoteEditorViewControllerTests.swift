@@ -79,6 +79,13 @@ struct NoteEditorViewControllerTests {
         // for the text pane.
         #expect(controller.editorController.view.frame.height > 100)
     }
+
+    @Test("quick note opens with the caret already in the editor")
+    func quickNoteFocusesTheEditor() {
+        let controller = QuickNoteWindowController(onSave: { _ in })
+        controller.showNearStatusItem(buttonFrame: NSRect(x: 100, y: 100, width: 20, height: 20))
+        #expect(controller.window?.firstResponder is NSTextView)
+    }
 }
 
 private final class ChangeRecorder: NoteEditorViewControllerDelegate {
