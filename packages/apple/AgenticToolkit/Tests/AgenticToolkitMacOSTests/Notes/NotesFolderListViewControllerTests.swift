@@ -196,6 +196,99 @@ final class NotesFolderListViewControllerTests: XCTestCase {
         XCTAssertTrue(spy.renamed.isEmpty)
     }
 
+    // MARK: - commitRename(of:to:) — the inline-editing commit path
+    //
+    // These call the commit handler directly rather than driving real
+    // `NSOutlineView` cell editing through AppKit, per the same
+    // headless-testability seam the mutation methods above already use.
+
+    func testCommitRenameTrimsWhitespaceAndCallsRenameFolder() throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let controller = NotesFolderListViewController(store: store)
+        let spy = Spy()
+        controller.delegate = spy
+        _ = controller.view
+        controller.reload()
+        let folder = NoteFolder(id: recipes.id, name: recipes.name, noteCount: 0, children: [])
+
+        controller.commitRename(of: folder, to: "  Meals  ")
+
+        let categories = try store.categories()
+        XCTAssertEqual(categories.first?.name, "Meals")
+        XCTAssertEqual(spy.renamed.count, 1)
+        XCTAssertEqual(spy.renamed.first?.1, "Meals")
+    }
+
+    func testCommitRenameIgnoresAnEmptyOrWhitespaceOnlyName() throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let controller = NotesFolderListViewController(store: store)
+        let spy = Spy()
+        controller.delegate = spy
+        _ = controller.view
+        controller.reload()
+        let folder = NoteFolder(id: recipes.id, name: recipes.name, noteCount: 0, children: [])
+
+        controller.commitRename(of: folder, to: "   ")
+
+        let categories = try store.categories()
+        XCTAssertEqual(categories.first?.name, "Recipes")
+        XCTAssertTrue(spy.renamed.isEmpty)
+    }
+
+    func testCommitRenameIgnoresAnUnchangedName() throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let controller = NotesFolderListViewController(store: store)
+        let spy = Spy()
+        controller.delegate = spy
+        _ = controller.view
+        controller.reload()
+        let folder = NoteFolder(id: recipes.id, name: recipes.name, noteCount: 0, children: [])
+
+        controller.commitRename(of: folder, to: "  Recipes  ")
+
+        XCTAssertTrue(spy.renamed.isEmpty)
+    }
+
+    // MARK: - Inline editing: which rows' cells are editable
+
+    func testAllNotesRowFieldIsNotEditable() throws {
+        let store = try store()
+        let controller = NotesFolderListViewController(store: store)
+        _ = controller.view
+        controller.reload()
+        let allNotes = NoteFolder(id: "", name: "All Notes", noteCount: 0, children: [])
+
+        let rowView = controller.outlineView(controller.outline, viewFor: nil, item: allNotes)
+        let field = try XCTUnwrap(Self.nameField(in: try XCTUnwrap(rowView)))
+
+        XCTAssertFalse(field.isEditable)
+    }
+
+    func testRegularFolderRowFieldIsEditable() throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let controller = NotesFolderListViewController(store: store)
+        _ = controller.view
+        controller.reload()
+        let folder = NoteFolder(id: recipes.id, name: recipes.name, noteCount: 0, children: [])
+
+        let rowView = controller.outlineView(controller.outline, viewFor: nil, item: folder)
+        let field = try XCTUnwrap(Self.nameField(in: try XCTUnwrap(rowView)))
+
+        XCTAssertTrue(field.isEditable)
+    }
+
+    /// Digs the name field out of a folder row view without needing to name
+    /// `NoteFolderRowView`, which is private to the implementation file: the
+    /// row is a plain `NSView` whose only subview is the `NSStackView`
+    /// holding the name field and the count label, in that order.
+    private static func nameField(in rowView: NSView) -> NSTextField? {
+        (rowView.subviews.first as? NSStackView)?.arrangedSubviews.first as? NSTextField
+    }
+
     // MARK: - deleteFolder(_:)
 
     func testDeleteFolderRemovesFromStoreAndNotifiesDelegateWithoutDeletingNotes() throws {

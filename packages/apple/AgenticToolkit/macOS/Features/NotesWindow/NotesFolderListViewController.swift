@@ -124,6 +124,9 @@ import AgenticToolkitMarkdown
             }
             reload()
             selectFolder(id: created.id)
+            if let row = row(forFolderID: created.id) {
+                beginRenaming(row: row)
+            }
             delegate?.notesFolderListDidRequestNewFolder(under: parent)
         } catch {
             logger.error("Failed to create folder: \(error.localizedDescription, privacy: .public)")
@@ -141,6 +144,25 @@ import AgenticToolkitMarkdown
         } catch {
             logger.error("Failed to rename folder: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// Commits an inline edit of a folder row's name field — the end of the
+    /// `NSOutlineView` cell-editing path wired up in
+    /// `outlineView(_:viewFor:item:)` below. Kept separate from that AppKit
+    /// glue, and from `NoteFolderRowView` itself, so a test can call it
+    /// directly without driving real text-field editing through AppKit, the
+    /// same seam the mutation methods above already use for the menu/alert
+    /// glue.
+    ///
+    /// Trims whitespace and ignores an empty result, exactly as the modal
+    /// prompt this replaced did. Also ignores a name that is unchanged after
+    /// trimming — editing ends whenever the field resigns first responder,
+    /// including a click-away with no typing, and that should not churn the
+    /// store or notify the delegate.
+    func commitRename(of folder: NoteFolder, to rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != folder.name else { return }
+        renameFolder(folder, to: name)
     }
 
     /// Deletes a category. Never deletes a note: `deleteCategory` tombstones
@@ -196,6 +218,27 @@ import AgenticToolkitMarkdown
         return outline.item(atRow: row) as? NoteFolder
     }
 
+    /// Begins inline editing of a row's name field — the native
+    /// `NSOutlineView` rename mechanism (Finder, Mail, Xcode, and Apple
+    /// Notes itself all use it for sidebar items) that replaced the modal
+    /// rename prompt. Making the field first responder rather than calling
+    /// the legacy cell-based `editColumn(_:row:with:select:)` works
+    /// uniformly here because every row is view-based
+    /// (`outlineView(_:viewFor:item:)` below always returns a real
+    /// `NoteFolderRowView`), so there is always a concrete `NSTextField` to
+    /// hand focus to. `makeIfNecessary: true` is what makes this safe to
+    /// call right after `reload()`/`selectFolder(id:)`, before AppKit has
+    /// necessarily laid out the row on screen. A no-op for a row whose field
+    /// is not editable — All Notes.
+    private func beginRenaming(row: Int) {
+        guard row >= 0,
+              let rowView = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NoteFolderRowView,
+              rowView.nameField.isEditable
+        else { return }
+        view.window?.makeFirstResponder(rowView.nameField)
+        rowView.nameField.currentEditor()?.selectAll(nil)
+    }
+
     // MARK: - View Lifecycle
 
     override public func loadView() {
@@ -238,39 +281,13 @@ import AgenticToolkitMarkdown
     }
 
     @objc private func renameMenuItemClicked() {
-        guard let folder = clickedFolder(), !folder.isAllNotes else { return }
-        presentRenamePrompt(for: folder)
+        guard let folder = clickedFolder(), !folder.isAllNotes, let row = row(forFolderID: folder.id) else { return }
+        beginRenaming(row: row)
     }
 
     @objc private func deleteMenuItemClicked() {
         guard let folder = clickedFolder(), !folder.isAllNotes else { return }
         presentDeleteConfirmation(for: folder)
-    }
-
-    private func presentRenamePrompt(for folder: NoteFolder) {
-        let alert = NSAlert()
-        alert.messageText = "Rename Folder"
-        alert.informativeText = "Enter a new name for “\(folder.name)”."
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-
-        let field = NSTextField(string: folder.name)
-        field.frame = NSRect(x: 0, y: 0, width: 240, height: 22)
-        alert.accessoryView = field
-
-        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { return }
-            self?.renameFolder(folder, to: name)
-        }
-        if let window = view.window {
-            alert.beginSheetModal(for: window) { response in
-                MainActor.assumeIsolated { finish(response) }
-            }
-        } else {
-            finish(alert.runModal())
-        }
     }
 
     private func presentDeleteConfirmation(for folder: NoteFolder) {
@@ -321,7 +338,11 @@ extension NotesFolderListViewController: NSOutlineViewDataSource, NSOutlineViewD
         item: Any
     ) -> NSView? {
         guard let folder = item as? NoteFolder else { return nil }
-        return NoteFolderRowView(folder: folder)
+        let row = NoteFolderRowView(folder: folder)
+        row.onCommit = { [weak self] newName in
+            self?.commitRename(of: folder, to: newName)
+        }
+        return row
     }
 
     public func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -338,7 +359,10 @@ extension NotesFolderListViewController: NSMenuDelegate {
         menu.removeAllItems()
         menu.addItem(withTitle: "New Folder", action: #selector(newFolderMenuItemClicked), keyEquivalent: "")
         if let folder = clickedFolder(), !folder.isAllNotes {
-            menu.addItem(withTitle: "Rename…", action: #selector(renameMenuItemClicked), keyEquivalent: "")
+            // No ellipsis: this no longer opens a dialog, it begins inline
+            // editing on the row — same convention Finder's own "Rename"
+            // context-menu item follows.
+            menu.addItem(withTitle: "Rename", action: #selector(renameMenuItemClicked), keyEquivalent: "")
             menu.addItem(withTitle: "Delete…", action: #selector(deleteMenuItemClicked), keyEquivalent: "")
         }
         for item in menu.items {
@@ -357,15 +381,32 @@ extension NotesFolderListViewController: Loggable {
 /// edge. Built from `ThemedLabel`s per the brief — `FileTreeNodeRowView` is
 /// private to `FileTreeOutlineViewController` and wired to git status and
 /// filesystem icons that have nothing to do with a folder row.
-private final class NoteFolderRowView: NSView {
+///
+/// The name field is editable in place — this is the row's half of the
+/// inline-rename mechanism the controller drives via `beginRenaming(row:)`.
+/// `onCommit` fires once, with the field's raw (untrimmed) text, whenever
+/// editing ends for any reason (Return, Tab, or the field simply losing
+/// first responder); `commitRename(of:to:)` on the controller is what trims
+/// and decides whether that counts as a real rename. All Notes is built with
+/// an uneditable field — `isEditable` follows `folder.isAllNotes` at
+/// construction, and `beginRenaming(row:)` checks it again before handing
+/// the field first responder, so there is no path that opens editing on it.
+private final class NoteFolderRowView: NSView, NSTextFieldDelegate {
+
+    let nameField: NSTextField
+
+    /// Called with the field's text once editing ends. `nil` until the
+    /// controller wires it up in `outlineView(_:viewFor:item:)`.
+    var onCommit: ((String) -> Void)?
 
     init(folder: NoteFolder) {
-        super.init(frame: .zero)
-
-        let nameLabel = ThemedLabel(string: folder.name, role: .primaryText, textRole: .body)
-        nameLabel.lineBreakMode = .byTruncatingTail
-        nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let nameField = ThemedLabel(string: folder.name, role: .primaryText, textRole: .body)
+        nameField.lineBreakMode = .byTruncatingTail
+        nameField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        nameField.isEditable = !folder.isAllNotes
+        nameField.isSelectable = !folder.isAllNotes
+        self.nameField = nameField
 
         let countLabel = ThemedLabel(
             string: "\(folder.noteCount)", role: .secondaryText, textRole: .caption)
@@ -373,11 +414,13 @@ private final class NoteFolderRowView: NSView {
         countLabel.setContentHuggingPriority(.required, for: .horizontal)
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let stack = NSStackView(views: [nameLabel, countLabel])
+        let stack = NSStackView(views: [nameField, countLabel])
         stack.orientation = .horizontal
         stack.distribution = .fill
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
+
+        super.init(frame: .zero)
         addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -385,8 +428,14 @@ private final class NoteFolderRowView: NSView {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+
+        nameField.delegate = self
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        onCommit?(nameField.stringValue)
+    }
 }
