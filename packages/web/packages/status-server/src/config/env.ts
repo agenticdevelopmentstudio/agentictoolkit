@@ -139,8 +139,6 @@ export function envConfig(env: EnvSource): StatusConfig {
       for (const name of STATUS_CREDENTIAL_NAMES) out[name] = env[name];
       return out;
     },
-    credential(name: string) {
-      return env[name];
-    },
+    secrets: env,
   };
 }

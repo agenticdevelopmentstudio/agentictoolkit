@@ -12,11 +12,11 @@ import type { Storage } from "../storage/ports";
 
 /** The active integration rows plus the credential lookup, assembled the same way
  *  `providerConnFromConfig` used to read them from the DB directly — except that the
- *  row's `tokenEnvVar` is resolved through the config port (`config.credential`) — the
- *  host decides what a credential name means; this package never reads the environment. */
+ *  row's `tokenEnvVar` is resolved through the config port (`config.secrets`): the host
+ *  decides what a credential name means; this package never reads the environment. */
 export async function providerConn(storage: Storage, config: StatusConfig): Promise<ProviderConn> {
   const active = (await storage.config.listIntegrations()).filter((i) => i.isActive);
-  return providerConnFromIntegrations(active, (name) => config.credential(name));
+  return providerConnFromIntegrations(active, (name) => config.secrets[name]);
 }
 
 /** `enumerateDeployProjectsVerified(db)`'s replacement — same result shape, built
