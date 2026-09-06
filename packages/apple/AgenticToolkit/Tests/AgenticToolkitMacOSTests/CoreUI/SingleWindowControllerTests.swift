@@ -164,4 +164,28 @@ final class SingleWindowControllerTests: XCTestCase {
         XCTAssertEqual(window.frame.height, 500, accuracy: 2.0,
             "window height must come from spec, not pre-restore default")
     }
+
+    // MARK: - Not interrupting whoever is running the suite
+
+    func testTestHostDoesNotForceWindowsInFrontOfOtherApps() {
+        // This assertion IS the guarantee: the suite exercises a dozen window
+        // controllers, and with front-forcing on, every one of them threw an
+        // opaque window over the developer's screen for the length of the run.
+        XCTAssertFalse(SingleWindowController.forcesWindowFront,
+            "a test host must never call orderFrontRegardless")
+    }
+
+    func testShownWindowStaysVisibleButSinksBehindTheDesktop() throws {
+        let windowController = ViewControllerBasedWC(windowID: "test.unobtrusive.\(UUID().uuidString)")
+        windowController.showWindow()
+
+        let window = try XCTUnwrap(windowController.window)
+        // Still a real, on-screen, laid-out window — everything the rest of
+        // this file asserts about frames and visibility depends on that.
+        XCTAssertTrue(window.isVisible)
+        XCTAssertNotNil(window.screen)
+        // But behind the desktop picture, so nobody watching the screen sees it.
+        XCTAssertEqual(window.level, NSWindow.Level(Int(CGWindowLevelForKey(.desktopWindow))),
+            "a window shown from a test host belongs behind the desktop, not over the user's work")
+    }
 }

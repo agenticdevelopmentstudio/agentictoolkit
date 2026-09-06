@@ -37,6 +37,26 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
 
     public static let defaultSize = NSSize(width: 600, height: 480)
 
+    /// Whether `showWindow(_:)` may pull the window above *other applications'*
+    /// windows with `orderFrontRegardless()`.
+    ///
+    /// True in a shipping app — that call is the whole reason a menubar
+    /// (LSUIElement) host can show a window at all. False under XCTest, where
+    /// it is pure damage: a suite that exercises window controllers throws
+    /// opaque, fully-drawn windows over whatever the developer is doing, for
+    /// as long as the run lasts. Nothing in the suite asserts front-ordering;
+    /// the tests assert `isVisible`, restored frames and delegate wiring, all
+    /// of which the `makeKeyAndOrderFront` inside `super.showWindow` still
+    /// provides. Settable so a host that genuinely wants the old behavior
+    /// back — including a future test *of* front-ordering — can say so.
+    public static var forcesWindowFront = !isRunningInTests
+
+    /// Whether this process is an XCTest host. XCTest links its own framework
+    /// into the runner, so the class exists in a test run and nowhere else.
+    private static var isRunningInTests: Bool {
+        NSClassFromString("XCTestCase") != nil
+    }
+
     public var windowID: String = ""
 
     /// Set by `configureAsHUD()`. Tells `loadWindow()` to apply the HUD
@@ -156,7 +176,20 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
         // other apps' windows. `orderFrontRegardless` brings *this* window
         // forward without touching NSApp activation (which is app-scoped and
         // the wrong tool here, and nil in headless `swift test`).
-        window?.orderFrontRegardless()
+        //
+        // Skipped in a test host — see `forcesWindowFront`.
+        if Self.forcesWindowFront {
+            window?.orderFrontRegardless()
+        } else if let window {
+            // The window has to stay genuinely on screen — `isVisible`, the
+            // restored frame and `window.screen` are all things the suite
+            // asserts, and all three evaporate if it is ordered out or moved
+            // off the display. So leave the geometry alone and sink it behind
+            // the desktop picture instead: still a real, laid-out, visible
+            // window to AppKit, invisible to whoever is using the machine.
+            window.level = NSWindow.Level(Int(CGWindowLevelForKey(.desktopWindow)))
+            window.orderBack(nil)
+        }
         WindowManager.shared.frames.saveVisibility(true, for: windowID)
         WindowManager.shared.windowDidInteract(self, kind: .show)
     }
