@@ -14,22 +14,33 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@agenticdevelopertoolkit/ui/components/dialog';
-import { Download, Minus, Plus, Upload } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@agenticdevelopertoolkit/ui/components/dropdown-menu';
+import { Download, Minus, Plus, Settings, TriangleAlert, Upload } from 'lucide-react';
 
 import { buildDocument } from '../exchange/document';
 import { downloadDocument } from '../exchange/files';
 import { ImportDialog } from '../exchange/ImportDialog';
 import type { ImportPlan } from '../exchange/plan';
+import { nameOf, ownerOf } from '../forge/existence';
+import type { ForgeCatalogue } from '../forge/useForgeCatalogue';
 import { SettingsForm, type RepoSettingsPatch } from '../settings/SettingsForm';
 import { toolbarState, type ButtonState } from '../toolbar/actions';
 import { TypeToConfirmDialog } from '../toolbar/dialogs';
 import { RegisterWizard } from '../toolbar/RegisterWizard';
+import { OrgDefaultsDialog } from './OrgDefaultsDialog';
 import type { Selection } from '../selection';
 import type {
   AccessVerb,
   DevRepo,
   ForgeConnection,
   Group,
+  OrgDefaults,
+  OrgDefaultsPatch,
   RegisterRequest,
   RepoItem,
 } from '../types';
@@ -76,8 +87,24 @@ import type { ShiprClient } from '../client';
  * passed down so the register wizard and the importer can OFFER a connection to register
  * against, and {@link onManageConnections} is the way out to the dialog that manages them —
  * the console swaps this dialog for that one, rather than stacking a third modal.
+ *
+ * THE RAIL IS TWO LEVELS, ORGANIZATION THEN REPOSITORY, because the deployment decisions on
+ * this screen are made per organization and not per repository. One flat list of
+ * `owner/name` said the owner eleven times down the left-hand side and still gave nowhere to
+ * hang "what does a new repository in THIS account get" — so the owner became the level
+ * above, its name is said once at the top of the column, and the repositories under it are
+ * named the way a person in that account would name them. It is also what gives the org
+ * defaults a home: a gear on the repository level's title, which is the only place on the
+ * screen whose subject is the organization itself.
+ *
+ * NOTHING HERE PROVISIONS. Add writes a row and stops; the defaults dialog re-aims rows and
+ * stops; the amber mark on an unconfigured name is what says the forge has not been touched
+ * yet. Making anything is Provision's, in the detail pane, one repository at a time — which
+ * is the whole reason the deployment organization is decided on a screen that cannot
+ * accidentally create a repository in the wrong one.
  */
 
+const ORGS_LEVEL_ID = 'shipr-configure-orgs';
 const REPOS_LEVEL_ID = 'shipr-configure-repos';
 
 /** The `<form>` the footer's OK submits. The boxes are a pane in the middle of this dialog
@@ -88,6 +115,20 @@ const SETTINGS_FORM_ID = 'shipr-configure-settings';
 interface Row {
   devRepo: DevRepo;
   mirrors: RepoItem[];
+}
+
+/**
+ * ADDED BUT NOT YET MADE — the state Add now leaves every repository in.
+ *
+ * `registeredAt` is set by the run that creates or adopts the deployment repository, so a
+ * null one is a row that describes a repository the forge has never been asked about. That
+ * is a perfectly good state to sit in — it is the point of configuring first — but it is not
+ * a state to sit in ACCIDENTALLY, and nothing else on the screen distinguishes it from a
+ * repository that is fully up. Any mirror missing it marks the row: a monorepo whose second
+ * shard was never provisioned is as unprovisioned as one whose first was.
+ */
+function unconfigured(row: Row): boolean {
+  return row.mirrors.some((m) => m.registeredAt === null);
 }
 
 export interface ConfigureDialogProps {
@@ -106,24 +147,38 @@ export interface ConfigureDialogProps {
   /** A run is in flight from this console. Add and Remove stand down; settings do not — see
    *  `configure` in `toolbarState`. */
   busy?: boolean;
-  /** The forge accounts the wizard and the importer may register AGAINST. Read-only here —
-   *  this dialog no longer manages them; see {@link onManageConnections}. */
+  /** The forge accounts the IMPORTER may register against. Read-only here — this dialog no
+   *  longer manages them; see {@link onManageConnections}. The Add picker no longer reads
+   *  this at all: it reads {@link catalogue}, which is these accounts plus what is in them
+   *  plus why any one of them could not be read. */
   connections?: readonly ForgeConnection[];
-  /** Why {@link connections} could not be read. Handed straight to the wizard — this dialog has
-   *  no empty state of its own to spend it on. */
-  connectionsError?: string | null;
+  /** Every account shipr reaches and what is in them, read once when the console came up and
+   *  held across every opening of this dialog. The Add picker is a view of it, and the
+   *  detail pane answers "is that deployment repository already there" off it rather than
+   *  by asking the forge again. */
+  catalogue: ForgeCatalogue;
   /** Leave for the Integrations dialog, because the operator has just found that
    *  {@link connections} is empty or missing the account they want. The host is expected to
    *  CLOSE this dialog and open that one — they are siblings on the console, not nested, so
    *  there is no stack to come back to. Optional: a host with nowhere to send them simply
    *  does not offer the link. */
   onManageConnections?: () => void;
-  onRegister: (body: RegisterRequest) => Promise<void>;
+  /** CONFIGURE, not provision, and a BATCH: the picker is multi-select, so one press is
+   *  however many repositories were ticked. Each becomes a row with nothing made on the
+   *  forge — see the note at the top of this file. */
+  onRegister: (bodies: readonly RegisterRequest[]) => Promise<void>;
   /** Unregister every mirror and retire the source row. One call, not one per mirror: the
    *  backend expands a `dev_repo` scope itself, and a browser tab closed halfway through a
    *  loop in this file would strand the rest. */
   onRemove: (devRepo: DevRepo) => Promise<void>;
   onSaveSettings: (patches: RepoSettingsPatch[]) => Promise<void>;
+  /** Upsert one organization's defaults. Optional: a host that has not wired it simply does
+   *  not draw the gear, rather than drawing a menu whose one entry cannot save. */
+  onSaveOrgDefaults?: (org: string, patch: OrgDefaultsPatch) => Promise<void>;
+  /** Make (or repair) what the configuration describes, for one source repository. The one
+   *  control on this screen that touches the forge, and it is deliberately per-repository:
+   *  see `ProvisionButton` in the settings pane. */
+  onProvision?: (devRepoId: string) => Promise<void> | void;
   /** Run an import plan. The plan is built here (it is a comparison against the rows this
    *  dialog is already showing); the writes it describes belong to the console, like every
    *  other one on this screen. */
@@ -137,8 +192,12 @@ export function ConfigureDialog(props: ConfigureDialogProps): React.ReactElement
       {/* Wide and tall, because it holds a rail and a detail pane rather than a form. The
           height is fixed rather than fitted: the repository list grows with the fleet, and a
           dialog that changes height when a register lands is a dialog whose buttons move
-          under the pointer. */}
-      <DialogContent className="flex h-[80vh] max-w-5xl flex-col gap-4">
+          under the pointer.
+
+          `max-w-7xl` and not `5xl`: there are THREE columns now — organizations, their
+          repositories, and the settings for one — and at the old width the third was narrow
+          enough to wrap `owner/name-deployment` mid-slug in the field that sets it. */}
+      <DialogContent className="flex h-[80vh] max-w-7xl flex-col gap-4">
         <DialogHeader>
           <DialogTitle>Configure</DialogTitle>
         </DialogHeader>
@@ -161,17 +220,23 @@ function ConfigureBody({
   verbs,
   busy = false,
   connections,
-  connectionsError = null,
+  catalogue,
   onManageConnections,
   onRegister,
   onRemove,
   onSaveSettings,
+  onSaveOrgDefaults,
+  onProvision,
   onImport,
 }: ConfigureDialogProps): React.ReactElement {
+  const [selectedOrg, setSelectedOrg] = React.useState<string | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [wizard, setWizard] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const [removing, setRemoving] = React.useState<Row | null>(null);
+  /** Which organization's defaults dialog is open, or null. The org rather than a boolean,
+   *  because the dialog's whole subject is which one. */
+  const [defaultsFor, setDefaultsFor] = React.useState<string | null>(null);
 
   /** Why the bar just refused a press — see `BarButton`. Null when nothing was refused. */
   const [refused, setRefused] = React.useState<string | null>(null);
@@ -199,10 +264,60 @@ function ConfigureBody({
     return all.sort((a, b) => a.devRepo.slug.localeCompare(b.devRepo.slug));
   }, [items]);
 
-  /** Re-derived from the live rows every render, so a row that is removed while its own
-   *  settings are open takes the selection with it rather than leaving a pane whose subject
-   *  no longer exists. */
-  const selected = rows.find((r) => r.devRepo.id === selectedId) ?? null;
+  /**
+   * The rows grouped by the account they live in — the rail's root level.
+   *
+   * Derived from the ROWS and not from the catalogue, because this level is a list of what
+   * is registered, not of what shipr can see. An account with an installation and nothing
+   * registered from it belongs in the Add picker, which is a view of the catalogue; putting
+   * it here would be a folder that opens on an empty list and cannot be acted on.
+   */
+  const orgs = React.useMemo(() => {
+    const byOrg = new Map<string, Row[]>();
+    for (const row of rows) {
+      const login = ownerOf(row.devRepo.slug);
+      const bucket = byOrg.get(login);
+      if (bucket) bucket.push(row);
+      else byOrg.set(login, [row]);
+    }
+    return [...byOrg.entries()]
+      .map(([login, orgRows]) => ({ login, rows: orgRows }))
+      .sort((a, b) => a.login.localeCompare(b.login));
+  }, [rows]);
+
+  /** Re-derived from the live rows every render, so an account whose last repository is
+   *  removed while it is open takes the selection with it rather than leaving a level whose
+   *  subject no longer exists. */
+  const activeOrg = orgs.find((o) => o.login === selectedOrg) ?? null;
+
+  /** Same, one level down — and scoped to the open account, so a stale id from the previous
+   *  one cannot select through it. */
+  const selected = activeOrg?.rows.find((r) => r.devRepo.id === selectedId) ?? null;
+
+  /**
+   * The stored per-organization defaults, read once per opening of this dialog.
+   *
+   * ON THIS SCREEN AND NOT IN THE CONSOLE, unlike the catalogue above it: the catalogue is
+   * a forge read worth prefetching and holding, this is one small row per account that only
+   * the gear menu behind it ever shows. `reload` is what a save calls, so the dialog that
+   * wrote them reopens on what was written rather than on what was read before it.
+   */
+  const [orgDefaults, setOrgDefaults] = React.useState<readonly OrgDefaults[]>([]);
+  const [orgDefaultsError, setOrgDefaultsError] = React.useState<string | null>(null);
+
+  const reloadOrgDefaults = React.useCallback(async () => {
+    try {
+      const res = await client.orgDefaults();
+      setOrgDefaults(res.orgDefaults);
+      setOrgDefaultsError(null);
+    } catch (e) {
+      setOrgDefaultsError((e as Error).message);
+    }
+  }, [client]);
+
+  React.useEffect(() => {
+    void reloadOrgDefaults();
+  }, [reloadOrgDefaults]);
 
   /**
    * WHAT REMOVE ACTS ON, in the vocabulary `toolbarState` already speaks.
@@ -230,30 +345,107 @@ function ConfigureBody({
     [selection, verbs, busy, groups.length],
   );
 
-  const level = React.useMemo<TopicLevel>(
+  const orgLevel = React.useMemo<TopicLevel>(
     () => ({
-      id: REPOS_LEVEL_ID,
-      title: 'Repositories',
-      itemNoun: 'repository',
-      items: rows.map((row) => ({
-        id: row.devRepo.id,
-        label: row.devRepo.slug,
-        sublabel:
-          row.mirrors.length === 1
-            ? row.mirrors[0]!.slug
-            : `${row.mirrors.length} deployment repositories`,
+      id: ORGS_LEVEL_ID,
+      title: 'Organizations',
+      itemNoun: 'organization',
+      leadsTo: 'list',
+      items: orgs.map((org) => ({
+        id: org.login,
+        label: org.login,
+        sublabel: `${org.rows.length} ${org.rows.length === 1 ? 'repository' : 'repositories'}`,
+        // The mark rides up the tree: an account with an unconfigured repository under it is
+        // an account with something to answer, and the level that hides it must say so or
+        // the warning is only visible to whoever already opened the right folder.
+        blocked: org.rows.some(unconfigured),
       })),
-      selectedId,
-      onSelect: (id: string) => setSelectedId(id),
-      onClear: () => setSelectedId(null),
+      selectedId: selectedOrg,
+      // NO AUTO-SELECT, even for the workspace with exactly one account — and it is worth
+      // saying why, because "one account means no choice to make" is the obvious argument for
+      // opening it for them. The rail's `defaultSelectedId` is armed once per SURFACE, and a
+      // surface outlives this dialog: it is held in a module-scope map keyed by the root
+      // level, for the life of the page. This dialog is deliberately unmounted when it closes,
+      // so the default would fire on the first opening and on no later one — the repositories
+      // appearing by themselves once and then never again, from a control the operator cannot
+      // see. A level that always has to be pressed is a smaller cost than one that behaves
+      // differently the second time.
+      onSelect: (id: string) => {
+        setSelectedOrg(id);
+        // The repository ids under the previous account mean nothing under this one, and a
+        // selection that survives the switch would leave the detail pane showing a
+        // repository the open level does not contain.
+        setSelectedId(null);
+      },
+      onClear: () => {
+        setSelectedOrg(null);
+        setSelectedId(null);
+      },
       emptyLabel: 'Nothing is registered yet — Add is how one gets here.',
       // A spinner, and only that now the bar is not hung off this level: the console
       // re-reads the tree at every hand-off while a run walks, and these rows are exactly
       // what an unregister removes.
       busy,
     }),
-    [rows, selectedId, busy],
+    [orgs, selectedOrg, busy],
   );
+
+  const repoLevel = React.useMemo<TopicLevel | null>(() => {
+    if (!activeOrg) return null;
+    return {
+      id: REPOS_LEVEL_ID,
+      // The account's name, said ONCE at the top of the column instead of once per row —
+      // which is also what makes the gear below safe to hang here. The rail host keys
+      // re-registration on a level's plain fields and never its React nodes, so a menu that
+      // only ever means "this title's account" is refreshed exactly when the title is.
+      title: activeOrg.login,
+      railLabel: 'Repositories',
+      itemNoun: 'repository',
+      titleActions: onSaveOrgDefaults ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                aria-label={`${activeOrg.login} settings`}
+                title={`${activeOrg.login} settings`}
+                className="flex shrink-0 items-center justify-center rounded p-0.5 text-apt-text-muted outline-none hover:text-apt-text focus-visible:ring-2 focus-visible:ring-apt-gold/40"
+              />
+            }
+          >
+            <Settings size={16} aria-hidden />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setDefaultsFor(activeOrg.login)}>
+              Settings
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : undefined,
+      items: activeOrg.rows.map((row) => ({
+        id: row.devRepo.id,
+        // WITHOUT THE ORGANIZATION IN IT: the column is already that account. `displayName`
+        // wins where it is set, because it is the name the operator chose and the one the
+        // console's own tree shows on /home.
+        label: row.devRepo.displayName || nameOf(row.devRepo.slug),
+        sublabel:
+          row.mirrors.length === 1
+            ? row.mirrors[0]!.slug
+            : `${row.mirrors.length} deployment repositories`,
+        // Added, not provisioned. Both marks say it — the icon is legible at a glance, the
+        // amber dot carries the "needs attention" the icon cannot say to a screen reader.
+        blocked: unconfigured(row),
+        icon: unconfigured(row) ? (
+          <TriangleAlert size={16} className="text-apt-orange" aria-hidden />
+        ) : undefined,
+      })),
+      selectedId,
+      onSelect: (id: string) => setSelectedId(id),
+      onClear: () => setSelectedId(null),
+      emptyLabel: 'Nothing is registered from this organization.',
+      busy,
+    };
+  }, [activeOrg, selectedId, busy, onSaveOrgDefaults]);
 
   return (
     <>
@@ -275,9 +467,9 @@ function ConfigureBody({
           <RegisterWizard
             open={wizard}
             onClose={() => setWizard(false)}
-            client={client}
-            connections={connections}
-            connectionsError={connectionsError}
+            /* The prefetched catalogue, not the client: the picker makes no request at all
+               now, which is what lets it open on a full list instead of a spinner. */
+            catalogue={catalogue}
             registeredSlugs={rows.map((r) => r.devRepo.slug)}
             /* Closes the wizard on the way out. The console is about to swap this whole dialog
                for Integrations, so leaving the wizard open would leave it mounted behind a
@@ -340,10 +532,15 @@ function ConfigureBody({
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-apt-border">
             <StandaloneRailHost>
-              <StackLevels levels={[level]}>
+              {/* The repository level exists only while an account is open, so the array is
+                  one long or two. A level published for a closed account would be a column
+                  whose title names nothing. */}
+              <StackLevels levels={repoLevel ? [orgLevel, repoLevel] : [orgLevel]}>
                 <DetailPane
                   selected={selected}
+                  catalogue={catalogue}
                   onSaveSettings={onSaveSettings}
+                  onProvision={onProvision}
                   onSaved={onClose}
                 />
               </StackLevels>
@@ -381,6 +578,29 @@ function ConfigureBody({
           </DialogFooter>
         </>
       )}
+
+      {/* The gear's one entry. Mounted next to the other sibling dialogs rather than inside
+          the level that opens it, because a level is re-registered whenever its plain fields
+          move and a dialog rendered from one would unmount mid-edit when a tree read lands. */}
+      {defaultsFor !== null && onSaveOrgDefaults ? (
+        <OrgDefaultsDialog
+          open
+          org={defaultsFor}
+          defaults={orgDefaults.find((d) => d.org === defaultsFor)}
+          defaultsError={orgDefaultsError}
+          rows={orgs.find((o) => o.login === defaultsFor)?.rows ?? []}
+          catalogue={catalogue}
+          onClose={() => setDefaultsFor(null)}
+          onSaveDefaults={async (org, patch) => {
+            await onSaveOrgDefaults(org, patch);
+            // Read back rather than patching the held copy: the row the server stored is
+            // what the next opening has to seed from, and it is the server that fills in
+            // the fields this form did not send.
+            await reloadOrgDefaults();
+          }}
+          onApply={onSaveSettings}
+        />
+      ) : null}
 
       <ImportDialog
         open={importing}
@@ -517,11 +737,17 @@ function BarButton({
 /** The detail area: the selected repository's settings, or the reason there aren't any. */
 function DetailPane({
   selected,
+  catalogue,
   onSaveSettings,
+  onProvision,
   onSaved,
 }: {
   selected: Row | null;
+  /** Answers "is that deployment repository already there" without a round trip, and names
+   *  the accounts the deployment-organization menu may offer. */
+  catalogue: ForgeCatalogue;
   onSaveSettings: (patches: RepoSettingsPatch[]) => Promise<void>;
+  onProvision?: (devRepoId: string) => Promise<void> | void;
   /** The save the footer's OK started has landed. Closing is the rest of what OK means. */
   onSaved: () => void;
 }): React.ReactElement {
@@ -539,7 +765,9 @@ function DetailPane({
           }}
           // The dialog's footer is this form's Save, so it draws no buttons of its own.
           formId={SETTINGS_FORM_ID}
+          catalogue={catalogue}
           onSave={onSaveSettings}
+          onProvision={onProvision}
           onSaved={onSaved}
         />
       </div>

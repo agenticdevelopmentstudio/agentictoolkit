@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Folder, GitBranch } from 'lucide-react';
+import { Folder, GitBranch, TriangleAlert } from 'lucide-react';
 
 import { Checkbox } from '@agenticdevelopertoolkit/ui/components/checkbox';
 import { Spinner } from '@agenticdevelopertoolkit/ui/components/spinner';
@@ -31,8 +31,15 @@ import type { LevelPlan, NodeRef } from './levels';
 
 /** How a mirror is NAMED in the rail: the development repository people actually push to,
  *  short — the mirror's own `owner/name-deployment` is machinery, and putting it in a
- *  240px rail buries the one word that tells two rows apart. */
+ *  240px rail buries the one word that tells two rows apart.
+ *
+ *  `displayName` WINS WHERE IT IS SET, because it is the only name on the row anybody chose.
+ *  It is set in Configure and it is set for exactly this: two repositories called `web` in
+ *  two accounts are two identical rows here, and the slug they differ by is the half this
+ *  function drops. */
 export function repoLabel(item: RepoItem): string {
+  const chosen = item.devRepo?.displayName;
+  if (chosen) return chosen;
   const slug = item.devRepo?.slug ?? item.slug;
   const short = slug.includes('/') ? slug.slice(slug.indexOf('/') + 1) : slug;
   return short;
@@ -113,6 +120,12 @@ function repoItem(item: RepoItem, opts: LevelsOptions): TopicDetailItem {
   const ref: NodeRef = { kind: 'repo', id: item.id };
   const label = repoLabel(item);
   const running = opts.runningRepoIds?.has(item.id) ?? false;
+  // CONFIGURED, BUT NOT MADE. Add writes the row and stops, so a repository can sit here
+  // fully described and with nothing behind it on the forge — and every other mark on this
+  // row would report that state as an ordinary one. The status dot says "never read", which
+  // is true of a freshly registered repository too and is not the same problem; this is the
+  // only one Provision fixes.
+  const unconfigured = item.registeredAt === null;
   return {
     id: `repo:${item.id}`,
     label,
@@ -126,9 +139,16 @@ function repoItem(item: RepoItem, opts: LevelsOptions): TopicDetailItem {
       <span className="font-semibold text-apt-gold">{shardLabel(item)}</span>
     ) : undefined,
     leadsTo: 'detail',
+    // The amber dot and its sr-only "needs attention" — the half of the mark that survives a
+    // rail collapsed to icons, and the only half a screen reader gets.
+    blocked: unconfigured,
     icon: opts.selection.selecting
       ? checkboxIcon(ref, opts.selection, opts.onToggleCheck, label)
-      : <GitBranch className="size-4" />,
+      : unconfigured ? (
+          <TriangleAlert className="size-4 text-apt-orange" aria-hidden />
+        ) : (
+          <GitBranch className="size-4" />
+        ),
     // A SPINNER, NOT A BLUE DOT. The trailing slot is where this row says how it stands,
     // and while a run is inside it the honest answer is "ask again in a moment" — a dot in
     // a fourth colour is still a settled-looking mark, indistinguishable at a glance from

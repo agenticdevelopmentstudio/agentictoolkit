@@ -63,6 +63,16 @@ export type { RegisterWizardProps } from './toolbar/RegisterWizard';
 
 export { ConfigureDialog } from './configure/ConfigureDialog';
 export type { ConfigureDialogProps } from './configure/ConfigureDialog';
+export { OrgDefaultsDialog } from './configure/OrgDefaultsDialog';
+export type { OrgDefaultsDialogProps } from './configure/OrgDefaultsDialog';
+
+// The forge, read once and held: what shipr can see, and what that means for a name nobody
+// has created yet. Exported because a host that mounts `ConfigureDialog` itself has to build
+// the catalogue to hand it — `ShiprConsole` is the only caller that does so on its own.
+export { useForgeCatalogue } from './forge/useForgeCatalogue';
+export type { ForgeCatalogue, ForgeOrg } from './forge/useForgeCatalogue';
+export { Existence, nameOf, ownerOf, verdictFor } from './forge/existence';
+export type { Verdict } from './forge/existence';
 
 // The fleet as one file, in both directions. `document`/`plan`/`apply` are pure and could
 // live outside this barrel, but the dialog above them cannot ('use client' is hoisted here),

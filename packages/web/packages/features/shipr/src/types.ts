@@ -84,6 +84,15 @@ export interface Group {
 export interface DevRepo {
   id: string;
   slug: string;
+  /**
+   * What the operator calls it, which is not always what the forge calls it.
+   *
+   * NULL MEANS NO OPINION, and every reader falls back to `slug` — a stored copy of the
+   * slug would be indistinguishable from a deliberate choice, and would go stale the
+   * moment the repository was renamed. A LABEL AND NOTHING MORE: no branch, no path and
+   * no forge call is derived from it.
+   */
+  displayName: string | null;
   mainBranch: string;
   preparedBranch: string;
   declarationSha: string | null;
@@ -323,6 +332,38 @@ export interface DeclarationResponse {
   note?: string;
 }
 
+/**
+ * What one forge org's repositories are BORN with — `GET /shipr/org-defaults`.
+ *
+ * Never a description of a mirror that already exists: a default is read when a mirror is
+ * first written, so changing one re-aims the NEXT repository and moves nothing already
+ * registered. The dialog's Apply is what walks the existing ones, one `PATCH` each.
+ */
+export interface OrgDefaults {
+  id: string;
+  /** The forge account login these defaults are for. */
+  org: string;
+  /** Which org the deployment repositories go in. NULL is "the same org", stored as null
+   *  rather than as a copy so an operator who never chose stays distinguishable from one
+   *  who chose the org they were already in. */
+  deploymentOwner: string | null;
+  /** `-deployment`, spelled per-org. Appended to the source repository's name. */
+  nameSuffix: string;
+  /** The ladder a new mirror starts with. EMPTY means the built-in default (every
+   *  environment, named after itself), not a repository that deploys nowhere. */
+  envBranches: Partial<Record<Environment, string>>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** The body of a `PUT /shipr/org-defaults/:org`. An ABSENT key is left alone rather than
+ *  reset, so a request about environments cannot quietly restore the suffix. */
+export interface OrgDefaultsPatch {
+  deploymentOwner?: string | null;
+  nameSuffix?: string;
+  envBranches?: Partial<Record<Environment, string>>;
+}
+
 /** The body of a `POST /shipr/register`. */
 export interface RegisterRequest {
   /** `owner/name` on the forge. */
@@ -339,13 +380,44 @@ export interface RegisterRequest {
   /** That mirror's name, on the same fallback. Overridable independently of the owner,
    *  because changing the org almost always keeps `<name>-deployment`. */
   deploymentName?: string;
+  /**
+   * Whether to GO AND MAKE IT, or only write down where it goes.
+   *
+   * `false` writes the rows synchronously, leaves `registeredAt` null and queues no run —
+   * so nothing is created on the forge under a name nobody has looked at yet. The operator
+   * then sets the org, the name and the environments and presses Provision, which is a
+   * plain `register` run against the same `dev_repo`. Defaults to true.
+   */
+  provision?: boolean;
 }
 
-/** The body of a `PATCH /shipr/repos/:id`. Every key is optional and ABSENT means
- *  unchanged — `slug` and `shard` are absent from the type because they are immutable. */
+/** `POST /shipr/register` with `provision: false` — 201, and nothing queued. The rows are
+ *  written and `registeredAt` is null on every mirror in `mirrors`. */
+export interface RegisterConfigured {
+  devRepo: DevRepo;
+  mirrors: Repo[];
+  /** What the run would have journalled — a repository carrying no `.shipr`, a malformed
+   *  one, a slug another repository already spoke for. Absent when there is nothing to say. */
+  notes?: string[];
+}
+
+/**
+ * The body of a `PATCH /shipr/repos/:id`. Every key is optional and ABSENT means unchanged.
+ *
+ * TWO TABLES, ONE ROUTE: `displayName` is the DEV repo's label, addressed through a mirror
+ * because a mirror is the only thing this console has an id for. `shard` is absent because
+ * it is immutable; `slug` is here but is accepted ONLY while `registeredAt` is null — a
+ * repository that is still a plan may be pointed anywhere, and one that has been
+ * provisioned answers 409, because re-pointing it would strand its mirror, its ladder and
+ * its history on a repository nothing now names.
+ */
 export interface RepoPatch {
   groupId?: string | null;
   position?: number;
+  /** `owner/name` of the DEPLOYMENT repository. 409 once it is provisioned. */
+  slug?: string;
+  /** The SOURCE repository's label. Null clears it. */
+  displayName?: string | null;
   shipBranch?: string;
   ciContext?: string;
   envBranches?: Partial<Record<Environment, string>>;

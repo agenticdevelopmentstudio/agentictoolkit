@@ -8,6 +8,7 @@ import { AlertModal } from '@agenticdevelopertoolkit/ui/components/alert-modal';
 import { useRunningRepos } from './activity/useRunningRepos';
 import { isFinished, useRuns } from './activity/useRuns';
 import { ConfigureDialog } from './configure/ConfigureDialog';
+import { useForgeCatalogue } from './forge/useForgeCatalogue';
 import {
   connectionsHashPresent,
   ConnectionsDialog,
@@ -46,7 +47,9 @@ import type {
   DevRepo,
   Environment,
   Operation,
+  OrgDefaultsPatch,
   RegisterRequest,
+  RepoPatch,
 } from './types';
 
 /**
@@ -123,6 +126,17 @@ function Console({
   rootLabel = 'Repositories',
   className,
 }: ShiprConsoleProps): React.ReactElement {
+  /**
+   * THE FORGE, READ ONCE AND HELD — see {@link useForgeCatalogue}.
+   *
+   * Here rather than inside the Configure dialog, because that dialog is unmounted when it
+   * closes: read down there, the accounts and their repositories were fetched again on every
+   * opening, and an installation whose read failed disappeared from the org menu without a
+   * word. Here it starts as the console mounts, survives every close, and is the one place
+   * that can answer whether an org the operator typed is even reachable.
+   */
+  const catalogue = useForgeCatalogue(client, connections, connectionsError);
+
   const tree = useTree(client);
   /**
    * WHAT THE DETAIL PANES RE-READ ON — deliberately not `tree.reads`.
@@ -385,10 +399,54 @@ function Console({
     [runs],
   );
 
+  /**
+   * ADD WRITES THE CONFIGURATION DOWN, AND CREATES NOTHING.
+   *
+   * It used to be `register`, which queued a run that went out and made the deployment
+   * repositories immediately — under whatever org the convention happened to land on, before
+   * anyone had looked at it. That is not a mistake an unregister undoes: the repository on
+   * the forge stays, in the wrong account, and the console's own row is the only half that
+   * goes away.
+   *
+   * So the two halves are split. This one writes the rows synchronously with `registeredAt`
+   * null, which is what puts the "not configured" mark on the repository in both the
+   * Configure dialog and the tree; the operator then sets the org, the name and the
+   * environments, and presses Provision — {@link onProvision} — which is the identical
+   * `register` operation the queue would have run.
+   *
+   * Nothing is queued here, so nothing is added to {@link queue} and the toolbar does not
+   * stand down: no run is in flight.
+   */
   const onRegister = React.useCallback(
-    async (body: RegisterRequest) => {
+    async (bodies: readonly RegisterRequest[]) => {
       setPressed((n) => n + 1);
-      const { runId } = await client.register(body);
+      // ONE AT A TIME, AND ONE REFRESH. The picker is multi-select — eleven repositories is
+      // an ordinary press — but each configure is its own row insert, and the backend has no
+      // batch form of it. Sequential rather than `Promise.all`: a failure then stops at the
+      // first bad slug with everything before it written, instead of eleven parallel writes
+      // whose partial outcome nobody can name. The tree read is paid once, at the end.
+      for (const body of bodies) await client.configure(body);
+      refreshAll();
+    },
+    [client, refreshAll],
+  );
+
+  /**
+   * GO AND MAKE IT — the other half of Add, pressed once the configuration is right.
+   *
+   * The same `register` operation, against the `dev_repo` scope, which is what the wizard's
+   * 202 used to queue. It is deliberately re-runnable: `register` adopts a repository that
+   * already exists rather than rebuilding it, which is what makes the button read "Doctor"
+   * once `registeredAt` is set — the same press, on a repository that has already had it.
+   */
+  const onProvision = React.useCallback(
+    async (devRepoId: string) => {
+      setPressed((n) => n + 1);
+      const { runId } = await client.run({
+        operation: 'register',
+        scopeKind: 'dev_repo',
+        scopeId: devRepoId,
+      });
       queueRegistrations([runId]);
       refreshAll();
     },
@@ -544,13 +602,35 @@ function Console({
       // repository, and a failure halfway through has to stop rather than leave the
       // remainder's outcome unknown.
       for (const patch of patches) {
-        if (patch.envBranches) {
-          await client.updateRepo(patch.repoId, { envBranches: patch.envBranches });
-        }
+        // ONE REQUEST PER REPOSITORY, not one per field: the route merges, and a second
+        // PATCH for the name would be a second chance to half-apply a save the operator
+        // pressed once. `body` is empty for a repository nothing was changed on, and that
+        // one is skipped rather than sent as a no-op.
+        const body: RepoPatch = {
+          ...(patch.envBranches ? { envBranches: patch.envBranches } : {}),
+          ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
+          ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
+        };
+        if (Object.keys(body).length > 0) await client.updateRepo(patch.repoId, body);
       }
       refreshAll();
     },
     [client, refreshAll],
+  );
+
+  /**
+   * One organization's defaults, upserted.
+   *
+   * NO `refreshAll`, unlike every other write on this screen: the defaults row is not in the
+   * tree and nothing drawn from the tree reads it. What a save does have to move is the
+   * dialog that wrote it, and that dialog re-reads them itself — a tree read here would be a
+   * round trip that changes nothing on screen.
+   */
+  const onSaveOrgDefaults = React.useCallback(
+    async (org: string, patch: OrgDefaultsPatch) => {
+      await client.setOrgDefaults(org, patch);
+    },
+    [client],
   );
 
   // ── rail interaction ────────────────────────────────────────────────────────
@@ -899,7 +979,9 @@ function Console({
         verbs={verbs}
         busy={busy}
         connections={connections}
-        connectionsError={connectionsError}
+        // The forge, read once at the mount rather than at every opening of this dialog.
+        catalogue={catalogue}
+        onProvision={onProvision}
         // The wizard's way out to the accounts it registers against. Swapping the modal
         // rather than nesting one: they are siblings, and two stacked dialogs over a console
         // is a stack an operator has to unwind twice to get back to the tree.
@@ -907,6 +989,7 @@ function Console({
         onRegister={onRegister}
         onRemove={onRemove}
         onSaveSettings={onSaveSettings}
+        onSaveOrgDefaults={onSaveOrgDefaults}
         onImport={onImport}
       />
 

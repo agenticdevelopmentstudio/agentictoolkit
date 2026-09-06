@@ -4,7 +4,10 @@ import type {
   ForgeConnection,
   ForgeRepository,
   Group,
+  OrgDefaults,
+  OrgDefaultsPatch,
   RegisterAccepted,
+  RegisterConfigured,
   RegisterRequest,
   Repo,
   RepoPatch,
@@ -217,6 +220,50 @@ export function createShiprClient(fetcher: Fetcher, workspace?: string) {
      */
     register: (body: RegisterRequest) =>
       send<RegisterAccepted>(`${BASE}/register${ws}`, 'POST', body),
+
+    /**
+     * Write down where a repository's mirrors GO, and create nothing.
+     *
+     * The same route, `provision: false`, and 201 rather than 202: the rows are written
+     * synchronously, `registeredAt` stays null on every one of them, and no run is queued.
+     * That is the whole of what Add does now — a deployment repository created under a name
+     * nobody has looked at yet is the mistake this split exists to prevent, and it is not
+     * one an unregister undoes, because the repository on the forge stays.
+     *
+     * Provisioning it later is `run({ operation: 'register', scopeKind: 'dev_repo', ... })`,
+     * which is the identical operation the queue would have run — there is no second path.
+     */
+    configure: (body: Omit<RegisterRequest, 'provision'>) =>
+      send<RegisterConfigured>(`${BASE}/register${ws}`, 'POST', {
+        ...body,
+        provision: false,
+      }),
+
+    // --- per-org defaults --------------------------------------------------
+
+    /**
+     * What each forge org's repositories are born with — all of them, in one read.
+     *
+     * A LIST AND NOT A LOOKUP, because the org menu already shows every account the
+     * caller's installations reach: one request fills every gear icon at once, and an org
+     * nobody has configured is simply ABSENT rather than a 404 the caller has to learn to
+     * read as "unset".
+     */
+    orgDefaults: () =>
+      send<{ orgDefaults: OrgDefaults[] }>(`${BASE}/org-defaults${ws}`, 'GET'),
+
+    /**
+     * Set one org's defaults. Upsert — "the defaults for this org" is one row whether or
+     * not anybody has written it yet, so the dialog's Apply does not behave differently the
+     * second time it is pressed.
+     *
+     * IT PROVISIONS NOTHING AND CHANGES NO MIRROR THAT ALREADY EXISTS: a default is read
+     * when a mirror is BORN, so writing one re-aims the next repository and leaves every
+     * registered one where the operator put it. Applying it to the ones already there is
+     * the dialog's own walk over `updateRepo`.
+     */
+    setOrgDefaults: (org: string, body: OrgDefaultsPatch) =>
+      send<OrgDefaults>(`${BASE}/org-defaults/${seg(org)}${ws}`, 'PUT', body),
 
     /**
      * The toolbar, as one call: an operation and a scope.

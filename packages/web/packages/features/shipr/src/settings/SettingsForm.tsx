@@ -5,7 +5,12 @@ import * as React from 'react';
 import { Button } from '@agenticdevelopertoolkit/ui/components/button';
 import { Checkbox } from '@agenticdevelopertoolkit/ui/components/checkbox';
 import { ErrorText } from '@agenticdevelopertoolkit/ui/components/error-text';
+import { Input } from '@agenticdevelopertoolkit/ui/components/input';
+import { Label } from '@agenticdevelopertoolkit/ui/components/label';
+import { Select } from '@agenticdevelopertoolkit/ui/components/select';
 
+import { Existence, nameOf, ownerOf } from '../forge/existence';
+import type { ForgeCatalogue } from '../forge/useForgeCatalogue';
 import { useSubmit } from '../toolbar/dialogs';
 import { repoLabel, shardLabel } from '../tree/toLevels';
 import type { Descendant } from '../tree/levels';
@@ -59,6 +64,21 @@ import {
 export interface RepoSettingsPatch {
   repoId: string;
   envBranches?: Partial<Record<Environment, string>>;
+  /**
+   * Where the mirror goes — `owner/name`, the whole thing.
+   *
+   * Accepted only while that mirror is unprovisioned; the server answers 409 afterwards,
+   * because re-pointing a live mirror strands its ladder and its history on a repository
+   * nothing now names. So the form offers the fields only up to that moment.
+   */
+  slug?: string;
+  /**
+   * The SOURCE repository's label, carried on a mirror because a mirror is the only thing
+   * this console has an id for. Null clears it, and a cleared label is not the same as one
+   * set to the slug: null means no opinion, and every reader falls back to the slug on its
+   * own, which keeps working when the repository is renamed.
+   */
+  displayName?: string | null;
 }
 
 export type SettingsTarget =
@@ -137,26 +157,12 @@ function RepoFacts({ repo }: { repo: RepoItem }): React.ReactElement {
 
 /** The SOURCE repository's own block. Not the mirror's: nothing here is cut, everything
  *  here is what the mirrors are cut FROM. */
-function DevRepoFacts({
-  devRepo,
-  mirrors,
-}: {
-  devRepo: DevRepo;
-  mirrors: readonly RepoItem[];
-}): React.ReactElement {
+function DevRepoFacts({ devRepo }: { devRepo: DevRepo }): React.ReactElement {
   return (
     <Facts>
       <Fact name="repository" value={devRepo.slug} />
       <Fact name="main" value={devRepo.mainBranch} />
       <Fact name="prepared" value={devRepo.preparedBranch} />
-      <Fact
-        name="mirrors"
-        value={mirrors.length === 1 ? '1' : String(mirrors.length)}
-      />
-      {/* The sha of the `.shipr` the last run read. It answers "is the console looking at
-          the file I just committed", which is the one question a stale declaration makes
-          people ask. */}
-      <Fact name="declaration" value={devRepo.declarationSha ?? 'never read'} />
     </Facts>
   );
 }
@@ -195,6 +201,96 @@ function ContentsList({
   );
 }
 
+/**
+ * WHERE ONE MIRROR GOES, and whether it is already there.
+ *
+ * This is the screen the Add wizard used to be. Add now writes the rows and creates nothing,
+ * so the org and the name are set HERE — beside the repository they belong to, with
+ * {@link Existence} under them saying what the forge actually holds, and with Provision the
+ * separate press that acts on it. That ordering is the entire point: the deployment
+ * repository is the one setting whose default can create a repository in somebody else's
+ * organization, and it is now read and corrected before anything is queued rather than
+ * discovered from a failed run.
+ *
+ * ONCE PROVISIONED IT IS READ-ONLY. `PATCH /shipr/repos/:id` answers 409 on a `slug` for a
+ * mirror with a `registeredAt`, and a control whose value the server refuses is worse than no
+ * control.
+ */
+function DeploymentTarget({
+  mirror,
+  draft,
+  catalogue,
+  onChange,
+}: {
+  mirror: RepoItem;
+  draft: { owner: string; name: string };
+  catalogue: ForgeCatalogue | undefined;
+  onChange: (next: { owner: string; name: string }) => void;
+}): React.ReactElement {
+  const slug = `${draft.owner}/${draft.name.trim()}`;
+
+  /**
+   * The org menu's options: every account shipr reaches, plus whatever is currently
+   * selected. The second is not padding — a mirror can already name an account shipr holds
+   * no installation on, which is the case worth showing most of all, and a menu that
+   * silently dropped it would answer the question by hiding it.
+   */
+  const orgs = React.useMemo(
+    () =>
+      [...new Set([...(catalogue?.orgs ?? []).map((o) => o.login), draft.owner])]
+        .filter(Boolean)
+        .sort(),
+    [catalogue, draft.owner],
+  );
+
+  if (mirror.registeredAt) {
+    return (
+      <div className="flex flex-col gap-1">
+        {mirror.shard ? <Label>{mirror.shard}</Label> : null}
+        <p className="text-sm text-apt-text-muted">
+          Deploys to <span className="font-mono text-apt-text">{mirror.slug}</span>, provisioned{' '}
+          {mirror.registeredAt}. Where a live mirror points is not editable.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {mirror.shard ? <Label>{mirror.shard}</Label> : null}
+      <div className="flex flex-col gap-1">
+        <Label htmlFor={`shipr-deploy-owner-${mirror.id}`}>Deployment organization</Label>
+        <Select
+          id={`shipr-deploy-owner-${mirror.id}`}
+          aria-label="Deployment organization"
+          value={draft.owner}
+          onChange={(e) => onChange({ ...draft, owner: e.target.value })}
+        >
+          {orgs.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <Label htmlFor={`shipr-deploy-name-${mirror.id}`}>Deployment repository</Label>
+        <Input
+          id={`shipr-deploy-name-${mirror.id}`}
+          aria-label="Deployment repository"
+          value={draft.name}
+          onChange={(e) => onChange({ ...draft, name: e.target.value })}
+        />
+      </div>
+      {draft.name.trim() === '' ? (
+        <p className="text-sm text-apt-orange">A deployment repository needs a name.</p>
+      ) : catalogue ? (
+        <Existence slug={slug} catalogue={catalogue} />
+      ) : null}
+    </div>
+  );
+}
+
 export interface SettingsFormProps {
   /** Null draws nothing but the frame — a pane with no row selected. */
   target: SettingsTarget | null;
@@ -215,6 +311,20 @@ export interface SettingsFormProps {
    *  them is the cancel. */
   cancel?: React.ReactNode;
   /**
+   * Every account and every repository shipr can reach.
+   *
+   * Optional because the two hosts differ: the Configure dialog holds it, the rail's gear
+   * modal does not. Without it the deployment fields still edit — the org menu falls back to
+   * what the mirror already names — and only the existence line, which is the part that
+   * needs the grants, is left unsaid rather than guessed at.
+   */
+  catalogue?: ForgeCatalogue;
+  /**
+   * GO AND MAKE IT. Absent, the button is not drawn — a host with no way to run the
+   * operation must not offer it.
+   */
+  onProvision?: (devRepoId: string) => Promise<void> | void;
+  /**
    * The id to hang on the `<form>`, so a button OUTSIDE it can submit it with `form=`.
    *
    * Given, this draws NO buttons of its own: the host's button is the Save, and two Saves
@@ -229,12 +339,72 @@ export interface SettingsFormProps {
   formId?: string;
 }
 
+/**
+ * THE ONE PRESS THAT TOUCHES THE FORGE. Everything else on this form writes a row.
+ *
+ * PROVISION AND DOCTOR ARE THE SAME REQUEST — `POST /shipr/runs` with `register` against
+ * this dev repo — and the same run: `register` adopts what is already there rather than
+ * rebuilding it, so re-running it on a live pipeline repairs the parts that drifted. Only
+ * the LABEL differs, off `registeredAt`, because "Provision" on something already
+ * provisioned reads like a second one is about to be made.
+ *
+ * It refuses while there are unsaved changes rather than saving them for you: provisioning
+ * acts on what the server holds, and a press that silently wrote three fields and then
+ * created a repository from them is the failure mode this whole configure-then-provision
+ * split exists to prevent.
+ */
+function ProvisionButton({
+  devRepo,
+  mirrors,
+  unsaved,
+  onProvision,
+}: {
+  devRepo: DevRepo;
+  mirrors: readonly RepoItem[];
+  unsaved: boolean;
+  onProvision: (devRepoId: string) => Promise<void> | void;
+}): React.ReactElement {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const provisioned = mirrors.length > 0 && mirrors.every((m) => m.registeredAt !== null);
+
+  return (
+    <div className="flex flex-col gap-1 border-t border-apt-border pt-3">
+      <div className="flex items-center gap-3">
+        <Button
+          type="button"
+          disabled={busy || unsaved || mirrors.length === 0}
+          onClick={() => {
+            setBusy(true);
+            setError(null);
+            void Promise.resolve(onProvision(devRepo.id))
+              .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? 'Starting…' : provisioned ? 'Doctor' : 'Provision'}
+        </Button>
+        <span className="text-xs text-apt-text-muted">
+          {unsaved
+            ? 'Save the changes above first — provisioning acts on what is stored.'
+            : provisioned
+              ? 'Re-runs the registration against what is already there, and repairs what drifted.'
+              : 'Creates the deployment repositories named above and starts the pipeline.'}
+        </span>
+      </div>
+      <ErrorText error={error} />
+    </div>
+  );
+}
+
 export function SettingsForm({
   target,
   active = true,
   onSave,
   onSaved,
   cancel,
+  catalogue,
+  onProvision,
   formId,
 }: SettingsFormProps): React.ReactElement {
   // What the boxes said when this opened. Kept beside the live flags because the diff
@@ -253,29 +423,86 @@ export function SettingsForm({
   );
 
   const [flags, setFlags] = React.useState<EnvFlags>(seed);
+
+  /** The dev repo shape, or null — every field below this line exists only on it. */
+  const dev = target?.kind === 'devRepo' ? target : null;
+
+  /** What the operator calls it. Seeded from the stored label and NOT from the slug: an
+   *  empty box means "no opinion", and pre-filling it with the slug would turn every save
+   *  into a stored copy that goes stale the moment the repository is renamed. */
+  const [displayName, setDisplayName] = React.useState('');
+  /** Where each mirror goes, split the way its two controls are, keyed by mirror id. */
+  const [deploy, setDeploy] = React.useState<
+    Record<string, { owner: string; name: string }>
+  >({});
+
+  const deploySeed = React.useMemo(() => {
+    const next: Record<string, { owner: string; name: string }> = {};
+    for (const mirror of dev?.mirrors ?? []) {
+      next[mirror.id] = { owner: ownerOf(mirror.slug), name: nameOf(mirror.slug) };
+    }
+    return next;
+  }, [dev]);
+
   // Re-seed on OPEN and on a change of target, never on every render: a parent that
   // re-renders while a box is ticked must not untick it.
   React.useEffect(() => {
-    if (active) setFlags(seed);
-  }, [active, seed]);
+    if (!active) return;
+    setFlags(seed);
+    setDisplayName(dev?.devRepo.displayName ?? '');
+    setDeploy(deploySeed);
+  }, [active, seed, dev, deploySeed]);
 
   const touched = changed(seed, flags);
 
+  /**
+   * ONE PATCH PER REPOSITORY, however many fields moved.
+   *
+   * The three answers this form collects land on different tables and, for the label, on a
+   * different row entirely — but they are all `PATCH /shipr/repos/:id`, so a mirror whose
+   * environments and whose slug both changed is one request, not two racing each other.
+   */
   const patches = React.useMemo<RepoSettingsPatch[]>(() => {
-    if (touched.length === 0) return [];
-    return (
-      repos
-        // Dropped again if THIS repository was already the way the boxes say — a folder of
+    const byId = new Map<string, RepoSettingsPatch>();
+    const at = (id: string) => {
+      const found = byId.get(id);
+      if (found) return found;
+      const made: RepoSettingsPatch = { repoId: id };
+      byId.set(id, made);
+      return made;
+    };
+
+    if (touched.length > 0) {
+      for (const repo of repos) {
+        const envBranches = applyFlags(repo.envBranches, flags, touched);
+        // Dropped if THIS repository was already the way the boxes say — a folder of
         // eleven where one already reads that way is ten writes, not eleven.
-        .filter(
-          (repo) => !isUnchanged(repo.envBranches, applyFlags(repo.envBranches, flags, touched)),
-        )
-        .map((repo) => ({
-          repoId: repo.id,
-          envBranches: applyFlags(repo.envBranches, flags, touched),
-        }))
-    );
-  }, [repos, flags, touched]);
+        if (!isUnchanged(repo.envBranches, envBranches)) at(repo.id).envBranches = envBranches;
+      }
+    }
+
+    if (dev) {
+      const stored = dev.devRepo.displayName ?? '';
+      const anchor = dev.mirrors[0];
+      // THE LABEL RIDES ON ANY MIRROR: it belongs to the dev repo, and a mirror id is the
+      // only id this route takes. Sending it once, on the first, is what keeps eleven
+      // shards from writing one column eleven times.
+      if (anchor && displayName.trim() !== stored) {
+        at(anchor.id).displayName = displayName.trim() === '' ? null : displayName.trim();
+      }
+      for (const mirror of dev.mirrors) {
+        // 409 once it is live — the form does not offer the fields, so this only guards
+        // against a stale draft left behind by a provision that landed under it.
+        if (mirror.registeredAt) continue;
+        const draft = deploy[mirror.id];
+        if (!draft || draft.name.trim() === '') continue;
+        const slug = `${draft.owner}/${draft.name.trim()}`;
+        if (slug !== mirror.slug) at(mirror.id).slug = slug;
+      }
+    }
+
+    return [...byId.values()];
+  }, [repos, flags, touched, dev, displayName, deploy]);
 
   const submit = React.useCallback(
     () => (patches.length === 0 ? Promise.resolve() : onSave(patches)),
@@ -299,13 +526,49 @@ export function SettingsForm({
           contents={target.contents}
           emptyLabel="Nothing is filed in this folder yet."
         />
-      ) : target ? (
+      ) : dev ? (
         <>
-          <DevRepoFacts devRepo={target.devRepo} mirrors={target.mirrors} />
-          <ContentsList
-            contents={target.mirrors.map((repo) => ({ repo, relativePath: '' }))}
-            emptyLabel="No deployment repositories yet — registering creates them."
-          />
+          <DevRepoFacts devRepo={dev.devRepo} />
+
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="shipr-display-name">Name</Label>
+            <Input
+              id="shipr-display-name"
+              aria-label="Name"
+              placeholder={dev.devRepo.slug}
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+            />
+            {/* A LABEL AND NOTHING MORE. Said out loud because a field beside a slug reads
+                like a rename, and one that renamed the repository would be a very
+                expensive misunderstanding. */}
+            <p className="text-xs text-apt-text-muted">
+              What this is called on the home page. Empty shows{' '}
+              <span className="font-mono">{dev.devRepo.slug}</span>; nothing on the forge is
+              renamed either way.
+            </p>
+          </div>
+
+          <fieldset className="flex flex-col gap-3">
+            <legend className="pb-1 text-xs font-semibold text-apt-text-muted">
+              Deployment
+            </legend>
+            {dev.mirrors.length === 0 ? (
+              <p className="text-sm text-apt-text-muted">
+                No deployment repository is configured for this repository yet.
+              </p>
+            ) : (
+              dev.mirrors.map((mirror) => (
+                <DeploymentTarget
+                  key={mirror.id}
+                  mirror={mirror}
+                  draft={deploy[mirror.id] ?? { owner: ownerOf(mirror.slug), name: nameOf(mirror.slug) }}
+                  catalogue={catalogue}
+                  onChange={(next) => setDeploy((prev) => ({ ...prev, [mirror.id]: next }))}
+                />
+              ))
+            )}
+          </fieldset>
         </>
       ) : null}
 
@@ -335,6 +598,15 @@ export function SettingsForm({
           </label>
         ))}
       </fieldset>
+
+      {dev && onProvision ? (
+        <ProvisionButton
+          devRepo={dev.devRepo}
+          mirrors={dev.mirrors}
+          unsaved={patches.length > 0}
+          onProvision={onProvision}
+        />
+      ) : null}
 
       <ErrorText error={error} />
       {/* The error stays, the buttons go: a host that submits this from outside still needs
