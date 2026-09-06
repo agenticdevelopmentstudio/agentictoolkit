@@ -9,13 +9,32 @@ import Foundation
 /// so there is exactly one formatter and everything goes through it.
 public enum MarkdownTimestamp {
 
+    /// Serialises every use of the two formatters below.
+    ///
+    /// `ISO8601DateFormatter` publishes **no** thread-safety guarantee —
+    /// unlike `DateFormatter`, which Apple documents as thread-safe on macOS
+    /// 10.9 and later — and `string(from:)`/`date(from:)` are not obviously
+    /// read-only: `NSFormatter` subclasses are free to cache internally, and
+    /// these two statics are reachable from `MarkdownStore`'s *concurrent*
+    /// read path (`BoundedDatabase.read` runs on a pool), so two readers can
+    /// be inside one formatter at the same instant.
+    ///
+    /// The previous comment asserted the safety property instead of
+    /// establishing it, which is the thing `nonisolated(unsafe)` cannot do for
+    /// you. The lock establishes it. The annotation stays because the language
+    /// requires it for a global of non-`Sendable` type, not because it is
+    /// carrying the argument.
+    ///
+    /// A lock rather than a per-call formatter because
+    /// `ISO8601DateFormatter()` is expensive relative to the work — every
+    /// timestamp written or read by this store goes through here — and rather
+    /// than `Mutex`, which needs macOS 15 and this framework deploys to 14.
+    private static let formatterLock = NSLock()
+
     /// Writes with milliseconds, so two edits inside the same second still
     /// order. `withInternetDateTime` supplies the explicit `Z`.
     ///
-    /// `ISO8601DateFormatter` isn't `Sendable`, but a formatter that is
-    /// configured once at init and only ever read from (`string(from:)`,
-    /// `date(from:)`) afterward has no mutable state a concurrent caller can
-    /// race on.
+    /// Never touched outside `formatterLock`.
     nonisolated(unsafe) private static let writer: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -25,6 +44,8 @@ public enum MarkdownTimestamp {
 
     /// A server row may or may not carry fractional seconds, so reading tries
     /// both. Writing never has that ambiguity.
+    ///
+    /// Never touched outside `formatterLock`.
     nonisolated(unsafe) private static let readerWithoutFraction: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
@@ -33,7 +54,7 @@ public enum MarkdownTimestamp {
     }()
 
     public static func string(_ date: Date) -> String {
-        writer.string(from: date)
+        formatterLock.withLock { writer.string(from: date) }
     }
 
     /// Both formatters, then one repair pass.
@@ -54,8 +75,13 @@ public enum MarkdownTimestamp {
         return parse(repaired)
     }
 
+    /// `isoForm(of:)` deliberately runs *outside* the lock — it touches only
+    /// `postgresForm`, which `NSRegularExpression` documents as thread-safe —
+    /// so `date(_:)`'s two calls here never nest.
     private static func parse(_ text: String) -> Date? {
-        writer.date(from: text) ?? readerWithoutFraction.date(from: text)
+        formatterLock.withLock {
+            writer.date(from: text) ?? readerWithoutFraction.date(from: text)
+        }
     }
 
     /// `^(date)[ T](time)(.fraction)?(zone)?$`, with the zone in any of the

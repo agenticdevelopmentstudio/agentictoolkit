@@ -18,12 +18,21 @@ public struct GRDBSyncStoreStatus: Codable, Sendable {
 /// preserving the outbox and the file; purgeForIdentityChange additionally
 /// clears the outbox — see its doc comment for why — but still never touches
 /// the file).
+///
+/// `@unchecked Sendable` because `SyncStore` is a `Sendable` protocol and this
+/// type is shared across tasks. The property it asserts is established, not
+/// assumed: every stored property is a `let`, and each is either itself
+/// `Sendable` (`DispatchQueue`, `Set<String>`, the projection) or serialises
+/// its own concurrent use (`BoundedDatabase`'s WAL pool). It used to hold two
+/// more — a shared `JSONEncoder` and `JSONDecoder`. Neither publishes any
+/// thread-safety guarantee, and both were reachable from `read`, which runs on
+/// a *pool*: two readers could be inside one decoder at the same instant. They
+/// are built per call now, at the four sites that need them, which costs
+/// nothing next to the disk access each one is part of.
 public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
 
     private let boundedDatabase: BoundedDatabase
     private let queue = DispatchQueue(label: "GRDBSyncStore")
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
     /// Resources this host may pull but never push. `stage(_:)` refuses them
     /// up front with `SyncStoreFailure.pullOnlyResource` (twin of
     /// `InMemorySyncStore.pullOnlyResources`).
@@ -177,7 +186,9 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
 
     public func apply(_ batch: [SyncChange], advancingTo cursor: SyncCursor?) async throws {
         let store = self
-        let encoder = self.encoder
+        // Built here, not held. See the note on this type's `@unchecked
+        // Sendable` conformance.
+        let encoder = JSONEncoder()
         try await onQueue {
             try store.boundedDatabase.write { conn in
                 for change in batch {
@@ -302,6 +313,10 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
         guard isKnown else {
             throw SyncStoreFailure.unknownResource(mutation.resource)
         }
+        // Built here, not held. See the note on this type's `@unchecked
+        // Sendable` conformance.
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
 
         let base: Int?
         if let projection = projection(for: mutation.resource) {
@@ -389,7 +404,9 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     /// opIds on retry is the server contract's idempotency guarantee.
     public func pendingOps(limit: Int) async throws -> [SyncPushOp] {
         let boundedDatabase = self.boundedDatabase
-        let decoder = self.decoder
+        // Built here, not held. See the note on this type's `@unchecked
+        // Sendable` conformance.
+        let decoder = JSONDecoder()
         return try await onQueue {
             try boundedDatabase.write { conn in
                 let rows = try Row.fetchAll(
@@ -670,6 +687,9 @@ public final class GRDBSyncStore: SyncStore, @unchecked Sendable {
     }
 
     private func materialize(_ row: Row) throws -> [String: JSONValue] {
+        // Built here, not held. See the note on this type's `@unchecked
+        // Sendable` conformance.
+        let decoder = JSONDecoder()
         var object = try ((row["data"] as String?)?.data(using: .utf8))
             .map { try decoder.decode([String: JSONValue].self, from: $0) } ?? [:]
         object["id"] = .string(row["id"])
