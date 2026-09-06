@@ -3,17 +3,24 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RegisterWizard } from '../toolbar/RegisterWizard';
-import type { ForgeConnection, RegisterRequest } from '../types';
+import type { DeclarationResponse, ForgeConnection, RegisterRequest } from '../types';
 
 /**
- * Register, as ONE question: which repository?
+ * Register, as TWO questions: which repository, and where does its mirror go?
  *
- * What is pinned here is mostly what the screen NO LONGER ASKS. It was three steps and seven
- * fields — an installation, a folder, a main branch, a prepared branch, a deployment owner and
- * name, and a confirmation of all of it — and every one of those has an answer that is
- * derivable here or on the server. Deleting a question is only safe if the answer it used to
- * collect still reaches the request, so each of the four that still matter is asserted on the
+ * Most of what is pinned here is still what the screen NO LONGER ASKS. It was three steps and
+ * seven fields — an installation, a folder, a main branch, a prepared branch, a deployment owner
+ * and name, and a confirmation of all of it — and all but the deployment repository have an
+ * answer that is derivable here or on the server. Deleting a question is only safe if the answer
+ * it used to collect still reaches the request, so each one that still matters is asserted on the
  * body `onSubmit` receives rather than on a control.
+ *
+ * THE DEPLOYMENT REPOSITORY CAME BACK, and it is the exception that proves the rule: it is not
+ * derivable, because it decides whether registering CREATES a repository in somebody else's
+ * organization. Deriving it silently is what produced
+ * `POST /orgs/DeploymentRepos/repos — 403: Resource not accessible by integration`, minutes into
+ * a run, from a screen that had asked nothing. So it is a second screen, with three facts on it
+ * and the same two buttons.
  *
  * The keyboard half is pinned for the same reason it exists: this is not a modal, it renders
  * inside the Configure dialog's pane, so an Escape that escaped would close the dialog too.
@@ -57,6 +64,11 @@ function draw(
     refreshError?: string;
     connections?: ForgeConnection[];
     connectionsError?: string;
+    /** What the dev repo's committed `.shipr` says. The default is the ordinary case: it
+     *  declares nothing, so the server hands back the slug it would fall back to. */
+    declaration?: DeclarationResponse;
+    /** The declaration read REFUSES. The second screen still has to be usable. */
+    declarationError?: string;
   } = {},
 ) {
   // One installation grants the list by default and the other grants nothing, because that is
@@ -74,6 +86,15 @@ function draw(
           repositories: over.refreshed ?? granted[id] ?? [],
           readAt: READ_AT,
         })),
+    // `fallbackSlug` is the SERVER's answer, and the fake keeps it that way — derived from the
+    // slug it was asked about rather than from a convention the test spells. A fixture that hard
+    // coded one name would pass just as happily against a wizard that ignored the response.
+    connectionDeclaration: over.declarationError
+      ? vi.fn().mockRejectedValue(new Error(over.declarationError))
+      : vi.fn().mockImplementation(
+          async (_id: string, slug: string): Promise<DeclarationResponse> =>
+            over.declaration ?? { deployments: null, fallbackSlug: `${slug}-deployment` },
+        ),
   };
   const onSubmit = over.onSubmit ?? vi.fn().mockResolvedValue(undefined);
   const onClose = over.onClose ?? vi.fn();
@@ -98,6 +119,19 @@ const repoList = () => screen.getByRole('list', { name: 'Repositories' });
 const orgMenu = () => screen.getByLabelText('Organization') as HTMLSelectElement;
 const ok = () => screen.getByRole('button', { name: 'OK' });
 
+/**
+ * Pick a repository and press OK — i.e. arrive on the deployment screen.
+ *
+ * Every assertion about the request body goes through here now, and that is the point: the two
+ * OKs are two answers, and a test that could reach `onSubmit` with one of them would be pinning
+ * a flow where the deployment repository is still being guessed.
+ */
+async function pick(slug: string): Promise<void> {
+  await userEvent.click(await screen.findByRole('button', { name: slug }));
+  await userEvent.click(ok());
+  await screen.findByLabelText('Deployment repository');
+}
+
 describe('RegisterWizard — the screen asks one question', () => {
   it('offers OK and Cancel, and nothing else to press through', async () => {
     // Back, Next and Register were three buttons for a job with one decision in it. The whole
@@ -111,14 +145,23 @@ describe('RegisterWizard — the screen asks one question', () => {
     }
   });
 
-  it('asks for no folder, no branches and no deployment repository', async () => {
-    // Four fields deleted, and each one's answer still reaches the request — see the
+  it('asks for no folder and no branches, here or anywhere', async () => {
+    // Three fields deleted for good, and each one's answer still reaches the request — see the
     // `onSubmit` assertions below. What is asserted here is only that nobody is asked.
     draw();
     await screen.findByRole('button', { name: 'acme/site' });
-    for (const label of ['Folder', 'Main branch', 'Prepared branch', 'Name']) {
+    for (const label of ['Folder', 'Main branch', 'Prepared branch']) {
       expect(screen.queryByLabelText(label)).toBeNull();
     }
+  });
+
+  it('keeps the deployment repository off the screen that picks the repository', async () => {
+    // It is asked, but not HERE. The picker is a list you scan; hanging three deployment facts
+    // beside it is what made the list the loser every time this was one pane.
+    draw();
+    await screen.findByRole('button', { name: 'acme/site' });
+    expect(screen.queryByLabelText('Deployment repository')).toBeNull();
+    expect(screen.queryByLabelText('Deployment organization')).toBeNull();
   });
 
   it('pins OK and Cancel to the bottom, and lets the list have the rest', async () => {
@@ -334,13 +377,15 @@ describe('RegisterWizard — what the pick answers', () => {
         c2: [{ slug: 'sandbox/toys', defaultBranch: 'main', private: false }],
       },
     });
-    await userEvent.click(await screen.findByRole('button', { name: 'acme/site' }));
+    await pick('acme/site');
     await userEvent.click(ok());
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith({
         slug: 'acme/site',
         connectionId: 'c1',
         mainBranch: 'trunk',
+        deploymentOwner: 'acme',
+        deploymentName: 'site-deployment',
       }),
     );
   });
@@ -354,13 +399,15 @@ describe('RegisterWizard — what the pick answers', () => {
     });
     await screen.findByRole('button', { name: 'acme/site' });
     await userEvent.selectOptions(orgMenu(), 'sandbox');
-    await userEvent.click(screen.getByRole('button', { name: 'sandbox/toys' }));
+    await pick('sandbox/toys');
     await userEvent.click(ok());
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith({
         slug: 'sandbox/toys',
         connectionId: 'c2',
         mainBranch: 'main',
+        deploymentOwner: 'sandbox',
+        deploymentName: 'toys-deployment',
       }),
     );
   });
@@ -374,12 +421,21 @@ describe('RegisterWizard — what the pick answers', () => {
  * list with it — the operator asked to leave one screen, not two.
  */
 describe('RegisterWizard — the keyboard', () => {
-  it('submits on Enter once a repository is picked', async () => {
+  it('advances on Enter once a repository is picked, and submits on the next one', async () => {
     const user = userEvent.setup();
     const { onSubmit } = draw();
     await user.click(await screen.findByRole('button', { name: 'acme/site' }));
     // Focus is on OK by now — the pick moves it there, which is what makes Enter mean OK.
     expect(document.activeElement).toBe(ok());
+    await user.keyboard('{Enter}');
+
+    // Enter commits the screen that is up, so the first one is the pick, not the register.
+    await screen.findByLabelText('Deployment repository');
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // And focus follows onto the second screen's OK, so the second Enter is the register —
+    // without a reach for the mouse in between.
+    await waitFor(() => expect(document.activeElement).toBe(ok()));
     await user.keyboard('{Enter}');
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
   });
@@ -409,6 +465,9 @@ describe('RegisterWizard — the keyboard', () => {
             refreshConnectionRepositories: vi
               .fn()
               .mockResolvedValue({ repositories: REPOSITORIES, readAt: READ_AT }),
+            connectionDeclaration: vi
+              .fn()
+              .mockResolvedValue({ deployments: null, fallbackSlug: 'acme/site-deployment' }),
           }}
           connections={[CONNECTIONS[0]!]}
           onSubmit={vi.fn().mockResolvedValue(undefined)}
@@ -420,5 +479,122 @@ describe('RegisterWizard — the keyboard', () => {
     expect(onClose).toHaveBeenCalled();
     // The host Configure dialog is what would otherwise close underneath.
     expect(outer).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * WHERE THE MIRROR GOES, AND WHETHER IT IS ALREADY THERE.
+ *
+ * Three facts, and the third is the one that cost a day. A register whose deployment repository
+ * exists and a register that creates one are the same two clicks, and the difference only
+ * surfaced minutes later, inside a run, as a 403 nobody reading it would connect back to a
+ * GitHub App installation. All three are knowable before anything is queued, so all three are
+ * asserted here.
+ */
+describe('RegisterWizard — where the mirror goes', () => {
+  it('asks before it registers, seeded from the server’s own fallback', async () => {
+    // Seeded from the RESPONSE, never from a convention spelled in the console: a second copy of
+    // that rule in a second language is how a console and a workstation come to mirror the same
+    // repository to two different places.
+    const { client } = draw();
+    await pick('acme/site');
+    expect(client.connectionDeclaration).toHaveBeenCalledWith('c1', 'acme/site', 'trunk');
+    expect((screen.getByLabelText('Deployment organization') as HTMLSelectElement).value).toBe(
+      'acme',
+    );
+    expect((screen.getByLabelText('Deployment repository') as HTMLInputElement).value).toBe(
+      'site-deployment',
+    );
+  });
+
+  it('sends what the operator actually confirmed, not what was seeded', async () => {
+    const { onSubmit } = draw();
+    await pick('acme/site');
+    const name = screen.getByLabelText('Deployment repository');
+    await userEvent.clear(name);
+    await userEvent.type(name, 'site-mirror');
+    await userEvent.click(ok());
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ deploymentOwner: 'acme', deploymentName: 'site-mirror' }),
+      ),
+    );
+  });
+
+  it('says the repository is already there when an installation granted it', async () => {
+    draw({
+      byConnection: {
+        c1: [
+          { slug: 'acme/site', defaultBranch: 'trunk', private: true },
+          { slug: 'acme/site-deployment', defaultBranch: 'main', private: true },
+        ],
+      },
+    });
+    await pick('acme/site');
+    expect(await screen.findByText(/already exists/)).toBeTruthy();
+  });
+
+  it('says it does not exist yet when the account is one we can see into', async () => {
+    // `acme` HAS an installation and it did not grant `acme/site-deployment`, so absent is a
+    // fact rather than a gap — and a run creating it is the right thing to promise.
+    draw();
+    await pick('acme/site');
+    expect(await screen.findByText(/does not exist yet/)).toBeTruthy();
+  });
+
+  it('refuses to guess about an account it holds no installation on', async () => {
+    // THE THIRD STATE, which is the whole reason this screen exists. `DeploymentRepos` is not
+    // one of the two connected accounts, so an empty grant there means "cannot look", not "not
+    // there" — and collapsing the two is exactly what produced the 403.
+    draw({
+      declaration: { deployments: null, fallbackSlug: 'DeploymentRepos/site-deployment' },
+    });
+    await pick('acme/site');
+    expect(await screen.findByText(/holds no GitHub App installation on/)).toBeTruthy();
+    expect(screen.queryByText(/does not exist yet/)).toBeNull();
+  });
+
+  it('offers nothing to fill in when the .shipr already names its mirrors', async () => {
+    // The server reads the file, and the file wins. A form over a declared shard would be a
+    // control whose value is discarded on submit, which is worse than no control at all.
+    const { onSubmit } = draw({
+      declaration: {
+        deployments: [{ shard: 'all', slug: 'acme/site-deployment' }],
+        fallbackSlug: 'acme/site-deployment',
+      },
+    });
+    await userEvent.click(await screen.findByRole('button', { name: 'acme/site' }));
+    await userEvent.click(ok());
+    expect(await screen.findByText(/names its deployment repositories/)).toBeTruthy();
+    expect(screen.queryByLabelText('Deployment repository')).toBeNull();
+
+    await userEvent.click(ok());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // No deployment keys at all — the file answered, so the request must not answer again.
+    expect(onSubmit.mock.calls[0]![0]).toEqual({
+      slug: 'acme/site',
+      connectionId: 'c1',
+      mainBranch: 'trunk',
+    });
+  });
+
+  it('lets the operator name it when the file could not be read at all', async () => {
+    // A failed read is not a dead end and not a licence to guess: the fields come up EMPTY —
+    // the convention is the server's to compute — and OK stays refused until one is named.
+    const { onSubmit } = draw({ declarationError: 'installation suspended' });
+    await userEvent.click(await screen.findByRole('button', { name: 'acme/site' }));
+    await userEvent.click(ok());
+    expect(await screen.findByText(/installation suspended/)).toBeTruthy();
+    expect((screen.getByLabelText('Deployment repository') as HTMLInputElement).value).toBe('');
+    expect(ok()).toBeDisabled();
+
+    await userEvent.selectOptions(screen.getByLabelText('Deployment organization'), 'acme');
+    await userEvent.type(screen.getByLabelText('Deployment repository'), 'site-deployment');
+    await userEvent.click(ok());
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ deploymentOwner: 'acme', deploymentName: 'site-deployment' }),
+      ),
+    );
   });
 });
