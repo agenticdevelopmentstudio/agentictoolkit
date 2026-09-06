@@ -222,15 +222,17 @@ export function toolbarState(input: ToolbarInput): ToolbarState {
           ? no('There are no folders to move into yet.')
           : OK,
 
-    // Turning batch mode ON seeds it with the highlighted row, so Select genuinely acts on
-    // the selection rather than merely sitting beside it. Turning it OFF must always be
-    // possible: a mode with a disabled exit is a trap, and the ticks it holds are what every
-    // other control is pointed at.
-    select: input.selection.selecting
-      ? OK
-      : nothing
-        ? no('Highlight a row to start a batch from.')
-        : OK,
+    // ALWAYS LIVE, IN BOTH DIRECTIONS — the one entry here that is not about a selection,
+    // because it is what the operator uses to MAKE one (Mike: "batch select doesn't work").
+    // It used to want a highlighted row first, which inverted the mode: on the rail where
+    // batch matters most — several rows, none of them yet chosen — the way in was greyed
+    // out, and the reason it gave ("highlight a row first") described the state the operator
+    // had opened the menu to get out of. Turning it on with a row highlighted still seeds
+    // the batch with that row; with none, it just puts the checkboxes up empty.
+    //
+    // Turning it OFF must always be possible too: a mode with a disabled exit is a trap, and
+    // the ticks it holds are what every other control is pointed at.
+    select: OK,
 
     settings: nothing
       ? no('Select a repository or a folder first.')

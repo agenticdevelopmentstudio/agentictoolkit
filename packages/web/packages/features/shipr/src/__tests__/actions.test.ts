@@ -161,13 +161,26 @@ describe('toolbarState — the folder buttons', () => {
 });
 
 describe('toolbarState — select and settings', () => {
-  it('needs a row to start a batch from, but never traps you in one', () => {
-    expect(state().select.enabled).toBe(false);
-    expect(state().select.reason).toBe('Highlight a row to start a batch from.');
+  it('is live in every state — it is how a selection is MADE, not something it needs', () => {
+    // The defect (Mike: "batch select doesn't work"): it wanted a highlighted row first, so
+    // on a rail with nothing chosen — which is exactly when an operator reaches for batch
+    // mode — the way in was greyed out, and its reason described the state they had opened
+    // the menu to leave.
+    expect(state().select.enabled).toBe(true);
+    expect(state().select.reason).toBe('');
     expect(state({ focus: r('r1') }).select.enabled).toBe(true);
     // Batch mode with a disabled exit is a trap — Done is always live, even with
     // every tick cleared.
     expect(state({ selecting: true, checked: [] }).select.enabled).toBe(true);
+    // Not gated on permission either: it reads a client-side mode, not the workspace. Both
+    // states matter — verbs unread (`undefined`) and verbs read as nothing (`[]`).
+    const unread = toolbarState({
+      selection: EMPTY_SELECTION,
+      verbs: undefined,
+      hasGroups: true,
+    });
+    expect(unread.select.enabled).toBe(true);
+    expect(state({}, []).select.enabled).toBe(true);
   });
 
   it('opens settings for one thing at a time', () => {

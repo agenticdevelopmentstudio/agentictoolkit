@@ -72,19 +72,26 @@ describe('RailMenu — the two scopes', () => {
     expect(h.onNewGroup).toHaveBeenCalledWith('a1');
   });
 
-  it('greys the five selection verbs, each with its own reason', async () => {
+  it('greys the four selection verbs, each with its own reason', async () => {
     await open();
     for (const [label, reason] of [
       ['Delete', 'Select a folder to delete.'],
       ['Rename', 'Select a folder to rename.'],
       ['Move', 'Select something to move.'],
-      ['Batch Select', 'Highlight a row to start a batch from.'],
       ['Settings', 'Select a repository or a folder first.'],
     ] as const) {
       // The reason rides in the accessible name as well as the tooltip: a greyed row that
       // says nothing is indistinguishable from a broken one.
       expect(await entry(`${label} — ${reason}`)).toHaveAttribute('data-disabled');
     }
+  });
+
+  it('leaves Batch Select live with nothing selected — it is the way IN', async () => {
+    // The defect (Mike: "batch select doesn't work"). It was greyed here, on the rail where
+    // batch mode is most useful: several rows, none of them chosen yet. The mode is what
+    // MAKES a selection, so it cannot be gated on having one.
+    await open();
+    expect(await entry('Batch Select')).not.toHaveAttribute('data-disabled');
   });
 
   it('wakes them once a row is highlighted', async () => {
