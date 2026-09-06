@@ -22,8 +22,7 @@ public final class TerminalCoordinator: AppFeature, TerminalSessionWindowLifecyc
             MenuContribution(slot: .file, title: "New Terminal Window", order: 0, key: "t") { [weak self] in
                 self?.openNewTerminalWindow()
             },
-            MenuContribution(slot: .file, title: "New Terminal Session", order: 10, key: "n",
-                             modifiers: [.command, .shift]) { [weak self] in
+            MenuContribution(slot: .file, title: "New Terminal Session", order: 10) { [weak self] in
                 self?.openNewTerminalSession()
             },
             MenuContribution(slot: .view, title: "Toggle Sidebar", order: 0, key: "s",
@@ -33,6 +32,23 @@ public final class TerminalCoordinator: AppFeature, TerminalSessionWindowLifecyc
             MenuContribution(slot: .statusItem(section: 1), title: "New Terminal Window", order: 30) { [weak self] in
                 self?.openNewTerminalWindow()
             }
+        ]
+
+        self.newItemProviders = [
+            NewItemProvider(
+                // Unlike Notes, there is no single instance to ask: each
+                // window gets its own fresh `TerminalSessionWindowController`
+                // (see `openNewTerminalWindow()`), so the claim has to be a
+                // type check against the key window's controller rather than
+                // an identity check against a captured controller.
+                claimsKeyWindow: {
+                    NSApp.keyWindow?.windowController is TerminalSessionWindowController
+                },
+                title: { "New Terminal Session" },
+                action: { [weak self] in
+                    self?.openNewTerminalSession()
+                }
+            )
         ]
     }
 

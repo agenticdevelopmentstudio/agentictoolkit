@@ -41,12 +41,24 @@ public final class NotesCoordinator: AppFeature {
             MenuContribution(slot: .window, title: "Notes", order: 40, key: "4") { [weak self] in
                 self?.showNotesWindow()
             },
-            MenuContribution(slot: .statusItem(section: 0), title: "Notes", order: 10, key: "n") { [weak self] in
+            MenuContribution(slot: .statusItem(section: 0), title: "Notes", order: 10) { [weak self] in
                 self?.showNotesWindow()
             },
             MenuContribution(slot: .statusItem(section: 0), title: "Quick Note", order: 20) { [weak self] in
                 self?.showQuickNoteWindow()
             }
+        ]
+
+        self.newItemProviders = [
+            NewItemProvider(
+                claimsKeyWindow: { [weak self] in
+                    self?.notesWindowController.window?.isKeyWindow == true
+                },
+                title: { "New Note" },
+                action: { [weak self] in
+                    self?.notesWindowController.viewController?.createNote()
+                }
+            )
         ]
 
         self.scriptingKeys.insert("scriptingNotesVisible")

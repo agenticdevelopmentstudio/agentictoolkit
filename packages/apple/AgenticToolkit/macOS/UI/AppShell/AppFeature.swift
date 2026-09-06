@@ -15,6 +15,10 @@ open class AppFeature {
 
     public var menuContributions: [MenuContribution] = []
 
+    /// What this feature's "New" means while its window is key. Empty when
+    /// the feature has no "New" of its own. See `NewItemProvider`.
+    public var newItemProviders: [NewItemProvider] = []
+
     public var scriptingKeys = Set<String>()
 
     /// Called once per launch, after the feature has been constructed and

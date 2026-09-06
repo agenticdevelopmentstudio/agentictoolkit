@@ -497,6 +497,47 @@ public final class NotesSplitViewController: ThemedSplitViewController {
         listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: id)
     }
 
+    /// The single authoritative "make a note and show it" path: creates the
+    /// note, files it under the selected folder, refreshes the folder counts
+    /// and the list, and selects it in the editor. Distinct from
+    /// `NotesManager.createNote(content:)`, which only writes the row — this
+    /// is what every caller that also has a window means by "new note".
+    /// Callers: the list's "+" button, Cmd-N (Task 9), Import (Task 10).
+    public func createNote(content: String = "") {
+        Task { @MainActor in
+            // No id means the insert failed and the note was discarded; the
+            // sheet is already on its way, and selecting nothing is right.
+            guard let newID = await notesManager.createNote(content: content) else { return }
+            // task-8-grounding G10 (Ruling 39): a new note lands in whatever
+            // folder is selected, the way Apple Notes does — leaving it
+            // unfiled put it in the editor while the filtered list beside it
+            // excluded it, so the user typed into a note they could not see.
+            // `selectedFolderID` is empty for "All Notes", which is exactly
+            // the "leave it unfiled" case and needs no special handling.
+            if let markdownStore, !selectedFolderID.isEmpty {
+                let newDocumentID = newID.uuidString.lowercased()
+                do {
+                    try markdownStore.assignCategory(selectedFolderID, toDocument: newDocumentID)
+                } catch {
+                    Self.logger.error(
+                        """
+                        Failed to file new document \(newDocumentID, privacy: .public) \
+                        under category \(self.selectedFolderID, privacy: .public): \
+                        \(error, privacy: .public)
+                        """)
+                }
+            }
+            // Reloads unconditionally, even for "All Notes" where nothing
+            // above changed any membership: `reloadAfterFolderMembershipChange`
+            // is the one piece of knowledge shared with `duplicateSelectedNote()`,
+            // `moveSelectedNote(toFolder:)` and `performDelete(_:)`, and this is
+            // the fourth of the four call sites that need it.
+            await reloadAfterFolderMembershipChange(keepingSelectedID: newID)
+            let newNote = notesManager.notes.first(where: { $0.id == newID })
+            editorVC.show(note: newNote)
+        }
+    }
+
     // MARK: - Reload
 
     public func reload() {
@@ -581,38 +622,7 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
     }
 
     public func notesListDidRequestNewNote() {
-        Task { @MainActor in
-            // No id means the insert failed and the note was discarded; the
-            // sheet is already on its way, and selecting nothing is right.
-            guard let newID = await notesManager.createNote(content: "") else { return }
-            // task-8-grounding G10 (Ruling 39): a new note lands in whatever
-            // folder is selected, the way Apple Notes does — leaving it
-            // unfiled put it in the editor while the filtered list beside it
-            // excluded it, so the user typed into a note they could not see.
-            // `selectedFolderID` is empty for "All Notes", which is exactly
-            // the "leave it unfiled" case and needs no special handling.
-            if let markdownStore, !selectedFolderID.isEmpty {
-                let newDocumentID = newID.uuidString.lowercased()
-                do {
-                    try markdownStore.assignCategory(selectedFolderID, toDocument: newDocumentID)
-                } catch {
-                    Self.logger.error(
-                        """
-                        Failed to file new document \(newDocumentID, privacy: .public) \
-                        under category \(self.selectedFolderID, privacy: .public): \
-                        \(error, privacy: .public)
-                        """)
-                }
-            }
-            // Reloads unconditionally, even for "All Notes" where nothing
-            // above changed any membership: `reloadAfterFolderMembershipChange`
-            // is the one piece of knowledge shared with `duplicateSelectedNote()`,
-            // `moveSelectedNote(toFolder:)` and `performDelete(_:)`, and this is
-            // the fourth of the four call sites that need it.
-            await reloadAfterFolderMembershipChange(keepingSelectedID: newID)
-            let newNote = notesManager.notes.first(where: { $0.id == newID })
-            editorVC.show(note: newNote)
-        }
+        createNote()
     }
 }
 

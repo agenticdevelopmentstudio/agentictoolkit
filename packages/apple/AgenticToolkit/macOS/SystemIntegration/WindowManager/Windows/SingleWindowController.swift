@@ -21,9 +21,14 @@ import AgenticDeveloperToolkitUI
 /// }
 /// ```
 ///
-/// The window is created on the first access that triggers `loadWindow()`
-/// (e.g. `showWindow()`, reading `window`, checking `isWindowLoaded`) and
-/// reused on subsequent calls. Prefer `makeContentViewController()` — the
+/// The window is built by the first call to `showWindow(_:)`, and `window` is
+/// `nil` before then — reading it does **not** lazy-load it, despite that
+/// being AppKit's usual `NSWindowController` behavior. `init(window: nil)`
+/// leaves `isWindowLoaded` `true` even though no window exists yet, which is
+/// exactly what stops both AppKit's lazy `window` getter and the default
+/// `showWindow(_:)` from calling `loadWindow()` on their own — so this class
+/// forces that call itself, the first time `showWindow(_:)` runs. The window
+/// is reused on subsequent calls. Prefer `makeContentViewController()` — the
 /// NSViewController lifecycle fires correctly. Override `makeContentView()`
 /// if you only need an `NSView`.
 @MainActor
