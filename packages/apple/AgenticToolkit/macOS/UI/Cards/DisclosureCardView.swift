@@ -2,16 +2,18 @@ import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
 import AppKit
 
-/// A titled card that folds: a rounded surface, a one-line masthead, and
-/// whatever content is added to it.
+/// A titled card that folds: a rounded surface, a titlebar naming it, and
+/// whatever content is added under that.
 ///
-///     ┌───────────────────────────────────────────🛑─┐
-///     │ mike@example.com                           ▾ │
+///     ┌══════════════════════════════════════════🛑═┐
+///     ║ ⃝  mike@example.com                       ▾ ║
+///     ├──────────────────────────────────────────────┤
 ///     │ …content…                                    │
 ///     └──────────────────────────────────────────────┘
 ///
-///     ┌───────────────────────────────────────────🛑─┐
-///     │ me@example.com                             ▸ │
+///     ┌══════════════════════════════════════════🛑═┐
+///     ║ ⃝  me@example.com                         ▸ ║
+///     ├──────────────────────────────────────────────┤
 ///     │                        5H: 23% | 7D: 12%     │
 ///     └──────────────────────────────────────────────┘
 ///
@@ -29,6 +31,34 @@ import AppKit
 /// that had a whole second line free. Under it they each get the full width, and
 /// stacked cards still read as a column of readings under one right edge rather
 /// than starting wherever each title happened to stop.
+///
+/// ## The masthead is a bar, not the first row of the content
+///
+/// The title and its toggle sit on a strip of their own — a slightly raised
+/// fill (`elevatedSurface`) across the top of the card, ruled off from what is
+/// under it. A card is a thing with a name and a body, and drawing the name as
+/// simply the first line inside the body made a stack of them read as one long
+/// column of text in which some lines happened to be bolder: the fold's handle
+/// had to be *found* rather than looked at. A bar is found without reading.
+///
+/// It is **tighter than the body it introduces** (`titlebarInset`, half the
+/// card's own `verticalInset`). That is what makes it read as a titlebar rather
+/// than as a first row: a strip is defined by being shallower than what it caps.
+/// Its lower inset is where the bar ends, so a folded card with nothing to
+/// summarise is exactly the bar and nothing else — the card's bottom inset
+/// switches to the bar's, rather than leaving a sliver of empty surface under a
+/// one-line card.
+///
+/// The bar is a subview of the surface rather than of the card, purely so it is
+/// clipped: it runs edge to edge, and the corners it would otherwise square off
+/// are the card's rounded ones. Being inside the surface also puts it *under*
+/// the surface's border — a `CALayer` draws its border above its sublayers —
+/// which is what keeps the card's outline unbroken across the top.
+///
+/// `titleIcon` puts one SF Symbol in front of the name (a person for an
+/// account, say). It is decoration on a name that is already spoken, so it is
+/// left out of the accessibility tree: a card whose address is read out does not
+/// also need to announce that it is a card about a person.
 ///
 /// ## The standing is a corner badge, not a masthead item
 ///
@@ -137,6 +167,16 @@ public final class DisclosureCardView: NSView, Themeable {
     }
 
     private let titleField = NSTextField(labelWithString: "")
+    /// The one symbol in front of the name, when the host gave one.
+    private let titleIconView = NSImageView()
+    /// Icon and name as one piece, so the pair yields together when the line is
+    /// too narrow for them.
+    private let titleLine = NSStackView()
+    /// The strip the title and its toggle are drawn on, and the hairline that
+    /// rules it off from the body. Subviews of `surface`, so the card's rounded
+    /// corners clip the bar and the card's border draws over it.
+    private let titlebar = NSView()
+    private let titlebarRule = NSView()
     /// One quiet line under the masthead saying what the card's content means.
     private let subtitleField = NSTextField(labelWithString: "")
     /// The collapsed card's one-line stand-in for its content, on its own row
@@ -149,9 +189,15 @@ public final class DisclosureCardView: NSView, Themeable {
     private let statusIcon = NSImageView()
     private let disclosure = NSButton()
     private let content = NSStackView()
+    /// Everything under the titlebar: the folded card's summary, the subtitle,
+    /// and the content itself. Detached entirely when there is nothing in it,
+    /// which is what lets a folded card be exactly its own titlebar.
+    private let body = NSStackView()
 
     /// Accent (an identifier, an address) vs. primary text (a plain heading).
     private let titleIsAccent: Bool
+    /// The SF Symbol drawn in front of the name, if any.
+    private let titleSymbol: String?
     private let summary: [SummaryPart]
     private let status: StatusSymbol?
     private let scaledSize: CGFloat
@@ -172,6 +218,12 @@ public final class DisclosureCardView: NSView, Themeable {
     private static let borderWidth: CGFloat = 1
     private static let horizontalInset: CGFloat = 14
     private static let verticalInset: CGFloat = 12
+    /// The titlebar's own vertical inset. Deliberately half the body's: a strip
+    /// reads as a strip by being shallower than what it caps.
+    private static let titlebarInset: CGFloat = 6
+    /// Between the symbol and the name it introduces — closer than the
+    /// masthead's own gap, because the two are one piece.
+    private static let iconGap: CGFloat = 6
     /// How far a dimmed card recedes. Far enough to sort one card out of a list
     /// at a glance, not so far that the dimmed cards stop being readable.
     private static let dimmedAlpha: CGFloat = 0.55
@@ -181,10 +233,13 @@ public final class DisclosureCardView: NSView, Themeable {
 
     private let padX: CGFloat
     private let padY: CGFloat
+    /// The titlebar's vertical inset at this text size.
+    private let padTitleY: CGFloat
 
     public init(
         title: String,
         titleIsAccent: Bool,
+        titleIcon: String? = nil,
         subtitle: String? = nil,
         summary: [SummaryPart] = [],
         status: StatusSymbol? = nil,
@@ -194,12 +249,14 @@ public final class DisclosureCardView: NSView, Themeable {
         onToggle: ((Bool) -> Void)? = nil
     ) {
         self.titleIsAccent = titleIsAccent
+        self.titleSymbol = titleIcon
         self.summary = summary
         self.status = status
         self.scaledSize = scaledSize
         self.onToggle = onToggle
         self.padX = Self.padXFor(scaledSize: scaledSize)
         self.padY = ceil(Self.verticalInset * scaledSize / CGFloat(NSFont.systemFontSize))
+        self.padTitleY = ceil(Self.titlebarInset * scaledSize / CGFloat(NSFont.systemFontSize))
         super.init(frame: .zero)
         // Whole-card alpha rather than a second set of dimmed colours: the card
         // recedes complete — border, surface, content and all — and every colour
@@ -233,6 +290,8 @@ public final class DisclosureCardView: NSView, Themeable {
         configureSummary(isCollapsed: isCollapsed)
         configureStatusBadge()
         configureDisclosure(isCollapsed: isCollapsed)
+        configureTitleLine()
+        configureTitlebar()
 
         content.orientation = .vertical
         content.alignment = .width
@@ -240,37 +299,42 @@ public final class DisclosureCardView: NSView, Themeable {
         content.translatesAutoresizingMaskIntoConstraints = false
         content.isHidden = isCollapsed
 
-        // The title at the left edge, the toggle at the right — the one piece
+        // The name at the left edge, the toggle at the right — the one piece
         // every card has, so it lands in the same place on all of them.
         let header = PinnedEndsLine.make(
-            leading: titleField, trailing: disclosure,
+            leading: titleLine, trailing: disclosure,
             minimumGap: Self.mastheadGap, alignment: .centerY
         )
 
-        // Title and subtitle are one masthead, tight together, so the card's own
-        // content spacing separates the masthead from the content rather than the
-        // title from its own explanation.
-        let masthead = NSStackView()
-        masthead.orientation = .vertical
-        masthead.spacing = 2
-        masthead.translatesAutoresizingMaskIntoConstraints = false
-        masthead.addFullWidthArrangedSubview(header)
-        masthead.addFullWidthArrangedSubview(summaryField)
-        masthead.addFullWidthArrangedSubview(subtitleField)
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .width
-        stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addFullWidthArrangedSubview(masthead)
+        body.orientation = .vertical
+        body.alignment = .width
+        body.spacing = 10
+        body.translatesAutoresizingMaskIntoConstraints = false
+        body.addFullWidthArrangedSubview(summaryField)
+        body.addFullWidthArrangedSubview(subtitleField)
         // Hidden rather than left out: an `NSStackView` detaches a hidden
         // arranged view completely, so a folded card is one line tall with no
         // stray spacing under it — and, unlike leaving the content out, the card
         // can still be measured at the width it will want when it opens.
-        stack.addFullWidthArrangedSubview(content)
-        // Order is what puts the badge over the border: the surface first, the
-        // content on it, the badge last and so above both.
+        body.addFullWidthArrangedSubview(content)
+        // Nothing under the bar at all: a folded card with no summary IS its
+        // titlebar, so the body leaves the layout rather than standing there as
+        // an empty stack between two insets.
+        let bodyIsEmpty = isCollapsed && summary.isEmpty
+        body.isHidden = bodyIsEmpty
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .width
+        // The bar's own lower inset plus the body's upper one: the bar stops
+        // `padTitleY` under the header, and the body starts `padY` under that.
+        stack.spacing = padTitleY + padY
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.addFullWidthArrangedSubview(header)
+        stack.addFullWidthArrangedSubview(body)
+        // Order is what puts the badge over the border: the surface first (with
+        // the titlebar inside it, so the border draws over that too), the
+        // content on it, the badge last and so above all three.
         addSubview(surface)
         addSubview(stack)
         addSubview(statusIcon)
@@ -294,8 +358,21 @@ public final class DisclosureCardView: NSView, Themeable {
             surface.bottomAnchor.constraint(equalTo: bottomAnchor),
             surface.leadingAnchor.constraint(equalTo: leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: padY),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padY),
+            // The bar runs edge to edge and stops a tight inset under the line
+            // it carries — so its height is the header's, never the body's.
+            titlebar.topAnchor.constraint(equalTo: surface.topAnchor),
+            titlebar.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+            titlebar.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+            titlebar.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: padTitleY),
+            titlebarRule.leadingAnchor.constraint(equalTo: titlebar.leadingAnchor),
+            titlebarRule.trailingAnchor.constraint(equalTo: titlebar.trailingAnchor),
+            titlebarRule.bottomAnchor.constraint(equalTo: titlebar.bottomAnchor),
+            titlebarRule.heightAnchor.constraint(equalToConstant: Self.borderWidth),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: padTitleY),
+            // The card's own bottom inset is the BAR's whenever the bar is all
+            // there is, so a one-line card ends where the bar ends.
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor,
+                                          constant: -(bodyIsEmpty ? padTitleY : padY)),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padX),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padX),
             statusIcon.centerXAnchor.constraint(equalTo: trailingAnchor, constant: -peak),
@@ -324,6 +401,54 @@ public final class DisclosureCardView: NSView, Themeable {
         // the point: an open card is exactly as tall as it was before the
         // summary had a row of its own.
         summaryField.isHidden = summary.isEmpty || !isCollapsed
+    }
+
+    /// The symbol and the name as one piece.
+    ///
+    /// A stack rather than a third end on the masthead line: the icon and the
+    /// address are one thing that yields together, and what a masthead pins to
+    /// its ends is the name and the toggle — not the name's own punctuation.
+    /// The stack takes the field's own priorities, so the pair goes short
+    /// exactly where the address alone used to, and the symbol keeps its width
+    /// while the letters give theirs up.
+    private func configureTitleLine() {
+        titleIconView.translatesAutoresizingMaskIntoConstraints = false
+        titleIconView.imageScaling = .scaleProportionallyDown
+        titleIconView.isHidden = titleSymbol == nil
+        if let titleSymbol {
+            titleIconView.image = NSImage(
+                systemSymbolName: titleSymbol, accessibilityDescription: nil
+            )
+            titleIconView.symbolConfiguration = NSImage.SymbolConfiguration(
+                pointSize: scaledSize, weight: .regular
+            )
+        }
+        // Decoration on a name that is already spoken: a card whose address is
+        // read out does not also need to announce that it is about a person.
+        titleIconView.setAccessibilityElement(false)
+        titleIconView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        titleIconView.setContentHuggingPriority(.required, for: .horizontal)
+
+        titleLine.orientation = .horizontal
+        titleLine.alignment = .centerY
+        titleLine.spacing = Self.iconGap
+        titleLine.translatesAutoresizingMaskIntoConstraints = false
+        titleLine.addArrangedSubview(titleIconView)
+        titleLine.addArrangedSubview(titleField)
+        titleLine.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLine.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    }
+
+    /// The bar itself: a fill inside the surface, and a rule along its foot.
+    /// Both are pure background, so neither is in the accessibility tree and
+    /// neither has anything to say when the card is read.
+    private func configureTitlebar() {
+        for strip in [titlebar, titlebarRule] {
+            strip.wantsLayer = true
+            strip.translatesAutoresizingMaskIntoConstraints = false
+        }
+        surface.addSubview(titlebar)
+        titlebar.addSubview(titlebarRule)
     }
 
     /// The corner badge: this card's standing, on its top-right corner, or
@@ -445,11 +570,21 @@ public final class DisclosureCardView: NSView, Themeable {
         surface.layer?.borderWidth = Self.borderWidth
         surface.layer?.backgroundColor = palette.surfaceColor.cgColor
         surface.layer?.borderColor = palette.outlineColor.cgColor
+        // What clips the bar's square top corners to the card's round ones —
+        // and, since a layer draws its border above its sublayers, what keeps
+        // the card's outline unbroken across the strip.
+        surface.layer?.masksToBounds = true
+
+        titlebar.layer?.backgroundColor = palette.elevatedSurfaceColor.cgColor
+        titlebarRule.layer?.backgroundColor = palette.dividerColor.cgColor
 
         var titleStyle = palette.theme.typography.style(.body)
         titleStyle.weight = .semibold
         titleField.font = titleStyle.nsFont(scaledSize: scaledSize)
         titleField.textColor = titleIsAccent ? palette.accentColor : palette.primaryTextColor
+        // The symbol is part of the name, so it takes the name's colour rather
+        // than a tier of its own.
+        titleIconView.contentTintColor = titleField.textColor
 
         subtitleField.font = palette.theme.typography.style(.caption)
             .nsFont(scaledSize: scaledSize * 0.85)
@@ -461,13 +596,14 @@ public final class DisclosureCardView: NSView, Themeable {
 
         let line = Self.summaryString(summary, palette: palette, scaledSize: scaledSize)
         summaryField.attributedStringValue = line
-        // The title is measured at its full length, not at whatever the line
-        // currently affords it, so the address is truncated only by a window
-        // that cannot be any wider. Against it, not added to it: the summary has
-        // a row to itself, and the wider of the two rows is what the masthead
-        // needs.
+        // The title is measured at its full length — symbol and all, which is
+        // why the LINE is measured rather than the field — not at whatever the
+        // bar currently affords it, so the address is truncated only by a window
+        // that cannot be any wider. Against the summary, not added to it: the
+        // summary has a row to itself, and the wider of the two rows is what the
+        // masthead needs.
         mastheadWidthFloor = summary.isEmpty ? 0 : max(
-            ceil(titleField.fittingSize.width)
+            ceil(titleLine.fittingSize.width)
                 + Self.mastheadGap + ceil(disclosure.fittingSize.width),
             ceil(line.size().width)
         )

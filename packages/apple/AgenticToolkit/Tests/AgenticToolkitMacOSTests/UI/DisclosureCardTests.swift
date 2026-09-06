@@ -155,6 +155,141 @@ final class DisclosureCardTests: XCTestCase {
                        accuracy: 0.5)
     }
 
+    // MARK: - The masthead is a bar, not the first row of the content
+
+    /// The bar itself, found by position rather than by outlet: it is the one
+    /// thing inside the surface, and the surface is the one thing under the card
+    /// (the badge and the stack are added after it).
+    private func titlebar(of card: DisclosureCardView) -> NSView? {
+        card.subviews.first?.subviews.first
+    }
+
+    /// A card carrying whatever a test needs and nothing it doesn't, hosted and
+    /// laid out. `card(isCollapsed:)` above always has a summary, a standing and
+    /// content, and what the bar does when one of those is ABSENT is most of
+    /// what these tests are about.
+    private func bare(
+        isCollapsed: Bool,
+        summary: [DisclosureCardView.SummaryPart] = [],
+        titleIcon: String? = nil
+    ) -> DisclosureCardView {
+        let card = DisclosureCardView(
+            title: "mike@example.com",
+            titleIsAccent: true,
+            titleIcon: titleIcon,
+            summary: summary,
+            status: .init(
+                symbolName: "octagon.fill", colorName: "red", accessibilityLabel: "Spent"
+            ),
+            isCollapsed: isCollapsed,
+            scaledSize: 13
+        )
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 120))
+        content.widthAnchor.constraint(equalToConstant: 600).isActive = true
+        content.heightAnchor.constraint(equalToConstant: 120).isActive = true
+        card.addContent(content)
+        host(card, width: 700)
+        return card
+    }
+
+    func testTheBarCapsTheCardRatherThanFillingIt() {
+        let card = bare(isCollapsed: false)
+        guard let bar = titlebar(of: card), let name = field("mike@example.com", in: card) else {
+            return XCTFail("every card has a titlebar and a name on it")
+        }
+
+        // Edge to edge and starting at the very top: the bar is the card's own
+        // cap, which is what lets the surface's rounded corners clip it.
+        XCTAssertEqual(bar.frame.width, card.frame.width, accuracy: 0.5)
+        XCTAssertEqual(bar.frame.maxY, card.frame.height, accuracy: 0.5)
+        // The name it carries is ON it — a bar the title had outgrown would be
+        // a stripe behind nothing.
+        let line = card.convert(name.bounds, from: name)
+        XCTAssertGreaterThanOrEqual(line.minY, bar.frame.minY - 0.5)
+        XCTAssertLessThanOrEqual(line.maxY, bar.frame.maxY + 0.5)
+        // And it stops well short of the content, so it reads as a strip
+        // capping the card rather than as the card's own background.
+        XCTAssertLessThan(bar.frame.height, card.frame.height / 2)
+    }
+
+    func testAFoldedCardWithNothingToSayIsExactlyItsOwnTitlebar() {
+        // The body leaves the layout entirely rather than standing there as an
+        // empty stack between two insets — otherwise such a card ends in a
+        // sliver of bare surface under the bar, which reads as a rendering bug.
+        let card = bare(isCollapsed: true)
+        guard let bar = titlebar(of: card) else { return XCTFail("no titlebar") }
+
+        XCTAssertEqual(bar.frame.height, card.frame.height, accuracy: 0.5)
+    }
+
+    func testAFoldedCardWithASummaryStillKeepsABodyUnderItsBar() {
+        // The summary IS the body in that case, so the bar is not the whole
+        // card — the distinction the rule above turns on, and the reason it is
+        // stated as "nothing to say" rather than "folded".
+        let card = bare(
+            isCollapsed: true,
+            summary: [.init(name: "5H", value: "23%", colorName: "blue")]
+        )
+        guard let bar = titlebar(of: card) else { return XCTFail("no titlebar") }
+
+        XCTAssertLessThan(bar.frame.height, card.frame.height - 1)
+    }
+
+    func testTheSymbolInFrontOfTheNameMovesNeitherTheBadgeNorTheToggle() {
+        // The icon is nested inside the masthead's leading end, so the badge is
+        // still the card's own subview and the toggle is still pinned to the
+        // trailing edge. An icon that shifted either would have moved the one
+        // mark a stack of cards is scanned by.
+        let plain = bare(isCollapsed: false)
+        let iconed = bare(isCollapsed: false, titleIcon: "person.crop.circle")
+        guard let plainBadge = badge(of: plain), let iconedBadge = badge(of: iconed),
+              let plainToggle = toggle(of: plain), let iconedToggle = toggle(of: iconed) else {
+            return XCTFail("both cards draw a standing and a toggle")
+        }
+
+        XCTAssertEqual(iconedBadge.frame.origin.x, plainBadge.frame.origin.x, accuracy: 0.5)
+        XCTAssertEqual(iconedBadge.frame.origin.y, plainBadge.frame.origin.y, accuracy: 0.5)
+        XCTAssertEqual(iconed.convert(iconedToggle.bounds, from: iconedToggle).maxX,
+                       plain.convert(plainToggle.bounds, from: plainToggle).maxX,
+                       accuracy: 0.5)
+    }
+
+    func testTheSymbolStandsInFrontOfTheNameAndIsNotSpokenOverIt() {
+        let card = bare(isCollapsed: false, titleIcon: "person.crop.circle")
+        guard let name = field("mike@example.com", in: card), let line = name.superview else {
+            return XCTFail("a card sets its name on a line of its own")
+        }
+        guard let symbol = line.subviews.compactMap({ $0 as? NSImageView }).first else {
+            return XCTFail("no symbol on the title line")
+        }
+
+        XCTAssertFalse(symbol.isHidden, "a card given an icon draws it")
+        XCTAssertLessThanOrEqual(symbol.frame.maxX, name.frame.minX + 0.5)
+        // Decoration on a name that is already spoken: a card whose address is
+        // read out does not also need to announce that it is about a person.
+        XCTAssertFalse(symbol.isAccessibilityElement())
+    }
+
+    func testACardWithNoSymbolLeavesNoGapWhereOneWouldHaveStood() {
+        // Hidden, not merely imageless: an arranged subview of zero width still
+        // costs the stack its spacing, so every card without an icon would be
+        // indented a few points further than one with — off the icon's own
+        // leading edge, which is the alignment a stack of cards is read by.
+        let plain = bare(isCollapsed: false)
+        guard let name = field("mike@example.com", in: plain), let line = name.superview else {
+            return XCTFail("a card sets its name on a line of its own")
+        }
+        let symbol = line.subviews.compactMap { $0 as? NSImageView }.first
+
+        XCTAssertEqual(symbol?.isHidden, true, "the icon view stands hidden, not absent")
+        // Measured on the label's ALIGNMENT rect, not its frame: a text field's
+        // frame overhangs its own text by a couple of points on each side, and
+        // a stack lays out the alignment rects, so it is the alignment rect
+        // that sits flush against the line's leading edge. Against the frame
+        // this reads as a two-point negative indent that no card actually has.
+        XCTAssertEqual(name.alignmentRect(forFrame: name.frame).minX, 0, accuracy: 0.5)
+    }
+
     // MARK: - The standing is a corner badge
 
     /// The badge and the toggle, found by kind rather than by outlet — the card

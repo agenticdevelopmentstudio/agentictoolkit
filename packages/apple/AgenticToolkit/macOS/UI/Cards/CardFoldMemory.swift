@@ -83,6 +83,7 @@ public final class CardFoldMemory {
         key: String,
         title: String,
         titleIsAccent: Bool = false,
+        titleIcon: String? = nil,
         subtitle: String? = nil,
         summary: [DisclosureCardView.SummaryPart] = [],
         status: DisclosureCardView.StatusSymbol? = nil,
@@ -92,6 +93,7 @@ public final class CardFoldMemory {
         DisclosureCardView(
             title: title,
             titleIsAccent: titleIsAccent,
+            titleIcon: titleIcon,
             subtitle: subtitle,
             summary: summary,
             status: status,
