@@ -27,11 +27,11 @@ public final class NotesCoordinator: AppFeature {
         self.notesManager = manager
         self.statusItemButtonFrameProvider = statusItemButtonFrameProvider
         self.notesWindowController = NotesWindowController(notesManager: manager)
-        self.quickNoteWindowController = QuickNoteWindowController(onSave: { [weak manager] title, content in
+        self.quickNoteWindowController = QuickNoteWindowController(onSave: { [weak manager] content in
             Task { @MainActor in
                 guard let manager else { return }
                 if !manager.isLoaded { await manager.loadNotes() }
-                _ = await manager.createNote(title: title, content: content)
+                _ = await manager.createNote(content: content)
             }
         })
 

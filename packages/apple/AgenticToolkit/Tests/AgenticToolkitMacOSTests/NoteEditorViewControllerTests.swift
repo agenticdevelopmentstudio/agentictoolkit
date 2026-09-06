@@ -14,8 +14,8 @@ struct NoteEditorViewControllerTests {
         return controller
     }
 
-    private func note(title: String = "Groceries", content: String = "# Groceries\n\nMilk") -> Note {
-        Note(id: UUID(), title: title, content: content,
+    private func note(content: String = "# Groceries\n\nMilk") -> Note {
+        Note(id: UUID(), content: content,
              createdDate: Date(), modifiedDate: Date(), isPinned: false)
     }
 
@@ -61,7 +61,7 @@ struct NoteEditorViewControllerTests {
 
     @Test("quick note is edit-only — no room for a mode switcher")
     func quickNoteIsEditOnly() {
-        let controller = QuickNoteWindowController(onSave: { _, _ in })
+        let controller = QuickNoteWindowController(onSave: { _ in })
         _ = controller.window
         #expect(controller.editorController.isPreviewAvailable == false)
         #expect(controller.editorController.mode == .edit)
@@ -69,7 +69,7 @@ struct NoteEditorViewControllerTests {
 
     @Test("quick note opens at its intended size, not the container's collapsed one")
     func quickNoteOpensAtIntendedSize() {
-        let controller = QuickNoteWindowController(onSave: { _, _ in })
+        let controller = QuickNoteWindowController(onSave: { _ in })
         controller.showNearStatusItem(buttonFrame: NSRect(x: 100, y: 100, width: 20, height: 20))
         controller.window?.contentView?.layoutSubtreeIfNeeded()
         let contentSize = controller.window?.contentView?.frame.size
@@ -83,8 +83,5 @@ struct NoteEditorViewControllerTests {
 
 private final class ChangeRecorder: NoteEditorViewControllerDelegate {
     var contentChanges: [UUID] = []
-    func noteEditorDidChangeTitle(_ title: String, for id: UUID) {}
     func noteEditorDidChangeContent(_ content: String, for id: UUID) { contentChanges.append(id) }
-    func noteEditorDidRequestPin(for id: UUID) {}
-    func noteEditorDidRequestDelete(for id: UUID) {}
 }

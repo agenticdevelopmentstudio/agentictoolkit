@@ -14,19 +14,19 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// `NoteStorage` methods deliberately do not.
     public let store: MarkdownStore
 
-    /// The two frontmatter keys this class writes.
+    /// The one frontmatter key this class writes.
     ///
-    /// `title` has no ADT equivalent: adh derives it from the content and
-    /// rejects a caller's, and there is no per-client metadata column at all,
-    /// so an explicit rename lives in this key instead. `pinned` is
-    /// `MarkdownDocument.isPinned`/`setPinned(_:)` in ADT and is named here as
-    /// well because ownership below is keyed by name and needs the string.
+    /// `pinned` is `MarkdownDocument.isPinned`/`setPinned(_:)` in ADT and is
+    /// named here because ownership below is keyed by name and needs the
+    /// string. There is no `title` key any more: a note's title is
+    /// `MarkdownText.deriveTitle(content)`, the same derivation adh applies,
+    /// and this class never writes one — a hand-typed `title:` fence is read
+    /// like any other frontmatter and is never this class's to claim.
     ///
     /// The cost is real and worth naming: pinning edits `content`, so once a
     /// remote writer exists, pinning appends a version on the server. A
     /// local-only column would avoid that and then vanish on the first sync,
     /// which is worse.
-    private static let titleKey = "title"
     private static let pinnedKey = "pinned"
 
     public init(store: MarkdownStore) {
@@ -36,17 +36,18 @@ public final class MarkdownNoteStorage: NoteStorage {
     // MARK: - Ownership
     //
     // Everything below turns on one fact that the document itself cannot
-    // carry: for each of these two keys, did *this app* write it, or did the
-    // user type it?
+    // carry: for `pinned`, did *this app* write it, or did the user type it?
     //
-    // Nothing in `title: Groceries` distinguishes the two. Three separate
-    // defects came from three separate attempts to guess: a save overwrote a
-    // hand-typed `title:` because the app assumed any title it did not
-    // recognise was stale; an unpin refused to clear `pinned:` because the app
-    // could not tell its own pin from a pasted one; and a foreign `pinned:
-    // true` in a Hugo document silently pinned the note. Each was patched with
-    // its own ad-hoc guard reading the *value*, and the guards disagreed with
-    // each other, which is how the file reached the state this replaces.
+    // Nothing in `pinned: true` distinguishes the two. Two separate defects
+    // came from two separate attempts to guess: an unpin refused to clear
+    // `pinned:` because the app could not tell its own pin from a pasted one,
+    // and a foreign `pinned: true` in a Hugo document silently pinned the
+    // note. (A third, sibling defect lived on the `title` key this class used
+    // to also own — a save overwrote a hand-typed `title:` because the app
+    // assumed any title it did not recognise was stale — and is moot now that
+    // this class writes no title at all.) Each was patched with its own
+    // ad-hoc guard reading the *value*, and the guards disagreed with each
+    // other, which is how the file reached the state this replaces.
     //
     // So the fact is recorded instead of inferred.
     // `MarkdownStore.ownedFrontmatterKeys` is written in the same transaction
@@ -70,10 +71,10 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// *unquotes*, so a user's `pinned: "true"` — a YAML string, and not what
     /// this class emits — compared equal to the desired `"true"`, and the app
     /// then rewrote the line as an unquoted boolean and claimed a key it had
-    /// just taken from the user. The same held for `title: "Groceries"` and
-    /// for any value whose quoting, spacing or scalar style differed from what
-    /// `Frontmatter.setting` produces. Comparing the rendered result catches
-    /// every one of those without enumerating them.
+    /// just taken from the user. The same holds for any value whose quoting,
+    /// spacing or scalar style differs from what `Frontmatter.setting`
+    /// produces. Comparing the rendered result catches every one of those
+    /// without enumerating them.
     ///
     /// `desired` is the `FrontmatterValue` the caller is about to hand
     /// `Frontmatter.setting`, not a string, so the comparison is against the
@@ -105,14 +106,9 @@ public final class MarkdownNoteStorage: NoteStorage {
     public func insertNote(_ note: Note) throws {
         // A create claims a key only when the note's own text does not already
         // have one, so a fresh note whose hand-typed body opens with its own
-        // `title:` or `pinned:` fence keeps it, unclaimed and untouched.
+        // `pinned:` fence keeps it, unclaimed and untouched.
         var content = note.content
         var owned: Set<String> = []
-        if let desiredTitle = Self.storedTitle(for: note),
-           Frontmatter.value(Self.titleKey, in: content) == nil {
-            content = Frontmatter.setting(Self.titleKey, to: .string(desiredTitle), in: content)
-            owned.insert(Self.titleKey)
-        }
         // Only ever true for a note inserted already pinned, which the protocol
         // allows and the app never does — but it now costs one statement
         // instead of the create-then-update pair it used to take, because the
@@ -160,15 +156,9 @@ public final class MarkdownNoteStorage: NoteStorage {
             owned = []
         }
 
-        // Each desired value is built once and used twice — asked about by
+        // The desired value is built once and used twice — asked about by
         // `mayWrite` and then written by `Frontmatter.setting` — so the write
         // that is permitted is provably the write that happens.
-        let desiredTitle: FrontmatterValue? = Self.storedTitle(for: note).map { .string($0) }
-        if Self.mayWrite(Self.titleKey, as: desiredTitle, in: document.content, owned: owned) {
-            document.content = Frontmatter.setting(Self.titleKey, to: desiredTitle, in: document.content)
-            Self.claim(Self.titleKey, wrote: desiredTitle != nil, in: &owned)
-        }
-
         let desiredPin: FrontmatterValue? = note.isPinned ? .bool(true) : nil
         if Self.mayWrite(Self.pinnedKey, as: desiredPin, in: document.content, owned: owned) {
             document.content = Frontmatter.setting(Self.pinnedKey, to: desiredPin, in: document.content)
@@ -200,23 +190,12 @@ public final class MarkdownNoteStorage: NoteStorage {
     /// to appear here, `Note.id` is what has to widen.
     private static func note(from document: MarkdownDocument, owned: Set<String>) -> Note? {
         guard let id = UUID(uuidString: document.id) else { return nil }
+        // Neither `title:` nor `excerpt:` is passed here — both are `Note`
+        // properties computed from `content`, exactly as `MarkdownDocument`
+        // computes `document.title` and `document.excerpt` from its own
+        // content, and `Note.content` below is what the two derive from.
         return Note(
             id: id,
-            // `document.title` *is* `MarkdownText.deriveTitle`, and that is the
-            // point: the list must show the same string adh will recompute on
-            // its next write, whoever wrote the frontmatter.
-            //
-            // Reading `document.frontmatter[titleKey]` first — which this used
-            // to do — looks like the same order and is not. `frontmatter` comes
-            // from `Frontmatter.parse` and is every YAML value as raw,
-            // untrimmed text, whereas `deriveTitle` goes through
-            // `Frontmatter.stringValue`, which takes a key only when YAML would
-            // type it as a string. So `title: 42`, `title: [a, b]` and
-            // `title: ""` each showed here verbatim (or blank) while adh fell
-            // through to `name` or to the first body line, and the list
-            // disagreed with the column on exactly the documents where it
-            // mattered.
-            title: document.title,
             content: strippedContent(of: document, owned: owned),
             createdDate: document.createdAt,
             modifiedDate: document.updatedAt,
@@ -228,9 +207,8 @@ public final class MarkdownNoteStorage: NoteStorage {
     }
 
     /// `document.content` with the keys *we* wrote removed, and nothing else
-    /// touched — a `title:` or `pinned:` the user typed stays visible in the
-    /// editor, where it belongs, along with every other line in its original
-    /// order.
+    /// touched — a `pinned:` the user typed stays visible in the editor,
+    /// where it belongs, along with every other line in its original order.
     ///
     /// This is both what `Note.content` shows the app and (via the equality
     /// check in `updateNote`) how a save tells "nothing changed" apart from
@@ -239,16 +217,5 @@ public final class MarkdownNoteStorage: NoteStorage {
         owned.sorted().reduce(document.content) { content, key in
             Frontmatter.setting(key, to: nil, in: content)
         }
-    }
-
-    /// `nil` when `note.title` is what the content would derive on its own —
-    /// an ordinary, never-renamed note — or when it's still the app's
-    /// untitled sentinel, which is the same thing before the note has any
-    /// heading to derive from. Only an actual rename is worth a frontmatter
-    /// key and the server version it costs.
-    private static func storedTitle(for note: Note) -> String? {
-        let derived = MarkdownText.deriveTitle(note.content)
-        let isUnnamed = note.title == derived || note.title == Note.untitledTitle || note.title.isEmpty
-        return isUnnamed ? nil : note.title
     }
 }

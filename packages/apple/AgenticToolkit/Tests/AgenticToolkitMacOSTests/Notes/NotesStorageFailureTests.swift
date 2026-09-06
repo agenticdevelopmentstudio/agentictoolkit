@@ -56,7 +56,7 @@ struct ThrowingNoteStorage: NoteStorage {
 final class NotesStorageFailureTests: XCTestCase {
 
     private func note() -> Note {
-        Note(id: UUID(), title: "Groceries", content: "Milk",
+        Note(id: UUID(), content: "Milk",
              createdDate: Date(), modifiedDate: Date(), isPinned: false)
     }
 
@@ -76,7 +76,7 @@ final class NotesStorageFailureTests: XCTestCase {
         let manager = NotesManager(storage: ThrowingNoteStorage(failing: [.insert]))
         await manager.loadNotes()
 
-        let id = await manager.createNote(title: "Groceries", content: "Milk")
+        let id = await manager.createNote(content: "Milk")
 
         XCTAssertNil(id, "a note that could not be persisted is not a note")
         XCTAssertEqual(manager.storageFailure?.operation, .create)

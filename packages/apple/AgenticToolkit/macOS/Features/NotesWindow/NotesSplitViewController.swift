@@ -194,7 +194,7 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
         Task { @MainActor in
             // No id means the insert failed and the note was discarded; the
             // sheet is already on its way, and selecting nothing is right.
-            guard let newID = await notesManager.createNote(title: "", content: "") else { return }
+            guard let newID = await notesManager.createNote(content: "") else { return }
             let newNote = notesManager.notes.first(where: { $0.id == newID })
             listVC.reload(notes: notesManager.notes, keepingSelectedID: newID)
             editorVC.show(note: newNote)
@@ -206,38 +206,11 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
 
 extension NotesSplitViewController: NoteEditorViewControllerDelegate {
 
-    public func noteEditorDidChangeTitle(_ title: String, for noteID: UUID) {
-        guard let note = notesManager.notes.first(where: { $0.id == noteID }) else { return }
-        Task { @MainActor in
-            await notesManager.updateNote(note, title: title, content: note.content)
-            listVC.reload(notes: notesManager.notes, keepingSelectedID: noteID)
-        }
-    }
-
     public func noteEditorDidChangeContent(_ content: String, for noteID: UUID) {
         guard let note = notesManager.notes.first(where: { $0.id == noteID }) else { return }
         Task { @MainActor in
-            await notesManager.updateNote(note, title: note.title, content: content)
+            await notesManager.updateNote(note, content: content)
             listVC.reload(notes: notesManager.notes, keepingSelectedID: noteID)
-        }
-    }
-
-    public func noteEditorDidRequestPin(for noteID: UUID) {
-        guard let note = notesManager.notes.first(where: { $0.id == noteID }) else { return }
-        Task { @MainActor in
-            await notesManager.togglePin(note: note)
-            listVC.reload(notes: notesManager.notes, keepingSelectedID: noteID)
-            if let updated = notesManager.notes.first(where: { $0.id == noteID }) {
-                editorVC.show(note: updated)
-            }
-        }
-    }
-
-    public func noteEditorDidRequestDelete(for noteID: UUID) {
-        Task { @MainActor in
-            await notesManager.deleteNote(id: noteID)
-            listVC.reload(notes: notesManager.notes, keepingSelectedID: nil)
-            editorVC.show(note: nil)
         }
     }
 }

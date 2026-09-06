@@ -121,8 +121,8 @@ public final class NotesManager {
     /// far, which is at most a title on a brand-new note, and it is the only
     /// answer that leaves the screen telling the truth.
     @discardableResult
-    public func createNote(title: String, content: String) async -> UUID? {
-        let note = Note.new(title: title, content: content)
+    public func createNote(content: String) async -> UUID? {
+        let note = Note.new(content: content)
         do {
             try storage.insertNote(note)
         } catch {
@@ -135,12 +135,12 @@ public final class NotesManager {
         return note.id
     }
 
-    /// Updates title and content with a 1-second debounce to avoid excessive writes.
-    public func updateNote(_ note: Note, title: String, content: String) async {
+    /// Updates content with a 1-second debounce to avoid excessive writes.
+    /// Title and excerpt are derived from `content`, so nothing else here
+    /// needs to change.
+    public func updateNote(_ note: Note, content: String) async {
         guard let idx = notes.firstIndex(where: { $0.id == note.id }) else { return }
         var updated = notes[idx]
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        updated.title = trimmed.isEmpty ? Note.untitledTitle : trimmed
         updated.content = content
         updated.modifiedDate = Date()
         notes[idx] = updated

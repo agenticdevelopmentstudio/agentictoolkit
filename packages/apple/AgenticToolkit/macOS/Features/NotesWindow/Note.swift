@@ -3,22 +3,33 @@ import AgenticToolkitMarkdown
 
 public struct Note: Identifiable, Equatable, Sendable {
     public let id: UUID
-    public var title: String
     public var content: String
     public let createdDate: Date
     public var modifiedDate: Date
     public var isPinned: Bool
 
+    /// A note has no title field of its own — this is `MarkdownDocument.title`,
+    /// the same derivation adh applies: frontmatter `title`/`name` first, then
+    /// the first body line, then `untitledTitle`. Computed, not stored, so it
+    /// can never go stale against `content` between an edit and the next save.
+    public var title: String { MarkdownText.deriveTitle(content) }
+
+    /// The list preview, likewise derived rather than stored — see
+    /// `MarkdownDocument.excerpt`. Skips the line `title` came from, so a
+    /// heading used as the title never repeats itself as the first line of
+    /// the preview underneath it.
+    public var excerpt: String {
+        MarkdownText.deriveExcerpt(MarkdownText.excerptSource(content), frontmatterFrom: content)
+    }
+
     public init(
         id: UUID,
-        title: String,
         content: String,
         createdDate: Date,
         modifiedDate: Date,
         isPinned: Bool
     ) {
         self.id = id
-        self.title = title
         self.content = content
         self.createdDate = createdDate
         self.modifiedDate = modifiedDate
@@ -34,23 +45,17 @@ public struct Note: Identifiable, Equatable, Sendable {
     /// The title a note gets when nobody has named it.
     ///
     /// It *is* `MarkdownText.untitled`, not a second string that means the same
-    /// thing. Two spellings of "unnamed" is one spelling too many, and the two
-    /// met: `MarkdownText.deriveTitle` answers `"Untitled"` for a document with
-    /// no heading, `MarkdownNoteStorage.storedTitle(for:)` asks whether a note
-    /// is still unnamed by comparing against both that derivation and this
-    /// constant, and while the two differed a note titled `"Untitled"` — which
-    /// is exactly what a never-named note reads back as, since `note(from:)`
-    /// takes its title from the document — was not recognised as unnamed and
-    /// got a frontmatter `title: Untitled` written into it for nothing.
-    /// One constant, so that comparison cannot be wrong again.
+    /// thing — `MarkdownText.deriveTitle` already answers `"Untitled"` for a
+    /// document with no heading and no frontmatter title, and this is that
+    /// same constant so a comparison against it can never disagree.
     public static let untitledTitle = MarkdownText.untitled
 
-    /// Creates a new note with sane defaults. Treats empty/whitespace titles as `untitledTitle`.
-    public static func new(title: String, content: String) -> Note {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return Note(
+    /// Creates a new note with sane defaults. Title and excerpt are derived
+    /// from `content` — an empty note derives `untitledTitle`, via
+    /// `MarkdownText.deriveTitle("")`.
+    public static func new(content: String) -> Note {
+        Note(
             id: UUID(),
-            title: trimmed.isEmpty ? untitledTitle : trimmed,
             content: content,
             createdDate: Date(),
             modifiedDate: Date(),

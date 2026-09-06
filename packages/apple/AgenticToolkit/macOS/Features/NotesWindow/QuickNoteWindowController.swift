@@ -10,29 +10,11 @@ public final class QuickNoteWindowController: NSWindowController {
 
     // MARK: - Callback
 
-    /// Called when the user saves. Provides (title, content).
+    /// Called when the user saves. Provides the content.
     /// Required at init time — a silently-dropped save is a terrible UX.
-    private let onSave: (String, String) -> Void
+    private let onSave: (String) -> Void
 
     // MARK: - Views
-
-    private lazy var titleField: NSTextField = {
-        let field = NSTextField()
-        field.placeholderString = "Note title..."
-        field.bezelStyle = .roundedBezel
-        field.translatesAutoresizingMaskIntoConstraints = false
-        field.observeTheme { field, palette in
-            field.font = palette.font(.heading)
-            field.textColor = palette.primaryTextColor
-            if let placeholder = field.placeholderString {
-                field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
-                    .foregroundColor: palette.placeholderTextColor,
-                    .font: palette.font(.heading)
-                ])
-            }
-        }
-        return field
-    }()
 
     /// The window's content view controller, so the editor below is a genuine
     /// child in the view-controller hierarchy rather than an orphan whose
@@ -66,7 +48,7 @@ public final class QuickNoteWindowController: NSWindowController {
 
     // MARK: - Initialization
 
-    public init(onSave: @escaping (String, String) -> Void) {
+    public init(onSave: @escaping (String) -> Void) {
         self.onSave = onSave
 
         let contentRect = NSRect(x: 0, y: 0, width: 360, height: 260)
@@ -102,7 +84,6 @@ public final class QuickNoteWindowController: NSWindowController {
     private func setupContentView() {
         let contentView = containerController.view
 
-        contentView.addSubview(titleField)
         contentView.addSubview(editorController.view)
         contentView.addSubview(cancelButton)
         contentView.addSubview(saveButton)
@@ -110,11 +91,7 @@ public final class QuickNoteWindowController: NSWindowController {
         editorController.view.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
-            titleField.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            titleField.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            titleField.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-
-            editorController.view.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 8),
+            editorController.view.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
             editorController.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             editorController.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             editorController.view.bottomAnchor.constraint(equalTo: cancelButton.topAnchor, constant: -12),
@@ -145,7 +122,6 @@ public final class QuickNoteWindowController: NSWindowController {
 
     /// Positions near the menu bar status item button and shows the window.
     public func showNearStatusItem(buttonFrame: NSRect) {
-        titleField.stringValue = ""
         editorController.content = ""
 
         guard let window else { return }
@@ -169,20 +145,19 @@ public final class QuickNoteWindowController: NSWindowController {
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        window.makeFirstResponder(titleField)
+        window.makeFirstResponder(editorController.view)
         logger.debug("Quick note window shown")
     }
 
     // MARK: - Actions
 
     @objc private func saveAction() {
-        let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let content = editorController.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty || !content.isEmpty else {
+        guard !content.isEmpty else {
             close()
             return
         }
-        onSave(title.isEmpty ? "Quick Note" : title, content)
+        onSave(content)
         close()
     }
 

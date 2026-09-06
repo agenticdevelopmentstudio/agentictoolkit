@@ -315,10 +315,7 @@ public final class NoteListCellView: NSTableCellView {
     public func configure(with note: Note) {
         titleLabel.stringValue = note.title
         dateLabel.stringValue = Self.relativeFormatter.localizedString(for: note.modifiedDate, relativeTo: Date())
-        let preview = note.content
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespaces)
-        previewLabel.stringValue = preview.isEmpty ? "(empty)" : String(preview.prefix(60))
+        previewLabel.stringValue = note.excerpt.isEmpty ? "(empty)" : note.excerpt
         pinIndicator.isHidden = !note.isPinned
     }
 }
