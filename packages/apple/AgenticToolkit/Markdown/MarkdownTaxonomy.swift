@@ -184,6 +184,185 @@ extension MarkdownStore {
         }
     }
 
+    /// Renames a live category, throwing `MarkdownStoreError.notFound(id)` when
+    /// no live row matches — the same typed error `assignItem` raises for a
+    /// missing owner, so a caller sees one error shape for "that id is not
+    /// there" everywhere in this file.
+    public func renameCategory(_ id: String, to name: String, now: Date = Date()) throws {
+        let stamp = MarkdownTimestamp.string(now)
+        try database.write { conn in
+            try conn.execute(
+                sql: """
+                    UPDATE categories SET name = ?, updated_at = ?
+                    WHERE id = ? AND deleted_at IS NULL
+                    """,
+                arguments: [name, stamp, id])
+            guard conn.changesCount > 0 else {
+                throw MarkdownStoreError.notFound(id)
+            }
+            try syncStore.stage(LocalMutation(
+                resource: "content.categories", rowId: id, type: .upsert,
+                data: ["name": .string(name)]), in: conn)
+        }
+    }
+
+    /// Tombstones a category and everything that names it — the row itself,
+    /// then every `category_edges` row where it is a parent or a child, then
+    /// every `category_items` row that files a document under it — each with
+    /// its own staged mutation, per spec §6.1.
+    ///
+    /// Documents are rows in `markdown` and are never touched: this deletes
+    /// the folder, not the notes inside it. A no-op edge or item tombstone
+    /// (nothing left naming this category) simply stages nothing for that
+    /// statement — the same "changed nothing, stage nothing" rule as every
+    /// other writer here.
+    ///
+    /// Every staged payload here also carries the columns `categories`,
+    /// `category_edges` and `category_items` declare `NOT NULL` with no
+    /// `DEFAULT` (`name`; `parent_id`/`child_id`; `category_id`/
+    /// `target_kind`/`target_id`). `GRDBSyncStore.stage(_:in:)` routes a
+    /// known resource through `MarkdownProjection.upsert(isFullRow: false)`,
+    /// which binds only the columns a payload names (plus `created_at`/
+    /// `updated_at`, its one hard-coded exception) — a payload that omits a
+    /// column with no schema default makes the `INSERT` half of that
+    /// method's `ON CONFLICT` fail its `NOT NULL` check before the conflict
+    /// ever resolves, even though the row already exists. `createKeyword`'s
+    /// revive carries `label` for the identical reason.
+    public func deleteCategory(_ id: String, now: Date = Date()) throws {
+        let stamp = MarkdownTimestamp.string(now)
+        try database.write { conn in
+            let name = try String.fetchOne(
+                conn, sql: "SELECT name FROM categories WHERE id = ? AND deleted_at IS NULL",
+                arguments: [id])
+            guard let name else {
+                throw MarkdownStoreError.notFound(id)
+            }
+            try conn.execute(
+                sql: """
+                    UPDATE categories SET deleted_at = ?, updated_at = ?
+                    WHERE id = ? AND deleted_at IS NULL
+                    """,
+                arguments: [stamp, stamp, id])
+            try syncStore.stage(LocalMutation(
+                resource: "content.categories", rowId: id, type: .upsert,
+                data: ["name": .string(name), "deleted_at": .string(stamp)]), in: conn)
+
+            // Every edge naming this category as parent or child. Fetched
+            // before the `UPDATE` hides them, so there is something to stage
+            // for — `changesCount` alone would say how many, never which.
+            let edges = try Row.fetchAll(
+                conn,
+                sql: """
+                    SELECT id, parent_id, child_id FROM category_edges
+                    WHERE (parent_id = ? OR child_id = ?) AND deleted_at IS NULL
+                    """,
+                arguments: [id, id])
+            if !edges.isEmpty {
+                try conn.execute(
+                    sql: """
+                        UPDATE category_edges SET deleted_at = ?, updated_at = ?
+                        WHERE (parent_id = ? OR child_id = ?) AND deleted_at IS NULL
+                        """,
+                    arguments: [stamp, stamp, id, id])
+                for edge in edges {
+                    try syncStore.stage(LocalMutation(
+                        resource: "content.category_edges", rowId: edge["id"], type: .upsert,
+                        data: [
+                            "parent_id": .string(edge["parent_id"]), "child_id": .string(edge["child_id"]),
+                            "deleted_at": .string(stamp)
+                        ]), in: conn)
+                }
+            }
+
+            // Every filing of a document under this category.
+            let items = try Row.fetchAll(
+                conn,
+                sql: """
+                    SELECT id, target_kind, target_id FROM category_items
+                    WHERE category_id = ? AND deleted_at IS NULL
+                    """,
+                arguments: [id])
+            if !items.isEmpty {
+                try conn.execute(
+                    sql: """
+                        UPDATE category_items SET deleted_at = ?, updated_at = ?
+                        WHERE category_id = ? AND deleted_at IS NULL
+                        """,
+                    arguments: [stamp, stamp, id])
+                for item in items {
+                    try syncStore.stage(LocalMutation(
+                        resource: "content.category_items", rowId: item["id"], type: .upsert,
+                        data: [
+                            "category_id": .string(id), "target_kind": .string(item["target_kind"]),
+                            "target_id": .string(item["target_id"]), "deleted_at": .string(stamp)
+                        ]), in: conn)
+                }
+            }
+        }
+    }
+
+    /// Removes one `parent → child` edge. Idempotent: a caller cannot always
+    /// know whether the edge is already gone, so "remove a link that isn't
+    /// there" throws nothing and stages nothing. `parent`/`child` are already
+    /// on hand, so no extra read is needed to carry them in the staged
+    /// payload the way `deleteCategory` must (see its doc comment).
+    public func removeCategoryEdge(parent: String, child: String, now: Date = Date()) throws {
+        let stamp = MarkdownTimestamp.string(now)
+        try database.write { conn in
+            let id = try String.fetchOne(
+                conn,
+                sql: """
+                    SELECT id FROM category_edges
+                    WHERE parent_id = ? AND child_id = ? AND deleted_at IS NULL
+                    """,
+                arguments: [parent, child])
+            try conn.execute(
+                sql: """
+                    UPDATE category_edges SET deleted_at = ?, updated_at = ?
+                    WHERE parent_id = ? AND child_id = ? AND deleted_at IS NULL
+                    """,
+                arguments: [stamp, stamp, parent, child])
+            guard conn.changesCount > 0, let edgeID = id else { return }
+            try syncStore.stage(LocalMutation(
+                resource: "content.category_edges", rowId: edgeID, type: .upsert,
+                data: [
+                    "parent_id": .string(parent), "child_id": .string(child),
+                    "deleted_at": .string(stamp)
+                ]), in: conn)
+        }
+    }
+
+    /// Unfiles a document from a category, leaving both the document and the
+    /// category alone. Idempotent, like `removeCategoryEdge`: removing an
+    /// assignment that is already gone throws nothing and stages nothing.
+    /// `id`, the target kind and `documentID` are already on hand for the
+    /// same reason `removeCategoryEdge` needs no extra read.
+    public func unassignCategory(_ id: String, fromDocument documentID: String, now: Date = Date()) throws {
+        let stamp = MarkdownTimestamp.string(now)
+        try database.write { conn in
+            let itemID = try String.fetchOne(
+                conn,
+                sql: """
+                    SELECT id FROM category_items
+                    WHERE category_id = ? AND target_kind = ? AND target_id = ? AND deleted_at IS NULL
+                    """,
+                arguments: [id, Self.documentTargetKind, documentID])
+            try conn.execute(
+                sql: """
+                    UPDATE category_items SET deleted_at = ?, updated_at = ?
+                    WHERE category_id = ? AND target_kind = ? AND target_id = ? AND deleted_at IS NULL
+                    """,
+                arguments: [stamp, stamp, id, Self.documentTargetKind, documentID])
+            guard conn.changesCount > 0, let rowID = itemID else { return }
+            try syncStore.stage(LocalMutation(
+                resource: "content.category_items", rowId: rowID, type: .upsert,
+                data: [
+                    "category_id": .string(id), "target_kind": .string(Self.documentTargetKind),
+                    "target_id": .string(documentID), "deleted_at": .string(stamp)
+                ]), in: conn)
+        }
+    }
+
     // MARK: - Keywords
 
     /// Throws `MarkdownStoreError.duplicateKeyword` when a *live* keyword

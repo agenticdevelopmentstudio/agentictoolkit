@@ -230,6 +230,134 @@ struct MarkdownTaxonomyTests {
         #expect(itemOps == 1)
     }
 
+    // MARK: - Category rename, delete, unassign, edge removal
+
+    @Test("renaming a category changes its name and stages the change")
+    func renamingACategoryChangesItsNameAndStagesTheChange() throws {
+        let harness = try store()
+        let category = try harness.createCategory(name: "Groceries")
+        try harness.renameCategory(category.id, to: "Shopping")
+        #expect(try harness.categories().map(\.name) == ["Shopping"])
+        // The rename coalesces into the create's still-pending op (same
+        // resource + row id), so this is one row, not two — but its payload
+        // must carry the rename, which is the mutation actually being tested.
+        let payload = try harness.database.read { conn in
+            try String.fetchOne(
+                conn, sql: "SELECT payload FROM _sync_outbox WHERE resource = 'content.categories'")
+        }
+        #expect(payload?.contains("Shopping") == true)
+    }
+
+    @Test("deleting a category hides it from the list")
+    func deletingACategoryHidesItFromTheList() throws {
+        let harness = try store()
+        let category = try harness.createCategory(name: "Groceries")
+        try harness.deleteCategory(category.id)
+        #expect(try harness.categories().isEmpty)
+    }
+
+    @Test("deleting a category leaves its documents alone")
+    func deletingACategoryLeavesItsDocumentsAlone() throws {
+        let harness = try store()
+        let document = try harness.createDocument(content: "# Milk", markers: [.note])
+        let category = try harness.createCategory(name: "Groceries")
+        try harness.assignCategory(category.id, toDocument: document.id)
+        try harness.deleteCategory(category.id)
+        #expect(try harness.document(id: document.id) != nil)
+        #expect(try harness.categories(forDocument: document.id).isEmpty)
+    }
+
+    @Test("deleting a parent category removes its edges")
+    func deletingAParentCategoryRemovesItsEdges() throws {
+        let harness = try store()
+        let parent = try harness.createCategory(name: "Work")
+        let child = try harness.createCategory(name: "Invoices")
+        try harness.addCategoryEdge(parent: parent.id, child: child.id)
+        try harness.deleteCategory(parent.id)
+        // The child survives as a root; only the edge went.
+        #expect(try harness.categories().map(\.name) == ["Invoices"])
+        // The edge's tombstone coalesces into its own still-pending create op
+        // (same resource + row id) rather than adding a second row — but the
+        // merged payload must carry the tombstone `deleteCategory` staged.
+        let payload = try harness.database.read { conn in
+            try String.fetchOne(
+                conn, sql: "SELECT payload FROM _sync_outbox WHERE resource = 'content.category_edges'")
+        }
+        #expect(payload?.contains("deleted_at") == true)
+    }
+
+    @Test("unassigning a category leaves the document and the category")
+    func unassigningACategoryLeavesTheDocumentAndTheCategory() throws {
+        let harness = try store()
+        let document = try harness.createDocument(content: "# Milk", markers: [.note])
+        let category = try harness.createCategory(name: "Groceries")
+        try harness.assignCategory(category.id, toDocument: document.id)
+        try harness.unassignCategory(category.id, fromDocument: document.id)
+        #expect(try harness.categories(forDocument: document.id).isEmpty)
+        #expect(try harness.categories().count == 1)
+        // The unassignment coalesces into the assignment's still-pending
+        // create op (same resource + row id) rather than adding a second
+        // row — but the merged payload must carry the tombstone
+        // `unassignCategory` staged.
+        let payload = try harness.database.read { conn in
+            try String.fetchOne(
+                conn, sql: "SELECT payload FROM _sync_outbox WHERE resource = 'content.category_items'")
+        }
+        #expect(payload?.contains("deleted_at") == true)
+    }
+
+    @Test("unassigning a category that was never assigned is a no-op")
+    func unassigningANeverAssignedCategoryIsANoOp() throws {
+        let harness = try store()
+        let document = try harness.createDocument(content: "hello", markers: [])
+        let category = try harness.createCategory(name: "Groceries")
+        try harness.unassignCategory(category.id, fromDocument: document.id)
+        let itemOps = try harness.database.read { conn in
+            try Int.fetchOne(
+                conn, sql: "SELECT COUNT(*) FROM _sync_outbox WHERE resource = 'content.category_items'")
+        }
+        #expect(itemOps == 0)
+    }
+
+    @Test("removing a category edge leaves both categories")
+    func removingACategoryEdgeLeavesBothCategories() throws {
+        let harness = try store()
+        let parent = try harness.createCategory(name: "Work")
+        let child = try harness.createCategory(name: "Invoices")
+        try harness.addCategoryEdge(parent: parent.id, child: child.id)
+        try harness.removeCategoryEdge(parent: parent.id, child: child.id)
+        #expect(try harness.categories().count == 2)
+    }
+
+    @Test("removing an edge that was never added is a no-op")
+    func removingANeverAddedEdgeIsANoOp() throws {
+        let harness = try store()
+        let parent = try harness.createCategory(name: "Work")
+        let child = try harness.createCategory(name: "Invoices")
+        try harness.removeCategoryEdge(parent: parent.id, child: child.id)
+        let edgeOps = try harness.database.read { conn in
+            try Int.fetchOne(
+                conn, sql: "SELECT COUNT(*) FROM _sync_outbox WHERE resource = 'content.category_edges'")
+        }
+        #expect(edgeOps == 0)
+    }
+
+    @Test("renaming a missing category throws not found")
+    func renamingAMissingCategoryThrowsNotFound() throws {
+        let harness = try store()
+        #expect(throws: MarkdownStoreError.notFound("no-such-id")) {
+            try harness.renameCategory("no-such-id", to: "Whatever")
+        }
+    }
+
+    @Test("deleting a missing category throws not found")
+    func deletingAMissingCategoryThrowsNotFound() throws {
+        let harness = try store()
+        #expect(throws: MarkdownStoreError.notFound("no-such-id")) {
+            try harness.deleteCategory("no-such-id")
+        }
+    }
+
     // MARK: - Keyword uniqueness
 
     /// adh's `UNIQUE (customer_id, ecosystem_id, label)` is unconditional, so
