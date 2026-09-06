@@ -458,15 +458,15 @@ struct MarkdownNoteStorageTests {
         let storage = try storage()
         let note = Note.new(content: "# Groceries\n\nMilk")
         try storage.insertNote(note)
-        let stored = try storage.store.document(id: note.id.uuidString.lowercased())
-        #expect(Frontmatter.value("title", in: stored!.content) == nil)
+        let stored = try #require(try storage.store.document(id: note.id.uuidString.lowercased()))
+        #expect(Frontmatter.value("title", in: stored.content) == nil)
     }
 
     @Test @MainActor func aHandTypedTitleKeyIsHonouredAndLeftInTheEditor() throws {
         let storage = try storage()
         let note = Note.new(content: "---\ntitle: Named By Hand\n---\n\nBody")
         try storage.insertNote(note)
-        let fetched = try storage.fetchAllNotes().first!
+        let fetched = try #require(try storage.fetchAllNotes().first)
         #expect(fetched.title == "Named By Hand")
         #expect(fetched.content.contains("title: Named By Hand"))
     }
@@ -474,13 +474,14 @@ struct MarkdownNoteStorageTests {
     @Test @MainActor func theTitleIsTheFirstLineOfTheBody() throws {
         let storage = try storage()
         try storage.insertNote(Note.new(content: "# Groceries\n\nMilk"))
-        #expect(try storage.fetchAllNotes().first?.title == "Groceries")
+        let fetched = try #require(try storage.fetchAllNotes().first)
+        #expect(fetched.title == "Groceries")
     }
 
     @Test @MainActor func theExcerptSkipsTheTitleLine() throws {
         let storage = try storage()
         try storage.insertNote(Note.new(content: "# Groceries\n\nMilk and eggs"))
-        let note = try storage.fetchAllNotes().first!
+        let note = try #require(try storage.fetchAllNotes().first)
         #expect(!note.excerpt.hasPrefix("Groceries"))
         #expect(note.excerpt.contains("Milk and eggs"))
     }
