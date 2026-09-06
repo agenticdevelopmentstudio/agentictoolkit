@@ -99,6 +99,21 @@ final class NotesSplitViewControllerTests: XCTestCase {
         try MarkdownStore(path: ":memory:", customerID: "cust-1", ecosystemID: "eco-1")
     }
 
+    /// `notesListDidRequestNewNote()` answers a delegate callback, not an
+    /// `async` request, so it fires an unstructured `Task` and returns before
+    /// the note exists. Polls instead of assuming one runloop turn is enough.
+    private func pollUntil(
+        attempts: Int = 200,
+        intervalNanoseconds: UInt64 = 10_000_000,
+        _ condition: () -> Bool
+    ) async throws -> Bool {
+        for _ in 0..<attempts {
+            if condition() { return true }
+            try await Task.sleep(nanoseconds: intervalNanoseconds)
+        }
+        return condition()
+    }
+
     // MARK: - Layout
 
     func testLoadingInstallsTheListBesideTheEditor() {
@@ -265,5 +280,71 @@ final class NotesSplitViewControllerTests: XCTestCase {
         folderVC.outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
 
         XCTAssertEqual(listRowCount(split), 2)
+    }
+
+    /// task-7-grounding G8, Test 1 — corrected. The grounding document's own
+    /// text describes the settled list count as `2` (the filtered note plus
+    /// the new one), but that contradicts the production code it is meant to
+    /// pin: `notesListDidRequestNewNote()` already carries a task-6-grounding
+    /// G9 comment stating that a note created inside a filtered folder has no
+    /// category yet, so it is correctly *excluded* from that filtered view.
+    /// `NotesManager.createNote(content:)` confirms this — it never assigns a
+    /// category. So the actually-correct, already-implemented settled count is
+    /// `1`, not `2`; this test pins that instead of the grounding's literal
+    /// (and, for this codebase, incorrect) claim.
+    ///
+    /// What this still has to distinguish from the historical bug
+    /// `notesListDidRequestNewNote()` used to have — reloading from *all*
+    /// notes and silently dropping the folder filter — is that the bug would
+    /// have settled at the unfiltered `3`, not `1`. Asserting the manager
+    /// actually grew to 3 notes *and* that the filtered list still shows only
+    /// 1 is what tells "the note was created but correctly hidden" apart from
+    /// "the note was never created."
+    func testANewNoteCreatedInAFilteredFolderDoesNotWidenTheListsFilter() async throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let inFolder = try store.createDocument(content: "a recipe", markers: [.note])
+        try store.assignCategory(recipes.id, toDocument: inFolder.id)
+        _ = try store.createDocument(content: "unfiled", markers: [.note])
+
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        split.reload()
+
+        let folderVC = try XCTUnwrap(split.splitViewItems[0].viewController as? NotesFolderListViewController)
+        let row = try XCTUnwrap((0..<folderVC.outline.numberOfRows).first {
+            (folderVC.outline.item(atRow: $0) as? NoteFolder)?.id == recipes.id
+        })
+        folderVC.outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        XCTAssertEqual(listRowCount(split), 1)
+
+        split.notesListDidRequestNewNote()
+
+        let settled = try await pollUntil { notesManager.notes.count == 3 }
+        XCTAssertTrue(settled, "expected the new note to be created")
+        XCTAssertEqual(listRowCount(split), 1, "a new note with no category must not widen an active folder filter")
+    }
+
+    // MARK: - Help pane persistence (task-7-grounding G8, Test 2)
+
+    /// `UserSettings.notesHelpVisible` is written by `toggleHelp()` and re-read
+    /// in `viewDidLoad` after the autosave frame restore. A fresh controller
+    /// with a new autosave name is a faithful stand-in for a relaunch — reusing
+    /// the first name would let the restored frame array, not the setting,
+    /// explain a pass.
+    func testHelpPanesExpandedStateSurvivesARelaunch() {
+        let split = makeSplit(autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        XCTAssertFalse(split.isHelpVisible)
+
+        split.toggleHelp()
+
+        let relaunched = makeSplit(autosaveName: makeAutosaveName())
+        relaunched.loadViewIfNeeded()
+
+        XCTAssertTrue(relaunched.isHelpVisible)
     }
 }

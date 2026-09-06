@@ -48,6 +48,22 @@ public final class NotesSplitViewController: ThemedSplitViewController {
     /// it. `nil` means "All Notes" — nothing to filter against.
     private var folderMembership: Set<UUID>?
 
+    // MARK: - Toolbar state (Task 7)
+
+    /// Fired whenever the selected note or the help pane's visibility changes
+    /// — the two things `NotesWindowToolbar` reflects in its buttons.
+    ///
+    /// Custom-view toolbar items are the only way to give a button an
+    /// accessibility identifier (task-7-grounding G7): `NSToolbarItem` itself
+    /// has no accessibility conformance, and AppKit documents that
+    /// `NSToolbarItemValidation` "will not send this message for items that
+    /// have custom views." So the toolbar cannot lean on the automatic
+    /// validation cycle G5 preferred and instead asks to be told when to
+    /// re-check itself — the same manual pattern
+    /// `ComposableSettings.SettingsWindow.updateToolbarState()` already uses
+    /// for its own custom-view items, for the identical reason.
+    public var onToolbarRelevantStateChange: (() -> Void)?
+
     // MARK: - Initialization
 
     public init(
@@ -286,6 +302,7 @@ public final class NotesSplitViewController: ThemedSplitViewController {
         let collapsed = !helpItem.isCollapsed
         helpItem.animator().isCollapsed = collapsed
         UserSettings.notesHelpVisible.value = !collapsed
+        onToolbarRelevantStateChange?()
     }
 
     public var isHelpVisible: Bool {
@@ -399,6 +416,7 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
 
     public func notesListDidSelectNote(_ note: Note?) {
         editorVC.show(note: note)
+        onToolbarRelevantStateChange?()
     }
 
     public func notesListDidRequestNewNote() {

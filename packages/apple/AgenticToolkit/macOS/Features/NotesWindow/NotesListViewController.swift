@@ -42,6 +42,18 @@ public final class NotesListViewController: NSViewController {
         } else {
             tableView.deselectAll(nil)
         }
+        // `applySearch()`'s `reloadData()` can itself invalidate a selection
+        // that no longer has a row to sit on (e.g. the list shrinking to zero
+        // rows) as a side effect, silently, before this method ever calls
+        // `selectRowIndexes`/`deselectAll` — so by the time `deselectAll(nil)`
+        // above runs, the selection may already read empty, making that call a
+        // no-op AppKit has nothing to notify about. Relying solely on
+        // `tableViewSelectionDidChange` to report a selection change is
+        // therefore not reliable across every `reload` outcome (task-7-
+        // grounding G5 needs a real, current answer — not one that can go
+        // stale on exactly this path), so this always double-checks and
+        // reports directly.
+        reportSelectionIfChanged()
     }
 
     public var selectedNoteID: UUID? {
@@ -63,6 +75,13 @@ public final class NotesListViewController: NSViewController {
 
     private var allNotes: [Note] = []
     private var filteredNotes: [Note] = []
+
+    /// The note id last reported through `delegate?.notesListDidSelectNote`,
+    /// so `reportSelectionIfChanged()` (called both from `reload` and from
+    /// AppKit's own selection notification) never reports the same selection
+    /// twice — redundantly re-showing an already-selected note in the editor
+    /// pane would reset the text view under the cursor mid-edit.
+    private var lastReportedSelectedNoteID: UUID?
 
     /// The normalized search text `applySearch()` filters against. Replaces
     /// the `NSSearchField` this pane used to own — the field itself moved to
@@ -197,8 +216,22 @@ extension NotesListViewController: NSTableViewDelegate {
     }
 
     public func tableViewSelectionDidChange(_ notification: Notification) {
-        let row = tableView.selectedRow
-        let note = (row >= 0 && row < filteredNotes.count) ? filteredNotes[row] : nil
+        reportSelectionIfChanged()
+    }
+}
+
+private extension NotesListViewController {
+
+    /// Reports the current selection to `delegate` exactly when it differs
+    /// from the last one reported — from either caller: AppKit's own
+    /// selection notification, or `reload(notes:keepingSelectedID:)` checking
+    /// itself after a `reloadData()` that may have quietly invalidated the
+    /// selection on its own (see the comment in `reload`).
+    func reportSelectionIfChanged() {
+        let id = selectedNoteID
+        guard id != lastReportedSelectedNoteID else { return }
+        lastReportedSelectedNoteID = id
+        let note = id.flatMap { noteID in filteredNotes.first { $0.id == noteID } }
         delegate?.notesListDidSelectNote(note)
     }
 }
