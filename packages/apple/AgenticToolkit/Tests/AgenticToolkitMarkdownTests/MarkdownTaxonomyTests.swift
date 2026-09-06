@@ -427,6 +427,45 @@ struct MarkdownTaxonomyTests {
         }
     }
 
+    // MARK: - Tombstone filtering (Task 5 review carry-over)
+    //
+    // The SQL predicates dropping a tombstoned row are correct by inspection,
+    // but a dropped `deleted_at IS NULL` is invisible at compile time and
+    // reaches the user as a deleted folder reappearing in the sidebar with
+    // the wrong count — exactly what these three pin.
+
+    @Test("categoryEdges omits an edge whose category was deleted")
+    func categoryEdgesOmitsAnEdgeWhoseCategoryWasDeleted() throws {
+        let harness = try store()
+        let parent = try harness.createCategory(name: "Work")
+        let child = try harness.createCategory(name: "Invoices")
+        try harness.addCategoryEdge(parent: parent.id, child: child.id)
+        try harness.deleteCategory(parent.id)
+        let edges = try harness.categoryEdges()
+        #expect(edges.contains { $0.parent == parent.id && $0.child == child.id } == false)
+    }
+
+    @Test("categoryNoteCounts does not count a deleted category")
+    func categoryNoteCountsDoesNotCountADeletedCategory() throws {
+        let harness = try store()
+        let category = try harness.createCategory(name: "Recipes")
+        let note = try harness.createDocument(content: "a note", markers: [.note])
+        try harness.assignCategory(category.id, toDocument: note.id)
+        try harness.deleteCategory(category.id)
+        let counts = try harness.categoryNoteCounts()
+        #expect(counts[category.id] == nil)
+    }
+
+    @Test("documentIDs(forCategory:) excludes the notes of a deleted category")
+    func documentIDsForCategoryExcludesADeletedCategory() throws {
+        let harness = try store()
+        let category = try harness.createCategory(name: "Recipes")
+        let note = try harness.createDocument(content: "a note", markers: [.note])
+        try harness.assignCategory(category.id, toDocument: note.id)
+        try harness.deleteCategory(category.id)
+        #expect(try harness.documentIDs(forCategory: category.id).isEmpty)
+    }
+
     // MARK: - Keyword uniqueness
 
     /// adh's `UNIQUE (customer_id, ecosystem_id, label)` is unconditional, so
