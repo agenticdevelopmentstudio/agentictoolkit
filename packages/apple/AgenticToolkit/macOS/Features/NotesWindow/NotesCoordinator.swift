@@ -1,6 +1,7 @@
 import AppKit
 import OSLog
 import AgenticToolkitCore
+import AgenticDeveloperToolkitUI
 
 /// Owns the Notes feature stack — the storage-backed `NotesManager` plus the
 /// two AppKit window controllers (full editor and quick-note popover) — and
@@ -46,7 +47,39 @@ public final class NotesCoordinator: AppFeature {
             },
             MenuContribution(slot: .statusItem(section: 0), title: "Quick Note", order: 20) { [weak self] in
                 self?.showQuickNoteWindow()
-            }
+            },
+            MenuContribution(
+                slot: .file, title: "New Folder", order: 10, key: "n", modifiers: [.command, .shift],
+                isEnabled: { [weak self] in self?.notesWindowController.window?.isKeyWindow == true },
+                action: { [weak self] in
+                    self?.notesWindowController.viewController?.createFolderUnderSelection()
+                }
+            ),
+            MenuContribution(
+                slot: .file, title: "Import Markdown File…", order: 20,
+                isEnabled: { [weak self] in self?.notesWindowController.window?.isKeyWindow == true },
+                action: { [weak self] in
+                    guard let self, let presenter = self.notesWindowController.contentViewController else { return }
+                    MarkdownFileImporter.present(from: presenter) { [weak self] text in
+                        guard let text else { return } // cancel or undecodable — no dialog
+                        self?.notesWindowController.viewController?.createNote(content: text)
+                    }
+                }
+            ),
+            MenuContribution(
+                slot: .file, title: "Delete Note", order: 30,
+                isEnabled: { [weak self] in self?.notesWindowController.window?.isKeyWindow == true },
+                action: { [weak self] in
+                    self?.notesWindowController.viewController?.deleteSelectedNote()
+                }
+            ),
+            MenuContribution(
+                slot: .file, title: "Delete Folder", order: 40,
+                isEnabled: { [weak self] in self?.notesWindowController.window?.isKeyWindow == true },
+                action: { [weak self] in
+                    self?.notesWindowController.viewController?.deleteSelectedFolder()
+                }
+            )
         ]
 
         self.newItemProviders = [

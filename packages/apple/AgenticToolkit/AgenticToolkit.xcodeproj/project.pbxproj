@@ -733,6 +733,7 @@
 		F8B98EF1B775D5033F45725E /* FileTreeNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5892B23358CC8088DB3A07AA /* FileTreeNode.swift */; };
 		F946E90504AC0420E9FD1352 /* TerminalCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF39A5EE490267175AD2F89 /* TerminalCommands.swift */; };
 		F9AD368E7963C24C2AAF238D /* MCPServerRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FCEFB5144AC969192DD72F4 /* MCPServerRegistryTests.swift */; };
+		F9D8F92D9AA0F61AFF270E42 /* NotesCoordinatorMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE8F713165AC8E94FACD702 /* NotesCoordinatorMenuTests.swift */; };
 		F9DA532AB46B8C411B5E25BE /* LogLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9880737F7060E9B047C7A98 /* LogLine.swift */; };
 		FA19D8A2A6075D8C9A8E5CCE /* model-catalog.json in Resources */ = {isa = PBXBuildFile; fileRef = 141BE154E49D6B8722E54512 /* model-catalog.json */; };
 		FA6C8E856602A0B23C805403 /* SqliteStorageProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD984745AB88163C81CFC8D /* SqliteStorageProviderTests.swift */; };
@@ -1616,6 +1617,7 @@
 		2BE0EEBE98883E7CA8730241 /* ModelChooserContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelChooserContentTests.swift; sourceTree = "<group>"; };
 		2C0881BC97904A9D6EF4A7B6 /* WindowActivationTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowActivationTester.swift; sourceTree = "<group>"; };
 		2CC8209B3A718CFBD2C709A9 /* MCPServerRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerRegistry.swift; sourceTree = "<group>"; };
+		2CE8F713165AC8E94FACD702 /* NotesCoordinatorMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesCoordinatorMenuTests.swift; sourceTree = "<group>"; };
 		2D6391E1372A83A76D72944F /* TopicListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicListViewController.swift; sourceTree = "<group>"; };
 		2D68CD35D9ECBEB6AC5B40C8 /* ModelUseFacet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelUseFacet.swift; sourceTree = "<group>"; };
 		2E7F82199DFFB1E7E91807D5 /* ProjectDatabaseLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDatabaseLayoutTests.swift; sourceTree = "<group>"; };
@@ -3750,6 +3752,7 @@
 			isa = PBXGroup;
 			children = (
 				27956BE8E623E1A3A2208A1A /* NoteFolderTests.swift */,
+				2CE8F713165AC8E94FACD702 /* NotesCoordinatorMenuTests.swift */,
 				52BDC7DD73089D6621690A75 /* NotesFolderListViewControllerTests.swift */,
 				F7B4441E5FCF1AE9454254BF /* NotesManagerMarkdownStoreTests.swift */,
 				EAB33E0B488A72854EAA5272 /* NotesSplitViewControllerTests.swift */,
@@ -5661,6 +5664,7 @@
 				0DF4A89354914614E7EAD642 /* NewItemRegistryTests.swift in Sources */,
 				7B5EF14B3D0CF5F17D668126 /* NoteEditorViewControllerTests.swift in Sources */,
 				AA48F877606D78B758593CDE /* NoteFolderTests.swift in Sources */,
+				F9D8F92D9AA0F61AFF270E42 /* NotesCoordinatorMenuTests.swift in Sources */,
 				A0BDC34CB8F3F733FE5C63A7 /* NotesFolderListViewControllerTests.swift in Sources */,
 				9A5F779A347BDB6F15C42139 /* NotesManagerMarkdownStoreTests.swift in Sources */,
 				279B8CFAF1FA7A8BE387F526 /* NotesSplitViewControllerTests.swift in Sources */,
