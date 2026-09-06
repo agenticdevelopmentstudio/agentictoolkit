@@ -586,6 +586,7 @@
 		AEA4359E46994980DE6256D6 /* LocalChatSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FB8AA1B5100D85B75A9E4A0 /* LocalChatSessionTests.swift */; };
 		AF06F0FBA7449AB6A5A9A17E /* ReconcileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFDA74414E7A1ACA14DDFC1C /* ReconcileView.swift */; };
 		AF39A227051CA2BE0B3430AE /* FileBrowserRestorationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B323E2C908DA71AE48164BE /* FileBrowserRestorationState.swift */; };
+		AF65081791830C96E9A3264F /* HTDVCellContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C929501A3AD95332E464035 /* HTDVCellContent.swift */; };
 		AF792A00075269B09E646A98 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97D73AE672A872337EA8DEB2 /* KeychainHelper.swift */; };
 		AFE2E74AEE003F3FE95F43EE /* UserSettings+Projects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40BDEC16E69F6327E8B370EC /* UserSettings+Projects.swift */; };
 		B02BA2C7FEE9987D9D937790 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C44178A173495CCDBE1371AC /* libsqlite3.tbd */; };
@@ -1713,6 +1714,7 @@
 		0BEECDBE30F93A0D0C750E3B /* NotesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesManager.swift; sourceTree = "<group>"; };
 		0C5C131AA11AA94F3C5BD62B /* PermissionRowViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionRowViewTests.swift; sourceTree = "<group>"; };
 		0C86FC37F48D2DC557B60669 /* AIPluginManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPluginManagerTests.swift; sourceTree = "<group>"; };
+		0C929501A3AD95332E464035 /* HTDVCellContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVCellContent.swift; sourceTree = "<group>"; };
 		0CBD6D7113FA1954DBC255E4 /* SpacingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpacingTests.swift; sourceTree = "<group>"; };
 		0DECC3D1E97AF33714DCB5D3 /* SingleConfigurationChatConfigProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleConfigurationChatConfigProvider.swift; sourceTree = "<group>"; };
 		0DF57595093D7A815C86BA53 /* ClaudeCLI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCLI.swift; sourceTree = "<group>"; };
@@ -4088,6 +4090,7 @@
 		D8D2E2854F058E65AB16E95D /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				0C929501A3AD95332E464035 /* HTDVCellContent.swift */,
 				732F83B2DC0B77B2784C7B7B /* HTDVModel.swift */,
 			);
 			path = Model;
@@ -6273,6 +6276,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AF65081791830C96E9A3264F /* HTDVCellContent.swift in Sources */,
 				520FD4FCCB07D9A929A98C31 /* HTDVModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
