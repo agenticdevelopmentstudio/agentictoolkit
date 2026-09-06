@@ -535,4 +535,104 @@ final class NotesSplitViewControllerTests: XCTestCase {
 
         XCTAssertTrue(relaunched.isHelpVisible)
     }
+
+    // MARK: - Fix round 1 (task-8 fix brief): folder counts staying fresh
+
+    /// Fix 1: `duplicateSelectedNote()` used to leave the folder pane's counts
+    /// stale — asserting the exact filtered count (not just "more than
+    /// before") is what pins the bug rather than passing against it.
+    func testDuplicateSelectedNoteRefreshesTheFilteredList() async throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let doc = try store.createDocument(content: "a recipe", markers: [.note])
+        try store.assignCategory(recipes.id, toDocument: doc.id)
+
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        split.reload()
+
+        let folderVC = try XCTUnwrap(split.splitViewItems[0].viewController as? NotesFolderListViewController)
+        let row = try XCTUnwrap((0..<folderVC.outline.numberOfRows).first {
+            (folderVC.outline.item(atRow: $0) as? NoteFolder)?.id == recipes.id
+        })
+        folderVC.outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        XCTAssertEqual(listRowCount(split), 1)
+
+        // `selectedNote()` reads off `listVC.selectedNoteID`, so the note being
+        // duplicated has to actually be selected through the list pane.
+        let listVC = try XCTUnwrap(split.splitViewItems[1].viewController as? NotesListViewController)
+        let original = try XCTUnwrap(notesManager.notes.first)
+        listVC.reload(notes: notesManager.notes, keepingSelectedID: original.id)
+
+        split.duplicateSelectedNote()
+
+        let settled = try await pollUntil { listRowCount(split) == 2 }
+        XCTAssertTrue(settled, "expected the folder pane's filtered list to settle at exactly 2")
+        let duplicate = try XCTUnwrap(notesManager.notes.first { $0.id != original.id })
+        let categories = try store.categories(forDocument: duplicate.id.uuidString.lowercased())
+        XCTAssertTrue(categories.contains { $0.id == recipes.id })
+    }
+
+    /// Fix 1: `moveSelectedNote(toFolder:)` used to leave the filtered list
+    /// showing a note that had just left the selected folder.
+    func testMoveSelectedNoteRefreshesTheFilteredList() async throws {
+        let store = try store()
+        let recipes = try store.createCategory(name: "Recipes")
+        let doc = try store.createDocument(content: "a recipe", markers: [.note])
+        try store.assignCategory(recipes.id, toDocument: doc.id)
+
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        split.reload()
+
+        let folderVC = try XCTUnwrap(split.splitViewItems[0].viewController as? NotesFolderListViewController)
+        let row = try XCTUnwrap((0..<folderVC.outline.numberOfRows).first {
+            (folderVC.outline.item(atRow: $0) as? NoteFolder)?.id == recipes.id
+        })
+        folderVC.outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        XCTAssertEqual(listRowCount(split), 1)
+
+        let listVC = try XCTUnwrap(split.splitViewItems[1].viewController as? NotesListViewController)
+        let note = try XCTUnwrap(notesManager.notes.first { $0.id.uuidString.lowercased() == doc.id })
+        listVC.reload(notes: notesManager.notes, keepingSelectedID: note.id)
+
+        split.moveSelectedNote(toFolder: "")
+
+        let settled = try await pollUntil { listRowCount(split) == 0 }
+        XCTAssertTrue(settled, "expected the note that just left the folder to drop out of the filtered list")
+    }
+
+    /// Fix 3: a selection the user made during `performDelete(_:)`'s `await`
+    /// must survive — the delete used to blank the selection and the editor
+    /// unconditionally, discarding whatever the user had moved on to.
+    func testPerformDeleteKeepsASelectionMadeDuringTheAwait() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "to be deleted", markers: [.note])
+        let keptDoc = try store.createDocument(content: "kept", markers: [.note])
+
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+
+        let toDelete = try XCTUnwrap(notesManager.notes.first { $0.content == "to be deleted" })
+        let kept = try XCTUnwrap(notesManager.notes.first { $0.id.uuidString.lowercased() == keptDoc.id })
+        let listVC = try XCTUnwrap(split.splitViewItems[1].viewController as? NotesListViewController)
+        // The user's selection at the moment of delete is the note that stays,
+        // not the one being deleted — the race Fix 3 covers.
+        listVC.reload(notes: notesManager.notes, keepingSelectedID: kept.id)
+
+        split.performDelete(toDelete)
+
+        let settled = try await pollUntil { notesManager.notes.count == 1 }
+        XCTAssertTrue(settled)
+        XCTAssertEqual(listVC.selectedNoteID, kept.id, "the user's selection must survive the delete")
+    }
 }

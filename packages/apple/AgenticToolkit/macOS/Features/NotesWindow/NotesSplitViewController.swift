@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
 import AgenticToolkitMarkdown
@@ -369,12 +370,22 @@ public final class NotesSplitViewController: ThemedSplitViewController {
                 let newDocumentID = newID.uuidString.lowercased()
                 let categories = (try? markdownStore.categories(forDocument: documentID)) ?? []
                 for category in categories {
-                    try? markdownStore.assignCategory(category.id, toDocument: newDocumentID)
+                    do {
+                        try markdownStore.assignCategory(category.id, toDocument: newDocumentID)
+                    } catch {
+                        Self.logger.error(
+                            """
+                            Failed to file duplicate \(newDocumentID, privacy: .public) \
+                            under category \(category.id, privacy: .public): \
+                            \(error, privacy: .public)
+                            """)
+                    }
                 }
-                if !categories.isEmpty { folderMembership = nil }
             }
+            // Unconditional, unlike the cache invalidation above: the copy
+            // needs the list to show it even when it carried no categories.
+            await reloadAfterFolderMembershipChange(keepingSelectedID: newID)
             let newNote = notesManager.notes.first(where: { $0.id == newID })
-            listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: newID)
             editorVC.show(note: newNote)
         }
     }
@@ -386,8 +397,16 @@ public final class NotesSplitViewController: ThemedSplitViewController {
     func performDelete(_ note: Note) {
         Task { @MainActor in
             await notesManager.deleteNote(id: note.id)
-            listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: nil)
-            editorVC.show(note: nil)
+            // Read before the reload below overwrites it: the user may have
+            // changed the selection during the `await` above, and only
+            // clearing the editor when they are still looking at the note
+            // that just got deleted is what keeps a selection they moved on
+            // to from being discarded out from under them.
+            let stillSelectedID = listVC.selectedNoteID
+            await reloadAfterFolderMembershipChange(keepingSelectedID: stillSelectedID)
+            if stillSelectedID == note.id {
+                editorVC.show(note: nil)
+            }
             onToolbarRelevantStateChange?()
         }
     }
@@ -438,10 +457,8 @@ public final class NotesSplitViewController: ThemedSplitViewController {
         } catch {
             return
         }
-        folderMembership = nil
         Task { @MainActor in
-            await notesManager.loadNotes()
-            listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: note.id)
+            await reloadAfterFolderMembershipChange(keepingSelectedID: note.id)
         }
     }
 
@@ -465,6 +482,19 @@ public final class NotesSplitViewController: ThemedSplitViewController {
         let item = NSMenuItem()
         item.tag = NSTextFinder.Action.showFindInterface.rawValue
         NSApp.sendAction(#selector(NSTextView.performTextFinderAction(_:)), to: nil, from: item)
+    }
+
+    /// Everything that has to happen when a note's folder membership changes.
+    /// The four steps are one piece of knowledge and they go stale
+    /// independently: `folderMembership` is this controller's own cache and
+    /// `notesForCurrentFolder()` filters against it; `NotesFolderListView
+    /// Controller` observes no notifications, so its counts only move when
+    /// something calls `reload()` on it.
+    private func reloadAfterFolderMembershipChange(keepingSelectedID id: UUID?) async {
+        folderMembership = nil
+        await notesManager.loadNotes()
+        folderVC.reload()
+        listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: id)
     }
 
     // MARK: - Reload
@@ -562,22 +592,25 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
             // `selectedFolderID` is empty for "All Notes", which is exactly
             // the "leave it unfiled" case and needs no special handling.
             if let markdownStore, !selectedFolderID.isEmpty {
-                try? markdownStore.assignCategory(
-                    selectedFolderID, toDocument: newID.uuidString.lowercased())
-                // Invalidates the cached membership set (`notesForCurrentFolder()`
-                // would otherwise still exclude the note this call just filed)
-                // and reloads the folder pane's own counts — both are beyond
-                // G10's literal snippet, which only calls
-                // `notesManager.loadNotes()`, but that alone leaves this
-                // controller's own membership cache stale and leaves the
-                // folder outline's count wrong, since `NotesFolderListView
-                // Controller` does not observe `notesDidChangeNotification`.
-                folderMembership = nil
-                await notesManager.loadNotes()
-                folderVC.reload()
+                let newDocumentID = newID.uuidString.lowercased()
+                do {
+                    try markdownStore.assignCategory(selectedFolderID, toDocument: newDocumentID)
+                } catch {
+                    Self.logger.error(
+                        """
+                        Failed to file new document \(newDocumentID, privacy: .public) \
+                        under category \(self.selectedFolderID, privacy: .public): \
+                        \(error, privacy: .public)
+                        """)
+                }
             }
+            // Reloads unconditionally, even for "All Notes" where nothing
+            // above changed any membership: `reloadAfterFolderMembershipChange`
+            // is the one piece of knowledge shared with `duplicateSelectedNote()`,
+            // `moveSelectedNote(toFolder:)` and `performDelete(_:)`, and this is
+            // the fourth of the four call sites that need it.
+            await reloadAfterFolderMembershipChange(keepingSelectedID: newID)
             let newNote = notesManager.notes.first(where: { $0.id == newID })
-            listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: newID)
             editorVC.show(note: newNote)
         }
     }
@@ -594,4 +627,10 @@ extension NotesSplitViewController: NoteEditorViewControllerDelegate {
             listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: noteID)
         }
     }
+}
+
+// MARK: - Loggable
+
+extension NotesSplitViewController: Loggable {
+    public static nonisolated let logger = makeLogger()
 }
