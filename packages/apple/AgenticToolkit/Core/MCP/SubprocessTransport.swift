@@ -92,6 +92,14 @@ public actor SubprocessTransport: Transport {
     /// caller likewise learns nothing about the first, and it keeps the guard
     /// from becoming a place a caller can be parked for the length of a
     /// process spawn. What it does *not* do any more is spawn a second child.
+    ///
+    /// A connect overtaken by `disconnect()` after the spawn succeeded returns
+    /// *successfully* while leaving the transport `.idle`, the child reaped and
+    /// the message stream finished — the two `guard case .connecting` checks
+    /// below take that exit. That is deliberate: `connect()` reports whether
+    /// the spawn worked, not whether the connection survived a teardown the
+    /// same caller asked for, and the SDK reads the outcome off `receive()`,
+    /// which is already closed.
     public func connect() async throws {
         guard case .idle = state else { return }
         // Claimed before the suspension, not after: from here until this
@@ -154,6 +162,13 @@ public actor SubprocessTransport: Transport {
     /// `hasLaunched`, so it is a no-op if the spawn has not happened yet and a
     /// real kill if it has — which is the only way to cover a window this
     /// actor cannot see the far side of.
+    ///
+    /// Two concurrent `disconnect()` calls do not both terminate, and the
+    /// second does not wait for the first: it observes the `.idle` the first
+    /// wrote before suspending and returns immediately, possibly while the
+    /// child is still inside its SIGTERM grace. Only the child's *reaping* is
+    /// serialised, by the channel; a caller that needs the process to be gone
+    /// must await the `disconnect()` it started, not a later one.
     public func disconnect() async {
         if case .idle = state { return }
         state = .idle
@@ -173,13 +188,15 @@ public actor SubprocessTransport: Transport {
         // `yield` returns immediately and never waits for a consumer. Nothing
         // in the task touches this actor, so it does not queue behind the call
         // in progress either.
-        if let forwardingTask {
-            await forwardingTask.value
-            // Belt and braces. A finished task ignores this; it costs nothing
-            // and stops a future change that lets the pump outlive the
-            // channel's stream from turning into a hang here.
-            forwardingTask.cancel()
-        }
+        // What keeps this await bounded is `terminate()`, above, and nothing
+        // else. There is deliberately no `cancel()` here: cancelling *after*
+        // an unbounded await cannot rescue it — the await is where the hang
+        // would be — and cancelling *before* it would race the drain this
+        // await exists to collect. So the bound is the channel's contract:
+        // `terminate()` finishes the frame stream before it returns. A future
+        // channel that stopped honouring that would hang this method, and the
+        // fix then is to bound the wait here, not to add a cancel.
+        await forwardingTask?.value
         forwardingTask = nil
 
         // Also belt and braces: the loop above ended by calling

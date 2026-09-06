@@ -1,4 +1,7 @@
 import Foundation
+import MCP
+// `Errno`, to assert the exact errno `send()` raises with no connection.
+import System
 import Testing
 @testable import AgenticToolkitCore
 
@@ -189,6 +192,52 @@ struct SubprocessTransportTests {
         await transport.disconnect()
     }
 
+    /// `ENOTCONN` is the errno `StdioTransport.send` raises with no
+    /// connection, and the SDK's error handling is written against the errno
+    /// rather than against a message. Both ends of the lifecycle are checked
+    /// because they fail differently underneath: before `connect()` the
+    /// channel would raise `SubprocessChannelError.notLaunched`, and after
+    /// `disconnect()` it would raise `EPIPE` from a closed stdin. The guard is
+    /// what makes those one answer.
+    @Test("send before connect and after disconnect both throw ENOTCONN")
+    func sendWithoutAConnectionThrowsENOTCONN() async throws {
+        func expectENOTCONN(
+            _ body: () async throws -> Void,
+            _ label: String,
+            sourceLocation: SourceLocation = #_sourceLocation
+        ) async {
+            do {
+                try await body()
+                Issue.record("send \(label) did not throw", sourceLocation: sourceLocation)
+            } catch let error as MCPError {
+                guard case let .transportError(underlying) = error else {
+                    Issue.record(
+                        "send \(label) threw \(error), not a transportError",
+                        sourceLocation: sourceLocation
+                    )
+                    return
+                }
+                #expect(
+                    (underlying as? Errno)?.rawValue == ENOTCONN,
+                    "send \(label) threw transportError(\(underlying)), not ENOTCONN",
+                    sourceLocation: sourceLocation
+                )
+            } catch {
+                Issue.record(
+                    "send \(label) threw \(error), not an MCPError",
+                    sourceLocation: sourceLocation
+                )
+            }
+        }
+
+        let transport = makeTransport(executable: "/bin/cat")
+        await expectENOTCONN({ try await transport.send(Data("{}".utf8)) }, "before connect()")
+
+        try await transport.connect()
+        await transport.disconnect()
+        await expectENOTCONN({ try await transport.send(Data("{}".utf8)) }, "after disconnect()")
+    }
+
     /// The transport half of `SubprocessChannel`'s graceful-shutdown
     /// guarantee. The channel deliberately keeps its pump running through the
     /// SIGTERM grace period so a server's last protocol message — a shutdown
@@ -277,6 +326,13 @@ struct SubprocessTransportTests {
         // is suspended — and its only suspension before it claims the
         // connection is `await channel.launch()`. Several rather than one so a
         // single scheduling quirk cannot land outside the window unnoticed.
+        //
+        // If this ever flakes on a loaded machine, the remedy is to raise 16
+        // to a few hundred — the hops are cheap actor round trips and the
+        // failure mode is landing *after* the window, never before it. Do not
+        // instead add a test-only hook to `SubprocessTransport` to make the
+        // probe deterministic: that was considered and rejected, because the
+        // hook would be permanent production surface bought for one test.
         for _ in 0..<16 { _ = await transport.receive() }
 
         await transport.disconnect()

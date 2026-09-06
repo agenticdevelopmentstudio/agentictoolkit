@@ -488,24 +488,40 @@ public actor SubprocessChannel {
             await pumpTask?.value
         }
 
-        // Fallbacks, not teardown. Both tasks are woken by their own finished
-        // chunk streams and end on their own, and on the ordinary path both
-        // cancels are no-ops.
-        //
-        // The two are not symmetric, and the asymmetry is worth stating
-        // exactly. The pump gets the bounded wait above because this method
-        // owns when the *message* stream finishes, so it has to still be here
-        // when that happens; its cancel is the fallback for a pump that
-        // outlived that budget. The drain gets no budget here at all — its
-        // cancel fires as soon as the pump's wait returns, milliseconds after
-        // `stopAll()` on the ordinary path. That is deliberate rather than an
-        // oversight: the stderr buffer belongs to this actor and outlives the
-        // drain task, and `standardErrorText()` does its own bounded wait for
-        // whatever is still in flight, so the grace stderr gets is spent
-        // there, by the caller who actually wants the text.
+        // A fallback, not teardown: the pump is woken by its own finished
+        // chunk stream and ends on its own, so on the ordinary path this
+        // cancel is a no-op. It is the fallback for a pump that outlived the
+        // budget above, and it belongs here because this method owns when the
+        // *message* stream finishes and so has to still be here when it does.
         pumpTask?.cancel()
         messageContinuation?.finish()
-        standardErrorTask?.cancel()
+
+        // The stderr drain is deliberately **not** cancelled here, and the
+        // asymmetry with the pump is the point. The grace stderr gets is
+        // spent in `standardErrorText()`, by the caller who actually wants
+        // the text: the buffer belongs to this actor and outlives the drain
+        // task, so there is nothing this method has to still be here for.
+        //
+        // A cancel here could only do harm. `stopAll()` above has already
+        // closed the stderr descriptor with `.stop`, and `DescriptorReader`
+        // guarantees exactly one outstanding `length: .max` read, so its
+        // handler is always called and the chunk stream always finishes on
+        // its own — even when a backgrounded grandchild still holds the write
+        // end. The drain therefore ends by itself, always, and a cancel can
+        // rescue nothing. What it *can* do is land in the sub-millisecond gap
+        // before the reader's final yield, and then that yield goes into a
+        // continuation the cancellation has already terminated and the bytes
+        // are dropped — see `DescriptorReader.finishStream()`, which says so
+        // itself. Measured on a replica of this exact tail, that margin is
+        // about a third of a millisecond on an idle machine and inverts under
+        // load; what it loses is a child's last words on the way out, which
+        // is precisely what `terminationGraceSeconds` exists to preserve.
+        //
+        // Note that cancellation does not discard *buffered* chunks — the
+        // stdlib delivers those to a cancelled consumer — so the loss is only
+        // ever the final yield. That is also why guarding `finishStream()`
+        // would not help: cancelling a parked `next()` terminates the stream
+        // regardless.
     }
 
     /// Waits for exit and returns the status. Returns immediately if already
