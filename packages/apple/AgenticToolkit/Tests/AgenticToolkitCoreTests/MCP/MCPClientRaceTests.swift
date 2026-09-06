@@ -74,11 +74,7 @@ struct MCPClientRaceTests {
             await client.disconnect()
         }
 
-        var survivors = try Self.processesMatching(batch)
-        for _ in 0..<50 where !survivors.isEmpty {
-            try await Task.sleep(for: .milliseconds(50))
-            survivors = try Self.processesMatching(batch)
-        }
+        let survivors = try await Self.survivors(of: batch)
         // Kill before asserting: a failure here means real orphans, and leaving
         // them running would outlive the whole test run.
         for pid in survivors { kill(pid, SIGKILL) }
@@ -116,11 +112,7 @@ struct MCPClientRaceTests {
         // Bounded by the disconnect above having already unwedged it.
         await connecting.value
 
-        var survivors = try Self.processesMatching(marker)
-        for _ in 0..<50 where !survivors.isEmpty {
-            try await Task.sleep(for: .milliseconds(50))
-            survivors = try Self.processesMatching(marker)
-        }
+        let survivors = try await Self.survivors(of: marker)
         for pid in survivors { kill(pid, SIGKILL) }
         #expect(
             survivors.isEmpty,
@@ -152,6 +144,143 @@ struct MCPClientRaceTests {
         #expect(state == .disconnected)
     }
 
+    /// The ordering that `teardown()`'s steps 2 and 3 cannot reach: a connect
+    /// suspended between publishing `self.transport` and
+    /// `MCP.Client.connect(transport:)`. Step 2 finds that transport still
+    /// idle and step 3 a client with no connection, so neither leaves a mark
+    /// the connect will notice; the connect then resumes, spawns, and parks on
+    /// `initialize`'s bare continuation, which the one `Client.disconnect()`
+    /// that could have resumed it has already been spent. Unbounded, step 4's
+    /// wait on that task never returns — so `disconnect()` never returns, and
+    /// step 5, the line written to reap this exact child, is never reached.
+    ///
+    /// The seam is what makes the window addressable. It is a single
+    /// cross-actor hop, closing in microseconds, and every reproduction of
+    /// this defect so far has come from hand-patching a delay into
+    /// `MCPClient` — which is not something CI can do.
+    ///
+    /// Two assertions, because the bug has two halves: a `disconnect()` that
+    /// never returns, and a server that outlives the app.
+    @Test("disconnect() gives up on a wedged connect rather than hanging, and still reaps its child")
+    func teardownAbandonsAWedgedConnectAndStillReapsTheChild() async throws {
+        let marker = "MCPClientWedgedConnectProbe-\(UUID().uuidString)"
+        let client = makeClient(marker: marker)
+        let reachedTheWindow = ConnectWindowGate()
+        let leaveTheWindow = ConnectWindowGate()
+
+        await client.setConnectSuspensionHook { point in
+            guard case .beforeTransportConnect = point else { return }
+            reachedTheWindow.open()
+            // Deliberately not `Task.sleep`: `teardown()`'s step 1 cancels
+            // this task, and a sleep would then return *immediately*, closing
+            // the window this test exists to hold open. A checked continuation
+            // ignores cancellation, which is exactly the property needed.
+            await leaveTheWindow.wait()
+        }
+
+        // Never awaited, and beyond rescue by cancellation: this connect parks
+        // on `initialize` for the life of the process, exactly as the registry
+        // would leave it.
+        let connecting = Task { try? await client.connect() }
+        defer { connecting.cancel() }
+        await reachedTheWindow.wait()
+
+        let disconnecting = Task { await client.disconnect() }
+        // Long enough for steps 1-3 to run to completion, and short enough
+        // that the spawn lands well inside the budget step 4 is now spending.
+        try await Task.sleep(for: .milliseconds(250))
+        leaveTheWindow.open()
+        let returned = await Self.completes(disconnecting, within: 8)
+
+        let survivors = try await Self.survivors(of: marker)
+        for pid in survivors { kill(pid, SIGKILL) }
+        #expect(
+            returned,
+            "disconnect() never returned — teardown() is waiting on a connect nothing can free"
+        )
+        #expect(
+            survivors.isEmpty,
+            "teardown() left the child of an abandoned connect running (pids \(survivors))"
+        )
+    }
+
+    /// The `connectTask` half of the fix, which nothing else pins. Before this
+    /// test existed, deleting both of `teardown()`'s `connectTask` statements
+    /// left the whole suite green, so a later simplification could have
+    /// dropped them on a clean build.
+    ///
+    /// Step 1's `cancel()` is synchronous, so a connect task that has not yet
+    /// reached its own `Task.checkCancellation()` never builds a transport and
+    /// never spawns; step 4 then waits for that to take effect. `isShutDown`
+    /// cannot reach this ordering — the connect is already past that guard —
+    /// and steps 2, 3 and 5 all find `self.transport` still nil at the moment
+    /// they run, so with neither `connectTask` statement present nothing in
+    /// `teardown()` is left that could reap what the connect goes on to spawn.
+    ///
+    /// What this pins is therefore the **pair**, which is the deletion that
+    /// strands a child permanently. Removing only the `cancel()` no longer
+    /// does: step 4's budget expires and step 5 reaps the child a second late,
+    /// so the suite stays green and only the timings move (0.30 s to 1.07 s
+    /// for this test). That is a real weakening of the mutation signal and is
+    /// recorded on step 1 of `teardown()` rather than hidden here.
+    @Test("a connect cancelled before it builds a transport never spawns a server")
+    func connectCancelledBeforeItBuildsATransportNeverSpawns() async throws {
+        let marker = "MCPClientCancelledConnectProbe-\(UUID().uuidString)"
+        let client = makeClient(marker: marker)
+        let reachedTheWindow = ConnectWindowGate()
+        let leaveTheWindow = ConnectWindowGate()
+
+        await client.setConnectSuspensionHook { point in
+            guard case .beforeCancellationCheck = point else { return }
+            reachedTheWindow.open()
+            await leaveTheWindow.wait()
+        }
+
+        let connecting = Task { try? await client.connect() }
+        defer { connecting.cancel() }
+        await reachedTheWindow.wait()
+
+        let disconnecting = Task { await client.disconnect() }
+        // Step 1's `cancel()` lands before `teardown()`'s first suspension, so
+        // this only has to be long enough for `disconnect()` to be entered.
+        try await Task.sleep(for: .milliseconds(250))
+        leaveTheWindow.open()
+        let returned = await Self.completes(disconnecting, within: 8)
+
+        let survivors = try await Self.survivors(of: marker)
+        for pid in survivors { kill(pid, SIGKILL) }
+        #expect(returned, "disconnect() never returned")
+        #expect(
+            survivors.isEmpty,
+            "a connect cancelled before its transport existed spawned a server anyway (pids \(survivors))"
+        )
+    }
+
+    /// Awaits `task`, giving up after `seconds` rather than hanging the whole
+    /// run. `withWallClockBudget` cancels the loser without awaiting it, so a
+    /// `disconnect()` that never returns costs this many seconds and no more —
+    /// the same property the fix under test relies on.
+    private static func completes(_ task: Task<Void, Never>, within seconds: TimeInterval) async -> Bool {
+        do {
+            try await withWallClockBudget(seconds) { await task.value }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// The pids matching `marker` once they have had a fair chance to exit —
+    /// `terminate()` signals a child, it does not reap it synchronously, so a
+    /// pid seen immediately after one is not yet evidence of a leak.
+    private static func survivors(of marker: String) async throws -> [pid_t] {
+        var found = try processesMatching(marker)
+        for _ in 0..<50 where !found.isEmpty {
+            try await Task.sleep(for: .milliseconds(50))
+            found = try processesMatching(marker)
+        }
+        return found
+    }
+
     /// The pids whose full command line contains `marker`. `pgrep` never
     /// matches itself, so the marker in its own `argv` is not a false hit.
     private static func processesMatching(_ marker: String) throws -> [pid_t] {
@@ -167,5 +296,44 @@ struct MCPClientRaceTests {
         return (String(bytes: data, encoding: .utf8) ?? "")
             .split(separator: "\n")
             .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+    }
+}
+
+/// A one-shot, **cancellation-proof** gate: `wait()` suspends until `open()`,
+/// and an `open()` that arrives first makes the wait return at once.
+///
+/// Cancellation-proof is the whole point. The tasks these tests hold open are
+/// exactly the ones `MCPClient.teardown()` cancels, so anything cancellable —
+/// `Task.sleep`, an `AsyncStream` iteration — would spring open the moment
+/// step 1 fires and close the very window under test.
+/// `withCheckedContinuation` is unaffected by cancellation.
+///
+/// `@unchecked Sendable` because the lock, not the compiler, is what makes the
+/// resume-exactly-once and open-before-wait orderings hold.
+private final class ConnectWindowGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if isOpen {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func open() {
+        lock.lock()
+        let waiter = continuation
+        continuation = nil
+        isOpen = true
+        lock.unlock()
+        waiter?.resume()
     }
 }

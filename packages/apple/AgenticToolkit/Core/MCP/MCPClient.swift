@@ -16,6 +16,22 @@ public enum MCPClientError: Swift.Error, Sendable, Equatable {
     case clientHasBeenDisconnected
 }
 
+/// Without this, a bare Swift enum reaches `localizedDescription` — which
+/// every logger and alert in this codebase reads — as "The operation couldn't
+/// be completed. (AgenticToolkitCore.MCPClientError error 0.)". The one place
+/// this error is caught rather than thrown is `MCPServerRegistry.reconcile`,
+/// which logs it when a server is disabled while its own connect is still
+/// queued; that line should say what happened and that nothing was left
+/// running.
+extension MCPClientError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .clientHasBeenDisconnected:
+            "The MCP server was disabled or removed before its connection finished starting; nothing was launched."
+        }
+    }
+}
+
 public enum MCPClientState: Sendable, Equatable {
     case disconnected
     case connecting
@@ -85,6 +101,55 @@ public actor MCPClient: MCPClientProtocol {
     /// runs until the app exits.
     private var isShutDown = false
 
+    /// How long `teardown()` waits for an in-flight connect before abandoning
+    /// it — step 4 of `teardown()`, where the reason for the bound is argued.
+    ///
+    /// The wait normally ends in microseconds, because steps 2 and 3 have
+    /// already unwedged every connect they can reach. A second is three orders
+    /// of magnitude of headroom for that, and it is only ever spent in the one
+    /// ordering those steps cannot reach — where the alternative is waiting
+    /// forever. What a caller pays in the worst case is this second on top of
+    /// one `SubprocessChannel.terminate()`, whose own SIGTERM-then-SIGKILL and
+    /// pump-drain graces total 2.5 s: `disconnect()` returns in roughly 3.5 s
+    /// even when the connect it raced can never be freed. (Only one of the two
+    /// `transport.disconnect()` calls can pay that 2.5 s; the other finds the
+    /// transport already idle and returns at once.)
+    private static let abandonedConnectBudgetSeconds: TimeInterval = 1.0
+
+    /// The two suspension points inside `establishConnection()` that decide a
+    /// connect/disconnect race. Names for a test seam, not a state machine —
+    /// see `setConnectSuspensionHook(_:)`.
+    enum ConnectSuspensionPoint: Sendable {
+        /// Before `Task.checkCancellation()`, i.e. before this task can be
+        /// stopped without a transport ever being built.
+        case beforeCancellationCheck
+        /// After `self.transport` is published and before
+        /// `MCP.Client.connect(transport:)` spawns the child — the actor is
+        /// released here, so a `teardown()` can run to completion in between.
+        case beforeTransportConnect
+    }
+
+    /// Widens one of the two connect suspension points so a test can land a
+    /// `disconnect()` inside it deterministically.
+    ///
+    /// `nil` in production and unreachable from outside the module: the hook
+    /// is `internal`, nothing in this module ever sets it, and a release build
+    /// has no `@testable` importer that could. The two call sites are optional
+    /// chains, so with no hook installed no call is made and no suspension
+    /// happens.
+    ///
+    /// It exists because two of this file's timing guarantees were otherwise
+    /// unfalsifiable — step 4's bound, and step 1's cancel. The only way
+    /// anyone had told a fixed tree from a broken one was to hand-patch a
+    /// delay into this file, which is not something CI can do. The seam turns
+    /// those hand patches into the two tests in `MCPClientRaceTests` that
+    /// install it.
+    private var connectSuspensionHook: (@Sendable (ConnectSuspensionPoint) async -> Void)?
+
+    func setConnectSuspensionHook(_ hook: (@Sendable (ConnectSuspensionPoint) async -> Void)?) {
+        connectSuspensionHook = hook
+    }
+
     public init(
         configuration: MCPServerConfiguration,
         secrets: [String: String] = [:],
@@ -141,9 +206,11 @@ public actor MCPClient: MCPClientProtocol {
         // spawned. Cancellation arriving later is caught by `teardown()`'s
         // `transport?.disconnect()` instead, which is why this is an
         // optimisation rather than the guarantee.
+        await connectSuspensionHook?(.beforeCancellationCheck)
         try Task.checkCancellation()
         let transport = makeTransport()
         self.transport = transport
+        await connectSuspensionHook?(.beforeTransportConnect)
         _ = try await client.connect(transport: transport)
         await registerToolListChangedHandler()
         try await refreshTools()
@@ -194,19 +261,32 @@ public actor MCPClient: MCPClientProtocol {
     /// and unconditionally: `MCP.Client.disconnect()` already disconnects the
     /// transport it holds, but it only holds one once `connect(transport:)`
     /// has been reached, so a failure between spawning and connecting would
-    /// otherwise leave the child running. A second `disconnect()` awaits the
-    /// first rather than returning early, so calling both is safe.
+    /// otherwise leave the child running. Calling both is safe because a
+    /// second disconnect is a *no-op*, not a wait: `SubprocessTransport`
+    /// returns immediately once it is `.idle` (step 3 and step 5 below both
+    /// rely on that), and `MCP.Client.disconnect()` on a client whose
+    /// `connection` is already nil has no transport to disconnect and no
+    /// pending request left to drain.
     ///
-    /// The ownership fix is the four statements below, and their order is the
-    /// whole argument. Both transport disconnects are needed, and each closes
-    /// a hazard the other opens:
+    /// The ownership fix is the five numbered steps below, and their order is
+    /// the whole argument. Both transport disconnects are needed, and each
+    /// closes a hazard the other opens:
     ///
     /// 1. `connectTask?.cancel()` is *synchronous* and therefore lands before
     ///    this method's first suspension. That matters: a connect task that
     ///    has not been scheduled yet sees the cancellation at its own
     ///    `Task.checkCancellation()` and never builds a transport at all.
-    /// 2. `await transport?.disconnect()` is what bounds step 4, and it is the
-    ///    only thing here that does. `MCP.Client.send` reads `connection`
+    ///
+    ///    Since step 4 grew a budget this is about *promptness*, not
+    ///    ownership: a teardown that skips it still reaps the child, because
+    ///    step 5 runs unconditionally — it just spends the whole budget
+    ///    getting there first. Deleting this line makes every racing teardown
+    ///    cost `abandonedConnectBudgetSeconds` (measured: the race suite goes
+    ///    from 0.04 s to 1.08 s) while still passing, which is exactly the
+    ///    kind of silent regression the budget is not meant to hide.
+    /// 2. `await transport?.disconnect()` is what lets step 4 end for the
+    ///    right reason — the connect actually finished — rather than by
+    ///    running out of budget. `MCP.Client.send` reads `connection`
     ///    synchronously, then registers its continuation from an *unstructured
     ///    task* it spawns — so a `Client.disconnect()` that drains
     ///    `pendingRequests` in between drains a dictionary the request has not
@@ -236,19 +316,50 @@ public actor MCPClient: MCPClientProtocol {
     ///    `connection`. Steps 2 and 3 between them leave no request unresumed.
     ///    It also disconnects the same transport a second time, which is a
     ///    no-op — the transport returns immediately when it is already idle.
-    /// 4. `await connectTask?.value` is the guarantee itself — after it, the
-    ///    spawn has either happened or been ruled out, and no code path can
-    ///    still be about to spawn. A connect that *fails* here is not this
-    ///    method's business: the error is swallowed with `try?`, because
-    ///    teardown releases resources and the party that wanted the outcome is
-    ///    the `connect()` awaiting the same task. Skipping the release below
-    ///    to propagate an error would leak the very child this exists to reap.
+    /// 4. `await connectTask?.value`, under a wall-clock budget. Unbounded it
+    ///    would be the guarantee itself — after it the spawn has either
+    ///    happened or been ruled out — but it cannot be unbounded, because
+    ///    steps 1-3 do not reach every connect. One escapes all three: a
+    ///    connect suspended between `self.transport = …` and
+    ///    `client.connect(transport:)` has published no connection for step 2
+    ///    to kill and registered no request for step 3 to drain, so when it
+    ///    resumes it finds an idle transport, spawns, and parks in
+    ///    `initialize` with the one `Client.disconnect()` that could have
+    ///    freed it already spent. An unbounded wait there never returns —
+    ///    and step 5, the line written to reap that exact child, is never
+    ///    reached. The budget makes that ordering cost
+    ///    `abandonedConnectBudgetSeconds` instead of forever: the wait is
+    ///    abandoned and step 5 runs. A connect still in flight when teardown
+    ///    runs is abandoned by definition, so cutting it short costs it
+    ///    nothing real; the bound exists only so that step 5 runs.
+    ///
+    ///    A connect that *fails* here is not this method's business either:
+    ///    the error is swallowed with `try?`, along with the budget's own
+    ///    `WallClockBudgetExceeded`, because teardown releases resources and
+    ///    the party that wanted the outcome is the `connect()` awaiting the
+    ///    same task. Skipping the release below to propagate an error would
+    ///    leak the very child this exists to reap.
+    ///
+    ///    The `cancel()` after the wait is not step 1 repeated. Step 1
+    ///    cancelled whichever task was current *then*; `connect()` can install
+    ///    a new one while this method is suspended in steps 2-3, because this
+    ///    method is also called from `connect()`'s own error path, which does
+    ///    not set `isShutDown` and so does not refuse a later `connect()`.
+    ///    That task has never been cancelled and is about to have its
+    ///    transport killed underneath it by step 5.
+    ///
+    ///    What the budget does not fix is the parked connect itself: a task
+    ///    wedged on `initialize`'s bare continuation stays wedged for the life
+    ///    of the process, and is leaked rather than freed. What is *bounded*
+    ///    here is `disconnect()`, and what is *guaranteed* is that the child
+    ///    dies.
     /// 5. The second `await transport?.disconnect()` reaps what step 2 could
-    ///    not have. A connect task suspended between `self.transport = …` and
+    ///    not have, and runs unconditionally — including when step 4 gave up.
+    ///    A connect task suspended between `self.transport = …` and
     ///    `MCP.Client.connect(transport:)`'s call to `transport.connect()`
     ///    sees an idle transport when it resumes, and an idle transport
-    ///    spawns. Step 4 waits for exactly that to play out; this line stops
-    ///    the child it produced. It is a no-op in every other ordering.
+    ///    spawns. This line stops the child it produced. It is a no-op in
+    ///    every other ordering.
     ///
     /// Awaiting the task *before* touching the transport — the obvious
     /// ordering, and the one this method used first — is the version that
@@ -258,7 +369,12 @@ public actor MCPClient: MCPClientProtocol {
         connectTask?.cancel()
         await transport?.disconnect()
         await client.disconnect()
-        if let connectTask { _ = try? await connectTask.value }
+        if let connectTask {
+            _ = try? await withWallClockBudget(Self.abandonedConnectBudgetSeconds) {
+                try await connectTask.value
+            }
+            connectTask.cancel()
+        }
         connectTask = nil
         await transport?.disconnect()
         transport = nil
