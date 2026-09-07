@@ -155,6 +155,48 @@ extension ComposableTabsViewController: PaneHost {
         }
     }
 
+    /// Re-states the pane state onto split items that have just been rebuilt.
+    ///
+    /// `split`, `remove` and `replaceChild` all re-create `NSSplitViewItem`s
+    /// through `makeItem(for:)`, which vends them uncollapsed and unpinned.
+    /// Minimize and zoom live on the *panes*, not on the items, so without this
+    /// a minimized pane comes back full size while `minimizedEdge` still reads
+    /// non-nil, and closing a pane while another is zoomed leaves the tab
+    /// visibly unzoomed with `zoomedLeaf` still set — the screen and the model
+    /// disagreeing, and the zoom button a no-op in one direction.
+    ///
+    /// Unlike `applyPersistedPaneState()`, which reads each pane's *store* and
+    /// is a one-time restore, this runs on every rebuild and holds no latch: it
+    /// only re-applies what the live panes already say about themselves.
+    ///
+    /// Both operations are idempotent, and setting `isCollapsed` to the value it
+    /// already has posts nothing, so re-running this settles rather than
+    /// re-triggering the resize notification that led here.
+    func reapplyPaneState() {
+        guard isRoot else { return }
+        let leaves = allLeaves()
+
+        // A zoom pointing at a pane that is no longer in the tree can never be
+        // undone by clicking anything, and it leaves every surviving pane
+        // collapsed. Removing the pane removes the zoom with it.
+        if let zoomed = zoomedLeaf, !leaves.contains(where: { $0 === zoomed }) {
+            zoomed.setZoomed(false)
+            zoomedLeaf = nil
+            applyZoom(target: nil)
+        }
+
+        for leaf in leaves {
+            guard let edge = leaf.minimizedEdge,
+                  let owner = leaf.parent as? ComposableTabsViewController,
+                  let item = owner.splitViewItem(for: leaf) else { continue }
+            owner.pin(item, to: leaf.minimizedThickness(for: edge))
+        }
+        // After the pinning, for the same reason `applyPersistedPaneState()`
+        // orders them this way: pinning an item the zoom has collapsed reads as
+        // a pane that never came back.
+        if let zoomed = zoomedLeaf { applyZoom(target: zoomed.nodeID) }
+    }
+
     /// Re-asks every pane which edges it may minimize toward. The answer is a
     /// fact about the tree, so it is re-asked whenever the tree changes.
     func refreshPaneControls() {

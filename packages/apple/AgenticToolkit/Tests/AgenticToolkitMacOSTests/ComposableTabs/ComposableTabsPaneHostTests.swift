@@ -38,9 +38,13 @@ final class ComposableTabsPaneHostTests: XCTestCase {
     /// Two unbounded view types, so nothing in these tests is refused by the
     /// spec — removal rules are `ComposableTabsViewControllerTests`' subject,
     /// not this suite's.
-    private func installLayout() throws {
+    private func installLayout(preferredFraction: CGFloat? = nil) throws {
         let registry = ComposableTabsViewRegistry()
-        registry.register(alpha, descriptor: .init(displayName: "Alpha", minimumThickness: 150)) { _ in
+        registry.register(alpha, descriptor: .init(
+            displayName: "Alpha",
+            minimumThickness: 150,
+            preferredThicknessFraction: preferredFraction
+        )) { _ in
             NSViewController()
         }
         registry.register(beta, descriptor: .init(displayName: "Beta", minimumThickness: 150)) { _ in
@@ -58,20 +62,22 @@ final class ComposableTabsPaneHostTests: XCTestCase {
 
     /// A root split holding `first` beside `second`, fully loaded — a split
     /// item does not exist until the view does.
-    private func makeTree(_ node: LayoutNode) throws -> ComposableTabsViewController {
-        try installLayout()
+    private func makeTree(_ node: LayoutNode, preferredFraction: CGFloat? = nil)
+        throws -> ComposableTabsViewController {
+        try installLayout(preferredFraction: preferredFraction)
         let root = ComposableTabsViewController.make(from: node, project: project, isRoot: true)
         root.loadViewIfNeeded()
         for leaf in root.allLeaves() { leaf.loadViewIfNeeded() }
         return root
     }
 
-    private func sideBySide() throws -> ComposableTabsViewController {
+    private func sideBySide(preferredFraction: CGFloat? = nil)
+        throws -> ComposableTabsViewController {
         try makeTree(.split(
             orientation: .horizontal,
             first: .leaf(id: leftID, contentType: alpha),
             second: .leaf(id: rightID, contentType: beta)
-        ))
+        ), preferredFraction: preferredFraction)
     }
 
     private func stacked() throws -> ComposableTabsViewController {
@@ -146,6 +152,10 @@ final class ComposableTabsPaneHostTests: XCTestCase {
 
     // MARK: - Minimizing
 
+    /// The concrete numbers rather than `minimizedThickness(for:)` read back at
+    /// itself: 28pt of strip plus the 2pt border on each side is what has to be
+    /// left showing, and comparing the constant to itself would pass whatever
+    /// it became.
     func testMinimizingPinsTheItemToTheStripWidth() throws {
         let root = try sideBySide()
         let left = try leaf(leftID, in: root)
@@ -153,9 +163,29 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         root.paneDidRequestMinimize(left, to: .leading)
 
         let pinned = try item(for: left)
-        XCTAssertEqual(pinned.minimumThickness, left.minimizedThickness(for: .leading))
-        XCTAssertEqual(pinned.maximumThickness, left.minimizedThickness(for: .leading))
+        XCTAssertEqual(pinned.minimumThickness, 32, "28pt strip + 2pt border either side")
+        XCTAssertEqual(pinned.maximumThickness, 32)
         XCTAssertEqual(pinned.holdingPriority, .defaultHigh)
+    }
+
+    /// Minimize has to be non-destructive: `preferredThicknessFraction` is the
+    /// share of the tab the pane gets back when it is restored, so pinning must
+    /// leave it exactly as the registry set it.
+    func testMinimizingLeavesThePreferredThicknessFractionAlone() throws {
+        let root = try sideBySide(preferredFraction: 0.3)
+        let left = try leaf(leftID, in: root)
+        XCTAssertEqual(try item(for: left).preferredThicknessFraction, 0.3, accuracy: 0.0001,
+                       "the descriptor's share, before anything has happened to it")
+
+        root.paneDidRequestMinimize(left, to: .leading)
+
+        XCTAssertEqual(try item(for: left).preferredThicknessFraction, 0.3, accuracy: 0.0001,
+                       "pinning must not overwrite what restore gives back")
+
+        root.paneDidRequestRestore(left)
+
+        XCTAssertEqual(try item(for: left).preferredThicknessFraction, 0.3, accuracy: 0.0001,
+                       "and it is still there to be given back")
     }
 
     /// The arrow picks the axis; the tree picks the side. Both horizontal
@@ -186,7 +216,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
 
         root.paneDidRequestMinimize(top, to: .top)
 
-        XCTAssertEqual(try item(for: top).minimumThickness, top.minimizedThickness(for: .top))
+        XCTAssertEqual(try item(for: top).minimumThickness, 30, "26pt title bar + 2pt border either side")
         XCTAssertLessThan(top.minimizedThickness(for: .top), top.minimizedThickness(for: .leading))
     }
 
@@ -268,13 +298,50 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         XCTAssertFalse(try item(for: top).isCollapsed)
     }
 
+    /// The brief's central promise: a layout saved while zoomed restores
+    /// unzoomed *and correct*. That is not a claim about the tree's shape —
+    /// which a collapse never touches — but about the sizes travelling with it,
+    /// so the tree is laid out for real and the capture is driven the way
+    /// `splitViewDidResizeSubviews` drives it.
     func testAZoomIsInvisibleToTheSavedLayout() throws {
         let root = try sideBySide()
+        layOut(root)
+        root.captureThicknessFractions()
         let before = root.snapshotNode()
-        root.paneDidRequestZoom(try leaf(leftID, in: root))
+        // Without this the assertion below could pass on two rows of "-" and
+        // prove nothing — which is exactly how the first version of this test
+        // missed a zoom writing 1.0 into the saved layout.
+        XCTAssertFalse(fractions(of: before).contains { $0.hasSuffix(":-") },
+                       "the capture must have produced real fractions to compare")
 
-        XCTAssertEqual(describe(root.snapshotNode()), describe(before),
+        root.paneDidRequestZoom(try leaf(leftID, in: root))
+        layOut(root)
+        root.captureThicknessFractions()
+
+        let after = root.snapshotNode()
+        XCTAssertEqual(describe(after), describe(before),
                        "collapsing changed the screen, not the tree")
+        XCTAssertEqual(fractions(of: after), fractions(of: before),
+                       "a zoom must not write the collapsed arrangement into the saved sizes")
+    }
+
+    /// Gives a tree a real size and lets AppKit lay it out, so the divider
+    /// positions `captureThicknessFractions()` reads actually exist.
+    private func layOut(_ root: ComposableTabsViewController) {
+        root.view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        root.view.layoutSubtreeIfNeeded()
+    }
+
+    /// The leaf thickness fractions a snapshot would be persisted with, in tree
+    /// order — the part of the layout `describe(_:)` deliberately drops.
+    private func fractions(of node: LayoutNode) -> [String] {
+        switch node.kind {
+        case .leaf:
+            let value = node.thicknessFraction.map { String(format: "%.3f", $0) } ?? "-"
+            return ["\(node.id):\(value)"]
+        case .split(_, let first, let second):
+            return fractions(of: first) + fractions(of: second)
+        }
     }
 
     /// A stable rendering of a tree, so two snapshots can be compared without
@@ -314,7 +381,10 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         XCTAssertFalse(right.isZoomed)
         XCTAssertNil(root.zoomedLeaf)
         XCTAssertEqual(left.minimizedEdge, .leading)
-        XCTAssertFalse(try item(for: right).isCollapsed)
+        // `left`, not `right`: `right` was the *zoomed* pane and was never
+        // collapsed, so asserting on it would hold whether or not the unzoom
+        // happened. `left` is the pane the zoom collapsed.
+        XCTAssertFalse(try item(for: left).isCollapsed)
     }
 
     func testClosingTheZoomedPaneClearsTheZoom() throws {
@@ -328,6 +398,69 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         XCTAssertFalse(try item(for: try leaf(rightID, in: root)).isCollapsed)
     }
 
+    // MARK: - Surviving a rebuild of the split items
+
+    /// Every structural mutation re-creates split items through
+    /// `makeItem(for:)`, which vends them unpinned. The minimize lives on the
+    /// pane, so the tree has to put it back or `minimizedEdge` describes a pane
+    /// that is visibly full size.
+    func testAMinimizedPaneStaysPinnedThroughASplit() throws {
+        let root = try sideBySide()
+        let left = try leaf(leftID, in: root)
+        root.paneDidRequestMinimize(left, to: .leading)
+
+        root.split(left, adding: beta, direction: .right)
+
+        XCTAssertEqual(left.minimizedEdge, .leading)
+        XCTAssertEqual(try item(for: left).maximumThickness, 32,
+                       "the rebuilt item has to come back pinned")
+    }
+
+    /// The same again through the other rebuild: closing a pane collapses the
+    /// degenerate split that is left, and the survivor is re-inserted into its
+    /// grandparent with a brand-new item.
+    func testAMinimizedPaneStaysPinnedWhenACloseElsewherePromotesIt() throws {
+        let root = try makeTree(.split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha),
+            second: .split(
+                orientation: .horizontal,
+                first: .leaf(id: topID, contentType: beta),
+                second: .leaf(id: bottomID, contentType: alpha)
+            )
+        ))
+        let top = try leaf(topID, in: root)
+        root.paneDidRequestMinimize(top, to: .leading)
+
+        // Through the pane's own host, which is the split that built its item —
+        // asking the root to close a grandchild is a no-op, and a test that did
+        // that would assert nothing.
+        let bottom = try leaf(bottomID, in: root)
+        try XCTUnwrap(bottom.host).paneDidRequestClose(bottom)
+
+        XCTAssertEqual(top.minimizedEdge, .leading)
+        XCTAssertEqual(try item(for: top).maximumThickness, 32,
+                       "promotion into the parent must not quietly un-minimize it")
+    }
+
+    /// `paneDidRequestClose` clears the zoom on the way in, but it is not the
+    /// only door: the pane's own confirm-and-close and a drag that moves a pane
+    /// both call `remove` directly. A zoom left pointing at a pane that is gone
+    /// cannot be undone by clicking anything, and every survivor stays
+    /// collapsed.
+    func testRemovingTheZoomedPaneDirectlyClearsTheZoom() throws {
+        let root = try sideBySide()
+        let left = try leaf(leftID, in: root)
+        root.paneDidRequestZoom(left)
+
+        root.remove(left)
+
+        XCTAssertNil(root.zoomedLeaf)
+        XCTAssertFalse(left.isZoomed)
+        XCTAssertFalse(try item(for: try leaf(rightID, in: root)).isCollapsed,
+                       "the survivor has to come back on screen")
+    }
+
     // MARK: - Re-applying what was persisted
 
     func testTheHostAppliesAPersistedMinimizeToTheTree() throws {
@@ -339,8 +472,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         root.applyPersistedPaneState()
 
         XCTAssertEqual(left.minimizedEdge, .leading)
-        XCTAssertEqual(try item(for: left).maximumThickness,
-                       left.minimizedThickness(for: .leading))
+        XCTAssertEqual(try item(for: left).maximumThickness, 32)
     }
 
     func testTheHostAppliesAPersistedZoomToTheTree() throws {

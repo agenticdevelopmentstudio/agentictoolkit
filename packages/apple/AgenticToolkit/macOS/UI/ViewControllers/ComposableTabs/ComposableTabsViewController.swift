@@ -274,7 +274,15 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// felt by every split at once, and the root is the only one that saves.
     /// A split whose view has never loaded is left alone: it keeps the sizes it
     /// was restored with, which is the whole point of storing them on the child.
+    ///
+    /// A *zoomed* tree is left alone entirely. A zoom collapses every pane but
+    /// one, which is an arrangement of the screen rather than a decision about
+    /// sizes — and reading it back would record the one visible pane at the full
+    /// thickness and its siblings at nothing, so a layout saved while zoomed
+    /// would restore unzoomed and wrong. Skipping leaves the pre-zoom fractions
+    /// exactly where they were, which is what unzooming has to give back.
     func captureThicknessFractions() {
+        guard rootSplit()?.zoomedLeaf == nil else { return }
         if isViewLoaded, layoutChildren.count > 1, splitViewItems.count == layoutChildren.count {
             let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
             if total > 1 {
@@ -694,6 +702,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     fileprivate func persistTreeToDocument() {
         guard isRoot else { return }
         reassignPaneIdentifiers()
+        reapplyPaneState()
         refreshPaneControls()
         onLayoutDidChange?(snapshotNode())
         NotificationCenter.default.post(name: Self.layoutDidChangeNotification, object: self)
@@ -760,18 +769,6 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         // with the window would be a third of a wide display.
         item.holdingPriority = descriptor?.resolvedHoldingPriority ?? .defaultLow
         return item
-    }
-
-    /// The item showing `viewController`, or `nil` before the view has loaded.
-    ///
-    /// An `override`: `NSSplitViewController` already vends this exact lookup,
-    /// so declaring it fresh is a redeclaration error. What is added is the
-    /// `isViewLoaded` guard — a restored but never-displayed tab has no items,
-    /// and asking AppKit for one there risks forcing the view to load just to
-    /// be told `nil`.
-    public override func splitViewItem(for viewController: NSViewController) -> NSSplitViewItem? {
-        guard isViewLoaded else { return nil }
-        return splitViewItems.first { $0.viewController === viewController }
     }
 
     /// Undoes a minimize's pinning, putting the item back on the sizing
