@@ -102,6 +102,9 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// describe an arrangement that is no longer on screen.
     private var hasAppliedPreferredThicknesses = false
 
+    /// Root only, once. See `viewDidAppear()`.
+    private var hasAppliedPersistedPaneState = false
+
     /// Root only: the pending write for a divider the user is still dragging.
     private var pendingThicknessPersist: DispatchWorkItem?
     /// Root only: the sizes last written, so a window resize that ends where it
@@ -222,6 +225,23 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     public override func viewDidLayout() {
         super.viewDidLayout()
         applyPreferredThicknessesIfNeeded()
+    }
+
+    /// A pane restores its own chrome in its `viewDidLoad`, off its own store.
+    /// The other half — pinning a minimized pane's split item, collapsing the
+    /// ancestors of a zoomed one — is the host's, and it cannot run until every
+    /// descendant split has built its items. A nested split does not load its
+    /// view until the tree is laid out, so the earliest correct moment is here:
+    /// after the first layout pass, once, on the root.
+    ///
+    /// The latch is this restore's alone. `reapplyPaneState()` re-states what
+    /// the *live* panes already say about themselves and deliberately holds no
+    /// latch, because it has to run on every rebuild — see its own comment.
+    public override func viewDidAppear() {
+        super.viewDidAppear()
+        guard isRoot, !hasAppliedPersistedPaneState else { return }
+        hasAppliedPersistedPaneState = true
+        applyPersistedPaneState()
     }
 
     private func applyPreferredThicknessesIfNeeded() {

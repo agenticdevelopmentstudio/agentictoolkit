@@ -16,18 +16,22 @@ final class ComposableTabsPaneHostTests: XCTestCase {
 
     private lazy var project = Self.makeWorkspace()
 
+    /// The repository is registered because a pane's store is the project's
+    /// now: `pane_state.repo_id` references `git_repo(id)` under
+    /// `PRAGMA foreign_keys=ON`, so a project the database has never heard of
+    /// silently drops everything a pane remembers about itself.
     @MainActor
     private static func makeWorkspace() -> ProjectWorkspace {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("PaneHostTests-\(UUID().uuidString)")
             .appendingPathComponent("Test.db").path
+        let repo = GitRepo(path: NSTemporaryDirectory(), name: "Test")
         // A failure here is a broken test environment, not a case to handle.
         // swiftlint:disable:next force_try
         let database = try! ProjectDatabase(path: path)
-        return ProjectWorkspace(
-            repo: GitRepo(path: NSTemporaryDirectory(), name: "Test"),
-            database: database
-        )
+        // swiftlint:disable:next force_try
+        try! database.insert(repo)
+        return ProjectWorkspace(repo: repo, database: database)
     }
 
     nonisolated override func tearDown() {

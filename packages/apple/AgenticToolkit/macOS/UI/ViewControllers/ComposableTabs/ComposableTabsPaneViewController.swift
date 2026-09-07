@@ -44,9 +44,9 @@ public final class ComposableTabsPaneViewController: PaneViewController {
         self.paneNumber = paneNumber
         self.viewID = viewID
         self.project = project
-        // Ephemeral until the project-backed store lands; the seam is what
-        // lets this task ship without it.
-        super.init(stateStore: EphemeralPaneStateStore())
+        // The parameters, not `self` — stored properties are set, but `self` is
+        // not usable until `super.init` returns.
+        super.init(stateStore: ProjectPaneStateStore(project: project, nodeID: nodeID))
     }
 
     @available(*, unavailable)
