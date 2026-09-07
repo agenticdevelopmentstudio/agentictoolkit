@@ -44,7 +44,7 @@ vi.mock("../hooks/use-status", () => ({
 }));
 // The split is layout, not behaviour: render both halves inline so the watermark (in
 // `top`) and the KPI strip are both in the tree without a real ResizeObserver.
-vi.mock("@agentic-toolkit/ui/components/resizable-split", () => ({
+vi.mock("@agenticdevelopertoolkit/ui/components/resizable-split", () => ({
   ResizableSplit: ({ top, bottom }: { top: ReactNode; bottom: ReactNode }) => (
     <div>{top}{bottom}</div>
   ),

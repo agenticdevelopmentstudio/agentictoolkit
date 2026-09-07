@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useContext, useLayoutEffect, type ReactElement, type ReactNode } from "react";
-import type { TopicLevel } from "@agentic-toolkit/ui/blocks";
+import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
 
 /**
  * The channel a Settings section uses to publish its ENTITY LIST up to the board

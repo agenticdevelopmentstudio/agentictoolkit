@@ -1,6 +1,6 @@
 "use client";
 import type { ReactElement } from "react";
-import { Progress } from "@agentic-toolkit/ui/components/progress";
+import { Progress } from "@agenticdevelopertoolkit/ui/components/progress";
 import type { BuildProgress } from "../hooks/use-build-progress";
 
 import { PALETTE } from "../lib/colors";

@@ -6,8 +6,8 @@ import {
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
-} from "@agentic-toolkit/ui/components/dropdown-menu";
-import { cn } from "@agentic-toolkit/ui/lib/utils";
+} from "@agenticdevelopertoolkit/ui/components/dropdown-menu";
+import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 import { menuTriggerPillClass } from "./menu-pill";
 
 export interface MultiSelectOption {
@@ -39,7 +39,7 @@ export interface MultiSelectFilterProps {
 
 /**
  * A compact multi-select filter: a trigger reading "{noun} all" or "{noun} n/total",
- * and a checkbox list. Built on the shared @agentic-toolkit/ui DropdownMenu (Base UI
+ * and a checkbox list. Built on the shared @agenticdevelopertoolkit/ui DropdownMenu (Base UI
  * engine) — each row is a `DropdownMenuCheckboxItem` with `closeOnClick={false}` so
  * the menu stays open across toggles (multi-select), and the menuitemcheckbox role +
  * keyboard navigation come free from the engine. Shared by the issue panes' source

@@ -1,6 +1,6 @@
 "use client";
 import type { ReactElement } from "react";
-import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 import type { IntegrationsResponse } from "../types";
 import { computeSelfCheck } from "../lib/self-check";
 

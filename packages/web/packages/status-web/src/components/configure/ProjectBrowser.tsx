@@ -2,10 +2,10 @@
 import { type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import { Button } from "@agentic-toolkit/ui/components/button";
-import { Input } from "@agentic-toolkit/ui/components/input";
-import { Select } from "@agentic-toolkit/ui/components/select";
-import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import { Input } from "@agenticdevelopertoolkit/ui/components/input";
+import { Select } from "@agenticdevelopertoolkit/ui/components/select";
+import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 import { useDeployProjects, type DeployProject } from "../../hooks/use-deploy-projects";
 import { uniqueByProject } from "../../lib/project-key";
 import { useNow } from "../../hooks/use-now";

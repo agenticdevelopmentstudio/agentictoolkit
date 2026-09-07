@@ -3,7 +3,7 @@ import { preserveDirectivesPlugin } from "esbuild-plugin-preserve-directives";
 
 // Entries are GLOBBED so that every subpath the `exports` map promises
 // (`./components/*`, `./lib/*`, `./header-auth`) exists in dist without anyone
-// editing this file — the same shape as @agentic-toolkit/ui. The globs are
+// editing this file — the same shape as @agenticdevelopertoolkit/ui. The globs are
 // RECURSIVE because the `*` in an exports subpath matches `/` too: the map promises
 // `./components/foo/Bar`, so a module in a sub-folder must get its own entry rather
 // than vanish into a shared chunk. Hooks, config and telemetry modules are not
@@ -34,7 +34,7 @@ export default defineConfig({
   bundle: true,
   splitting: true,
   outExtension: () => ({ js: ".js" }),
-  // Peers and the sibling toolkit packages stay external so the host resolves ONE copy
+  // Peers, the sibling toolkit packages and the public toolkit stay external so the host resolves ONE copy
   // of each (react-query's QueryClientProvider context, next/navigation's router).
   external: [
     "react",
@@ -46,6 +46,7 @@ export default defineConfig({
     "@tanstack/react-query",
     "lucide-react",
     /^@agentic-toolkit\//,
+    /^@agenticdevelopertoolkit\//,
   ],
   esbuildPlugins: [
     preserveDirectivesPlugin({

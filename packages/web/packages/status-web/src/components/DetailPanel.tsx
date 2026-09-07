@@ -8,7 +8,7 @@ import { ResponseChart } from "./ResponseChart";
 import { ChecksStrip } from "./ChecksStrip";
 import { DeployList } from "./DeployList";
 import { paneStyle } from "./panel-styles";
-import { sectionLabelClass } from "@agentic-toolkit/ui/components/section-label";
+import { sectionLabelClass } from "@agenticdevelopertoolkit/ui/components/section-label";
 
 export interface DetailPanelProps {
   /** Slug of the selected endpoint (single env). */

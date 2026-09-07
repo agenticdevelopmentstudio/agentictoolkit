@@ -2,7 +2,7 @@ import { type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { COLORS, PALETTE, envBadgeLabel, envColor } from "../lib/colors";
 import { platformLabel, platformColor } from "../lib/deploy-display";
 import { hostOf } from "../lib/url";
-import { CopyButton } from "@agentic-toolkit/ui/components/copy-button";
+import { CopyButton } from "@agenticdevelopertoolkit/ui/components/copy-button";
 import { ProjLink } from "./ProjLink";
 
 // Line layout: [glyph] [ENV] [title→link] …flex… [copy?] [status "<word> on <platform>"] [time slot].

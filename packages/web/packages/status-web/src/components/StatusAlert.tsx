@@ -2,8 +2,8 @@
 import { type ReactElement, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Settings } from "lucide-react";
-import { Alert, AlertTitle, AlertDescription } from "@agentic-toolkit/ui/components/alert";
-import { Button } from "@agentic-toolkit/ui/components/button";
+import { Alert, AlertTitle, AlertDescription } from "@agenticdevelopertoolkit/ui/components/alert";
+import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 
 /**
  * A themed, in-app replacement for window.alert — the shared accent {@link Alert}

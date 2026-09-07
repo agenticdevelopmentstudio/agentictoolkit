@@ -3,8 +3,8 @@
 import { useMemo, type ReactElement } from "react";
 import { CircleUser } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Field, type TopicLevel } from "@agentic-toolkit/ui/blocks";
-import { Select } from "@agentic-toolkit/ui/components/select";
+import { Field, type TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
+import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { useStatusApi } from "../../api/client";
 import { useSettingsEntityLevel } from "../settings-level";
 import { useEditorMutations } from "./use-editor-mutations";

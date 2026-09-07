@@ -8,7 +8,7 @@ import { hostOf } from "../lib/url";
 import { plural } from "../lib/format";
 import { COLORS, PALETTE } from "../lib/colors";
 import { AutoConfigureButton } from "./AutoConfigureButton";
-import { Popover, PopoverTrigger, PopoverContent } from "@agentic-toolkit/ui/components/popover";
+import { Popover, PopoverTrigger, PopoverContent } from "@agenticdevelopertoolkit/ui/components/popover";
 import { BANNER_MONO, bannerBarStyle, bannerTriggerClass } from "./banner-bar";
 
 const mono = BANNER_MONO;

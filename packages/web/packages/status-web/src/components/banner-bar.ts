@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 import { PALETTE, TINT } from "../lib/colors";
 
 // Shared shell for the top-of-page attention banners (Unconfigured projects, Retire

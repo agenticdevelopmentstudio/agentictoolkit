@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { Separator } from "@agentic-toolkit/ui/components/separator";
+import { Separator } from "@agenticdevelopertoolkit/ui/components/separator";
 import type { CheckState } from "../types";
 import type { Indicator } from "../lib/board-types";
 import type { PlatformSummary } from "../lib/deploy-view";

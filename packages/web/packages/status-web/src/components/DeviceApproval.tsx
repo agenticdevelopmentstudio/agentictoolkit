@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactElement, useCallback, useEffect, useState } from "react";
-import { Button } from "@agentic-toolkit/ui/components/button";
+import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { useStatusApi } from "../api/client";
 
 const mono = "var(--mono,ui-monospace,monospace)";

@@ -7,7 +7,7 @@
        @import "@agentic-toolkit/status-web/styles/panels.css";
 
    It ships from `src/styles/` (the package's `files` includes `src`, and the
-   export path points there — the same arrangement as @agentic-toolkit/ui's
+   export path points there — the same arrangement as @agenticdevelopertoolkit/ui's
    globals.css) so no build step has to mirror it. Only the neutral `--color-apt-*`
    tokens are named; the host's theme supplies their values. */
 

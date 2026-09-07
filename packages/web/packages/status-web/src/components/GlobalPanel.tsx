@@ -9,7 +9,7 @@ import { platformGlyph } from "../lib/deploy-display";
 import { timeAgo } from "../lib/time-ago";
 import { useNow } from "../hooks/use-now";
 import { paneStyle } from "./panel-styles";
-import { sectionLabelClass } from "@agentic-toolkit/ui/components/section-label";
+import { sectionLabelClass } from "@agenticdevelopertoolkit/ui/components/section-label";
 
 import { COLORS, PALETTE } from "../lib/colors";
 export interface GlobalPanelProps {

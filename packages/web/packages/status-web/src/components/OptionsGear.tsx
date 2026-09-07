@@ -1,8 +1,8 @@
 "use client";
 import { type CSSProperties, type ReactElement, type ReactNode, useState } from "react";
 import { Settings } from "lucide-react";
-import { Popover, PopoverTrigger, PopoverContent } from "@agentic-toolkit/ui/components/popover";
-import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { Popover, PopoverTrigger, PopoverContent } from "@agenticdevelopertoolkit/ui/components/popover";
+import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 
 import { COLORS, PALETTE } from "../lib/colors";
 const mono = "var(--mono,ui-monospace,monospace)";
@@ -42,7 +42,7 @@ export interface OptionsGearProps {
  * synopsis. The popover body is supplied by each panel (sources, environments,
  * etc.) so the trigger, badge, and tooltip stay identical everywhere.
  *
- * Built on the shared @agentic-toolkit/ui Popover (Base UI engine) rather than a bespoke
+ * Built on the shared @agenticdevelopertoolkit/ui Popover (Base UI engine) rather than a bespoke
  * portal: the gear body is arbitrary consumer JSX (native checkbox/radio rows), not
  * menu items, so a non-menu popup is the right primitive. `open` is controlled here
  * so the render-prop `close()` still dismisses after a single-select pick.

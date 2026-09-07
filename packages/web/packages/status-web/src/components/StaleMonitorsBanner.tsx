@@ -10,8 +10,8 @@ import { selectStaleMonitors, STALE_MONITOR_MS } from "../lib/stale-monitors";
 import { timeAgo } from "../lib/time-ago";
 import { hostOf } from "../lib/url";
 import { plural } from "../lib/format";
-import { Popover, PopoverTrigger, PopoverContent } from "@agentic-toolkit/ui/components/popover";
-import { AlertModal } from "@agentic-toolkit/ui/components/alert-modal";
+import { Popover, PopoverTrigger, PopoverContent } from "@agenticdevelopertoolkit/ui/components/popover";
+import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { BANNER_MONO, bannerBarStyle, bannerColor, bannerTriggerClass } from "./banner-bar";
 import { invalidateConfigQueries } from "../hooks/use-config-status";
 

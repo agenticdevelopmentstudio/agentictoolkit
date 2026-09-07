@@ -1,6 +1,6 @@
 "use client";
 import { type ReactElement, useState } from "react";
-import { ResizableSplit } from "@agentic-toolkit/ui/components/resizable-split";
+import { ResizableSplit } from "@agenticdevelopertoolkit/ui/components/resizable-split";
 import { useStatus } from "../hooks/use-status";
 import { useUptime } from "../hooks/use-uptime";
 import { useLiveSnapshot } from "../hooks/use-live-snapshot";

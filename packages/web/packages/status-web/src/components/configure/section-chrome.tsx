@@ -1,7 +1,7 @@
 "use client";
 import { useState, type ReactElement, type ReactNode } from "react";
-import { ButtonBar } from "@agentic-toolkit/ui/blocks";
-import { AlertModal } from "@agentic-toolkit/ui/components/alert-modal";
+import { ButtonBar } from "@agenticdevelopertoolkit/ui/blocks";
+import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 
 /** The centered no-selection state every Settings section (and the panel host)
  *  shows in its leaf — one home for the styling. */

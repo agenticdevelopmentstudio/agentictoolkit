@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactElement, ReactNode } from "react";
-import { Tabs, TabsList, TabsTab, TabsPanel } from "@agentic-toolkit/ui/components/tabs";
-import { CopyButton } from "@agentic-toolkit/ui/components/copy-button";
+import { Tabs, TabsList, TabsTab, TabsPanel } from "@agenticdevelopertoolkit/ui/components/tabs";
+import { CopyButton } from "@agenticdevelopertoolkit/ui/components/copy-button";
 import { PALETTE, COLORS, envColor, envBadgeLabel } from "../lib/colors";
 import { rowDetailToText, type RowDetail } from "../lib/row-detail";
 import { ProjLink } from "./ProjLink";

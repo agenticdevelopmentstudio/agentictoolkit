@@ -7,10 +7,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@agentic-toolkit/ui/components/dialog";
-import { Button } from "@agentic-toolkit/ui/components/button";
-import { Select } from "@agentic-toolkit/ui/components/select";
-import { Checkbox } from "@agentic-toolkit/ui/components/checkbox";
+} from "@agenticdevelopertoolkit/ui/components/dialog";
+import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import { Select } from "@agenticdevelopertoolkit/ui/components/select";
+import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
 import { PLATFORM_ORDER, platformCanon } from "../lib/deploy-view";
 import { platformLabel } from "../lib/deploy-display";
 import { projectKeyOf } from "../lib/project-key";
@@ -69,7 +69,7 @@ function bySection(projects: ReviewProject[]): { platform: string; items: Review
  * ignore checkbox + a per-platform "ignore all", so the operator can prune a large
  * batch (the many Railway infra projects) before the rest are configured. Applying
  * persists the checked projects to the ignore list and configures the rest. Built on
- * the shared @agentic-toolkit/ui Dialog (which owns focus-trap + Escape + focus restore).
+ * the shared @agenticdevelopertoolkit/ui Dialog (which owns focus-trap + Escape + focus restore).
  */
 export function AutoConfigureReview({ projects, groups, busy, progress, onApply, onCancel }: AutoConfigureReviewProps): ReactElement {
   const [ignore, setIgnore] = useState<Set<string>>(() => new Set());

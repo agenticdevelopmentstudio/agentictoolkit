@@ -1,6 +1,6 @@
 // Monitor palette — every value references the shared ADH theme tokens (var(--color-apt-*))
 // so the status board tracks the same theme as the rest of the suite. No hard-coded hex:
-// a token's value is owned by @agentic-toolkit/themes, not copied here. Tints/glows apply alpha
+// a token's value is owned by @agenticdevelopertoolkit/themes, not copied here. Tints/glows apply alpha
 // to a token via color-mix (the form the UI checker accepts). Shade changes vs the old
 // bespoke values are intentional — the board now uses the canonical theme colors.
 const GREEN = "var(--color-apt-green)"; // status: good       (= --color-success)
@@ -34,7 +34,7 @@ export const DEPLOY_COLORS: Record<string, string> = {
 
 // Environment tag colors — a CATEGORICAL palette (3 distinct env hues that must read as
 // "which env", never as a health signal). Uses the shared theme's CATEGORICAL hues
-// (apt-cat-*, owned by @agentic-toolkit/themes) — distinct, theme-managed, and deliberately
+// (apt-cat-*, owned by @agenticdevelopertoolkit/themes) — distinct, theme-managed, and deliberately
 // outside the status spectrum so an env badge never reads as a health signal. No collision
 // with the platform badges (which use other apt-cat-* hues).
 export const ENV_COLORS: Record<string, string> = {

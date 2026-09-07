@@ -1,8 +1,8 @@
 "use client";
 import { type ReactElement, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { Button } from "@agentic-toolkit/ui/components/button";
-import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 
 export interface RefreshIconButtonProps {
   onRefresh: () => void;

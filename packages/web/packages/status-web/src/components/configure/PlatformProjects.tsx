@@ -1,7 +1,7 @@
 "use client";
 import { type ReactElement, useRef, useState } from "react";
-import { Button } from "@agentic-toolkit/ui/components/button";
-import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 import { useStatusApi } from "../../api/client";
 import * as api from "../../api/monitored-sites";
 import { useDeployProjects, type DeployProject } from "../../hooks/use-deploy-projects";

@@ -3,7 +3,7 @@ import {
   type ReactElement, type ReactNode, type KeyboardEvent, type WheelEvent, type TouchEvent,
   useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
-import { InfoPanel } from "@agentic-toolkit/ui/blocks";
+import { InfoPanel } from "@agenticdevelopertoolkit/ui/blocks";
 import { type Row, rowToStatusRowProps, rowSearchText, rowsToText } from "../lib/row-model";
 import { ISSUE_SOURCES, SOURCE_LABEL, isIssueSource, type IssueSource } from "../lib/issue-sources";
 import { matchesQuery } from "../lib/filter";
@@ -15,13 +15,13 @@ import { COLORS, PALETTE, envColor } from "../lib/colors";
 import { StatusRow } from "./StatusRow";
 import { ActivityDetails } from "./ActivityDetails";
 import { rowToDetailProps, rowDetailToText } from "../lib/row-detail";
-import { stepIndex } from "@agentic-toolkit/ui/lib/step-index";
-import { ResizableSplit } from "@agentic-toolkit/ui/components/resizable-split";
+import { stepIndex } from "@agenticdevelopertoolkit/ui/lib/step-index";
+import { ResizableSplit } from "@agenticdevelopertoolkit/ui/components/resizable-split";
 import { StatusSign } from "./StatusSign";
-import { CopyButton } from "@agentic-toolkit/ui/components/copy-button";
-import { Input } from "@agentic-toolkit/ui/components/input";
+import { CopyButton } from "@agenticdevelopertoolkit/ui/components/copy-button";
+import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Eraser } from "lucide-react";
-import { cn } from "@agentic-toolkit/ui/lib/utils";
+import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 import { OptionsGear, OptionSection, OptionDivider, optionRow } from "./OptionsGear";
 
 const mono = "var(--mono,ui-monospace,monospace)";

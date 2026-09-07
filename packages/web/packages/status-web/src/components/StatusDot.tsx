@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import {
   StatusDot as SharedStatusDot,
   type StatusDotTone,
-} from "@agentic-toolkit/ui/components/status-dot";
+} from "@agenticdevelopertoolkit/ui/components/status-dot";
 
 // Domain adapter only: maps the monitor's health/overall status WORDS onto the
 // family tone scale. The rendering (fill + glow driven by one tone) is the
