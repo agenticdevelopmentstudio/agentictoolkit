@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 
+import AgenticDeveloperToolkitUI
 import AgenticToolkitCore
 import AgenticToolkitCoreUI
 import AgenticToolkitCoreMacOS
@@ -45,6 +46,16 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     public let project: ProjectWorkspace
     private let tabbed: MultiTabbedViewController
 
+    /// The window's content: the tabs, with the footer under them. Held so the
+    /// footer can be reached without walking `window?.contentViewController`,
+    /// which is nil until the window loads.
+    private let content: WindowFooterContentViewController
+
+    /// The strip across the bottom. Public because the UI suite and the
+    /// scripting bridge both address it, and neither should have to know it
+    /// arrived by composition.
+    public var footer: WindowFooterBar { content.footer }
+
     /// Project-level tabs, in creation order.
     private var tabGroups: [TabGroup] = []
 
@@ -75,8 +86,16 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
 
     public init(project: ProjectWorkspace) {
         self.project = project
-        self.tabbed = MultiTabbedViewController()
-        super.init(windowID: Self.windowID(for: project.id), contentViewController: tabbed)
+        // Locals first: a stored property cannot be read back before
+        // `super.init`, and the host needs the tab controller to wrap.
+        let tabbed = MultiTabbedViewController()
+        let content = WindowFooterContentViewController(
+            contentViewController: tabbed,
+            accessibilityPrefix: "project.footer"
+        )
+        self.tabbed = tabbed
+        self.content = content
+        super.init(windowID: Self.windowID(for: project.id), contentViewController: content)
 
         self.windowSpec = WindowSpec(
             defaultSize: NSSize(width: 800, height: 500),
@@ -99,6 +118,16 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             }
         }
         installInitialTabs()
+
+        // The pane the user is working in is tracked once for the whole app;
+        // this window only cares when the change is its own.
+        NotificationCenter.default.publisher(for: ComposableTabsActivePane.didChangeNotification)
+            .sink { [weak self] notification in
+                guard let self, (notification.object as? NSWindow) === self.window else { return }
+                self.refreshFooterStatus()
+            }
+            .store(in: &cancellables)
+        refreshFooterStatus()
     }
 
     isolated deinit {
@@ -333,6 +362,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         } else {
             focusedLeafByTabID.removeValue(forKey: activeTabID)
         }
+        refreshFooterStatus()
         scheduleFocusPersist()
     }
 
@@ -353,6 +383,66 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         // mounted before we try to make a leaf first responder.
         DispatchQueue.main.async {
             activeSplit.makeLeafFirstResponder(nodeID: focusedNodeID)
+        }
+    }
+
+    // MARK: - Footer
+
+    /// The display path for the window's current state: the project, the tab
+    /// in front, the pane the user is working in, and what that pane says is
+    /// selected.
+    ///
+    /// `internal`, and a computed property rather than a stored string, so a
+    /// test can read it without a window on screen and so there is exactly one
+    /// answer to "what should the footer say" (`dry`).
+    var footerStatus: String {
+        let pane = activePane
+        return PaneDisplayPath.format([
+            project.displayName,
+            activeTabTitle,
+            pane?.resolvedTitle,
+            pane?.selectionDescription
+        ])
+    }
+
+    func refreshFooterStatus() {
+        content.status = footerStatus
+    }
+
+    private var activeSplit: ComposableTabsViewController? {
+        guard let activeTabID = tabbed.activeTabID else { return nil }
+        return splitControllersByTabID[activeTabID]
+    }
+
+    private var activeTabTitle: String? {
+        guard let activeTabID = tabbed.activeTabID else { return nil }
+        return Edge.allCases
+            .flatMap { tabbed.tabs(on: $0) }
+            .first { $0.id == activeTabID }?
+            .title
+    }
+
+    /// The pane the footer is about, in order of how directly the user said
+    /// so: the one `ComposableTabsActivePane` is tracking, then the one
+    /// holding the first responder, then the tab's first pane. The last is not
+    /// a guess — a tab nobody has clicked in yet still has a pane on screen,
+    /// and naming it is more use than naming nothing.
+    private var activePane: ComposableTabsPaneViewController? {
+        guard let split = activeSplit else { return nil }
+        let tracked = ComposableTabsActivePane.shared.activeNodeID(in: window)
+        if let nodeID = tracked ?? split.focusedLeafNodeID,
+           let leaf = split.allLeaves().first(where: { $0.nodeID == nodeID }) {
+            return leaf
+        }
+        return split.firstLeaf()
+    }
+
+    /// Every leaf reports its own selection changes to the footer. Re-run
+    /// whenever the tree changes, because a split makes leaves that have never
+    /// been wired and the ones it replaced are gone.
+    private func wireSelectionObservers(on split: ComposableTabsViewController) {
+        for leaf in split.allLeaves() {
+            leaf.onSelectionChange = { [weak self] in self?.refreshFooterStatus() }
         }
     }
 
@@ -418,8 +508,10 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     }
 
     private func wireLayoutCallback(on split: ComposableTabsViewController, tabID: UUID) {
-        split.onLayoutDidChange = { [weak self] node in
+        split.onLayoutDidChange = { [weak self, weak split] node in
             guard let self else { return }
+            // A split or a close makes leaves this window has never seen.
+            if let split { self.wireSelectionObservers(on: split) }
             // A removed pane must not leave a focus record behind, or
             // `installInitialTabs()` restores focus to a node that no
             // longer exists on the next launch.
@@ -428,7 +520,9 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 self.focusedLeafByTabID[tabID] = nil
             }
             self.persistAllTabs()
+            self.refreshFooterStatus()
         }
+        wireSelectionObservers(on: split)
     }
 
     private static func leafIDs(in node: LayoutNode) -> Set<UUID> {
@@ -484,6 +578,7 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
     ) {
         restoreFocusedLeafForActiveTab()
         persistAllTabs()
+        refreshFooterStatus()
     }
 
     public func multiTabbedViewController(

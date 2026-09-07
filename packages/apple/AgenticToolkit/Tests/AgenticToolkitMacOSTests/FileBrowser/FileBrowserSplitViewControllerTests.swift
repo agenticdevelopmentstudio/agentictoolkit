@@ -80,6 +80,38 @@ final class FileBrowserSplitViewControllerTests: XCTestCase {
         second.paneContentWillBeDiscarded()
     }
 
+    // MARK: - What the footer is told
+
+    /// The last segment of the window's display path, for a browser with
+    /// nothing selected and then with a file selected.
+    func testTheSelectionDescriptionIsTheSelectedFilesName() {
+        let directory = makeDirectory()
+        let split = makeSplit(in: directory)
+        XCTAssertNil(split.paneSelectionDescription, "nothing selected ends the path at the pane")
+
+        let url = directory.appendingPathComponent("main.swift")
+        try? "let x = 1\n".write(to: url, atomically: true, encoding: .utf8)
+        split.selection.selectedNode = FileTreeNode(url: url, isDirectory: false)
+
+        XCTAssertEqual(split.paneSelectionDescription, "main.swift")
+        split.paneContentWillBeDiscarded()
+    }
+
+    /// The browser reports; the footer does not poll.
+    func testSelectingAFileTellsTheFooterToRecompute() {
+        let directory = makeDirectory()
+        let split = makeSplit(in: directory)
+        var reports = 0
+        split.onPaneSelectionChange = { reports += 1 }
+
+        let url = directory.appendingPathComponent("main.swift")
+        try? "let x = 1\n".write(to: url, atomically: true, encoding: .utf8)
+        split.selection.selectedNode = FileTreeNode(url: url, isDirectory: false)
+
+        XCTAssertGreaterThan(reports, 0, "a new selection has to reach whoever renders it")
+        split.paneContentWillBeDiscarded()
+    }
+
     func testCollapsingTheTreeLeavesTheViewerTheWholePane() {
         let split = makeSplit(in: makeDirectory())
         split.loadViewIfNeeded()

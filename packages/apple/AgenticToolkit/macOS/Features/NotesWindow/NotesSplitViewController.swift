@@ -18,6 +18,11 @@ public final class NotesSplitViewController: ThemedSplitViewController {
     /// one notes pane at a time.
     private let splitAutosaveName: String
 
+    /// `PaneSelectionDescribing`'s change callback. Stored here rather than in
+    /// the conformance below because Swift has no stored properties in
+    /// extensions, and the protocol declares it `{ get set }`.
+    public var onPaneSelectionChange: (() -> Void)?
+
     // MARK: - Child VCs
 
     private let folderVC: NotesFolderListViewController
@@ -669,6 +674,10 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
     public func notesListDidSelectNote(_ note: Note?) {
         editorVC.show(note: note)
         onToolbarRelevantStateChange?()
+        // The single funnel for every selection change in this pane, so the
+        // footer is told from one place rather than from each caller that can
+        // move the selection (`dry`).
+        onPaneSelectionChange?()
     }
 
     public func notesListDidRequestNewNote() {
@@ -693,4 +702,14 @@ extension NotesSplitViewController: NoteEditorViewControllerDelegate {
 
 extension NotesSplitViewController: Loggable {
     public static nonisolated let logger = makeLogger()
+}
+
+// MARK: - PaneSelectionDescribing
+
+extension NotesSplitViewController: PaneSelectionDescribing {
+    /// The selected note's title — the same derivation the list shows, read
+    /// back off the note rather than derived a second time here.
+    public var paneSelectionDescription: String? {
+        selectedNote()?.title
+    }
 }

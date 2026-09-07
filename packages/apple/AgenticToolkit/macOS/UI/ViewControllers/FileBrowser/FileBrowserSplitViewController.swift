@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
@@ -36,6 +37,17 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
     /// Callers that can have more than one pass a distinct name.
     private let splitAutosaveName: String
 
+    /// `PaneSelectionDescribing`'s change callback. Stored here rather than in
+    /// the conformance below because Swift has no stored properties in
+    /// extensions, and the protocol declares it `{ get set }`.
+    public var onPaneSelectionChange: (() -> Void)?
+
+    /// Watches the shared selection so the callback above fires for every way
+    /// a file gets selected — the tree, a restore, a host setting it directly
+    /// — rather than only for the clicks the tree happens to route through a
+    /// delegate (`dry`).
+    private var selectionObserver: AnyCancellable?
+
     /// - Parameters:
     ///   - directories: The roots to show — the project itself, plus whatever
     ///     the user has added with the tree's `+`.
@@ -66,6 +78,9 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
         self.viewerViewController = FileViewerViewController(selection: selection)
         self.splitAutosaveName = autosaveName
         super.init(nibName: nil, bundle: nil)
+
+        selectionObserver = selection.$selectedNode
+            .sink { [weak self] _ in self?.onPaneSelectionChange?() }
     }
 
     /// A browser over a single directory, with nothing to add or remove.
@@ -129,5 +144,15 @@ extension FileBrowserSplitViewController: PaneContentTeardown {
     /// `viewDidDisappear`.
     public func paneContentWillBeDiscarded() {
         browserViewController.paneContentWillBeDiscarded()
+    }
+}
+
+extension FileBrowserSplitViewController: PaneSelectionDescribing {
+    /// The selected file's name, not its path: the footer already names the
+    /// project and the pane in the segments before this one, and a repo-rooted
+    /// path repeated there would push the part the user is looking for off the
+    /// truncation.
+    public var paneSelectionDescription: String? {
+        selection.selectedNode?.name
     }
 }

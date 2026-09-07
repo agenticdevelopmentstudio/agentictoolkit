@@ -706,4 +706,41 @@ final class NotesSplitViewControllerTests: XCTestCase {
         XCTAssertTrue(settled)
         XCTAssertEqual(listVC.selectedNoteID, kept.id, "the user's selection must survive the delete")
     }
+
+    // MARK: - What the footer is told
+
+    /// The last segment of the window's display path. A note has no title of
+    /// its own — `Note.title` is derived from the content — so this is the
+    /// same string the list shows, not a second derivation of it.
+    func testTheSelectionDescriptionIsTheSelectedNotesTitle() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "# Release notes\n\nbody", markers: [.note])
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        XCTAssertNil(split.paneSelectionDescription, "nothing selected ends the path at the pane")
+
+        let note = try XCTUnwrap(notesManager.notes.first)
+        let listVC = try XCTUnwrap(split.splitViewItems[1].viewController as? NotesListViewController)
+        listVC.reload(notes: notesManager.notes, keepingSelectedID: note.id)
+
+        XCTAssertEqual(split.paneSelectionDescription, note.title)
+    }
+
+    /// The pane reports; the footer does not poll. Every selection change in
+    /// this pane funnels through the list's delegate callback, so that is the
+    /// one place the report is made from.
+    func testSelectingANoteTellsTheFooterToRecompute() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "# Release notes\n\nbody", markers: [.note])
+        let (split, note, _) = try await makeSplitWithASelectedNote(store: store)
+        var reports = 0
+        split.onPaneSelectionChange = { reports += 1 }
+
+        split.notesListDidSelectNote(note)
+
+        XCTAssertGreaterThan(reports, 0, "a new selection has to reach whoever renders it")
+    }
 }
