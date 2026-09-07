@@ -28,19 +28,34 @@ public final class ProjectDatabase {
 
     public static let currentSchemaVersion = 3
 
-    /// `~/.<token>/<Token>.db` — e.g. `~/.coffeegrinder/CoffeeGrinder.db`.
+    /// `~/.<token>/Projects.db` — e.g. `~/.coffeegrinder/Projects.db`.
     ///
     /// A dotfolder in the home directory rather than Application Support: this
     /// is the same registry the command line tools read, and asking someone to
     /// type a path with two spaces in it is a hostile default.
+    ///
+    /// The directory carries the app's identity; the file says what is in it,
+    /// exactly as `MarkdownStore.defaultPath` names `Markdown.db` in the same
+    /// folder. Naming the file after the token too was a second spelling of
+    /// the app name that folded differently from the first: the directory is
+    /// lowercased and the filename was not, so changing the display name's
+    /// capitalization alone — "Coffee grinder" to "Coffee Grinder" — resolved
+    /// to the same directory and a *different* file, which `openDatabase`
+    /// would then create empty beside the real one and migrate from scratch.
     /// - Parameter home: The home directory to hang it off. Defaults to the
     ///   user's; a test passes a temporary one so a run cannot edit the
     ///   developer's own registry (`homeDirectoryForCurrentUser` ignores
     ///   `$HOME`, so there is no ambient way to redirect this).
-    public static func defaultPath(inHome home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
-        let token = AppStorageLocation.token
-        return AppStorageLocation.directory(inHome: home, token: token)
-            .appendingPathComponent("\(token).db")
+    /// - Parameter token: The storage token naming the directory. Defaults to
+    ///   the running app's; present for the same reason `MarkdownStore` has
+    ///   it, so the two stores that must land in one directory can be told to
+    ///   use one and cannot drift apart in a test that overrides only one.
+    public static func defaultPath(
+        inHome home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        token: String = AppStorageLocation.token
+    ) -> String {
+        AppStorageLocation.directory(inHome: home, token: token)
+            .appendingPathComponent("Projects.db")
             .path
     }
 

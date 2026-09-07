@@ -15,10 +15,28 @@ public enum KeychainHelper {
     /// default) preserves the original per-binary behavior.
     nonisolated(unsafe) public static var accessGroup: String?
 
+    /// Service identifiers this app used to write under, newest first.
+    ///
+    /// The service defaults to the bundle identifier, so changing the bundle
+    /// identifier — a rename, a new reverse-DNS prefix — orphans every secret
+    /// the app has ever stored. Nothing surfaces: `get` returns `nil` and the
+    /// feature behaves as though the user never entered the key. Listing the
+    /// retired identifiers here lets `get` find one and re-store it under the
+    /// current service, the same shape as the access-group recovery below.
+    ///
+    /// The legacy item is read and never deleted. It belongs to the old
+    /// identity, another install may still be using it, and a secret is not
+    /// something to destroy on a guess.
+    nonisolated(unsafe) public static var legacyServices: [String] = []
+
     /// Builds the base generic-password query for an account key. When an access
     /// group is in play, scopes the item to it and forces the macOS data-protection
     /// keychain (required for access groups on macOS).
-    static func makeQuery(account: String, accessGroup: String? = KeychainHelper.accessGroup) -> [String: Any] {
+    static func makeQuery(
+        account: String,
+        accessGroup: String? = KeychainHelper.accessGroup,
+        service: String = KeychainHelper.service
+    ) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -68,12 +86,30 @@ public enum KeychainHelper {
             set(legacy, forKey: key)
             return legacy
         }
+        // Retired-service migration: the service defaults to the bundle
+        // identifier, so a bundle-identifier change leaves every secret behind
+        // under the old one. Recover the newest and re-store it under the
+        // current service. The old item is left where it is.
+        for legacyService in legacyServices {
+            if let legacy = copyValue(forKey: key, accessGroup: accessGroup, service: legacyService)
+                ?? (accessGroup != nil
+                    ? copyValue(forKey: key, accessGroup: nil, service: legacyService)
+                    : nil) {
+                logger.info("Recovered '\(key, privacy: .public)' from retired Keychain service")
+                set(legacy, forKey: key)
+                return legacy
+            }
+        }
         return nil
     }
 
     /// Copies the stored string for an account, scoped to the given access group.
-    private static func copyValue(forKey key: String, accessGroup: String?) -> String? {
-        var query = makeQuery(account: key, accessGroup: accessGroup)
+    private static func copyValue(
+        forKey key: String,
+        accessGroup: String?,
+        service: String = KeychainHelper.service
+    ) -> String? {
+        var query = makeQuery(account: key, accessGroup: accessGroup, service: service)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -100,11 +136,22 @@ public enum KeychainHelper {
     }
 
     /// Returns whether a value exists in the Keychain for the given key.
+    ///
+    /// Retired services count. An item `get` would recover is present as far
+    /// as any caller is concerned, and answering `false` here would have a
+    /// settings pane render an empty field over a stored secret. This probe
+    /// does not migrate — the first `get` does that.
     public static func exists(forKey key: String) -> Bool {
         var query = makeQuery(account: key)
         query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+        if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
+            return true
+        }
+        return legacyServices.contains { legacyService in
+            var legacyQuery = makeQuery(account: key, service: legacyService)
+            legacyQuery[kSecMatchLimit as String] = kSecMatchLimitOne
+            return SecItemCopyMatching(legacyQuery as CFDictionary, nil) == errSecSuccess
+        }
     }
 }
 

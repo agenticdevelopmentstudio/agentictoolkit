@@ -1,4 +1,5 @@
 import AgenticToolkitCore
+import AgenticToolkitDatabase
 import AgenticToolkitCoreUI
 import AgenticToolkitCoreMacOS
 import AgenticToolkitPermissions
@@ -685,7 +686,7 @@ extension SessionWatcher {
         private func sendNotification(for session: SessionWatcherSession) -> SessionWatcherActionResult {
             logger.debug("sendNotification: \(session.projectName, privacy: .public)")
             let content = UNMutableNotificationContent()
-            content.title = "Whippet: \(session.projectName)"
+            content.title = "\(AppStorageLocation.displayName): \(session.projectName)"
             content.body = "SessionWatcherSession: \(session.sessionId)"
                 + "\nModel: \(session.model)"
                 + "\nStatus: \(session.status.rawValue)"

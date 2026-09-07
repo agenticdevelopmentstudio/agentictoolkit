@@ -216,14 +216,27 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(try reopened.setting(repoID: repo.id, key: "theme"), "dark")
     }
 
-    /// The database directory is created on demand: `~/.whippet` does not exist
-    /// on a machine that has never run the app.
+    /// The database directory is created on demand: the app's dotfolder does
+    /// not exist on a machine that has never run it.
     func testTheDatabaseDirectoryIsCreatedOnDemand() throws {
         let path = tempRoot
             .appendingPathComponent("not-yet-there", isDirectory: true)
-            .appendingPathComponent("Whippet.db").path
+            .appendingPathComponent("Projects.db").path
         _ = try ProjectDatabase(path: path)
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+    }
+
+    /// The file is named for its contents, not for the app, so two display
+    /// names differing only in capitalization resolve to one database rather
+    /// than to a real one and an empty one beside it.
+    func testDefaultPathIsUnchangedByTheCaseOfTheToken() {
+        let home = URL(fileURLWithPath: "/tmp/home")
+        XCTAssertEqual(
+            ProjectDatabase.defaultPath(inHome: home, token: "COFFEEgrinder"),
+            ProjectDatabase.defaultPath(inHome: home, token: "CoffeeGrinder"))
+        XCTAssertEqual(
+            ProjectDatabase.defaultPath(inHome: home, token: "CoffeeGrinder"),
+            "/tmp/home/.coffeegrinder/Projects.db")
     }
 
     // MARK: - Helpers

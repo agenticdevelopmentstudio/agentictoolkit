@@ -104,7 +104,13 @@ public final class PermissionRowView: NSView {
         // permission, so an unqualified "open-settings" would name several
         // buttons at once and a test could not say which it clicked.
         button.setAccessibilityIdentifier("permission.\(permission.identifierToken).open-settings")
-        setAccessibilityIdentifier("permission.\(permission.identifierToken).row")
+        // The row itself carries no identifier. A plain `NSView` is not an
+        // accessibility element, so an identifier set on one is never
+        // published — `XCUIElement` cannot see it, and nothing here calls
+        // `setAccessibilityElement(true)`. Making the container a group to
+        // hold a name would add an element VoiceOver has to step through and
+        // no test asks for; the button, which is a real element, is the
+        // per-permission handle.
 
         addSubview(icon)
         addSubview(titleLabel)

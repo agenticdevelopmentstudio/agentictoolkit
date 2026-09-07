@@ -2,6 +2,7 @@ import Foundation
 import os
 import AgenticToolkitCore
 import AgenticToolkitMarkdown
+import AgenticToolkitDatabase
 
 /// Coordinates in-memory note state and storage persistence.
 /// All access must happen on the main actor.
@@ -334,7 +335,7 @@ public struct NotesStorageFailure: Equatable, Sendable {
             case .load: return "Your notes could not be read from disk."
             case .create: return "The new note was not saved and has been removed."
             case .save: return "Your most recent changes are not saved to disk yet."
-            case .delete: return "The note may reappear the next time Whippet starts."
+            case .delete: return "The note may reappear the next time \(AppStorageLocation.displayName) starts."
             }
         }
     }

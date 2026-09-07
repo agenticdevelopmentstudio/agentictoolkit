@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticToolkitDatabase
 
 /// A floating panel view that shows all discoverable windows grouped by app.
 /// Opens immediately with a spinner while window enumeration runs asynchronously.
@@ -156,7 +157,8 @@ public final class WindowDiscoveryView: NSView {
         let title = ThemedLabel(string: "Accessibility Access Required", role: .primaryText, textRole: .heading)
 
         let desc = NSTextField(
-            wrappingLabelWithString: "Grant Whippet Accessibility access to discover and activate windows."
+            wrappingLabelWithString: "Grant \(AppStorageLocation.displayName) Accessibility access "
+                + "to discover and activate windows."
         )
         desc.observeTheme { view, palette in
             view.font = palette.font(.caption)

@@ -8,7 +8,7 @@ final class AppStorageLocationTests: XCTestCase {
     }
 
     func testLeavesASingleWordNameAlone() {
-        XCTAssertEqual(AppStorageLocation.token(for: "Whippet"), "Whippet")
+        XCTAssertEqual(AppStorageLocation.token(for: "Percolator"), "Percolator")
     }
 
     func testStripsPunctuationAndPathSeparators() {
@@ -24,5 +24,15 @@ final class AppStorageLocationTests: XCTestCase {
         XCTAssertEqual(
             AppStorageLocation.directory(inHome: home, token: "CoffeeGrinder").path,
             "/tmp/home/.coffeegrinder")
+    }
+
+    /// Capitalization in a display name is cosmetic, so it must not move the
+    /// store. This is the property that makes it safe for the files inside the
+    /// directory to be named for their contents rather than for the app.
+    func testDirectoryIgnoresTheCaseOfTheToken() {
+        let home = URL(fileURLWithPath: "/tmp/home")
+        XCTAssertEqual(
+            AppStorageLocation.directory(inHome: home, token: "COFFEEgrinder").path,
+            AppStorageLocation.directory(inHome: home, token: "CoffeeGrinder").path)
     }
 }

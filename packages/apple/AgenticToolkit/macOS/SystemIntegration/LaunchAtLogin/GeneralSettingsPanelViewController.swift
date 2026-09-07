@@ -1,5 +1,6 @@
 import AppKit
 import AgenticToolkitCore
+import AgenticToolkitDatabase
 
 /// General app-startup panel. The launch-at-login coachmark renders inline
 /// until the user dismisses it via "Got It".
@@ -58,7 +59,8 @@ public final class GeneralSettingsPanelViewController: ComposableSettings.Settin
         ))
 
         group.addSettingSubview(ComposableSettings.DismissibleHintView(
-            text: "Whippet works best when it starts automatically with your Mac. "
+            text: "\(AppStorageLocation.displayName) works best when it starts automatically "
+                + "with your Mac. "
                 + "Enable launch at login so you never miss a Claude Code session.",
             dismissedSetting: UserSettings.launchAtLoginHintDismissed
         ))
