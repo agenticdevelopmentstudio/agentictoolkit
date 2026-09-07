@@ -84,10 +84,34 @@
    genuinely local to adh.
 
    Which is the stack. `.adh-header` is at 50 here, above the dock's default 45,
-   so the chat would be painted under the header and the scrim would stop short of
-   it. 51 clears the header and stays under every overlay above it (a site's
-   drawers and modals live at 55+, and the footer's own dialogs use the native
-   Popover top layer, which nothing here can reach anyway).
+   so the ENGAGED chat would be painted under the header and its scrim would stop
+   short of it. 51 clears the header.
+
+   ONLY WHILE ENGAGED, and that condition is the whole rule. The lift used to be
+   unconditional, on the claim that "51 stays under every overlay above it — a
+   site's drawers and modals live at 55+". That is not true of the shared ui
+   package, which is where this site's overlays actually come from: popover,
+   tooltip, combobox, dropdown-menu, dialog, sheet, toast and the create modal are
+   every one of them `z-50`. So a DOZING bitbag outranked every overlay in the
+   fleet.
+
+   Nothing looked wrong, which is why it stood. What overlaps an overlay is not
+   anything bitbag paints — it is `.bb-dock__avatar`'s box, a 350×195 viewBox whose
+   backing rect is `fill="transparent"` and therefore hit-testable (SVG's default
+   `pointer-events: visiblePainted` counts `transparent` as painted). The overlay
+   renders exactly where it should, on top as far as the eye can tell, and silently
+   stops taking clicks; nor do those clicks fall THROUGH to the dock, because base-ui
+   marks everything outside an open popup inert while it is up. The hub's reaction
+   palette is the case that found it: its emoji sit over the dozing rig, and
+   `elementFromPoint` there answers with his hit box
+   (`e2e/work-item-comments.spec.ts`, "reacting adds the viewer's emoji").
+
+   Conditioning on `:has(.persona-chat:not(.pc-collapsed))` — the same selector the
+   scrim two blocks down already engages on — costs the lift nothing it was written
+   for and takes back everything it was not. Collapsed, the rig is a 3.6rem entry
+   line on the viewport's bottom edge and the header is at the top: they cannot
+   overlap, so 45 is indistinguishable from 51 except to the overlays. Engaged, the
+   scrim covers the viewport and the lift is exactly the reason it exists.
 
    This only works because FooterChatInner portals the dock to `document.body`:
    inside `.adh-footer` — sticky WITH a z-index, hence a stacking context — no
@@ -95,14 +119,15 @@
 
    BOTH CLASSES, and that is load-bearing. The host class rides on the dock's own
    root, so `.adh-footer__chat` and bitbag-dock.css's `.bb-dock { z-index: 45 }`
-   are the same element at the same specificity — which leaves source order to
-   break the tie, and order is not ours to control: this file arrives in the site's
-   main bundle via globals.css, while bitbag-dock.css rides the `next/dynamic`
-   chunk FooterChat loads on the client, so it lands LATER and 45 would win.
-   Written as one compound selector it is (0,2,0) against (0,1,0) and the tie never
-   happens. A single class here type-checks, reads correctly, and silently reverts
-   the portal fix above — the dock would go back under the header. */
-.bb-dock.adh-footer__chat {
+   are the same element, and a single class here would be (0,1,0) against (0,1,0) —
+   a tie left to source order, which is not ours to control: this file arrives in
+   the site's main bundle via globals.css, while bitbag-dock.css rides the
+   `next/dynamic` chunk FooterChat loads on the client, so it lands LATER and 45
+   would win. The `:has()` makes this rule decisive on its own, but keep both
+   classes anyway: they are what says WHOSE dock this is, and the day the condition
+   is dropped the tie is back. When the selector does not match, `.bb-dock`'s own 45
+   is the fallback — which is the point, not an accident. */
+.bb-dock.adh-footer__chat:has(.persona-chat:not(.pc-collapsed)) {
   z-index: 51;
 }
 
