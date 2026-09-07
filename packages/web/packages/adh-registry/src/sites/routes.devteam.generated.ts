@@ -2,7 +2,7 @@
 // Regenerate: python3 <websites-root>/tools/gen-site-routes.py --region devteam
 //
 // devteam's share of the fleet's page routes, derived from that repo's App Router
-// trees. The rest is in its siblings `routes.hub.generated.ts`, `routes.main.generated.ts`, `routes.marketing.generated.ts`, `routes.placeholder.generated.ts`, written by the other repos;
+// trees. The rest is in its siblings `routes.community.generated.ts`, `routes.cookbook.generated.ts`, `routes.docs.generated.ts`, `routes.hub.generated.ts`, `routes.main.generated.ts`, `routes.marketing.generated.ts`, `routes.personaregistry.generated.ts`, `routes.placeholder.generated.ts`, `routes.registry.generated.ts`, `routes.research.generated.ts`, `routes.shipr.generated.ts`, `routes.toolkit.generated.ts`, written by the other repos;
 // `routes.generated.ts` merges them all and is what consumers import. See the
 // generator's docstring for why this is one file per repo.
 //
