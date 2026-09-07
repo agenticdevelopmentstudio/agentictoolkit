@@ -121,6 +121,14 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// the project's tab list.
     public var onLayoutDidChange: ((LayoutNode) -> Void)?
 
+    /// The array is the general shape, but a split here is binary or solo and
+    /// `captureThicknessFractions()` now depends on that: it skips a split whole
+    /// when one of its items is a rail, which is only lossless because a binary
+    /// split holding a rail has no draggable divider left. A third child would
+    /// have one — and would silently stop being persisted, since `snapshotNode`
+    /// serialises two. The invariant was true of every call site by
+    /// construction; this makes it something a new one trips over rather than
+    /// something a future reader has to rediscover.
     public init(
         nodeID: UUID,
         axis: ComposableTabsAxis,
@@ -128,6 +136,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         project: ProjectWorkspace?,
         isRoot: Bool
     ) {
+        assert(children.count <= 2, "a split is binary or solo; nest instead of appending")
         self.nodeID = nodeID
         self.axis = axis
         self.layoutChildren = children
@@ -302,12 +311,18 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// resize while a pane is minimized, so this needs no unusual gesture.
     ///
     /// Nothing capturable is given up by widening the skip from the item to the
-    /// split. Every split here is binary — `first:`/`second:` is the only way
-    /// one is built with siblings, `split(_:adding:)` nests rather than appends,
-    /// and `snapshotNode()` serialises exactly two children — and a binary split
-    /// with a rail in it has no divider left to drag. The recursion into child
-    /// splits stays: a nested split's fractions are relative to its own bounds,
-    /// so a rail in the parent does not distort them.
+    /// split, and what carries that is the *runtime* shape of a split rather
+    /// than the persisted one. Every split here is binary or solo: the
+    /// array-taking init asserts it, `first:`/`second:` is the only way one is
+    /// built with siblings, `split(_:adding:)` nests rather than appends, and
+    /// `rebuild(from:)` assigns two children or one. A binary split holding a
+    /// rail has no divider left to drag, so there is nothing here to read.
+    /// (`snapshotNode()` serialises exactly two children as well, but that leg
+    /// proves nothing on its own — a live split with three would persist its
+    /// first two and a real divider between them would be lost. The invariant
+    /// above is the one this gate stands on.) The recursion into child splits
+    /// stays: a nested split's fractions are relative to its own bounds, so a
+    /// rail in the parent does not distort them.
     ///
     /// `maximumThickness != unspecifiedDimension` is an exact test rather than a
     /// heuristic: `pin(_:to:)` is the only thing that sets it and

@@ -346,6 +346,51 @@ final class ComposableTabsPaneHostTests: XCTestCase {
                        "the dragged position, not the even split it started at")
     }
 
+    /// The capture walks the *whole* tree, so declining to run it costs every
+    /// split and not only the one showing a rail. A divider dragged elsewhere is
+    /// still sitting in the 300ms debounce when the user zooms a minimized pane;
+    /// a zoom that refuses to capture drops it — the very loss the test above
+    /// exists to prevent, reached by a different door.
+    ///
+    /// Nothing has to be guarded by hand for the minimized pane itself:
+    /// `captureThicknessFractions` skips a split that is showing a rail, so the
+    /// stale frames the restore has not laid out yet are declined at source and
+    /// every other split is still read.
+    func testZoomingAMinimizedPaneStillCapturesADragInAnotherSplit() throws {
+        let root = try makeTree(.split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha),
+            second: .split(
+                orientation: .vertical,
+                first: .leaf(id: topID, contentType: beta),
+                second: .leaf(id: bottomID, contentType: alpha)
+            )
+        ))
+        layOut(root)
+        let left = try leaf(leftID, in: root)
+        root.paneDidRequestMinimize(left, to: .leading)
+        root.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(left.minimizedEdge, .leading, "the setup has to actually minimize")
+
+        // A drag in the nested split, which the debounce has not written yet.
+        let top = try leaf(topID, in: root)
+        let inner = try XCTUnwrap(top.parent as? ComposableTabsViewController)
+        let total = inner.splitView.bounds.height
+        inner.splitView.setPosition(200, ofDividerAt: 0)
+        root.view.layoutSubtreeIfNeeded()
+        // Read what the drag actually produced rather than assuming which edge
+        // `setPosition` measures from; the assertion is that the capture agrees
+        // with the screen, not that the screen holds a particular number.
+        let onScreen = top.view.frame.height / total
+        XCTAssertNotEqual(onScreen, 0.5, accuracy: 0.05, "the drag moved nothing")
+
+        root.paneDidRequestZoom(left)
+
+        XCTAssertEqual(try XCTUnwrap(fraction(of: topID, in: root.snapshotNode())),
+                       onScreen, accuracy: 0.01,
+                       "the drag in the unrelated split was dropped by the zoom")
+    }
+
     /// A capture may only read geometry the user actually arranged. A pane
     /// showing its rail is not arranged — it is 32pt of chrome — and the 300ms
     /// debounce fires on any window resize while a pane is minimized, so the

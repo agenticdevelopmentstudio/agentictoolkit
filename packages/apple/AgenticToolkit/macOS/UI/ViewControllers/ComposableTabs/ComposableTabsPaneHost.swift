@@ -96,7 +96,6 @@ extension ComposableTabsViewController: PaneHost {
 
     public func paneDidRequestZoom(_ pane: PaneViewController) {
         guard let leaf = pane as? ComposableTabsPaneViewController else { return }
-        let wasMinimized = leaf.minimizedEdge != nil
         // Before the zoom goes up, for the same reason `paneDidRequestMinimize`
         // captures first: a divider dragged in the last 300ms is still sitting
         // in the debounce, and once `zoomedLeaf` is set the capture refuses to
@@ -104,14 +103,16 @@ extension ComposableTabsViewController: PaneHost {
         // zoom this is a no-op, which is correct: what is on screen then is the
         // collapsed arrangement, not sizes worth keeping.
         //
-        // A pane that is currently minimized is the one case where there is
-        // nothing worth reading: the restore below has not been laid out yet, so
-        // the frames still show the rail, and the pane's real fractions were
-        // captured when it was minimized. Capturing here would replace them with
-        // 32pt of chrome.
-        if !wasMinimized { rootSplit()?.captureThicknessFractions() }
+        // Unconditional, including when `leaf` is minimized. The restore below
+        // has not been laid out yet, so that pane's split is still showing its
+        // rail — and `captureThicknessFractions` skips a split showing a rail,
+        // which is exactly the case this used to guard by hand. Declining the
+        // whole call instead would suppress the walk over every *other* split
+        // too, dropping a drag somewhere unrelated for the sake of a split that
+        // now declines itself.
+        rootSplit()?.captureThicknessFractions()
         // A minimized pane that zoomed would take over the tab as a rail.
-        if wasMinimized { paneDidRequestRestore(leaf) }
+        if leaf.minimizedEdge != nil { paneDidRequestRestore(leaf) }
         setZoomedLeaf(leaf.isZoomed ? nil : leaf)
     }
 
