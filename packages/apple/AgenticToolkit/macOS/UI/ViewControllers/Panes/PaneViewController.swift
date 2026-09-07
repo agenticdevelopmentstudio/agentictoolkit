@@ -54,6 +54,27 @@ open class PaneViewController: NSViewController {
     private var minimizedStrip: PaneMinimizedStripView?
     private var optionsPopover: WindowConfigPopover?
 
+    /// This pane's spacing, and where it comes from. `lazy` because it asks
+    /// `inheritedPaneSpacing`, which a subclass overrides — so it cannot be
+    /// built until `self` exists.
+    public private(set) lazy var spacingOverride = PaneSpacingOverride(
+        store: stateStore,
+        inherited: { [weak self] in self?.inheritedPaneSpacing ?? Spacing() }
+    )
+
+    /// What the pane is *itself* holding the content off its edges by. Zero
+    /// when the content applies the gap instead — which is the invariant this
+    /// property exists to make testable.
+    public private(set) var contentSpacingInsets = NSEdgeInsets()
+
+    private var contentEdgeConstraints: (top: NSLayoutConstraint,
+                                         leading: NSLayoutConstraint,
+                                         bottom: NSLayoutConstraint,
+                                         trailing: NSLayoutConstraint)?
+
+    private var spacingControl: SpacingControl?
+    private var spacingResetButton: NSButton?
+
     public init(stateStore: PaneStateStore = EphemeralPaneStateStore()) {
         self.stateStore = stateStore
         super.init(nibName: nil, bundle: nil)
@@ -85,10 +106,21 @@ open class PaneViewController: NSViewController {
     /// pane among several.
     open var paneAccessibilityIdentifier: String { "pane" }
 
-    /// The rows in the gear popover. The content's own rows, and — once the
-    /// spacing task lands — the frame spacing control above them.
+    /// The spacing this pane falls back to when it has no override of its own.
+    ///
+    /// Content that already applies a gap names the global it is applying, so
+    /// the per-pane control overrides *that* number rather than introducing a
+    /// second one. Everything else inherits nothing, and a subclass that knows
+    /// better overrides this.
+    open var inheritedPaneSpacing: Spacing {
+        (contentViewController as? PaneContentSpacingConsuming)?.inheritedPaneSpacing ?? Spacing()
+    }
+
+    /// The rows in the gear popover: the frame spacing control first, then the
+    /// content's own rows.
     open func makeOptionRows() -> [NSView] {
-        (contentViewController as? PaneOptionsProviding)?.makePaneOptionRows() ?? []
+        makeSpacingRows()
+            + ((contentViewController as? PaneOptionsProviding)?.makePaneOptionRows() ?? [])
     }
 
     // MARK: - Loading
@@ -120,12 +152,12 @@ open class PaneViewController: NSViewController {
             let view = content.view
             view.translatesAutoresizingMaskIntoConstraints = false
             contentContainer.addSubview(view)
-            NSLayoutConstraint.activate([
-                view.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-                view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
-                view.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
-                view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor)
-            ])
+            let top = view.topAnchor.constraint(equalTo: contentContainer.topAnchor)
+            let leading = view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor)
+            let bottom = contentContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            let trailing = contentContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            NSLayoutConstraint.activate([top, leading, bottom, trailing])
+            contentEdgeConstraints = (top, leading, bottom, trailing)
         }
 
         self.view = container
@@ -135,6 +167,8 @@ open class PaneViewController: NSViewController {
         super.viewDidLoad()
         wireControls()
         wireContentCallbacks()
+        spacingOverride.onChange = { [weak self] _ in self?.applyResolvedSpacing() }
+        applyResolvedSpacing()
         installGear()
         refreshTitle()
         refreshAccessories()
@@ -196,6 +230,64 @@ open class PaneViewController: NSViewController {
         }
         minimizePicker = picker
         picker.show(relativeTo: anchor)
+    }
+
+    // MARK: - Spacing
+
+    /// Hands the gap to whichever of the two is applying it, and takes it back
+    /// off the other. Safe to call repeatedly — it assigns, it does not
+    /// accumulate (`idempotency`).
+    public func applyResolvedSpacing() {
+        let spacing = resolvedSpacing
+        spacingControl?.value = spacing
+        spacingResetButton?.isEnabled = spacingOverride.isOverridden
+
+        if let consumer = contentViewController as? PaneContentSpacingConsuming {
+            consumer.applyPaneSpacing(spacing)
+            contentSpacingInsets = NSEdgeInsets()
+        } else {
+            contentSpacingInsets = spacingOverride.insets
+        }
+
+        contentEdgeConstraints?.top.constant = contentSpacingInsets.top
+        contentEdgeConstraints?.leading.constant = contentSpacingInsets.left
+        contentEdgeConstraints?.bottom.constant = contentSpacingInsets.bottom
+        contentEdgeConstraints?.trailing.constant = contentSpacingInsets.right
+    }
+
+    /// Split out so `applyResolvedSpacing` reads as one idea; a subclass never
+    /// needs it, since `inheritedPaneSpacing` is the hook.
+    private var resolvedSpacing: Spacing { spacingOverride.resolved }
+
+    /// The gear's first rows: the picture, and the way back to inheriting.
+    ///
+    /// The control's own reset sets every number to zero, which is a *look* a
+    /// user may want — so returning to the app's spacing needs its own button,
+    /// and it is disabled while there is nothing to return from.
+    public func makeSpacingRows() -> [NSView] {
+        let control = SpacingControl(style: .frame, range: PaneSpacingOverride.range)
+        control.value = spacingOverride.resolved
+        control.onChange = { [weak self] value in self?.spacingOverride.setOverride(value) }
+        control.accessibilityID("pane.options.spacing")
+        spacingControl = control
+
+        let reset = NSButton(title: "Use Default", target: nil, action: nil)
+        reset.bezelStyle = .rounded
+        reset.isEnabled = spacingOverride.isOverridden
+        reset.accessibilityID("pane.options.spacing.reset")
+        reset.setAccessibilityLabel("Use Default Spacing")
+        // The button outlives this method only through the popover that shows
+        // it, so the action is a closure the button itself carries rather than
+        // a selector on a target the pane would have to keep alive.
+        reset.target = self
+        reset.action = #selector(resetSpacing)
+        spacingResetButton = reset
+
+        return [control, reset]
+    }
+
+    @objc private func resetSpacing() {
+        spacingOverride.reset()
     }
 
     // MARK: - Reading the content

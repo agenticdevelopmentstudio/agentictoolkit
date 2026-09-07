@@ -123,13 +123,16 @@ final class PaneViewControllerTests: XCTestCase {
         let (pane, _) = loadedPane(content: content)
         XCTAssertEqual(pane.titleBar.accessoryViews.count, 1)
         XCTAssertTrue(pane.titleBar.accessoryViews.first === content.accessory)
-        XCTAssertEqual(pane.makeOptionRows().count, 2)
+        // 2 universal spacing rows (Task 14) + the content's own 2.
+        XCTAssertEqual(pane.makeOptionRows().count, 4)
     }
 
     func testBareContentGetsNoAccessoriesAndNoOptionRows() {
         let (pane, _) = loadedPane(content: BareContent())
         XCTAssertTrue(pane.titleBar.accessoryViews.isEmpty)
-        XCTAssertTrue(pane.makeOptionRows().isEmpty)
+        // The gear always leads with the 2 universal spacing rows (Task 14);
+        // bare content contributes none of its own beyond those.
+        XCTAssertEqual(pane.makeOptionRows().count, 2)
     }
 
     func testTheGearIsInTheTitleBarsTrailingSlot() {
