@@ -5405,6 +5405,127 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/integrations/providers/{providerId}/adopt-installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                providerId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Connect every installation the saved GitHub App can already see
+         * @description This is what lets ADDING the integration BE the connect. A GitHub App is installed on github.com, by a person choosing an account there — so by the time an app id and private key are saved, that choice has already been made and the app can read it back. An OAuth redirect at this point would ask a question whose answer is already known.
+         *
+         *     Only valid for github_app providers (400 otherwise); 404 for an unknown provider or an unknown config. `providerConfigId` is REQUIRED and read by id, never resolved: the resolver falls back to the platform-global app when an ecosystem has none of its own, and enumerating a shared app's installations would list every other tenant's.
+         *
+         *     ONE INSTALLATION'S FAILURE IS NOT THE BATCH'S. An app on four orgs, one of them suspended, connects three and reports the fourth under `skipped` with GitHub's message. Only a failure to enumerate at all — which is the credentials themselves being wrong — is a 400. Calling it again is safe: an installation already connected comes back under `connected` with its existing `connectionId`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Target ecosystem id (the caller must manage it) */
+                        ecosystemId: string;
+                        /** @description The saved config holding the app id and private key. See above for why it cannot be omitted. */
+                        providerConfigId: string;
+                        /** @description Defaults to the provider's primary service type. */
+                        serviceType?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description What became of each installation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            connected: {
+                                installationId: string;
+                                /** @description The account the app is installed on — the org whose repositories it reaches. */
+                                accountLogin: string;
+                                /** @description `Organization` or `User`. */
+                                targetType: string;
+                                /** @description The connection holding it — set when this call made one, AND when a previous call already had. Adoption is idempotent, so a second call over the same installations reports them connected rather than connecting them again. */
+                                connectionId?: string;
+                                /** @description Why it was not connected. Absent on success. */
+                                skipped?: string;
+                                /** @description The connection stands, and the prefetch that rides along behind it — caching what this installation was granted — did not finish. NOT a skip: everything that needs a connection works, and only the repository picker opening instantly does not. It is reported because this call is what the Test button runs, and a picker that will open empty should say so now rather than at the moment somebody needs it. */
+                                warning?: string;
+                            }[];
+                            skipped: {
+                                installationId: string;
+                                /** @description The account the app is installed on — the org whose repositories it reaches. */
+                                accountLogin: string;
+                                /** @description `Organization` or `User`. */
+                                targetType: string;
+                                /** @description The connection holding it — set when this call made one, AND when a previous call already had. Adoption is idempotent, so a second call over the same installations reports them connected rather than connecting them again. */
+                                connectionId?: string;
+                                /** @description Why it was not connected. Absent on success. */
+                                skipped?: string;
+                                /** @description The connection stands, and the prefetch that rides along behind it — caching what this installation was granted — did not finish. NOT a skip: everything that needs a connection works, and only the repository picker opening instantly does not. It is reported because this call is what the Test button runs, and a picker that will open empty should say so now rather than at the moment somebody needs it. */
+                                warning?: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/integrations/connect": {
         parameters: {
             query?: never;
@@ -37351,8 +37472,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Move it, reorder it, or change which branches it ships to
-         * @description `slug` and `shard` are not editable: changing either would re-point a registered pipeline at a different repository while leaving its mirror, ladder and history behind.
+         * Move it, reorder it, rename it, or change which branches it ships to
+         * @description TWO TABLES, ONE ROUTE: `displayName` is the DEV repo’s label, addressed through a mirror the way `/platforms` is, because a mirror is the only thing this console has an id for. `shard` is never editable. `slug` is editable ONLY while `registeredAt` is null — a repository that is still a plan may be pointed anywhere, and one that has been provisioned answers 409, because re-pointing it would strand its mirror, ladder and history on a repository nothing now names.
          */
         patch: {
             parameters: {
@@ -37369,6 +37490,10 @@ export interface paths {
                     "application/json": {
                         groupId?: string | null;
                         position?: number;
+                        /** @description owner/name of the DEPLOYMENT repository. 409 once it is provisioned. */
+                        slug?: string;
+                        /** @description The source repository’s label, shown in the console instead of its slug. Null clears it. */
+                        displayName?: string | null;
                         shipBranch?: string;
                         ciContext?: string;
                         envBranches?: {
@@ -37790,8 +37915,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -37891,8 +38014,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -37992,8 +38113,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -38093,8 +38212,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -38250,8 +38367,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -38615,6 +38730,8 @@ export interface paths {
         /**
          * Every repository one connection can reach
          * @description What the installation was granted, which is exactly the set `register` can act on — offering anything wider means an operator picks a repository whose first push fails minutes later. The account-and-repository picker that produced this set is GitHub’s own installation page, so there is no org listing beside it. A connection that is not the caller’s own is a 404, never a 403: a 403 would confirm it exists.
+         *
+         *     This reads what was last stored, so it is a database read and normally cannot fail on GitHub’s account. The one exception is a connection nothing has been stored for yet: answering `[]` there would report an empty grant on the single occasion it is certainly untrue, so a miss goes and asks — which is why 502 is still among the responses. Use the refresh below to ask deliberately.
          */
         get: {
             parameters: {
@@ -38640,6 +38757,11 @@ export interface paths {
                                 defaultBranch: string;
                                 private: boolean;
                             }[];
+                            /**
+                             * Format: date-time
+                             * @description When GitHub last said this. The picker shows a stored list immediately and refreshes behind it, so the list on screen can be older than the request that returned it — this is how a caller can say so instead of implying it is current.
+                             */
+                            readAt: string;
                         };
                     };
                 };
@@ -38683,6 +38805,99 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shipr/connections/{id}/repositories/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask GitHub again what this connection was granted
+         * @description The Test button, and the read-then-refresh the picker does on open. Always goes to GitHub — a stored list never short-circuits it, because the whole reason to call this rather than the GET is to find out whether the credentials still work and what has changed since.
+         *
+         *     The answer replaces the stored row wholesale rather than merging into it: a grant is a set, and a merge would keep a repository the installation has since lost, which is exactly the kind of entry an operator would pick and only discover was gone at the first push. A call that cannot reach GitHub is a 502 and leaves the stored row untouched — a list read an hour ago can still be picked from, and an empty one cannot.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The repositories, as GitHub just described them */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            repositories: {
+                                /** @description owner/name */
+                                slug: string;
+                                defaultBranch: string;
+                                private: boolean;
+                            }[];
+                            /**
+                             * Format: date-time
+                             * @description When GitHub last said this. The picker shows a stored list immediately and refreshes behind it, so the list on screen can be older than the request that returned it — this is how a caller can say so instead of implying it is current.
+                             */
+                            readAt: string;
+                        };
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -38836,10 +39051,26 @@ export interface paths {
                         deploymentOwner?: string;
                         /** @description The mirror’s name on the same fallback. Defaults to `<name>-deployment`; overridable independently of the owner, because changing the org almost always keeps the name. */
                         deploymentName?: string;
+                        /** @description Whether to GO AND MAKE IT, or only write down where it goes. `false` writes the rows synchronously, leaves `registeredAt` null and queues no run, so nothing is created on the forge under a name nobody has looked at yet; the operator then sets the org, the name and the environments and presses Provision, which is `POST /shipr/runs` with the same `register` operation. Defaults to true. */
+                        provision?: boolean;
                     };
                 };
             };
             responses: {
+                /** @description Configured — rows written, nothing provisioned */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            devRepo: components["schemas"]["ShiprDevRepo"];
+                            mirrors: components["schemas"]["ShiprRepo"][];
+                            /** @description What the run would have journalled: a repository carrying no `.shipr`, a malformed one, a slug another repository already spoke for. Present only when there is something to say. */
+                            notes?: string[];
+                        };
+                    };
+                };
                 /** @description Queued */
                 202: {
                     headers: {
@@ -38899,6 +39130,171 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shipr/org-defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The per-org defaults, all of them
+         * @description A LIST AND NOT A LOOKUP: the menu that opens the Settings dialog already shows every org the caller’s installations reach, so one request fills every gear icon and an org nobody has configured is simply absent rather than a 404 the client has to read as “unset”.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description The workspace slug to act in. Omitted, the caller's own personal workspace. */
+                    workspace?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The configured orgs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            orgDefaults: components["schemas"]["ShiprOrgDefaults"][];
+                        };
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shipr/org-defaults/{org}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A forge account login. */
+                org: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set one org’s defaults
+         * @description UPSERT, because “the defaults for this org” is one row whether or not anybody has written it yet. IT PROVISIONS NOTHING AND CHANGES NO EXISTING MIRROR — a default is read when a mirror is born, so writing one re-aims the next repository and leaves every registered one where the operator put it. An ABSENT field is left alone rather than reset, so a request about environments cannot quietly restore the suffix.
+         */
+        put: {
+            parameters: {
+                query?: {
+                    /** @description The workspace slug to act in. Omitted, the caller's own personal workspace. */
+                    workspace?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description A forge account login. */
+                    org: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        deploymentOwner?: string | null;
+                        nameSuffix?: string;
+                        envBranches?: {
+                            [key: string]: string;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description The defaults as stored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ShiprOrgDefaults"];
+                    };
+                };
+                /** @description Error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -73166,10 +73562,28 @@ export interface components {
         ShiprDevRepo: {
             id?: string;
             slug?: string;
+            /** @description What the operator calls it, which is not always what the forge calls it. Null means no opinion and every reader falls back to `slug`. A LABEL AND NOTHING MORE: no branch, no path and no forge call is derived from it. */
+            displayName?: string | null;
             mainBranch?: string;
             preparedBranch?: string;
             declarationSha?: string | null;
             connectionId?: string | null;
+        };
+        /** @description What a mirror in one forge org is BORN with — never a description of one that already exists. Read when a mirror is first written; changing it re-aims the next repository and moves nothing already registered. */
+        ShiprOrgDefaults: {
+            id?: string;
+            /** @description The forge account login. */
+            org?: string;
+            /** @description Which org the deployment repositories go in. Null is “the same org”, stored as null rather than as a copy so that an operator who never chose stays distinguishable from one who chose the org they were already in. */
+            deploymentOwner?: string | null;
+            /** @description `-deployment`, spelled per-org. Appended to the source repository’s name when its `.shipr` declares no shards. */
+            nameSuffix?: string;
+            /** @description The ladder a new mirror starts with. Empty means the built-in default (every environment, named after itself), not a repository that deploys nowhere. */
+            envBranches?: {
+                [key: string]: string;
+            };
+            createdAt?: string;
+            updatedAt?: string;
         };
         /** @description The column-aligned commit view: one row per commit, oldest first, with a mark in each branch column whose tip is at or above it. */
         ShiprLadder: {
