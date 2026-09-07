@@ -1,107 +1,82 @@
 import AppKit
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticDeveloperToolkitUI
 
 extension ComposableSettings {
 
-    /// The settings window's help drawer: an `NSDrawer` on the window's trailing
-    /// edge whose content is a `HelpDrawerView`.
+    /// The settings window's help drawer.
     ///
-    /// A drawer slides out *beside* the window instead of taking width from it,
-    /// which is the whole point — opening help must not reflow the controls it
-    /// is explaining, and closing it must not leave a gap where prose used to be.
-    /// AppKit animates the slide, tracks the window, and flips the drawer to the
-    /// other edge when there's no room on screen; none of that is ours to write.
+    /// Everything about *being* a drawer — the slide, the edge, the window
+    /// tracking, the fact that opening on a window not yet on screen is
+    /// silently dropped — belongs to `WindowDrawer` now. What is left here is
+    /// the only part that was ever about settings: that the drawer is
+    /// remembered in `settingsHelpDrawerVisible`, and that its one tab is Help.
     ///
-    /// `NSDrawer` has been deprecated since 10.13 — AppKit's suggested
-    /// replacement is `NSSplitViewController`, i.e. precisely the pane-that-steals-
-    /// width this is not — but it is still in the SDK and still works. This type
-    /// carries the same deprecation on purpose: a deprecated declaration is a
-    /// warning-free zone for the API it wraps, so AppKit's drawer vocabulary
-    /// stays inside this one file and everything else sees only
-    /// `SettingsHelpPresenting`.
+    /// The deprecation annotation stays because `WindowDrawer` carries one, and
+    /// naming a deprecated type is only warning-free from inside another.
     @available(macOS, deprecated: 10.13, message: "Wraps NSDrawer, deprecated since macOS 10.13")
     @MainActor
-    public final class HelpDrawerController: NSObject, SettingsHelpPresenting {
+    public final class HelpDrawerController: NSObject, HelpPresenting {
 
-        /// Opening width. Wide enough for a comfortable measure at the 11pt
-        /// explanation size; the user can drag the drawer's outer edge from
-        /// `minContentWidth` to `maxContentWidth` from there.
-        public static let contentWidth: CGFloat = 300
-        private static let minContentWidth: CGFloat = 220
-        private static let maxContentWidth: CGFloat = 520
+        public static let contentWidth: CGFloat = WindowDrawer.defaultContentWidth
 
-        private let drawer: NSDrawer
-        private let helpView = HelpDrawerView()
+        private static let helpTabID = "help"
+
+        private let helpView = HelpContentView()
         private let preference: UserSettingObserver<Bool>
+        private var drawer: WindowDrawer!
 
         public var onVisibilityChange: (() -> Void)?
 
         /// Unused: a drawer comes out of the window's edge, not out of a button.
-        /// `SettingsHelpPresenting` still requires it, because the popover
-        /// presenter does need somewhere to hang its help from.
+        /// `HelpPresenting` still requires it, because the popover presenter
+        /// does need somewhere to hang its help from.
         public var helpAnchorView: NSView?
 
-        /// The drawer is open because the reader asked for it to be open, and for
-        /// no other reason.
+        /// The drawer is open because the reader asked for it to be open, and
+        /// for no other reason.
         ///
-        /// It used to be `hasHelp && preference`, which made the drawer slam shut
-        /// on the way to a panel that had no prose and slide open again on the way
-        /// out — an animation triggered by clicking the sidebar, which nobody
-        /// asked for and which reads as the window flinching. A panel with nothing
-        /// to say now says so *inside* the drawer, where it costs a line of text
-        /// instead of a change of layout.
+        /// It used to be `hasHelp && preference`, which made the drawer slam
+        /// shut on the way to a panel that had no prose and slide open again on
+        /// the way out — an animation triggered by clicking the sidebar, which
+        /// nobody asked for and which reads as the window flinching. A panel
+        /// with nothing to say now says so *inside* the drawer, where it costs
+        /// a line of text instead of a change of layout.
         public var isHelpVisible: Bool { self.preference.value }
 
         public init(parentWindow: NSWindow) {
-            self.drawer = NSDrawer(
-                contentSize: NSSize(width: Self.contentWidth, height: parentWindow.frame.height),
-                preferredEdge: .maxX
-            )
             self.preference = UserSettingObserver(UserSettings.settingsHelpDrawerVisible)
-
             super.init()
 
-            self.drawer.parentWindow = parentWindow
-            self.drawer.contentView = self.helpView
-            // Height is the window's to decide; only the width is draggable.
-            self.drawer.minContentSize = NSSize(width: Self.minContentWidth, height: 0)
-            self.drawer.maxContentSize = NSSize(width: Self.maxContentWidth, height: 0)
+            let helpView = self.helpView
+            self.drawer = WindowDrawer(
+                parentWindow: parentWindow,
+                accessibilityPrefix: "settings.drawer",
+                tabs: [
+                    DrawerTab(
+                        id: Self.helpTabID,
+                        title: "Help",
+                        symbolName: "questionmark.circle",
+                        makeView: { helpView })
+                ],
+                contentWidth: Self.contentWidth)
 
             self.preference.onChange = { [weak self] _ in
                 self?.applyVisibility()
             }
-            self.observeParentWindow(parentWindow)
-        }
-
-        /// A drawer can only open on a window that is already on screen, and the
-        /// first panel is selected while the settings window is still being made
-        /// visible — so the opening call at that moment is silently dropped.
-        /// Re-applying when the window arrives is what makes "remembered open"
-        /// actually open on launch rather than on the second try.
-        ///
-        /// Registered by selector rather than by block so the observation is
-        /// zeroing-weak and needs no `deinit` to undo.
-        private func observeParentWindow(_ window: NSWindow) {
-            let center = NotificationCenter.default
-            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification] {
-                center.addObserver(
-                    self,
-                    selector: #selector(self.parentWindowDidAppear),
-                    name: name,
-                    object: window
-                )
+            // `WindowDrawer` remembers nothing; this is what it re-asserts when
+            // the window finally appears, so a remembered-open drawer opens on
+            // launch rather than on the second try.
+            self.drawer.reapplyVisibility = { [weak self] in
+                self?.applyVisibility()
             }
         }
 
-        @objc private func parentWindowDidAppear() {
-            self.applyVisibility()
-        }
+        // MARK: - HelpPresenting
 
-        // MARK: - SettingsHelpPresenting
-
-        public func setHelp(_ help: PanelHelp?) {
-            self.helpView.setHelp(help)
+        public func setHelp(_ content: HelpContent?) {
+            self.helpView.setHelp(content)
             self.applyVisibility()
         }
 
@@ -111,7 +86,7 @@ extension ComposableSettings {
 
         private func applyVisibility() {
             if self.isHelpVisible {
-                self.drawer.open()
+                self.drawer.open(selecting: Self.helpTabID)
             } else {
                 self.drawer.close()
             }
