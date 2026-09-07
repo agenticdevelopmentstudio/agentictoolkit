@@ -363,6 +363,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         root.captureThicknessFractions()
         XCTAssertEqual(try XCTUnwrap(fraction(of: leftID, in: root.snapshotNode())),
                        0.25, accuracy: 0.02, "the drag itself must land first")
+        let dragged = fractions(of: root.snapshotNode())
 
         root.paneDidRequestMinimize(try leaf(leftID, in: root), to: .leading)
         root.view.layoutSubtreeIfNeeded()
@@ -373,9 +374,53 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(fraction(of: leftID, in: root.snapshotNode())),
                        0.25, accuracy: 0.02,
                        "the rail's own thickness was recorded as what the pane wants")
+        // And not the pane's own fraction alone: the 32pt the rail gave up went
+        // to its sibling, so the sibling's reading is just as false a record of
+        // what the user chose. Here it is only latent — the divider is placed
+        // from the *first* child, so the sibling's number is never consulted —
+        // but it is the same wrong reading that ruins the trailing case below.
+        XCTAssertEqual(fractions(of: root.snapshotNode()), dragged,
+                       "a split showing a rail must record no new sizes at all")
         // What the user sees after a relaunch, before restoring anything.
         let rebuilt = try rebuild(root.snapshotNode())
         XCTAssertEqual(try width(of: leftID, in: rebuilt), 200, accuracy: 4,
+                       "the pane reopened at its floor instead of the size it was dragged to")
+    }
+
+    /// The same gesture on the other side of the divider, and the one the user
+    /// actually loses their layout to. Minimizing the *second* slot leaves the
+    /// rail's own fraction intact — but `applyPreferredThicknessesIfNeeded`
+    /// positions the divider from the non-last children and gives the last one
+    /// whatever is left, so it is the *sibling's* fraction that decides where
+    /// the minimized pane comes back to. The sibling swallowed the 32pt the
+    /// rail freed; recording that hands it 767 of 800 on the next rebuild and
+    /// the minimized pane reopens at its floor.
+    ///
+    /// Like the test above this only bites across a rebuild, and unlike the
+    /// zoom test below it goes through the plain debounce — no unusual gesture,
+    /// just a window resize while a pane is minimized.
+    func testMinimizingTheTrailingPaneDoesNotOverwriteTheSizeTheUserDraggedTo() throws {
+        let root = try sideBySide()
+        layOut(root)
+        // The user drags until the *right* pane is 200 of 800.
+        let total = root.splitView.bounds.width
+        root.splitView.setPosition(total - 200 - root.splitView.dividerThickness, ofDividerAt: 0)
+        root.view.layoutSubtreeIfNeeded()
+        root.captureThicknessFractions()
+        XCTAssertEqual(try width(of: rightID, in: root), 200, accuracy: 4,
+                       "the drag itself must land first")
+        let dragged = fractions(of: root.snapshotNode())
+
+        root.paneDidRequestMinimize(try leaf(rightID, in: root), to: .trailing)
+        root.view.layoutSubtreeIfNeeded()
+        // The next debounce, while the pane is still a rail.
+        root.captureThicknessFractions()
+
+        XCTAssertEqual(fractions(of: root.snapshotNode()), dragged,
+                       "the space the rail freed was recorded as the sibling's desired size")
+        // What the user sees after a relaunch, before restoring anything.
+        let rebuilt = try rebuild(root.snapshotNode())
+        XCTAssertEqual(try width(of: rightID, in: rebuilt), 200, accuracy: 4,
                        "the pane reopened at its floor instead of the size it was dragged to")
     }
 

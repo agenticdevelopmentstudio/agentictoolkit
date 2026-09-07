@@ -287,24 +287,41 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// would restore unzoomed and wrong. Skipping leaves the pre-zoom fractions
     /// exactly where they were, which is what unzooming has to give back.
     ///
-    /// A *pinned* item is skipped for the same reason a collapsed one is: a
-    /// minimized pane is showing its rail, not its size. Recording the rail's
-    /// 32pt as what the pane wants is only invisible while the session lasts,
-    /// because AppKit's untouched `preferredThicknessFraction` still remembers —
-    /// after a rebuild `applyPreferredThicknessesIfNeeded` prefers the stored
-    /// fraction and clamps it up to the minimum, so a pane the user dragged to
-    /// 200 reopens at its floor. The debounce fires on any window resize while a
-    /// pane is minimized, so this needs no unusual gesture to happen. `min ==
-    /// max` is exactly what `pin(_:to:)` sets and `restoreSizing(of:)` puts
-    /// back, which makes the test below an exact one rather than a heuristic.
+    /// A split holding a *rail* is skipped whole — every item in it, not just
+    /// the pinned one. Minimizing takes the pane down to 32pt and hands the
+    /// space it gave up to its sibling, so neither number describes anything the
+    /// user chose. Skipping only the pinned item protects its own fraction and
+    /// still loses the layout, because `applyPreferredThicknessesIfNeeded`
+    /// places the dividers from the *non-last* children and gives the last one
+    /// whatever is left: minimize the second slot and it is the sibling's
+    /// inflated fraction that decides where the rail comes back to. Recording
+    /// either is invisible while the session lasts, because AppKit's untouched
+    /// `preferredThicknessFraction` still remembers — but after a rebuild the
+    /// stored fraction wins and is clamped up to the minimum, so a pane the user
+    /// dragged to 200 reopens at its floor. The debounce fires on any window
+    /// resize while a pane is minimized, so this needs no unusual gesture.
+    ///
+    /// Nothing capturable is given up by widening the skip from the item to the
+    /// split. Every split here is binary — `first:`/`second:` is the only way
+    /// one is built with siblings, `split(_:adding:)` nests rather than appends,
+    /// and `snapshotNode()` serialises exactly two children — and a binary split
+    /// with a rail in it has no divider left to drag. The recursion into child
+    /// splits stays: a nested split's fractions are relative to its own bounds,
+    /// so a rail in the parent does not distort them.
+    ///
+    /// `maximumThickness != unspecifiedDimension` is an exact test rather than a
+    /// heuristic: `pin(_:to:)` is the only thing that sets it and
+    /// `restoreSizing(of:)` the only thing that puts it back.
     func captureThicknessFractions() {
         guard rootSplit()?.zoomedLeaf == nil else { return }
-        if isViewLoaded, layoutChildren.count > 1, splitViewItems.count == layoutChildren.count {
+        let showsRail = isViewLoaded && splitViewItems.contains {
+            $0.maximumThickness != NSSplitViewItem.unspecifiedDimension
+        }
+        if !showsRail, isViewLoaded, layoutChildren.count > 1,
+           splitViewItems.count == layoutChildren.count {
             let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
             if total > 1 {
-                for (child, item) in zip(layoutChildren, splitViewItems)
-                where !item.isCollapsed
-                    && item.maximumThickness == NSSplitViewItem.unspecifiedDimension {
+                for (child, item) in zip(layoutChildren, splitViewItems) where !item.isCollapsed {
                     child.thicknessFraction = thickness(of: item.viewController.view) / total
                 }
             }
