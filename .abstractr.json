@@ -111,7 +111,8 @@
         "apple-coremacos",
         "apple-permissions",
         "apple-permissionsui",
-        "apple-pluginkit"
+        "apple-pluginkit",
+        "apple-database"
       ],
       "shared": true,
       "holds": "AgenticToolkitMacOS. The feature-rich framework the host app, plugins, Whippet and Stenographer all consume."

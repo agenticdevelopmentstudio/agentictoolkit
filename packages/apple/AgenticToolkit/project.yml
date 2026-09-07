@@ -176,6 +176,7 @@ targets:
       - target: AIPluginKit
       - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
       - target: AgenticToolkitMarkdown-macOS
+      - target: AgenticToolkitDatabase
       - package: SwiftTerm
       - package: CodeEditSourceEditor
       - package: CodeEditLanguages

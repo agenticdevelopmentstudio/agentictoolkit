@@ -1,6 +1,7 @@
 import Foundation
 import SQLite3
 import AgenticToolkitCore
+import AgenticToolkitDatabase
 
 public enum ProjectDatabaseError: Error {
     case openFailed(String)
@@ -37,10 +38,9 @@ public final class ProjectDatabase {
     ///   developer's own registry (`homeDirectoryForCurrentUser` ignores
     ///   `$HOME`, so there is no ambient way to redirect this).
     public static func defaultPath(inHome home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
-        let appName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "AgenticToolkit"
-        return home
-            .appendingPathComponent(".\(appName.lowercased())")
-            .appendingPathComponent("\(appName).db")
+        let token = AppStorageLocation.token
+        return AppStorageLocation.directory(inHome: home, token: token)
+            .appendingPathComponent("\(token).db")
             .path
     }
 

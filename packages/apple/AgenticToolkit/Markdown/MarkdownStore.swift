@@ -116,11 +116,21 @@ public final class MarkdownStore: @unchecked Sendable {
     let customerID: String
     let ecosystemID: String
 
-    /// `~/.whippet/Markdown.db` — deliberately not `Whippet.db`. That file is
+    /// `~/.<token>/Markdown.db` — deliberately not `<Token>.db`. That file is
     /// driven by raw SQLite3 C API code and this store is GRDB; two stacks on
-    /// one file means two connection pools disagreeing about WAL state.
-    public static func defaultPath(inHome home: URL) -> String {
-        home.appendingPathComponent(".whippet").appendingPathComponent("Markdown.db").path
+    /// one file means two connection pools disagreeing about WAL state. The
+    /// *directory* is shared, and comes from the same token so the two cannot
+    /// drift apart.
+    ///
+    /// - Parameter token: Defaults to `AppStorageLocation.token`, which reads
+    ///   `CFBundleName` off `Bundle.main`. That default is only meaningful when
+    ///   `Bundle.main` is the app itself; this bundle's own test target is
+    ///   hostless (`Bundle.main` there is the `xctest` runner), so its tests
+    ///   pass a token explicitly rather than depend on which harness is running.
+    public static func defaultPath(inHome home: URL, token: String = AppStorageLocation.token) -> String {
+        AppStorageLocation.directory(inHome: home, token: token)
+            .appendingPathComponent("Markdown.db")
+            .path
     }
 
     /// `customerID` and `ecosystemID` are the tenancy every mirrored row is

@@ -582,10 +582,11 @@ struct MarkdownStoreTests {
         #expect(queued.map(\.intent) == [.publish, .unpublish])
     }
 
-    @Test("defaultPath puts the database beside Whippet's, not inside it")
+    @Test("defaultPath puts the database beside the projects store, not inside it")
     func defaultPathIsItsOwnFile() {
         let home = URL(fileURLWithPath: "/Users/example")
-        #expect(MarkdownStore.defaultPath(inHome: home) == "/Users/example/.whippet/Markdown.db")
+        #expect(MarkdownStore.defaultPath(inHome: home, token: "KitchenIDE")
+                == "/Users/example/.kitchenide/Markdown.db")
     }
 
     @Test("concurrent mutateDocument merges all survive — no lost update")
