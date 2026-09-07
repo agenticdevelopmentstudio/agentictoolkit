@@ -346,6 +346,78 @@ final class ComposableTabsPaneHostTests: XCTestCase {
                        "the dragged position, not the even split it started at")
     }
 
+    /// A capture may only read geometry the user actually arranged. A pane
+    /// showing its rail is not arranged — it is 32pt of chrome — and the 300ms
+    /// debounce fires on any window resize while a pane is minimized, so the
+    /// rail gets written as the pane's desired size without an unusual gesture.
+    ///
+    /// This has to survive a rebuild to be visible at all: in the same session
+    /// AppKit's untouched `preferredThicknessFraction` still gives back the
+    /// dragged size, so a test that only restores in-session cannot fail.
+    func testMinimizingDoesNotOverwriteTheSizeTheUserDraggedTo() throws {
+        let root = try sideBySide()
+        layOut(root)
+        // The user drags to 200 of 800; the debounce writes that.
+        root.splitView.setPosition(200, ofDividerAt: 0)
+        root.view.layoutSubtreeIfNeeded()
+        root.captureThicknessFractions()
+        XCTAssertEqual(try XCTUnwrap(fraction(of: leftID, in: root.snapshotNode())),
+                       0.25, accuracy: 0.02, "the drag itself must land first")
+
+        root.paneDidRequestMinimize(try leaf(leftID, in: root), to: .leading)
+        root.view.layoutSubtreeIfNeeded()
+        // The next debounce — a window resize, a tab appearing — while the pane
+        // is still a rail.
+        root.captureThicknessFractions()
+
+        XCTAssertEqual(try XCTUnwrap(fraction(of: leftID, in: root.snapshotNode())),
+                       0.25, accuracy: 0.02,
+                       "the rail's own thickness was recorded as what the pane wants")
+        // What the user sees after a relaunch, before restoring anything.
+        let rebuilt = try rebuild(root.snapshotNode())
+        XCTAssertEqual(try width(of: leftID, in: rebuilt), 200, accuracy: 4,
+                       "the pane reopened at its floor instead of the size it was dragged to")
+    }
+
+    /// The same rule on the other stale-frame path. `paneDidRequestMinimize`
+    /// clears a zoom and captures with no layout pass in between, so the frames
+    /// it would read still describe the zoomed arrangement — every pane but one
+    /// collapsed. The fractions captured on the way *into* the zoom are the
+    /// truth and are still in the tree, so the capture must be skipped.
+    func testMinimizingAfterAZoomKeepsTheSizesFromBeforeTheZoom() throws {
+        let root = try sideBySide()
+        layOut(root)
+        root.splitView.setPosition(200, ofDividerAt: 0)
+        root.view.layoutSubtreeIfNeeded()
+        root.captureThicknessFractions()
+
+        root.paneDidRequestZoom(try leaf(leftID, in: root))
+        root.view.layoutSubtreeIfNeeded()
+        root.paneDidRequestMinimize(try leaf(rightID, in: root), to: .trailing)
+
+        XCTAssertEqual(try XCTUnwrap(fraction(of: leftID, in: root.snapshotNode())),
+                       0.25, accuracy: 0.02,
+                       "the zoomed arrangement was written over the size the user dragged to")
+        let rebuilt = try rebuild(root.snapshotNode())
+        XCTAssertEqual(try width(of: leftID, in: rebuilt), 200, accuracy: 4,
+                       "and it is what the pane comes back at")
+    }
+
+    /// What a relaunch does: a fresh tree built from the snapshot that would
+    /// have been persisted, with nothing but the stored fractions to go on.
+    private func rebuild(_ node: LayoutNode) throws -> ComposableTabsViewController {
+        let rebuilt = ComposableTabsViewController.make(from: node, project: project, isRoot: true)
+        rebuilt.loadViewIfNeeded()
+        for leaf in rebuilt.allLeaves() { leaf.loadViewIfNeeded() }
+        layOut(rebuilt)
+        return rebuilt
+    }
+
+    /// One pane's thickness along its parent's axis, on screen.
+    private func width(of id: UUID, in root: ComposableTabsViewController) throws -> CGFloat {
+        try item(for: leaf(id, in: root)).viewController.view.frame.width
+    }
+
     /// One leaf's serialised fraction, or `nil` if it has none.
     private func fraction(of id: UUID, in node: LayoutNode) -> Double? {
         let prefix = "\(id):"

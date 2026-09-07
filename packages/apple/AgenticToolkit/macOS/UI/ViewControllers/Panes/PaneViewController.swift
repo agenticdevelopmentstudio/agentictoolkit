@@ -52,6 +52,13 @@ open class PaneViewController: NSViewController {
 
     private let contentContainer = NSView()
     private var minimizedStrip: PaneMinimizedStripView?
+
+    /// Held so the rail can switch it off. A pane minimized to a side is pinned
+    /// narrower than the title bar's own controls can fit, and a hidden view
+    /// still takes part in Auto Layout — so leaving both sides pinned makes the
+    /// item's 32pt maximum unsatisfiable, and AppKit recovers by breaking a
+    /// constraint inside the title bar it happens to pick.
+    private var titleBarTrailing: NSLayoutConstraint?
     private var optionsPopover: WindowConfigPopover?
 
     /// This pane's spacing, and where it comes from. `lazy` because it asks
@@ -135,10 +142,14 @@ open class PaneViewController: NSViewController {
         container.addSubview(titleBar)
         container.addSubview(contentContainer)
 
+        let titleBarTrailing = container.trailingAnchor.constraint(
+            equalTo: titleBar.trailingAnchor, constant: contentInset)
+        self.titleBarTrailing = titleBarTrailing
+
         NSLayoutConstraint.activate([
             titleBar.topAnchor.constraint(equalTo: container.topAnchor, constant: contentInset),
             titleBar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: contentInset),
-            container.trailingAnchor.constraint(equalTo: titleBar.trailingAnchor, constant: contentInset),
+            titleBarTrailing,
 
             contentContainer.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: contentInset),
@@ -400,6 +411,9 @@ open class PaneViewController: NSViewController {
     /// - minimized leading or trailing: a rail one icon wide, instead of both.
     private func applyMinimizedAppearance() {
         titleBar.controls.isMinimized = minimizedEdge != nil
+        // Only the rail is narrower than the title bar; every other shape shows
+        // it, so it goes back to spanning the pane.
+        titleBarTrailing?.isActive = !(minimizedEdge?.isHorizontal ?? false)
 
         guard let edge = minimizedEdge else {
             titleBar.isHidden = false

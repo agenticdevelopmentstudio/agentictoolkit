@@ -275,18 +275,36 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// A split whose view has never loaded is left alone: it keeps the sizes it
     /// was restored with, which is the whole point of storing them on the child.
     ///
+    /// **A capture may only read geometry the user actually arranged** — never a
+    /// rail, never a collapsed or just-uncollapsed frame. Everything below is
+    /// that one rule, and so are the two call sites in `PaneHost` that decline
+    /// to call this at all.
+    ///
     /// A *zoomed* tree is left alone entirely. A zoom collapses every pane but
     /// one, which is an arrangement of the screen rather than a decision about
     /// sizes — and reading it back would record the one visible pane at the full
     /// thickness and its siblings at nothing, so a layout saved while zoomed
     /// would restore unzoomed and wrong. Skipping leaves the pre-zoom fractions
     /// exactly where they were, which is what unzooming has to give back.
+    ///
+    /// A *pinned* item is skipped for the same reason a collapsed one is: a
+    /// minimized pane is showing its rail, not its size. Recording the rail's
+    /// 32pt as what the pane wants is only invisible while the session lasts,
+    /// because AppKit's untouched `preferredThicknessFraction` still remembers —
+    /// after a rebuild `applyPreferredThicknessesIfNeeded` prefers the stored
+    /// fraction and clamps it up to the minimum, so a pane the user dragged to
+    /// 200 reopens at its floor. The debounce fires on any window resize while a
+    /// pane is minimized, so this needs no unusual gesture to happen. `min ==
+    /// max` is exactly what `pin(_:to:)` sets and `restoreSizing(of:)` puts
+    /// back, which makes the test below an exact one rather than a heuristic.
     func captureThicknessFractions() {
         guard rootSplit()?.zoomedLeaf == nil else { return }
         if isViewLoaded, layoutChildren.count > 1, splitViewItems.count == layoutChildren.count {
             let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
             if total > 1 {
-                for (child, item) in zip(layoutChildren, splitViewItems) where !item.isCollapsed {
+                for (child, item) in zip(layoutChildren, splitViewItems)
+                where !item.isCollapsed
+                    && item.maximumThickness == NSSplitViewItem.unspecifiedDimension {
                     child.thicknessFraction = thickness(of: item.viewController.view) / total
                 }
             }
@@ -409,7 +427,9 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// of this split included — is ignored rather than searched for, and
     /// `testRemovingAPaneNotInThisSplitIsANoOp` pins that. To close a pane you
     /// do not already own, go through its host's `paneDidRequestClose(_:)`,
-    /// which asks the split that actually holds it.
+    /// which asks the split that actually holds it — that routing is safe
+    /// because `makeItem(for:)` sets `host === enclosingSplit`, so a pane's
+    /// host is always the split that can actually remove it.
     public func remove(_ child: ComposableTabsPaneViewController) {
         guard let index = layoutChildren.firstIndex(where: { $0.viewController === child }) else { return }
 
