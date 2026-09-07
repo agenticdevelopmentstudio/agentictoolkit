@@ -3,8 +3,8 @@ import Foundation
 /// Where an app keeps its own files, derived from its display name without
 /// assuming that name is safe to put in a path.
 ///
-/// A display name is chosen for menu bars, not filesystems: "Kitchen IDE" has a
-/// space in it, and `~/.kitchen ide/` is the hostile default that
+/// A display name is chosen for menu bars, not filesystems: "Coffee Grinder"
+/// has a space in it, and `~/.coffee grinder/` is the hostile default that
 /// `ProjectDatabase.defaultPath` already argued against in prose while
 /// producing it in code. The token is the name reduced to what a path can hold.
 public enum AppStorageLocation {
@@ -13,10 +13,10 @@ public enum AppStorageLocation {
     /// harness with no `CFBundleName` gets.
     public static let fallbackToken = "AgenticToolkit"
 
-    /// `"Kitchen IDE"` -> `"KitchenIDE"`. Everything that is not a letter or a
-    /// digit is dropped rather than substituted: a separator would only move the
-    /// problem (`.kitchen-ide` vs `.kitchen_ide` is a coin toss that later has
-    /// to be guessed correctly to find the file again).
+    /// `"Coffee Grinder"` -> `"CoffeeGrinder"`. Everything that is not a letter
+    /// or a digit is dropped rather than substituted: a separator would only
+    /// move the problem (`.coffee-grinder` vs `.coffee_grinder` is a coin toss
+    /// that later has to be guessed correctly to find the file again).
     public static func token(for displayName: String) -> String {
         let stripped = displayName.unicodeScalars
             .filter { CharacterSet.alphanumerics.contains($0) }

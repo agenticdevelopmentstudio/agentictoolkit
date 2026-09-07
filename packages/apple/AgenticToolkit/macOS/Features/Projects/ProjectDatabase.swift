@@ -28,7 +28,7 @@ public final class ProjectDatabase {
 
     public static let currentSchemaVersion = 3
 
-    /// `~/.<token>/<Token>.db` — e.g. `~/.kitchenide/KitchenIDE.db`.
+    /// `~/.<token>/<Token>.db` — e.g. `~/.coffeegrinder/CoffeeGrinder.db`.
     ///
     /// A dotfolder in the home directory rather than Application Support: this
     /// is the same registry the command line tools read, and asking someone to

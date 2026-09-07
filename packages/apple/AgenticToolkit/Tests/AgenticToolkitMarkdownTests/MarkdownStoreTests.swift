@@ -585,8 +585,8 @@ struct MarkdownStoreTests {
     @Test("defaultPath puts the database beside the projects store, not inside it")
     func defaultPathIsItsOwnFile() {
         let home = URL(fileURLWithPath: "/Users/example")
-        #expect(MarkdownStore.defaultPath(inHome: home, token: "KitchenIDE")
-                == "/Users/example/.kitchenide/Markdown.db")
+        #expect(MarkdownStore.defaultPath(inHome: home, token: "CoffeeGrinder")
+                == "/Users/example/.coffeegrinder/Markdown.db")
     }
 
     @Test("concurrent mutateDocument merges all survive — no lost update")

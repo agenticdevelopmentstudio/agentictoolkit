@@ -4,7 +4,7 @@ import XCTest
 final class AppStorageLocationTests: XCTestCase {
 
     func testStripsSpacesFromADisplayName() {
-        XCTAssertEqual(AppStorageLocation.token(for: "Kitchen IDE"), "KitchenIDE")
+        XCTAssertEqual(AppStorageLocation.token(for: "Coffee Grinder"), "CoffeeGrinder")
     }
 
     func testLeavesASingleWordNameAlone() {
@@ -12,7 +12,7 @@ final class AppStorageLocationTests: XCTestCase {
     }
 
     func testStripsPunctuationAndPathSeparators() {
-        XCTAssertEqual(AppStorageLocation.token(for: "Kitchen/IDE 2.0"), "KitchenIDE20")
+        XCTAssertEqual(AppStorageLocation.token(for: "Coffee/Grinder 2.0"), "CoffeeGrinder20")
     }
 
     func testFallsBackWhenNothingUsableSurvives() {
@@ -22,7 +22,7 @@ final class AppStorageLocationTests: XCTestCase {
     func testDirectoryIsTheLowercasedTokenAsADotfolder() {
         let home = URL(fileURLWithPath: "/tmp/home")
         XCTAssertEqual(
-            AppStorageLocation.directory(inHome: home, token: "KitchenIDE").path,
-            "/tmp/home/.kitchenide")
+            AppStorageLocation.directory(inHome: home, token: "CoffeeGrinder").path,
+            "/tmp/home/.coffeegrinder")
     }
 }
