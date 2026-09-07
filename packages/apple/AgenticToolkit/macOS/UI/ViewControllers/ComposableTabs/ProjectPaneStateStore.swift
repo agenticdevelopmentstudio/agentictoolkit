@@ -1,5 +1,4 @@
 import Foundation
-import AgenticToolkitCore
 
 /// A pane's `PaneStateStore`, backed by the project database's `pane_state`
 /// bag.
@@ -17,6 +16,15 @@ import AgenticToolkitCore
 /// and nowhere else, so everything written here is prefixed. The pane never
 /// sees the prefix: it asks for `minimize.edge`, and where that lives is this
 /// class's business (`separation-of-concerns`).
+///
+/// The guarantee that buys is one-directional and worth stating exactly:
+/// nothing this class writes can land on a key a content pane chose, because
+/// every key it writes starts with `prefix`. The other direction is a
+/// documented reservation rather than a check — `ProjectWorkspace.setPaneState`
+/// says the prefix is spoken for, and a content pane that writes
+/// `chrome.something` anyway would still land on top of the chrome. Enforcing
+/// it would mean a check on a path this class itself has to be allowed
+/// through, which buys less than the sentence does.
 ///
 /// **Cleanup is somebody else's.** `saveTabs` deletes every `pane_state` row
 /// whose `node_id` is no longer a layout node, so a closed pane's state goes

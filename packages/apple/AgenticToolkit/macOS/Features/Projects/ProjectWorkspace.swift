@@ -111,21 +111,54 @@ public final class ProjectWorkspace {
     /// A pane reaches this through the `nodeID` its factory is handed
     /// (`ComposableTabsViewContext`), so remembering something new costs a key
     /// rather than a schema change or a new path through the window controller.
+    ///
+    /// **The `chrome.` prefix is reserved.** `ProjectPaneStateStore` writes
+    /// everything the pane *chrome* remembers — its minimize edge, its zoom,
+    /// its spacing override — into this same bag under that prefix. A pane's
+    /// content picks its own keys and must not begin one with `chrome.`, or it
+    /// lands on the chrome's row for the same node. Nothing checks this: the
+    /// prefix is what keeps chrome off content's keys, and this sentence is
+    /// what keeps content off chrome's. A check would have to let the one
+    /// caller that is *supposed* to write the prefix through, which buys less
+    /// than the sentence does.
     public func paneState(nodeID: UUID, key: String) -> String? {
         do {
             return try database.paneState(repoID: repo.id, nodeID: nodeID, key: key)
         } catch {
-            Self.logger.error("Failed to load pane state: \(error.localizedDescription, privacy: .public)")
+            logPaneStateFailure("load", nodeID: nodeID, key: key, error: error)
             return nil
         }
     }
 
+    /// See `paneState(nodeID:key:)` for the reserved `chrome.` prefix.
+    ///
+    /// A failure is logged and dropped rather than reported. Every piece of
+    /// chrome keeps its own in-memory copy of what it wrote, so the session
+    /// stays correct and only the *next* launch shows the loss — the right
+    /// trade for a minimize edge, and the reason the log has to name the row:
+    /// without that, a report from the field cannot say which pane forgot.
     public func setPaneState(nodeID: UUID, key: String, value: String?) {
         do {
             try database.setPaneState(repoID: repo.id, nodeID: nodeID, key: key, value: value)
         } catch {
-            Self.logger.error("Failed to save pane state: \(error.localizedDescription, privacy: .public)")
+            logPaneStateFailure("save", nodeID: nodeID, key: key, error: error)
         }
+    }
+
+    /// Names the row a failed pane-state access was about.
+    ///
+    /// All three parts, because the failure this is most likely to be is a
+    /// foreign-key refusal — a repo the database has never heard of — and that
+    /// one is unrecognisable without the repo id sitting beside the node and
+    /// the key. `localizedDescription` alone says "constraint failed".
+    private func logPaneStateFailure(_ verb: String, nodeID: UUID, key: String, error: any Error) {
+        Self.logger.error("""
+            Failed to \(verb, privacy: .public) pane state \
+            (repo \(self.repo.id.uuidString, privacy: .public), \
+            node \(nodeID.uuidString, privacy: .public), \
+            key \(key, privacy: .public)): \
+            \(error.localizedDescription, privacy: .public)
+            """)
     }
 
     /// A list of strings, stored as JSON in one pane-state value.

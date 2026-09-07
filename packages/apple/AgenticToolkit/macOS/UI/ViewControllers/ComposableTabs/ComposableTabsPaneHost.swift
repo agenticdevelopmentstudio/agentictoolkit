@@ -167,8 +167,29 @@ extension ComposableTabsViewController: PaneHost {
     public func applyPersistedPaneState() {
         guard isRoot else { return }
         let leaves = allLeaves()
+        // One snapshot for the whole pass, for the same reason
+        // `reapplyPaneState()` takes one: pinning an item moves nothing in the
+        // tree, so the shape cannot change underneath it.
+        let tree = snapshotNode()
         for leaf in leaves {
             guard let edge = leaf.persistedMinimizeEdge else { continue }
+            // The edge was resolved against the tree the pane lived in last
+            // launch, and the layout spec can have changed the axis under it
+            // since. `paneDidRequestMinimize` refuses an edge the tree no
+            // longer admits — by returning, silently — while the pane's own
+            // `restorePersistedState()` has *already* drawn its rail off the
+            // same row. Ignoring the refusal would leave a pane holding its
+            // full share of the split with nothing but a 28pt rail in it and
+            // empty space beside it, and no control able to undo that. Giving
+            // the pane back is the only outcome the user can act on, and it is
+            // what `reapplyPaneState()` already does with the identical case.
+            // It also clears the row, so the next launch does not re-try an
+            // edge the layout has already refused once.
+            guard PaneMinimizeGeometry.resolvedEdge(
+                forNode: leaf.nodeID, in: tree, requested: edge) != nil else {
+                paneDidRequestRestore(leaf)
+                continue
+            }
             paneDidRequestMinimize(leaf, to: edge)
         }
         if let zoomed = leaves.first(where: { $0.persistedZoomed }) {

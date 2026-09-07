@@ -229,10 +229,27 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
 
     /// A pane restores its own chrome in its `viewDidLoad`, off its own store.
     /// The other half — pinning a minimized pane's split item, collapsing the
-    /// ancestors of a zoomed one — is the host's, and it cannot run until every
-    /// descendant split has built its items. A nested split does not load its
-    /// view until the tree is laid out, so the earliest correct moment is here:
-    /// after the first layout pass, once, on the root.
+    /// ancestors of a zoomed one — is the host's, and it waits for the first
+    /// layout pass.
+    ///
+    /// Not because the tree is not built yet. `viewDidLoad` adds a split item
+    /// for every child, and `NSSplitViewController` installs an item's view as
+    /// it is added, so the whole controller tree loads recursively out of the
+    /// root's `viewDidLoad` — `ComposableTabsPaneHostTests` demonstrates it by
+    /// getting split items back after nothing more than `loadViewIfNeeded()`.
+    ///
+    /// It is the divider positions. `applyPersistedPaneState()` goes through
+    /// `paneDidRequestMinimize`, which calls `captureThicknessFractions()` —
+    /// and that *writes* each child's `thicknessFraction` from the geometry
+    /// currently on screen. Before the first real layout that geometry is
+    /// `loadView`'s placeholder, so running the restore any earlier would
+    /// overwrite every persisted fraction with a placeholder, and
+    /// `applyPreferredThicknessesIfNeeded()` would then hand back the clobbered
+    /// values: relaunching with one minimized pane would forget every divider
+    /// position in the tab. `viewDidLayout` runs before `viewDidAppear` on both
+    /// mount paths — a root set as a window's `contentViewController`, and a
+    /// tab mounted into an already-visible container — so by here the preferred
+    /// thicknesses are applied and the capture reads the real arrangement.
     ///
     /// The latch is this restore's alone. `reapplyPaneState()` re-states what
     /// the *live* panes already say about themselves and deliberately holds no
@@ -854,11 +871,20 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// `makeItem(for:)` gave it. It lives here rather than with the `PaneHost`
     /// conformance because it is that method's knowledge read backwards, and
     /// two copies of it would drift.
+    ///
+    /// The ceiling comes off *before* the floor goes up. Each assignment is a
+    /// separate constraint update, so raising the minimum first would leave the
+    /// item, for that instant, asking AppKit for a width at least its
+    /// registered minimum and at most the rail it is still pinned to — a pair
+    /// AppKit cannot satisfy, logs, and recovers from by breaking one of them.
+    /// Lifting the ceiling first makes the intermediate state merely wide,
+    /// which is always satisfiable. (`pin` is this read backwards and is
+    /// already safe: it lowers the floor before it lowers the ceiling.)
     func restoreSizing(of item: NSSplitViewItem) {
         let registry = layout.registry
+        item.maximumThickness = NSSplitViewItem.unspecifiedDimension
         item.minimumThickness = Self.minimumThickness(
             of: item.viewController, along: axis, registry: registry)
-        item.maximumThickness = NSSplitViewItem.unspecifiedDimension
         let descriptor = (item.viewController as? ComposableTabsPaneViewController)
             .map { registry.descriptor(for: $0.viewID) }
         item.holdingPriority = descriptor?.resolvedHoldingPriority ?? .defaultLow
