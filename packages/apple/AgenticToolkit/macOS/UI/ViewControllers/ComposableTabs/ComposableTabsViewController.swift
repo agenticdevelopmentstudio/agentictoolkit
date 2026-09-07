@@ -175,6 +175,8 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         for child in layoutChildren {
             addSplitViewItem(makeItem(for: child.viewController))
         }
+
+        if isRoot { reassignPaneIdentifiers() }
     }
 
     /// Where a dragged divider becomes a saved layout. AppKit has no "the user
@@ -645,8 +647,45 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         return nil
     }
 
+    /// Every leaf in this subtree, depth first — the order the user reads the
+    /// panes in, which is the order that has to number them.
+    public func allLeaves() -> [ComposableTabsPaneViewController] {
+        layoutChildren.flatMap { child -> [ComposableTabsPaneViewController] in
+            if let leaf = child as? ComposableTabsPaneViewController { return [leaf] }
+            if let split = child as? ComposableTabsViewController { return split.allLeaves() }
+            return []
+        }
+    }
+
+    /// Stamps `pane.<content-type>` on every leaf, numbering only the kinds
+    /// that appear more than once.
+    ///
+    /// A number that appeared on every pane would make the common identifier
+    /// — one terminal in the tab — depend on how many panes happen to be open,
+    /// so a test addressing "the terminal" would break when a second one was
+    /// added elsewhere. Numbering only the ambiguous kinds keeps the simple
+    /// case simple and still leaves nothing unaddressable.
+    public func reassignPaneIdentifiers() {
+        let leaves = allLeaves()
+        var counts: [String: Int] = [:]
+        for leaf in leaves { counts[leaf.paneTypeIdentifier, default: 0] += 1 }
+
+        var seen: [String: Int] = [:]
+        for leaf in leaves {
+            let type = leaf.paneTypeIdentifier
+            guard counts[type, default: 0] > 1 else {
+                leaf.assignPaneIndex(nil)
+                continue
+            }
+            let index = seen[type, default: 0] + 1
+            seen[type] = index
+            leaf.assignPaneIndex(index)
+        }
+    }
+
     fileprivate func persistTreeToDocument() {
         guard isRoot else { return }
+        reassignPaneIdentifiers()
         onLayoutDidChange?(snapshotNode())
         NotificationCenter.default.post(name: Self.layoutDidChangeNotification, object: self)
     }

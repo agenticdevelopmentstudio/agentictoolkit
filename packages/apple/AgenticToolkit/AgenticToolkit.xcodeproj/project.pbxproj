@@ -780,6 +780,7 @@
 		FD80FC8DB0751A415C244252 /* AIProviderChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94E3CA94B3C512CA0534FEF /* AIProviderChatSession.swift */; };
 		FDBA7C0F866B85191098C563 /* HelpDrawerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEEB54E6901DA73B3B6FC1C6 /* HelpDrawerController.swift */; };
 		FDC42BA0A99E8CAFB9221A1B /* NewItemProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDDC1F8466F6201B3ED33EA8 /* NewItemProvider.swift */; };
+		FDD004A058E8EEE7A5A40072 /* ComposableTabsPaneChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBA8C42F9BB7AEDB993FBCE1 /* ComposableTabsPaneChromeTests.swift */; };
 		FE81ACB84A253707AC826A57 /* MockScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0776A98E3E586B49F40101B0 /* MockScreen.swift */; };
 		FECEF27DBCC5D212DB5A3083 /* UserSettingsThemeStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 934FAAEB406E8B94F56B793A /* UserSettingsThemeStorage.swift */; };
 		FEDA227CEC547EF3EBB3E942 /* LanguageDetection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 589C1834D45126F28A704275 /* LanguageDetection.swift */; };
@@ -2069,6 +2070,7 @@
 		CB783DDA1E4AB17256866125 /* DividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerView.swift; sourceTree = "<group>"; };
 		CB81401C0B5A6C5701A84AD4 /* FileViewerViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileViewerViewController.swift; sourceTree = "<group>"; };
 		CB8EA4CB9A8A704A74264FFE /* CustomHeuristic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomHeuristic.swift; sourceTree = "<group>"; };
+		CBA8C42F9BB7AEDB993FBCE1 /* ComposableTabsPaneChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsPaneChromeTests.swift; sourceTree = "<group>"; };
 		CC0AA8BC9941D7E782CEFB52 /* OllamaModelPageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaModelPageStore.swift; sourceTree = "<group>"; };
 		CC959528CF23522D84FE859F /* AIProviderMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderMigration.swift; sourceTree = "<group>"; };
 		CCC51F4D1A780A54D23DC5E1 /* ModelFitPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelFitPolicy.swift; sourceTree = "<group>"; };
@@ -2978,6 +2980,7 @@
 			isa = PBXGroup;
 			children = (
 				9F3B15D40C11A39F8FA044E4 /* ComposableTabLayoutSpecTests.swift */,
+				CBA8C42F9BB7AEDB993FBCE1 /* ComposableTabsPaneChromeTests.swift */,
 				68D8A687BA975179C597AA7F /* ComposableTabsViewControllerTests.swift */,
 				03206DE5EF36CF23046AB0B4 /* LayoutNodeThicknessTests.swift */,
 				71942A25CE71F5CEFEDBF694 /* PaneMinimizeGeometryTests.swift */,
@@ -5752,6 +5755,7 @@
 				5ACB1C9591DDEC3535B45E35 /* ChatErrorTests.swift in Sources */,
 				7E3D59A2283D3441B672E851 /* ChatViewFocusTests.swift in Sources */,
 				A9A2D08E18BB7F9E87F84AF5 /* ComposableTabLayoutSpecTests.swift in Sources */,
+				FDD004A058E8EEE7A5A40072 /* ComposableTabsPaneChromeTests.swift in Sources */,
 				E43B644C0AE3FB8407383971 /* ComposableTabsViewControllerTests.swift in Sources */,
 				83661684BCBC4B07761FF8E7 /* DirectoryWatchCoordinatorTests.swift in Sources */,
 				246E0BFA8CA1639D7CC339FA /* DisclosureCardTests.swift in Sources */,

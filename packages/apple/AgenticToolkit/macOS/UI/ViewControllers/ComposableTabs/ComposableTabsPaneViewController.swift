@@ -4,14 +4,20 @@ import Combine
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
 
-/// One leaf of a tab: registry-vended content, plus — while arrange mode is on
-/// — the scrim and toolbar that change the layout around it.
+/// One leaf of a tab: registry-vended content under a pane title bar, plus —
+/// while arrange mode is on — the scrim and toolbar that change the layout
+/// around it.
+///
+/// The chrome, the controls, the gear and the spacing all come from
+/// `PaneViewController`; what is left here is the three things only a project
+/// window knows — which registry vends the content, which background draws the
+/// active-pane outline, and what arrange mode does over the top.
 ///
 /// Nothing rearranges the layout while the user is working in it. Arrange mode
 /// is a mode precisely so that the affordance can be big and central instead of
 /// a small pull-down permanently in the corner of every pane.
 @MainActor
-public final class ComposableTabsPaneViewController: NSViewController {
+public final class ComposableTabsPaneViewController: PaneViewController {
 
     public let nodeID: UUID
     public let paneNumber: Int
@@ -24,6 +30,10 @@ public final class ComposableTabsPaneViewController: NSViewController {
     private var arrowKeyMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
 
+    /// Set by the enclosing tree when a tab holds more than one pane of this
+    /// kind. `nil` — the common case — leaves the identifier unnumbered.
+    private var paneIndex: Int?
+
     public init(
         nodeID: UUID,
         paneNumber: Int,
@@ -34,7 +44,9 @@ public final class ComposableTabsPaneViewController: NSViewController {
         self.paneNumber = paneNumber
         self.viewID = viewID
         self.project = project
-        super.init(nibName: nil, bundle: nil)
+        // Ephemeral until the project-backed store lands; the seam is what
+        // lets this task ship without it.
+        super.init(stateStore: EphemeralPaneStateStore())
     }
 
     @available(*, unavailable)
@@ -42,40 +54,54 @@ public final class ComposableTabsPaneViewController: NSViewController {
         fatalError("init(coder:) is not supported")
     }
 
-    /// The registry-vended content, held as a child view controller so AppKit
-    /// keeps it alive, routes appearance callbacks to it, and puts it in the
-    /// responder chain. `nil` only if the project went away first.
-    public private(set) var contentViewController: NSViewController?
+    /// The backdrop that draws the active-pane outline. Unchanged — it is the
+    /// reason this pane has a container of its own at all.
+    public override func makeContainerView() -> NSView {
+        ComposableTabsPaneBackgroundView(nodeID: nodeID)
+    }
 
-    public override func loadView() {
-        let container = ComposableTabsPaneBackgroundView(nodeID: nodeID)
-        container.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+    /// `nil` only if the project went away first.
+    public override func makeContentViewController() -> NSViewController? {
+        guard let project else { return nil }
+        return project.layout.registry.makeContentViewController(
+            for: viewID,
+            nodeID: nodeID,
+            project: project,
+            paneNumber: paneNumber
+        )
+    }
 
-        let content: NSView
-        if let project = project {
-            let contentVC = project.layout.registry.makeContentViewController(
-                for: viewID,
-                nodeID: nodeID,
-                project: project,
-                paneNumber: paneNumber
-            )
-            addChild(contentVC)
-            contentViewController = contentVC
-            content = contentVC.view
-        } else {
-            content = NSView(frame: container.bounds)
-        }
-        content.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(content)
+    /// The active-pane border is drawn on the backdrop's own layer, so the
+    /// chrome is held off its edge by that much or the border lands under it.
+    public override var contentInset: CGFloat { Self.borderInset }
 
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.borderInset),
-            container.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: Self.borderInset),
-            content.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.borderInset),
-            container.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: Self.borderInset)
-        ])
+    /// What this pane is called, as the registry names it. The same string the
+    /// Add popup offers, so a pane and the choice that made it match — and only
+    /// used when the content does not name itself.
+    public override var fallbackTitle: String { paneName }
 
-        self.view = container
+    /// `pane.<content-type>`, numbered only when the tab holds more than one of
+    /// this kind. The number comes from the tree, which is the only thing that
+    /// can know.
+    public override var paneAccessibilityIdentifier: String {
+        paneIndex.map { "\(paneTypeIdentifier).\($0)" } ?? paneTypeIdentifier
+    }
+
+    /// `pane.terminal` from `whippet.terminal` — the identifier is about the
+    /// kind of pane, so the vendor prefix that keeps registry keys unique
+    /// between apps is not part of it.
+    public var paneTypeIdentifier: String {
+        let kind = viewID.rawValue.split(separator: ".").last.map(String.init) ?? viewID.rawValue
+        return "pane.\(AccessibilityID.slug(kind))"
+    }
+
+    /// Called by the root after any change to the tree. Re-stamping the view is
+    /// safe at any time and is what makes a *move* renumber both panes.
+    public func assignPaneIndex(_ index: Int?) {
+        guard paneIndex != index else { return }
+        paneIndex = index
+        guard isViewLoaded else { return }
+        view.accessibilityID(paneAccessibilityIdentifier)
     }
 
     public override func viewDidLoad() {
@@ -136,7 +162,7 @@ public final class ComposableTabsPaneViewController: NSViewController {
 
     /// What this pane is called, as the registry names it. The same string the
     /// Add popup offers, so a pane and the choice that made it match.
-    private var paneName: String {
+    var paneName: String {
         let registry = (project?.layout ?? ComposableTabsLayout.placeholderOnly()).registry
         return registry.descriptor(for: viewID).displayName
     }
