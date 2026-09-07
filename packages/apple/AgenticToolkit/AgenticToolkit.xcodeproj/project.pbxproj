@@ -369,6 +369,7 @@
 		65A4B1BF9ADD768DC0C66BB9 /* UserSettings+SessionWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83891226E4E59687EFD31663 /* UserSettings+SessionWatcher.swift */; };
 		65BC4AFED3A51A4BF9767AFD /* CaptionedSliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53642ACF172CFEC27284CADD /* CaptionedSliderView.swift */; };
 		664F8F60BCAC920B2BF060D3 /* FontPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A6CCA7870DBDB74A35168A /* FontPickerView.swift */; };
+		6652E253C85FA7BC081976A7 /* AppStorageLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377F378363D7C5429B3F0656 /* AppStorageLocation.swift */; };
 		66B97AD3582AC8075A26B8BA /* AIPluginDescriptorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF57A9BB4F2B559D820C1F3 /* AIPluginDescriptorTests.swift */; };
 		6703752D5A66F216CA722F84 /* SingleConfigurationChatConfigProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DECC3D1E97AF33714DCB5D3 /* SingleConfigurationChatConfigProvider.swift */; };
 		6716519D57EA18D4BE9075DD /* SystemWindowContextPickerPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 421A8DD0B0A598874BE929C0 /* SystemWindowContextPickerPanel.swift */; };
@@ -479,6 +480,7 @@
 		8C3D3E6807319411A808ABB5 /* QuickLookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0B2A22C81E94C0BA99434A7 /* QuickLookPreview.swift */; };
 		8C9C0178B17C177BBF9B6B07 /* SystemWindowDiscoveryWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5DC328EE579D93F8F566A10 /* SystemWindowDiscoveryWindowController.swift */; };
 		8CBCF3512946894FCE5C1A5B /* DaemonAIChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E80B41DFA14413F6CD071CF /* DaemonAIChat.swift */; };
+		8CEDF2EED81DBB13E20232A2 /* AppStorageLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35F6E8E07AAF01ED95F11BDC /* AppStorageLocationTests.swift */; };
 		8DBC5D3194BA4FB5C28C66CA /* AgenticToolkitMarkdown-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9BE5AA37E98B6801FE1D1948 /* AgenticToolkitMarkdown-macOS.framework */; };
 		8DDA76AD7B03F18D151615C8 /* AgenticToolkitCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FF857DF2BB3D2BE006BBA101 /* AgenticToolkitCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		8DDF301745E291E1261F2EF5 /* SemanticPalette+EditorTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1302FC853711BD157199061C /* SemanticPalette+EditorTheme.swift */; };
@@ -669,6 +671,7 @@
 		D21E64220F721413CA25BA5D /* PopupMenuChoiceViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 546447A5E3CFAF9218D61C4B /* PopupMenuChoiceViewTests.swift */; };
 		D2D88301C7C912CD735CF566 /* ChatEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DA56E0ADF90FCB532FEE763 /* ChatEvent.swift */; };
 		D30B841253F2092E830FE5E6 /* AppFeatureRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44B9CD746F483DAD9143D69 /* AppFeatureRegistryTests.swift */; };
+		D344127FA64390ABE722E30A /* AgenticToolkitDatabase.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4BB62E3D95DA86CAF132B225 /* AgenticToolkitDatabase.framework */; };
 		D35788BA91E0E2FF4BA260E6 /* SettingsKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21632D2A100D8B2EAEE30D47 /* SettingsKeyTests.swift */; };
 		D3C781B34E8C55C934EAAC7B /* ColorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6CCE95461780CEB975B410C /* ColorViewModel.swift */; };
 		D3DFEEA7CD3BC8E5031160C8 /* AIModelChatConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310D7389C2AAF6717CCC2A67 /* AIModelChatConfig.swift */; };
@@ -1405,6 +1408,13 @@
 			remoteGlobalIDString = 003F8A478BDB5243DE76FA9E;
 			remoteInfo = AgenticToolkitCore;
 		};
+		FACBC7DB1414CA257DAE3A66 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5BFCF4EF9B6A3F62F3599C61;
+			remoteInfo = AgenticToolkitDatabase;
+		};
 		FD01A149F0B336A8181186DC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 7964E913AD06611688C0B3A6 /* Project object */;
@@ -1703,9 +1713,11 @@
 		352356572860CD9B9F8BCFF2 /* SingleConfigurationChatConfigProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleConfigurationChatConfigProviderTests.swift; sourceTree = "<group>"; };
 		354720009B7C806A03318365 /* ProjectFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilter.swift; sourceTree = "<group>"; };
 		358F81A2A2BB3272DE0FCA8F /* LocalModelServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelServerTests.swift; sourceTree = "<group>"; };
+		35F6E8E07AAF01ED95F11BDC /* AppStorageLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStorageLocationTests.swift; sourceTree = "<group>"; };
 		36891551371F0B380FD52A1D /* ThemedTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemedTerminalView.swift; sourceTree = "<group>"; };
 		368B098E9316C0BC6A1C425B /* AIChatViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatViewModelTests.swift; sourceTree = "<group>"; };
 		36B79F54E44FA17A32F10648 /* NotesListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesListViewController.swift; sourceTree = "<group>"; };
+		377F378363D7C5429B3F0656 /* AppStorageLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStorageLocation.swift; sourceTree = "<group>"; };
 		37B3C943A5A8E8E45CF89881 /* AgenticToolkitCoreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgenticToolkitCoreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		383E9D7881E3F86C735105DC /* SystemWindowMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowMatcher.swift; sourceTree = "<group>"; };
 		38E51905C6DBE63117871354 /* MarkdownSchemaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownSchemaTests.swift; sourceTree = "<group>"; };
@@ -2236,6 +2248,7 @@
 				FBB563CDF99857D4FC81B924 /* AIPluginKit.framework in Frameworks */,
 				4D3E95FD69B51DEB256162DE /* AgenticDeveloperToolkitUI-macOS.framework in Frameworks */,
 				0034802278356D8ACEA55475 /* AgenticToolkitMarkdown-macOS.framework in Frameworks */,
+				D344127FA64390ABE722E30A /* AgenticToolkitDatabase.framework in Frameworks */,
 				7AA7DD4D1A43A9B02FDE0EB8 /* SwiftTerm in Frameworks */,
 				61F0B29C25C9B4905A355938 /* CodeEditSourceEditor in Frameworks */,
 				D9A144BC2DCD94266E5386E4 /* CodeEditLanguages in Frameworks */,
@@ -3379,6 +3392,7 @@
 		82FF41555129C8B40FBF3AED /* AgenticToolkitDatabaseTests */ = {
 			isa = PBXGroup;
 			children = (
+				35F6E8E07AAF01ED95F11BDC /* AppStorageLocationTests.swift */,
 				9EC4AE464CD78AC3BCC36370 /* BoundedDatabaseTests.swift */,
 			);
 			name = AgenticToolkitDatabaseTests;
@@ -3779,6 +3793,7 @@
 		C94733FEC784E2C80D1A1275 /* Database */ = {
 			isa = PBXGroup;
 			children = (
+				377F378363D7C5429B3F0656 /* AppStorageLocation.swift */,
 				5134B714779C3FC29D9DD4AA /* BoundedDatabase.swift */,
 			);
 			path = Database;
@@ -4232,6 +4247,7 @@
 				1E2BE6AB78948632AC554885 /* PBXTargetDependency */,
 				FDAAB70C572BFE4921F2A1AC /* PBXTargetDependency */,
 				66BC6204E666E65CF3E66A11 /* PBXTargetDependency */,
+				D8295CB30AE25F7F85615077 /* PBXTargetDependency */,
 			);
 			name = AgenticToolkitMacOS;
 			packageProductDependencies = (
@@ -5709,6 +5725,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8CEDF2EED81DBB13E20232A2 /* AppStorageLocationTests.swift in Sources */,
 				C41438174EC879D1D8400DC3 /* BoundedDatabaseTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -5953,6 +5970,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6652E253C85FA7BC081976A7 /* AppStorageLocation.swift in Sources */,
 				06564B2D54BEEDD12124BE8D /* BoundedDatabase.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -6353,6 +6371,11 @@
 			isa = PBXTargetDependency;
 			target = 1E3A144560D2664472251EE8 /* AgenticToolkitCoreMacOS */;
 			targetProxy = 867001B2BAE9C2E639D8110A /* PBXContainerItemProxy */;
+		};
+		D8295CB30AE25F7F85615077 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5BFCF4EF9B6A3F62F3599C61 /* AgenticToolkitDatabase */;
+			targetProxy = FACBC7DB1414CA257DAE3A66 /* PBXContainerItemProxy */;
 		};
 		DB75E398C6A4EEBC3545AE16 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
