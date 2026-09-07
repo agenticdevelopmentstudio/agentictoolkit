@@ -26,8 +26,9 @@ public struct ComposableTabsViewID: RawRepresentable, Hashable, Sendable, Expres
     }
 
     /// The numbered, tinted rectangle shown for a pane whose content type this
-    /// app doesn't register. The raw value is persisted in every existing
-    /// `.whiproj` package, so it is spelled the way it always was.
+    /// app doesn't register. The raw value is a storage format — it is written
+    /// into saved layouts — so it keeps the spelling it was first persisted
+    /// under, whatever the host app is called now.
     public static let placeholder = ComposableTabsViewID("whippet.placeholder")
 }
 

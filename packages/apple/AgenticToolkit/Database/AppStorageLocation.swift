@@ -30,9 +30,9 @@ public enum AppStorageLocation {
         return token(for: name ?? fallbackToken)
     }
 
-    /// `~/.<token lowercased>` — the one directory every store of this app's
-    /// shares. Stores pick their own filename inside it; they must not share a
-    /// *file* (see `MarkdownStore.defaultPath`).
+    /// `~/.<token lowercased>` — the one directory all of this app's stores
+    /// share. Each store picks its own filename inside it; they must not share
+    /// a *file* (see `MarkdownStore.defaultPath`).
     public static func directory(inHome home: URL, token: String = AppStorageLocation.token) -> URL {
         home.appendingPathComponent(".\(token.lowercased())")
     }
