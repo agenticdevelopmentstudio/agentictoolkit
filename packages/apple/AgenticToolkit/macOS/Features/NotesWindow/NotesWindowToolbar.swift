@@ -1,4 +1,5 @@
 import AppKit
+import AgenticDeveloperToolkitUI
 import AgenticToolkitCoreMacOS
 import AgenticToolkitMarkdown
 
@@ -167,44 +168,28 @@ public final class NotesWindowToolbar: NSObject, NSToolbarDelegate {
 
     // MARK: - Item construction
 
-    /// A borderless, image-only button in an `NSToolbarItem`'s custom `view` —
-    /// the exact idiom `PanelHostView`'s help button uses
-    /// (`isBordered = false`, `imagePosition = .imageOnly`,
-    /// `setButtonType(.momentaryChange)`), which is this codebase's established
-    /// "toolbar-style icon button," now reused here for the same look.
+    /// Delegates to `WindowToolbarBuilder`, which owns the custom-view idiom
+    /// and the accessibility-identifier rule this file discovered. The
+    /// wrapper stays because every call site here passes `target: self`.
     private func makeButtonItem(
         identifier: NSToolbarItem.Identifier,
         symbol: String,
         label: String,
         action: Selector
     ) -> (item: NSToolbarItem, button: NSButton) {
-        let button = NSButton(
-            image: NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage(),
+        WindowToolbarBuilder.iconButtonItem(
+            identifier: identifier,
+            symbol: symbol,
+            label: label,
             target: self,
             action: action)
-        button.isBordered = false
-        button.imagePosition = .imageOnly
-        button.setButtonType(.momentaryChange)
-        button.toolTip = label
-        // task-7-grounding G7: Whippet's UI suite (Task 11) reaches every one
-        // of these controls by an accessibility identifier equal to the
-        // toolbar identifier itself.
-        button.accessibilityID(identifier.rawValue)
-
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = label
-        item.paletteLabel = label
-        item.toolTip = label
-        item.view = button
-        return (item, button)
     }
 
     private func makeSearchItem() -> NSSearchToolbarItem {
-        let item = NSSearchToolbarItem(itemIdentifier: .notesSearch)
-        item.searchField.placeholderString = "Search"
-        item.searchField.delegate = self
-        item.searchField.accessibilityID(NSToolbarItem.Identifier.notesSearch.rawValue)
-        return item
+        WindowToolbarBuilder.searchItem(
+            identifier: .notesSearch,
+            placeholder: "Search",
+            delegate: self)
     }
 
     // MARK: - Actions
@@ -412,25 +397,18 @@ public final class NotesWindowToolbar: NSObject, NSToolbarDelegate {
         }
     }
 
-    /// The help symbol swap (task-7-grounding G3), copied whole: filled while
-    /// the pane is open, outlined while closed, at `pointSize: 15, weight:
-    /// .regular`, with the tint and tooltip that go with it — the button
-    /// reports the pane's state as well as toggling it.
+    /// The help symbol swap: filled while the pane is open, outlined while
+    /// closed, tinted from the button's own resolved scope — all three now
+    /// `WindowToolbarBuilder`'s to know. What stays here is the only part that
+    /// is about Notes: which flag counts as "disclosed."
     private func applyHelpAppearance(to button: NSButton) {
-        let disclosed = splitViewController?.isHelpVisible ?? false
-        let symbol = disclosed ? "questionmark.circle.fill" : "questionmark.circle"
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Help")
-        button.image = image?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))
-        // The button's own resolved scope (task-7 fix round 1), not
-        // `ThemePaletteObserver.currentPalette` — matches
-        // `NotesSplitViewController`'s `view.resolvedThemeScope.palette` and
-        // `PanelHostView`'s `self.resolvedThemeScope.palette`: this toolbar may
-        // run inside a window with its own theme scope, and the static
-        // app-wide accessor would ignore that.
-        let palette = button.resolvedThemeScope.palette
-        button.contentTintColor = disclosed ? palette.accentColor : palette.secondaryTextColor
-        button.toolTip = disclosed ? "Hide Help" : "Show Help"
+        WindowToolbarBuilder.applyDisclosureAppearance(
+            to: button,
+            disclosed: splitViewController?.isHelpVisible ?? false,
+            outlineSymbol: "questionmark.circle",
+            filledSymbol: "questionmark.circle.fill",
+            showTooltip: "Show Help",
+            hideTooltip: "Hide Help")
     }
 }
 
