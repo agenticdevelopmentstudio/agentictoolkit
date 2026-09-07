@@ -31,6 +31,25 @@ extension Permission {
         }
     }
 
+    /// Stable kebab-case token identifying this permission, for accessibility
+    /// identifiers and anything else that needs to name one permission and be
+    /// matched on later. Not `displayName`: that is user-facing copy, free to
+    /// be reworded or localized, and it collapses every `.automation` grant
+    /// onto the one string "Automation" — while each target app is a separate
+    /// grant in System Settings and gets its own row.
+    public var identifierToken: String {
+        switch self {
+        case .accessibility: "accessibility"
+        case .notifications: "notifications"
+        case .automation(let targetBundleID):
+            "automation-" + targetBundleID.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+                .joined(separator: "-")
+        case .location: "location"
+        }
+    }
+
     /// SF Symbol name representing the permission.
     public var systemImageName: String {
         switch self {

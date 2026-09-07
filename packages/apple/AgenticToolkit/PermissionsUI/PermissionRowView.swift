@@ -100,6 +100,11 @@ public final class PermissionRowView: NSView {
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.translatesAutoresizingMaskIntoConstraints = false
+        // Namespaced by permission: the panel shows one row per pending
+        // permission, so an unqualified "open-settings" would name several
+        // buttons at once and a test could not say which it clicked.
+        button.setAccessibilityIdentifier("permission.\(permission.identifierToken).open-settings")
+        setAccessibilityIdentifier("permission.\(permission.identifierToken).row")
 
         addSubview(icon)
         addSubview(titleLabel)

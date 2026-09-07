@@ -90,6 +90,7 @@ public final class PermissionWalkthrough: AppFeature {
         doneButton.bezelStyle = .rounded
         doneButton.controlSize = .large
         doneButton.keyEquivalent = "\r"
+        doneButton.accessibilityID("permission-walkthrough.done")
 
         let stack = NSStackView(views: [title, explanation, panel, doneButton])
         stack.orientation = .vertical
