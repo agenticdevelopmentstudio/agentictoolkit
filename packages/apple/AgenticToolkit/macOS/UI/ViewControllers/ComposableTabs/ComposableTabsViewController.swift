@@ -403,6 +403,13 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// one child is a degenerate split, so it collapses into its parent, which
     /// adopts the survivor at the same position. The *root* may legitimately
     /// hold a single child — that is a tab reduced to one full-size pane.
+    ///
+    /// `child` must be a **direct** child of this split. Every caller reaches
+    /// this as `enclosingSplit.remove(self)`, so any other pane — a descendant
+    /// of this split included — is ignored rather than searched for, and
+    /// `testRemovingAPaneNotInThisSplitIsANoOp` pins that. To close a pane you
+    /// do not already own, go through its host's `paneDidRequestClose(_:)`,
+    /// which asks the split that actually holds it.
     public func remove(_ child: ComposableTabsPaneViewController) {
         guard let index = layoutChildren.firstIndex(where: { $0.viewController === child }) else { return }
 
