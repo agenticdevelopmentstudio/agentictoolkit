@@ -14,7 +14,7 @@ import { detectEnv } from '@agentic-toolkit/adh-registry'
  * atomically.
  *
  * Scoped to LOCAL dev, where every sibling site is a SAME-SITE origin (the suite
- * serves them all as subdomains of one `*.dev.local` / `*.localhost` host), which
+ * serves them all as subdomains of one `*.dev.test` / `*.localhost` host), which
  * is the platform's precondition for cross-origin prerendering — paired with the
  * `Supports-Loading-Mode: credentialed-prerender` response header the apps send
  * (see `PRERENDER_HEADERS` in `@agentic-toolkit/next-headers`, merged into every
@@ -33,7 +33,7 @@ export function PrefetchSiblingSites(): null {
     if (detectEnv(window.location.hostname) !== 'local') return
 
     // Same-site host pattern: siblings share everything after the first DNS label
-    // (`academy.hub-x.dev.local` ⇒ `*.hub-x.dev.local`). `window.location.host`
+    // (`academy.hub-x.dev.test` ⇒ `*.hub-x.dev.test`). `window.location.host`
     // keeps any port (bare-localhost dev) so the pattern still matches.
     const hostPattern = window.location.host.replace(/^[^.]+/, '*')
     const rules = {

@@ -650,7 +650,13 @@ export type SiteEnv = 'production' | 'staging' | 'testing' | 'local'
  *  walk the path up to the nearest existing route instead of showing a 404. */
 export const SITE_SWITCH_HASH = '#site-switch'
 
-/** Classify the current environment from a hostname (no protocol/port). */
+/** Classify the current environment from a hostname (no protocol/port).
+ *
+ *  `.test` is here for the same reason `.local` is: RFC 6761 reserves it for
+ *  testing, so no such name can ever be a deployed site. The local suite serves
+ *  `dev.test` today and `dev.local` before that — matching the whole TLD rather
+ *  than either suite domain keeps this classifier out of the business of knowing
+ *  which one is current, which is `localOrigin`'s job and nothing else's. */
 export function detectEnv(hostname: string): SiteEnv {
   const host = hostname.toLowerCase().replace(/:\d+$/, '')
   if (
@@ -658,6 +664,7 @@ export function detectEnv(hostname: string): SiteEnv {
     host.startsWith('127.') ||
     host === '::1' ||
     host.endsWith('.local') ||
+    host.endsWith('.test') ||
     host.endsWith('.localhost')
   ) {
     return 'local'
@@ -681,26 +688,40 @@ function hostForEnv(site: SiteDef, env: SiteEnv): string {
   return site.prodHost
 }
 
+/** Domains the `dev.local` tool serves a suite under, current one first.
+ *
+ *  `dev.test` is what it serves today; `dev.local` is the superseded spelling,
+ *  kept because a bookmark, an open tab, or an install that has not been
+ *  re-run still puts that host in the address bar — and a host this list does
+ *  not recognise falls through to the bare-`localhost` branch below, i.e. every
+ *  switcher link on the page silently points at the wrong origin.
+ *
+ *  Order matters only for readability: `localOrigin` matches on suffix and
+ *  rebuilds with the domain it matched, so each spelling stays on itself
+ *  rather than bouncing the user between two domains mid-session. */
+const LOCAL_SUITE_DOMAINS = ['dev.test', 'dev.local'] as const
+
 /** Build the local-dev origin for a target site from the current host. Two local
  *  schemes are supported:
  *
- *   - `dev.local` suite (the `dev.local suite` dev server): the hub apex is
- *     `<suite>.dev.local` and every other site is `<id>.<suite>.dev.local`,
- *     where `<suite>` is `hub` on main and `hub-<branch>` on other worktrees.
- *     Mirrors the routing in `dev.local/suite.toml` (apex = 'hub'); change both
- *     together.
+ *   - a `dev.local` suite (the `dev.local suite` dev server) on any domain in
+ *     {@link LOCAL_SUITE_DOMAINS}: the hub apex is `<suite>.<domain>` and every
+ *     other site is `<id>.<suite>.<domain>`, where `<suite>` is `hub` on main
+ *     and `hub-<branch>` on other worktrees. Mirrors the routing in
+ *     `dev.local/suite.toml` (apex = 'hub'); change both together.
  *   - bare `localhost` (single-site `next dev`, optionally carrying a port, e.g.
  *     "admin.localhost:5171"): hub is the bare apex, others are `<id>.localhost`. */
 function localOrigin(target: SiteDef, currentHost: string): string {
   const sub = target.id === 'hub' ? '' : `${target.id}.`
   const host = currentHost.toLowerCase().replace(/:\d+$/, '')
-  if (host.endsWith('.dev.local')) {
-    // Current host is `<suite>.dev.local` (apex) or `<id>.<suite>.dev.local`
+  const domain = LOCAL_SUITE_DOMAINS.find((d) => host.endsWith(`.${d}`))
+  if (domain) {
+    // Current host is `<suite>.<domain>` (apex) or `<id>.<suite>.<domain>`
     // (child). `<suite>` is a single DNS label, so it's the label immediately
-    // before `.dev.local` (robust even if a deeper subdomain ever appears).
-    const base = host.slice(0, -'.dev.local'.length)
+    // before the domain (robust even if a deeper subdomain ever appears).
+    const base = host.slice(0, -(domain.length + 1))
     const suite = base.slice(base.lastIndexOf('.') + 1)
-    return `https://${sub}${suite}.dev.local`
+    return `https://${sub}${suite}.${domain}`
   }
   const port = currentHost.match(/:(\d+)$/)?.[1]
   const suffix = port ? `:${port}` : ''

@@ -67,10 +67,13 @@ describe('detectEnv', () => {
     expect(detectEnv('testing.agenticdeveloperhub.com')).toBe('testing')
     expect(detectEnv('staging.admin.agenticdeveloperhub.com')).toBe('staging')
   })
-  it('classifies local hosts (localhost, 127.*, *.local, *.localhost, ports)', () => {
+  it('classifies local hosts (localhost, 127.*, *.local, *.test, *.localhost, ports)', () => {
     expect(detectEnv('localhost')).toBe('local')
     expect(detectEnv('localhost:3000')).toBe('local')
     expect(detectEnv('127.0.0.1')).toBe('local')
+    // The suite's domain today, and the one it was served under before that.
+    // RFC 6761 reserves `.test` outright, so the whole TLD is local by rule.
+    expect(detectEnv('projects.dev.test')).toBe('local')
     expect(detectEnv('projects.dev.local')).toBe('local')
     // *.localhost subdomains — used by single-site `next dev` for cross-site local routing
     expect(detectEnv('admin.localhost')).toBe('local')
@@ -134,18 +137,28 @@ describe('local cross-site origins', () => {
     expect(buildSiteHref(cookbook, 'localhost:5171', '/')).toBe('http://cookbook.localhost:5171/')
   })
 
-  // dev.local suite scheme: apex is `<suite>.dev.local`, others `<id>.<suite>.dev.local`.
-  it('routes hub to the bare suite apex from a dev.local child host', () => {
-    expect(buildSiteHref(hub, 'admin.hub.dev.local', '/')).toBe('https://hub.dev.local/')
+  // Suite scheme: apex is `<suite>.<domain>`, others `<id>.<suite>.<domain>`,
+  // for every domain in LOCAL_SUITE_DOMAINS.
+  it('routes hub to the bare suite apex from a dev.test child host', () => {
+    expect(buildSiteHref(hub, 'admin.hub.dev.test', '/')).toBe('https://hub.dev.test/')
   })
 
-  it('routes a non-hub site to <id>.<suite>.dev.local from the dev.local apex', () => {
-    expect(buildSiteHref(cookbook, 'hub.dev.local', '/')).toBe('https://cookbook.hub.dev.local/')
+  it('routes a non-hub site to <id>.<suite>.dev.test from the dev.test apex', () => {
+    expect(buildSiteHref(cookbook, 'hub.dev.test', '/')).toBe('https://cookbook.hub.dev.test/')
   })
 
-  it('preserves a per-worktree suite suffix across the dev.local switch', () => {
+  it('preserves a per-worktree suite suffix across the dev.test switch', () => {
     // from a child on the `hub-mybranch` suite, hub → the suite apex, cookbook → its child
-    expect(buildSiteHref(hub, 'admin.hub-mybranch.dev.local', '/')).toBe('https://hub-mybranch.dev.local/')
+    expect(buildSiteHref(hub, 'admin.hub-mybranch.dev.test', '/')).toBe('https://hub-mybranch.dev.test/')
+    expect(buildSiteHref(cookbook, 'hub-mybranch.dev.test', '/home')).toBe('https://cookbook.hub-mybranch.dev.test/home')
+  })
+
+  // The superseded suite domain still routes, and routes to ITSELF: a tab left
+  // open on `dev.local` keeps switching sites instead of falling through to the
+  // bare-localhost branch (which would send every link to `http://<id>.localhost`)
+  // or bouncing the session onto a domain the running install may not serve.
+  it('keeps a legacy dev.local host on dev.local', () => {
+    expect(buildSiteHref(hub, 'admin.hub.dev.local', '/')).toBe('https://hub.dev.local/')
     expect(buildSiteHref(cookbook, 'hub-mybranch.dev.local', '/home')).toBe('https://cookbook.hub-mybranch.dev.local/home')
   })
 
@@ -155,7 +168,7 @@ describe('local cross-site origins', () => {
     )
   })
 
-  it('routes the persona registry to its <id>.<suite>.dev.local local subdomain', () => {
+  it('routes the persona registry to its <id>.<suite>.dev.test local subdomain', () => {
     const registry = getSite('personaregistry')!
     // The site id matches the suite's leaf dir (`personaregistry`), so the local
     // cross-site link resolves to where the suite actually serves the app.
@@ -163,8 +176,8 @@ describe('local cross-site origins', () => {
     // site spends its root segment on public handles, so it has no workspace route and
     // no `/home` to carry one to, and `carryPath` degrades to the root for exactly that
     // (`hasHome: false`). So what this case still pins is the HOST derivation.
-    expect(buildSiteHref(registry, 'hub-personas-move.dev.local', '/home')).toBe(
-      'https://personaregistry.hub-personas-move.dev.local/',
+    expect(buildSiteHref(registry, 'hub-personas-move.dev.test', '/home')).toBe(
+      'https://personaregistry.hub-personas-move.dev.test/',
     )
     // Local-only subdomain; testing/prod derive from prodHost (agenticpersonaregistry.com).
     expect(buildSiteHref(registry, 'testing.agenticdeveloperhub.com', '/home')).toBe(

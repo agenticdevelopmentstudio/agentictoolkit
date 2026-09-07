@@ -232,7 +232,7 @@ export function useSiteMenu(
       // env's AS only allow-lists its own origins, so wrapping a cross-ENV hop would
       // bounce the user to that AS's login page instead of the destination. The local
       // suite is an env like any other here — it has a real AS (the shared adh-auth
-      // service) that allow-lists `https://*.dev.local`, so its hops wrap too.
+      // service) that allow-lists `https://*.dev.test`, so its hops wrap too.
       try {
         return detectEnv(new URL(href).hostname) === currentEnv ? resolveHref(href) : href
       } catch {
