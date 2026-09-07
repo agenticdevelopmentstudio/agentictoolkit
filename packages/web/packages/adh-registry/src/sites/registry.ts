@@ -652,11 +652,12 @@ export const SITE_SWITCH_HASH = '#site-switch'
 
 /** Classify the current environment from a hostname (no protocol/port).
  *
- *  `.test` is here for the same reason `.local` is: RFC 6761 reserves it for
- *  testing, so no such name can ever be a deployed site. The local suite serves
- *  `dev.test` today and `dev.local` before that — matching the whole TLD rather
- *  than either suite domain keeps this classifier out of the business of knowing
- *  which one is current, which is `localOrigin`'s job and nothing else's. */
+ *  `.localhost`, `.test` and `.local` are all here for the same reason: RFC 6761
+ *  reserves each of them, so no such name can ever be a deployed site. The local
+ *  suite serves `sites.localhost` today, `dev.test` before that and `dev.local`
+ *  before that — matching the whole suffix rather than any one suite domain
+ *  keeps this classifier out of the business of knowing which is current, which
+ *  is `localOrigin`'s job and nothing else's. */
 export function detectEnv(hostname: string): SiteEnv {
   const host = hostname.toLowerCase().replace(/:\d+$/, '')
   if (
@@ -690,16 +691,25 @@ function hostForEnv(site: SiteDef, env: SiteEnv): string {
 
 /** Domains the `dev.local` tool serves a suite under, current one first.
  *
- *  `dev.test` is what it serves today; `dev.local` is the superseded spelling,
- *  kept because a bookmark, an open tab, or an install that has not been
- *  re-run still puts that host in the address bar — and a host this list does
- *  not recognise falls through to the bare-`localhost` branch below, i.e. every
- *  switcher link on the page silently points at the wrong origin.
+ *  `sites.localhost` is what it serves today; `dev.test` and `dev.local` are
+ *  the superseded spellings, kept because a bookmark, an open tab, or an
+ *  install that has not been re-run still puts one of those hosts in the
+ *  address bar — and a host this list does not recognise falls through to the
+ *  bare-`localhost` branch below, i.e. every switcher link on the page
+ *  silently points at the wrong origin.
  *
- *  Order matters only for readability: `localOrigin` matches on suffix and
- *  rebuilds with the domain it matched, so each spelling stays on itself
- *  rather than bouncing the user between two domains mid-session. */
-const LOCAL_SUITE_DOMAINS = ['dev.test', 'dev.local'] as const
+ *  The current entry ends in `localhost`, and that is the one thing about this
+ *  list that is load-bearing: `<suite>.sites.localhost` is a suite host, not
+ *  the bare-`localhost` single-site scheme, and it reads as one only because
+ *  `localOrigin` consults this list *before* it falls through. Drop the entry
+ *  and every switcher link on a served suite silently becomes
+ *  `http://<id>.localhost`.
+ *
+ *  Order matters only for readability — no entry is a suffix of another, so
+ *  `localOrigin` matches on suffix and rebuilds with the domain it matched,
+ *  and each spelling stays on itself rather than bouncing the user between two
+ *  domains mid-session. */
+const LOCAL_SUITE_DOMAINS = ['sites.localhost', 'dev.test', 'dev.local'] as const
 
 /** Build the local-dev origin for a target site from the current host. Two local
  *  schemes are supported:
@@ -710,7 +720,10 @@ const LOCAL_SUITE_DOMAINS = ['dev.test', 'dev.local'] as const
  *     and `hub-<branch>` on other worktrees. Mirrors the routing in
  *     `dev.local/suite.toml` (apex = 'hub'); change both together.
  *   - bare `localhost` (single-site `next dev`, optionally carrying a port, e.g.
- *     "admin.localhost:5171"): hub is the bare apex, others are `<id>.localhost`. */
+ *     "admin.localhost:5171"): hub is the bare apex, others are `<id>.localhost`.
+ *
+ *  The suite list is consulted first, which is what keeps the two schemes apart
+ *  now that the served domain is itself under `.localhost`. */
 function localOrigin(target: SiteDef, currentHost: string): string {
   const sub = target.id === 'hub' ? '' : `${target.id}.`
   const host = currentHost.toLowerCase().replace(/:\d+$/, '')

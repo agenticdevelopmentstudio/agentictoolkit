@@ -162,7 +162,7 @@ export const ogImageSize = OG_IMAGE_SIZE
 
 /** Hosts that are the real, indexable home of a site: the production host and
  *  its `www.` form. Everything else — `staging.`, `testing.`, `*.vercel.app`,
- *  `dev.test`, `localhost` — is a copy that must not be crawled. */
+ *  `sites.localhost`, `localhost` — is a copy that must not be crawled. */
 function isProductionHost(prodHost: string, host: string): boolean {
   const h = host.toLowerCase().replace(/:\d+$/, '')
   return h === prodHost || h === `www.${prodHost}`
