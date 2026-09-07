@@ -37790,8 +37790,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -37891,8 +37889,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -37992,8 +37988,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -38093,8 +38087,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
@@ -38250,8 +38242,6 @@ export interface paths {
                         options?: {
                             /** @description prepare: the tip to pin. Absent means the dev repo’s main as it stands. */
                             sha?: string;
-                            /** @description prepare: proceed although the gate has posted no verdict for the sha. Never overrides a verdict that exists and is red. */
-                            acknowledgedUnverified?: boolean;
                             /** @description register: which [deployments] key this mirror is. */
                             shard?: string;
                             /** @description register: the folder a FIRST registration files its new mirrors under. */
