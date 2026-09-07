@@ -10,10 +10,17 @@ import { Select } from '@agenticdevelopertoolkit/ui/components/select';
 
 import { nameOf } from '../forge/existence';
 import type { ForgeCatalogue } from '../forge/useForgeCatalogue';
-import { applyFlags, flagsOf, isUnchanged, type EnvFlags } from '../settings/env';
+import {
+  applyFlags,
+  changed,
+  flagsOf,
+  isUnchanged,
+  type EnvFlags,
+} from '../settings/env';
 import type { RepoSettingsPatch } from '../settings/SettingsForm';
 import {
   ENVIRONMENTS,
+  WHOLE_REPO_SHARD,
   type DevRepo,
   type OrgDefaults,
   type OrgDefaultsPatch,
@@ -139,7 +146,13 @@ export function OrgDefaultsForm({
   onApply,
   onSaved,
 }: OrgDefaultsFormProps): React.ReactElement {
-  const [draft, setDraft] = React.useState<Draft>(() => draftOf(defaults));
+  /**
+   * WHAT THE BOXES SAID WHEN THIS OPENED. The walk writes the difference against this and not
+   * the boxes themselves — see `touched` below — so it is captured once, at mount, and never
+   * re-derived: it is the operator's starting point, not the server's current answer.
+   */
+  const [seed] = React.useState<Draft>(() => draftOf(defaults));
+  const [draft, setDraft] = React.useState<Draft>(seed);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -155,7 +168,9 @@ export function OrgDefaultsForm({
           ...(defaults?.deploymentOwner ? [defaults.deploymentOwner] : []),
         ]),
       ]
-        .filter(Boolean)
+        // ONLY ACCOUNTS SHIPR CAN NAME — this menu's value is stored as `deploymentOwner` and
+        // every deployment repository in the org is composed from it. See `ForgeOrg.login`.
+        .filter((o): o is string => typeof o === 'string' && o !== '')
         .sort(),
     [org, catalogue, defaults],
   );
@@ -173,13 +188,20 @@ export function OrgDefaultsForm({
    * the half that is safe to change on a live pipeline.
    */
   const patches = React.useMemo<RepoSettingsPatch[]>(() => {
+    // THE BOXES THE OPERATOR MOVED, and not all three of them. Passing `ENVIRONMENTS` here
+    // made every repository in the organization agree with this form on all three, so opening
+    // the pane to change the OWNER also turned production on for the repositories that never
+    // had it and off for the ones that did — a write nothing on screen described, across the
+    // whole org, from a press whose stated subject was a deployment account. `changed`'s own
+    // note names this exact hazard one level down, on a folder; this is it at org scale.
+    const touched = changed(seed.flags, draft.flags);
     const out: RepoSettingsPatch[] = [];
     for (const row of rows) {
       for (const mirror of row.mirrors) {
         const patch: RepoSettingsPatch = { repoId: mirror.id };
         let moved = false;
 
-        const envBranches = applyFlags(mirror.envBranches, draft.flags, ENVIRONMENTS);
+        const envBranches = applyFlags(mirror.envBranches, draft.flags, touched);
         if (!isUnchanged(mirror.envBranches, envBranches)) {
           patch.envBranches = envBranches;
           moved = true;
@@ -190,7 +212,12 @@ export function OrgDefaultsForm({
         // not be able to say two different things about one repository — the same rule that
         // stops the Add form overriding a declared shard. So the walk re-aims exactly the
         // ones the convention named: unsharded, and not yet provisioned.
-        if (!mirror.registeredAt && !mirror.shard) {
+        //
+        // `=== WHOLE_REPO_SHARD` and not `!mirror.shard`: unsharded is a VALUE, so the
+        // truthiness test this used to be was false for every row in the system and the
+        // whole branch was unreachable. Changing the owner or the suffix saved the defaults
+        // row, reported success, closed the dialog, and re-aimed nothing.
+        if (!mirror.registeredAt && mirror.shard === WHOLE_REPO_SHARD) {
           const slug = `${owner}/${nameOf(row.devRepo.slug)}${suffix}`;
           if (slug !== mirror.slug) {
             patch.slug = slug;
@@ -202,7 +229,7 @@ export function OrgDefaultsForm({
       }
     }
     return out;
-  }, [rows, draft.flags, owner, suffix]);
+  }, [rows, seed.flags, draft.flags, owner, suffix]);
 
   const noEnvironments = ENVIRONMENTS.every((env) => !draft.flags[env]);
 

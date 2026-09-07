@@ -46,9 +46,18 @@ const SANDBOX: ForgeRepository[] = [
   { slug: 'sandbox/toys', defaultBranch: 'main', private: false },
 ];
 
+/**
+ * One account.
+ *
+ * `login` is spelled at every call site — including as `null` — because it is the field this
+ * screen used to key its menu on and the one that turned out to be optional. `label` defaults
+ * to the login, which is what a connection whose account is known reads as anyway; the
+ * unnamed account below overrides it, which is the whole of the difference.
+ */
 function org(over: Partial<ForgeOrg> & Pick<ForgeOrg, 'login'>): ForgeOrg {
   return {
-    connectionId: `c-${over.login}`,
+    connectionId: `c-${over.login ?? 'unnamed'}`,
+    label: over.login ?? 'a GitHub App installation',
     repositories: [],
     error: null,
     loading: false,
@@ -114,6 +123,14 @@ function draw(
 /** The repository list, addressed by the label the screen gives it. */
 const repoList = () => screen.getByRole('list', { name: 'Repositories' });
 const orgMenu = () => screen.getByLabelText('Organization') as HTMLSelectElement;
+/** Pick an account BY THE NAME ON IT. The option's value is the connection id — an account
+ *  shipr has no login for still has an installation — so a test that selected by value would
+ *  be pinning an identifier no operator ever sees. */
+const selectOrg = (name: string) =>
+  userEvent.selectOptions(
+    orgMenu(),
+    within(orgMenu()).getByRole('option', { name }) as HTMLOptionElement,
+  );
 const filter = () => screen.getByLabelText('Filter repositories');
 const ok = () => screen.getByRole('button', { name: 'OK' });
 /** The confirm button whatever it is called — it counts the ticks once there is more than
@@ -206,7 +223,7 @@ describe('RegisterWizard — the org menu and the filter', () => {
     expect(within(repoList()).getByRole('checkbox', { name: 'acme/site' })).toBeTruthy();
     expect(within(repoList()).queryByRole('checkbox', { name: 'sandbox/toys' })).toBeNull();
 
-    await userEvent.selectOptions(orgMenu(), 'sandbox');
+    await selectOrg('sandbox');
     expect(within(repoList()).getByRole('checkbox', { name: 'sandbox/toys' })).toBeTruthy();
     expect(within(repoList()).queryByRole('checkbox', { name: 'acme/taken' })).toBeNull();
   });
@@ -221,7 +238,39 @@ describe('RegisterWizard — the org menu and the filter', () => {
         org({ login: 'sandbox', error: 'installation suspended' }),
       ]),
     });
-    expect([...orgMenu().options].map((o) => o.value)).toEqual(['acme', 'sandbox']);
+    expect([...orgMenu().options].map((o) => o.textContent)).toEqual(['acme', 'sandbox']);
+    // AND ADDRESSED BY THE CONNECTION, not by the login. One installation is one account, so
+    // the id is always there and always unique; the login is neither — see the account with
+    // none, below.
+    expect([...orgMenu().options].map((o) => o.value)).toEqual(['c-acme', 'c-sandbox']);
+  });
+
+  it('keeps an account shipr cannot name, under the label the operator connected', async () => {
+    // `label` is what the backend composes as `displayName || username || id`, so it is
+    // whatever the operator typed or a bare connection id — a NAME and never a login. It used
+    // to be the last fallback for `login` itself, which put it into the deployment-organization
+    // menus as though it were an account and composed `<uuid>/site-deployment` for a
+    // repository no forge will ever hold. It is now confined to this: what to CALL the row.
+    draw({
+      catalogue: catalogueOf([
+        org({ login: 'acme', repositories: ACME }),
+        org({
+          login: null,
+          label: 'my github app',
+          connectionId: 'c-nameless',
+          repositories: [{ slug: 'nameless/site', defaultBranch: 'main', private: false }],
+        }),
+      ]),
+    });
+    expect([...orgMenu().options].map((o) => o.textContent)).toEqual([
+      'acme',
+      'my github app',
+    ]);
+
+    // And it is still an account you can add out of: the rows carry their own slugs, so
+    // nothing here ever had to compose one from the login.
+    await selectOrg('my github app');
+    expect(box('nameless/site')).toBeTruthy();
   });
 
   it('names the repository without its owner, which the column already is', () => {
@@ -242,7 +291,7 @@ describe('RegisterWizard — the org menu and the filter', () => {
 
   it('matches the whole slug, so the owner still filters', async () => {
     draw();
-    await userEvent.selectOptions(orgMenu(), 'sandbox');
+    await selectOrg('sandbox');
     await userEvent.type(filter(), 'sandbox/toys');
     expect(within(repoList()).getByRole('checkbox', { name: 'sandbox/toys' })).toBeTruthy();
   });
@@ -299,7 +348,7 @@ describe('RegisterWizard — why the list is empty', () => {
         org({ login: 'sandbox', error: 'installation suspended' }),
       ]),
     });
-    await userEvent.selectOptions(orgMenu(), 'sandbox');
+    await selectOrg('sandbox');
     expect(screen.getByText(/sandbox's repositories could not be read/)).toBeTruthy();
     expect(screen.getByText(/installation suspended/)).toBeTruthy();
   });
@@ -359,7 +408,7 @@ describe('RegisterWizard — what the ticks answer', () => {
 
   it('takes the installation from the repository, not from the first one read', async () => {
     const { onSubmit } = draw();
-    await userEvent.selectOptions(orgMenu(), 'sandbox');
+    await selectOrg('sandbox');
     await userEvent.click(box('sandbox/toys'));
     await userEvent.click(ok());
     await waitFor(() =>
@@ -378,7 +427,7 @@ describe('RegisterWizard — what the ticks answer', () => {
     await userEvent.click(box('acme/taken'));
     // The ticks SURVIVE the menu — switching accounts is narrowing the list, not starting
     // over, and a set that reset would silently drop the first half of a two-account add.
-    await userEvent.selectOptions(orgMenu(), 'sandbox');
+    await selectOrg('sandbox');
     await userEvent.click(box('sandbox/toys'));
 
     await userEvent.click(confirm());

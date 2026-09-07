@@ -154,7 +154,9 @@ function draw(items: RepoItem[] = [], over: Partial<React.ComponentProps<typeof 
   const onSaveSettings = vi.fn((_patches: RepoSettingsPatch[]) => Promise.resolve());
   const onImport = vi.fn(() => Promise.resolve());
   const onRemove = vi.fn((_devRepo: DevRepo) => Promise.resolve());
-  render(
+  const props = (
+    extra: Partial<React.ComponentProps<typeof ConfigureDialog>> = {},
+  ): React.ReactElement => (
     <ConfigureDialog
       open
       onClose={onClose}
@@ -168,9 +170,15 @@ function draw(items: RepoItem[] = [], over: Partial<React.ComponentProps<typeof 
       onSaveSettings={onSaveSettings}
       onImport={onImport}
       {...over}
-    />,
+      {...extra}
+    />
   );
-  return { onClose, onSaveSettings, onImport, onRemove };
+  const view = render(props());
+  /** Re-render with a prop changed — the workspace's verbs ARRIVING, in practice, which is
+   *  the one thing a test of an armed press cannot fake any other way. */
+  const land = (extra: Partial<React.ComponentProps<typeof ConfigureDialog>>) =>
+    view.rerender(props(extra));
+  return { onClose, onSaveSettings, onImport, onRemove, land };
 }
 
 /**
@@ -492,21 +500,64 @@ describe('Remove in the repository pane', () => {
     await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(1));
   });
 
-  it('is an ordinary disabled button when the gate refuses', async () => {
-    // No `D`, so `toolbarState` refuses unregister. An ordinary button, refused the ordinary
-    // way (Mike: "the remove button needs to not look like some weird ui you invented"), with
-    // the gate's own sentence on the tooltip rather than in a modal.
+  it('looks like an ordinary button and SAYS SO when the gate refuses', async () => {
+    // No `D`, so `toolbarState` refuses unregister.
+    //
+    // TWO THINGS AT ONCE, and the cheap version of either breaks the other. It must still be
+    // an ordinary button (Mike: "the remove button needs to not look like some weird ui you
+    // invented") — the `destructive` variant at the ordinary size, not the bar's ghost xs —
+    // and it must refuse the way every other refused control in this dialog refuses:
+    // `aria-disabled`, never natively `disabled`. Chrome dispatches no click and shows no
+    // `title` tooltip over a `disabled` button, so a refusal that lived only on `title` could
+    // be read only by someone who already knew what it said.
+    const user = userEvent.setup();
     const { onRemove } = draw([mirror({})], { verbs: ['C', 'R', 'U', 'M'] });
     await openRepo();
     await screen.findByRole('checkbox', { name: /testing/i });
 
     const pane = removes()[1]!;
-    expect(pane).toBeDisabled();
+    // The ordinary button's clothes: the solid `destructive` treatment, not `destructive-ghost`,
+    // at the default height rather than the toolbar's `xs`.
+    expect(pane).toHaveClass('bg-destructive/15');
+    expect(pane).toHaveClass('h-8');
+
+    expect(pane).toHaveAttribute('aria-disabled', 'true');
+    expect(pane).not.toBeDisabled();
     expect(pane).toHaveAttribute('title', 'You cannot unregister repositories here.');
 
-    await userEvent.click(pane);
+    await user.click(pane);
+    expect(
+      await screen.findByText('You cannot unregister repositories here.'),
+    ).toBeInTheDocument();
     expect(onRemove).not.toHaveBeenCalled();
     expect(dialog('Remove repository')).toBeUndefined();
+  });
+
+  it('arms a press made before the verbs landed rather than dropping it', async () => {
+    // `disabled` fires no `onClick`, so the pane's copy used to swallow a press made in the
+    // fraction of a second before the workspace's verbs arrive — and then went live a moment
+    // later with the operator believing they had already pressed it. That is the swallowed
+    // click the bar's `BarButton` was built to prevent; this control is now the same one.
+    const user = userEvent.setup();
+    const { onRemove, land } = draw([mirror({})], { verbs: undefined });
+    await openRepo();
+    await screen.findByRole('checkbox', { name: /testing/i });
+
+    await user.click(removes()[1]!);
+    // Held, not answered. "Still reading what you may do here" is not a refusal, and putting
+    // it on screen would tell the operator no to a question that has not been asked yet.
+    expect(dialog('Remove repository')).toBeUndefined();
+    expect(
+      screen.queryByText('Still reading what you may do in this workspace.'),
+    ).toBeNull();
+
+    land({ verbs: ['C', 'R', 'U', 'D', 'M'] });
+
+    // And spent on whatever the answer turned out to be: the operator gets the confirmation
+    // for the press they actually made.
+    const asked = await confirm();
+    expect(within(asked).getByText(/acme\/site/)).toBeTruthy();
+    expect(onRemove).not.toHaveBeenCalled();
   });
 });
 

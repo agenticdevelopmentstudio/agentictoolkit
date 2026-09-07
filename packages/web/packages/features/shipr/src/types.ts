@@ -99,6 +99,21 @@ export interface DevRepo {
   connectionId: string | null;
 }
 
+/**
+ * THE SHARD A REPOSITORY WITH NO `[deployments]` SECTION GETS.
+ *
+ * `WHOLE_REPO_SHARD` on the backend (`shipr/ops/bootstrap.ts`), and therefore the value of
+ * `shard` on the overwhelming majority of rows there have ever been.
+ *
+ * IT IS A STRING AND NOT AN ABSENCE, which is the trap: the column is `notNull`, so
+ * `!mirror.shard` is false for every mirror in the system and `mirror.shard ?` is true for
+ * every one. Two surfaces read it as optional and were wrong in opposite directions — the
+ * settings pane drew a chip reading `all` beside every ordinary repository, and the org
+ * walk hid its slug recompute behind a condition that could never hold, so re-aiming an
+ * organization silently moved nothing. Ask `=== WHOLE_REPO_SHARD`, never truthiness.
+ */
+export const WHOLE_REPO_SHARD = 'all';
+
 /** A deployment mirror — the repository the pipeline actually pushes branches on. This is
  *  the row a toolbar button acts on, and the row `shard` distinguishes when one dev repo
  *  has several. */

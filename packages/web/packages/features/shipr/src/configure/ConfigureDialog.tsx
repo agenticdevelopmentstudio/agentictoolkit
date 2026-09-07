@@ -575,19 +575,28 @@ function ConfigureBody({
                   orgOpen={activeOrg !== null}
                   /* An ordinary button (Mike: "add a remove button to the sites details
                      pane", and "the remove button needs to not look like some weird ui you
-                     invented"). Same shape as every other button in this dialog, the same
-                     `destructive` variant the rest of the app uses for the same job, and the
-                     same `buttons.unregister` gate the bar's copy reads. */
+                     invented") — the same shape as every other button in this dialog and the
+                     same `destructive` variant the rest of the app uses for the same job, both
+                     of which are now what `variant` and `size` say.
+
+                     IT IS A BarButton FOR THE CLICK, NOT FOR THE LOOK. It reads the same
+                     `buttons.unregister` gate the bar's copy reads, and that gate is
+                     three-state: while the workspace's verbs are still being read it is
+                     `pending`, which is "not yet" and not "no". Written as a `<Button
+                     disabled>` this swallowed a press made in that window — no dialog, no
+                     refusal, nothing — and then went live a moment later with the operator
+                     believing they had already pressed it. BarButton arms that press and
+                     spends it on whatever the answer turns out to be. */
                   remove={
-                    <Button
-                      type="button"
+                    <BarButton
+                      label="Remove"
+                      state={buttons.unregister}
                       variant="destructive"
-                      disabled={!buttons.unregister.enabled}
+                      size="default"
                       title={buttons.unregister.reason}
                       onClick={() => selected && setRemoving(selected)}
-                    >
-                      Remove
-                    </Button>
+                      onRefused={setRefused}
+                    />
                   }
                   orgForm={
                     orgPane && activeOrg && onSaveOrgDefaults ? (
@@ -741,13 +750,32 @@ function BarButton({
   icon,
   state,
   destructive = false,
+  size = 'xs',
+  variant = destructive ? 'destructive-ghost' : 'ghost',
+  title,
   onClick,
   onRefused,
 }: {
   label: string;
-  icon: React.ReactNode;
+  /** Optional, because a control outside the bar may be a word on its own. */
+  icon?: React.ReactNode;
   state: ButtonState;
   destructive?: boolean;
+  /**
+   * HOW IT LOOKS — and the only thing a caller outside the toolbar ever wanted to change.
+   *
+   * The detail pane's Remove is an ordinary button by explicit instruction ("the remove
+   * button needs to not look like some weird ui you invented"), and for a while that meant a
+   * bare `<Button disabled>` written out beside this one. A `disabled` button does not fire
+   * `onClick`, so that copy had none of the arming below: pressed in the fraction of a second
+   * before the verbs land it did nothing at all, silently, which is the one failure the note
+   * above says this component exists to prevent. Appearance was never the reason it could not
+   * be a BarButton, so appearance is what moved into props.
+   */
+  size?: React.ComponentProps<typeof Button>['size'];
+  variant?: React.ComponentProps<typeof Button>['variant'];
+  /** The hover hint. The bar leaves it unset — its refusals are spoken by `onRefused`. */
+  title?: string;
   onClick: () => void;
   /** Pressed while refused. Gets `state.reason`, or a stand-in when the gate named none. */
   onRefused: (reason: string) => void;
@@ -770,8 +798,9 @@ function BarButton({
   return (
     <Button
       type="button"
-      size="xs"
-      variant={destructive ? 'destructive-ghost' : 'ghost'}
+      size={size}
+      variant={variant}
+      title={title}
       aria-disabled={!state.enabled}
       aria-busy={state.pending || armed ? true : undefined}
       className={state.enabled ? undefined : 'opacity-50'}

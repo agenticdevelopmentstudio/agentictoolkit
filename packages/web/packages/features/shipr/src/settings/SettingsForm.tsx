@@ -8,6 +8,7 @@ import { ErrorText } from '@agenticdevelopertoolkit/ui/components/error-text';
 import { Input } from '@agenticdevelopertoolkit/ui/components/input';
 import { Label } from '@agenticdevelopertoolkit/ui/components/label';
 import { Select } from '@agenticdevelopertoolkit/ui/components/select';
+import { formatDateTime } from '@agenticdevelopertoolkit/ui/lib/timestamps';
 
 import { Existence, nameOf, ownerOf } from '../forge/existence';
 import type { ForgeCatalogue } from '../forge/useForgeCatalogue';
@@ -16,6 +17,7 @@ import { repoLabel } from '../tree/toLevels';
 import type { Descendant } from '../tree/levels';
 import {
   ENVIRONMENTS,
+  WHOLE_REPO_SHARD,
   type DevRepo,
   type Environment,
   type Group,
@@ -236,7 +238,11 @@ function DeploymentTarget({
   const orgs = React.useMemo(
     () =>
       [...new Set([...(catalogue?.orgs ?? []).map((o) => o.login), draft.owner])]
-        .filter(Boolean)
+        // ONLY ACCOUNTS SHIPR CAN NAME. The field below this menu completes `owner/name`, so
+        // an entry here is half a repository slug — and an account whose login is unknown has
+        // no half to give (see `ForgeOrg.login`). It stays visible in the register wizard,
+        // which selects accounts without ever composing a slug from one.
+        .filter((o): o is string => typeof o === 'string' && o !== '')
         .sort(),
     [catalogue, draft.owner],
   );
@@ -244,10 +250,15 @@ function DeploymentTarget({
   if (mirror.registeredAt) {
     return (
       <div className="flex flex-col gap-1">
-        {mirror.shard ? <Label>{mirror.shard}</Label> : null}
+        {mirror.shard === WHOLE_REPO_SHARD ? null : <Label>{mirror.shard}</Label>}
         <p className="text-sm text-apt-text-muted">
           Deploys to <span className="font-mono text-apt-text">{mirror.slug}</span>, provisioned{' '}
-          {mirror.registeredAt}. Where a live deployment repository points is not editable.
+          {/* `formatDateTime`, because the column is `timestamp` through drizzle's
+              `mode: 'string'` and arrives as `2026-08-25 16:37:50.852` — a space, six decimal
+              places, and no zone. Printed raw it was the only stamp in the console rendered as
+              the database's own literal, and it read as UTC to a viewer who is not in it. */}
+          {formatDateTime(mirror.registeredAt)}. Where a live deployment repository points is
+          not editable.
         </p>
       </div>
     );
@@ -255,7 +266,7 @@ function DeploymentTarget({
 
   return (
     <div className="flex flex-col gap-2">
-      {mirror.shard ? <Label>{mirror.shard}</Label> : null}
+      {mirror.shard === WHOLE_REPO_SHARD ? null : <Label>{mirror.shard}</Label>}
       <div className="flex flex-col gap-1">
         <Label htmlFor={`shipr-deploy-owner-${mirror.id}`}>Deployment organization</Label>
         <Select
@@ -463,14 +474,47 @@ export function SettingsForm({
     return next;
   }, [dev]);
 
+  const seedName = dev?.devRepo.displayName ?? '';
+
+  /**
+   * WHAT THE SEED SAYS, as a string — and the reason the effect below is keyed on it rather
+   * than on the objects.
+   *
+   * The Configure dialog passes `target` as an OBJECT LITERAL built inside its own render, so
+   * `repos`, `seed`, `dev` and `deploySeed` are every one of them a new object on every render
+   * of that dialog. An effect listing them therefore fires on every render — and this effect's
+   * body is a re-seed, so anything the operator had typed or ticked was thrown away each time
+   * the catalogue refreshed or a run polled underneath them. The exact defect the comment
+   * above it says must not happen.
+   *
+   * Comparing the VALUES fixes it at the only place it can be fixed here: the identities are
+   * the caller's to make stable, this form cannot make them so, and the question it actually
+   * wants to ask is "did the server's answer change". The repository ids are in the key too,
+   * so selecting a different row still re-seeds even when the two happen to read alike.
+   */
+  const seedKey = JSON.stringify([
+    repos.map((r) => r.id),
+    seed,
+    dev?.devRepo.id ?? null,
+    seedName,
+    deploySeed,
+  ]);
+  // Read through a ref so the deps list can be the key alone. Assigned during render, which
+  // is safe for exactly this use: it is never read during a render, only by the effect below.
+  const latest = React.useRef({ seed, seedName, deploySeed });
+  latest.current = { seed, seedName, deploySeed };
+
   // Re-seed on OPEN and on a change of target, never on every render: a parent that
   // re-renders while a box is ticked must not untick it.
   React.useEffect(() => {
     if (!active) return;
-    setFlags(seed);
-    setDisplayName(dev?.devRepo.displayName ?? '');
-    setDeploy(deploySeed);
-  }, [active, seed, dev, deploySeed]);
+    setFlags(latest.current.seed);
+    setDisplayName(latest.current.seedName);
+    setDeploy(latest.current.deploySeed);
+    // `seedKey` IS every one of those, by value; see its docstring for why the objects
+    // themselves must not be listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, seedKey]);
 
   const touched = changed(seed, flags);
 

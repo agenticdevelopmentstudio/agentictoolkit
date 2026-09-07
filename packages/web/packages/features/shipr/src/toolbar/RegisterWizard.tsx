@@ -106,7 +106,15 @@ export function RegisterWizard({
   /** THE ONE ANSWER THIS SCREEN COLLECTS, by slug. A set and not an array: ticking is a
    *  membership question, and the order boxes were ticked in means nothing to the request. */
   const [checked, setChecked] = React.useState<ReadonlySet<string>>(() => new Set());
-  const [owner, setOwner] = React.useState('');
+  /** WHICH ACCOUNT'S REPOSITORIES ARE LISTED, as a CONNECTION ID and not as a login.
+   *
+   *  An installation is what this screen actually picks between — one installation is one
+   *  account — and it is the only identifier every account has: a connection whose forge login
+   *  shipr has not read back has `login: null` (see `ForgeOrg.login`), and keying on the login
+   *  would have dropped exactly the account this menu promises below to keep in place. Nothing
+   *  here composes a slug from it, so nothing here needs the login at all: the requests are
+   *  built from the ticked repositories' own slugs. */
+  const [accountId, setAccountId] = React.useState('');
   const [filter, setFilter] = React.useState('');
 
   const filterRef = React.useRef<HTMLInputElement>(null);
@@ -116,7 +124,7 @@ export function RegisterWizard({
   React.useEffect(() => {
     if (!open) return;
     setChecked(new Set());
-    setOwner('');
+    setAccountId('');
     setFilter('');
   }, [open]);
 
@@ -128,11 +136,17 @@ export function RegisterWizard({
   const orgs = catalogue.orgs;
 
   /** The menu's value, resolved rather than stored: the catalogue arrives after the first
-   *  paint and can change again under a refresh, so an owner held in state would name one that
-   *  is no longer there and show an empty list under a menu that looks answered. */
-  const logins = React.useMemo(() => (orgs ?? []).map((o) => o.login), [orgs]);
-  const activeOwner = logins.includes(owner) ? owner : (logins[0] ?? '');
-  const activeOrg = (orgs ?? []).find((o) => o.login === activeOwner) ?? null;
+   *  paint and can change again under a refresh, so an account held in state would name one
+   *  that is no longer there and show an empty list under a menu that looks answered. */
+  const accountIds = React.useMemo(
+    () => (orgs ?? []).map((o) => o.connectionId),
+    [orgs],
+  );
+  const activeId = accountIds.includes(accountId) ? accountId : (accountIds[0] ?? '');
+  const activeOrg = (orgs ?? []).find((o) => o.connectionId === activeId) ?? null;
+  /** What the open account is CALLED, for the sentences below — its login where shipr knows
+   *  it, and the connection's own label where it does not. */
+  const activeName = activeOrg ? (activeOrg.login ?? activeOrg.label) : '';
 
   /** That org's repositories, narrowed by the filter. The filter matches the WHOLE slug, so
    *  the `acme/site` an operator would have typed into the free-text field this replaced still
@@ -203,10 +217,10 @@ export function RegisterWizard({
     catalogue.error != null
       ? `Your integrations could not be read: ${catalogue.error}`
       : activeOrg?.error != null
-        ? `${activeOwner}'s repositories could not be read: ${activeOrg.error}`
+        ? `${activeName}'s repositories could not be read: ${activeOrg.error}`
         : orgs !== undefined && orgs.length === 0
           ? 'No GitHub App installation is connected yet — open Integrations to add one.'
-          : `shipr's GitHub App hasn't been granted any repositories on ${activeOwner} yet — open Integrations and press Test.`;
+          : `shipr's GitHub App hasn't been granted any repositories on ${activeName} yet — open Integrations and press Test.`;
 
   // Unmounted rather than hidden while closed, so the host's pane holds the repository list
   // and nothing else. The reset effect above still keys on `open` — a host that keeps this
@@ -239,16 +253,22 @@ export function RegisterWizard({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
         <Select
           aria-label="Organization"
-          value={activeOwner}
-          disabled={logins.length === 0}
-          onChange={(e) => setOwner(e.target.value)}
+          value={activeId}
+          disabled={accountIds.length === 0}
+          onChange={(e) => setAccountId(e.target.value)}
         >
           {/* EVERY account, including one whose read failed — that org keeps its place in the
               menu and says why underneath, which is the difference between an installation
-              that is missing and an installation nobody can see is missing. */}
-          {logins.map((o) => (
-            <option key={o} value={o}>
-              {o}
+              that is missing and an installation nobody can see is missing.
+
+              AND INCLUDING ONE SHIPR CANNOT NAME, which is why the value is the connection id
+              and the text is `login ?? label`. Keyed on the login, an account whose
+              `accountLogin` has not been read back would have had no value to carry and would
+              have fallen out of the menu — the same disappearance this comment exists to
+              forbid, arriving by a different route. */}
+          {(orgs ?? []).map((org) => (
+            <option key={org.connectionId} value={org.connectionId}>
+              {org.login ?? org.label}
             </option>
           ))}
         </Select>

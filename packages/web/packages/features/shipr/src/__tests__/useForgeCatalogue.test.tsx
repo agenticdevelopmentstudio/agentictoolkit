@@ -208,6 +208,40 @@ describe('useForgeCatalogue', () => {
     await waitFor(() => expect(client.refreshConnectionRepositories).toHaveBeenCalledTimes(2));
   });
 
+  it('stays "checking" until the FORGE answers, not until the cache does', async () => {
+    // `loading` used to be cleared by the stored read, and `loading` is what every reader
+    // downstream holds its verdict on: `verdictFor` says "checking" while it is set and a
+    // definite "absent" or "present" the moment it is not. Cleared on the cache, a repository
+    // created a minute ago — after the row that cache was written from — was reported as
+    // "does not exist yet — provisioning will create it", and the register that followed
+    // collided with a repository that was already there.
+    let answerTheForge!: (page: { repositories: ForgeRepository[]; readAt: string }) => void;
+    const client = {
+      connectionRepositories: vi.fn(async () => ({ repositories: ACME, readAt: READ_AT })),
+      refreshConnectionRepositories: vi.fn(
+        () =>
+          new Promise<{ repositories: ForgeRepository[]; readAt: string }>((resolve) => {
+            answerTheForge = resolve;
+          }),
+      ),
+    };
+    const { result } = renderHook(() => useForgeCatalogue(client, [CONNECTIONS[0]!]));
+
+    // The stored rows are on screen — they are drawn either way, which is the point of
+    // reading them first — and the question is still open.
+    await waitFor(() =>
+      expect(slugsOf(result.current.orgs![0]!.repositories)).toEqual([
+        'acme/site',
+        'acme/taken',
+      ]),
+    );
+    expect(result.current.orgs![0]!.loading).toBe(true);
+    expect(result.current.loading).toBe(true);
+
+    answerTheForge({ repositories: ACME, readAt: READ_AT });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
   it('falls back to the rows for an account the connect flow never named', async () => {
     // An installation whose `accountLogin` was never recorded still has to appear under a
     // name, or its repositories are reachable and its org is not.
@@ -218,5 +252,25 @@ describe('useForgeCatalogue', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.orgs![0]!.login).toBe('acme');
+  });
+
+  it('leaves the login NULL when nothing can name the account, and says what to call it', async () => {
+    // AND THEN IT STOPS. `label` used to be the last fallback, and it is not a login: the
+    // backend builds it as `displayName || username || id`, so it is whatever the operator
+    // typed or a bare uuid. Either way it went into the deployment-organization menus as
+    // though it were an account, and picking it composed a slug for a repository no forge can
+    // hold. There is no honest guess available, so the field says so — and the label rides
+    // alongside it, so the account still appears everywhere it appeared before.
+    const client = clientOf({});
+    const { result } = renderHook(() =>
+      useForgeCatalogue(client, [{ id: 'c1', label: 'my github app', accountLogin: null }]),
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.orgs![0]!.login).toBeNull();
+    expect(result.current.orgs![0]!.label).toBe('my github app');
+    // And it answers `installedOn` for nobody — least of all for its own label, which is the
+    // string that would have been asked about had it been treated as a login.
+    expect(result.current.installedOn('my github app')).toBe(false);
   });
 });

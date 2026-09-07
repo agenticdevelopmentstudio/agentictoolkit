@@ -12,7 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@agenticdevelopertoolkit/ui/components/dialog';
-import { ErrorText } from '@agenticdevelopertoolkit/ui/components/error-text';
+import {
+  DialogErrorText,
+  ErrorText,
+} from '@agenticdevelopertoolkit/ui/components/error-text';
 import { Input } from '@agenticdevelopertoolkit/ui/components/input';
 import { Label } from '@agenticdevelopertoolkit/ui/components/label';
 import { Select } from '@agenticdevelopertoolkit/ui/components/select';
@@ -152,6 +155,13 @@ export interface ConfirmDialogProps {
  * The refusal goes UNDER the question rather than replacing it. These calls are refused by
  * the backend for reasons the operator can act on ("move them out first"), and a dialog that
  * swapped its sentence for the refusal would drop what was about to happen.
+ *
+ * It is {@link DialogErrorText} and not `ErrorText` — the shared line's `<span>` variant, which
+ * exists for exactly this position. `description` is rendered by Base UI as a `<p>`, `<p>` may
+ * not nest, and the parser resolves that by CLOSING the outer paragraph: the refusal is
+ * re-parented out of the description it was appended to, above the question instead of under
+ * it, which is the one thing this dialog's own note says must not happen. Every other error
+ * line in this file sits in a form body and stays `ErrorText`.
  */
 export function ConfirmDialog({
   open,
@@ -169,7 +179,7 @@ export function ConfirmDialog({
       description={
         <>
           {body}
-          <ErrorText error={error} />
+          <DialogErrorText error={error} />
         </>
       }
       confirmLabel={confirmLabel}

@@ -138,6 +138,24 @@ function Console({
    */
   const catalogue = useForgeCatalogue(client, connections, connectionsError);
 
+  /**
+   * The Integrations dialog wrote something — re-read BOTH halves.
+   *
+   * The host's `onConnectionsChanged` re-reads the connection LIST, and that is only half of
+   * what that dialog changes. The catalogue keys its per-installation repository reads on
+   * WHICH connections exist, so connecting or disconnecting an account does re-read on its
+   * own — but pressing Test does not: the grants change, the ids do not, and the org menus
+   * went on offering the repositories from before the operator granted the ones they opened
+   * that dialog to grant.
+   *
+   * `catalogue.refresh` is stable for the life of the console; the catalogue OBJECT is not,
+   * so the method is what this depends on.
+   */
+  const onConnectionsSettled = React.useCallback(() => {
+    catalogue.refresh();
+    onConnectionsChanged?.();
+  }, [catalogue.refresh, onConnectionsChanged]);
+
   const tree = useTree(client);
   /**
    * WHAT THE DETAIL PANES RE-READ ON — deliberately not `tree.reads`.
@@ -444,8 +462,16 @@ function Console({
       // batch form of it. Sequential rather than `Promise.all`: a failure then stops at the
       // first bad slug with everything before it written, instead of eleven parallel writes
       // whose partial outcome nobody can name. The tree read is paid once, at the end.
-      for (const body of bodies) await client.configure(body);
-      refreshAll();
+      try {
+        for (const body of bodies) await client.configure(body);
+      } finally {
+        // IN A `finally`, BECAUSE THE PARTIAL OUTCOME IS THE WHOLE POINT of doing them one at
+        // a time. The rows written before the refusal exist; without this the read that would
+        // have shown them was skipped along with the rest, so the operator got the error and
+        // no sign of the ten repositories that went in ahead of it — and the wizard's list
+        // still offered them as unregistered.
+        refreshAll();
+      }
     },
     [client, refreshAll],
   );
@@ -590,71 +616,113 @@ function Console({
 
   const onDelete = React.useCallback(
     async (ids: readonly string[]) => {
-      // One at a time, first failure stops the rest — the same rule `onMove` follows, and
-      // for the same reason: the backend refuses a folder that still holds anything, so a
-      // batch of four where the second is non-empty must stop with two gone and say so,
-      // not report a success it did not have.
-      for (const id of ids) await client.deleteGroup(id);
-      const gone = new Set(ids);
-      // A deleted folder may be open. Truncating the path at the FIRST deleted ancestor puts
-      // the operator in its surviving parent instead of on a rail of nothing.
-      setPath((prev) => {
-        const at = prev.findIndex((id) => gone.has(id));
-        return at === -1 ? prev : prev.slice(0, at);
-      });
-      setSelection((prev) => ({
-        ...prev,
-        focus:
-          prev.focus?.kind === 'group' && gone.has(prev.focus.id)
-            ? null
-            : prev.focus,
-        // Ticks pointing at rows that no longer exist are ticks every other control is
-        // still aimed at.
-        checked: prev.checked.filter(
-          (c) => !(c.kind === 'group' && gone.has(c.id)),
-        ),
-      }));
-      refreshAll();
+      // WHICH ONES ACTUALLY WENT, and not which ones were asked for. The loop stops at the
+      // first refusal, so a batch of four whose second folder is not empty leaves one deleted
+      // and three standing — and everything below has to say exactly that. Built from `ids`
+      // it would truncate the open path at a folder that is still there and untick rows that
+      // still exist.
+      const gone = new Set<string>();
+      try {
+        // One at a time, first failure stops the rest — the same rule `onMove` follows, and
+        // for the same reason: the backend refuses a folder that still holds anything, so a
+        // batch of four where the second is non-empty must stop with two gone and say so,
+        // not report a success it did not have.
+        for (const id of ids) {
+          await client.deleteGroup(id);
+          gone.add(id);
+        }
+      } finally {
+        // IN A `finally`: a rail still pointing into a folder that no longer exists is the
+        // state this pruning exists to prevent, and a batch that stopped halfway is the case
+        // that produces it. Nothing deleted is nothing to prune and nothing to re-read.
+        if (gone.size > 0) {
+          // A deleted folder may be open. Truncating the path at the FIRST deleted ancestor
+          // puts the operator in its surviving parent instead of on a rail of nothing.
+          setPath((prev) => {
+            const at = prev.findIndex((id) => gone.has(id));
+            return at === -1 ? prev : prev.slice(0, at);
+          });
+          setSelection((prev) => ({
+            ...prev,
+            focus:
+              prev.focus?.kind === 'group' && gone.has(prev.focus.id)
+                ? null
+                : prev.focus,
+            // Ticks pointing at rows that no longer exist are ticks every other control is
+            // still aimed at.
+            checked: prev.checked.filter(
+              (c) => !(c.kind === 'group' && gone.has(c.id)),
+            ),
+          }));
+          refreshAll();
+        }
+      }
     },
     [client, refreshAll],
   );
 
   const onMove = React.useCallback(
     async (refs: readonly NodeRef[], destination: string | null) => {
-      // One at a time, and the first failure stops the rest: a partial move the operator can
-      // see half of is recoverable; one that reports success while three rows stayed put is
-      // not. The error carries the backend's own sentence.
-      for (const ref of refs) {
-        if (ref.kind === 'group') {
-          await client.updateGroup(ref.id, { parentId: destination });
-        } else {
-          await client.updateRepo(ref.id, { groupId: destination });
+      // WHAT ACTUALLY MOVED, keyed by kind and id — a folder and a repository may share an
+      // id, and this set is what decides which ticks are cleared below.
+      const moved = new Set<string>();
+      try {
+        // One at a time, and the first failure stops the rest: a partial move the operator can
+        // see half of is recoverable; one that reports success while three rows stayed put is
+        // not. The error carries the backend's own sentence.
+        for (const ref of refs) {
+          if (ref.kind === 'group') {
+            await client.updateGroup(ref.id, { parentId: destination });
+          } else {
+            await client.updateRepo(ref.id, { groupId: destination });
+          }
+          moved.add(`${ref.kind}:${ref.id}`);
+        }
+      } finally {
+        // IN A `finally`, AND ONLY THE ONES THAT MOVED. Skipping this on a refusal left the
+        // tree showing the moved rows in their old folder until something else re-read it;
+        // clearing every tick instead would take the selection off the rows that did NOT
+        // move, which are precisely the ones the operator has to retry.
+        if (moved.size > 0) {
+          setSelection((prev) => ({
+            ...prev,
+            checked: prev.checked.filter((c) => !moved.has(`${c.kind}:${c.id}`)),
+          }));
+          refreshAll();
         }
       }
-      setSelection((prev) => ({ ...prev, checked: [] }));
-      refreshAll();
     },
     [client, refreshAll],
   );
 
   const onSaveSettings = React.useCallback(
     async (patches: RepoSettingsPatch[]) => {
-      // Sequential for the same reason `onMove` is: a folder's save is a request per
-      // repository, and a failure halfway through has to stop rather than leave the
-      // remainder's outcome unknown.
-      for (const patch of patches) {
-        // ONE REQUEST PER REPOSITORY, not one per field: the route merges, and a second
-        // PATCH for the name would be a second chance to half-apply a save the operator
-        // pressed once. `body` is empty for a repository nothing was changed on, and that
-        // one is skipped rather than sent as a no-op.
-        const body: RepoPatch = {
-          ...(patch.envBranches ? { envBranches: patch.envBranches } : {}),
-          ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
-          ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
-        };
-        if (Object.keys(body).length > 0) await client.updateRepo(patch.repoId, body);
+      let wrote = false;
+      try {
+        // Sequential for the same reason `onMove` is: a folder's save is a request per
+        // repository, and a failure halfway through has to stop rather than leave the
+        // remainder's outcome unknown.
+        for (const patch of patches) {
+          // ONE REQUEST PER REPOSITORY, not one per field: the route merges, and a second
+          // PATCH for the name would be a second chance to half-apply a save the operator
+          // pressed once. `body` is empty for a repository nothing was changed on, and that
+          // one is skipped rather than sent as a no-op.
+          const body: RepoPatch = {
+            ...(patch.envBranches ? { envBranches: patch.envBranches } : {}),
+            ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
+            ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
+          };
+          if (Object.keys(body).length > 0) {
+            await client.updateRepo(patch.repoId, body);
+            wrote = true;
+          }
+        }
+      } finally {
+        // IN A `finally`: a folder of eleven that stopped at the fourth has three saved
+        // repositories on the server and eleven stale ones on screen, and the form that
+        // stayed open is then showing the operator values it has already written.
+        if (wrote) refreshAll();
       }
-      refreshAll();
     },
     [client, refreshAll],
   );
@@ -1102,7 +1170,7 @@ function Console({
         open={modal.kind === 'connections'}
         onClose={close}
         client={client}
-        onChanged={onConnectionsChanged}
+        onChanged={onConnectionsSettled}
       />
 
       <DeployDialog

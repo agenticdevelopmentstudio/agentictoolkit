@@ -37,8 +37,23 @@ import type { ForgeConnection, ForgeRepository } from '../types';
  *    {@link ForgeCatalogue.installedOn}. That question has no home inside a form.
  */
 export interface ForgeOrg {
-  /** The forge account login. */
-  login: string;
+  /**
+   * The forge account login — `acme` in `acme/site` — or NULL when shipr does not know it.
+   *
+   * NULLABLE ON PURPOSE, and every reader that builds a slug from it must skip the nulls.
+   * The connection row carries `accountLogin` only once the connect flow has read the
+   * installation's account back; until then all that exists is `label`, which the backend
+   * composes as `displayName || username || id` — a name the operator typed, or a bare
+   * connection id. Putting that in here made it selectable as a deployment ORGANIZATION, and
+   * `<connection uuid>/site-deployment` is a repository the forge will never create. There is
+   * no honest guess available, so the field says so.
+   */
+  login: string | null;
+  /** What to CALL this account on screen when {@link login} is null. Always present, never a
+   *  forge identifier: it is the connection's own label, which is what the Integrations
+   *  screen shows, so an account shipr cannot name still appears as the row the operator
+   *  recognises rather than vanishing from every menu. */
+  label: string;
   /** The installation that reaches it. One installation is one account, so this is the
    *  connection a register against any repository in this org must be made with. */
   connectionId: string;
@@ -63,7 +78,8 @@ export interface ForgeCatalogue {
   connectionOf: (slug: string) => string | undefined;
   /** Whether the caller holds an installation on an account. THE THIRD ANSWER a deployment
    *  target needs: "not there" and "cannot see" are different sentences, and only this
-   *  distinguishes them. */
+   *  distinguishes them. An account whose login is unknown answers this for nobody — see
+   *  {@link ForgeOrg.login}. */
   installedOn: (login: string) => boolean;
   /** Ask the forge again for every installation, and store what it says. */
   refresh: () => void;
@@ -123,15 +139,23 @@ export function useForgeCatalogue(
         // The stored list first, because it is on screen without a forge round trip, and a
         // refresh that fails behind it leaves it standing. Both halves are per-connection:
         // one revoked installation must not take the other three off the menu.
+        //
+        // NEITHER HALF CLEARS `loading`. The first read is the CACHE, and `loading` is what
+        // every reader downstream uses to hold its verdict: `verdictFor` answers 'checking'
+        // while it is set and a definite 'absent' or 'present' the moment it is not. Cleared
+        // here, a repository the operator created a minute ago — after the row this cache was
+        // written from — was reported as "does not exist yet — provisioning will create it",
+        // and the register that followed it collided with a repository that was already
+        // there. The stored rows are drawn either way; what the flag says is only whether
+        // this console has finished asking, and it has not until the refresh below answers.
         try {
           const stored = await client.connectionRepositories(id);
           put(id, {
             repositories: [...stored.repositories].sort(bySlug),
             error: null,
-            loading: false,
           });
         } catch (e) {
-          put(id, { error: (e as Error).message, loading: false });
+          put(id, { error: (e as Error).message });
         }
         try {
           const fresh = await client.refreshConnectionRepositories(id);
@@ -174,20 +198,31 @@ export function useForgeCatalogue(
         const entry = entries[connection.id];
         // An installation the connect flow recorded no account for still has to appear, or
         // its repositories are reachable and its org is not. The rows know the answer even
-        // when the connection row does not, so fall back to the first slug's owner.
+        // when the connection row does not, so fall back to the first slug's owner — that IS
+        // the login, read off a grant this installation returned.
+        //
+        // AND THEN IT STOPS. `connection.label` used to be the last fallback, and it is not a
+        // login: the backend builds it as `displayName || username || id`, so on a connection
+        // with a display name it is whatever the operator typed and on one with neither it is
+        // a uuid. Either way it went into the deployment-organization menus as though it were
+        // an account, and picking it composed a slug for a repository no forge can hold. An
+        // account shipr cannot name is now `null` here and shows as its `label`, which keeps
+        // it visible everywhere it was visible before without ever being usable as an owner.
         const login =
-          connection.accountLogin ??
-          entry?.repositories[0]?.slug.split('/')[0] ??
-          connection.label;
+          connection.accountLogin ?? entry?.repositories[0]?.slug.split('/')[0] ?? null;
         return {
           login,
+          label: connection.label,
           connectionId: connection.id,
           repositories: entry?.repositories ?? [],
           error: entry?.error ?? null,
           loading: entry?.loading ?? true,
         };
       })
-      .sort((a, b) => a.login.localeCompare(b.login));
+      // Sorted by what the reader SEES, which is the login where there is one and the label
+      // where there is not — an account sorted by a name nothing on screen shows is an
+      // account that appears in the wrong place in every menu.
+      .sort((a, b) => (a.login ?? a.label).localeCompare(b.login ?? b.label));
   }, [connections, entries]);
 
   const connectionOf = React.useCallback(

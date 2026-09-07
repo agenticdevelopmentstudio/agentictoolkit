@@ -1,3 +1,5 @@
+import { parseBackendTimestamp } from '@agenticdevelopertoolkit/ui/lib/timestamps';
+
 import type { RepoState } from './types';
 
 /**
@@ -15,20 +17,23 @@ export const STATUS_MAX_AGE_MS = 60 * 60 * 1000;
 /**
  * A backend stamp as milliseconds.
  *
- * `timestamp without time zone` read through drizzle's `mode: 'string'` comes back as
- * `2026-08-25 16:37:50.852` — a space, and no zone — which `Date.parse` reads as LOCAL time.
- * Every stamp compared against another gets the identical treatment here, so a comparison
- * holds whichever shape the wire settles on; naming UTC keeps it right if only one side ever
- * gains a `Z`.
+ * THE SHAPE IS THE TRANSPORT'S, NOT THIS CONSOLE'S. `timestamp without time zone` read through
+ * drizzle's `mode: 'string'` comes back as `2026-08-25 16:37:50.852` — a space, and no zone —
+ * which `Date` reads as LOCAL time; every surface in the fleet that renders a backend stamp
+ * needs the same correction, so `parseBackendTimestamp` in the shared UI package owns it and
+ * this delegates rather than carrying a second copy of the rule. The copy that used to live
+ * here differed from the shared one already: its zone probe accepted a bare `+00` that the
+ * shared `NAIVE` test rejects, which is the drift a duplicated rule produces on its own.
  *
  * `NaN` for an absent or unparseable stamp, and that is load-bearing at both call sites:
  * every comparison against `NaN` is false, so "we cannot date this read" falls out as "this
- * read is not fresh" rather than as an accidental pass.
+ * read is not fresh" rather than as an accidental pass. The shared parser says the same thing
+ * as `null`, so the translation is this function's whole remaining job.
  */
 export function stampMs(at: string | null | undefined): number {
   if (!at) return Number.NaN;
-  const iso = at.includes('T') ? at : at.replace(' ', 'T');
-  return Date.parse(/[Zz]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+  const d = parseBackendTimestamp(at);
+  return d ? d.getTime() : Number.NaN;
 }
 
 /**
