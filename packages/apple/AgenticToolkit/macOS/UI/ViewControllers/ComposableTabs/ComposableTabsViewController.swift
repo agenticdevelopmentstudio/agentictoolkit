@@ -235,8 +235,11 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// Not because the tree is not built yet. `viewDidLoad` adds a split item
     /// for every child, and `NSSplitViewController` installs an item's view as
     /// it is added, so the whole controller tree loads recursively out of the
-    /// root's `viewDidLoad` — `ComposableTabsPaneHostTests` demonstrates it by
-    /// getting split items back after nothing more than `loadViewIfNeeded()`.
+    /// root's `viewDidLoad` — `ComposableTabsPaneHostTests` demonstrates it on
+    /// its nested trees, which vend split items for splits nothing ever loaded
+    /// by hand. (Its fixture does call `loadViewIfNeeded()` on the root and on
+    /// every leaf; the intermediate splits are the ones nobody loads, and they
+    /// are the ones the claim is about.)
     ///
     /// It is the divider positions. `applyPersistedPaneState()` goes through
     /// `paneDidRequestMinimize`, which calls `captureThicknessFractions()` —
@@ -248,8 +251,18 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// values: relaunching with one minimized pane would forget every divider
     /// position in the tab. `viewDidLayout` runs before `viewDidAppear` on both
     /// mount paths — a root set as a window's `contentViewController`, and a
-    /// tab mounted into an already-visible container — so by here the preferred
-    /// thicknesses are applied and the capture reads the real arrangement.
+    /// root added by `MultiTabbedViewController.refreshCenterContent()` into a
+    /// container already on screen — so by here the preferred thicknesses are
+    /// applied and the capture reads the real arrangement. The tab path is
+    /// measured rather than assumed, because it is the one where the ordering
+    /// is not obvious: in `ProjectPaneStateStoreTests`,
+    /// `testTheTabMountPathLaysOutBeforeItAppears` records the callback order
+    /// a tab-mounted controller actually receives, and
+    /// `testARootMountedAsATabRestoresOnlyOnceItIsLaidOut` pins the consequence
+    /// for a real tree — the shares the capture writes tile the split, which
+    /// they only do once layout has run. (AppKit delivers `viewDidAppear` on a
+    /// later run-loop turn there than on the window path; the layout pass still
+    /// comes first.)
     ///
     /// The latch is this restore's alone. `reapplyPaneState()` re-states what
     /// the *live* panes already say about themselves and deliberately holds no

@@ -359,6 +359,112 @@ final class ProjectPaneStateStoreTests: XCTestCase {
                        "only the root restores the tree's half")
     }
 
+    /// A tab can hold one pane minimized *and another* zoomed, and a restore has
+    /// to survive both at once. `paneDidRequestZoom` restores only the pane
+    /// being zoomed, so a zoom on the *other* pane leaves the minimize row
+    /// standing and the database keeps both — which makes
+    /// `applyPersistedPaneState()` pin an item and then collapse it.
+    ///
+    /// `testAZoomedPaneComesBackZoomed` covers the zoom half windowless, where
+    /// no constraint engine ever runs. This one puts a real window around the
+    /// pair, so the suite's "no `Unable to simultaneously satisfy constraints`"
+    /// bar speaks for a pinned-then-collapsed item too — the same class of bug
+    /// the `restoreSizing(of:)` ordering turned out to be, and the one shape of
+    /// it no window had ever been put around.
+    func testAMinimizedPaneBesideAZoomedOneComesBackAsBoth() throws {
+        let first = try makeTree()
+        first.paneDidRequestMinimize(try leaf(leftID, in: first), to: .leading)
+        first.paneDidRequestZoom(try leaf(rightID, in: first))
+        XCTAssertEqual(project.paneState(nodeID: leftID, key: "chrome.minimize.edge"), "leading",
+                       "zooming the other pane leaves this row standing")
+        XCTAssertEqual(project.paneState(nodeID: rightID, key: "chrome.zoomed"), "1",
+                       "and the zoom is stored beside it")
+
+        let second = try makeTree()
+        appear(second)
+
+        let (left, _, leftItem) = try splitItem(for: leftID, in: second)
+        XCTAssertEqual(left.minimizedEdge, .leading, "the minimized pane came back minimized")
+        XCTAssertEqual(leftItem.maximumThickness, left.minimizedThickness(for: .leading),
+                       "its item is pinned to the rail")
+        XCTAssertTrue(try leaf(rightID, in: second).isZoomed, "and the zoomed pane came back zoomed")
+        XCTAssertTrue(leftItem.isCollapsed, "with the pinned item collapsed under the zoom")
+    }
+
+    // MARK: - The other mount path: a root mounted as a tab
+
+    // The placement of the restore in `viewDidAppear()` rests on `viewDidLayout`
+    // running first, on *both* paths a root is mounted by. The tests above take
+    // the first path, a root set as a window's `contentViewController`. These
+    // two take the other — `MultiTabbedViewController.refreshCenterContent()`,
+    // which adds a root into a container that is already on screen — where the
+    // ordering is not obvious: nothing here is a window being shown, the root
+    // is pinned in with constraints that defer its subtree's first real layout,
+    // and AppKit sends `viewWillAppear` at the moment it is added.
+
+    /// Mounts `root` the way a tab is mounted: into a `MultiTabbedViewController`
+    /// that is already on screen. Unlike the window path, AppKit delivers
+    /// `viewDidAppear` here on a later run-loop turn, so the caller has to let
+    /// the loop turn before the appearance has happened.
+    private func mountAsTab(_ root: NSViewController) {
+        let tabs = MultiTabbedViewController()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentViewController = tabs
+        window.makeKeyAndOrderFront(nil)
+        window.contentView?.layoutSubtreeIfNeeded()
+        windows.append(window)
+
+        tabs.addTab(.init(title: "Tab 1", viewController: root), on: .top)
+        window.contentView?.layoutSubtreeIfNeeded()
+        for _ in 0..<5 {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+    }
+
+    /// The ordering the `viewDidAppear()` comment rests on, recorded on the tab
+    /// path. A plain controller rather than a `ComposableTabsViewController`
+    /// because that class is `final` and cannot be subclassed to record — and
+    /// because the ordering being claimed is AppKit's, a property of how the
+    /// container mounts its content, not of what is mounted.
+    func testTheTabMountPathLaysOutBeforeItAppears() throws {
+        let recorder = AppearanceOrderRecorder()
+
+        mountAsTab(recorder)
+
+        XCTAssertEqual(recorder.events, ["will-appear", "layout", "appear"],
+                       "a tab is laid out before it is told it appeared")
+    }
+
+    /// And the consequence, for the real controller on the same path: the
+    /// restore runs there, and the capture it goes through reads an arrangement
+    /// that has actually been laid out.
+    ///
+    /// The second assertion is what says "laid out". `captureThicknessFractions()`
+    /// writes each child's share of the split from the geometry on screen, so
+    /// after a capture of a real arrangement the shares tile the split and sum
+    /// to one (bar the divider). Before the first layout pass they do not:
+    /// every view still holds the frame `loadView` gave it, the children
+    /// overflow their parent, and the same capture yields 0.6 and 0.6. So a
+    /// restore that ran ahead of layout — which is exactly what this placement
+    /// exists to prevent, because the values it writes then replace the
+    /// persisted divider positions — would fail here.
+    func testARootMountedAsATabRestoresOnlyOnceItIsLaidOut() throws {
+        let first = try makeTree()
+        first.paneDidRequestMinimize(try leaf(leftID, in: first), to: .leading)
+
+        let second = try makeTree()
+        mountAsTab(second)
+
+        let (pane, _, item) = try splitItem(for: leftID, in: second)
+        XCTAssertEqual(item.maximumThickness, pane.minimizedThickness(for: .leading),
+                       "appearing as a tab restored the tree's half")
+        let shares = try second.layoutChildren.map { try XCTUnwrap($0.thicknessFraction) }
+        XCTAssertEqual(shares.reduce(0, +), 1.0, accuracy: 0.02,
+                       "the capture read a laid-out arrangement, not loadView's placeholder frames")
+    }
+
     /// Closing a pane must not leave its rows behind. The database already
     /// prunes on save; this is the test that says so from up here.
     func testAClosedPaneTakesItsStateWithIt() throws {
@@ -380,5 +486,31 @@ final class ProjectPaneStateStoreTests: XCTestCase {
         )
 
         XCTAssertNil(project.paneState(nodeID: leftID, key: "chrome.minimize.edge"))
+    }
+}
+
+/// Records the appearance and layout callbacks AppKit delivers, in order.
+/// Consecutive layout passes collapse into one entry — the question is which
+/// side of `viewDidAppear` the first one falls on.
+private final class AppearanceOrderRecorder: NSViewController {
+    private(set) var events: [String] = []
+
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        events.append("will-appear")
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        if events.last != "layout" { events.append("layout") }
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        events.append("appear")
     }
 }
