@@ -51,7 +51,6 @@ import type {
   OrgDefaultsPatch,
   RegisterRequest,
   RepoPatch,
-  RunOptions,
 } from './types';
 
 /**
@@ -335,9 +334,6 @@ function Console({
       operations: readonly {
         operation: Operation;
         environments?: Environment[];
-        /** Per STEP, not per press: a deploy that prepares first sends the acknowledgement
-         *  on the prepare and nothing on the deploys. */
-        options?: RunOptions;
       }[],
       /**
        * The rows to run over — the selection, unless a caller names them.
@@ -368,7 +364,6 @@ function Console({
               ...(step.environments?.length
                 ? { environments: step.environments }
                 : {}),
-              ...(step.options ? { options: step.options } : {}),
             });
             started.push(runId);
           }
@@ -394,23 +389,12 @@ function Console({
   );
 
   const onDeploy = React.useCallback(
-    ({ prepare, acknowledgeUnverified, environments }: DeployRequest) => {
+    ({ prepare, environments }: DeployRequest) => {
       // Each environment is a run of its own, in ladder order, and prepare goes first.
       // Splitting them here rather than sending one run with three environments keeps the
       // per-environment verdict separable in the log.
       const steps = [
-        ...(prepare
-          ? [
-              {
-                operation: 'prepare' as const,
-                // Absent unless the operator ticked it. `acknowledgedUnverified: false` is
-                // not the same thing as not saying it, and the backend reads the presence.
-                ...(acknowledgeUnverified
-                  ? { options: { acknowledgedUnverified: true } }
-                  : {}),
-              },
-            ]
-          : []),
+        ...(prepare ? [{ operation: 'prepare' as const }] : []),
         ...environments.map((env) => ({
           operation: 'deploy' as const,
           environments: [env],

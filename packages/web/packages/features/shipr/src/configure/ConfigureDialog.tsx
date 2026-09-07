@@ -24,6 +24,7 @@ import { nameOf, ownerOf } from '../forge/existence';
 import type { ForgeCatalogue } from '../forge/useForgeCatalogue';
 import { SettingsForm, type RepoSettingsPatch } from '../settings/SettingsForm';
 import { toolbarState, type ButtonState } from '../toolbar/actions';
+import { ConfirmDialog } from '../toolbar/dialogs';
 import { RegisterWizard } from '../toolbar/RegisterWizard';
 import { OrgDefaultsForm } from './OrgDefaultsForm';
 import type { Selection } from '../selection';
@@ -235,14 +236,21 @@ function ConfigureBody({
   /** Why the bar just refused a press — see `BarButton`. Null when nothing was refused. */
   const [refused, setRefused] = React.useState<string | null>(null);
 
+  /** The row a Remove press is waiting on an answer about. Null when nothing was pressed. */
+  const [removing, setRemoving] = React.useState<Row | null>(null);
+
   /**
-   * Unregister a repository, with nothing in the way (Mike: "it doesn't need to have the
-   * dangerzone confirmation dialog").
+   * Unregister a repository, once the operator has said so.
    *
-   * It used to open a type-to-confirm that made the operator retype the slug. Nothing here
-   * earns that: the run unregisters the row and leaves the repositories, their branches and
-   * their protection rules exactly as they are on the forge, so registering again adopts what
-   * is there rather than rebuilding it.
+   * The press does not do this — it opens {@link ConfirmDialog}, and this is what the
+   * confirm runs. Removing is destructive from where the operator stands: they are pressing
+   * it on their own repository, and it retires the row every mirror hangs off. That the
+   * forge keeps the repositories, their branches and their protection rules untouched is an
+   * argument about the blast radius, not about whether to ask.
+   *
+   * What it is NOT is a type-to-confirm (Mike: "it doesn't need to have the dangerzone
+   * confirmation dialog"). One press of an ordinary confirm, the same one the folder Delete
+   * asks — the correction was about the dialog's form, never about whether to have one.
    */
   const remove = React.useCallback(
     async (row: Row) => {
@@ -527,7 +535,7 @@ function ConfigureBody({
               icon={<Minus />}
               state={buttons.unregister}
               destructive
-              onClick={() => selected && void remove(selected)}
+              onClick={() => selected && setRemoving(selected)}
               onRefused={setRefused}
             />
 
@@ -576,7 +584,7 @@ function ConfigureBody({
                       variant="destructive"
                       disabled={!buttons.unregister.enabled}
                       title={buttons.unregister.reason}
-                      onClick={() => selected && void remove(selected)}
+                      onClick={() => selected && setRemoving(selected)}
                     >
                       Remove
                     </Button>
@@ -662,6 +670,27 @@ function ConfigureBody({
         items={items}
         connections={connections}
         onImport={onImport}
+      />
+
+      {/* ONE confirm for BOTH Remove buttons — the bar's and the detail pane's — because
+          they are one verb pressed from two places, and a second copy is a second chance for
+          the two to answer differently. The slug is in the question: this dialog is opened
+          over a list, and "Remove the repository?" names nothing the operator can check. */}
+      <ConfirmDialog
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        title="Remove repository"
+        body={
+          removing
+            ? `Remove ${removing.devRepo.slug}? Its ${
+                removing.mirrors.length === 1
+                  ? 'deployment repository is'
+                  : `${removing.mirrors.length} deployment repositories are`
+              } unregistered and the row retires. Nothing on the forge is deleted — the repositories, their branches and their protection rules stay exactly as they are, so registering it again adopts what is there.`
+            : ''
+        }
+        confirmLabel="Remove"
+        onConfirm={() => (removing ? remove(removing) : Promise.resolve())}
       />
 
 

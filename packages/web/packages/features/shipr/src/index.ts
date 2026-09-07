@@ -48,7 +48,6 @@ export {
   DeployDialog,
   MoveDialog,
   NameDialog,
-  TypeToConfirmDialog,
   moveDestinations,
   useSubmit,
 } from './toolbar/dialogs';
@@ -56,7 +55,6 @@ export type {
   ConnectionOption,
   DeployDialogProps,
   DeployRequest,
-  TypeToConfirmDialogProps,
 } from './toolbar/dialogs';
 export { RegisterWizard } from './toolbar/RegisterWizard';
 export type { RegisterWizardProps } from './toolbar/RegisterWizard';

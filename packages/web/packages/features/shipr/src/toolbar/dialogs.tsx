@@ -2,12 +2,12 @@
 
 import * as React from 'react';
 
+import { AlertModal } from '@agenticdevelopertoolkit/ui/components/alert-modal';
 import { Button } from '@agenticdevelopertoolkit/ui/components/button';
 import { Checkbox } from '@agenticdevelopertoolkit/ui/components/checkbox';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -139,6 +139,20 @@ export interface ConfirmDialogProps {
   onConfirm: () => Promise<void>;
 }
 
+/**
+ * The confirmation, for every destructive verb this console offers.
+ *
+ * It is the platform's {@link AlertModal} in confirm mode rather than a modal assembled
+ * here: a second implementation of "are you sure" is a second set of keyboard rules for the
+ * same question, and this one was that second implementation until it was folded back.
+ * `destructive` is the whole safety argument — the action button is red, Cancel takes
+ * initial focus, and Enter and Escape are both dead, so nothing here can be answered by
+ * momentum. It is one press, and deliberately not a phrase to retype.
+ *
+ * The refusal goes UNDER the question rather than replacing it. These calls are refused by
+ * the backend for reasons the operator can act on ("move them out first"), and a dialog that
+ * swapped its sentence for the refusal would drop what was about to happen.
+ */
 export function ConfirmDialog({
   open,
   onClose,
@@ -149,111 +163,22 @@ export function ConfirmDialog({
 }: ConfirmDialogProps): React.ReactElement {
   const { busy, error, run } = useSubmit(onConfirm, onClose);
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{body}</DialogDescription>
-        </DialogHeader>
-        <ErrorText error={error} />
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="destructive" disabled={busy} onClick={run}>
-            {busy ? 'Working…' : confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export interface TypeToConfirmDialogProps {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  body: React.ReactNode;
-  /** The EXACT string that has to be typed. A slug, always — the thing being destroyed is
-   *  named `owner/name` everywhere else on the screen, and asking for a ceremonial word like
-   *  DELETE would test that the operator can read the dialog rather than that they know
-   *  which repository they are looking at. */
-  phrase: string;
-  confirmLabel: string;
-  onConfirm: () => Promise<void>;
-}
-
-/**
- * A confirmation that cannot be pressed through.
- *
- * {@link ConfirmDialog} is one click, which is right for a folder: the backend refuses one
- * that still holds anything, so the worst outcome of a mis-click is an empty folder gone.
- * Removing a repository is not that — it unregisters every mirror the pipeline pushes to and
- * retires the row they hang off, and the operator's own muscle memory is the only thing
- * between the wrong row and that happening.
- *
- * So the row has to be NAMED, by typing it. It is the one input on this screen that cannot
- * be satisfied by momentum.
- */
-export function TypeToConfirmDialog({
-  open,
-  onClose,
-  title,
-  body,
-  phrase,
-  confirmLabel,
-  onConfirm,
-}: TypeToConfirmDialogProps): React.ReactElement {
-  const [typed, setTyped] = React.useState('');
-  // Cleared on OPEN, not on close: a dialog is mounted while closed, and a box that still
-  // held the last repository's slug would arm the button before the operator had read the
-  // sentence above it.
-  React.useEffect(() => {
-    if (open) setTyped('');
-  }, [open, phrase]);
-
-  const matches = typed.trim() === phrase;
-  const { busy, error, run } = useSubmit(onConfirm, onClose);
-
-  return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{body}</DialogDescription>
-        </DialogHeader>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (matches && !busy) run();
-          }}
-          className="flex flex-col gap-2"
-        >
-          <Label htmlFor="shipr-confirm-phrase">
-            Type <span className="font-mono text-apt-text">{phrase}</span> to confirm
-          </Label>
-          <Input
-            id="shipr-confirm-phrase"
-            value={typed}
-            autoFocus
-            autoComplete="off"
-            spellCheck={false}
-            className="font-mono"
-            onChange={(e) => setTyped(e.target.value)}
-            placeholder={phrase}
-          />
+    <AlertModal
+      open={open}
+      title={title}
+      description={
+        <>
+          {body}
           <ErrorText error={error} />
-          <DialogFooter className="pt-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="destructive" disabled={!matches || busy}>
-              {busy ? 'Working…' : confirmLabel}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+        </>
+      }
+      confirmLabel={confirmLabel}
+      cancelLabel="Cancel"
+      destructive
+      busy={busy}
+      onConfirm={run}
+      onCancel={onClose}
+    />
   );
 }
 
@@ -370,15 +295,6 @@ export type ConnectionOption = ForgeConnection;
 export interface DeployRequest {
   /** Bring the prepared branch up to date first, as a run of its own before the deploy. */
   prepare: boolean;
-  /**
-   * Pin the tip even though nothing has cleared it under the gate context.
-   *
-   * The refusal this waives is the pipeline's, not the dialog's: prepare refuses an
-   * unverified tip server-side, and the only way past it is the caller saying so. So it is
-   * a box the operator ticks, never a retry the console sends on their behalf, and it is
-   * meaningless without {@link prepare}.
-   */
-  acknowledgeUnverified: boolean;
   environments: Environment[];
 }
 
@@ -410,7 +326,6 @@ export function DeployDialog({
   onSubmit,
 }: DeployDialogProps): React.ReactElement {
   const [prepare, setPrepare] = React.useState(false);
-  const [unverified, setUnverified] = React.useState(false);
   const [envs, setEnvs] = React.useState<readonly Environment[]>([]);
 
   // Every opening starts from nothing chosen. A dialog that remembers last time's ticks is
@@ -418,7 +333,6 @@ export function DeployDialog({
   React.useEffect(() => {
     if (open) {
       setPrepare(false);
-      setUnverified(false);
       setEnvs([]);
     }
   }, [open]);
@@ -437,14 +351,12 @@ export function DeployDialog({
     () =>
       onSubmit({
         prepare,
-        // Untickable without prepare, and unsent without it either — the flag is prepare's.
-        acknowledgeUnverified: prepare && unverified,
         environments: [...chosen],
       }),
     // `chosen` is derived from `envs` on every render; keying on the contents keeps the
     // submit callback from changing identity when nothing about the request has.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onSubmit, prepare, unverified, chosen.join(',')],
+    [onSubmit, prepare, chosen.join(',')],
   );
   const { busy, error, run } = useSubmit(submit, onClose);
 
@@ -475,18 +387,6 @@ export function DeployDialog({
             />
             <span>Prepare</span>
           </label>
-
-          {/* Only under a ticked Prepare, because it qualifies that step and nothing else. */}
-          {prepare ? (
-            <label className="flex items-center gap-2 pl-6 text-sm text-apt-text">
-              <Checkbox
-                checked={unverified}
-                aria-label="Pin without a verdict"
-                onCheckedChange={(checked: boolean) => setUnverified(checked)}
-              />
-              <span>Pin without a verdict</span>
-            </label>
-          ) : null}
 
           <fieldset className="flex flex-col gap-2 border-t border-apt-border pt-3">
             <div className="flex items-center gap-2">

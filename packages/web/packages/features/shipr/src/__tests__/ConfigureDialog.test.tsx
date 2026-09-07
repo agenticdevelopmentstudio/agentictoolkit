@@ -421,11 +421,19 @@ describe("the account's defaults", () => {
  * fields that describe that repository, where the operator already is.
  *
  * It is the SAME button, not a second one: the same `toolbarState` answer decides whether it
- * may be pressed, and the same type-to-confirm opens when it is. That is what keeps a second
+ * may be pressed, and the same confirmation opens when it is. That is what keeps a second
  * place to press it from becoming a second answer to whether it is allowed.
  */
 describe('Remove in the repository pane', () => {
+  /** The bar's copy, then the pane's — and, once the question is up, the confirm's. */
   const removes = () => screen.getAllByRole('button', { name: 'Remove' });
+  /** The confirmation, once it is up. Thrown-on rather than `null` so `waitFor` retries. */
+  const confirm = () =>
+    waitFor(() => {
+      const found = dialog('Remove repository');
+      if (!found) throw new Error('the Remove confirmation is not open');
+      return found;
+    });
 
   it('appears with the repository, and only with it', async () => {
     draw([mirror({})]);
@@ -437,17 +445,51 @@ describe('Remove in the repository pane', () => {
     expect(removes()).toHaveLength(2);
   });
 
-  it('unregisters the row on the press, with nothing in the way', async () => {
-    // Mike: "it doesn't need to have the dangerzone confirmation dialog". Nothing here earns
-    // one — the run leaves the repositories on the forge exactly as they are — so the press
-    // IS the action.
+  it('asks before it unregisters, and names the row in the question', async () => {
+    // Mike: "I said I don't want the dangerzone confirmation dialog… but I still want a
+    // confirmation dialog when deleting something!" The correction was about the dialog's
+    // FORM — no phrase to retype — and never about whether to ask. So the press opens the
+    // question and does nothing else, and the question says which row it is about, because
+    // this dialog is opened over a list and "the repository" names nothing checkable.
     const { onRemove } = draw([mirror({})]);
     await openRepo();
     await screen.findByRole('checkbox', { name: /testing/i });
 
     await userEvent.click(removes()[1]!);
+    const asked = await confirm();
+    expect(within(asked).getByText(/acme\/site/)).toBeTruthy();
+    expect(onRemove).not.toHaveBeenCalled();
+
+    await userEvent.click(within(asked).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(1));
     expect(onRemove.mock.calls[0]![0]).toMatchObject({ slug: 'acme/site' });
+  });
+
+  it('unregisters nothing when the question is cancelled', async () => {
+    // The half of a confirmation that actually does the work. A dialog whose Cancel still
+    // removed the row would be worse than no dialog, because it would be believed.
+    const { onRemove } = draw([mirror({})]);
+    await openRepo();
+    await screen.findByRole('checkbox', { name: /testing/i });
+
+    await userEvent.click(removes()[1]!);
+    const asked = await confirm();
+    await userEvent.click(within(asked).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(dialog('Remove repository')).toBeUndefined());
+    expect(onRemove).not.toHaveBeenCalled();
+  });
+
+  it('asks the same question from the bar as from the pane', async () => {
+    // One verb pressed from two places. A second copy of the confirm is a second chance for
+    // the bar and the pane to answer differently.
+    const { onRemove } = draw([mirror({})]);
+    await openRepo();
+    await screen.findByRole('checkbox', { name: /testing/i });
+
+    await userEvent.click(removes()[0]!);
+    const asked = await confirm();
+    await userEvent.click(within(asked).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(1));
   });
 
   it('is an ordinary disabled button when the gate refuses', async () => {
@@ -464,6 +506,7 @@ describe('Remove in the repository pane', () => {
 
     await userEvent.click(pane);
     expect(onRemove).not.toHaveBeenCalled();
+    expect(dialog('Remove repository')).toBeUndefined();
   });
 });
 

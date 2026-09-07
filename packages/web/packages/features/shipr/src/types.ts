@@ -264,14 +264,6 @@ export interface RunRequest {
 export interface RunOptions {
   /** Deploy this exact commit rather than the tip. */
   sha?: string;
-  /**
-   * Proceed even though the tip has no passing gate verdict.
-   *
-   * The refusal it overrides is the pipeline's, not the UI's: an unverified tip is
-   * refused server-side, and this is the caller saying so out loud. Never send it by
-   * default, and never send it on the caller's behalf.
-   */
-  acknowledgedUnverified?: boolean;
   shard?: string;
   groupId?: string;
 }
