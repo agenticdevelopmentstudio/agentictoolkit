@@ -551,6 +551,7 @@
 		A66F75512582A9198D0402EB /* SystemWindowContextManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3684C3A0440E061B80E868 /* SystemWindowContextManager.swift */; };
 		A68B6F745019C14AFC2FB782 /* SettingsPanelListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A1E913777AA53295489FAA /* SettingsPanelListViewController.swift */; };
 		A6A7662BF8F17365E898836A /* AgenticToolkitDatabase.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4BB62E3D95DA86CAF132B225 /* AgenticToolkitDatabase.framework */; };
+		A6DD1C18CDD822003B466624 /* ComposableTabsPaneHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083F9ED5C24717B457577C92 /* ComposableTabsPaneHostTests.swift */; };
 		A6E59EDD83C247327C242D05 /* SessionWatcherListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 339250B6C2715F71635C6744 /* SessionWatcherListViewModel.swift */; };
 		A6E8DA5A4B884A29692EC4AA /* SystemWindowContextsState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F16132D7316C1AB971B57ACD /* SystemWindowContextsState.swift */; };
 		A754BA62575AB6986CA5905B /* SyncGRDBSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8BFA956ECF26D7CD7AFD93E /* SyncGRDBSmokeTests.swift */; };
@@ -568,6 +569,7 @@
 		AB23FAC1C0384772CC1F3C6D /* ExplanationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31E7501A87831CAE04B1416A /* ExplanationView.swift */; };
 		ACBA48B9A33C63AE12DCAC1F /* ComposableSettings+Help.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDFE5A1259670347AA7BA2A8 /* ComposableSettings+Help.swift */; };
 		ACE1BDC2DD619684FC932CB4 /* TerminalSessionListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6F980C469F477A1897B613 /* TerminalSessionListViewController.swift */; };
+		AD1C12CD5E2ABAE4E065D9C3 /* ComposableTabsPaneHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FAED5D8E9BC07D386D1AF1 /* ComposableTabsPaneHost.swift */; };
 		AD508E884D29BF4F2FA1C421 /* FileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39E42B65AECE7EFEA631F88B /* FileEditorView.swift */; };
 		AD611C8E732C03F2B945BDB0 /* PanelHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4425888F9715CC2C33E23445 /* PanelHostView.swift */; };
 		AD631F0333A8818FD1B65928 /* SyncSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19A08A5C282E2B0B503DDA9B /* SyncSmokeTests.swift */; };
@@ -1586,6 +1588,7 @@
 		07210A2531869F6AC3309BD0 /* IntegerFieldView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegerFieldView.swift; sourceTree = "<group>"; };
 		0721AF2482B9A583B0C2537D /* ComposableTabsViewRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsViewRegistry.swift; sourceTree = "<group>"; };
 		0776A98E3E586B49F40101B0 /* MockScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockScreen.swift; sourceTree = "<group>"; };
+		083F9ED5C24717B457577C92 /* ComposableTabsPaneHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsPaneHostTests.swift; sourceTree = "<group>"; };
 		085D01FE73EBFAD731A18864 /* AgenticToolkitSync.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AgenticToolkitSync.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		092DDF4AA6EF01E9761B5F2C /* SystemWindowContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowContext.swift; sourceTree = "<group>"; };
 		0958863976662F3A84AE254D /* AutomationProbing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationProbing.swift; sourceTree = "<group>"; };
@@ -1905,6 +1908,7 @@
 		86AADA6CE6B185B5BA934378 /* AIChatContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatContext.swift; sourceTree = "<group>"; };
 		86FEFB54F5560AB6533F4379 /* NotesCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesCommands.swift; sourceTree = "<group>"; };
 		88CC81802D37F9BE7A21B1E7 /* AIPluginDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPluginDescriptor.swift; sourceTree = "<group>"; };
+		88FAED5D8E9BC07D386D1AF1 /* ComposableTabsPaneHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsPaneHost.swift; sourceTree = "<group>"; };
 		891D2F21BE29CCE600FB6473 /* NoteEditorViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorViewControllerTests.swift; sourceTree = "<group>"; };
 		896AEE008F661A1C4FAA1A23 /* ChoiceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChoiceViewModel.swift; sourceTree = "<group>"; };
 		899F3580FEE03CB7C0B10586 /* OllamaModelPageStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaModelPageStoreTests.swift; sourceTree = "<group>"; };
@@ -2981,6 +2985,7 @@
 			children = (
 				9F3B15D40C11A39F8FA044E4 /* ComposableTabLayoutSpecTests.swift */,
 				CBA8C42F9BB7AEDB993FBCE1 /* ComposableTabsPaneChromeTests.swift */,
+				083F9ED5C24717B457577C92 /* ComposableTabsPaneHostTests.swift */,
 				68D8A687BA975179C597AA7F /* ComposableTabsViewControllerTests.swift */,
 				03206DE5EF36CF23046AB0B4 /* LayoutNodeThicknessTests.swift */,
 				71942A25CE71F5CEFEDBF694 /* PaneMinimizeGeometryTests.swift */,
@@ -3073,6 +3078,7 @@
 				8C41450A42A2BA27B4432260 /* ComposableTabsFocusable.swift */,
 				501F5C38DE7AEF4AB2D504C0 /* ComposableTabsLayout.swift */,
 				0E46550294E7E8457D2C8B65 /* ComposableTabsMove.swift */,
+				88FAED5D8E9BC07D386D1AF1 /* ComposableTabsPaneHost.swift */,
 				8C5EBCBE46FB9FF0162C243F /* ComposableTabsPaneViewController.swift */,
 				569BE7CA64E63BE8794FE653 /* ComposableTabsSettingsViewController.swift */,
 				FDE73B26B7AA0074C2573345 /* ComposableTabsViewController.swift */,
@@ -5278,6 +5284,7 @@
 				C1501D2650525E0A8F90D70F /* ComposableTabsFocusable.swift in Sources */,
 				C9462412D0700CE3C3D2FBAD /* ComposableTabsLayout.swift in Sources */,
 				E638095A95AB3354B41F57CD /* ComposableTabsMove.swift in Sources */,
+				AD1C12CD5E2ABAE4E065D9C3 /* ComposableTabsPaneHost.swift in Sources */,
 				F49A964B68167270ADE07DCF /* ComposableTabsPaneViewController.swift in Sources */,
 				1A11B3EDBBA5ED8430537959 /* ComposableTabsSettingsViewController.swift in Sources */,
 				1A048CB124FBA955A6945143 /* ComposableTabsViewController.swift in Sources */,
@@ -5756,6 +5763,7 @@
 				7E3D59A2283D3441B672E851 /* ChatViewFocusTests.swift in Sources */,
 				A9A2D08E18BB7F9E87F84AF5 /* ComposableTabLayoutSpecTests.swift in Sources */,
 				FDD004A058E8EEE7A5A40072 /* ComposableTabsPaneChromeTests.swift in Sources */,
+				A6DD1C18CDD822003B466624 /* ComposableTabsPaneHostTests.swift in Sources */,
 				E43B644C0AE3FB8407383971 /* ComposableTabsViewControllerTests.swift in Sources */,
 				83661684BCBC4B07761FF8E7 /* DirectoryWatchCoordinatorTests.swift in Sources */,
 				246E0BFA8CA1639D7CC339FA /* DisclosureCardTests.swift in Sources */,

@@ -335,6 +335,21 @@ open class PaneViewController: NSViewController {
 
     // MARK: - State the host hands back
 
+    /// How thick this pane is once it is minimized along `edge` — the rail's
+    /// width for a side, the title bar's height for a top or bottom. The
+    /// border allowance is counted twice because it sits on both sides of
+    /// whichever chrome is left showing.
+    ///
+    /// The host pins the pane to this. It is a method on the pane because the
+    /// answer is a fact about the pane's own chrome: a subclass with a taller
+    /// title bar overrides `contentInset`, and this follows.
+    public func minimizedThickness(for edge: PaneEdge) -> CGFloat {
+        let chrome = edge.isHorizontal
+            ? PaneMinimizedStripView.thickness
+            : PaneTitleBarView.height
+        return chrome + contentInset * 2
+    }
+
     /// Called by the host once it has actually minimized (or restored) this
     /// pane. Never called from a click: a click is a request.
     public func setMinimized(to edge: PaneEdge?) {

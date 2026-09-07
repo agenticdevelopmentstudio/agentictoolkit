@@ -81,12 +81,20 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// The live child list, and the single source of truth for the tree —
     /// `splitViewItems` only exists once the view has loaded, and a restored
     /// but never-displayed tab never loads its view.
-    private var layoutChildren: [any ComposableTabsChild]
+    ///
+    /// Not `private`: the `PaneHost` conformance in `ComposableTabsPaneHost.swift`
+    /// walks it to decide what a zoom collapses.
+    var layoutChildren: [any ComposableTabsChild]
     private weak var project: ProjectWorkspace?
-    private let isRoot: Bool
+    let isRoot: Bool
 
     /// See `ComposableTabsChild.thicknessFraction`.
     public var thicknessFraction: CGFloat?
+
+    /// Root only: the pane currently taking over the whole tab, or `nil`.
+    /// Stored on the root because a zoom is a fact about the tab rather than
+    /// about one split, and weak because the tree owns its panes.
+    public weak var zoomedLeaf: ComposableTabsPaneViewController?
 
     /// One-shot: after the first real layout the user owns the dividers, and
     /// re-imposing a fraction on every layout pass would fight them. Reset
@@ -686,6 +694,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     fileprivate func persistTreeToDocument() {
         guard isRoot else { return }
         reassignPaneIdentifiers()
+        refreshPaneControls()
         onLayoutDidChange?(snapshotNode())
         NotificationCenter.default.post(name: Self.layoutDidChangeNotification, object: self)
     }
@@ -731,6 +740,10 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// Sizing comes from whatever the leaf's view registered — or, for a
     /// nested split, from everything underneath it.
     private func makeItem(for viewController: NSViewController) -> NSSplitViewItem {
+        // Every item — the initial ones, an inserted split, a promoted survivor
+        // — is built here, which makes it the one place a pane can be told
+        // which split is holding it.
+        (viewController as? ComposableTabsPaneViewController)?.host = self
         let item = NSSplitViewItem(viewController: viewController)
         let registry = layout.registry
         let descriptor = (viewController as? ComposableTabsPaneViewController)
@@ -747,6 +760,32 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         // with the window would be a third of a wide display.
         item.holdingPriority = descriptor?.resolvedHoldingPriority ?? .defaultLow
         return item
+    }
+
+    /// The item showing `viewController`, or `nil` before the view has loaded.
+    ///
+    /// An `override`: `NSSplitViewController` already vends this exact lookup,
+    /// so declaring it fresh is a redeclaration error. What is added is the
+    /// `isViewLoaded` guard — a restored but never-displayed tab has no items,
+    /// and asking AppKit for one there risks forcing the view to load just to
+    /// be told `nil`.
+    public override func splitViewItem(for viewController: NSViewController) -> NSSplitViewItem? {
+        guard isViewLoaded else { return nil }
+        return splitViewItems.first { $0.viewController === viewController }
+    }
+
+    /// Undoes a minimize's pinning, putting the item back on the sizing
+    /// `makeItem(for:)` gave it. It lives here rather than with the `PaneHost`
+    /// conformance because it is that method's knowledge read backwards, and
+    /// two copies of it would drift.
+    func restoreSizing(of item: NSSplitViewItem) {
+        let registry = layout.registry
+        item.minimumThickness = Self.minimumThickness(
+            of: item.viewController, along: axis, registry: registry)
+        item.maximumThickness = NSSplitViewItem.unspecifiedDimension
+        let descriptor = (item.viewController as? ComposableTabsPaneViewController)
+            .map { registry.descriptor(for: $0.viewID) }
+        item.holdingPriority = descriptor?.resolvedHoldingPriority ?? .defaultLow
     }
 
     /// What a subtree needs along `axis`. A leaf answers from its registration;
