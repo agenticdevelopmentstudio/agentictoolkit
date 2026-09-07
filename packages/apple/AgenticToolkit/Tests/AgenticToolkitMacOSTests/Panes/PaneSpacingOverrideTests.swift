@@ -210,6 +210,45 @@ final class PaneSpacingOverrideTests: XCTestCase {
         XCTAssertEqual(pane.spacingOverride.resolved, Spacing(uniform: 10))
     }
 
+    /// `applyResolvedSpacing` assigns, it never adds. It runs once per override
+    /// change already, so calling it again must leave the gap at the number the
+    /// override names rather than doubling it (`idempotency`).
+    func testApplyingTheSpacingRepeatedlyDoesNotAccumulate() {
+        let pane = TestPane(content: PlainContent(), inherited: Spacing(uniform: 10))
+        pane.loadViewIfNeeded()
+
+        pane.spacingOverride.setOverride(Spacing(uniform: 4))
+        pane.applyResolvedSpacing()
+        pane.applyResolvedSpacing()
+
+        XCTAssertEqual(pane.contentSpacingInsets.top, 4)
+        XCTAssertEqual(pane.contentSpacingInsets.left, 4)
+        XCTAssertEqual(pane.contentSpacingInsets.bottom, 4)
+        XCTAssertEqual(pane.contentSpacingInsets.right, 4)
+
+        pane.spacingOverride.setOverride(Spacing(uniform: 6))
+        pane.applyResolvedSpacing()
+
+        XCTAssertEqual(pane.contentSpacingInsets.top, 6,
+                       "a second change replaces the first rather than adding to it")
+        XCTAssertEqual(pane.contentSpacingInsets.left, 6)
+    }
+
+    /// The same guarantee on the other branch: content that applies its own
+    /// padding keeps the pane flush at zero however often the pane is asked.
+    func testRepeatedApplicationLeavesSpacingAwareContentFlush() {
+        let content = SpacingAwareContent()
+        let pane = TestPane(content: content, inherited: Spacing(uniform: 10))
+        pane.loadViewIfNeeded()
+
+        pane.spacingOverride.setOverride(Spacing(uniform: 3))
+        pane.applyResolvedSpacing()
+
+        XCTAssertEqual(content.applied.last, Spacing(top: 3, leading: 3, bottom: 3, trailing: 3))
+        XCTAssertEqual(pane.contentSpacingInsets, NSEdgeInsets(),
+                       "the pane adds nothing on top, no matter how many times it is called")
+    }
+
     func testAnOverrideReachesSpacingAwareContentImmediately() {
         let content = SpacingAwareContent()
         let pane = TestPane(content: content)

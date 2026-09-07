@@ -33,9 +33,12 @@ final class PaneViewControllerTests: XCTestCase {
         let paneSearchPlaceholder = "Filter files"
         private(set) var receivedQueries: [String] = []
         let accessory = NSButton()
+        /// Held rather than built fresh per call, so a test can assert the pane
+        /// hands back *these* rows and not merely two of something.
+        let optionRows = [NSButton(), NSButton()]
 
         func makePaneAccessoryViews() -> [NSView] { [accessory] }
-        func makePaneOptionRows() -> [NSView] { [NSButton(), NSButton()] }
+        func makePaneOptionRows() -> [NSView] { optionRows }
         var paneMinimizedSymbolName: String { "folder" }
         var paneMinimizedTooltip: String { "Files" }
         func paneSearch(for query: String) { receivedQueries.append(query) }
@@ -123,16 +126,29 @@ final class PaneViewControllerTests: XCTestCase {
         let (pane, _) = loadedPane(content: content)
         XCTAssertEqual(pane.titleBar.accessoryViews.count, 1)
         XCTAssertTrue(pane.titleBar.accessoryViews.first === content.accessory)
-        // 2 universal spacing rows (Task 14) + the content's own 2.
-        XCTAssertEqual(pane.makeOptionRows().count, 4)
+
+        // The gear leads with the two universal spacing rows (Task 14), then
+        // the content's own. Asserted by identity, so four generic rows cannot
+        // pass on the count alone; the spacing pair is rebuilt on every call,
+        // so it is named by type and identifier rather than by instance.
+        let rows = pane.makeOptionRows()
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertTrue(rows.first is SpacingControl)
+        XCTAssertEqual(rows[1].accessibilityIdentifier(), "pane.options.spacing.reset")
+        XCTAssertTrue(rows[2] === content.optionRows[0])
+        XCTAssertTrue(rows[3] === content.optionRows[1])
     }
 
-    func testBareContentGetsNoAccessoriesAndNoOptionRows() {
+    func testBareContentGetsNoAccessoriesAndOnlyTheUniversalOptionRows() {
         let (pane, _) = loadedPane(content: BareContent())
         XCTAssertTrue(pane.titleBar.accessoryViews.isEmpty)
-        // The gear always leads with the 2 universal spacing rows (Task 14);
-        // bare content contributes none of its own beyond those.
-        XCTAssertEqual(pane.makeOptionRows().count, 2)
+
+        // Content that opts into nothing still gets the spacing pair every pane
+        // has, and nothing past it.
+        let rows = pane.makeOptionRows()
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertTrue(rows.first is SpacingControl)
+        XCTAssertEqual(rows[1].accessibilityIdentifier(), "pane.options.spacing.reset")
     }
 
     func testTheGearIsInTheTitleBarsTrailingSlot() {
