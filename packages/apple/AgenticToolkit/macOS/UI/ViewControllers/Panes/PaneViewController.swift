@@ -326,11 +326,20 @@ open class PaneViewController: NSViewController {
                 host?.paneDidRequestRestore(self)
             }
             view.addSubview(strip)
+            // The strip owns its own 28pt width. Pinning both sides as well
+            // makes that width unsatisfiable at every container size but one,
+            // so the pane docks the rail to the edge it minimized toward and
+            // lets the rail's own width settle the other side. At the
+            // thickness the host pins a minimized split item to, the two
+            // agree exactly; at any other width the rail hugs its edge
+            // instead of fighting.
+            let dockedSide = edge == .leading
+                ? strip.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+                : strip.trailingAnchor.constraint(equalTo: view.trailingAnchor)
             NSLayoutConstraint.activate([
                 strip.topAnchor.constraint(equalTo: view.topAnchor),
-                strip.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                strip.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                strip.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+                strip.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                dockedSide
             ])
             minimizedStrip = strip
         }

@@ -217,6 +217,10 @@ final class PaneViewControllerTests: XCTestCase {
         let (pane, host) = loadedPane(content: BareContent())
         pane.setMinimized(to: .trailing)
         let strip = pane.view.subviews.compactMap { $0 as? PaneMinimizedStripView }.first
+        XCTAssertEqual(strip?.symbolName, PaneMinimizedStripView.defaultSymbolName,
+                       "content with no minimized representation gets the generic glyph")
+        XCTAssertEqual(strip?.tooltip, pane.resolvedTitle,
+                       "and falls back to the pane's own title for the rail's tooltip")
         strip?.restoreButton.performClick(nil)
         XCTAssertEqual(host.restores, 1)
     }
