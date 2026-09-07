@@ -325,6 +325,34 @@ final class ComposableTabsPaneHostTests: XCTestCase {
                        "a zoom must not write the collapsed arrangement into the saved sizes")
     }
 
+    /// The other half of the same guard. A divider dragged in the last 300ms is
+    /// still sitting in the debounce when the user hits zoom, and once
+    /// `zoomedLeaf` is set the capture refuses to run at all — so unless the
+    /// zoom takes the reading on its way in, the drag is silently lost.
+    /// `paneDidRequestMinimize` already captures first; this is the same
+    /// obligation on the other entry point.
+    func testZoomingCapturesADragTheDebounceHasNotWrittenYet() throws {
+        let root = try sideBySide()
+        layOut(root)
+        // What a drag leaves behind, without waiting out the 300ms.
+        root.splitView.setPosition(200, ofDividerAt: 0)
+        root.view.layoutSubtreeIfNeeded()
+
+        root.paneDidRequestZoom(try leaf(leftID, in: root))
+
+        let captured = try XCTUnwrap(fraction(of: leftID, in: root.snapshotNode()),
+                                     "nothing was captured, so the drag was dropped")
+        XCTAssertEqual(captured, 0.25, accuracy: 0.02,
+                       "the dragged position, not the even split it started at")
+    }
+
+    /// One leaf's serialised fraction, or `nil` if it has none.
+    private func fraction(of id: UUID, in node: LayoutNode) -> Double? {
+        let prefix = "\(id):"
+        guard let row = fractions(of: node).first(where: { $0.hasPrefix(prefix) }) else { return nil }
+        return Double(row.dropFirst(prefix.count))
+    }
+
     /// Gives a tree a real size and lets AppKit lay it out, so the divider
     /// positions `captureThicknessFractions()` reads actually exist.
     private func layOut(_ root: ComposableTabsViewController) {
@@ -438,9 +466,55 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         let bottom = try leaf(bottomID, in: root)
         try XCTUnwrap(bottom.host).paneDidRequestClose(bottom)
 
-        XCTAssertEqual(top.minimizedEdge, .leading)
+        // The side is re-asked, not carried over: `top` was the *first* child of
+        // the inner split and is promoted into the root's *second* slot, so the
+        // tree re-docks it trailing. Same rule as
+        // `testTheTreeDecidesWhichSideThePaneDocksTo`, applied to a pane that
+        // moved rather than to one being minimized.
+        XCTAssertEqual(top.minimizedEdge, .trailing)
         XCTAssertEqual(try item(for: top).maximumThickness, 32,
                        "promotion into the parent must not quietly un-minimize it")
+    }
+
+    /// The same promotion across a *change of axis*, which is where re-applying
+    /// the stored edge stops being safe: `top` is minimized on a vertical edge
+    /// inside a vertical split, and the close promotes it into a horizontal one
+    /// where `.top` means nothing. Pinning it there freezes the pane at the
+    /// vertical thickness on the horizontal axis, and the title-bar controls it
+    /// would be restored from lay out at nothing — an unrecoverable pane, with
+    /// no constraint warning to say so.
+    func testACrossAxisPromotionNeverLeavesAPaneStuckOnADeadEdge() throws {
+        let root = try makeTree(.split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha),
+            second: .split(
+                orientation: .vertical,
+                first: .leaf(id: topID, contentType: beta),
+                second: .leaf(id: bottomID, contentType: alpha)
+            )
+        ))
+        let top = try leaf(topID, in: root)
+        root.paneDidRequestMinimize(top, to: .top)
+        XCTAssertEqual(top.minimizedEdge, .top, "minimized along the axis it was living on")
+
+        let bottom = try leaf(bottomID, in: root)
+        try XCTUnwrap(bottom.host).paneDidRequestClose(bottom)
+
+        // Either outcome is defensible — adopt an edge the new axis offers, or
+        // give up and restore — but the pane has to be usable afterwards.
+        let offered = root.availableMinimizeEdges(for: top)
+        let pinned = try item(for: top)
+        if let edge = top.minimizedEdge {
+            XCTAssertTrue(offered.contains(edge),
+                          "a pane cannot stay minimized toward an edge the tree no longer offers")
+            XCTAssertEqual(pinned.maximumThickness, 32,
+                           "pinned on a horizontal axis, so the horizontal thickness")
+        } else {
+            XCTAssertEqual(pinned.maximumThickness, NSSplitViewItem.unspecifiedDimension,
+                           "the minimize was given up, so the pinning has to go with it")
+        }
+        XCTAssertGreaterThanOrEqual(pinned.minimumThickness, 32,
+                                    "narrower than its own title-bar controls is a pane the user cannot get back")
     }
 
     /// `paneDidRequestClose` clears the zoom on the way in, but it is not the

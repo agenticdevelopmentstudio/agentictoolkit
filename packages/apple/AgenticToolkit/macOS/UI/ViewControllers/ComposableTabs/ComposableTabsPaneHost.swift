@@ -92,6 +92,13 @@ extension ComposableTabsViewController: PaneHost {
         guard let leaf = pane as? ComposableTabsPaneViewController else { return }
         // A minimized pane that zoomed would take over the tab as a rail.
         if leaf.minimizedEdge != nil { paneDidRequestRestore(leaf) }
+        // Before the zoom goes up, for the same reason `paneDidRequestMinimize`
+        // captures first: a divider dragged in the last 300ms is still sitting
+        // in the debounce, and once `zoomedLeaf` is set the capture refuses to
+        // run at all — so the drag would be dropped. On the way back *out* of a
+        // zoom this is a no-op, which is correct: what is on screen then is the
+        // collapsed arrangement, not sizes worth keeping.
+        rootSplit()?.captureThicknessFractions()
         setZoomedLeaf(leaf.isZoomed ? nil : leaf)
     }
 
@@ -185,11 +192,32 @@ extension ComposableTabsViewController: PaneHost {
             applyZoom(target: nil)
         }
 
+        // One snapshot for the whole pass: re-resolving an edge does not move
+        // anything in the tree, so the shape cannot change underneath it.
+        let tree = snapshotNode()
         for leaf in leaves {
             guard let edge = leaf.minimizedEdge,
                   let owner = leaf.parent as? ComposableTabsViewController,
                   let item = owner.splitViewItem(for: leaf) else { continue }
-            owner.pin(item, to: leaf.minimizedThickness(for: edge))
+            // The stored edge was resolved against the tree the pane used to
+            // live in, and a rebuild can change the axis under it — a close
+            // that promotes a pane out of a vertical split into a horizontal
+            // one leaves it carrying `.top`. Pinning that would freeze the pane
+            // at the vertical thickness on the horizontal axis: 30pt *wide*,
+            // narrower than the title-bar controls that would restore it, and
+            // AppKit reports nothing. So the edge is re-asked, never trusted.
+            guard let resolved = PaneMinimizeGeometry.resolvedEdge(
+                forNode: leaf.nodeID, in: tree, requested: edge) else {
+                // Nowhere left to minimize toward. Giving the pane back is the
+                // only outcome that leaves the user able to act on it.
+                owner.restoreSizing(of: item)
+                leaf.setMinimized(to: nil)
+                continue
+            }
+            owner.pin(item, to: leaf.minimizedThickness(for: resolved))
+            // A promotion can also keep the axis and change the side. Telling
+            // the pane keeps its chrome on the edge it is actually docked to.
+            if resolved != edge { leaf.setMinimized(to: resolved) }
         }
         // After the pinning, for the same reason `applyPersistedPaneState()`
         // orders them this way: pinning an item the zoom has collapsed reads as
