@@ -32,10 +32,19 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// The server's `completionProvider.triggerCharacters`, once resolved.
     ///
     /// `nil` means "not resolved yet", which is not the same as "the server
-    /// declares none" — an unresolved set is retried, an empty one is not.
-    /// `resolveTriggerCharacters()` fills this in eagerly when the document's
-    /// editor slot opens, so the set is known before the user types anything.
+    /// declares none". `resolveTriggerCharacters()` fills this in eagerly when
+    /// the document's editor slot opens, so the set is known before the user
+    /// types anything.
     private var resolvedTriggerCharacters: Set<String>?
+
+    /// Which session the resolved set came from.
+    ///
+    /// Kept because a session is not permanent: editing a server's command in
+    /// settings retires the old session and creates a new one for the same
+    /// language, and the retired server's trigger characters must not outlive
+    /// it. A cached answer is only reused while the session it was read from is
+    /// still the one serving this document.
+    private var resolvedTriggerCharacterSource: ObjectIdentifier?
 
     /// Identifies the most recent completion request, so a superseded one
     /// cannot publish over the cache belonging to a newer one.
@@ -85,18 +94,35 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// session returns immediately and on a starting one awaits the same task
     /// the registry is awaiting, so this waits exactly as long as it must.
     ///
-    /// Returns the empty set when there is no session, no `completionProvider`,
-    /// or the server declares no trigger characters. Only a resolved answer is
-    /// cached, so a call made before the server was up is retried by the next.
+    /// Returns the empty set when no session serves this document's language,
+    /// when the server declares no `completionProvider`, and when it declares
+    /// one with no trigger characters.
+    ///
+    /// **This method never retries on its own.** It is safe to call repeatedly
+    /// — an answer already read from the session still serving this document is
+    /// returned without touching the server — and `FileEditorState` calls it
+    /// again whenever `registry.$sessions` changes, which is what turns the
+    /// "no session yet" empty answer into the real one once a server appears.
+    /// A caller without that subscription gets one answer and keeps it.
     @discardableResult
     func resolveTriggerCharacters() async -> Set<String> {
-        if let resolvedTriggerCharacters { return resolvedTriggerCharacters }
-        guard let session = registry.session(forLanguageId: document.languageId) else { return [] }
+        guard let session = registry.session(forLanguageId: document.languageId) else {
+            // The server was removed or disabled. Its trigger set goes with it
+            // rather than being answered on behalf of a session that is gone.
+            resolvedTriggerCharacters = nil
+            resolvedTriggerCharacterSource = nil
+            return []
+        }
+        let source = ObjectIdentifier(session)
+        if let resolvedTriggerCharacters, resolvedTriggerCharacterSource == source {
+            return resolvedTriggerCharacters
+        }
         try? await session.start()
         guard let capabilities = await session.capabilities(),
               let completionProvider = capabilities.completionProvider else { return [] }
         let characters = Set(completionProvider.triggerCharacters ?? [])
         resolvedTriggerCharacters = characters
+        resolvedTriggerCharacterSource = source
         return characters
     }
 
@@ -133,6 +159,7 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // session's life, so two interleaved requests write the same thing and
         // no invariant spans the suspension.
         resolvedTriggerCharacters = Set(completionProvider.triggerCharacters ?? [])
+        resolvedTriggerCharacterSource = ObjectIdentifier(session)
 
         let response: CompletionResponse
         do {

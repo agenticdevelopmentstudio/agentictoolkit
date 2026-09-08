@@ -194,17 +194,11 @@ private struct FileEditorContentView: View {
             SourceEditor(
                 storage,
                 language: language,
-                configuration: SourceEditorConfiguration(
-                    appearance: .init(
-                        // Both derived from the one palette in the
-                        // environment, so a theme switch repaints the
-                        // editor's chrome, syntax and font together.
-                        theme: appPalette.editorTheme,
-                        font: appPalette.font(.code),
-                        wrapLines: false
-                    ),
-                    peripherals: editorState.peripherals(for: uri)
-                ),
+                // Built by `FileEditorState`, not inline here, so the whole
+                // configuration — the trigger characters included — is
+                // reachable from a test. Everything this view contributes is
+                // the palette.
+                configuration: editorState.editorConfiguration(for: uri, palette: appPalette),
                 state: editorState.sourceEditorStateBinding(for: uri),
                 // `SourceEditor` holds both of these `weak`; `FileEditorState.Slot`
                 // is what keeps them alive for the life of the cached editor.
@@ -503,6 +497,9 @@ final class FileEditorState: ObservableObject {
     /// exists, and so tests have something to await.
     private var triggerCharacterTasks: [DocumentUri: Task<Void, Never>] = [:]
 
+    /// Holds the subscription to `registry.$sessions`.
+    private var cancellables: Set<AnyCancellable> = []
+
     init(
         documentStore: TextDocumentStore,
         saveScheduler: TextDocumentSaveScheduler,
@@ -513,6 +510,30 @@ final class FileEditorState: ObservableObject {
         self.saveScheduler = saveScheduler
         self.languageServices = languageServices
         self.openFile = openFile
+
+        // A session can appear *after* a slot is open: the registry creates one
+        // when a language server is added or enabled in settings, and this pane
+        // may already be showing a file of that language. Resolution at
+        // slot-open time answers `[]` in that case, and with `openSlot` as the
+        // only caller nothing would ever ask again — the completion window
+        // never opening on `.` for that buffer, which is the defect the eager
+        // resolution was added to fix, re-entering by another door.
+        //
+        // `LanguageServerDocumentSync` watches `registry.$sessions` for the
+        // same reason; this is that pattern rather than a second one. The sink
+        // closure is not `@Sendable`, so it inherits this class's `@MainActor`.
+        // Doing the work in a `Task` also gets us off `@Published`'s `willSet`:
+        // `registry.sessions` still holds the *old* dictionary while the sink
+        // runs, and `resolveTriggerCharacters()` reads it back through
+        // `registry.session(forLanguageId:)`.
+        languageServices?.registry.$sessions
+            .sink { [weak self] _ in
+                guard let self else { return }
+                for uri in self.slotsByURI.keys {
+                    self.startTriggerCharacterResolution(for: uri)
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // Isolated explicitly (SE-0371): a MainActor class's deinit is
@@ -577,18 +598,31 @@ final class FileEditorState: ObservableObject {
         slotsByURI[uri]?.jumpToDefinitionDelegate
     }
 
-    /// The peripherals half of the editor configuration for one document.
+    /// The configuration one cached document's editor is built with.
     ///
     /// Built here rather than inline in the view because
-    /// `codeSuggestionTriggerCharacters` is the live path by which a language
-    /// server's trigger set reaches the editor — `CodeSuggestionDelegate`'s own
-    /// `completionTriggerCharacters()` is never called by this package — and a
-    /// path that load-bearing should be reachable from a test.
-    func peripherals(for uri: DocumentUri) -> SourceEditorConfiguration.Peripherals {
-        SourceEditorConfiguration.Peripherals(
-            showGutter: true,
-            showMinimap: true,
-            codeSuggestionTriggerCharacters: completionTriggerCharacters[uri] ?? []
+    /// `peripherals.codeSuggestionTriggerCharacters` is the live path by which
+    /// a language server's trigger set reaches the editor —
+    /// `CodeSuggestionDelegate.completionTriggerCharacters()` is never called by
+    /// this package — and a path that load-bearing has to be reachable from a
+    /// test. `FileEditorContentView.makeEditor` passes the result of exactly
+    /// this call to `SourceEditor`, so asserting on it asserts on what the
+    /// editor is given.
+    func editorConfiguration(for uri: DocumentUri, palette: SemanticPalette) -> SourceEditorConfiguration {
+        SourceEditorConfiguration(
+            appearance: .init(
+                // Both derived from the one palette in the environment, so a
+                // theme switch repaints the editor's chrome, syntax and font
+                // together.
+                theme: palette.editorTheme,
+                font: palette.font(.code),
+                wrapLines: false
+            ),
+            peripherals: SourceEditorConfiguration.Peripherals(
+                showGutter: true,
+                showMinimap: true,
+                codeSuggestionTriggerCharacters: completionTriggerCharacters[uri] ?? []
+            )
         )
     }
 
@@ -725,13 +759,27 @@ final class FileEditorState: ObservableObject {
         // Resolved now rather than on the first completion request: the request
         // path is only reached once the window is already open, so a trigger
         // set discovered there is discovered too late to have opened it.
-        if let completionDelegate {
-            triggerCharacterTasks[uri]?.cancel()
-            triggerCharacterTasks[uri] = Task { [weak self] in
-                let characters = await completionDelegate.resolveTriggerCharacters()
-                guard let self, !Task.isCancelled, self.slotsByURI[uri] != nil else { return }
-                self.completionTriggerCharacters[uri] = characters
-            }
+        startTriggerCharacterResolution(for: uri)
+    }
+
+    /// Resolves one slot's completion trigger characters and publishes them,
+    /// replacing whatever resolution was already in flight for that URI.
+    ///
+    /// Called when the slot opens and again on every change to the registry's
+    /// session set, so it has to be cheap to repeat: the delegate returns an
+    /// answer it has already read from the session still serving the document
+    /// without going near the server, and an unchanged set is not republished.
+    private func startTriggerCharacterResolution(for uri: DocumentUri) {
+        guard let completionDelegate = slotsByURI[uri]?.completionDelegate else { return }
+        triggerCharacterTasks[uri]?.cancel()
+        triggerCharacterTasks[uri] = Task { [weak self] in
+            let characters = await completionDelegate.resolveTriggerCharacters()
+            guard let self, !Task.isCancelled, self.slotsByURI[uri] != nil else { return }
+            // Compared before assigning: every publication re-runs the view's
+            // body and re-diffs the configuration of every mounted editor, and
+            // most session changes mean nothing for most open documents.
+            guard (self.completionTriggerCharacters[uri] ?? []) != characters else { return }
+            self.completionTriggerCharacters[uri] = characters
         }
     }
 
