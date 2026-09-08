@@ -14,8 +14,12 @@ import AppKit
 
 /// Content that names itself, and says when the name changed.
 ///
-/// A file browser retitles itself when its root changes; the title bar never
-/// learns what a file browser is.
+/// The seam is here so that content whose name is its own to decide — a file
+/// browser retitling itself when its root changes — can say so without the
+/// title bar ever learning what a file browser is. Nothing conforms yet: every
+/// pane on this branch is named by `PaneViewController.fallbackTitle`, which
+/// `ComposableTabsPaneViewController` overrides with `paneName`. The archetype
+/// is what the protocol is for, not a description of a caller that exists.
 @MainActor
 public protocol PaneTitleProviding: AnyObject {
     var paneTitle: String { get }
