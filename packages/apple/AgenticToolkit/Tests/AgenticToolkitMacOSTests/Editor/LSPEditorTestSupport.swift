@@ -52,26 +52,32 @@ struct FakeEditorSessionBehavior: Sendable {
     var completionResponse: CompletionResponse
     var definitionResponse: DefinitionResponse
     var hoverResponse: HoverResponse
+    var semanticTokensResponse: SemanticTokensResponse
     var completionError: LanguageServerSessionError?
     var definitionError: LanguageServerSessionError?
     var hoverError: LanguageServerSessionError?
+    var semanticTokensError: LanguageServerSessionError?
 
     init(
         capabilities: ServerCapabilities? = nil,
         completionResponse: CompletionResponse = nil,
         definitionResponse: DefinitionResponse = nil,
         hoverResponse: HoverResponse = nil,
+        semanticTokensResponse: SemanticTokensResponse = nil,
         completionError: LanguageServerSessionError? = nil,
         definitionError: LanguageServerSessionError? = nil,
-        hoverError: LanguageServerSessionError? = nil
+        hoverError: LanguageServerSessionError? = nil,
+        semanticTokensError: LanguageServerSessionError? = nil
     ) {
         self.capabilities = capabilities
         self.completionResponse = completionResponse
         self.definitionResponse = definitionResponse
         self.hoverResponse = hoverResponse
+        self.semanticTokensResponse = semanticTokensResponse
         self.completionError = completionError
         self.definitionError = definitionError
         self.hoverError = hoverError
+        self.semanticTokensError = semanticTokensError
     }
 }
 
@@ -100,6 +106,7 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     private(set) var lastCompletionParams: CompletionParams?
     private(set) var lastDefinitionParams: TextDocumentPositionParams?
     private(set) var lastHoverParams: TextDocumentPositionParams?
+    private(set) var lastSemanticTokensParams: SemanticTokensParams?
 
     /// The push-diagnostics half of the protocol. The test plays the server;
     /// `publish(_:)` is the wire.
@@ -134,6 +141,15 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     /// And the same again for `hover(_:)`.
     private var gatedHoversRemaining = 0
     private var heldHovers: [CheckedContinuation<Void, Never>] = []
+
+    /// And once more for `semanticTokensFull(_:)`. The queue is what makes a
+    /// *superseded* fetch expressible: the provider's ordering guard is only
+    /// observable when two fetches carry different token data, and a single
+    /// fixed answer makes "the older one landed last" indistinguishable from
+    /// "the newer one did".
+    private var queuedSemanticTokensResponses: [SemanticTokensResponse] = []
+    private var gatedSemanticTokensRemaining = 0
+    private var heldSemanticTokens: [CheckedContinuation<Void, Never>] = []
 
     init(
         configuration: LanguageServerConfiguration,
@@ -338,9 +354,51 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         return DocumentDiagnosticReport(kind: .full, items: [])
     }
 
+    /// Answers the next semantic-token calls with these, in order, before
+    /// falling back to `behavior.semanticTokensResponse`.
+    func enqueueSemanticTokensResponses(_ responses: [SemanticTokensResponse]) {
+        queuedSemanticTokensResponses = responses
+    }
+
+    /// Parks the next `count` semantic-token calls until
+    /// `releaseHeldSemanticTokens()`.
+    func holdNextSemanticTokens(_ count: Int) {
+        gatedSemanticTokensRemaining = count
+    }
+
+    /// How many semantic-token calls are parked right now.
+    var heldSemanticTokensCount: Int { heldSemanticTokens.count }
+
+    func releaseHeldSemanticTokens() {
+        let held = heldSemanticTokens
+        heldSemanticTokens = []
+        for continuation in held {
+            continuation.resume()
+        }
+    }
+
     func semanticTokensFull(_ params: SemanticTokensParams) async throws -> SemanticTokensResponse {
         try requireRunning()
-        return nil
+        // Recorded on the log rather than a counter of its own, because the
+        // assertion that matters most is a *negative* one — that a server which
+        // does not advertise the capability is never asked — and the log can be
+        // read without a suspension that would give a pending request time to
+        // arrive.
+        log.record("semanticTokensFull(\(params.textDocument.uri))")
+        lastSemanticTokensParams = params
+        // Chosen before parking, so the answer belongs to this call rather than
+        // to whichever call happens to resume first.
+        let response = queuedSemanticTokensResponses.isEmpty
+            ? behavior.semanticTokensResponse
+            : queuedSemanticTokensResponses.removeFirst()
+        if gatedSemanticTokensRemaining > 0 {
+            gatedSemanticTokensRemaining -= 1
+            await withCheckedContinuation { continuation in
+                heldSemanticTokens.append(continuation)
+            }
+        }
+        if let error = behavior.semanticTokensError { throw error }
+        return response
     }
 }
 
@@ -378,6 +436,30 @@ func makeDefiningCapabilities(provides: Bool = true) -> ServerCapabilities {
 func makeHoveringCapabilities(provides: Bool = true) -> ServerCapabilities {
     var capabilities = ServerCapabilities()
     capabilities.hoverProvider = .optionA(provides)
+    return capabilities
+}
+
+/// A server that advertises `textDocument/semanticTokens/full`, with the legend
+/// given.
+///
+/// The legend is a parameter and not a default the way trigger characters are,
+/// because it is the whole translation table: a token's `type` field is an index
+/// into `tokenTypes`, so a test that does not choose the legend is not choosing
+/// what its own token data means.
+///
+/// - Parameter full: `false` is the deliberate other case — a bare `false` is a
+///   declaration that full-document requests are *not* served, which is not the
+///   same as omitting the key, and is the one shape that advertises the
+///   capability while refusing the only request this editor makes.
+func makeSemanticTokenCapabilities(
+    legend: SemanticTokensLegend,
+    full: Bool = true
+) -> ServerCapabilities {
+    var capabilities = ServerCapabilities()
+    capabilities.semanticTokensProvider = .optionA(SemanticTokensOptions(
+        legend: legend,
+        full: .optionA(full)
+    ))
     return capabilities
 }
 
