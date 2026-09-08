@@ -66,10 +66,34 @@ public final class DiagnosticStore: ObservableObject {
     /// currently produce would be a guess with no way to test it.
     @Published public private(set) var documents: [DocumentUri: DocumentDiagnostics] = [:]
 
-    /// One observation task per session object, keyed by identity rather than
-    /// by configuration id: a session that is *replaced* keeps its id, and both
+    /// One live observation: the session being read, and the task reading it.
+    ///
+    /// The session is held on purpose. `ObjectIdentifier` is an address, and an
+    /// address identifies an object only for as long as that object is alive —
+    /// so a map keyed by one is sound only while it also guarantees its keys'
+    /// objects are alive. Holding the session here is that guarantee, written
+    /// where the key is stored rather than left to the fact that the reading
+    /// task's own capture happens to do the same thing.
+    private struct Observation {
+        let session: any LanguageServerSessionProtocol
+        let task: Task<Void, Never>
+    }
+
+    /// One observation per session object, keyed by identity rather than by
+    /// configuration id: a session that is *replaced* keeps its id, and both
     /// objects can be alive at once while the old one drains.
-    private var observations: [ObjectIdentifier: Task<Void, Never>] = [:]
+    ///
+    /// **Entries are retired when their stream ends, not only at `shutdown()`.**
+    /// Two things go wrong without that. The map grows for the life of the app,
+    /// one entry per server restart — and the registry replaces a session
+    /// whenever its `SessionDescriptor` changes, so restarts are ordinary. And,
+    /// far worse, a dead session's key stays in the map: a later session
+    /// allocated at that freed address hashes to the same key, `observe(_:)`
+    /// finds a non-nil entry and returns, and that session's diagnostics never
+    /// reach the store — permanently, with nothing reporting it. On screen it
+    /// looks like a server that is still starting up, because the previous
+    /// session's diagnostics are deliberately left in place during a restart.
+    private var observations: [ObjectIdentifier: Observation] = [:]
 
     private var cancellables: Set<AnyCancellable> = []
     private var isShutDown = false
@@ -103,13 +127,41 @@ public final class DiagnosticStore: ObservableObject {
         // `[weak self]` so an abandoned store — one whose owner was released
         // without calling `shutdown()` — does not keep itself alive through a
         // task parked on a live server's stream.
-        observations[key] = Task { [weak self] in
+        let task = Task { [weak self] in
             for await params in session.publishedDiagnostics {
                 guard let self else { return }
                 self.apply(params)
             }
+            // The stream is finished: this session will publish nothing more,
+            // and this is the point at which its key stops identifying it.
+            self?.finishedObserving(key)
         }
+        // Stored after the task is made, and safe to be: this method runs to
+        // completion on the main actor before the task body can begin, so the
+        // entry is always in the map before `finishedObserving` could remove
+        // it. A stream that is already finished does not change that.
+        observations[key] = Observation(session: session, task: task)
     }
+
+    /// Retires one finished observation, which is what keeps every key in
+    /// `observations` the key of a session that is still alive.
+    ///
+    /// Unconditional, and it can be: the only writer of `observations[key]` is
+    /// `observe(_:)`, and it refuses while an entry is present — so between
+    /// this task's creation and this call the entry can only be this task's
+    /// own.
+    private func finishedObserving(_ key: ObjectIdentifier) {
+        observations[key] = nil
+    }
+
+    /// How many sessions are being read right now.
+    ///
+    /// Internal, for tests. Retiring an entry has exactly one externally
+    /// visible consequence — the map is empty again once a session's stream
+    /// ends — and asserting that directly is what makes the behaviour testable
+    /// without relying on the allocator to actually hand a later session a
+    /// freed address.
+    var observationCount: Int { observations.count }
 
     /// Observes every session the registry has now **and every session it
     /// publishes later**.
@@ -206,8 +258,8 @@ public final class DiagnosticStore: ObservableObject {
     public func shutdown() {
         guard !isShutDown else { return }
         isShutDown = true
-        for task in observations.values {
-            task.cancel()
+        for observation in observations.values {
+            observation.task.cancel()
         }
         observations = [:]
         cancellables = []
@@ -222,8 +274,8 @@ public final class DiagnosticStore: ObservableObject {
     /// `nonisolated` by default and `observations` is main-actor state. Same
     /// shape as `LanguageServerDocumentSync.deinit`.
     isolated deinit {
-        for task in observations.values {
-            task.cancel()
+        for observation in observations.values {
+            observation.task.cancel()
         }
     }
 }

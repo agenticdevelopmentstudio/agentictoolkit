@@ -355,6 +355,69 @@ struct DiagnosticStoreTests {
         }
         #expect(received == expected)
     }
+
+    // MARK: - 9. Retiring observations
+
+    /// A session whose stream has ended is retired from `observations`, so a
+    /// later session is observed rather than mistaken for it.
+    ///
+    /// What it catches: a map keyed by `ObjectIdentifier` whose entries are
+    /// removed only by `shutdown()`. An address identifies an object only for
+    /// as long as that object is alive, so an entry left behind by a dead
+    /// session is a trap for whichever session the allocator later puts at that
+    /// address — `observe(_:)` finds a non-nil entry, returns, and that
+    /// session's diagnostics never reach the store, for the life of the app and
+    /// with nothing reporting it. On screen it looks like a server that is
+    /// still starting, because a restart deliberately leaves the previous
+    /// diagnostics in place. The registry replaces a session whenever its
+    /// descriptor changes, so this is the ordinary path, not an exotic one.
+    ///
+    /// Asserted on the guard's own state — the map is empty again once the
+    /// stream ends — rather than on the allocator actually recycling an
+    /// address, which no test can arrange and which a passing run would
+    /// therefore prove nothing about.
+    @Test("a session whose stream ends is retired, so a later session is still observed")
+    func endedObservationsAreRetired() async {
+        let store = DiagnosticStore()
+        let first = makeSession()
+
+        store.observe(first)
+        #expect(store.observationCount == 1)
+
+        // Idempotence on a *live* session is unchanged: a second iterator would
+        // split the events arbitrarily between the two and neither would see
+        // them all.
+        store.observe(first)
+        #expect(store.observationCount == 1)
+
+        first.publish(PublishDiagnosticsParams(
+            uri: Self.firstURI,
+            version: 1,
+            diagnostics: [makeDiagnostic("first")]
+        ))
+        #expect(await poll { store.diagnostics(for: Self.firstURI).count == 1 })
+
+        // The server goes away. The entry must go with it.
+        first.finishDiagnostics()
+        #expect(await poll { store.observationCount == 0 })
+
+        let second = makeSession()
+        store.observe(second)
+        #expect(store.observationCount == 1)
+
+        second.publish(PublishDiagnosticsParams(
+            uri: Self.secondURI,
+            version: 1,
+            diagnostics: [makeDiagnostic("second")]
+        ))
+        #expect(await poll { store.diagnostics(for: Self.secondURI).count == 1 })
+
+        // And what the dead session said is still on screen, which is the
+        // behaviour a restart is supposed to have.
+        #expect(store.diagnostics(for: Self.firstURI).count == 1)
+
+        store.shutdown()
+    }
 }
 
 /// Test 7 — the stream's *lifetime*, which only the real session can answer.

@@ -201,14 +201,6 @@ final class DiagnosticOverlayView: NSView {
     /// One rect per line fragment the range touches, in this view's coordinate
     /// space, each at least one character wide.
     ///
-    /// Two clamps, both load-bearing. The layout manager discards fragments of
-    /// zero width (`TextLayoutManager+Public.rectsFor(range:in:)` guards on
-    /// `fragmentRect.width > 0`), so an empty range measures to nothing at all
-    /// — it is widened to one character *before* measuring, and backwards at
-    /// the very end of the document, where there is no character after it. And
-    /// a range that measures thinner than a character, which a composed
-    /// sequence at a fragment boundary can, is widened after.
-    ///
     /// **The measurement is done one line at a time on purpose.** Handed a
     /// range that spans lines, `rectsFor(range:)` answers with the first line's
     /// rect and nothing else: it converts the range to line-relative
@@ -218,10 +210,54 @@ final class DiagnosticOverlayView: NSView {
     /// its first line. Clipping to each line before asking keeps every
     /// sub-range inside the line it is measured against, which is the input
     /// shape that method is correct for.
+    ///
+    /// **Nothing measurable still draws.** The layout manager discards
+    /// fragments of zero width (`TextLayoutManager+Public.rectsFor(range:in:)`
+    /// guards on `fragmentRect.width > 0`), and a line terminator typesets to
+    /// zero advance — so a diagnostic sited at the end of a line, on an empty
+    /// line, or on an empty document measures to no rects at all, and the
+    /// widening in the trailing `map` cannot rescue what never came back.
+    /// Those are not exotic: "expected '}'" at end of line is the single most
+    /// common thing a parser emits. When the measurement is empty the caret
+    /// rect at the diagnostic's own offset is used instead, widened to one
+    /// character — `rectForOffset(_:)` has no such guard and answers for a
+    /// newline, an empty line and an empty document alike.
     private func rects(for range: NSRange) -> [CGRect] {
         guard let textView, let layoutManager = textView.layoutManager else { return [] }
 
         let documentLength = textView.documentRange.length
+        guard range.location >= 0, range.location <= documentLength else { return [] }
+
+        let minimumWidth = characterWidth(in: textView)
+        let measured = measurableRange(for: range, documentLength: documentLength).map { probe in
+            layoutManager.linesInRange(probe).flatMap { line -> [CGRect] in
+                guard let onThisLine = line.range.intersection(probe), onThisLine.length > 0 else { return [] }
+                return layoutManager.rectsFor(range: onThisLine)
+            }
+        } ?? []
+
+        guard !measured.isEmpty else {
+            guard let caret = layoutManager.rectForOffset(range.location) else { return [] }
+            return [CGRect(x: caret.minX, y: caret.minY, width: minimumWidth, height: caret.height)]
+        }
+
+        // A range that measures thinner than a character — which a composed
+        // sequence at a fragment boundary can — is widened after.
+        return measured.map { rect in
+            guard rect.width < minimumWidth else { return rect }
+            return CGRect(x: rect.minX, y: rect.minY, width: minimumWidth, height: rect.height)
+        }
+    }
+
+    /// The range to hand the layout manager, or `nil` when there is nothing it
+    /// can measure.
+    ///
+    /// An empty range is widened to one character so that it has a fragment to
+    /// land on — forwards, or backwards at the very end of the document where
+    /// there is no character after it. The widening is a best effort and is
+    /// allowed to fail: the caller falls back to the caret rect, which is the
+    /// only answer available on an empty line or an empty document.
+    private func measurableRange(for range: NSRange, documentLength: Int) -> NSRange? {
         var probe = range
         if probe.length == 0 {
             if probe.location < documentLength {
@@ -234,17 +270,8 @@ final class DiagnosticOverlayView: NSView {
         guard probe.length > 0,
               probe.location >= 0,
               probe.location + probe.length <= documentLength
-        else { return [] }
-
-        let minimumWidth = characterWidth(in: textView)
-        let measured = probe
-        return layoutManager.linesInRange(measured).flatMap { line -> [CGRect] in
-            guard let onThisLine = line.range.intersection(measured), onThisLine.length > 0 else { return [] }
-            return layoutManager.rectsFor(range: onThisLine)
-        }.map { rect in
-            guard rect.width < minimumWidth else { return rect }
-            return CGRect(x: rect.minX, y: rect.minY, width: minimumWidth, height: rect.height)
-        }
+        else { return nil }
+        return probe
     }
 
     private func characterWidth(in textView: TextView) -> CGFloat {

@@ -139,6 +139,63 @@ struct LSPEditorAnnotationTests {
         #expect(width >= 3)
     }
 
+    // MARK: - 10b. Zero-length ranges at a line boundary
+
+    /// The case test 10 misses, and the one that matters most.
+    ///
+    /// What it catches: widening an empty range *forwards* onto the `"\n"`.
+    /// A line terminator typesets to zero advance, and the layout manager drops
+    /// zero-width fragments before the overlay's minimum-width fixup can run —
+    /// so nothing is drawn at all. "expected '}'" at the end of a line, and a
+    /// diagnostic at column 0 of an empty line, are exactly this shape, and
+    /// they are what a parser emits most often. Test 10 probes mid-line, where
+    /// the forward widening lands on a real glyph and the hole is invisible.
+    @Test("a zero-length diagnostic at a line boundary still draws")
+    func zeroLengthRangeAtALineBoundaryIsStillMarked() throws {
+        // "let value = 1\n\nlet other = 2\n"
+        //   ^ 0                       offset 13 is line 0's terminator,
+        //                             offset 14 is column 0 of the empty line.
+        let controller = laidOutEditor(text: "let value = 1\n\nlet other = 2\n")
+        let overlay = makeOverlay(in: controller)
+
+        overlay.marks = [makeMark(location: 13, length: 0)]
+        let endOfLine = overlay.squiggles()
+        #expect(endOfLine.count >= 1)
+        #expect((endOfLine.first?.rect.width ?? 0) >= 3)
+
+        overlay.marks = [makeMark(location: 14, length: 0)]
+        let emptyLine = overlay.squiggles()
+        #expect(emptyLine.count >= 1)
+        #expect((emptyLine.first?.rect.width ?? 0) >= 3)
+
+        // Not the same mark drawn twice: the two sit on different lines.
+        let endOfLineY = try #require(endOfLine.first?.rect.minY)
+        let emptyLineY = try #require(emptyLine.first?.rect.minY)
+        #expect(endOfLineY != emptyLineY)
+
+        // A server that sends the same thing as a length-1 range over the line
+        // break is the same problem wearing a different hat.
+        overlay.marks = [makeMark(location: 13, length: 1)]
+        #expect(overlay.squiggles().count >= 1)
+    }
+
+    /// The degenerate end of the same family: an empty document.
+    ///
+    /// What it catches: `documentLength == 0`, so neither widening direction
+    /// applies and the measured range is empty. `expected declaration` on a new
+    /// empty file would draw nothing.
+    @Test("a diagnostic on an empty document still draws")
+    func zeroLengthRangeOnAnEmptyDocumentIsStillMarked() {
+        let controller = laidOutEditor(text: "")
+        let overlay = makeOverlay(in: controller)
+
+        overlay.marks = [makeMark(location: 0, length: 0, message: "expected declaration")]
+        let squiggles = overlay.squiggles()
+        #expect(squiggles.count == 1)
+        #expect((squiggles.first?.rect.width ?? 0) >= 3)
+        #expect((squiggles.first?.rect.height ?? 0) > 0)
+    }
+
     // MARK: - 11. Out of the way
 
     /// What it catches: an overlay that swallows clicks. It covers the entire
