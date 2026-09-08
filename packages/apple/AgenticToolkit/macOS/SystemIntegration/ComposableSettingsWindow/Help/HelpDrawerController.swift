@@ -60,6 +60,15 @@ extension ComposableSettings {
         /// drawer along with its window and reports it through the same
         /// callback a drag produces, so without this a settings window that is
         /// simply closed would be read as the reader putting help away.
+        ///
+        /// Cleared again when the window comes back, in the `reapplyVisibility`
+        /// closure below. This presenter outlives its window:
+        /// `SingleWindowController` builds it once from `loadWindow()` and
+        /// keeps the window with `isReleasedWhenClosed = false`, so a latch
+        /// that never lifted would swallow every dragged-shut drawer after the
+        /// first ⌘W for the rest of the app's life.
+        /// `ProjectHelpDrawerController` needs no such reset because its whole
+        /// controller is dropped when its window closes.
         private var isTearingDown = false
 
         public init(parentWindow: NSWindow) {
@@ -85,8 +94,16 @@ extension ComposableSettings {
             // `WindowDrawer` remembers nothing; this is what it re-asserts when
             // the window finally appears, so a remembered-open drawer opens on
             // launch rather than on the second try.
+            //
+            // It is also the moment the window is live again — it is fired
+            // from `didBecomeKey`/`didBecomeMain` — so the teardown latch is
+            // lifted here, before the re-assert, rather than inside
+            // `applyVisibility()`, which also runs while the window is going
+            // away.
             self.drawer.reapplyVisibility = { [weak self] in
-                self?.applyVisibility()
+                guard let self else { return }
+                self.isTearingDown = false
+                self.applyVisibility()
             }
             // A drawer can also be dragged shut by its outer edge, which goes
             // nowhere near the `?`. Without this the preference still says

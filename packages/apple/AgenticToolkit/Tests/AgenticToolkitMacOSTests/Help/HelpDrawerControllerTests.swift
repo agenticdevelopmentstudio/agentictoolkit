@@ -114,6 +114,37 @@ final class HelpDrawerControllerTests: XCTestCase {
         XCTAssertTrue(UserSettings.settingsHelpDrawerVisible.value)
     }
 
+    /// The settings window's presenter outlives its window — `loadWindow()`
+    /// runs once for the life of the app — so the teardown latch that keeps a
+    /// ⌘W from erasing the preference has to be lifted again when the window
+    /// comes back. Close it, reopen it, then drag the drawer shut: that drag is
+    /// the reader putting help away, and must be remembered as one.
+    func testADrawerDraggedShutAfterTheWindowReopensIsForgotten() throws {
+        let controller = ComposableSettings.HelpDrawerController(parentWindow: self.window)
+        UserSettings.settingsHelpDrawerVisible.value = true
+        controller.setHelp(HelpContent(topics: [HelpContent.Topic(title: "T", body: "B")]))
+        XCTAssertTrue(controller.isHelpVisible)
+
+        // ⌘W.
+        NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: self.window)
+
+        // The reopen, posted through the notification
+        // `WindowDrawer.observeParentWindow` actually registers for rather than
+        // by poking `reapplyVisibility` directly — the point is that the reset is
+        // reachable by the path AppKit takes.
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: self.window)
+
+        // Now the drag, as AppKit reports it.
+        try XCTUnwrap(self.window.drawers?.first).close()
+        controller.drawer.drawerDidClose(
+            Notification(name: Notification.Name("NSDrawerDidCloseNotification")))
+
+        XCTAssertFalse(
+            controller.isHelpVisible,
+            "A window that came back is live again; the drag that follows is the reader's")
+        XCTAssertFalse(UserSettings.settingsHelpDrawerVisible.value)
+    }
+
     /// A drawer comes out of the window's edge, not out of a button, so the
     /// anchor is accepted and ignored — the protocol still requires it because
     /// the popover presenter genuinely needs one.

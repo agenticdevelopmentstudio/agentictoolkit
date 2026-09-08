@@ -1044,6 +1044,13 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
     /// reader putting help away, and erases the preference this whole feature
     /// exists to keep. Once it is set, what the reader left behind is what gets
     /// remembered; nothing announced afterwards changes it.
+    ///
+    /// Never cleared, and it does not need to be: `ProjectWindowManager.swift:171`
+    /// drops this controller inside its own `willClose` observer, so reopening a
+    /// project builds a fresh presenter — unlike
+    /// `ComposableSettings.HelpDrawerController`, whose one instance outlives
+    /// every close of the settings window and which therefore clears its own
+    /// flag when the window comes back.
     private var isTearingDown = false
 
     /// True only while `applyVisibility()` is moving the drawer itself.
