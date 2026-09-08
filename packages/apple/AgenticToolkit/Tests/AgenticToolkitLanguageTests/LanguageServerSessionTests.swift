@@ -274,4 +274,82 @@ struct LanguageServerSessionTests {
             try await session.start()
         }
     }
+
+    /// More than one component starts a session on purpose:
+    /// `LanguageServerRegistry.reconcile` starts every session it creates, and
+    /// `LanguageServerDocumentSync` starts every session it sees, because
+    /// `start()` returning is the only "the handshake is done" signal a session
+    /// has. So the *second* caller's answer has to be as good as the first's.
+    ///
+    /// What it catches: the guard this method used to open with — `guard case
+    /// .idle = state else { return }` — which returned success to the loser of
+    /// that race having awaited nothing. Its caller then asked `capabilities()`
+    /// of a session with no `InitializingServer` yet, got `nil`, and could only
+    /// read that as "this server published no capabilities". Document
+    /// synchronisation went silent for the life of the session, and nothing
+    /// logged a thing.
+    @Test("a concurrent second start joins the first and sees the handshake it waited for")
+    func concurrentStartJoinsTheFirstRatherThanReturningEarly() async throws {
+        let session = makeSession(script: Self.respondingServerScript)
+
+        // Both calls are issued before either can finish, so exactly one takes
+        // the `.idle` path and the other meets `.starting`. Which one wins does
+        // not matter — that is the point.
+        async let first: Void = session.start()
+        async let second: Void = session.start()
+        _ = try await (first, second)
+
+        let state = await session.state
+        guard case .running = state else {
+            Issue.record("expected .running, got \(state)")
+            await session.stop()
+            return
+        }
+
+        // Values only the child could have supplied. Under the old guard this
+        // was `nil` whenever the joiner asked first.
+        let capabilities = await session.capabilities()
+        #expect(capabilities?.completionProvider?.triggerCharacters == ["."])
+
+        await session.stop()
+        // Stopping is still terminal for every caller, joined or not.
+        await #expect(throws: LanguageServerSessionError.sessionHasBeenStopped) {
+            try await session.start()
+        }
+    }
+
+    /// The other half: a joiner must not be told a start succeeded when it
+    /// failed, and a later caller must not be told a failed session is fine.
+    ///
+    /// What it catches: propagating the outcome to the winner only. A pipeline
+    /// built on the loser's silent success would queue notifications for a
+    /// server that does not exist.
+    @Test("a concurrent second start throws the first's failure, and so does a later one")
+    func concurrentStartPropagatesTheFailureToEveryCaller() async throws {
+        let session = makeSession(script: Self.failingServerScript)
+
+        // Unstructured rather than `async let`, because each outcome has to be
+        // asserted separately and an `async let` cannot be captured by the
+        // `#expect(throws:)` closure. Whether the second call joins the first or
+        // arrives after it has already landed in `.failed`, both must throw.
+        let first = Task { try await session.start() }
+        let second = Task { try await session.start() }
+        let firstResult = await first.result
+        let secondResult = await second.result
+        #expect(throws: (any Error).self) { try firstResult.get() }
+        #expect(throws: (any Error).self) { try secondResult.get() }
+
+        // Failed, and torn down carrying the child's explanation — unchanged
+        // behaviour, asserted here because the new non-`.idle` paths run beside
+        // it.
+        let failure = await session.state.failure
+        #expect(failure != nil)
+        #expect(failure?.standardErrorText.contains("boom: no toolchain here") == true)
+
+        // A start on an already-`.failed` session reports that failure rather
+        // than returning success, and does not spawn a second child or
+        // overwrite how the first died.
+        await #expect(throws: (any Error).self) { try await session.start() }
+        #expect(await session.state.failure?.standardErrorText.contains("boom: no toolchain here") == true)
+    }
 }

@@ -126,13 +126,6 @@ enum DocumentSyncEvent: Sendable {
 /// pipe.
 actor DocumentSyncPipeline {
 
-    /// How many events are held while the server's capabilities are still
-    /// unknown. See `resolvedSync()` for why that window exists at all. The
-    /// bound is what keeps "never queue indefinitely waiting for a server"
-    /// true: past it the oldest events are dropped, and D6's rule 2 repairs the
-    /// server's view on the next edit.
-    private static let pendingLimit = 256
-
     private let session: any LanguageServerSessionProtocol
     private let events: AsyncStream<DocumentSyncEvent>
 
@@ -141,17 +134,16 @@ actor DocumentSyncPipeline {
     /// ordered, so no ordering decision is ever made off the main actor.
     private nonisolated let continuation: AsyncStream<DocumentSyncEvent>.Continuation
 
-    /// Write-once. `nil` means "not settled yet", which is *not* the same as
-    /// "this server wants nothing" — that is `.disabled`.
-    private var sync: ResolvedTextDocumentSync?
-
-    /// Set when the session reached a terminal state without ever publishing
-    /// capabilities. Stops `resolvedSync()` asking again for ever.
-    private var resolutionAbandoned = false
-
-    /// Events that arrived before the capability was known. Bounded by
-    /// `pendingLimit` and flushed, in order, the instant it becomes known.
-    private var pending: [DocumentSyncEvent] = []
+    /// Resolved once, in `run(startFailure:)`, from the capabilities the server
+    /// published during the handshake — and never re-read afterwards.
+    ///
+    /// Resolving once is only sound because `LanguageServerSession.start()`
+    /// *joins* an in-flight start rather than returning early, so by the time
+    /// the drain task's `start()` has returned the handshake has completed (or
+    /// failed) no matter which component won the race to start this session. It
+    /// is therefore never read before it is written: the write happens before
+    /// the drain loop begins.
+    private var sync: ResolvedTextDocumentSync = .disabled
 
     /// What this client believes the server has open. Not authoritative — it is
     /// a belief, and every failed notification corrects it downward so the next
@@ -189,10 +181,19 @@ actor DocumentSyncPipeline {
     /// Drains the queue until `finish()` is called.
     ///
     /// `startFailure` is the outcome of `session.start()`, awaited by the caller
-    /// rather than here — see `LanguageServerDocumentSync.makeEntry` for why
+    /// rather than here — see `LanguageServerDocumentSync.addPipeline` for why
     /// that call has to be the drain task's own first statement. To this actor
     /// the distinction is only "there is a server" versus "there is not, and
     /// never will be for this session object".
+    ///
+    /// **The capability is resolved here, once, and there is no queue in front
+    /// of it.** The awaited `start()` has already completed the handshake, so
+    /// `capabilities()` answers now or never — a `nil` here genuinely means the
+    /// server published none rather than "not yet". An earlier draft buffered
+    /// events against that `nil`; a buffer that drops on overflow drops the
+    /// oldest first, which is the `didOpen`, and keeps the `didChange`es that
+    /// depend on it. That is the permanently divergent server buffer this whole
+    /// design exists to prevent, so there is no buffer.
     func run(startFailure: (any Error)?) async {
         if let startFailure {
             startFailed = true
@@ -205,77 +206,21 @@ actor DocumentSyncPipeline {
                 """
             )
         } else {
-            _ = await resolvedSync()
+            sync = ResolvedTextDocumentSync.resolve(await session.capabilities()?.textDocumentSync)
         }
 
         // The stream is drained on the failure path too: it has to terminate
         // when `finish()` is called, and an undrained queue behind a server that
-        // will never run is a leak.
+        // will never run is a leak. `sync` is passed rather than re-read after
+        // each await because it is written once, above, before this loop.
+        let resolved = sync
         for await event in events {
             guard !startFailed else { continue }
-            await handle(event)
+            await forward(event, sync: resolved)
         }
-    }
-
-    // MARK: - Capability resolution
-
-    /// The resolved capability, or `nil` while the server has not published one.
-    ///
-    /// `capabilities()` answering `nil` is precisely "the `initialize` handshake
-    /// has not completed", and there is a reachable ordering in which this
-    /// pipeline's own `session.start()` was a no-op because
-    /// `LanguageServerRegistry.reconcile` had already started the same session
-    /// — `LanguageServerSession.start()` returns immediately, without waiting,
-    /// when the session is already `.starting`. Treating that `nil` as "this
-    /// server wants nothing" would silence the pipeline permanently, so it is
-    /// treated as "not yet" and asked again on the next event. Asking again is
-    /// one actor hop, only while unresolved, and only when there is real work.
-    ///
-    /// It is bounded twice over: a session that reaches `.failed` or `.stopped`
-    /// without capabilities is abandoned outright, and `pending` is capped.
-    private func resolvedSync() async -> ResolvedTextDocumentSync? {
-        if let sync { return sync }
-        guard !resolutionAbandoned else { return nil }
-
-        if let capabilities = await session.capabilities() {
-            // Write-once, and this actor's single drain task is the only writer,
-            // so nothing can have raced it across the await above.
-            let resolved = ResolvedTextDocumentSync.resolve(capabilities.textDocumentSync)
-            sync = resolved
-            return resolved
-        }
-
-        switch await session.state {
-        case .failed, .stopped:
-            resolutionAbandoned = true
-            pending.removeAll()
-        case .idle, .starting, .running:
-            break
-        }
-        return nil
     }
 
     // MARK: - Forwarding
-
-    private func handle(_ event: DocumentSyncEvent) async {
-        guard let sync = await resolvedSync() else {
-            guard !resolutionAbandoned else { return }
-            pending.append(event)
-            if pending.count > Self.pendingLimit {
-                pending.removeFirst(pending.count - Self.pendingLimit)
-            }
-            return
-        }
-
-        if !pending.isEmpty {
-            let queued = pending
-            pending = []
-            for queuedEvent in queued {
-                await forward(queuedEvent, sync: sync)
-            }
-        }
-        await forward(event, sync: sync)
-    }
 
     /// `sync` is passed rather than re-read after each await because it is
     /// write-once: once resolved it never changes, so a local copy cannot go

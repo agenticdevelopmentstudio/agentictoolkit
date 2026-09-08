@@ -111,11 +111,13 @@ struct FakeSessionBehavior: Sendable {
 /// a reuse, and it records every call so a test can assert order.
 ///
 /// Its lifecycle is deliberately faithful to `LanguageServerSession` in the one
-/// respect that matters to callers: **`start()` on a session that is not
-/// `.idle` is an immediate no-op**, not a second start. Both
+/// respect that matters to callers: **a second `start()` does not start a second
+/// server, and it reports the first one's outcome** — returning if the session
+/// is running, throwing the failure's cause if it failed. Both
 /// `LanguageServerRegistry.reconcile` and `LanguageServerDocumentSync` start
 /// every session they see, so a fake that started twice would make "start was
-/// called once" untestable and would hide the real ordering.
+/// called once" untestable, and one that returned success off a failed session
+/// would hide the very defect that contract was written to close.
 actor FakeLanguageServerSession: LanguageServerSessionProtocol {
 
     nonisolated let id: UUID
@@ -152,7 +154,20 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     }
 
     func start() async throws {
-        guard case .idle = state else { return }
+        switch state {
+        case .idle:
+            break
+        case .starting, .running:
+            // This fake's start has no suspension point, so `.starting` is not
+            // observable from outside; a second caller only ever meets a settled
+            // outcome. `LanguageServerSession` reaches the same place by
+            // awaiting its held `startTask`.
+            return
+        case .failed(let failure):
+            throw failure.error
+        case .stopped:
+            throw LanguageServerSessionError.sessionHasBeenStopped
+        }
         record(.start)
         if let startError = behavior.startError {
             state = .failed(LanguageServerFailure(error: startError, standardErrorText: ""))

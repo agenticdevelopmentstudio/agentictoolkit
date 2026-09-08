@@ -333,13 +333,58 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// overtaken; and `.starting` is published before the first suspension so a
     /// `stop()` landing mid-start sees a session that claims to own a child.
     ///
-    /// Calling twice is a no-op; a concurrent second call made while the first
-    /// is still `.starting` is the same no-op and returns immediately rather
-    /// than waiting. On failure the session lands in `.failed`, carrying the
-    /// cause and the server's stderr, and the error is rethrown.
+    /// **Every caller learns the outcome, not just the first one.** A second
+    /// call landing while the first is still `.starting` joins the held
+    /// `startTask` and returns — or throws — exactly when the first does; a
+    /// call on a `.running` session returns; a call on a `.failed` one throws
+    /// the failure's cause. That matters because more than one component starts
+    /// a session on purpose: `LanguageServerRegistry.reconcile` starts every
+    /// session it creates, and `LanguageServerDocumentSync` starts every session
+    /// it sees, since `start()` returning is the only "the handshake is done"
+    /// signal a session has. When the loser returned immediately, it went on to
+    /// ask `capabilities()` of a session that had no `InitializingServer` yet,
+    /// got `nil`, and concluded the server had published no capabilities at all.
+    ///
+    /// On failure the session lands in `.failed`, carrying the cause and the
+    /// server's stderr, and the error is rethrown — to every caller.
     public func start() async throws {
         guard !isStopped else { throw LanguageServerSessionError.sessionHasBeenStopped }
-        guard case .idle = state else { return }
+
+        switch state {
+        case .idle:
+            break
+
+        case .starting:
+            // The handle exists for exactly this: it is held from the statement
+            // after `state = .starting` — with no suspension in between, so a
+            // joiner that observes `.starting` observes the task too — and
+            // `teardown()` already waits on it the same way.
+            //
+            // The one exception is the sliver in which the owning call has
+            // caught a failure, cleared the handle, and is suspended inside
+            // `fail(with:)` collecting stderr. A joiner there returns without a
+            // running server, which is the pre-existing behaviour and is
+            // harmless: every traffic method and `capabilities()` gate on
+            // `.running`, so the joiner's next question gets the same answer the
+            // `.failed` it is about to see would have given.
+            if let startTask {
+                try await startTask.value
+            }
+            return
+
+        case .running:
+            return
+
+        case .failed(let failure):
+            throw failure.error
+
+        case .stopped:
+            // Unreachable: `isStopped` is set before `stop()`'s first
+            // suspension and is checked above. Throwing rather than returning
+            // keeps the two spellings of "stopped" answering alike.
+            throw LanguageServerSessionError.sessionHasBeenStopped
+        }
+
         // Claimed before the first suspension. From here until this method
         // returns, `stop()` must behave as though a child exists, because for
         // most of that span one does.

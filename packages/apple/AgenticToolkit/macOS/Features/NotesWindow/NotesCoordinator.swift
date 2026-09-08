@@ -48,7 +48,7 @@ public final class NotesCoordinator: AppFeature {
         // The predicate used to read `notesWindowController.window?.isKeyWindow`,
         // which is a narrower question than the items mean. Hosts mount the
         // very same `NotesSplitViewController` inside a project window's pane
-        // (Whippet's `WhippetDocumentPanes`), and with that window key the
+        // (Whippet's `DocumentPanes`), and with that window key the
         // standalone window is not — so New Folder, Import Markdown File…,
         // Delete Note, Delete Folder and ⌘N all greyed out over a notes view
         // the user was working in, and the keyboard shortcuts did nothing.
