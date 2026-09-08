@@ -357,6 +357,7 @@
 		5ACB1C9591DDEC3535B45E35 /* ChatErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D09D1BB62899DF2C5823CBDC /* ChatErrorTests.swift */; };
 		5AD034CBD7E4D2C45BA0B5D6 /* LanguageServerRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9350E73886960316647425A /* LanguageServerRegistryTests.swift */; };
 		5B07D6DE2C40B750DCB8597D /* LayoutNodeThicknessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03206DE5EF36CF23046AB0B4 /* LayoutNodeThicknessTests.swift */; };
+		5B2CAF733469FE65BD284AED /* DiagnosticStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDEBEC9E343BB524F08EA7CA /* DiagnosticStore.swift */; };
 		5BB6CE5D9D21F66AF3F3B905 /* ScreenInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C4C6929FAC8A8A1FFD7675 /* ScreenInfo.swift */; };
 		5BEA70810AEABA666EE60567 /* AgenticToolkitPermissions.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = BF04ADB42980B9D5DE44BF46 /* AgenticToolkitPermissions.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		5C53439F123D35E5A611C50D /* WindowRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5FAAE90E60AB5FE73FE94F6 /* WindowRegistry.swift */; };
@@ -429,6 +430,7 @@
 		6DB90FE76E15CFFDC866C496 /* AIChatContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86AADA6CE6B185B5BA934378 /* AIChatContext.swift */; };
 		6DEF1975BAEC36A6CF4D6EFE /* NotesFolderListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA76CBE5CE3BC31037C44C20 /* NotesFolderListViewController.swift */; };
 		6E72E0F55B5153026FEA120E /* BuiltInActivationStrategies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4966EDCE2C627106751538 /* BuiltInActivationStrategies.swift */; };
+		706183A285228F58023EC4E6 /* DiagnosticStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6745B33525E7C6E30D94C439 /* DiagnosticStoreTests.swift */; };
 		7067BC5C4EB233D69722C4CB /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = C44178A173495CCDBE1371AC /* libsqlite3.tbd */; };
 		706F9BB5C6FF4C5F47F975F3 /* LogBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC2F1884991EE22995244BD /* LogBuffer.swift */; };
 		70DA32ADFB70E9E5F4FF5A97 /* WindowStateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6D611E2D7695026FE058E44 /* WindowStateStorage.swift */; };
@@ -1981,6 +1983,7 @@
 		66D3943517FC3C4B5DF4BBF6 /* WindowDiscoveryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDiscoveryViewModel.swift; sourceTree = "<group>"; };
 		66E16F0850D99B97CEC85475 /* AIPluginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPluginManager.swift; sourceTree = "<group>"; };
 		6717C0944EE1895FD8420EAB /* SystemWindowInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowInfo.swift; sourceTree = "<group>"; };
+		6745B33525E7C6E30D94C439 /* DiagnosticStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticStoreTests.swift; sourceTree = "<group>"; };
 		677FA8E599601D661129D938 /* ProjectWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindowManager.swift; sourceTree = "<group>"; };
 		67AEFF464DC5C557DEB876AC /* MultiTabbedViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiTabbedViewController.swift; sourceTree = "<group>"; };
 		6804416B0D2AB235CA39ED14 /* RGBAColor+NSColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "RGBAColor+NSColor.swift"; path = "../macOS/UI/Settings/SettingStorage/RGBAColor+NSColor.swift"; sourceTree = "<group>"; };
@@ -2299,6 +2302,7 @@
 		DBF568C4E57FFEE3670544C8 /* FileTypesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypesSettingsView.swift; sourceTree = "<group>"; };
 		DD4ED71A3B2B4EAEBE0483F9 /* NotesSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesSplitViewController.swift; sourceTree = "<group>"; };
 		DD7610008818461A7BFD0669 /* AIRequestBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRequestBuilderTests.swift; sourceTree = "<group>"; };
+		DDEBEC9E343BB524F08EA7CA /* DiagnosticStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticStore.swift; sourceTree = "<group>"; };
 		DEC1699BDA1A015CB677274D /* NSFont+TabularFigures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSFont+TabularFigures.swift"; sourceTree = "<group>"; };
 		DEEB54E6901DA73B3B6FC1C6 /* HelpDrawerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpDrawerController.swift; sourceTree = "<group>"; };
 		DFBA4A0CF10115E47B07547E /* GRDBSyncStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GRDBSyncStore.swift; sourceTree = "<group>"; };
@@ -2738,6 +2742,7 @@
 		122BDF1A5FA84766670A85D4 /* LSP */ = {
 			isa = PBXGroup;
 			children = (
+				DDEBEC9E343BB524F08EA7CA /* DiagnosticStore.swift */,
 				0C6121FBD298FCD00FFC3E5E /* DocumentSyncPipeline.swift */,
 				AE3D388387AB649B92A6E2F1 /* LanguageServerChannel.swift */,
 				78A45D1BC3FE8C242E68D885 /* LanguageServerConfiguration.swift */,
@@ -3864,6 +3869,7 @@
 		9EBC9D87302A15873C824E7A /* AgenticToolkitLanguageTests */ = {
 			isa = PBXGroup;
 			children = (
+				6745B33525E7C6E30D94C439 /* DiagnosticStoreTests.swift */,
 				E1D79D777A5CE614E6515D2B /* FakeLanguageServerSession.swift */,
 				6303EBB9BF5D3E5CB262BF15 /* LanguageServerDocumentSyncScopeTests.swift */,
 				4C336BD90D299D4BEBE356FF /* LanguageServerDocumentSyncTests.swift */,
@@ -5666,6 +5672,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5B2CAF733469FE65BD284AED /* DiagnosticStore.swift in Sources */,
 				93907F7F5989C86FAD02290D /* DocumentSyncPipeline.swift in Sources */,
 				A1FB26C0CBB1F7B78AF2B948 /* LanguageServerChannel.swift in Sources */,
 				C3544DCA25DE49090EA2753A /* LanguageServerConfiguration.swift in Sources */,
@@ -6358,6 +6365,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				706183A285228F58023EC4E6 /* DiagnosticStoreTests.swift in Sources */,
 				23A749A6776DFA6A760B4C73 /* FakeLanguageServerSession.swift in Sources */,
 				7AB6FF12BDB707342037BE1D /* LanguageServerDocumentSyncScopeTests.swift in Sources */,
 				21B7BD73591C1B03AD65DCE5 /* LanguageServerDocumentSyncTests.swift in Sources */,

@@ -33,12 +33,20 @@ public final class ProjectLanguageServices {
     /// something from this object needs the registry.
     private let sync: LanguageServerDocumentSync
 
+    /// Everything the servers have said, unasked, about this project's files.
+    ///
+    /// Public where `sync` is private because this one *does* have consumers:
+    /// the editor's annotation coordinator subscribes to it per URI to draw the
+    /// squiggles, and reads it to answer a hover without a round trip.
+    public let diagnostics: DiagnosticStore
+
     private var isStarted = false
     private var isShutDown = false
 
     public init(documentStore: TextDocumentStore, registry: LanguageServerRegistry) {
         self.registry = registry
         self.sync = LanguageServerDocumentSync(store: documentStore, registry: registry)
+        self.diagnostics = DiagnosticStore()
     }
 
     /// Installs the document-sync observers. Idempotent, and a no-op after
@@ -51,6 +59,11 @@ public final class ProjectLanguageServices {
         guard !isStarted, !isShutDown else { return }
         isStarted = true
         sync.start()
+        // Subscribes to `registry.$sessions`, so it picks up both the sessions
+        // already running and every session started later — a file is routinely
+        // open before its server has finished handshaking, and a store wired
+        // only to what existed at construction would show nothing for it.
+        diagnostics.observeSessions(from: registry)
     }
 
     /// Tears the stack down, sync first.
@@ -68,6 +81,14 @@ public final class ProjectLanguageServices {
         guard !isShutDown else { return }
         isShutDown = true
         await sync.shutdown()
+        // Before `registry.shutdown()`, for the same reason as the sync: the
+        // store's observation tasks read streams owned by sessions the registry
+        // is about to stop. Stopping them first would leave those tasks to be
+        // ended by a stream finish arriving from underneath, which works but
+        // makes the ordering accidental instead of stated. Synchronous — it
+        // cancels tasks and does not await them, because nothing it could still
+        // deliver is worth waiting for during teardown.
+        diagnostics.shutdown()
         await registry.shutdown()
     }
 }

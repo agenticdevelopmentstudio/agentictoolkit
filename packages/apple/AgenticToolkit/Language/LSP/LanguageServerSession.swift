@@ -158,17 +158,55 @@ public protocol LanguageServerSessionProtocol: Actor {
     /// `textDocument/completion` — Task 3.3.
     func completion(_ params: CompletionParams) async throws -> CompletionResponse
 
-    /// `textDocument/hover` — Task 3.4.
+    /// `textDocument/hover` — Task 3.4, alongside push diagnostics below.
     func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse
 
     /// `textDocument/definition` — Task 3.3's go-to-definition.
     func definition(_ params: TextDocumentPositionParams) async throws -> DefinitionResponse
 
-    /// `textDocument/diagnostic` — Task 3.5, the pull model.
+    /// `textDocument/diagnostic`, the **pull** model. Nothing calls it.
+    ///
+    /// Task 3.4 built the diagnostics the editor actually shows on the *push*
+    /// model — `publishedDiagnostics` below — because that is what servers
+    /// send unasked and what makes a squiggle appear without a poll. This
+    /// stays because the request is part of the surface a server may prefer,
+    /// and removing it would cost a later task the round trip to add it back.
     func diagnostics(_ params: DocumentDiagnosticParams) async throws -> DocumentDiagnosticReport
 
     /// `textDocument/semanticTokens/full` — Task 3.6.
     func semanticTokensFull(_ params: SemanticTokensParams) async throws -> SemanticTokensResponse
+
+    // MARK: What the server says without being asked
+
+    /// Every `textDocument/publishDiagnostics` the server pushes, in the order
+    /// it sent them.
+    ///
+    /// This is the only server-initiated traffic any conformer surfaces, and
+    /// it is a stream rather than a request because push diagnostics have no
+    /// request: a server sends them when it decides it has something to say.
+    ///
+    /// **Ordering.** Diagnostics arrive in send order, because one task drains
+    /// one `AsyncStream` and yields into another unbounded one in receipt
+    /// order. **No ordering is guaranteed against traffic the client sent.** A
+    /// `publishDiagnostics` received just after a `didChange` need not reflect
+    /// that change — it may well be the previous version's answer, still in
+    /// flight — so a consumer must not treat receipt as acknowledgement.
+    ///
+    /// **One consumer, and only one.** `AsyncStream` supports a single
+    /// iterator: two `for await` loops over this property split the events
+    /// between them arbitrarily and neither sees them all. The symptom is
+    /// "some diagnostics randomly missing", which is close to undiagnosable
+    /// from a bug report. `DiagnosticStore` is the one consumer; anything else
+    /// that wants diagnostics subscribes to the store.
+    ///
+    /// **When it finishes.** On `stop()`, and on a `start()` that failed —
+    /// both route through `teardown()`, which is the only place the
+    /// continuation is finished. It does **not** finish when a running server
+    /// dies on its own: that path publishes `.failed` and leaves the session
+    /// standing, so the stream stays open until someone stops the session. A
+    /// consumer that cannot wait for that must cancel its own iteration, which
+    /// is what `DiagnosticStore.shutdown()` does.
+    nonisolated var publishedDiagnostics: AsyncStream<PublishDiagnosticsParams> { get }
 }
 
 /// One running language server: the child process, the JSON-RPC plumbing over
@@ -304,11 +342,36 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// rather than a race.
     private nonisolated let streamEnd = StreamEndBox()
 
+    /// Server-pushed `textDocument/publishDiagnostics`. See the protocol
+    /// requirement for the ordering and single-consumer contracts.
+    public nonisolated let publishedDiagnostics: AsyncStream<PublishDiagnosticsParams>
+
+    /// The write end of `publishedDiagnostics`.
+    ///
+    /// `nonisolated let` on purpose: it is yielded into from the drain task
+    /// below, synchronously, with no isolated state read across a suspension —
+    /// the same shape `DocumentSyncPipeline` uses and for the same reason. An
+    /// isolated method for the drain loop to call would put a hop between the
+    /// event arriving and the event being published, and the ordering
+    /// guarantee would go with it.
+    private nonisolated let diagnosticsContinuation: AsyncStream<PublishDiagnosticsParams>.Continuation
+
+    /// Drains `InitializingServer.eventSequence` for the one notification this
+    /// session re-exposes. Held so `teardown()` can end it.
+    ///
+    /// It deliberately captures neither `self` nor anything isolated: a drain
+    /// loop that reached back onto this actor would suspend inside the loop,
+    /// and every guard it read would be stale by the time it published.
+    private var eventDrainTask: Task<Void, Never>?
+
     public init(configuration: Configuration) {
         self.id = configuration.id
         self.name = configuration.name
         self.languageIds = configuration.languageIds
         self.configuration = configuration
+        let (stream, continuation) = AsyncStream.makeStream(of: PublishDiagnosticsParams.self)
+        self.publishedDiagnostics = stream
+        self.diagnosticsContinuation = continuation
     }
 
     // MARK: - Lifecycle
@@ -471,6 +534,26 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         let params = makeInitializeParams()
         let server = InitializingServer(server: connection) { params }
         self.server = server
+
+        // Attached here — before the handshake, not after — because
+        // `InitializingServer` builds its `eventSequence` from an
+        // `AsyncStreamTap` with the default unbounded buffering policy, so
+        // events that arrive before a consumer attaches are buffered rather
+        // than dropped. Attaching early therefore costs nothing and removes
+        // the question of how this orders against `initializeIfNeeded()`.
+        //
+        // The captures are the whole safety argument: a `nonisolated`
+        // continuation and a `nonisolated` sequence, both read *here*, in this
+        // actor step, and neither re-read afterwards. The loop body reads no
+        // actor state at all, so there is no guard in it that a suspension
+        // could make stale.
+        self.eventDrainTask = Task { [continuation = diagnosticsContinuation, events = server.eventSequence] in
+            for await event in events {
+                guard case .notification(.textDocumentPublishDiagnostics(let params)) = event
+                else { continue }
+                continuation.yield(params)
+            }
+        }
 
         do {
             let budget = configuration.initializeBudgetSeconds
@@ -669,6 +752,11 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     ///    out of this task's scope; reaching it at all requires a start wedged
     ///    for the whole of `abandonedStartBudgetSeconds` that then resumes
     ///    within microseconds.
+    /// 6. **End `publishedDiagnostics`.** Last, so the notifications step 4
+    ///    delivered are yielded before the consumer's `for await` terminates.
+    ///    This is the only place the continuation is finished, which is what
+    ///    makes "finished exactly once, on every stop path" true by
+    ///    construction rather than by inspection.
     private func teardown() async {
         if let startTask {
             _ = try? await withWallClockBudget(configuration.abandonedStartBudgetSeconds) {
@@ -691,6 +779,20 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         await channel?.terminate()
         await bridge?.drain()
         await channel?.terminate()
+
+        // After the drain, not before it. `drain()` is what delivers the
+        // frames a graceful child wrote between SIGTERM and `exit`, and a
+        // `publishDiagnostics` among them is a real answer the consumer should
+        // still see. Cancelling first would cut the `for await` short —
+        // `AsyncStream`'s iterator checks cancellation — and lose them.
+        //
+        // The finish is unconditional and this is the only place it happens,
+        // so every stop path ends the consumer's iteration exactly once: a
+        // `finish()` on an already-finished continuation is a no-op, and a
+        // `yield` after it is dropped rather than trapping.
+        eventDrainTask?.cancel()
+        eventDrainTask = nil
+        diagnosticsContinuation.finish()
 
         server = nil
         bridge = nil

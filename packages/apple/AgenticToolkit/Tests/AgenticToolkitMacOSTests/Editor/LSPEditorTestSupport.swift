@@ -51,21 +51,27 @@ struct FakeEditorSessionBehavior: Sendable {
     var capabilities: ServerCapabilities?
     var completionResponse: CompletionResponse
     var definitionResponse: DefinitionResponse
+    var hoverResponse: HoverResponse
     var completionError: LanguageServerSessionError?
     var definitionError: LanguageServerSessionError?
+    var hoverError: LanguageServerSessionError?
 
     init(
         capabilities: ServerCapabilities? = nil,
         completionResponse: CompletionResponse = nil,
         definitionResponse: DefinitionResponse = nil,
+        hoverResponse: HoverResponse = nil,
         completionError: LanguageServerSessionError? = nil,
-        definitionError: LanguageServerSessionError? = nil
+        definitionError: LanguageServerSessionError? = nil,
+        hoverError: LanguageServerSessionError? = nil
     ) {
         self.capabilities = capabilities
         self.completionResponse = completionResponse
         self.definitionResponse = definitionResponse
+        self.hoverResponse = hoverResponse
         self.completionError = completionError
         self.definitionError = definitionError
+        self.hoverError = hoverError
     }
 }
 
@@ -93,6 +99,12 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     /// rather than only what came back.
     private(set) var lastCompletionParams: CompletionParams?
     private(set) var lastDefinitionParams: TextDocumentPositionParams?
+    private(set) var lastHoverParams: TextDocumentPositionParams?
+
+    /// The push-diagnostics half of the protocol. The test plays the server;
+    /// `publish(_:)` is the wire.
+    nonisolated let publishedDiagnostics: AsyncStream<PublishDiagnosticsParams>
+    private nonisolated let diagnosticsContinuation: AsyncStream<PublishDiagnosticsParams>.Continuation
 
     private let behavior: FakeEditorSessionBehavior
     private let log: EditorSessionLog
@@ -124,11 +136,21 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         behavior: FakeEditorSessionBehavior,
         log: EditorSessionLog
     ) {
+        let (stream, continuation) = AsyncStream.makeStream(of: PublishDiagnosticsParams.self)
+        self.publishedDiagnostics = stream
+        self.diagnosticsContinuation = continuation
         self.id = configuration.id
         self.name = configuration.name
         self.languageIds = configuration.languageIds
         self.behavior = behavior
         self.log = log
+    }
+
+    /// Pushes one `publishDiagnostics` notification, as a server would.
+    /// `nonisolated` because the continuation is — see the sibling fake in
+    /// `AgenticToolkitLanguageTests`.
+    nonisolated func publish(_ params: PublishDiagnosticsParams) {
+        diagnosticsContinuation.yield(params)
     }
 
     func start() async throws {
@@ -153,6 +175,7 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     func stop() async {
         state = .stopped
         log.record("stop")
+        diagnosticsContinuation.finish()
     }
 
     /// Answers the next capability calls with these, in order, before falling
@@ -265,7 +288,10 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
 
     func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse {
         try requireRunning()
-        return nil
+        log.record("hover")
+        lastHoverParams = params
+        if let error = behavior.hoverError { throw error }
+        return behavior.hoverResponse
     }
 
     func definition(_ params: TextDocumentPositionParams) async throws -> DefinitionResponse {

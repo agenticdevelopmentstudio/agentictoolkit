@@ -130,6 +130,12 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     nonisolated let rootURL: URL
     nonisolated let environment: [String: String]
 
+    /// The push-diagnostics half of the protocol. The real session fills this
+    /// from the server's `eventSequence`; here the test is the server, and
+    /// `publish(_:)` is the wire.
+    nonisolated let publishedDiagnostics: AsyncStream<PublishDiagnosticsParams>
+    private nonisolated let diagnosticsContinuation: AsyncStream<PublishDiagnosticsParams>.Continuation
+
     private(set) var state: LanguageServerSessionState = .idle
     private let log: SessionLog
     private let behavior: FakeSessionBehavior
@@ -143,6 +149,9 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
         log: SessionLog,
         behavior: FakeSessionBehavior = FakeSessionBehavior()
     ) {
+        let (stream, continuation) = AsyncStream.makeStream(of: PublishDiagnosticsParams.self)
+        self.publishedDiagnostics = stream
+        self.diagnosticsContinuation = continuation
         self.id = configuration.id
         self.name = configuration.name
         self.languageIds = configuration.languageIds
@@ -179,6 +188,28 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     func stop() async {
         state = .stopped
         record(.stop)
+        // Finished here for the same reason the real session finishes it in
+        // `teardown()`: a consumer's `for await` must terminate when the server
+        // it is reading is gone. A fake that never finished would let a store
+        // bug — an observation task that outlives its session — pass.
+        diagnosticsContinuation.finish()
+    }
+
+    /// Pushes one `publishDiagnostics` notification, as a server would.
+    ///
+    /// `nonisolated`, because the continuation is: yielding is synchronous and
+    /// needs none of this actor's state, so a test can push without an `await`
+    /// and without an ordering question about when the push lands relative to
+    /// the actor's own queue.
+    nonisolated func publish(_ params: PublishDiagnosticsParams) {
+        diagnosticsContinuation.yield(params)
+    }
+
+    /// Ends the stream without stopping the session — the shape of a server
+    /// that died on its own, which the real session's `publishStreamEnd` path
+    /// does not currently cover.
+    nonisolated func finishDiagnostics() {
+        diagnosticsContinuation.finish()
     }
 
     // MARK: The traffic half of the protocol
