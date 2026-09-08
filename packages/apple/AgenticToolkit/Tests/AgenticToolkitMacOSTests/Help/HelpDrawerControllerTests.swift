@@ -145,6 +145,29 @@ final class HelpDrawerControllerTests: XCTestCase {
         XCTAssertFalse(UserSettings.settingsHelpDrawerVisible.value)
     }
 
+    /// The latch has to hold for the whole teardown, not just the instant of
+    /// `willClose`. `applyVisibility()` runs on every `setHelp(_:)`, so a reset
+    /// put there instead of on the window's return would unlatch a window on its
+    /// way out and lose exactly the preference the ⌘W was supposed to keep.
+    func testHelpChangingDuringTeardownDoesNotUnlatchTheClose() throws {
+        let controller = ComposableSettings.HelpDrawerController(parentWindow: self.window)
+        UserSettings.settingsHelpDrawerVisible.value = true
+        controller.setHelp(HelpContent(topics: [HelpContent.Topic(title: "T", body: "B")]))
+
+        NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: self.window)
+        // A last panel switch on the way out still reaches `applyVisibility()`.
+        controller.setHelp(HelpContent(topics: [HelpContent.Topic(title: "U", body: "V")]))
+
+        try XCTUnwrap(self.window.drawers?.first).close()
+        controller.drawer.drawerDidClose(
+            Notification(name: Notification.Name("NSDrawerDidCloseNotification")))
+
+        XCTAssertTrue(
+            controller.isHelpVisible,
+            "the reset belongs to the window coming back, not to a pass through applyVisibility()")
+        XCTAssertTrue(UserSettings.settingsHelpDrawerVisible.value)
+    }
+
     /// A drawer comes out of the window's edge, not out of a button, so the
     /// anchor is accepted and ignored — the protocol still requires it because
     /// the popover presenter genuinely needs one.

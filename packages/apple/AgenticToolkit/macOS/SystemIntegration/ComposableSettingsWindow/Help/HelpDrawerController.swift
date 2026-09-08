@@ -96,10 +96,14 @@ extension ComposableSettings {
             // launch rather than on the second try.
             //
             // It is also the moment the window is live again — it is fired
-            // from `didBecomeKey`/`didBecomeMain` — so the teardown latch is
-            // lifted here, before the re-assert, rather than inside
-            // `applyVisibility()`, which also runs while the window is going
-            // away.
+            // from `didBecomeKey`/`didBecomeMain` — so this is where the
+            // teardown latch is lifted, rather than inside `applyVisibility()`,
+            // which also runs on every `setHelp(_:)` and would therefore unlatch
+            // a window that is on its way out. That placement is pinned by
+            // `testHelpChangingDuringTeardownDoesNotUnlatchTheClose`. Whether
+            // the clear lands before or after the re-assert is immaterial and
+            // deliberately not asserted: `applyVisibility()` masks its own
+            // callbacks with `isApplyingVisibility` for the whole of its body.
             self.drawer.reapplyVisibility = { [weak self] in
                 guard let self else { return }
                 self.isTearingDown = false
