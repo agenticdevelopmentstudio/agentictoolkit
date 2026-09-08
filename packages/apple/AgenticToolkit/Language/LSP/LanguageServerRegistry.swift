@@ -430,9 +430,12 @@ public final class LanguageServerRegistry: ObservableObject {
     /// surface — the next caller's return value goes unchecked, but the log
     /// does not.
     ///
-    /// - Returns: `false` when `id` already has a live observation, which the
-    ///   only call site — `reconcile`'s create loop, gated
-    ///   `where sessions[id] == nil` — cannot produce.
+    /// - Returns: `false` when `id` already has a live observation. Per the
+    ///   precondition above, `reconcile`'s create loop — gated
+    ///   `where sessions[id] == nil` — cannot produce that; a direct call
+    ///   is free to, and the test at
+    ///   `LanguageServerRegistryTests.swift:633` does exactly that to
+    ///   exercise this refusal.
     @discardableResult
     func observeState(of session: any LanguageServerSessionProtocol, id: UUID) -> Bool {
         guard stateObservations[id] == nil else {

@@ -215,8 +215,9 @@ public final class LanguageServerDocumentSync {
         //    the time *this* `start()` has returned, the handshake has
         //    definitively completed or definitively failed. That is what lets
         //    `DocumentSyncPipeline` resolve the sync capability once, right
-        //    after this await, and read `capabilities()` as a real answer: a
-        //    `nil` there means the server published none, never "not yet".
+        //    after this await, and read `capabilities()` as a real answer
+        //    rather than "not yet" — see the doc on `DocumentSyncPipeline.run`
+        //    for what a `nil` there can mean instead, and why it is safe.
         let drainTask = Task {
             var startFailure: (any Error)?
             do {

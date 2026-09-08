@@ -126,6 +126,19 @@ public protocol LanguageServerSessionProtocol: Actor {
 
     /// The server's capabilities, or `nil` if it is not initialized.
     /// Tasks 3.3-3.6 gate their features on this.
+    ///
+    /// **Every conformer must answer `nil` unless the session is `.running`** —
+    /// not merely "has a server" or "has ever initialized". A caller is
+    /// entitled to read a non-`nil` answer as "this session is live and offers
+    /// this capability", and `LSPCompletionDelegate` depends on exactly that
+    /// reading: its cache-hit guard and its opportunistic re-cache in
+    /// `completionSuggestionsRequested` both rely on this method going `nil`
+    /// for a dead session instead of re-checking liveness at every call site
+    /// (`LSPCompletionDelegate.swift:262-276`). This is stated here, on the
+    /// protocol, because it once was not: this task exists because
+    /// `LanguageServerSession`'s implementation and a test fake diverged on
+    /// exactly this method, and a contract that lives only on one conformer
+    /// leaves the next conformer free to diverge the same way.
     func capabilities() async -> ServerCapabilities?
 
     /// Everything the server wrote to stderr, bounded. The one place a
@@ -694,7 +707,7 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// The server's capabilities, or `nil` if it is not initialized.
     /// Tasks 3.3-3.6 gate their features on this.
     ///
-    /// Gated on `.running`, not merely on `server` being set, and that second
+    /// Gated on `.running`, not merely on `server` being set, and that first
     /// clause is load-bearing: a server that dies on its own does not go
     /// through `teardown()` (see `stop()`'s doc), so `server` stays set and
     /// `InitializingServer.state` stays `.initialized` after a crash. Without

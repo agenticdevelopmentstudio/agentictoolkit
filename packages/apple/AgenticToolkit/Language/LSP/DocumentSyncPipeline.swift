@@ -188,8 +188,16 @@ actor DocumentSyncPipeline {
     ///
     /// **The capability is resolved here, once, and there is no queue in front
     /// of it.** The awaited `start()` has already completed the handshake, so
-    /// `capabilities()` answers now or never — a `nil` here genuinely means the
-    /// server published none rather than "not yet". An earlier draft buffered
+    /// `capabilities()` answers now or never: a `nil` here means either the
+    /// server published none, or — since `capabilities()` gates on
+    /// `.running` — the session died in the gap between `start()` returning
+    /// and this actor hop resuming. "Not yet" is not a possible reading
+    /// either way, and both readings resolve to the same safe answer:
+    /// `ResolvedTextDocumentSync.resolve(nil)` is `.disabled`, written once
+    /// here, and a session that died this way can never restart to prove it
+    /// wrong — `LanguageServerSession.start()` on a `.failed` session throws
+    /// rather than retrying (`LanguageServerSession.swift:531-532`). An
+    /// earlier draft buffered
     /// events against that `nil`; a buffer that drops on overflow drops the
     /// oldest first, which is the `didOpen`, and keeps the `didChange`es that
     /// depend on it. That is the permanently divergent server buffer this whole
