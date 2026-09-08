@@ -14,9 +14,25 @@ public protocol MultiTabbedViewControllerDelegate: AnyObject {
     /// enabled edge at the same tab count.
     func multiTabbedViewControllerNeedsNewTab(_ controller: MultiTabbedViewController)
 
-    /// The active tab on `edge` changed. Always called when the selection
-    /// moves — programmatic or user-driven.
+    /// The user picked the tab on `edge` — by clicking its bar, or by closing
+    /// the tab next to it and being handed the neighbour. **Not** the
+    /// exhaustive "the selection moved" hook: a fallback activation after an
+    /// edge is disabled, and the first tab arriving on an empty edge, both
+    /// change the active tab without ever reaching here. Implement
+    /// `activeTabDidChange` for that.
     func multiTabbedViewController(_ controller: MultiTabbedViewController, didSelectTab id: UUID, on edge: Edge)
+
+    /// The active tab changed, however it changed — a click, `selectTab(id:on:)`,
+    /// a fallback activation after a close, or the first tab arriving on an
+    /// empty edge. Deliberately separate from `didSelectTab`, which means "the
+    /// user picked this tab" and carries the heavier duties a host attaches to
+    /// that (restoring focus, persisting). A host that only needs to know
+    /// *which pane is in front now* implements this one and nothing else.
+    func multiTabbedViewController(
+        _ controller: MultiTabbedViewController,
+        activeTabDidChange id: UUID,
+        on edge: Edge
+    )
 
     /// User clicked the close button on a tab on `edge`. The host can veto
     /// by simply not calling `removeTab(id:)` in response. By default the
@@ -43,6 +59,11 @@ extension MultiTabbedViewControllerDelegate {
     public func multiTabbedViewController(
         _ controller: MultiTabbedViewController,
         didSelectTab id: UUID,
+        on edge: Edge
+    ) {}
+    public func multiTabbedViewController(
+        _ controller: MultiTabbedViewController,
+        activeTabDidChange id: UUID,
         on edge: Edge
     ) {}
     public func multiTabbedViewController(

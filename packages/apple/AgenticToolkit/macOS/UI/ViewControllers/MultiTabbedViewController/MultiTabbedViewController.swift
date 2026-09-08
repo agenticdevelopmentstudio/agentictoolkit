@@ -330,6 +330,13 @@ open class MultiTabbedViewController: NSViewController {
         activeTabID = id
         for bar in tabBars.values { bar.setSelected(id) }
         refreshCenterContent()
+        // The single funnel every activation goes through — a click,
+        // `selectTab`, `activateFallbackTab`, `insertTab`, `removeTab`'s
+        // neighbour — so a host is told once, here, instead of at each of them.
+        // Fired after the state is applied so the host sees the settled tab.
+        if let id, let edge = edge(forTabID: id) {
+            delegate?.multiTabbedViewController(self, activeTabDidChange: id, on: edge)
+        }
     }
 
     /// Activates the first tab on the first enabled edge, or clears the
