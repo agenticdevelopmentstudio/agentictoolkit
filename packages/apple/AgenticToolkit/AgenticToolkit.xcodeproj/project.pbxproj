@@ -685,6 +685,7 @@
 		C1501D2650525E0A8F90D70F /* ComposableTabsFocusable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C41450A42A2BA27B4432260 /* ComposableTabsFocusable.swift */; };
 		C1CF8C47B6F113AE8AE4D2E0 /* MarkdownSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 553B286FB8AF6CC860C1CE5F /* MarkdownSchema.swift */; };
 		C1D2CB4E9259BD1C02B2A879 /* LLMProvidersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2783245881A0C4CACD86139E /* LLMProvidersView.swift */; };
+		C2068A781D621479AFBCC1B5 /* SemanticTokenCaptureMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEEEFBF3B707D171F83DF3D /* SemanticTokenCaptureMappingTests.swift */; };
 		C20BD3D986D567A2EBF0B6D5 /* LogBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD2039D9DCA0CE40BB3ACC5D /* LogBufferTests.swift */; };
 		C3544DCA25DE49090EA2753A /* LanguageServerConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A45D1BC3FE8C242E68D885 /* LanguageServerConfiguration.swift */; };
 		C408F9A22A6D80AB6C05EDFF /* SplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8CE9CC3B7493BF16445C111 /* SplitViewController.swift */; };
@@ -750,6 +751,7 @@
 		D7095B7271DB7511B88F6DC4 /* OllamaModelPageStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 899F3580FEE03CB7C0B10586 /* OllamaModelPageStoreTests.swift */; };
 		D71BC73ACA6F3FC83C200665 /* AgenticToolkitDatabase.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 4BB62E3D95DA86CAF132B225 /* AgenticToolkitDatabase.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D72842B262E14B4050D8AF6F /* AgenticToolkitPermissionsUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FB251437E922B5A8689625BF /* AgenticToolkitPermissionsUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		D7F46AF8189F22DA67969C8E /* SemanticTokenCaptureMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110EABA48B0D04396599CCF2 /* SemanticTokenCaptureMapping.swift */; };
 		D80BA3C91D6C5DFC42CAEE18 /* ChatToolSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56F31D5794F99825D2D3F2C2 /* ChatToolSource.swift */; };
 		D82800D87E946AB4B95D830C /* TextDocumentStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90AF74F7C15F06925B32E9D7 /* TextDocumentStorageTests.swift */; };
 		D8FF5AEBDE16D341CFDA564E /* ComposableTabsViewID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7600580077B5E7991D5129D4 /* ComposableTabsViewID.swift */; };
@@ -1759,6 +1761,7 @@
 		101685017FD3939C6E5EED27 /* AgenticToolkitCoreMacOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgenticToolkitCoreMacOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		10C06EB2ADBF3FE51A046E3D /* AIProviderConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfigStoreTests.swift; sourceTree = "<group>"; };
 		11000504C1A1C034A52A96A0 /* FileTreeOutlineViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeOutlineViewController.swift; sourceTree = "<group>"; };
+		110EABA48B0D04396599CCF2 /* SemanticTokenCaptureMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticTokenCaptureMapping.swift; sourceTree = "<group>"; };
 		11E81DAA1316C42A0091575C /* iCloudSettingsStorageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iCloudSettingsStorageProvider.swift; sourceTree = "<group>"; };
 		127425969220F166083FBCAD /* AIRequestSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRequestSpec.swift; sourceTree = "<group>"; };
 		1302FC853711BD157199061C /* SemanticPalette+EditorTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SemanticPalette+EditorTheme.swift"; sourceTree = "<group>"; };
@@ -2189,6 +2192,7 @@
 		AD2039D9DCA0CE40BB3ACC5D /* LogBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogBufferTests.swift; sourceTree = "<group>"; };
 		AD4F36DE797BB7ABBBBB8194 /* NotesManagerStorageOrderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesManagerStorageOrderingTests.swift; sourceTree = "<group>"; };
 		ADAB544F96065D5F0FD8AF55 /* NotesWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesWindowController.swift; sourceTree = "<group>"; };
+		ADEEEFBF3B707D171F83DF3D /* SemanticTokenCaptureMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticTokenCaptureMappingTests.swift; sourceTree = "<group>"; };
 		AE3D388387AB649B92A6E2F1 /* LanguageServerChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageServerChannel.swift; sourceTree = "<group>"; };
 		AE6166E8D345E8E4FC2C4CB7 /* PaneCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneCommands.swift; sourceTree = "<group>"; };
 		AE6B2E59FBA7EEA9553CA0B0 /* TextDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentTests.swift; sourceTree = "<group>"; };
@@ -3726,6 +3730,7 @@
 				52FE6B87363B83FEFB34624F /* LSPEditorTestSupport.swift */,
 				73AABFF9469CDC91BFC0AB25 /* LSPJumpToDefinitionDelegateTests.swift */,
 				7B3A174D6B7687410F9254F1 /* ProjectLanguageServicesTests.swift */,
+				ADEEEFBF3B707D171F83DF3D /* SemanticTokenCaptureMappingTests.swift */,
 				90AF74F7C15F06925B32E9D7 /* TextDocumentStorageTests.swift */,
 			);
 			path = Editor;
@@ -4315,6 +4320,7 @@
 				064C20DF3295C975AFE44C02 /* LSPHoverController.swift */,
 				8592D4E95C1C5FBF4783A900 /* LSPJumpToDefinitionDelegate.swift */,
 				0B774952393631C1EBDB56CD /* ProjectLanguageServices.swift */,
+				110EABA48B0D04396599CCF2 /* SemanticTokenCaptureMapping.swift */,
 				0EC635036404E415CED86E37 /* TextDocumentCoordinator.swift */,
 				A82CE7DDCDBDDF6097A247CF /* TextDocumentStorage.swift */,
 			);
@@ -5961,6 +5967,7 @@
 				A14295124F9E66E8A5533E6A /* ScriptingRouter.swift in Sources */,
 				61DCAA409469ACEF24D1F3AA /* SecureTextEditView.swift in Sources */,
 				8DDF301745E291E1261F2EF5 /* SemanticPalette+EditorTheme.swift in Sources */,
+				D7F46AF8189F22DA67969C8E /* SemanticTokenCaptureMapping.swift in Sources */,
 				5A22847B30E2E77B45DE6793 /* SessionListView.swift in Sources */,
 				7E06A61532A711063DA6EC4D /* SessionListViewController.swift in Sources */,
 				13CBEE54D88F01BBEABE34BC /* SessionSources.swift in Sources */,
@@ -6363,6 +6370,7 @@
 				63DB102B342074B1FF9223B2 /* ScreenManagerTests.swift in Sources */,
 				29C34DE7636859C833F72C67 /* ScreenMatcherTests.swift in Sources */,
 				2E8A83A5A5995AD8CA8B9C8F /* SemanticPaletteEditorThemeTests.swift in Sources */,
+				C2068A781D621479AFBCC1B5 /* SemanticTokenCaptureMappingTests.swift in Sources */,
 				60DACCD0B6C4BD8D65E0F9E5 /* SessionLayoutStateTests.swift in Sources */,
 				7CFFEA150BB6C132E93BA1A7 /* SessionListViewModelTests.swift in Sources */,
 				83EE05B5B7E9A3A0A8496A0D /* SessionListViewTests.swift in Sources */,
