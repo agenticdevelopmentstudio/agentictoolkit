@@ -401,13 +401,30 @@ public final class LanguageServerRegistry: ObservableObject {
     /// the replacement's very first value, and a working reader would have been
     /// cancelled to install one that dies immediately.
     ///
+    /// **This all rests on a precondition this method does not check: `id` is
+    /// never passed unless it is already a key in `sessions`.** The refusal
+    /// above keys on `id` alone, while the retire loop this paragraph leans on
+    /// keys on `sessions`; the two agree only because the sole call site sits a
+    /// few statements after `sessions[id] = session`, in the same iteration of
+    /// `reconcile`'s create loop. If that ever stopped holding — a caller
+    /// passing an `id` `sessions` does not have — the refusal above would
+    /// install an entry for it that nothing but `shutdown()` ever removes,
+    /// permanently refusing every later legitimate call for that `id` and
+    /// freezing `sessionStates[id]` at whatever it last was. Documented rather
+    /// than guarded: a check nothing can reach is a branch that will never be
+    /// exercised and will be trusted anyway.
+    ///
     /// Internal rather than private, and returning whether it installed a
-    /// reader, because that return value is the *only* thing a second call
-    /// changes. A second reader is invisible from outside: the entry is keyed
-    /// by id, so overwriting it leaves the count at one, and the identity check
-    /// below means both readers write the same key with the same values. That
-    /// invisibility is the finding — the next caller gets no error, no log and
-    /// no test failure — so the refusal says so in all three ways it can.
+    /// reader, because that return value is the only thing a second call
+    /// changes *for the caller*. It is not the only observable effect of a
+    /// second call: the guard below also logs a fault, so a second call is
+    /// visible in the log even though its `Bool` is easy to discard.
+    /// A second reader is invisible from outside for a different reason — the
+    /// entry is keyed by id, so overwriting it leaves the count at one, and the
+    /// identity check below means both readers write the same key with the
+    /// same values. That invisibility is the finding the fault log exists to
+    /// surface — the next caller's return value goes unchecked, but the log
+    /// does not.
     ///
     /// - Returns: `false` when `id` already has a live observation, which the
     ///   only call site — `reconcile`'s create loop, gated
