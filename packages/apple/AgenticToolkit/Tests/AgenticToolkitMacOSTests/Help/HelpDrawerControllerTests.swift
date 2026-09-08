@@ -74,6 +74,46 @@ final class HelpDrawerControllerTests: XCTestCase {
         XCTAssertGreaterThan(announcements, 0)
     }
 
+    /// A drawer can be dragged shut by its outer edge, which goes nowhere near
+    /// the `?` button. Without reconciling, the preference still says visible
+    /// and the next window focus slides the drawer back out — two clicks to put
+    /// away a drawer that will not stay away.
+    func testADrawerDraggedShutIsForgotten() throws {
+        let controller = ComposableSettings.HelpDrawerController(parentWindow: self.window)
+        UserSettings.settingsHelpDrawerVisible.value = true
+        controller.setHelp(HelpContent(topics: [HelpContent.Topic(title: "T", body: "B")]))
+        XCTAssertTrue(controller.isHelpVisible)
+
+        // The drag, as AppKit reports it: the `NSDrawer` shuts and the delegate
+        // is told, with nothing having gone through this controller.
+        try XCTUnwrap(self.window.drawers?.first).close()
+        controller.drawer.drawerDidClose(
+            Notification(name: Notification.Name("NSDrawerDidCloseNotification")))
+
+        XCTAssertFalse(controller.isHelpVisible)
+        XCTAssertFalse(UserSettings.settingsHelpDrawerVisible.value)
+    }
+
+    /// AppKit shuts a drawer along with the window it hangs off, and announces
+    /// it through the same callback a drag uses. A settings window that is
+    /// simply closed must not be read as the reader putting help away.
+    func testClosingTheWindowDoesNotForgetADisclosedDrawer() throws {
+        let controller = ComposableSettings.HelpDrawerController(parentWindow: self.window)
+        UserSettings.settingsHelpDrawerVisible.value = true
+        controller.setHelp(HelpContent(topics: [HelpContent.Topic(title: "T", body: "B")]))
+        XCTAssertTrue(controller.isHelpVisible)
+
+        NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: self.window)
+        try XCTUnwrap(self.window.drawers?.first).close()
+        controller.drawer.drawerDidClose(
+            Notification(name: Notification.Name("NSDrawerDidCloseNotification")))
+
+        XCTAssertTrue(
+            controller.isHelpVisible,
+            "The reader left help open; closing the window is not them putting it away")
+        XCTAssertTrue(UserSettings.settingsHelpDrawerVisible.value)
+    }
+
     /// A drawer comes out of the window's edge, not out of a button, so the
     /// anchor is accepted and ignored — the protocol still requires it because
     /// the popover presenter genuinely needs one.

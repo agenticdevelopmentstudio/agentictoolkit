@@ -25,7 +25,11 @@ extension ComposableSettings {
 
         private let helpView = HelpContentView()
         private let preference: UserSettingObserver<Bool>
-        private var drawer: WindowDrawer!
+        /// The drawer itself, so the suite that covers this controller can
+        /// drive the delegate callbacks AppKit drives. Not `public`: nothing
+        /// outside the framework has any business reaching past
+        /// `HelpPresenting`.
+        private(set) var drawer: WindowDrawer!
 
         public var onVisibilityChange: (() -> Void)?
 
@@ -44,6 +48,19 @@ extension ComposableSettings {
         /// with nothing to say now says so *inside* the drawer, where it costs
         /// a line of text instead of a change of layout.
         public var isHelpVisible: Bool { self.preference.value }
+
+        /// True only while `applyVisibility()` is moving the drawer itself. The
+        /// drawer announces every move, including the ones this controller
+        /// asked for — and including an `open()` AppKit dropped because the
+        /// window was not on screen yet, which from the outside looks exactly
+        /// like the reader dragging the drawer shut.
+        private var isApplyingVisibility = false
+
+        /// True from the moment the window says it is closing. AppKit shuts a
+        /// drawer along with its window and reports it through the same
+        /// callback a drag produces, so without this a settings window that is
+        /// simply closed would be read as the reader putting help away.
+        private var isTearingDown = false
 
         public init(parentWindow: NSWindow) {
             self.preference = UserSettingObserver(UserSettings.settingsHelpDrawerVisible)
@@ -71,6 +88,44 @@ extension ComposableSettings {
             self.drawer.reapplyVisibility = { [weak self] in
                 self?.applyVisibility()
             }
+            // A drawer can also be dragged shut by its outer edge, which goes
+            // nowhere near the `?`. Without this the preference still says
+            // visible and the next window focus slides it back out — the same
+            // defect `ProjectHelpDrawerController` reconciles, reached through
+            // the same callback.
+            self.drawer.onVisibilityChange = { [weak self] in
+                self?.drawerVisibilityDidChange()
+            }
+            // Registered by selector rather than by block so the observation is
+            // zeroing-weak and needs no `deinit` to undo.
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(self.parentWindowWillClose),
+                name: NSWindow.willCloseNotification,
+                object: parentWindow)
+        }
+
+        /// The drawer moved, and it was not `applyVisibility()` that moved it:
+        /// the reader dragged it shut. The preference is the truth about what
+        /// they want, so it is what gets corrected — and correcting it comes
+        /// back round through `preference.onChange` on the next turn, which
+        /// finds the drawer already closed and does nothing.
+        ///
+        /// Idempotent on purpose: one move can be announced twice, once from
+        /// `WindowDrawer.close()` and once from `NSDrawer`'s delegate.
+        private func drawerVisibilityDidChange() {
+            guard !self.isApplyingVisibility, !self.isTearingDown else { return }
+            // Whether a shut drawer on this window could be the reader's doing
+            // at all is the drawer's question, and `WindowDrawer` answers it for
+            // every owner rather than each one re-deriving it.
+            guard self.drawer.closeIsAttributableToTheReader, self.isHelpVisible else { return }
+            self.preference.value = false
+        }
+
+        /// Everything announced from here on is AppKit taking the window apart,
+        /// not the reader putting help away.
+        @objc private func parentWindowWillClose() {
+            self.isTearingDown = true
         }
 
         // MARK: - HelpPresenting
@@ -85,6 +140,9 @@ extension ComposableSettings {
         }
 
         private func applyVisibility() {
+            self.isApplyingVisibility = true
+            defer { self.isApplyingVisibility = false }
+
             if self.isHelpVisible {
                 self.drawer.open(selecting: Self.helpTabID)
             } else {

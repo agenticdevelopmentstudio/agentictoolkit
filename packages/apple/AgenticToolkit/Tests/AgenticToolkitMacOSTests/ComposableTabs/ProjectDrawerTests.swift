@@ -203,15 +203,62 @@ final class ProjectDrawerTests: XCTestCase {
         XCTAssertEqual(button.image?.tiffRepresentation, Self.glyph("questionmark.circle"))
     }
 
-    /// The glyph follows the theme live, rather than staying tinted for the
-    /// palette that happened to be in effect when it was last toggled.
-    func testTheHelpButtonTintFollowsItsOwnScope() throws {
+    /// The tint at the two moments the button is restyled anyway. This is the
+    /// disclosure contract — outlined and secondary while closed, accented while
+    /// open — and nothing more: both assertions hold with no theme observer at
+    /// all, because a toggle restyles the button by itself. What the observer is
+    /// for is the test below.
+    func testTheHelpButtonTintFollowsTheDrawer() throws {
         let controller = makeController(for: makeProject())
         let button = try helpButton(of: controller)
 
         XCTAssertEqual(button.contentTintColor, button.resolvedThemeScope.palette.secondaryTextColor)
         controller.toggleHelp()
         XCTAssertEqual(button.contentTintColor, button.resolvedThemeScope.palette.accentColor)
+    }
+
+    /// The glyph follows the theme *live*, rather than staying tinted for the
+    /// palette that happened to be in effect when it was last toggled — a theme
+    /// can change while the window just sits there, and nothing toggles then.
+    ///
+    /// The button is stamped with a colour no palette produces before the theme
+    /// moves, so "the tint followed" cannot be satisfied by a tint that was
+    /// already correct. Delete the window controller's `helpThemeObserver` and
+    /// the stamp survives the theme change, which is the failure this pins.
+    func testTheHelpButtonTintFollowsALiveThemeChange() throws {
+        let controller = makeController(for: makeProject())
+        let button = try helpButton(of: controller)
+
+        button.contentTintColor = .systemPink
+
+        // The notification itself rather than a `ThemeManager` that posts it:
+        // `selectTheme(id:)` bails when the theme it names is already the active
+        // one, and the active theme is read from `UserSettings`, which outlives
+        // this process. A test that depends on which theme happens to be on disk
+        // is a test that passes or fails by accident.
+        NotificationCenter.default.post(name: ThemeManager.didChangeNotification, object: nil)
+
+        XCTAssertEqual(button.contentTintColor, button.resolvedThemeScope.palette.secondaryTextColor)
+        XCTAssertNotEqual(button.contentTintColor, .systemPink)
+    }
+
+    /// AppKit asks the toolbar delegate for its items again whenever the toolbar
+    /// is rebuilt, and the delegate answers with a *new* `NSButton` every time.
+    /// An observer pinned to the first one goes on tinting a button nobody can
+    /// see, while the button on screen keeps whatever tint it was born with.
+    func testTheHelpButtonTintFollowsAToolbarItemThatWasRebuilt() throws {
+        let controller = makeController(for: makeProject())
+        let first = try helpButton(of: controller)
+        let second = try helpButton(of: controller)
+        XCTAssertFalse(
+            first === second,
+            "The delegate is expected to hand back a new button; the test is vacuous otherwise")
+
+        second.contentTintColor = .systemPink
+        NotificationCenter.default.post(name: ThemeManager.didChangeNotification, object: nil)
+
+        XCTAssertEqual(second.contentTintColor, second.resolvedThemeScope.palette.secondaryTextColor)
+        XCTAssertNotEqual(second.contentTintColor, .systemPink)
     }
 
     /// The `?` button's contract, in one test: click discloses, click again
@@ -377,6 +424,77 @@ final class ProjectDrawerTests: XCTestCase {
         drawer.reapplyVisibility?()
         XCTAssertFalse(drawer.isOpen)
         XCTAssertFalse(controller.isHelpVisible)
+    }
+
+    /// The same drag, arriving the way AppKit actually reports it: the drawer
+    /// shuts and the *delegate* is told, with nothing having gone through
+    /// `WindowDrawer.close()`. The test above drives the wrapper; this one
+    /// drives the callback, which is the path the guard added for window
+    /// teardown has to keep working for.
+    func testADragShutDrawerAnnouncedByTheDelegateStaysClosed() throws {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        let drawer = try XCTUnwrap(controller.helpDrawer)
+        controller.toggleHelp()
+        XCTAssertEqual(project.setting("drawer.open"), "1")
+
+        // The drag itself: the `NSDrawer` the window holds is shut directly, so
+        // nothing on this side has announced anything yet.
+        try XCTUnwrap(controller.window?.drawers?.first).close()
+        drawer.drawerDidClose(Notification(name: Notification.Name("NSDrawerDidCloseNotification")))
+
+        XCTAssertFalse(controller.isHelpVisible)
+        XCTAssertNil(project.setting("drawer.open"))
+    }
+
+    /// AppKit shuts a drawer along with the window it hangs off, and reports it
+    /// through the very same callback a drag uses. Read as a drag, closing the
+    /// window with help open erases the preference this whole feature is for —
+    /// and `willClose` arrives *before* the drawer shuts, so the last-chance
+    /// write cannot save it either.
+    func testClosingTheWindowDoesNotForgetADisclosedDrawer() throws {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        let drawer = try XCTUnwrap(controller.helpDrawer)
+        controller.toggleHelp()
+        XCTAssertEqual(project.setting("drawer.open"), "1")
+
+        // AppKit's order on the way out: the window says it is closing, and the
+        // drawer goes with it afterwards.
+        NotificationCenter.default.post(
+            name: NSWindow.willCloseNotification, object: try XCTUnwrap(controller.window))
+        try XCTUnwrap(controller.window?.drawers?.first).close()
+        drawer.drawerDidClose(Notification(name: Notification.Name("NSDrawerDidCloseNotification")))
+
+        XCTAssertEqual(
+            project.setting("drawer.open"), "1",
+            "The reader left help open; a window close is not them putting it away")
+        XCTAssertTrue(controller.isHelpVisible)
+    }
+
+    /// One window focus re-asserts the drawer twice — `didBecomeKey` and
+    /// `didBecomeMain` — and every re-assert announces a visibility change. A
+    /// tab and a width written on each of those is two upserts per focus, on the
+    /// main thread, for values nobody changed.
+    ///
+    /// Asserted on the rows rather than on a counter: the remembered width is
+    /// poked to something the controller never wrote, so any write it makes from
+    /// here shows up as that value being gone.
+    func testAnAnnouncementThatChangesNothingWritesNothing() throws {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        let drawer = try XCTUnwrap(controller.helpDrawer)
+        controller.toggleHelp()
+        drawer.contentWidth = 460
+        controller.toggleHelp()
+        XCTAssertEqual(project.setting("drawer.width"), "460.0")
+
+        project.setSetting("drawer.width", to: "999.0")
+        drawer.reapplyVisibility?()
+        drawer.reapplyVisibility?()
+
+        XCTAssertEqual(project.setting("drawer.width"), "999.0")
+        XCTAssertEqual(project.setting("drawer.tab"), "help")
     }
 
     /// What one symbol draws at the configuration `applyDisclosureAppearance`
