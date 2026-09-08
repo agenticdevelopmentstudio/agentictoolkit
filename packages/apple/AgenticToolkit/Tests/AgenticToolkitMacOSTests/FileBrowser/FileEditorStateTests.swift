@@ -90,7 +90,12 @@ struct FileEditorStateTests {
         let writer = RecordingWriter()
         let store = TextDocumentStore()
         let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
-        let state = FileEditorState(documentStore: store, saveScheduler: scheduler)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
 
         state.load(from: fileURL)
         await state.awaitPendingLoad()
@@ -125,7 +130,12 @@ struct FileEditorStateTests {
         let writer = RecordingWriter()
         let store = TextDocumentStore()
         let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
-        let state = FileEditorState(documentStore: store, saveScheduler: scheduler)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
 
         state.load(from: fileA)
         await state.awaitPendingLoad()
@@ -152,7 +162,12 @@ struct FileEditorStateTests {
         let writer = RecordingWriter()
         let store = TextDocumentStore()
         let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
-        let state = FileEditorState(documentStore: store, saveScheduler: scheduler)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
 
         let bound = FileEditorState.maximumCachedDocuments
         var urls: [URL] = []
@@ -184,7 +199,12 @@ struct FileEditorStateTests {
         let writer = RecordingWriter()
         let store = TextDocumentStore()
         let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
-        let state = FileEditorState(documentStore: store, saveScheduler: scheduler)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
 
         let firstURL = try makeFile(in: directory, named: "First.swift")
         state.load(from: firstURL)
@@ -229,7 +249,12 @@ struct FileEditorStateTests {
             guard case .opened(let uri, _, _, _) = event else { return }
             writer.record("open:\(uri)")
         }
-        let state = FileEditorState(documentStore: store, saveScheduler: scheduler)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
 
         state.load(from: fileA)
         await state.awaitPendingLoad()
@@ -259,7 +284,12 @@ struct FileEditorStateTests {
         let store = TextDocumentStore()
         let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
 
-        var state: FileEditorState? = FileEditorState(documentStore: store, saveScheduler: scheduler)
+        var state: FileEditorState? = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
         state?.load(from: fileURL)
         await state?.awaitPendingLoad()
         typeText("the last second of typing\n", into: try #require(state?.storage(for: uri)))
@@ -284,8 +314,18 @@ struct FileEditorStateTests {
         let store = TextDocumentStore()
         let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
 
-        var paneOne: FileEditorState? = FileEditorState(documentStore: store, saveScheduler: scheduler)
-        let paneTwo = FileEditorState(documentStore: store, saveScheduler: scheduler)
+        var paneOne: FileEditorState? = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
+        let paneTwo = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
         paneOne?.load(from: fileURL)
         await paneOne?.awaitPendingLoad()
         paneTwo.load(from: fileURL)

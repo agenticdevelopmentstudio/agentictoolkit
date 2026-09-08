@@ -40,7 +40,11 @@ struct LanguageServerDocumentSyncTests {
     ) -> LanguageServerRegistry {
         LanguageServerRegistry(
             store: settings,
-            workspaceURL: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true),
+            // The filesystem root, so every fixture URI below is in workspace
+            // scope and these tests keep testing what they were written to
+            // test. The scope filter itself has its own suite —
+            // `LanguageServerDocumentSyncScopeTests`.
+            workspaceURL: URL(fileURLWithPath: "/", isDirectory: true),
             builtInConfigurations: [],
             sessionFactory: { configuration, secrets, rootURL in
                 FakeLanguageServerSession(

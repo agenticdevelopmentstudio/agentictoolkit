@@ -88,6 +88,24 @@ public final class ProjectsCoordinator: AppFeature {
         try? database.checkpoint()
     }
 
+    /// Stops every open project's language servers before the process exits.
+    ///
+    /// Awaited by the host's termination sweep, which is the only place that
+    /// can wait: `stop()` is synchronous and a language server exits by way of
+    /// `SubprocessChannel.terminate()`, which is not. Without this, quitting
+    /// with project windows open leaves the `willCloseNotification` shutdowns
+    /// racing the process exit and orphans a `sourcekit-lsp` per window.
+    ///
+    /// Reached through `opener` rather than `ProjectWindowManager.shared` so a
+    /// host that attached its own manager gets that one. The cast is the seam
+    /// on purpose: `ProjectOpening` says nothing about language servers, and
+    /// widening it for this one call would push an LSP concern into the
+    /// protocol the registry is tested against.
+    public override func terminate() async {
+        guard let windows = opener as? ProjectWindowManager else { return }
+        await windows.shutdownAllLanguageServices()
+    }
+
     // MARK: - Registry
 
     public func repo(id: UUID) -> GitRepo? {

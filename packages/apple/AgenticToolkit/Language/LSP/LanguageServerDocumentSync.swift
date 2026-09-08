@@ -86,7 +86,7 @@ public final class LanguageServerDocumentSync {
         guard !isStarted, !isShutDown else { return }
         isStarted = true
 
-        for document in store.openDocuments {
+        for document in store.openDocuments where isInWorkspaceScope(document.uri) {
             languageIdsByURI[document.uri] = document.languageId
         }
 
@@ -241,7 +241,8 @@ public final class LanguageServerDocumentSync {
         let claimed = Set(session.languageIds.map { $0.lowercased() })
         guard !claimed.isEmpty else { return }
 
-        for document in store.openDocuments where claimed.contains(document.languageId.lowercased()) {
+        for document in store.openDocuments
+        where claimed.contains(document.languageId.lowercased()) && isInWorkspaceScope(document.uri) {
             pipeline.enqueue(.opened(
                 uri: document.uri,
                 languageId: document.languageId,
@@ -275,6 +276,11 @@ public final class LanguageServerDocumentSync {
 
         switch event {
         case .opened(let uri, let languageId, let version, let text):
+            // The one place an out-of-workspace document can enter this class.
+            // See `isInWorkspaceScope(_:)` for why this guard, the seeding loop
+            // in `start()` and the one in `replayOpenDocuments` are the only
+            // three needed.
+            guard isInWorkspaceScope(uri) else { return }
             languageIdsByURI[uri] = languageId
             enqueue(
                 .opened(uri: uri, languageId: languageId, version: version, text: text),
@@ -317,6 +323,70 @@ public final class LanguageServerDocumentSync {
             enqueue(.closed(uri: uri), languageId: languageId)
         }
     }
+
+    // MARK: - Workspace scope
+
+    /// Whether `uri` names a file inside this sync's workspace root.
+    ///
+    /// A `TextDocumentStore` is app-wide: one window's Quick Note, another
+    /// project's file, a scratch buffer under `/tmp` all live in the same store.
+    /// A language server started for *this* project has no business being told
+    /// about any of them — a `didOpen` for a file outside the root it was
+    /// initialised with is at best noise and at worst makes the server index a
+    /// tree the user never opened.
+    ///
+    /// **Why three call sites are enough.** Every other path through this class
+    /// is gated on a lookup in `languageIdsByURI` — `.changed`, `.saved` and
+    /// `.closed` all `guard let languageId = languageIdsByURI[uri]` and give up
+    /// when it misses. So a URI that never gets *into* that table can never
+    /// produce a later notification. There are exactly three places a URI enters
+    /// the table or reaches a pipeline without going through it: the seeding
+    /// loop in `start()`, the `.opened` case in `handle(_:)`, and the replay
+    /// loop in `replayOpenDocuments(to:session:)`. Guarding those three is
+    /// therefore equivalent to guarding all seven, and cheaper: the scope test
+    /// touches the filesystem (symlink resolution), and putting it on the
+    /// keystroke path would pay that cost on every edit.
+    ///
+    /// **Accepted gap.** The root a session is actually initialised with is
+    /// resolved by walking *up* from the workspace looking for a root marker, so
+    /// it can be an ancestor of `registry.workspaceURL` — a package inside a
+    /// monorepo checkout, say. Filtering on `workspaceURL` therefore rejects
+    /// some documents the server would have accepted. That is the conservative
+    /// side of the error: the cost is a file in a sibling directory not getting
+    /// completions, versus a server being fed a tree the user never opened.
+    /// Narrowing this to the session's own root would mean asking each session
+    /// for its root — an `await` per event on the synchronous store-callback
+    /// path — which is not a trade worth making here.
+    private func isInWorkspaceScope(_ uri: DocumentUri) -> Bool {
+        // Not a file URL — a `untitled:` buffer, or something unparseable. The
+        // servers this layer drives are all filesystem-backed, so out of scope.
+        guard let url = URL(string: uri), url.isFileURL else { return false }
+
+        let root = workspaceScopeComponents
+        guard !root.isEmpty else { return false }
+
+        // Path *components*, never a string prefix: `/Users/me/proj-old` has
+        // `/Users/me/proj` as a string prefix but is a different directory.
+        let components = Self.scopeComponents(of: url)
+        guard components.count >= root.count else { return false }
+        return Array(components.prefix(root.count)) == root
+    }
+
+    /// Resolved, standardized path components for one URL.
+    ///
+    /// Both sides of the comparison go through this. Symlink resolution matters
+    /// on macOS specifically: `NSTemporaryDirectory()` hands back `/var/folders/...`
+    /// which resolves to `/private/var/folders/...`, and `/tmp` resolves to
+    /// `/private/tmp`, so a workspace and a document naming the same directory
+    /// by different routes would otherwise fail to match.
+    private static func scopeComponents(of url: URL) -> [String] {
+        url.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+    }
+
+    /// Computed once, on first use rather than in `init`, because resolving
+    /// symlinks hits the filesystem and a sync is constructed before anything
+    /// has asked it a question.
+    private lazy var workspaceScopeComponents: [String] = Self.scopeComponents(of: registry.workspaceURL)
 
     /// Routes one snapshot to every pipeline whose session claims `languageId`.
     ///

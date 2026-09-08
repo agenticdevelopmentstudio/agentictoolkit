@@ -33,7 +33,8 @@ final class FileBrowserSplitViewControllerTests: XCTestCase {
             excludedURL: directory.appendingPathComponent("Cache.pkg"),
             autosaveName: autosaveName,
             documentStore: TextDocumentStore(),
-            saveScheduler: TextDocumentSaveScheduler(write: { _ in })
+            saveScheduler: TextDocumentSaveScheduler(write: { _ in }),
+            languageServices: nil
         )
     }
 

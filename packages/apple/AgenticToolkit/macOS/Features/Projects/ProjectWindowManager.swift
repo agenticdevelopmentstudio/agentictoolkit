@@ -42,6 +42,16 @@ public final class ProjectWindowManager: ProjectOpening {
     private var adoptedForScripting: Set<UUID> = []
     private weak var coordinator: ProjectsCoordinator?
 
+    /// Builds the language-server stack for a project about to be opened, given
+    /// its directory. Set once by the host at startup; `nil` in a host that
+    /// wants no language support, and in every test that has not asked for it.
+    ///
+    /// A closure rather than a stored `TextDocumentStore` + settings pair
+    /// because this type has no business knowing what a registry needs — the
+    /// host already owns the app-wide document store and the settings, and this
+    /// only has to know *when* to ask (`dependency-injection`).
+    public var languageServicesFactory: (@MainActor (URL) -> ProjectLanguageServices)?
+
     public init() {}
 
     /// Wires the manager to the registry it opens projects from and registers
@@ -135,7 +145,17 @@ public final class ProjectWindowManager: ProjectOpening {
             Self.logger.error("Cannot open \(repo.name, privacy: .public): no project database attached")
             return
         }
-        let workspace = ProjectWorkspace(repo: repo, database: database)
+        let languageServices = languageServicesFactory?(repo.url)
+        if languageServices == nil {
+            // Info, not a warning: a host with no language-server wiring is a
+            // supported configuration, and this is the one line that tells a
+            // reader of the log why a window has no completions.
+            Self.logger.info(
+                "No language services for \(repo.name, privacy: .public): no factory wired"
+            )
+        }
+        let workspace = ProjectWorkspace(repo: repo, database: database, languageServices: languageServices)
+        languageServices?.start()
         let controller = ComposableTabsWindowController(project: workspace)
         controllers[repo.id] = controller
         openOrder.append(repo.id)
@@ -147,6 +167,31 @@ public final class ProjectWindowManager: ProjectOpening {
 
     public func closeProject(repoID: UUID) {
         controllers[repoID]?.close()
+    }
+
+    // MARK: - Termination
+
+    /// Shuts down every open project's language servers, concurrently.
+    ///
+    /// A task group rather than a `for` loop over `await`: each
+    /// `LanguageServerSession.stop()` bottoms out in
+    /// `SubprocessChannel.terminate()`, which is uncancellable and waits up to
+    /// 2.5 seconds for a child that ignores SIGTERM. Those budgets do not
+    /// share — five stubborn servers run sequentially is twelve seconds of a
+    /// beachball on quit, and run concurrently is still two and a half.
+    ///
+    /// Called from `ProjectsCoordinator.terminate()`, which the host's
+    /// termination sweep already awaits. The per-window path in
+    /// `observeClose(of:repoID:)` covers the ordinary case; this covers quitting
+    /// with windows still open, where no `willClose` shutdown has run yet.
+    public func shutdownAllLanguageServices() async {
+        let services = controllers.values.compactMap(\.project.languageServices)
+        guard !services.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            for service in services {
+                group.addTask { await service.shutdown() }
+            }
+        }
     }
 
     // MARK: - Restore
@@ -250,9 +295,19 @@ public final class ProjectWindowManager: ProjectOpening {
                 if recordsOpenState, !WindowManager.shared.isTerminating {
                     self.setWindowOpen(false, repoID: repoID)
                 }
+                // Captured strongly and *before* the controller is dropped:
+                // dropping it releases the workspace and with it the services,
+                // and a shutdown needs the object to still exist when the task
+                // it schedules runs. Best-effort — nothing waits for it here,
+                // because a window close must not block the main thread on a
+                // subprocess exiting.
+                let services = self.controllers[repoID]?.project.languageServices
                 self.controllers.removeValue(forKey: repoID)
                 self.openOrder.removeAll { $0 == repoID }
                 self.adoptedForScripting.remove(repoID)
+                if let services {
+                    Task { await services.shutdown() }
+                }
                 if let observer = self.closeObservers.removeValue(forKey: repoID) {
                     NotificationCenter.default.removeObserver(observer)
                 }

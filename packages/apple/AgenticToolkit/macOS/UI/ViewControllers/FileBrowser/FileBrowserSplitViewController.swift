@@ -63,6 +63,11 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
     ///     share one refcounted set of open documents.
     ///   - saveScheduler: The app-wide debounced autosave scheduler, likewise
     ///     shared rather than built per pane.
+    ///   - languageServices: The project's language servers, or `nil` for a
+    ///     browser that has none. Optional in type because a non-project file
+    ///     browser legitimately has none; required in position — with no
+    ///     default value — because a default would let a new call site lose
+    ///     completion and go-to-definition and never say so.
     public init(
         directories: FileBrowserDirectories,
         excludedURL: URL,
@@ -71,7 +76,8 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
         autosaveName: String = "file-browser-split",
         restoration: FileBrowserRestorationState = FileBrowserRestorationState(),
         documentStore: TextDocumentStore,
-        saveScheduler: TextDocumentSaveScheduler
+        saveScheduler: TextDocumentSaveScheduler,
+        languageServices: ProjectLanguageServices?
     ) {
         let selection = FileBrowserSelection()
         self.selection = selection
@@ -87,7 +93,8 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
         self.viewerViewController = FileViewerViewController(
             selection: selection,
             documentStore: documentStore,
-            saveScheduler: saveScheduler
+            saveScheduler: saveScheduler,
+            languageServices: languageServices
         )
         self.splitAutosaveName = autosaveName
         super.init(nibName: nil, bundle: nil)
@@ -122,7 +129,8 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
         autosaveName: String = "file-browser-split",
         restoration: FileBrowserRestorationState = FileBrowserRestorationState(),
         documentStore: TextDocumentStore,
-        saveScheduler: TextDocumentSaveScheduler
+        saveScheduler: TextDocumentSaveScheduler,
+        languageServices: ProjectLanguageServices?
     ) {
         self.init(
             directories: FileBrowserDirectories(primary: rootURL),
@@ -132,7 +140,8 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
             autosaveName: autosaveName,
             restoration: restoration,
             documentStore: documentStore,
-            saveScheduler: saveScheduler
+            saveScheduler: saveScheduler,
+            languageServices: languageServices
         )
     }
 

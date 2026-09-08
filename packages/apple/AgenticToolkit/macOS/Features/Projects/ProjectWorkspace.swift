@@ -22,17 +22,32 @@ public final class ProjectWorkspace {
     /// one to the projects it opens (`dependency-injection`).
     public var layout: ComposableTabsLayout
 
+    /// This project's language servers, or `nil` when the host wired none.
+    ///
+    /// Held here because a `ProjectWorkspace` is what every pane in the window
+    /// is handed, so it is the one object already threaded to the file editor.
+    /// `ProjectWindowManager` owns the lifecycle — it builds this through its
+    /// `languageServicesFactory` and shuts it down when the window closes.
+    ///
+    /// Optional, and defaulted, on purpose. A `ProjectWorkspace` is constructed
+    /// in tests and in hosts that want no language support, and the production
+    /// registry starts real language-server subprocesses; a non-optional
+    /// parameter would spawn `sourcekit-lsp` from every one of those.
+    public let languageServices: ProjectLanguageServices?
+
     private var nextPaneNumber = 1
     private var cachedDirectories: FileBrowserDirectories?
 
     public init(
         repo: GitRepo,
         database: ProjectDatabase,
-        layout: ComposableTabsLayout? = nil
+        layout: ComposableTabsLayout? = nil,
+        languageServices: ProjectLanguageServices? = nil
     ) {
         self.repo = repo
         self.database = database
         self.layout = layout ?? ComposableTabsLayout.current ?? ComposableTabsLayout.placeholderOnly()
+        self.languageServices = languageServices
     }
 
     public var id: UUID { repo.id }

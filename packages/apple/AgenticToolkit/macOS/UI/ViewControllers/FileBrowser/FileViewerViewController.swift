@@ -22,14 +22,22 @@ public final class FileViewerViewController: NSViewController {
     private let documentStore: TextDocumentStore
     private let saveScheduler: TextDocumentSaveScheduler
 
+    /// This project's language servers, or `nil` for a viewer with none — a
+    /// test, or a file browser that is not a project window. Optional in type,
+    /// required in position: a default value would let a new call site lose
+    /// completion without ever saying so.
+    private let languageServices: ProjectLanguageServices?
+
     public init(
         selection: FileBrowserSelection,
         documentStore: TextDocumentStore,
-        saveScheduler: TextDocumentSaveScheduler
+        saveScheduler: TextDocumentSaveScheduler,
+        languageServices: ProjectLanguageServices?
     ) {
         self.selection = selection
         self.documentStore = documentStore
         self.saveScheduler = saveScheduler
+        self.languageServices = languageServices
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -43,7 +51,8 @@ public final class FileViewerViewController: NSViewController {
             rootView: FileViewerPaneView(
                 selection: selection,
                 documentStore: documentStore,
-                saveScheduler: saveScheduler
+                saveScheduler: saveScheduler,
+                languageServices: languageServices
             ).themedRoot()
         )
         hosting.frame = NSRect(x: 0, y: 0, width: 520, height: 400)
@@ -57,12 +66,36 @@ private struct FileViewerPaneView: View {
     @ObservedObject var selection: FileBrowserSelection
     let documentStore: TextDocumentStore
     let saveScheduler: TextDocumentSaveScheduler
+    let languageServices: ProjectLanguageServices?
 
     var body: some View {
         FileEditorView(
             selectedNode: selection.selectedNode,
             documentStore: documentStore,
-            saveScheduler: saveScheduler
+            saveScheduler: saveScheduler,
+            languageServices: languageServices,
+            openFile: openFile
         )
+    }
+
+    /// How a cross-file go-to-definition target gets shown.
+    ///
+    /// It originates here because this is the one view that holds both the
+    /// selection and the editor; everything below it — `FileEditorView`,
+    /// `FileEditorState`, `LSPJumpToDefinitionDelegate` — takes it as an
+    /// injected closure and knows nothing about a file browser.
+    ///
+    /// `selection` is captured, never `self`: this is a `struct` re-created on
+    /// every render, and the closure outlives the value it was made in.
+    ///
+    /// **Deliberate limitation:** the file is opened, but the target *range*
+    /// inside it is not selected. Doing that needs a way to hand a pending
+    /// cursor position to an editor that does not exist yet, so it is out of
+    /// scope for Task 3.3 rather than forgotten.
+    private var openFile: @MainActor (URL) -> Void {
+        let selection = self.selection
+        return { url in
+            selection.selectedNode = FileTreeNode(url: url, isDirectory: false)
+        }
     }
 }

@@ -37,14 +37,27 @@ public struct FileEditorView: View {
     ///     (see `TextDocumentCoordinator`, which every host constructs once).
     ///   - saveScheduler: The app-wide debounced autosave scheduler, likewise
     ///     shared rather than built per view.
+    ///   - languageServices: This project's language servers, or `nil` for a
+    ///     browser that has none. No default value: a default would let a new
+    ///     call site lose completion and go-to-definition without saying so.
+    ///   - openFile: How to show a cross-file go-to-definition target. Supplied
+    ///     from above rather than decided here — this view has no selection to
+    ///     drive.
     public init(
         selectedNode: FileTreeNode?,
         documentStore: TextDocumentStore,
-        saveScheduler: TextDocumentSaveScheduler
+        saveScheduler: TextDocumentSaveScheduler,
+        languageServices: ProjectLanguageServices?,
+        openFile: (@MainActor (URL) -> Void)?
     ) {
         self.selectedNode = selectedNode
         self._editorState = StateObject(
-            wrappedValue: FileEditorState(documentStore: documentStore, saveScheduler: saveScheduler)
+            wrappedValue: FileEditorState(
+                documentStore: documentStore,
+                saveScheduler: saveScheduler,
+                languageServices: languageServices,
+                openFile: openFile
+            )
         )
     }
 
@@ -195,7 +208,14 @@ private struct FileEditorContentView: View {
                         showMinimap: true
                     )
                 ),
-                state: editorState.sourceEditorStateBinding(for: uri)
+                state: editorState.sourceEditorStateBinding(for: uri),
+                // `SourceEditor` holds both of these `weak`; `FileEditorState.Slot`
+                // is what keeps them alive for the life of the cached editor.
+                // `coordinators:` and `highlightProviders:` are deliberately left
+                // at their defaults — they belong to later tasks, and passing
+                // `[]`/`nil` explicitly here would change nothing.
+                completionDelegate: editorState.completionDelegate(for: uri),
+                jumpToDefinitionDelegate: editorState.jumpToDefinitionDelegate(for: uri)
             )
             .environment(\.themePalette, appPalette)
         )
@@ -420,10 +440,28 @@ final class FileEditorState: ObservableObject {
         let language: CodeLanguage
         var sourceEditorState: SourceEditorState
         let changeObservation: TextDocumentObservation
+
+        /// The two language-server delegates for this document. Held here
+        /// because `SourceEditor` stores both `weak`, so something has to own
+        /// them — and the slot's lifetime is exactly the cached editor's, so
+        /// eviction releases them with everything else the document owns.
+        /// `nil` when the pane has no language services, or (for the jump
+        /// delegate) no way to open another file.
+        let completionDelegate: LSPCompletionDelegate?
+        let jumpToDefinitionDelegate: LSPJumpToDefinitionDelegate?
     }
 
     private let documentStore: TextDocumentStore
     private let saveScheduler: TextDocumentSaveScheduler
+
+    /// This pane's project language servers, or `nil` if it has none. The
+    /// *holder* rather than the registry itself, so the per-project objects
+    /// later tasks add beside it change no signature in this stack.
+    private let languageServices: ProjectLanguageServices?
+
+    /// How a cross-file go-to-definition target is shown. Injected from the
+    /// view that owns the selection; this type knows nothing about a file tree.
+    private let openFile: (@MainActor (URL) -> Void)?
 
     /// How the current file is being shown.
     @Published private(set) var display: Display = .empty
@@ -448,9 +486,16 @@ final class FileEditorState: ObservableObject {
     /// file can't land on top of a newer one.
     private var loadTask: Task<Void, Never>?
 
-    init(documentStore: TextDocumentStore, saveScheduler: TextDocumentSaveScheduler) {
+    init(
+        documentStore: TextDocumentStore,
+        saveScheduler: TextDocumentSaveScheduler,
+        languageServices: ProjectLanguageServices?,
+        openFile: (@MainActor (URL) -> Void)?
+    ) {
         self.documentStore = documentStore
         self.saveScheduler = saveScheduler
+        self.languageServices = languageServices
+        self.openFile = openFile
     }
 
     // Isolated explicitly (SE-0371): a MainActor class's deinit is
@@ -502,6 +547,14 @@ final class FileEditorState: ObservableObject {
 
     func document(for uri: DocumentUri) -> TextDocument? {
         slotsByURI[uri]?.document
+    }
+
+    func completionDelegate(for uri: DocumentUri) -> LSPCompletionDelegate? {
+        slotsByURI[uri]?.completionDelegate
+    }
+
+    func jumpToDefinitionDelegate(for uri: DocumentUri) -> LSPJumpToDefinitionDelegate? {
+        slotsByURI[uri]?.jumpToDefinitionDelegate
     }
 
     func sourceEditorStateBinding(for uri: DocumentUri) -> Binding<SourceEditorState> {
@@ -592,12 +645,34 @@ final class FileEditorState: ObservableObject {
             scheduler.schedule(document)
         }
 
+        // Both delegates are per-document, because every offset<->`Position`
+        // conversion they do is resolved against this one document. A pane with
+        // no language services simply has neither, and `SourceEditor` treats a
+        // `nil` delegate as "no completion" / "no jump" rather than failing.
+        var completionDelegate: LSPCompletionDelegate?
+        var jumpToDefinitionDelegate: LSPJumpToDefinitionDelegate?
+        if let languageServices {
+            completionDelegate = LSPCompletionDelegate(
+                document: document,
+                registry: languageServices.registry
+            )
+            if let openFile {
+                jumpToDefinitionDelegate = LSPJumpToDefinitionDelegate(
+                    document: document,
+                    registry: languageServices.registry,
+                    openFile: openFile
+                )
+            }
+        }
+
         slotsByURI[uri] = Slot(
             document: document,
             storage: storage,
             language: language,
             sourceEditorState: SourceEditorState(),
-            changeObservation: changeObservation
+            changeObservation: changeObservation,
+            completionDelegate: completionDelegate,
+            jumpToDefinitionDelegate: jumpToDefinitionDelegate
         )
         openOrder.append(uri)
         touch(uri)

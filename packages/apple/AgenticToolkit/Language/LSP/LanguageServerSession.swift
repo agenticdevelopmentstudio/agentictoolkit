@@ -161,7 +161,7 @@ public protocol LanguageServerSessionProtocol: Actor {
     /// `textDocument/hover` — Task 3.4.
     func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse
 
-    /// `textDocument/definition` — Task 3.4's go-to-definition.
+    /// `textDocument/definition` — Task 3.3's go-to-definition.
     func definition(_ params: TextDocumentPositionParams) async throws -> DefinitionResponse
 
     /// `textDocument/diagnostic` — Task 3.5, the pull model.
