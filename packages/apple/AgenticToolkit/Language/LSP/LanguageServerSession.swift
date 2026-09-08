@@ -67,7 +67,16 @@ public enum LanguageServerSessionError: Error, LocalizedError, Sendable, Equatab
     /// could not be collected within its budget (a backgrounded grandchild can
     /// hold the descriptors open indefinitely).
     case serverExited(status: Int32?)
-    /// A request was made on a session that is not `.running`.
+    /// A document notification or an LSP request was made on a session that is
+    /// not `.running`.
+    ///
+    /// Every traffic method on `LanguageServerSessionProtocol` throws this
+    /// rather than writing into a transport that is starting, torn down, or
+    /// dead. That check is the reason the session vends *methods* instead of
+    /// its `InitializingServer`: a handle handed out once keeps working after
+    /// `stop()` has closed the descriptor underneath it, and a write into a
+    /// closed descriptor is how `JSONRPCSession` ends up resuming one
+    /// continuation twice.
     case notRunning
 
     public var errorDescription: String? {
@@ -89,6 +98,17 @@ public enum LanguageServerSessionError: Error, LocalizedError, Sendable, Equatab
 /// The surface the registry and Tasks 3.2-3.6 consume. Backed by
 /// `LanguageServerSession` in production; tests substitute a fake conforming
 /// type via `LanguageServerRegistry.SessionFactory`.
+///
+/// LSP traffic is expressed as **methods on this protocol**, not as a handle to
+/// the underlying `InitializingServer`. Two reasons, and both are load-bearing:
+///
+/// - A fake has to be implementable in a few lines. Vending an
+///   `InitializingServer` would make every fake either spawn a real child or
+///   stop being able to stand in at all, and `LanguageServerRegistry` only ever
+///   hands out `any LanguageServerSessionProtocol`.
+/// - A handle is an unrevoked capability. Its holder keeps sending after
+///   `stop()`, into a descriptor `SubprocessChannel.terminate()` has closed.
+///   A method checks `state` on the actor first and throws `.notRunning`.
 public protocol LanguageServerSessionProtocol: Actor {
     nonisolated var id: UUID { get }
     nonisolated var name: String { get }
@@ -101,6 +121,54 @@ public protocol LanguageServerSessionProtocol: Actor {
 
     func start() async throws
     func stop() async
+
+    // MARK: What the server can do
+
+    /// The server's capabilities, or `nil` if it is not initialized.
+    /// Tasks 3.3-3.6 gate their features on this.
+    func capabilities() async -> ServerCapabilities?
+
+    /// Everything the server wrote to stderr, bounded. The one place a
+    /// "the editor has no completions and nobody knows why" report can be
+    /// turned into a cause.
+    func standardErrorText() async -> String
+
+    // MARK: Document synchronisation
+
+    /// `textDocument/didOpen`. Task 3.2 sends one per editor that opens a file
+    /// this server claims; a server that never sees the open answers every
+    /// later request with "unknown document".
+    func didOpen(_ params: DidOpenTextDocumentParams) async throws
+
+    /// `textDocument/didChange`. Task 3.2's edit forwarding. The server's view
+    /// of the buffer is only as current as the last of these it received.
+    func didChange(_ params: DidChangeTextDocumentParams) async throws
+
+    /// `textDocument/didSave`. Declared in `clientCapabilities`
+    /// (`didSave: true`), so a server may legitimately wait for it — several
+    /// only re-run diagnostics on save.
+    func didSave(_ params: DidSaveTextDocumentParams) async throws
+
+    /// `textDocument/didClose`. Task 3.2's counterpart to `didOpen`; without it
+    /// a server keeps indexing buffers no editor is showing any more.
+    func didClose(_ params: DidCloseTextDocumentParams) async throws
+
+    // MARK: Requests
+
+    /// `textDocument/completion` — Task 3.3.
+    func completion(_ params: CompletionParams) async throws -> CompletionResponse
+
+    /// `textDocument/hover` — Task 3.4.
+    func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse
+
+    /// `textDocument/definition` — Task 3.4's go-to-definition.
+    func definition(_ params: TextDocumentPositionParams) async throws -> DefinitionResponse
+
+    /// `textDocument/diagnostic` — Task 3.5, the pull model.
+    func diagnostics(_ params: DocumentDiagnosticParams) async throws -> DocumentDiagnosticReport
+
+    /// `textDocument/semanticTokens/full` — Task 3.6.
+    func semanticTokensFull(_ params: SemanticTokensParams) async throws -> SemanticTokensResponse
 }
 
 /// One running language server: the child process, the JSON-RPC plumbing over
@@ -142,6 +210,17 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         /// before `SubprocessChannel.terminate()` takes over. A server that
         /// ignores `shutdown` must not hold up the app.
         public var shutdownBudgetSeconds: TimeInterval
+        /// How long `stop()` waits for a `start()` it is racing before it
+        /// abandons it and tears down anyway. See `teardown()` step 1: the
+        /// wait is what makes the child reapable, and the bound is what stops
+        /// a server that never answers `initialize` from wedging app quit.
+        public var abandonedStartBudgetSeconds: TimeInterval
+        /// How long the exit status of a server whose stdout has already ended
+        /// is waited for. Bounded because a child that has exited while a
+        /// grandchild it backgrounded still holds the descriptors makes the
+        /// wait unbounded — the same hazard
+        /// `SubprocessChannel.standardErrorText()` documents.
+        public var exitStatusBudgetSeconds: TimeInterval
         public var clientName: String
         public var clientVersion: String
 
@@ -155,6 +234,8 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
             rootURL: URL,
             initializeBudgetSeconds: TimeInterval = 30,
             shutdownBudgetSeconds: TimeInterval = 2,
+            abandonedStartBudgetSeconds: TimeInterval = 1,
+            exitStatusBudgetSeconds: TimeInterval = 1,
             clientName: String = "AgenticToolkit",
             clientVersion: String = "1.0.0"
         ) {
@@ -167,26 +248,37 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
             self.rootURL = rootURL
             self.initializeBudgetSeconds = initializeBudgetSeconds
             self.shutdownBudgetSeconds = shutdownBudgetSeconds
+            self.abandonedStartBudgetSeconds = abandonedStartBudgetSeconds
+            self.exitStatusBudgetSeconds = exitStatusBudgetSeconds
             self.clientName = clientName
             self.clientVersion = clientVersion
         }
     }
 
-    /// How long the exit status of a server whose stdout has already ended is
-    /// waited for. Bounded because a child that has exited while a grandchild
-    /// it backgrounded still holds the descriptors makes the wait unbounded —
-    /// the same hazard `SubprocessChannel.standardErrorText()` documents.
-    private static let exitStatusBudgetSeconds: TimeInterval = 1
-
     public nonisolated let id: UUID
     public nonisolated let name: String
     public nonisolated let languageIds: [String]
 
-    /// The initialized server, once `start()` has completed. Tasks 3.2-3.6
-    /// send their notifications and requests through this.
-    public private(set) var server: InitializingServer?
+    /// The initialized server, once `start()` has completed.
+    ///
+    /// **Private, and it stays private.** Every caller reaches the server
+    /// through the traffic methods below, which check `state` on this actor
+    /// first. A handed-out reference cannot be revoked by `stop()`: its holder
+    /// would keep writing into a descriptor `terminate()` has closed, which is
+    /// the JSONRPC path that resumes one continuation twice and traps the
+    /// process.
+    private var server: InitializingServer?
 
     public private(set) var state: LanguageServerSessionState = .idle
+
+    /// The in-flight `start()`, held so `stop()` can wait for it.
+    ///
+    /// This is what makes teardown *ordered with respect to* the start rather
+    /// than concurrent with it — see `teardown()` step 1. `MCPClient` holds its
+    /// `connectTask` for exactly the same reason and against exactly the same
+    /// ordering: work that publishes a child from inside a suspension cannot be
+    /// torn down beside it, only after it.
+    private var startTask: Task<Void, Error>?
 
     /// Set by `stop()` before its first suspension, and never cleared.
     ///
@@ -224,12 +316,22 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// Spawns the server, builds the JSON-RPC stack over it, and runs the
     /// `initialize` handshake under `initializeBudgetSeconds`.
     ///
-    /// Every guard here is decided **before** the suspension it protects, and
-    /// the state is published before the suspension rather than after it — the
-    /// `.starting` case exists precisely because a `Bool` cannot express "a
-    /// child may already be running but `start()` has not resumed to record
-    /// it", and a `stop()` landing in that window would otherwise find nothing
-    /// to reap.
+    /// The work runs in a **held task** (`startTask`) rather than inline, so a
+    /// concurrent `stop()` has something to wait for. That is the whole
+    /// lifecycle argument, and the guards are not a substitute for it: a guard
+    /// decided before a suspension protects the *actor's* state, but the child
+    /// process and the child's stdin are external resources that
+    /// `LanguageServerChannel.connect` and `initializeIfNeeded()` publish from
+    /// inside their suspensions, where no guard on this actor can see them. A
+    /// `stop()` that tore down beside such a suspension would leave an
+    /// unreapable child (`SubprocessChannel.terminate()` before `launch()` is a
+    /// no-op that sets no barrier) or close stdin under an in-flight
+    /// `initialize` write. `teardown()` waits instead.
+    ///
+    /// What the guards do cover: `isStopped` is decided before this method's
+    /// first suspension, so a `stop()` that completed first can never be
+    /// overtaken; and `.starting` is published before the first suspension so a
+    /// `stop()` landing mid-start sees a session that claims to own a child.
     ///
     /// Calling twice is a no-op; a concurrent second call made while the first
     /// is still `.starting` is the same no-op and returns immediately rather
@@ -243,6 +345,32 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         // most of that span one does.
         state = .starting
 
+        let task = Task { try await self.performStart() }
+        startTask = task
+        do {
+            try await task.value
+            if startTask == task { startTask = nil }
+        } catch {
+            // Cleared *before* the teardown below, so that teardown's step 1
+            // does not try to await the task it is running inside.
+            if startTask == task { startTask = nil }
+            await fail(with: error)
+            await teardown()
+            throw error
+        }
+    }
+
+    /// The body of `start()`. Runs on this actor, and its completion is what
+    /// `teardown()` waits for — so every child it spawns and every request it
+    /// issues is either finished or ruled out before teardown touches the
+    /// transport.
+    ///
+    /// It throws the *diagnosed* cause rather than the raw error, because the
+    /// stream-end box may hold a better explanation than the symptom that
+    /// surfaced here. Publishing `.failed` and tearing down are `start()`'s
+    /// job, not this method's: doing them here would mean tearing down from
+    /// inside the task teardown is waiting for.
+    private func performStart() async throws {
         let channel = SubprocessChannel(configuration: .init(
             executableURL: configuration.executableURL,
             arguments: configuration.arguments,
@@ -255,10 +383,16 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
             // Both types are load-bearing; neither gets renamed.
             framing: AgenticToolkitCore.MessageFraming.contentLength
         ))
-        // Published before the launch suspension, so a `stop()` that lands
-        // mid-launch has something to terminate. `terminate()` guards on the
-        // channel's own `hasLaunched`, so it is a no-op if the spawn has not
-        // happened yet and a real kill if it has.
+        // Published before the launch suspension so `teardown()` has something
+        // to terminate — but publishing it is *not* what makes the child
+        // reapable, and reading it that way is how this file got its first
+        // orphan. `SubprocessChannel.terminate()` guards on the channel's own
+        // `hasLaunched` and does nothing whatsoever before the spawn: it leaves
+        // no barrier, so a `launch()` that completes afterwards still produces
+        // a child, and by then `stop()` has finished and nothing will ever kill
+        // it. What closes that window is `teardown()` awaiting `startTask`
+        // before it terminates, so the spawn has already happened or been ruled
+        // out by the time `terminate()` runs.
         self.channel = channel
 
         let connected: LanguageServerChannel
@@ -267,16 +401,21 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
                 self?.recordStreamEnd(error)
             }
         } catch {
-            let cause = await diagnosedCause(for: error)
-            await fail(with: cause)
-            await teardown()
-            throw cause
+            throw await diagnosedCause(for: error)
         }
 
-        // A `stop()` that landed while the line above was suspended has already
-        // terminated the channel. Building a JSON-RPC stack over a dead child
-        // would publish a server nobody can use.
-        guard case .starting = state else { return }
+        // A `stop()` may have landed while the line above was suspended. It has
+        // set `isStopped` — that is decided before its first suspension — but it
+        // has *not* necessarily terminated the channel: a `terminate()` that ran
+        // before the spawn completed did nothing at all. So this returns rather
+        // than building a JSON-RPC stack over a child that is about to die, and
+        // the child (if the spawn did complete) is `teardown()`'s to reap, which
+        // it can do because it waits for this task first.
+        //
+        // The `isStopped` half also keeps the `initialize` write below from ever
+        // being issued after a stop was observed — an in-flight write is what
+        // `terminate()` closing stdin turns into a double-resumed continuation.
+        guard !isStopped, case .starting = state else { return }
         self.bridge = connected
 
         // `addMessageFraming: false`: `SubprocessChannel` already frames.
@@ -292,29 +431,28 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
             let budget = configuration.initializeBudgetSeconds
             _ = try await withWallClockBudget(budget) { try await server.initializeIfNeeded() }
         } catch {
-            let cause = await diagnosedCause(for: error)
-            await fail(with: cause)
-            await teardown()
-            throw cause
+            throw await diagnosedCause(for: error)
         }
 
-        guard case .starting = state else { return }
+        guard !isStopped, case .starting = state else { return }
         state = .running
     }
 
     /// Stops the server and retires this session permanently.
     ///
-    /// Teardown is ordered, and the graceful half is bounded:
-    /// `shutdown` request, then `exit` notification (both inside
-    /// `InitializingServer.shutdownAndExit()`, under
-    /// `shutdownBudgetSeconds`), then `SubprocessChannel.terminate()` as the
-    /// backstop, which always runs.
+    /// Teardown is ordered, and every unbounded half is bounded: wait out the
+    /// `start()` this call is racing, then `shutdown` + `exit` (both inside
+    /// `InitializingServer.shutdownAndExit()`, under `shutdownBudgetSeconds`),
+    /// then `SubprocessChannel.terminate()` as the backstop, which always runs.
+    /// The order is argued step by step on `teardown()`.
     ///
     /// `terminate()` costs up to 2.5 s flat per channel, is **not** cancellable,
     /// and the budgets do not share between channels — so a caller stopping
     /// several sessions must do it in a `withTaskGroup`, never a `for` loop.
-    /// `LanguageServerRegistry.reconcile` is the only multi-session teardown
-    /// path in this task and does exactly that.
+    /// `LanguageServerRegistry` has **two** multi-session teardown paths —
+    /// `reconcile` retiring superseded sessions, and `shutdown()` at app quit —
+    /// and both route through `LanguageServerRegistry.stopAll`, which is that
+    /// task group. A third path must route through it too rather than looping.
     ///
     /// A session that had already `.failed` keeps that state: how it died is
     /// more useful than the fact that it was then stopped.
@@ -327,13 +465,6 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         state = .stopped
     }
 
-    /// Everything the server wrote to stderr. Available after a failure (where
-    /// it is also carried on the failure state) and while running.
-    public func standardErrorText() async -> String {
-        guard let channel else { return "" }
-        return await channel.standardErrorText()
-    }
-
     /// The server's capabilities, or `nil` if it is not initialized.
     /// Tasks 3.3-3.6 gate their features on this.
     public func capabilities() async -> ServerCapabilities? {
@@ -341,37 +472,163 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         return await server.capabilities
     }
 
+    /// Everything the server wrote to stderr. Available after a failure (where
+    /// it is also carried on the failure state) and while running.
+    ///
+    /// Deliberately not gated on `.running`: the state this is most needed in
+    /// is `.failed`.
+    public func standardErrorText() async -> String {
+        guard let channel else { return "" }
+        return await channel.standardErrorText()
+    }
+
+    // MARK: - Traffic
+
+    /// The one gate every notification and request goes through.
+    ///
+    /// It is a *synchronous* actor method on purpose: the check and the handle
+    /// it returns are decided in the same actor step, so a `stop()` cannot land
+    /// between them. What can still happen is a `stop()` landing after this
+    /// returns and before the write reaches the descriptor — that write fails
+    /// with a transport error rather than silently succeeding, which is the
+    /// outcome a caller can act on.
+    private func runningServer() throws -> InitializingServer {
+        guard !isStopped, case .running = state, let server else {
+            throw LanguageServerSessionError.notRunning
+        }
+        return server
+    }
+
+    public func didOpen(_ params: DidOpenTextDocumentParams) async throws {
+        try await runningServer().sendNotification(.textDocumentDidOpen(params))
+    }
+
+    public func didChange(_ params: DidChangeTextDocumentParams) async throws {
+        try await runningServer().sendNotification(.textDocumentDidChange(params))
+    }
+
+    public func didSave(_ params: DidSaveTextDocumentParams) async throws {
+        try await runningServer().sendNotification(.textDocumentDidSave(params))
+    }
+
+    public func didClose(_ params: DidCloseTextDocumentParams) async throws {
+        try await runningServer().sendNotification(.textDocumentDidClose(params))
+    }
+
+    public func completion(_ params: CompletionParams) async throws -> CompletionResponse {
+        try await runningServer().sendRequest(.completion(params, ClientRequest.NullHandler))
+    }
+
+    public func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse {
+        try await runningServer().sendRequest(.hover(params, ClientRequest.NullHandler))
+    }
+
+    public func definition(_ params: TextDocumentPositionParams) async throws -> DefinitionResponse {
+        try await runningServer().sendRequest(.definition(params, ClientRequest.NullHandler))
+    }
+
+    public func diagnostics(_ params: DocumentDiagnosticParams) async throws -> DocumentDiagnosticReport {
+        try await runningServer().sendRequest(.diagnostics(params, ClientRequest.NullHandler))
+    }
+
+    public func semanticTokensFull(_ params: SemanticTokensParams) async throws -> SemanticTokensResponse {
+        try await runningServer().sendRequest(.semanticTokensFull(params, ClientRequest.NullHandler))
+    }
+
     // MARK: - Teardown
 
+    /// Releases the child, in the one order that is sound under every
+    /// interleaving of `start()` and `stop()`.
+    ///
+    /// The shape is `MCPClient.teardown()`'s, for the same reason: work that
+    /// publishes an external resource from inside a suspension cannot be
+    /// cancelled out of existence, only waited for.
+    ///
+    /// 1. **Wait out the in-flight `start()`, bounded.** This is the step the
+    ///    rest depends on. Two windows in `performStart()` are invisible to any
+    ///    guard on this actor — the suspension inside
+    ///    `LanguageServerChannel.connect`, where `SubprocessChannel.launch()`
+    ///    spawns the child, and the suspension inside `initializeIfNeeded()`,
+    ///    where a write to the child's stdin is outstanding. Terminating beside
+    ///    either one is what produced both HIGH findings: `terminate()` before
+    ///    the spawn is a **no-op that sets no barrier**, so the spawn completes
+    ///    afterwards and nothing is left to reap it; and `terminate()` during
+    ///    the write closes stdin under `JSONRPCSession`, which then fails the
+    ///    request's responder from its write path *and* again from
+    ///    `readSequenceFinished()` — one continuation resumed twice, which traps
+    ///    the process. Waiting first makes both unreachable: when step 3 runs,
+    ///    the spawn has happened or been ruled out, and the write has completed
+    ///    or failed on its own.
+    ///
+    ///    The task is **not** cancelled first, which is where this departs from
+    ///    `MCPClient`. Cancelling would resume `performStart()` immediately
+    ///    through `withWallClockBudget`'s cancellation handler while the
+    ///    `initialize` write is still outstanding inside JSONRPC — reopening the
+    ///    exact window this step exists to close. The budget, not cancellation,
+    ///    is what bounds the wait.
+    ///
+    ///    The bound is `abandonedStartBudgetSeconds`, and it exists so a server
+    ///    that never answers `initialize` cannot make app quit hang. A start
+    ///    still in flight when teardown runs is abandoned by definition, so
+    ///    cutting it short costs it nothing real; its error still reaches its
+    ///    own caller, because `start()` awaits the task's completion and
+    ///    rethrows from there.
+    /// 2. **Graceful `shutdown` + `exit`, under `shutdownBudgetSeconds`.** A
+    ///    server that ignores `shutdown`, or that is already dead, is not a
+    ///    teardown failure — step 3 is the answer to both.
+    /// 3. **`terminate()`, unconditional.** The backstop, and what makes this
+    ///    actor the only owner of the child.
+    /// 4. **`drain()`.** `terminate()` finishes the frame stream itself after
+    ///    waiting out its own pump-drain grace, so this is already finishing or
+    ///    done. Waiting is what delivers the frames a graceful child wrote
+    ///    between SIGTERM and `exit`. It is bounded in every ordering because
+    ///    `bridge` is only non-nil once step 3 has a launched channel to
+    ///    terminate.
+    /// 5. **`terminate()` again.** Only step 1's budget expiring can make this
+    ///    more than a no-op: an abandoned start that resumes afterwards and
+    ///    completes its spawn leaves a child step 3 could not have seen. A
+    ///    second `terminate()` on a live channel reaps it, and
+    ///    `SubprocessChannel.terminate()` is idempotent — a second call awaits
+    ///    the first call's own termination task rather than repeating the 2.5 s.
+    ///    This is `MCPClient.teardown()`'s step 5, one transport over.
+    ///
+    ///    What it does not close is the sliver in which an abandoned start
+    ///    resumes and spawns *between* steps 3 and 5. Closing that needs a
+    ///    terminate-before-launch barrier inside `SubprocessChannel`, which is
+    ///    out of this task's scope; reaching it at all requires a start wedged
+    ///    for the whole of `abandonedStartBudgetSeconds` that then resumes
+    ///    within microseconds.
     private func teardown() async {
+        if let startTask {
+            _ = try? await withWallClockBudget(configuration.abandonedStartBudgetSeconds) {
+                _ = try? await startTask.value
+            }
+        }
+
         if let server {
             let budget = configuration.shutdownBudgetSeconds
             do {
                 try await withWallClockBudget(budget) { try await server.shutdownAndExit() }
             } catch {
-                // A server that ignores `shutdown`, or that is already dead, is
-                // not a teardown failure — `terminate()` below is the answer to
-                // both. Losing the reason would make a hung shutdown invisible,
-                // so it is logged and not rethrown.
+                // Losing the reason would make a hung shutdown invisible, so it
+                // is logged and not rethrown.
                 let message = error.localizedDescription
                 logger.debug("Graceful LSP shutdown did not complete: \(message, privacy: .public)")
             }
         }
 
-        // The backstop, unconditional: it is what makes this actor the only
-        // owner of the child.
         await channel?.terminate()
-
-        // `terminate()` finishes the frame stream itself, after waiting out its
-        // own pump-drain grace, so this is already finishing or done. Waiting
-        // is what delivers the frames a graceful child wrote between SIGTERM
-        // and `exit`; finishing without waiting would discard them.
         await bridge?.drain()
+        await channel?.terminate()
 
         server = nil
         bridge = nil
-        // `channel` is deliberately kept: it is terminated and inert, and it is
-        // where `standardErrorText()` reads from after a failure.
+        // `channel` is deliberately kept, and this is an intra-object
+        // invariant rather than a retain that grows: it is terminated and
+        // inert, and it is where `standardErrorText()` reads from after a
+        // failure. Nothing accumulates, because a retired session is dropped
+        // from `LanguageServerRegistry.sessions` whole — the channel goes with
+        // it, captured stderr buffer and all.
     }
 
     // MARK: - Failure
@@ -383,6 +640,15 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         Task { [weak self] in await self?.publishStreamEnd() }
     }
 
+    /// Publishes the failure for a stream end nobody asked for.
+    ///
+    /// The cause comes straight out of the box rather than through
+    /// `diagnosedCause(for:)`: this path *is* the stream end, so it has no
+    /// fallback to fall back to. A recorded transport error is the explanation;
+    /// its absence means the server exited at a frame boundary, which
+    /// `serverExited(status:)` says exactly. Routing it through a fallback of
+    /// `.notRunning` used to surface "The language server is not running." to
+    /// the user as the *cause* of the server not running.
     private func publishStreamEnd() async {
         // A stop we asked for ends the stream too; that is not a failure.
         guard !isStopped else { return }
@@ -390,7 +656,12 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         case .idle, .stopped, .failed: return
         case .starting, .running: break
         }
-        let cause = await diagnosedCause(for: LanguageServerSessionError.notRunning)
+        let cause: any Error
+        if let recorded = streamEnd.value.error {
+            cause = recorded
+        } else {
+            cause = LanguageServerSessionError.serverExited(status: await exitStatus())
+        }
         await fail(with: cause)
     }
 
@@ -399,7 +670,8 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// A stream that has already ended explains *why* a request failed;
     /// `ProtocolTransportError.dataStreamClosed` or a `WallClockBudgetExceeded`
     /// only says that it did. Reading the box is synchronous, so this does not
-    /// race the handler's own hop onto this actor.
+    /// race the handler's own hop onto this actor. Callers are `performStart()`'s
+    /// two failure paths, where `fallback` is the real error the operation threw.
     private func diagnosedCause(for fallback: any Error) async -> any Error {
         let ended = streamEnd.value
         guard ended.didEnd else { return fallback }
@@ -409,7 +681,7 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
 
     private func exitStatus() async -> Int32? {
         guard let channel else { return nil }
-        return try? await withWallClockBudget(Self.exitStatusBudgetSeconds) {
+        return try? await withWallClockBudget(configuration.exitStatusBudgetSeconds) {
             await channel.waitUntilExit()
         }
     }

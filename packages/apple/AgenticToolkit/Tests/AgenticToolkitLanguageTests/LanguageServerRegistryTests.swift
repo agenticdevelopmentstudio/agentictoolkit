@@ -1,13 +1,19 @@
 import AgenticToolkitCore
 import Foundation
+import LanguageServerProtocol
 import Testing
 @testable import AgenticToolkitLanguage
 
-/// Reconciliation and root-marker resolution, with **no process ever
-/// launched**: every registry here is built with `builtInConfigurations: []`
-/// and an injected `sessionFactory` that hands back `FakeLanguageServerSession`.
-/// That is what the injected factory is for — a registry test that spawned
+/// Reconciliation and root-marker resolution. Every registry here is built
+/// with `builtInConfigurations: []` and, with one deliberate exception, an
+/// injected `sessionFactory` that hands back `FakeLanguageServerSession`. That
+/// is what the injected factory is for — a registry test that spawned
 /// `sourcekit-lsp` would be a language-server test.
+///
+/// The exception is section 7, which is about the *default* factory and so
+/// cannot inject one. It launches a `/bin/sh` scripted server — the same kind
+/// of double `LanguageServerSessionTests` uses — never a real language
+/// server.
 @Suite("LanguageServerRegistry")
 @MainActor
 struct LanguageServerRegistryTests {
@@ -90,6 +96,56 @@ struct LanguageServerRegistryTests {
             state = .stopped
             log.recordStop(id)
         }
+
+        // MARK: The traffic half of the protocol
+
+        // Adjudication 2's whole point, and the reason `LanguageServerSession`
+        // vends methods rather than its `InitializingServer`: a substitute has
+        // to be writable in a few lines. Vending the server would force this
+        // fake to spawn a real child, and `LanguageServerRegistry` only ever
+        // hands out `any LanguageServerSessionProtocol`.
+        //
+        // Every request path answers "nothing", which is a valid LSP response
+        // and exactly what Tasks 3.3-3.6 must already handle from a server
+        // that has no result. `.notRunning` off a stopped session is the other
+        // half of the contract they have to handle.
+
+        private func requireRunning() throws {
+            guard case .running = state else { throw LanguageServerSessionError.notRunning }
+        }
+
+        func capabilities() async -> ServerCapabilities? { nil }
+        func standardErrorText() async -> String { "" }
+
+        func didOpen(_ params: DidOpenTextDocumentParams) async throws { try requireRunning() }
+        func didChange(_ params: DidChangeTextDocumentParams) async throws { try requireRunning() }
+        func didSave(_ params: DidSaveTextDocumentParams) async throws { try requireRunning() }
+        func didClose(_ params: DidCloseTextDocumentParams) async throws { try requireRunning() }
+
+        func completion(_ params: CompletionParams) async throws -> CompletionResponse {
+            try requireRunning()
+            return nil
+        }
+
+        func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse {
+            try requireRunning()
+            return nil
+        }
+
+        func definition(_ params: TextDocumentPositionParams) async throws -> DefinitionResponse {
+            try requireRunning()
+            return nil
+        }
+
+        func diagnostics(_ params: DocumentDiagnosticParams) async throws -> DocumentDiagnosticReport {
+            try requireRunning()
+            return DocumentDiagnosticReport(kind: .full, items: [])
+        }
+
+        func semanticTokensFull(_ params: SemanticTokensParams) async throws -> SemanticTokensResponse {
+            try requireRunning()
+            return nil
+        }
     }
 
     // MARK: - Fixtures
@@ -148,6 +204,21 @@ struct LanguageServerRegistryTests {
             try? await Task.sleep(for: .milliseconds(20))
         }
         return condition()
+    }
+
+    /// The same ceiling, for a condition that has to cross an actor boundary.
+    /// Section 7's session is a real `LanguageServerSession`, so reading its
+    /// state is an `await` and the synchronous `poll` above cannot express it.
+    private func pollAsync(
+        seconds: TimeInterval = LanguageServerRegistryTests.pollSeconds,
+        until condition: () async -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return await condition()
     }
 
     /// A unique directory that exists only for the duration of `body`.
@@ -428,5 +499,125 @@ struct LanguageServerRegistryTests {
             let session = registry.session(for: configuration.id) as? FakeLanguageServerSession
             #expect(session?.rootURL.standardizedFileURL == repository.standardizedFileURL)
         }
+    }
+
+    // MARK: - 7. The production session factory
+
+    /// The one server this suite actually launches, and only because the
+    /// factory under test is the one that builds real sessions.
+    ///
+    /// It reports the two environment variables it was given before doing
+    /// anything else, answers `initialize` from the first header line — enough
+    /// to know `JSONRPCSession` has registered the responder for id 1 — and
+    /// then copies the rest of what the client wrote to **stderr** rather than
+    /// discarding it. That copy is the initialize *body*, which is where
+    /// `rootUri` is. Between them, stderr carries the evidence for three of the
+    /// factory's mappings; reaching `.running` at all is the evidence for the
+    /// other two.
+    private static let productionFactoryProbeScript = #"""
+    printf 'ENV %s %s\n' "$LSP_TEST_PLAIN" "$LSP_TEST_OVERRIDDEN" >&2
+    CAPS='{"hoverProvider":true}'
+    BODY='{"jsonrpc":"2.0","id":1,"result":{"capabilities":'"$CAPS"'}}'
+    IFS= read -r HEADER_LINE
+    printf 'Content-Length: %s\r\n\r\n%s' "${#BODY}" "$BODY"
+    cat >&2
+    """#
+
+    /// `LanguageServerRegistry.init`'s **default** `sessionFactory` — the one
+    /// the app uses and the only code path in this file that no other test
+    /// covers, because every other test replaces it.
+    ///
+    /// The registry is constructed without a `sessionFactory:` argument on
+    /// purpose. Passing one, even a faithful copy, would test the copy.
+    ///
+    /// What it catches: every mapping the closure performs, each of which is
+    /// silent when wrong. A `command` not carried into `executableURL` gives a
+    /// session that never starts; `arguments` dropped turns `/bin/sh -c script`
+    /// into an interactive shell that answers nothing; the environment merged
+    /// the other way round makes a secret lose to the placeholder a settings
+    /// file holds, which is how a token-authenticated server fails to
+    /// authenticate with the settings UI showing the right value; a `rootURL`
+    /// not forwarded roots every server at whatever the session defaults to,
+    /// so cross-file navigation silently resolves nothing; and an `id` not
+    /// carried through makes `session(for:)` miss.
+    ///
+    /// It also pins that the session the default factory builds is one the
+    /// registry can drive: `stopAll` reaches a real `LanguageServerSession`,
+    /// not just a fake whose `stop()` is a flag.
+    @Test("the default session factory maps a configuration onto a session that starts")
+    func defaultSessionFactoryBuildsAWorkingSession() async throws {
+        let workspace = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("LSPFactoryTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+
+        let store = makeStore()
+        let registry = LanguageServerRegistry(
+            store: store,
+            workspaceURL: workspace,
+            builtInConfigurations: []
+        )
+
+        var configuration = LanguageServerConfiguration(
+            name: "Scripted",
+            languageIds: ["swift"],
+            command: "/bin/sh",
+            arguments: ["-c", Self.productionFactoryProbeScript],
+            environment: [
+                "LSP_TEST_PLAIN": "from-configuration",
+                // Also present in the secrets below. The registry merges
+                // secrets *over* the configuration, so the secret must win.
+                "LSP_TEST_OVERRIDDEN": "from-configuration"
+            ],
+            // Empty, so the resolved root is the workspace itself and the
+            // assertion below is about the factory rather than about marker
+            // resolution, which section 6 already covers.
+            rootMarkers: []
+        )
+        configuration.isEnabled = true
+
+        // Secrets first: `publisher(for:)` replays its current value, so
+        // setting configurations last means the descriptor is complete the
+        // first time reconcile builds one, and exactly one session is created.
+        store.set(
+            [configuration.id.uuidString: ["LSP_TEST_OVERRIDDEN": "from-secrets"]],
+            for: UserSettings.languageServerSecrets
+        )
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+
+        let session = try #require(registry.session(for: configuration.id))
+        #expect(session is LanguageServerSession)
+
+        let running = await pollAsync {
+            if case .running = await session.state { return true }
+            return false
+        }
+        #expect(running, "the default factory's session never reached .running")
+
+        // Only the child could have supplied this, so the handshake really
+        // completed over the process the factory named.
+        let capabilities = await session.capabilities()
+        #expect(capabilities?.hoverProvider != nil)
+
+        let wire = await session.standardErrorText()
+        // Merge direction: the plain value survives, the secret overrides.
+        #expect(wire.contains("ENV from-configuration from-secrets"))
+        // The initialize body the child echoed back carries the root the
+        // registry resolved and the factory forwarded.
+        #expect(wire.contains(#""rootUri""#))
+        #expect(wire.contains(workspace.lastPathComponent))
+
+        // And the registry can tear a real session down, not just a fake.
+        configuration.isEnabled = false
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+        #expect(registry.session(for: configuration.id) == nil)
+
+        let stopped = await pollAsync {
+            switch await session.state {
+            case .stopped, .failed: return true
+            case .idle, .starting, .running: return false
+            }
+        }
+        #expect(stopped, "the retired session was never stopped")
     }
 }
