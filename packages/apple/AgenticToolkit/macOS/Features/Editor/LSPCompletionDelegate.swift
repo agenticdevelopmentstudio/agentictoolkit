@@ -66,18 +66,38 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// still naming the request doing the writing.
     private var currentRequestGeneration = 0
 
-    /// The same discipline, for the trigger-character cache: identifies the
-    /// most recent resolution so a superseded one cannot write over a newer
-    /// one's answer.
+    /// The trigger-character cache is ordered by these two, which between them
+    /// hold an invariant with two halves:
     ///
-    /// A counter of its own rather than a share of `currentRequestGeneration`,
+    /// 1. A write must never overwrite one derived from newer information.
+    /// 2. A call that writes nothing must not stop another call from writing.
+    ///
+    /// A claim-a-ticket counter buys the first half at the cost of the second,
+    /// and that cost is the whole bug this shape replaced: a caller that took a
+    /// ticket and then returned early — no session, no capabilities yet — left
+    /// its ticket the newest one, so a resolution still suspended inside the
+    /// server was refused when it resumed. Nothing wrote anything;
+    /// `resolveTriggerCharacters` does not retry on its own and
+    /// `registry.$sessions` does not re-emit, so the set stayed empty and `.`
+    /// silently stopped opening the completion window.
+    ///
+    /// So these do not order *calls*, they order *information*.
+    /// `triggerReadClock` stamps each read of the facts an answer is derived
+    /// from, taken at entry before the first suspension, and
+    /// `resolvedTriggerReadStamp` is the stamp of the read the cached answer
+    /// came from. `storeTriggerCharacters` admits a write whose stamp is at
+    /// least the cached one's — that is half 1 — and because the bar moves only
+    /// when someone actually writes, a stamp nobody used blocks nobody, which
+    /// is half 2.
+    ///
+    /// A clock of its own rather than a share of `currentRequestGeneration`,
     /// because the two caches have different lifetimes. `clearCache()` bumps
     /// the request generation on every window close and every applied
     /// completion — routine events that say nothing about which server serves
-    /// this document — and a shared counter would make each of them throw away
-    /// a trigger resolution that is in flight. Since `resolveTriggerCharacters`
-    /// never retries on its own, a discarded write there is not re-asked for.
-    private var currentTriggerGeneration = 0
+    /// this document — and a shared counter would make each of them discard a
+    /// trigger resolution that is in flight and that nothing would re-ask for.
+    private var triggerReadClock = 0
+    private var resolvedTriggerReadStamp = 0
 
     init(document: TextDocument, registry: LanguageServerRegistry) {
         self.document = document
@@ -130,30 +150,42 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// `$sessions` subscription makes them reachable — a server disabled and
     /// re-enabled publishes twice while the first resolution is still suspended
     /// — so a superseded call neither writes the cache nor hands its own answer
-    /// back to be published.
+    /// back to be published. Ordering is by the age of the information, not by
+    /// who started last, so a call that overtakes this one and then returns
+    /// without an answer does not stop this one from landing its own; see
+    /// `triggerReadClock`.
     @discardableResult
     func resolveTriggerCharacters() async -> Set<String> {
-        // Claimed before the guard, not merely before the first `await`: the
-        // clear below is a cache write too, and it has to supersede whatever is
-        // already in flight rather than be undone by it.
-        let generation = beginTriggerResolution()
+        // Stamped before the session is read, so the stamp dates the oldest
+        // fact this call could write from.
+        let stamp = nextTriggerReadStamp()
         guard let session = registry.session(forLanguageId: document.languageId) else {
             // The server was removed or disabled. Its trigger set goes with it
-            // rather than being answered on behalf of a session that is gone.
-            resolvedTriggerCharacters = nil
-            resolvedTriggerCharacterSource = nil
-            return []
+            // rather than being answered on behalf of a session that is gone —
+            // recorded through the same guard as any other answer, so a
+            // resolution still suspended against the retired session cannot
+            // undo it, and so a caller this write supersedes falls back to
+            // "none" instead of to the set it was about to publish.
+            return storeTriggerCharacters(nil, from: nil, readAt: stamp)
         }
         if let resolvedTriggerCharacters, resolvedTriggerCharacterSource === session {
             return resolvedTriggerCharacters
         }
         try? await session.start()
         guard let capabilities = await session.capabilities(),
-              let completionProvider = capabilities.completionProvider else { return [] }
+              let completionProvider = capabilities.completionProvider else {
+            // Either the handshake has not finished — `capabilities()` answers
+            // `nil` until the session is running — or the server declares no
+            // completion at all. Recorded as *unresolved* rather than as an
+            // empty answer, because the cache hit above must not start handing
+            // back `[]` for a server that is still starting; the next
+            // `registry.$sessions` change is what asks again.
+            return storeTriggerCharacters(nil, from: nil, readAt: stamp)
+        }
         return storeTriggerCharacters(
             Set(completionProvider.triggerCharacters ?? []),
             from: session,
-            ifCurrent: generation
+            readAt: stamp
         )
     }
 
@@ -167,7 +199,7 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // request built from a mixture of pre- and post-edit facts is exactly
         // the desynchronisation `DocumentSyncPipeline` exists to avoid.
         let generation = beginRequest()
-        let triggerGeneration = beginTriggerResolution()
+        let triggerStamp = nextTriggerReadStamp()
         guard let session = registry.session(forLanguageId: document.languageId),
               let offset = utf16Offset(of: cursorPosition) else {
             clearCache(ifCurrent: generation)
@@ -190,10 +222,15 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // same guard `resolveTriggerCharacters` writes under, because this
         // write also lands after a suspension and a request superseded by a
         // fresher resolution must not undo it.
+        //
+        // This path is opportunistic, not authoritative: it writes only when it
+        // has a real answer, and the two early returns above deliberately
+        // record nothing about trigger characters. Under the stamps that costs
+        // no other caller anything — an unused stamp is not a claim.
         _ = storeTriggerCharacters(
             Set(completionProvider.triggerCharacters ?? []),
             from: session,
-            ifCurrent: triggerGeneration
+            readAt: triggerStamp
         )
 
         let response: CompletionResponse
@@ -344,40 +381,55 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         generation == currentRequestGeneration
     }
 
-    /// Claims the next trigger-resolution generation, so a later resolution
-    /// always wins over one that is still suspended.
-    private func beginTriggerResolution() -> Int {
-        currentTriggerGeneration += 1
-        return currentTriggerGeneration
+    /// Stamps a read of the facts a trigger answer will be derived from. Taken
+    /// before the first `await`, so the stamp dates the information rather than
+    /// the moment the answer happens to come back.
+    ///
+    /// Taking one commits the caller to nothing. An unused stamp never becomes
+    /// the bar `storeTriggerCharacters` compares against, so a call that takes
+    /// a stamp and then returns without an answer leaves every other call
+    /// exactly as free to write as it was.
+    private func nextTriggerReadStamp() -> Int {
+        triggerReadClock += 1
+        return triggerReadClock
     }
 
-    /// Stores a resolved trigger set unless a newer resolution has superseded
-    /// this one, and returns the set that is authoritative afterwards.
+    /// Records a trigger answer read at `stamp` unless the cache already holds
+    /// one derived from newer information, and returns the answer that is
+    /// authoritative afterwards.
     ///
-    /// The check and both writes are one synchronous statement on the main
-    /// actor, so nothing can interleave between deciding to write and writing.
+    /// `nil` characters — with a `nil` session — record *unresolved*: no server
+    /// serves this document, or the one that does has not said yet. Every path
+    /// that reaches a verdict about trigger characters goes through here, so
+    /// nothing writes those properties behind this comparison's back.
+    ///
+    /// The comparison and all three writes are one synchronous statement on the
+    /// main actor, so nothing can interleave between deciding to write and
+    /// writing. A stamp is never issued twice, so `>=` only ever admits
+    /// strictly newer information.
     ///
     /// The *return* value is guarded for the same reason as the write. A
-    /// superseded call still runs to completion — neither `await` here is a
-    /// cancellation point — and its caller publishes whatever comes back, so
-    /// handing back an answer this delegate has just refused to cache would put
-    /// the stale set on screen and merely keep it out of the cache.
+    /// superseded call still runs to completion — neither `await` in
+    /// `resolveTriggerCharacters` is a cancellation point — and its caller
+    /// publishes whatever comes back, so handing back an answer this delegate
+    /// has just refused to cache would put the stale set on screen and merely
+    /// keep it out of the cache. Refusal here means a newer answer has already
+    /// landed, so the cache is exactly what to hand back — including when that
+    /// newer answer was "no session", which is why the fallback is `[]` and not
+    /// the caller's own set.
     /// `FileEditorState` does happen to drop a cancelled task's result, but
     /// that is the caller's discipline, not an invariant this class can lean
     /// on.
     private func storeTriggerCharacters(
-        _ characters: Set<String>,
-        from session: any LanguageServerSessionProtocol,
-        ifCurrent generation: Int
+        _ characters: Set<String>?,
+        from session: (any LanguageServerSessionProtocol)?,
+        readAt stamp: Int
     ) -> Set<String> {
-        guard generation == currentTriggerGeneration else {
-            // Superseded: the newer resolution's answer, or — if it has not
-            // landed yet — this one, which it is about to replace.
-            return resolvedTriggerCharacters ?? characters
-        }
+        guard stamp >= resolvedTriggerReadStamp else { return resolvedTriggerCharacters ?? [] }
         resolvedTriggerCharacters = characters
         resolvedTriggerCharacterSource = session
-        return characters
+        resolvedTriggerReadStamp = stamp
+        return characters ?? []
     }
 
     /// Empties the cache and invalidates every in-flight request, so a response

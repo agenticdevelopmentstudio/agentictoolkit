@@ -373,6 +373,57 @@ struct LSPCompletionDelegateTests {
         #expect(staleAnswer == ["#"])
     }
 
+    // MARK: - Fix round 4: a resolution overtaken by a request that writes nothing
+
+    @Test("a trigger resolution suspended across a request that returns early still lands its answer")
+    func suspendedResolutionSurvivesAnEarlyReturningRequest() async throws {
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: ["@", "#"])
+            )
+        )
+        let session = try await fixture.startedSession()
+        // The resolution reads the real capabilities and parks inside the
+        // server. The request that overtakes it meets the *second* queued
+        // answer — a server that has not finished its handshake — which is one
+        // of the two early returns that write nothing.
+        await session.enqueueCapabilities([
+            makeCompletingCapabilities(triggerCharacters: ["@", "#"]),
+            nil
+        ])
+        await session.holdNextCapabilities(1)
+
+        let document = makeEditorDocument(text: Self.sampleText)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: Self.sampleText)
+
+        let resolution = Task { @MainActor in await delegate.resolveTriggerCharacters() }
+        try await waitForParkedCapabilityCall(on: session)
+
+        // The user types while the resolution is still in flight. The request
+        // returns nil without ever sending `textDocument/completion`.
+        let request = await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: Self.caretOffset)
+        )
+        #expect(request == nil)
+        #expect(!fixture.log.events.contains("completion"))
+
+        await session.releaseHeldCapabilities()
+        let resolved = await resolution.value
+
+        // The cache is the assertion that matters: a call that wrote nothing
+        // must not have starved the one that had an answer. Order overlapping
+        // calls by a claimed generation instead and the request's unused claim
+        // makes this empty — the editor is handed no trigger characters at all,
+        // nothing re-asks, and `.` silently stops opening the window.
+        #expect(delegate.completionTriggerCharacters() == ["@", "#"])
+        // Deliberately not the discriminator: the refusal branch's fallback
+        // hands a superseded caller its own set back when the cache is empty,
+        // so this reads correctly even when the cache did not get written.
+        #expect(resolved == ["@", "#"])
+    }
+
     // MARK: - Fix round 1, finding 2: overlapping requests
 
     @Test("a superseded request cannot wipe the cache a newer one published")
