@@ -64,8 +64,11 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     ///
     /// `lazy` so the whole wiring is one initialiser call: a `let` cannot name
     /// `self` before `super.init`, which is what pushed target, search delegate
-    /// and availability onto three separate later assignments. Nothing reads
-    /// this before `configureWindow`, long after init returns.
+    /// and availability onto three separate later assignments. It is first
+    /// forced during `init` itself — `installInitialTabs()` reaches it through
+    /// the `activeTabDidChange` refresh, and the tail of `init` asks again —
+    /// which is after `super.init`, and being after `super.init` is all `lazy`
+    /// needs.
     ///
     /// Internal rather than private because a custom-view item only exists once
     /// the delegate has been asked for it, and a test with no window on screen
@@ -358,12 +361,14 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             }
         }
         persistAllTabs()
-        // `selectTab(id:on:)` above already fired `activeTabDidChange`. This is
-        // the refresh that makes the answer deterministic: in a real window the
-        // pane swap posts `ComposableTabsActivePane.didChangeNotification`
-        // mid-swap, and `livePanes` orders out of an unordered `NSHashTable`,
-        // so a recompute taken during the swap can name either pane. This one
-        // runs after everything has settled.
+        // `selectTab(id:on:)` above already fired `activeTabDidChange`, and
+        // that callback runs after `refreshCenterContent()`, so the primary
+        // recompute has already happened. This one is belt and braces for the
+        // asynchronous half: in a real window the pane swap posts
+        // `ComposableTabsActivePane.didChangeNotification` as views come and
+        // go, and `livePanes` orders out of an unordered `NSHashTable`, so a
+        // recompute racing those posts can name either pane. Guarded and
+        // idempotent, so keeping it costs one comparison.
         refreshActivePaneChrome()
     }
 
@@ -489,10 +494,12 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         applySearchAvailability(to: field)
     }
 
-    /// Takes the field as a parameter rather than reading `searchField`,
-    /// because the creation hook runs while `toolbarDelegate`'s own initialiser
-    /// expression may still be on the stack — reading the lazy var from inside
-    /// it would re-enter a property that is not there yet.
+    /// Takes the field as a parameter rather than reading `searchField`, so the
+    /// creation hook never reaches back through `toolbarDelegate` for the field
+    /// it was just handed. The hook cannot in fact run before the lazy var is
+    /// assigned — AppKit only asks for items through a `Delegate` that already
+    /// exists — but a parameter settles the question instead of leaving a
+    /// shared surface depending on the answer.
     private func applySearchAvailability(to field: NSSearchField) {
         let pane = activePane
         field.isEnabled = pane?.isSearchable ?? false
@@ -692,9 +699,10 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
 
     /// Deliberately one line. This fires during `installInitialTabs()` and
     /// mid-`addTabGroup()`, where a `persistAllTabs()` would write a half-built
-    /// tab set and a `restoreFocusedLeafForActiveTab()` would run before
-    /// `splitControllersByTabID` has the entry. A pure recompute is safe there;
-    /// the heavier duties stay on `didSelectTab`.
+    /// tab set. A pure recompute is safe there. The heavier duties stay on
+    /// `didSelectTab` because they answer a different question — the user
+    /// picked this tab — and not "which pane is in front now", which is all
+    /// this callback claims to report.
     public func multiTabbedViewController(
         _ controller: MultiTabbedViewController,
         activeTabDidChange id: UUID,
