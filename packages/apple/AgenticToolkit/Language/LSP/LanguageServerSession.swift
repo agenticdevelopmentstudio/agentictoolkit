@@ -173,7 +173,7 @@ public protocol LanguageServerSessionProtocol: Actor {
     /// and removing it would cost a later task the round trip to add it back.
     func diagnostics(_ params: DocumentDiagnosticParams) async throws -> DocumentDiagnosticReport
 
-    /// `textDocument/semanticTokens/full` — Task 3.6.
+    /// `textDocument/semanticTokens/full` — Task 3.5.
     func semanticTokensFull(_ params: SemanticTokensParams) async throws -> SemanticTokensResponse
 
     // MARK: What the server says without being asked
@@ -889,7 +889,11 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// told we support a capability we do not honour sends requests we drop on
     /// the floor, and the failure then surfaces as the editor mysteriously not
     /// working rather than as an error.
-    private static let clientCapabilities = ClientCapabilities(
+    /// Internal rather than `private` so a test can assert on what is actually
+    /// declared. The semantic-token flags below are a promise to a real server
+    /// about what we will render correctly, and a promise that specific is
+    /// worth an assertion rather than a reading.
+    static let clientCapabilities = ClientCapabilities(
         workspace: nil,
         textDocument: TextDocumentClientCapabilities(
             synchronization: TextDocumentSyncClientCapabilities(
@@ -921,7 +925,20 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
                 relatedInformation: true,
                 versionSupport: true
             ),
-            semanticTokens: SemanticTokensClientCapabilities()
+            // `multilineTokenSupport` is `true` by default and is corrected
+            // here, because we do not honour it: the decoder we render tokens
+            // through, `TokenRepresentation.decodeTokens`, computes every
+            // token's end as `Position(line: line, character: startChar +
+            // length)` — always the *same* line. A server taking the default
+            // at its word and emitting a token that spans lines would have it
+            // painted as a same-line range of the wrong length, silently
+            // colouring the wrong characters.
+            //
+            // Every other default is left alone. `augmentsSyntaxTokens: true`
+            // in particular is correct for us and must stay: tree-sitter
+            // highlights underneath the semantic layer, so a server that takes
+            // that hint sends fewer tokens and we lose nothing.
+            semanticTokens: SemanticTokensClientCapabilities(multilineTokenSupport: false)
         ),
         window: nil,
         general: nil,

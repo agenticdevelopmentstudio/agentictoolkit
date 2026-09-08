@@ -423,6 +423,7 @@
 		699D0BDBD0FF23DBFF85FD1C /* NSWindow+FitHeight.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6F3B2DDE9E4F4930EF59CDC /* NSWindow+FitHeight.swift */; };
 		69A4F55A1A5232DC43433D61 /* SystemPermissionChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCADA5C4506D83ABF68AC262 /* SystemPermissionChecker.swift */; };
 		6A91A1FC352079D9A12FE8ED /* AgenticDeveloperToolkit-iOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 275FFEBE0698BE7A32B95A5E /* AgenticDeveloperToolkit-iOS.framework */; };
+		6AD7A85025D8B1CCCB1E3128 /* LanguageServerClientCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D54F67262EC7569C7D17FE0 /* LanguageServerClientCapabilitiesTests.swift */; };
 		6B01AE55A2B6555CE317B153 /* AgenticToolkitLanguage.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C26E880FE190723B2AC5B42 /* AgenticToolkitLanguage.framework */; };
 		6BB4F6E73F21E0104231BB26 /* SemanticPalette+SwiftUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBBFE24B8B46A204F53E629 /* SemanticPalette+SwiftUI.swift */; };
 		6C620EF13FC80A3002135271 /* TerminalSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22AF47A752273B94A3878209 /* TerminalSessionManager.swift */; };
@@ -2101,6 +2102,7 @@
 		8CA97AA66D7EAB27142E35CA /* SystemWindowControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowControlling.swift; sourceTree = "<group>"; };
 		8D203235D455143D305E30D2 /* OpenAIModelCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIModelCatalogTests.swift; sourceTree = "<group>"; };
 		8D21F8F899C4B44436BA0F07 /* ScreenMatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenMatcherTests.swift; sourceTree = "<group>"; };
+		8D54F67262EC7569C7D17FE0 /* LanguageServerClientCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageServerClientCapabilitiesTests.swift; sourceTree = "<group>"; };
 		8E0448347D601C05E85051B6 /* StoredSettingPropertyWrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredSettingPropertyWrapper.swift; sourceTree = "<group>"; };
 		8E38151E983C1FA78238F016 /* IDEDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IDEDetector.swift; sourceTree = "<group>"; };
 		8EDB01019588E6CF7B6FE0CE /* OpenAIModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIModelCatalog.swift; sourceTree = "<group>"; };
@@ -3883,6 +3885,7 @@
 			children = (
 				6745B33525E7C6E30D94C439 /* DiagnosticStoreTests.swift */,
 				E1D79D777A5CE614E6515D2B /* FakeLanguageServerSession.swift */,
+				8D54F67262EC7569C7D17FE0 /* LanguageServerClientCapabilitiesTests.swift */,
 				6303EBB9BF5D3E5CB262BF15 /* LanguageServerDocumentSyncScopeTests.swift */,
 				4C336BD90D299D4BEBE356FF /* LanguageServerDocumentSyncTests.swift */,
 				C9350E73886960316647425A /* LanguageServerRegistryTests.swift */,
@@ -6395,6 +6398,7 @@
 			files = (
 				706183A285228F58023EC4E6 /* DiagnosticStoreTests.swift in Sources */,
 				23A749A6776DFA6A760B4C73 /* FakeLanguageServerSession.swift in Sources */,
+				6AD7A85025D8B1CCCB1E3128 /* LanguageServerClientCapabilitiesTests.swift in Sources */,
 				7AB6FF12BDB707342037BE1D /* LanguageServerDocumentSyncScopeTests.swift in Sources */,
 				21B7BD73591C1B03AD65DCE5 /* LanguageServerDocumentSyncTests.swift in Sources */,
 				5AD034CBD7E4D2C45BA0B5D6 /* LanguageServerRegistryTests.swift in Sources */,
