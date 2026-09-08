@@ -131,6 +131,10 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     private var gatedCapabilitiesRemaining = 0
     private var heldCapabilities: [CheckedContinuation<Void, Never>] = []
 
+    /// And the same again for `hover(_:)`.
+    private var gatedHoversRemaining = 0
+    private var heldHovers: [CheckedContinuation<Void, Never>] = []
+
     init(
         configuration: LanguageServerConfiguration,
         behavior: FakeEditorSessionBehavior,
@@ -286,10 +290,37 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         return response
     }
 
+    /// Parks the next `count` hover calls until `releaseHeldHovers()`.
+    ///
+    /// The same gate as the completion one above, and for the same reason: the
+    /// hover controller's generation guard is only observable while a request
+    /// is still in flight, and a fake that answered immediately would never
+    /// leave that window open.
+    func holdNextHovers(_ count: Int) {
+        gatedHoversRemaining = count
+    }
+
+    /// How many hover calls are parked right now.
+    var heldHoverCount: Int { heldHovers.count }
+
+    func releaseHeldHovers() {
+        let held = heldHovers
+        heldHovers = []
+        for continuation in held {
+            continuation.resume()
+        }
+    }
+
     func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse {
         try requireRunning()
         log.record("hover")
         lastHoverParams = params
+        if gatedHoversRemaining > 0 {
+            gatedHoversRemaining -= 1
+            await withCheckedContinuation { continuation in
+                heldHovers.append(continuation)
+            }
+        }
         if let error = behavior.hoverError { throw error }
         return behavior.hoverResponse
     }
@@ -336,6 +367,17 @@ func makeCompletingCapabilities(triggerCharacters: [String] = ["."]) -> ServerCa
 func makeDefiningCapabilities(provides: Bool = true) -> ServerCapabilities {
     var capabilities = ServerCapabilities()
     capabilities.definitionProvider = .optionA(provides)
+    return capabilities
+}
+
+/// A server that advertises hover.
+///
+/// `provides: false` is the deliberate other case, exactly as for definitions:
+/// a bare `false` says the server does *not* answer hovers, which is not the
+/// same as omitting the key.
+func makeHoveringCapabilities(provides: Bool = true) -> ServerCapabilities {
+    var capabilities = ServerCapabilities()
+    capabilities.hoverProvider = .optionA(provides)
     return capabilities
 }
 

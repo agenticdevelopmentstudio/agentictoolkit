@@ -57,14 +57,16 @@ final class FileEditorState: ObservableObject {
         var sourceEditorState: SourceEditorState
         let changeObservation: TextDocumentObservation
 
-        /// The two language-server delegates for this document. Held here
-        /// because `SourceEditor` stores both `weak`, so something has to own
-        /// them — and the slot's lifetime is exactly the cached editor's, so
-        /// eviction releases them with everything else the document owns.
-        /// `nil` when the pane has no language services, or (for the jump
-        /// delegate) no way to open another file.
+        /// The language-server objects for this document. Held here because
+        /// `SourceEditor` stores the two delegates `weak` and keeps a
+        /// coordinator only for as long as its controller lives, so something
+        /// has to own all three — and the slot's lifetime is exactly the cached
+        /// editor's, so eviction releases them with everything else the
+        /// document owns. `nil` when the pane has no language services, or (for
+        /// the jump delegate) no way to open another file.
         let completionDelegate: LSPCompletionDelegate?
         let jumpToDefinitionDelegate: LSPJumpToDefinitionDelegate?
+        let annotationCoordinator: LSPEditorAnnotationCoordinator?
     }
 
     private let documentStore: TextDocumentStore
@@ -223,6 +225,10 @@ final class FileEditorState: ObservableObject {
         slotsByURI[uri]?.jumpToDefinitionDelegate
     }
 
+    func annotationCoordinator(for uri: DocumentUri) -> LSPEditorAnnotationCoordinator? {
+        slotsByURI[uri]?.annotationCoordinator
+    }
+
     /// The configuration one cached document's editor is built with.
     ///
     /// Built here rather than inline in the view because
@@ -348,16 +354,23 @@ final class FileEditorState: ObservableObject {
             scheduler.schedule(document)
         }
 
-        // Both delegates are per-document, because every offset<->`Position`
+        // All three are per-document, because every offset<->`Position`
         // conversion they do is resolved against this one document. A pane with
-        // no language services simply has neither, and `SourceEditor` treats a
-        // `nil` delegate as "no completion" / "no jump" rather than failing.
+        // no language services simply has none of them, and `SourceEditor`
+        // treats a `nil` delegate as "no completion" / "no jump", and an empty
+        // `coordinators:` as "no annotations", rather than failing.
         var completionDelegate: LSPCompletionDelegate?
         var jumpToDefinitionDelegate: LSPJumpToDefinitionDelegate?
+        var annotationCoordinator: LSPEditorAnnotationCoordinator?
         if let languageServices {
             completionDelegate = LSPCompletionDelegate(
                 document: document,
                 registry: languageServices.registry
+            )
+            annotationCoordinator = LSPEditorAnnotationCoordinator(
+                document: document,
+                registry: languageServices.registry,
+                store: languageServices.diagnostics
             )
             if let openFile {
                 jumpToDefinitionDelegate = LSPJumpToDefinitionDelegate(
@@ -375,7 +388,8 @@ final class FileEditorState: ObservableObject {
             sourceEditorState: SourceEditorState(),
             changeObservation: changeObservation,
             completionDelegate: completionDelegate,
-            jumpToDefinitionDelegate: jumpToDefinitionDelegate
+            jumpToDefinitionDelegate: jumpToDefinitionDelegate,
+            annotationCoordinator: annotationCoordinator
         )
         openOrder.append(uri)
         touch(uri)
