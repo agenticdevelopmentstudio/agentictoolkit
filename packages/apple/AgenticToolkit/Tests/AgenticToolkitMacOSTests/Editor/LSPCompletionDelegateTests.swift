@@ -328,6 +328,51 @@ struct LSPCompletionDelegateTests {
         #expect(await delegate.resolveTriggerCharacters().isEmpty)
     }
 
+    // MARK: - Fix round 3, item 1: overlapping trigger resolutions
+
+    @Test("a superseded trigger resolution cannot overwrite a newer one's answer")
+    func supersededTriggerResolutionCannotClobberNewerAnswer() async throws {
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: ["@", "#"])
+            )
+        )
+        let session = try await fixture.startedSession()
+        // The older resolution's answer, then the newer one's. Two answers
+        // rather than one because a clobber is only observable when the stale
+        // write differs — the reachable shape is a server disabled and quickly
+        // re-enabled, where the second session's answer is the current one.
+        await session.enqueueCapabilities([
+            makeCompletingCapabilities(triggerCharacters: ["@"]),
+            makeCompletingCapabilities(triggerCharacters: ["#"])
+        ])
+        await session.holdNextCapabilities(1)
+
+        let document = makeEditorDocument(text: Self.sampleText)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+
+        // Parked inside the server, exactly as the `$sessions` sink leaves a
+        // resolution when a second publication arrives before the first
+        // returns. Its continuation still runs: neither await in
+        // `resolveTriggerCharacters` is a cancellation point.
+        let older = Task { @MainActor in await delegate.resolveTriggerCharacters() }
+        try await waitForParkedCapabilityCall(on: session)
+
+        let newer = await delegate.resolveTriggerCharacters()
+        #expect(newer == ["#"])
+        #expect(delegate.completionTriggerCharacters() == ["#"])
+
+        await session.releaseHeldCapabilities()
+        let staleAnswer = await older.value
+
+        // Without the generation guard the older continuation's unconditional
+        // write lands here and both of these are `["@"]` — the trigger set the
+        // retired server declared, cached as the current one and published to
+        // the editor by whoever called the superseded resolution.
+        #expect(delegate.completionTriggerCharacters() == ["#"])
+        #expect(staleAnswer == ["#"])
+    }
+
     // MARK: - Fix round 1, finding 2: overlapping requests
 
     @Test("a superseded request cannot wipe the cache a newer one published")
@@ -542,6 +587,15 @@ struct LSPCompletionDelegateTests {
             try await Task.sleep(for: .milliseconds(4))
         }
         Issue.record("the first completion request never reached the server")
+    }
+
+    /// The same, for a parked `capabilities()` call.
+    private func waitForParkedCapabilityCall(on session: FakeEditorLanguageServerSession) async throws {
+        for _ in 0..<500 {
+            if await session.heldCapabilityCount > 0 { return }
+            try await Task.sleep(for: .milliseconds(4))
+        }
+        Issue.record("the first trigger resolution never reached the server")
     }
 
 }

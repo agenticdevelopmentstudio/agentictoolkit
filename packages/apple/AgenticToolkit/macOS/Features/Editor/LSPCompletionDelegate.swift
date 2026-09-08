@@ -44,7 +44,15 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// language, and the retired server's trigger characters must not outlive
     /// it. A cached answer is only reused while the session it was read from is
     /// still the one serving this document.
-    private var resolvedTriggerCharacterSource: ObjectIdentifier?
+    ///
+    /// A `weak` reference rather than an `ObjectIdentifier`, because an
+    /// identifier is an address: once the session it named is deallocated the
+    /// allocator may hand that address to the *next* session, and a stale key
+    /// then compares equal to a session it was never read from. A weak
+    /// reference cannot be address-confused — it nils out on deallocation, and
+    /// a `nil` source is simply a cache miss. `LanguageServerSessionProtocol`
+    /// refines `Actor`, so it is already class-bound and this costs nothing.
+    private weak var resolvedTriggerCharacterSource: (any LanguageServerSessionProtocol)?
 
     /// Identifies the most recent completion request, so a superseded one
     /// cannot publish over the cache belonging to a newer one.
@@ -57,6 +65,19 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// cache *wipes* included. Every write below is therefore gated on this
     /// still naming the request doing the writing.
     private var currentRequestGeneration = 0
+
+    /// The same discipline, for the trigger-character cache: identifies the
+    /// most recent resolution so a superseded one cannot write over a newer
+    /// one's answer.
+    ///
+    /// A counter of its own rather than a share of `currentRequestGeneration`,
+    /// because the two caches have different lifetimes. `clearCache()` bumps
+    /// the request generation on every window close and every applied
+    /// completion — routine events that say nothing about which server serves
+    /// this document — and a shared counter would make each of them throw away
+    /// a trigger resolution that is in flight. Since `resolveTriggerCharacters`
+    /// never retries on its own, a discarded write there is not re-asked for.
+    private var currentTriggerGeneration = 0
 
     init(document: TextDocument, registry: LanguageServerRegistry) {
         self.document = document
@@ -104,8 +125,18 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// again whenever `registry.$sessions` changes, which is what turns the
     /// "no session yet" empty answer into the real one once a server appears.
     /// A caller without that subscription gets one answer and keeps it.
+    ///
+    /// **Overlapping calls are ordered by this method, not by its caller.** The
+    /// `$sessions` subscription makes them reachable — a server disabled and
+    /// re-enabled publishes twice while the first resolution is still suspended
+    /// — so a superseded call neither writes the cache nor hands its own answer
+    /// back to be published.
     @discardableResult
     func resolveTriggerCharacters() async -> Set<String> {
+        // Claimed before the guard, not merely before the first `await`: the
+        // clear below is a cache write too, and it has to supersede whatever is
+        // already in flight rather than be undone by it.
+        let generation = beginTriggerResolution()
         guard let session = registry.session(forLanguageId: document.languageId) else {
             // The server was removed or disabled. Its trigger set goes with it
             // rather than being answered on behalf of a session that is gone.
@@ -113,17 +144,17 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
             resolvedTriggerCharacterSource = nil
             return []
         }
-        let source = ObjectIdentifier(session)
-        if let resolvedTriggerCharacters, resolvedTriggerCharacterSource == source {
+        if let resolvedTriggerCharacters, resolvedTriggerCharacterSource === session {
             return resolvedTriggerCharacters
         }
         try? await session.start()
         guard let capabilities = await session.capabilities(),
               let completionProvider = capabilities.completionProvider else { return [] }
-        let characters = Set(completionProvider.triggerCharacters ?? [])
-        resolvedTriggerCharacters = characters
-        resolvedTriggerCharacterSource = source
-        return characters
+        return storeTriggerCharacters(
+            Set(completionProvider.triggerCharacters ?? []),
+            from: session,
+            ifCurrent: generation
+        )
     }
 
     func completionSuggestionsRequested(
@@ -136,6 +167,7 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // request built from a mixture of pre- and post-edit facts is exactly
         // the desynchronisation `DocumentSyncPipeline` exists to avoid.
         let generation = beginRequest()
+        let triggerGeneration = beginTriggerResolution()
         guard let session = registry.session(forLanguageId: document.languageId),
               let offset = utf16Offset(of: cursorPosition) else {
             clearCache(ifCurrent: generation)
@@ -154,12 +186,15 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
             clearCache(ifCurrent: generation)
             return nil
         }
-        // Assigned after an await without a generation guard on purpose, and
-        // safe to be: it is a pure cache of a value that does not change over a
-        // session's life, so two interleaved requests write the same thing and
-        // no invariant spans the suspension.
-        resolvedTriggerCharacters = Set(completionProvider.triggerCharacters ?? [])
-        resolvedTriggerCharacterSource = ObjectIdentifier(session)
+        // The trigger set is on its way past, so it is taken — through the
+        // same guard `resolveTriggerCharacters` writes under, because this
+        // write also lands after a suspension and a request superseded by a
+        // fresher resolution must not undo it.
+        _ = storeTriggerCharacters(
+            Set(completionProvider.triggerCharacters ?? []),
+            from: session,
+            ifCurrent: triggerGeneration
+        )
 
         let response: CompletionResponse
         do {
@@ -307,6 +342,42 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
 
     private func isCurrent(_ generation: Int) -> Bool {
         generation == currentRequestGeneration
+    }
+
+    /// Claims the next trigger-resolution generation, so a later resolution
+    /// always wins over one that is still suspended.
+    private func beginTriggerResolution() -> Int {
+        currentTriggerGeneration += 1
+        return currentTriggerGeneration
+    }
+
+    /// Stores a resolved trigger set unless a newer resolution has superseded
+    /// this one, and returns the set that is authoritative afterwards.
+    ///
+    /// The check and both writes are one synchronous statement on the main
+    /// actor, so nothing can interleave between deciding to write and writing.
+    ///
+    /// The *return* value is guarded for the same reason as the write. A
+    /// superseded call still runs to completion — neither `await` here is a
+    /// cancellation point — and its caller publishes whatever comes back, so
+    /// handing back an answer this delegate has just refused to cache would put
+    /// the stale set on screen and merely keep it out of the cache.
+    /// `FileEditorState` does happen to drop a cancelled task's result, but
+    /// that is the caller's discipline, not an invariant this class can lean
+    /// on.
+    private func storeTriggerCharacters(
+        _ characters: Set<String>,
+        from session: any LanguageServerSessionProtocol,
+        ifCurrent generation: Int
+    ) -> Set<String> {
+        guard generation == currentTriggerGeneration else {
+            // Superseded: the newer resolution's answer, or — if it has not
+            // landed yet — this one, which it is about to replace.
+            return resolvedTriggerCharacters ?? characters
+        }
+        resolvedTriggerCharacters = characters
+        resolvedTriggerCharacterSource = session
+        return characters
     }
 
     /// Empties the cache and invalidates every in-flight request, so a response

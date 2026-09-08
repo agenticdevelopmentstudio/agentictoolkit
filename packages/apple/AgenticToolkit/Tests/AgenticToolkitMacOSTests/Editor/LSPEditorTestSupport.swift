@@ -111,6 +111,14 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     private var gatedCompletionsRemaining = 0
     private var heldCompletions: [CheckedContinuation<Void, Never>] = []
 
+    /// The same two, for `capabilities()`. Trigger-character resolution never
+    /// reaches `completion(_:)`, so the completion gate above cannot express
+    /// two overlapping *resolutions* — which is the interleaving the
+    /// trigger-cache generation exists to survive.
+    private var queuedCapabilities: [ServerCapabilities?] = []
+    private var gatedCapabilitiesRemaining = 0
+    private var heldCapabilities: [CheckedContinuation<Void, Never>] = []
+
     init(
         configuration: LanguageServerConfiguration,
         behavior: FakeEditorSessionBehavior,
@@ -147,9 +155,44 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         log.record("stop")
     }
 
+    /// Answers the next capability calls with these, in order, before falling
+    /// back to `behavior.capabilities`.
+    ///
+    /// A real server does not change its capabilities mid-session; this exists
+    /// so a test can tell *which* of two overlapping resolutions wrote the
+    /// cache, which is not observable when both read the same answer.
+    func enqueueCapabilities(_ capabilities: [ServerCapabilities?]) {
+        queuedCapabilities = capabilities
+    }
+
+    /// Parks the next `count` capability calls until `releaseHeldCapabilities()`.
+    func holdNextCapabilities(_ count: Int) {
+        gatedCapabilitiesRemaining = count
+    }
+
+    /// How many capability calls are parked right now.
+    var heldCapabilityCount: Int { heldCapabilities.count }
+
+    func releaseHeldCapabilities() {
+        let held = heldCapabilities
+        heldCapabilities = []
+        for continuation in held {
+            continuation.resume()
+        }
+    }
+
     func capabilities() async -> ServerCapabilities? {
         guard case .running = state else { return nil }
-        return behavior.capabilities
+        // Chosen before parking, so the answer belongs to this call rather than
+        // to whichever call happens to resume first.
+        let answer = queuedCapabilities.isEmpty ? behavior.capabilities : queuedCapabilities.removeFirst()
+        if gatedCapabilitiesRemaining > 0 {
+            gatedCapabilitiesRemaining -= 1
+            await withCheckedContinuation { continuation in
+                heldCapabilities.append(continuation)
+            }
+        }
+        return answer
     }
 
     func standardErrorText() async -> String { "" }
