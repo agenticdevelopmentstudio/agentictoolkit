@@ -46,6 +46,11 @@ open class PaneViewController: NSViewController {
     /// footer's display path is recomputed by whoever knows the rest of the path.
     public var onSelectionChange: (() -> Void)?
 
+    /// Fires when `resolvedTitle` changed. The pane's own title bar is not the
+    /// only thing that shows it — the window's footer names the pane too — so
+    /// the change is published rather than only painted here.
+    public var onTitleChange: (() -> Void)?
+
     /// Internal rather than private so a test can check which edges the picker
     /// was opened with, without opening a popover.
     private(set) var minimizePicker: PaneMinimizePicker?
@@ -325,6 +330,7 @@ open class PaneViewController: NSViewController {
 
     public func refreshTitle() {
         titleBar.title = resolvedTitle
+        onTitleChange?()
     }
 
     /// Re-asks the content for its title-bar controls. Content whose controls

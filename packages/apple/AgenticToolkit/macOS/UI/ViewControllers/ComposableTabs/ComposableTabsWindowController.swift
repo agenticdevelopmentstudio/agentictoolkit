@@ -123,7 +123,12 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         // this window only cares when the change is its own.
         NotificationCenter.default.publisher(for: ComposableTabsActivePane.didChangeNotification)
             .sink { [weak self] notification in
-                guard let self, (notification.object as? NSWindow) === self.window else { return }
+                // Unwrap before comparing: a notification with no window and a
+                // controller whose window is still nil would otherwise match
+                // as `nil === nil`, and every such post would refresh this
+                // window. Same shape as `ComposableTabsActivePane`'s observer.
+                guard let self, let changed = notification.object as? NSWindow,
+                      changed === self.window else { return }
                 self.refreshFooterStatus()
             }
             .store(in: &cancellables)
@@ -437,12 +442,16 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         return split.firstLeaf()
     }
 
-    /// Every leaf reports its own selection changes to the footer. Re-run
-    /// whenever the tree changes, because a split makes leaves that have never
-    /// been wired and the ones it replaced are gone.
-    private func wireSelectionObservers(on split: ComposableTabsViewController) {
+    /// Every leaf reports its own selection *and* title changes to the footer.
+    /// The window renders both segments, so it owns both subscriptions rather
+    /// than waiting for a value somebody else happens to push
+    /// (`separation-of-concerns`). Re-run whenever the tree changes, because a
+    /// split makes leaves that have never been wired and the ones it replaced
+    /// are gone.
+    private func wirePaneObservers(on split: ComposableTabsViewController) {
         for leaf in split.allLeaves() {
             leaf.onSelectionChange = { [weak self] in self?.refreshFooterStatus() }
+            leaf.onTitleChange = { [weak self] in self?.refreshFooterStatus() }
         }
     }
 
@@ -511,7 +520,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         split.onLayoutDidChange = { [weak self, weak split] node in
             guard let self else { return }
             // A split or a close makes leaves this window has never seen.
-            if let split { self.wireSelectionObservers(on: split) }
+            if let split { self.wirePaneObservers(on: split) }
             // A removed pane must not leave a focus record behind, or
             // `installInitialTabs()` restores focus to a node that no
             // longer exists on the next launch.
@@ -522,7 +531,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             self.persistAllTabs()
             self.refreshFooterStatus()
         }
-        wireSelectionObservers(on: split)
+        wirePaneObservers(on: split)
     }
 
     private static func leafIDs(in node: LayoutNode) -> Set<UUID> {

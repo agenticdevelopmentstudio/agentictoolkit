@@ -79,7 +79,16 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
         self.splitAutosaveName = autosaveName
         super.init(nibName: nil, bundle: nil)
 
+        // `@Published` publishes from `willSet`, so a synchronous sink reads
+        // the *previous* node back out of `selection` — the footer would name
+        // the file clicked before this one. Hopping to the run loop lets the
+        // store complete first, the same compensation
+        // `FileTreeOutlineViewController` and `FileBrowserViewController`
+        // already make (`dry`). `removeDuplicates` keeps a re-click on the row
+        // that is already selected from re-rendering the whole path.
         selectionObserver = selection.$selectedNode
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.onPaneSelectionChange?() }
     }
 

@@ -729,18 +729,58 @@ final class NotesSplitViewControllerTests: XCTestCase {
         XCTAssertEqual(split.paneSelectionDescription, note.title)
     }
 
-    /// The pane reports; the footer does not poll. Every selection change in
-    /// this pane funnels through the list's delegate callback, so that is the
-    /// one place the report is made from.
+    /// The pane reports; the footer does not poll. Driven through the list's
+    /// own `reload`, which is what actually moves the selection — calling
+    /// `notesListDidSelectNote` here would invoke the very method that holds
+    /// the line under test, and would pass even if the list never called its
+    /// delegate. The assertion is the value an observer reads back, not the
+    /// number of times the closure ran.
     func testSelectingANoteTellsTheFooterToRecompute() async throws {
         let store = try store()
         _ = try store.createDocument(content: "# Release notes\n\nbody", markers: [.note])
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        let note = try XCTUnwrap(notesManager.notes.first)
+        let listVC = try XCTUnwrap(split.splitViewItems[1].viewController as? NotesListViewController)
+        var described: [String?] = []
+        split.onPaneSelectionChange = { [weak split] in
+            described.append(split?.paneSelectionDescription)
+        }
+
+        listVC.reload(notes: notesManager.notes, keepingSelectedID: note.id)
+
+        XCTAssertEqual(
+            described, [note.title],
+            "the footer has to be able to read the new selection back when it is told")
+    }
+
+    /// A note has no title of its own: `Note.title` is its first line. So an
+    /// edit to that line is a change to `paneSelectionDescription` even though
+    /// the selection never moved, and `PaneSelectionDescribing` says that is
+    /// exactly when to report. Driven through the editor's own
+    /// `onContentChange`, the way typing reaches the split controller.
+    func testRenamingTheSelectedNoteTellsTheFooterToRecompute() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "# Release notes\n\nbody", markers: [.note])
         let (split, note, _) = try await makeSplitWithASelectedNote(store: store)
-        var reports = 0
-        split.onPaneSelectionChange = { reports += 1 }
+        XCTAssertEqual(split.paneSelectionDescription, "Release notes")
+        let editorVC = try XCTUnwrap(
+            split.splitViewItems[2].viewController as? NoteEditorViewController)
+        var described: [String?] = []
+        split.onPaneSelectionChange = { [weak split] in
+            described.append(split?.paneSelectionDescription)
+        }
 
-        split.notesListDidSelectNote(note)
+        editorVC.editorController.onContentChange?("# Shipping notes\n\nbody")
 
-        XCTAssertGreaterThan(reports, 0, "a new selection has to reach whoever renders it")
+        let renamed = try await pollUntil { split.paneSelectionDescription == "Shipping notes" }
+        XCTAssertTrue(renamed, "the derived title has to follow the content")
+        XCTAssertEqual(
+            described, ["Shipping notes"],
+            "the rename has to reach the footer, reading back the new title")
+        XCTAssertEqual(note.id, split.selectedNote()?.id, "the selection itself must not have moved")
     }
 }

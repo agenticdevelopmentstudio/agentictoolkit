@@ -19,12 +19,27 @@ final class ProjectFooterStatusTests: XCTestCase {
         }
     }
 
+    /// A pane content that names itself and can be renamed afterwards, so the
+    /// footer's *pane* segment has a source that changes after the window was
+    /// built. Starts on the registry's own display name, so a window made with
+    /// it reads the same as one made with content that names nothing.
+    private final class TitlingContent: NSViewController, PaneTitleProviding {
+        var paneTitle = "Alpha"
+        var onPaneTitleChange: (() -> Void)?
+
+        func retitle(_ title: String) {
+            paneTitle = title
+            onPaneTitleChange?()
+        }
+    }
+
     private let alpha = ComposableTabsViewID("test.alpha")
 
     /// The layout is installed before the workspace is made: `ProjectWorkspace`
     /// captures `ComposableTabsLayout.current` in its initialiser, so a
     /// workspace built first would hold the placeholder layout forever.
     private var contents: [SelectingContent] = []
+    private var titlingContents: [TitlingContent] = []
 
     /// The panes' contents are built in `PaneViewController.loadView()`, so a
     /// controller nobody has loaded has panes but no content in them — and
@@ -33,18 +48,36 @@ final class ProjectFooterStatusTests: XCTestCase {
     /// mounts the active tab, which loads its split, which loads its panes.
     /// Still no window on screen, which is the point.
     private func makeController() -> ComposableTabsWindowController {
-        installLayout()
+        installLayout { [weak self] in
+            let content = SelectingContent()
+            self?.contents.append(content)
+            return content
+        }
+        return loadedController()
+    }
+
+    /// The same window over content that provides its own title, for the one
+    /// segment `SelectingContent` cannot move.
+    private func makeTitlingController() -> ComposableTabsWindowController {
+        installLayout { [weak self] in
+            let content = TitlingContent()
+            self?.titlingContents.append(content)
+            return content
+        }
+        return loadedController()
+    }
+
+    private func loadedController() -> ComposableTabsWindowController {
         let controller = ComposableTabsWindowController(project: makeWorkspace())
         controller.contentViewController?.loadViewIfNeeded()
         return controller
     }
 
-    private func installLayout() {
+    private func installLayout(makeContent: @escaping () -> NSViewController) {
         let registry = ComposableTabsViewRegistry()
-        registry.register(alpha, descriptor: .init(displayName: "Alpha", minimumThickness: 150)) { [weak self] _ in
-            let content = SelectingContent()
+        registry.register(alpha, descriptor: .init(displayName: "Alpha", minimumThickness: 150)) { _ in
+            let content = makeContent()
             content.view = NSView()
-            self?.contents.append(content)
             return content
         }
         // swiftlint:disable:next force_try
@@ -116,5 +149,20 @@ final class ProjectFooterStatusTests: XCTestCase {
 
         content.select(nil)
         XCTAssertEqual(controller.footer.status, "api-server › Tab 1 › Alpha")
+    }
+
+    /// The pane segment has to be invalidated the same way the selection
+    /// segment is. The pane's own title bar is not the only reader of
+    /// `resolvedTitle`, so a retitle that only repaints the bar leaves the
+    /// footer naming the pane by a name it no longer has.
+    func testTheFooterFollowsATitleChange() throws {
+        let controller = makeTitlingController()
+        let content = try XCTUnwrap(titlingContents.first)
+        XCTAssertEqual(controller.footerStatus, "api-server › Tab 1 › Alpha")
+
+        content.retitle("Backend")
+
+        XCTAssertEqual(controller.footerStatus, "api-server › Tab 1 › Backend")
+        XCTAssertEqual(controller.footer.status, "api-server › Tab 1 › Backend")
     }
 }

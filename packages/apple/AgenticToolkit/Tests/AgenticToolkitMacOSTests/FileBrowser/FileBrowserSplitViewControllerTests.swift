@@ -97,18 +97,34 @@ final class FileBrowserSplitViewControllerTests: XCTestCase {
         split.paneContentWillBeDiscarded()
     }
 
-    /// The browser reports; the footer does not poll.
+    /// The browser reports; the footer does not poll. Asserting what the
+    /// callback *shows an observer* rather than that it ran: `@Published`
+    /// publishes from `willSet`, so a report made too early hands the footer
+    /// the previously selected file and a call-count assertion is green
+    /// through the whole bug.
     func testSelectingAFileTellsTheFooterToRecompute() {
         let directory = makeDirectory()
         let split = makeSplit(in: directory)
-        var reports = 0
-        split.onPaneSelectionChange = { reports += 1 }
+        let reported = expectation(description: "the footer was told about the selection")
+        // `@Published` also delivers its current value on subscribe, so the
+        // callback may run once for the initial empty selection before the
+        // click's own report. Both read back the same answer; neither is a
+        // failure.
+        reported.assertForOverFulfill = false
+        var described: String?
+        split.onPaneSelectionChange = { [weak split] in
+            described = split?.paneSelectionDescription
+            reported.fulfill()
+        }
 
         let url = directory.appendingPathComponent("main.swift")
         try? "let x = 1\n".write(to: url, atomically: true, encoding: .utf8)
         split.selection.selectedNode = FileTreeNode(url: url, isDirectory: false)
 
-        XCTAssertGreaterThan(reports, 0, "a new selection has to reach whoever renders it")
+        wait(for: [reported], timeout: 2)
+        XCTAssertEqual(
+            described, "main.swift",
+            "the footer has to be able to read the new selection back when it is told")
         split.paneContentWillBeDiscarded()
     }
 

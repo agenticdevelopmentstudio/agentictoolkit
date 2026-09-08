@@ -674,9 +674,12 @@ extension NotesSplitViewController: NotesListViewControllerDelegate {
     public func notesListDidSelectNote(_ note: Note?) {
         editorVC.show(note: note)
         onToolbarRelevantStateChange?()
-        // The single funnel for every selection change in this pane, so the
-        // footer is told from one place rather than from each caller that can
-        // move the selection (`dry`).
+        // The single funnel for every change of *which* note is selected, so
+        // the footer is told from one place rather than from each caller that
+        // can move the selection (`dry`). It is not the only place the footer
+        // is told: `Note.title` is derived from the content, so editing the
+        // selected note's first line changes the answer without moving the
+        // selection — `noteEditorDidChangeContent` reports that one.
         onPaneSelectionChange?()
     }
 
@@ -694,6 +697,15 @@ extension NotesSplitViewController: NoteEditorViewControllerDelegate {
         Task { @MainActor in
             await notesManager.updateNote(note, content: content)
             listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: noteID)
+            // A note's title is its first line, so this edit may have renamed
+            // it. The selection never moved, so the list's delegate funnel
+            // above never fires — but `paneSelectionDescription` now answers
+            // differently, which is exactly when `PaneSelectionDescribing`
+            // says to report. Only for the note the footer is naming; an edit
+            // to some other note changes nothing the footer shows.
+            if selectedNote()?.id == noteID {
+                onPaneSelectionChange?()
+            }
         }
     }
 }
