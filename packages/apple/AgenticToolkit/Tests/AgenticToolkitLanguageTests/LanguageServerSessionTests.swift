@@ -390,4 +390,171 @@ struct LanguageServerSessionTests {
         await #expect(throws: (any Error).self) { try await session.start() }
         #expect(await session.state.failure?.standardErrorText.contains("boom: no toolchain here") == true)
     }
+
+    // MARK: - 6. The state stream
+
+    /// Consumes `stateChanges` from the moment it is built.
+    ///
+    /// A recorder rather than a `for await` in the test body, for two reasons.
+    /// The stream carries a single-iterator contract, so exactly one consumer
+    /// may exist; and an inline loop would *block* on a stream that never
+    /// finishes — which is precisely the regression test 5 looks for. Every
+    /// assertion below therefore goes through the suite's bounded `poll`, so a
+    /// stream that misbehaves fails the test instead of wedging the suite.
+    private actor StateRecorder {
+
+        /// The transcript, as `caseName`s.
+        private(set) var states: [String] = []
+
+        /// Every `.failed` payload the *stream* delivered, so a test can assert
+        /// the reason travelled with the transition rather than re-reading it
+        /// off the session afterwards.
+        private(set) var failures: [LanguageServerFailure] = []
+
+        private(set) var didFinish = false
+
+        /// The reader is started and let go rather than held: it ends when the
+        /// stream does, `[weak self]` keeps it from owning the recorder, and
+        /// every test here stops its session, so there is nothing to cancel.
+        init(_ stream: AsyncStream<LanguageServerSessionState>) {
+            Task { [weak self] in
+                for await state in stream {
+                    await self?.append(state)
+                }
+                await self?.markFinished()
+            }
+        }
+
+        private func append(_ state: LanguageServerSessionState) {
+            states.append(state.caseName)
+            if let failure = state.failure { failures.append(failure) }
+        }
+
+        private func markFinished() { didFinish = true }
+    }
+
+    /// What it catches: a `state` assignment that bypasses the one publisher,
+    /// and a stream that reports only terminal states. `.starting` is the
+    /// transition a status panel needs in order to draw a handshake in
+    /// progress, and it is written on the path easiest to forget.
+    @Test("a successful start publishes .starting then .running")
+    func stateChangesEmitsStartingThenRunningForASuccessfulStart() async throws {
+        let session = makeSession(script: Self.respondingServerScript)
+        let recorder = StateRecorder(session.stateChanges)
+
+        try await session.start()
+
+        let arrived = await poll { await recorder.states.count >= 2 }
+        #expect(arrived)
+        #expect(Array(await recorder.states.prefix(2)) == ["starting", "running"])
+
+        await session.stop()
+    }
+
+    /// What it catches: a failure recorded in `state` but never published, and
+    /// a publication that drops the payload. The panel's whole reason for
+    /// existing is the second line of a failed row, and it can only come from
+    /// here.
+    @Test("a start that throws publishes .failed carrying the child's explanation")
+    func stateChangesEmitsFailedWhenStartThrows() async {
+        let session = makeSession(script: Self.failingServerScript)
+        let recorder = StateRecorder(session.stateChanges)
+
+        await #expect(throws: (any Error).self) { try await session.start() }
+
+        let failed = await poll { await recorder.states.last == "failed" }
+        #expect(failed)
+        #expect(await recorder.states == ["starting", "failed"])
+        #expect(await recorder.failures.last?.standardErrorText.contains("boom: no toolchain here") == true)
+
+        await session.stop()
+    }
+
+    /// ★ The `teardown()` trap, stated as a test.
+    ///
+    /// `stop()` writes `.stopped` *after* `teardown()` returns, so finishing
+    /// this stream where `publishedDiagnostics` finishes its own — inside
+    /// `teardown()` — yields the terminal state into a finished continuation,
+    /// where it is dropped without a trace. Nothing else notices: `state` is
+    /// still correct, the child is still reaped, every other test in this file
+    /// still passes. Only a consumer of the stream sees it, and what it sees is
+    /// a server that says "running" forever.
+    @Test("stop() delivers .stopped before the stream ends")
+    func stateChangesDeliversStoppedBeforeTheStreamEnds() async throws {
+        let session = makeSession(script: Self.respondingServerScript)
+        let recorder = StateRecorder(session.stateChanges)
+
+        try await session.start()
+        await session.stop()
+
+        let ended = await poll { await recorder.didFinish }
+        #expect(ended)
+        #expect(await recorder.states == ["starting", "running", "stopped"])
+    }
+
+    /// The other half of the contract: the stream *does* end, so a consumer's
+    /// `for await` returns rather than parking forever on a session that no
+    /// longer exists. An observation task that never returns is how a closed
+    /// project keeps its registry — and its subprocesses — alive.
+    @Test("the consumer's loop terminates once the session has stopped")
+    func stateChangesFinishesAfterStop() async throws {
+        let session = makeSession(script: Self.respondingServerScript)
+        let recorder = StateRecorder(session.stateChanges)
+
+        try await session.start()
+        await session.stop()
+        #expect(await poll { await recorder.didFinish })
+
+        // And on the path with no child at all. A session retired before its
+        // start ever landed must still release its observer, or a registry that
+        // reconciles twice in quick succession leaks one parked task per pass.
+        let neverStarted = makeSession(script: Self.respondingServerScript)
+        let idleRecorder = StateRecorder(neverStarted.stateChanges)
+
+        await neverStarted.stop()
+
+        #expect(await poll { await idleRecorder.didFinish })
+        #expect(await idleRecorder.states == ["stopped"])
+    }
+
+    /// An *unasked* death is news about a session that is still standing, not
+    /// the end of the session — the same contract `publishedDiagnostics`
+    /// carries. Finishing here would make `.failed` the last thing a panel
+    /// could ever hear, and would retire the observation before `stop()` has
+    /// been called.
+    @Test("a running server that dies on its own publishes .failed and leaves the stream open")
+    func stateChangesStaysOpenWhenARunningServerDiesOnItsOwn() async throws {
+        let session = makeSession(script: Self.exitingServerScript)
+        let recorder = StateRecorder(session.stateChanges)
+
+        try await session.start()
+
+        let failed = await poll { await recorder.states.last == "failed" }
+        #expect(failed)
+        #expect(await recorder.didFinish == false)
+
+        await session.stop()
+        let ended = await poll { await recorder.didFinish }
+        #expect(ended)
+        // `.failed` survives the stop, so the transcript never says "stopped".
+        #expect(await recorder.states == ["starting", "running", "failed"])
+    }
+
+    /// What it catches: `stop()`'s failure branch written as an early `return`.
+    /// The state is right either way — that is the point — but the stream is
+    /// never finished, and every consumer of a server that failed to start is
+    /// parked on it for the lifetime of the process.
+    @Test("stopping a failed session keeps the failure and still ends the stream")
+    func stoppingAFailedSessionKeepsTheFailureAndStillEndsTheStream() async {
+        let session = makeSession(script: Self.failingServerScript)
+        let recorder = StateRecorder(session.stateChanges)
+
+        await #expect(throws: (any Error).self) { try await session.start() }
+        await session.stop()
+
+        let ended = await poll { await recorder.didFinish }
+        #expect(ended)
+        #expect(await recorder.states == ["starting", "failed"])
+        #expect(await session.state.failure != nil)
+    }
 }

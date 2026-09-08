@@ -47,6 +47,31 @@ public final class LanguageServerRegistry: ObservableObject {
     /// settings UI can list exactly what is running.
     @Published public private(set) var configurations: [LanguageServerConfiguration] = []
 
+    /// Each live session's last reported state, keyed by configuration id.
+    ///
+    /// This is the answer to "is that server actually running?", and before it
+    /// existed nobody could ask: a session whose `start()` threw stays in
+    /// `sessions` looking exactly like one that started, and `$sessions` never
+    /// emits again — the failure lived only in the log.
+    ///
+    /// **A second published map rather than richer values in `sessions`.**
+    /// `sessions` is the *identity* map every consumer looks a session up in —
+    /// `LanguageServerDocumentSync`, `DiagnosticStore`, the completion and
+    /// definition delegates all subscribe to it to learn which object serves a
+    /// language. Putting mutable state in it would republish every one of those
+    /// subscriptions on every handshake tick, for a change none of them care
+    /// about. The two questions are genuinely different: `sessions` answers
+    /// *which* session, this answers *whether it can answer yet*
+    /// (`separation-of-concerns`).
+    ///
+    /// An entry is added when the session is created and removed by whoever
+    /// removes the session — never by the session's stream ending. A stream
+    /// that finished while its session was still in `sessions` would simply
+    /// stop updating, which is the honest behaviour; it cannot happen today,
+    /// because `stop()` is the only finisher and this registry removes a
+    /// session before it stops it.
+    @Published public private(set) var sessionStates: [UUID: LanguageServerSessionState] = [:]
+
     /// The directory sessions are rooted at when a configuration's root markers
     /// find nothing above it — normally the open project directory.
     public let workspaceURL: URL
@@ -56,6 +81,12 @@ public final class LanguageServerRegistry: ObservableObject {
     private let sessionFactory: SessionFactory
     private let fileManager: FileManager
     private var descriptors: [UUID: SessionDescriptor] = [:]
+
+    /// One `stateChanges` reader per live session, keyed by configuration id —
+    /// the same key `sessions` uses, because these are created and retired in
+    /// lockstep with it.
+    private var stateObservations: [UUID: Task<Void, Never>] = [:]
+
     private var cancellables: Set<AnyCancellable> = []
 
     public init(
@@ -246,8 +277,21 @@ public final class LanguageServerRegistry: ObservableObject {
         let running = Array(sessions.values)
         sessions = [:]
         descriptors = [:]
+        for observation in stateObservations.values {
+            observation.cancel()
+        }
+        stateObservations = [:]
+        sessionStates = [:]
         await Self.stopAll(running)
     }
+
+    /// How many sessions are having their state read right now.
+    ///
+    /// Internal, for tests. Cancelling an observation has no other externally
+    /// visible consequence — a cancelled reader simply stops writing — so
+    /// without this the difference between "cancelled" and "leaked and parked
+    /// forever" is not assertable.
+    var stateObservationCount: Int { stateObservations.count }
 
     private func reconcile(
         userConfigurations: [LanguageServerConfiguration],
@@ -278,6 +322,8 @@ public final class LanguageServerRegistry: ObservableObject {
             retired.append(session)
             sessions.removeValue(forKey: id)
             descriptors.removeValue(forKey: id)
+            sessionStates.removeValue(forKey: id)
+            stateObservations.removeValue(forKey: id)?.cancel()
         }
         if !retired.isEmpty {
             Task { await Self.stopAll(retired) }
@@ -287,6 +333,14 @@ public final class LanguageServerRegistry: ObservableObject {
             let session = sessionFactory(descriptor.configuration, descriptor.secrets, descriptor.rootURL)
             sessions[id] = session
             descriptors[id] = descriptor
+            // Seeded synchronously, here, and before the start below. A
+            // `sessions` entry with no `sessionStates` entry is a window in
+            // which a panel has to invent an answer for a server it can see;
+            // `.idle` is the session's real state at this instant, and the
+            // session itself does not publish it (nobody is listening yet when
+            // its initialiser runs).
+            sessionStates[id] = .idle
+            observeState(of: session, id: id)
             let name = descriptor.configuration.name
             Task {
                 do {
@@ -297,6 +351,42 @@ public final class LanguageServerRegistry: ObservableObject {
                         "Failed to start language server \(name, privacy: .public): \(message, privacy: .public)"
                     )
                 }
+            }
+        }
+    }
+
+    /// Reads one session's transitions into `sessionStates` until the session's
+    /// stream finishes or the observation is cancelled.
+    ///
+    /// `Task {}` inside a `@MainActor` method inherits main-actor isolation, so
+    /// the identity check and the write below are one synchronous step with no
+    /// window between them — the same argument `DiagnosticStore.observe(_:)`
+    /// makes about `apply(_:)`.
+    ///
+    /// **The identity check is the whole point, and it is re-evaluated after
+    /// every suspension rather than once at subscribe time.** `reconcile`
+    /// retires superseded sessions and then installs their replacements under
+    /// the *same* configuration id, while the outgoing session is still
+    /// draining in `stopAll`'s detached task. A retired session's reader can
+    /// therefore be resumed with a value it was handed before it was cancelled,
+    /// and an unguarded write would put that session's `.stopped` on top of its
+    /// replacement's state — a panel showing a stopped server that is in fact
+    /// running, with no further emission to correct it.
+    ///
+    /// The invariant that makes it sound: **nothing is read before an await and
+    /// used after it.** `id` and `session` are constants captured at creation,
+    /// `state` is delivered by the await itself, and `sessions[id]` is read
+    /// fresh on every iteration.
+    ///
+    /// `[weak self]` so an abandoned registry — one released without
+    /// `shutdown()` — is not kept alive by a task parked on a live server's
+    /// stream.
+    private func observeState(of session: any LanguageServerSessionProtocol, id: UUID) {
+        stateObservations[id] = Task { [weak self] in
+            for await state in session.stateChanges {
+                guard let self else { return }
+                guard self.sessions[id] === session else { return }
+                self.sessionStates[id] = state
             }
         }
     }

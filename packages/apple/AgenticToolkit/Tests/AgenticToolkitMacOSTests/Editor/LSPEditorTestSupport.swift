@@ -49,6 +49,13 @@ struct FakeEditorSessionBehavior: Sendable {
     /// that has not finished its handshake; every consumer has to treat that as
     /// "no feature", which is one of the paths under test.
     var capabilities: ServerCapabilities?
+
+    /// When true, `start()` parks — **before** it writes any state — until
+    /// `releaseHeldStart()`. The registry starts every session it creates in a
+    /// `Task` of its own, so this is the only way a test can hold a session at
+    /// a pre-`.running` state long enough to observe what the editor does with
+    /// one.
+    var holdsStart: Bool
     var completionResponse: CompletionResponse
     var definitionResponse: DefinitionResponse
     var hoverResponse: HoverResponse
@@ -60,6 +67,7 @@ struct FakeEditorSessionBehavior: Sendable {
 
     init(
         capabilities: ServerCapabilities? = nil,
+        holdsStart: Bool = false,
         completionResponse: CompletionResponse = nil,
         definitionResponse: DefinitionResponse = nil,
         hoverResponse: HoverResponse = nil,
@@ -70,6 +78,7 @@ struct FakeEditorSessionBehavior: Sendable {
         semanticTokensError: LanguageServerSessionError? = nil
     ) {
         self.capabilities = capabilities
+        self.holdsStart = holdsStart
         self.completionResponse = completionResponse
         self.definitionResponse = definitionResponse
         self.hoverResponse = hoverResponse
@@ -112,6 +121,14 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     /// `publish(_:)` is the wire.
     nonisolated let publishedDiagnostics: AsyncStream<PublishDiagnosticsParams>
     private nonisolated let diagnosticsContinuation: AsyncStream<PublishDiagnosticsParams>.Continuation
+
+    /// The lifecycle half of the protocol. Every transition goes through
+    /// `setState(_:)`, so the stream cannot disagree with `state`.
+    nonisolated let stateChanges: AsyncStream<LanguageServerSessionState>
+    private nonisolated let stateContinuation: AsyncStream<LanguageServerSessionState>.Continuation
+
+    /// `start()` calls parked by `behavior.holdsStart`.
+    private var heldStarts: [CheckedContinuation<Void, Never>] = []
 
     private let behavior: FakeEditorSessionBehavior
     private let log: EditorSessionLog
@@ -159,6 +176,9 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         let (stream, continuation) = AsyncStream.makeStream(of: PublishDiagnosticsParams.self)
         self.publishedDiagnostics = stream
         self.diagnosticsContinuation = continuation
+        let (states, stateContinuation) = AsyncStream.makeStream(of: LanguageServerSessionState.self)
+        self.stateChanges = states
+        self.stateContinuation = stateContinuation
         self.id = configuration.id
         self.name = configuration.name
         self.languageIds = configuration.languageIds
@@ -178,24 +198,53 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         case .idle:
             break
         case .starting, .running:
-            // This fake's start has no suspension point, so `.starting` is
-            // never observable; a second caller only ever meets a settled
-            // outcome, which is where awaiting the real session's `startTask`
-            // also lands.
+            // Unless `behavior.holdsStart` is set, this fake's start has no
+            // suspension point, so `.starting` is never observable; a second
+            // caller only ever meets a settled outcome, which is where awaiting
+            // the real session's `startTask` also lands. With the gate set the
+            // session stays at `.idle` while parked, so a second caller parks
+            // too and both settle together on release.
             return
         case .failed(let failure):
             throw failure.error
         case .stopped:
             throw LanguageServerSessionError.sessionHasBeenStopped
         }
+        if behavior.holdsStart {
+            await withCheckedContinuation { continuation in
+                heldStarts.append(continuation)
+            }
+        }
         log.record("start")
-        state = .running
+        setState(.running)
+    }
+
+    /// Resumes every `start()` parked by `behavior.holdsStart`.
+    func releaseHeldStart() {
+        let held = heldStarts
+        heldStarts = []
+        for continuation in held {
+            continuation.resume()
+        }
     }
 
     func stop() async {
-        state = .stopped
+        setState(.stopped)
         log.record("stop")
         diagnosticsContinuation.finish()
+        // After the terminal state, never before — the real session's ordering.
+        stateContinuation.finish()
+    }
+
+    /// The single writer, as `LanguageServerSession.setState(_:)` is.
+    private func setState(_ next: LanguageServerSessionState) {
+        state = next
+        stateContinuation.yield(next)
+    }
+
+    /// Drives one transition from a test — the state and the stream together.
+    func transition(to next: LanguageServerSessionState) {
+        setState(next)
     }
 
     /// Answers the next capability calls with these, in order, before falling
@@ -224,7 +273,20 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         }
     }
 
+    /// How many times `capabilities()` has been asked, counted **before** the
+    /// running guard.
+    ///
+    /// A counter rather than a `log.record`, because several existing suites
+    /// assert on the whole of `log.events`, and a capability query is not an
+    /// event any of them was written to expect. It exists so a test can say
+    /// "the resolution ran again" in the case where it cannot say "and the
+    /// answer changed" — a transition that leaves the session object identity
+    /// alone re-asks the delegate, and the delegate's own trigger cache is
+    /// keyed on that identity.
+    private(set) var capabilityRequestCount = 0
+
     func capabilities() async -> ServerCapabilities? {
+        capabilityRequestCount += 1
         guard case .running = state else { return nil }
         // Chosen before parking, so the answer belongs to this call rather than
         // to whichever call happens to resume first.

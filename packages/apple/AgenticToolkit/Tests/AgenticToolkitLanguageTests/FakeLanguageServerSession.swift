@@ -77,6 +77,16 @@ struct FakeSessionBehavior: Sendable {
     /// When set, `start()` fails with it and the session lands in `.failed`.
     var startError: LanguageServerSessionError?
 
+    /// When true, `start()` parks — **before** it writes any state — until
+    /// `releaseHeldStart()`, so the session sits at `.idle` for as long as a
+    /// test needs it to.
+    ///
+    /// This is what makes the retire race expressible. The registry starts
+    /// every session it creates, and a fake that ran straight to `.running`
+    /// would overwrite the very entry a test about a *late* write is trying to
+    /// inspect.
+    var holdsStart: Bool
+
     /// Errors for successive `didOpen` calls; a `nil` entry (or running off the
     /// end) succeeds. `[.notRunning, nil]` is "the first open is dropped, the
     /// next one lands".
@@ -89,12 +99,14 @@ struct FakeSessionBehavior: Sendable {
         capabilities: ServerCapabilities? = nil,
         startError: LanguageServerSessionError? = nil,
         didOpenErrors: [LanguageServerSessionError?] = [],
-        didChangeErrors: [LanguageServerSessionError?] = []
+        didChangeErrors: [LanguageServerSessionError?] = [],
+        holdsStart: Bool = false
     ) {
         self.capabilities = capabilities
         self.startError = startError
         self.didOpenErrors = didOpenErrors
         self.didChangeErrors = didChangeErrors
+        self.holdsStart = holdsStart
     }
 
     /// A server that declared the given sync capability and nothing else.
@@ -136,7 +148,16 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     nonisolated let publishedDiagnostics: AsyncStream<PublishDiagnosticsParams>
     private nonisolated let diagnosticsContinuation: AsyncStream<PublishDiagnosticsParams>.Continuation
 
+    /// The lifecycle half of the protocol, faithful to the real session in the
+    /// one respect the registry depends on: every transition is published, in
+    /// the order it was made, and the stream finishes at the end of `stop()`.
+    nonisolated let stateChanges: AsyncStream<LanguageServerSessionState>
+    private nonisolated let stateContinuation: AsyncStream<LanguageServerSessionState>.Continuation
+
     private(set) var state: LanguageServerSessionState = .idle
+
+    /// Parked `start()` calls, when `behavior.holdsStart` is set.
+    private var heldStarts: [CheckedContinuation<Void, Never>] = []
     private let log: SessionLog
     private let behavior: FakeSessionBehavior
     private var didOpenCount = 0
@@ -152,6 +173,9 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
         let (stream, continuation) = AsyncStream.makeStream(of: PublishDiagnosticsParams.self)
         self.publishedDiagnostics = stream
         self.diagnosticsContinuation = continuation
+        let (states, stateContinuation) = AsyncStream.makeStream(of: LanguageServerSessionState.self)
+        self.stateChanges = states
+        self.stateContinuation = stateContinuation
         self.id = configuration.id
         self.name = configuration.name
         self.languageIds = configuration.languageIds
@@ -178,21 +202,62 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
             throw LanguageServerSessionError.sessionHasBeenStopped
         }
         record(.start)
+        if behavior.holdsStart {
+            await withCheckedContinuation { continuation in
+                heldStarts.append(continuation)
+            }
+        }
         if let startError = behavior.startError {
-            state = .failed(LanguageServerFailure(error: startError, standardErrorText: ""))
+            setState(.failed(LanguageServerFailure(error: startError, standardErrorText: "")))
             throw startError
         }
-        state = .running
+        setState(.running)
+    }
+
+    /// Resumes every `start()` parked by `behavior.holdsStart`.
+    func releaseHeldStart() {
+        let held = heldStarts
+        heldStarts = []
+        for continuation in held {
+            continuation.resume()
+        }
     }
 
     func stop() async {
-        state = .stopped
+        setState(.stopped)
         record(.stop)
         // Finished here for the same reason the real session finishes it in
         // `teardown()`: a consumer's `for await` must terminate when the server
         // it is reading is gone. A fake that never finished would let a store
         // bug — an observation task that outlives its session — pass.
         diagnosticsContinuation.finish()
+        // The state stream finishes at the end of `stop()`, after the terminal
+        // state has been yielded — the real session's Ruling BA asymmetry,
+        // mirrored here so a fake cannot hide a consumer that depends on it.
+        stateContinuation.finish()
+    }
+
+    /// The single writer, exactly as `LanguageServerSession.setState(_:)` is.
+    private func setState(_ next: LanguageServerSessionState) {
+        state = next
+        stateContinuation.yield(next)
+    }
+
+    /// Drives one transition from a test — the state and the stream together.
+    func transition(to next: LanguageServerSessionState) {
+        setState(next)
+    }
+
+    /// Yields a transition **without** the actor hop, leaving `state` alone.
+    ///
+    /// `nonisolated` for the same reason `publish(_:)` is, and it is what makes
+    /// the retire race expressible: a test on the main actor can put a value
+    /// into an observation task's hands and then reconcile *in the same
+    /// synchronous step*, with no suspension in between for the registry to
+    /// notice. `transition(to:)` would suspend at the actor hop and let the
+    /// observation run first, which is the ordering the race is not about.
+    nonisolated func yieldState(_ next: LanguageServerSessionState) {
+        stateContinuation.yield(next)
     }
 
     /// Pushes one `publishDiagnostics` notification, as a server would.
@@ -302,5 +367,24 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     func semanticTokensFull(_ params: SemanticTokensParams) async throws -> SemanticTokensResponse {
         try requireRunning()
         return nil
+    }
+}
+
+extension LanguageServerSessionState {
+
+    /// The case as a word.
+    ///
+    /// `LanguageServerSessionState` is deliberately not `Equatable` — `.failed`
+    /// carries `any Error` — so a name is what a test can actually compare, and
+    /// it is what a failure message needs to read. Payload assertions go
+    /// through `failure` beside this, never instead of it.
+    var caseName: String {
+        switch self {
+        case .idle: return "idle"
+        case .starting: return "starting"
+        case .running: return "running"
+        case .stopped: return "stopped"
+        case .failed: return "failed"
+        }
     }
 }

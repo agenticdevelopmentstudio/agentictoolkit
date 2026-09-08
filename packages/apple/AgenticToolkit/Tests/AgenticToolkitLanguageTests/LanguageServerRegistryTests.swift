@@ -1,4 +1,5 @@
 import AgenticToolkitCore
+import Combine
 import Foundation
 import LanguageServerProtocol
 import Testing
@@ -44,7 +45,12 @@ struct LanguageServerRegistryTests {
     private func makeRegistry(
         store: SettingsStore,
         log: SessionLog,
-        workspaceURL: URL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        workspaceURL: URL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true),
+        // Applied to every fake the factory hands back, because the reconcile
+        // rule is not selective and neither is this. Section 8's tests set
+        // `holdsStart` so a session parks at `.idle` and stays there for as
+        // long as the assertions need it to.
+        behavior: FakeSessionBehavior = FakeSessionBehavior()
     ) -> LanguageServerRegistry {
         LanguageServerRegistry(
             store: store,
@@ -58,7 +64,8 @@ struct LanguageServerRegistryTests {
                     configuration: configuration,
                     environment: configuration.environment.merging(secrets) { _, secret in secret },
                     rootURL: rootURL,
-                    log: log
+                    log: log,
+                    behavior: behavior
                 )
             }
         )
@@ -503,5 +510,240 @@ struct LanguageServerRegistryTests {
             }
         }
         #expect(stopped, "the retired session was never stopped")
+    }
+
+    // MARK: - 8. Session state aggregation
+
+    /// The state the registry currently reports for `id`, as a word, or
+    /// `"none"` when it has no entry at all — so one assertion distinguishes
+    /// "not tracked" from "tracked as idle".
+    private func stateName(_ registry: LanguageServerRegistry, _ id: UUID) -> String {
+        registry.sessionStates[id]?.caseName ?? "none"
+    }
+
+    /// The session the registry currently holds for `id`, as the fake it is.
+    /// Fetched rather than captured, because a reconcile *replaces* the object
+    /// under an unchanged id and a captured reference would silently be the old
+    /// one.
+    private func fake(_ registry: LanguageServerRegistry, _ id: UUID) -> FakeLanguageServerSession? {
+        registry.sessions[id] as? FakeLanguageServerSession
+    }
+
+    /// What it catches: an entry created only when the session first publishes.
+    /// A session publishes nothing at construction — nobody is listening yet
+    /// when its initialiser runs — so a registry that waited for the stream
+    /// would leave a window in which `sessions` holds a server that
+    /// `sessionStates` has no answer for, and a panel would have to invent one.
+    @Test("creating a session seeds sessionStates with .idle")
+    func sessionStatesGainsAnIdleEntryWhenASessionIsCreated() {
+        let store = makeStore()
+        let registry = makeRegistry(
+            store: store,
+            log: SessionLog(),
+            behavior: FakeSessionBehavior(holdsStart: true)
+        )
+
+        let configuration = makeConfiguration()
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+
+        // Asserted synchronously, in the same step as the `sessions` entry: the
+        // two are written by one reconcile, so there is no tick in which one
+        // exists without the other.
+        #expect(registry.sessions[configuration.id] != nil)
+        #expect(stateName(registry, configuration.id) == "idle")
+        #expect(registry.stateObservationCount == 1)
+    }
+
+    /// What it catches: an observation that reads the first transition and
+    /// stops, and one that reports the case but drops the payload. A failed
+    /// row's second line — the reason, and the server's own stderr — is read
+    /// off this map and nowhere else.
+    @Test("sessionStates follows the session's transitions")
+    func sessionStatesFollowsASessionsTransitions() async {
+        let store = makeStore()
+        let registry = makeRegistry(
+            store: store,
+            log: SessionLog(),
+            behavior: FakeSessionBehavior(holdsStart: true)
+        )
+
+        let configuration = makeConfiguration()
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+        guard let session = fake(registry, configuration.id) else {
+            Issue.record("no session was created")
+            return
+        }
+
+        await session.transition(to: .starting)
+        #expect(await poll { stateName(registry, configuration.id) == "starting" })
+
+        await session.transition(to: .running)
+        #expect(await poll { stateName(registry, configuration.id) == "running" })
+
+        await session.transition(to: .failed(LanguageServerFailure(
+            error: LanguageServerSessionError.serverExited(status: 9),
+            standardErrorText: "boom: no toolchain here"
+        )))
+        #expect(await poll { stateName(registry, configuration.id) == "failed" })
+        #expect(
+            registry.sessionStates[configuration.id]?.failure?.standardErrorText
+                == "boom: no toolchain here"
+        )
+    }
+
+    /// What it catches: a retire path that drops the session but keeps the
+    /// state, which leaves a disabled server permanently listed as running; and
+    /// one that forgets to cancel the reader, which is a task parked on a
+    /// retired session's stream — and therefore a strong reference to that
+    /// session, and to its child, for the lifetime of the registry.
+    @Test("disabling a configuration drops its sessionStates entry and its observation")
+    func sessionStatesDropsTheEntryWhenAConfigurationIsDisabled() {
+        let store = makeStore()
+        let registry = makeRegistry(
+            store: store,
+            log: SessionLog(),
+            behavior: FakeSessionBehavior(holdsStart: true)
+        )
+
+        var configuration = makeConfiguration()
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+        #expect(stateName(registry, configuration.id) == "idle")
+        #expect(registry.stateObservationCount == 1)
+
+        configuration.isEnabled = false
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+
+        #expect(registry.sessionStates.isEmpty)
+        #expect(stateName(registry, configuration.id) == "none")
+        #expect(registry.stateObservationCount == 0)
+    }
+
+    /// ★ Ruling BB, stated as a test.
+    ///
+    /// A superseded session is retired and its replacement installed under the
+    /// *same* configuration id, while the outgoing one is still draining in
+    /// `stopAll`'s detached task. So the retired session's reader can be
+    /// resumed with a value it was handed *before* it was cancelled — a cancel
+    /// cannot take back a value already delivered — and an unguarded write puts
+    /// that session's `.stopped` on top of its replacement's state. The panel
+    /// then shows a stopped server that is in fact running, permanently,
+    /// because nothing emits again to correct it.
+    ///
+    /// Deterministic by construction, not by scheduling. The yield and the
+    /// reconcile happen in **one synchronous main-actor step** with no
+    /// suspension between them, which is the only ordering in which the guard
+    /// is load-bearing: `yieldState` resumes the parked reader with `.stopped`
+    /// before the reconcile cancels it. (A yield issued *after* the cancel is
+    /// unobservable — the reader is resumed with `nil` and returns — so a test
+    /// written that way would pass against the unguarded code.)
+    ///
+    /// **Deviation from the brief's wording, deliberate.** The brief says "let
+    /// the replacement reach `.starting`". This fake publishes no `.starting` —
+    /// its `start()` has no suspension point — and its start is held anyway, so
+    /// the replacement's observable state is the `.idle` the reconcile seeded.
+    /// That serves the same purpose: it is a state that is not the outgoing
+    /// session's `.stopped`, and the final two assertions go further than the
+    /// brief asked by driving the replacement's own transition through
+    /// afterwards, proving the guard rejects the retired *session* and not the
+    /// id.
+    @Test("a retired session's late transition cannot overwrite its replacement")
+    func aRetiredSessionsLateTransitionCannotOverwriteItsReplacement() async {
+        let store = makeStore()
+        let registry = makeRegistry(
+            store: store,
+            log: SessionLog(),
+            behavior: FakeSessionBehavior(holdsStart: true)
+        )
+
+        var configuration = makeConfiguration()
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+        guard let outgoing = fake(registry, configuration.id) else {
+            Issue.record("no session was created")
+            return
+        }
+
+        // Driven somewhere observable and waited for, so the reader is parked
+        // in `for await` — not mid-iteration — at the instant the race is set
+        // up below.
+        await outgoing.transition(to: .running)
+        #expect(await poll { stateName(registry, configuration.id) == "running" })
+
+        // The race. No `await` between these two statements.
+        outgoing.yieldState(.stopped)
+        configuration.command = "/nonexistent/second-server"
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+
+        guard let replacement = fake(registry, configuration.id) else {
+            Issue.record("no replacement was created")
+            return
+        }
+        #expect(replacement.instanceID != outgoing.instanceID)
+        #expect(stateName(registry, configuration.id) == "idle")
+
+        // Now let the retired reader run. Unguarded, this is where it writes
+        // `.stopped` over the seeded `.idle`.
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(stateName(registry, configuration.id) == "idle")
+
+        await replacement.transition(to: .running)
+        #expect(await poll { stateName(registry, configuration.id) == "running" })
+    }
+
+    /// What it catches: a quit path that stops every child but leaves the
+    /// readers parked, so the registry cannot be released; and one that leaves
+    /// the last known states behind, so a settings panel reopened after a quit
+    /// lists servers that no longer exist.
+    @Test("shutdown clears sessionStates and cancels every observation")
+    func shutdownClearsSessionStatesAndCancelsTheObservations() async {
+        let store = makeStore()
+        let registry = makeRegistry(
+            store: store,
+            log: SessionLog(),
+            behavior: FakeSessionBehavior(holdsStart: true)
+        )
+
+        let first = makeConfiguration(languageIds: ["swift"])
+        let second = makeConfiguration(languageIds: ["python"], command: "/nonexistent/second-server")
+        store.set([first, second], for: UserSettings.languageServerConfigurations)
+        #expect(registry.sessionStates.count == 2)
+        #expect(registry.stateObservationCount == 2)
+
+        await registry.shutdown()
+
+        #expect(registry.sessionStates.isEmpty)
+        #expect(registry.stateObservationCount == 0)
+    }
+
+    /// ★ The gap Ruling AQ named, stated as a test — and the reason a second
+    /// published map exists at all.
+    ///
+    /// A `start()` that throws changes nothing about `sessions`: the object is
+    /// still there, still resolvable by language id, and `$sessions` does not
+    /// emit again. Every consumer watching only that publisher — which, before
+    /// this task, was every consumer there was — has no way to learn the server
+    /// is dead. `sessionStates` is where the failure shows up.
+    @Test("sessionStates reports a failed start that `sessions` cannot see")
+    func sessionStatesReportsAFailedStartThatSessionsCannotSee() async {
+        let store = makeStore()
+        let registry = makeRegistry(
+            store: store,
+            log: SessionLog(),
+            behavior: FakeSessionBehavior(startError: .serverExited(status: 3))
+        )
+
+        var sessionEmissions = 0
+        let token = registry.$sessions.sink { _ in sessionEmissions += 1 }
+        defer { token.cancel() }
+
+        let configuration = makeConfiguration()
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+        let emissionsAfterCreation = sessionEmissions
+
+        #expect(await poll { stateName(registry, configuration.id) == "failed" })
+
+        #expect(registry.sessions[configuration.id] != nil)
+        #expect(registry.session(forLanguageId: "swift") != nil)
+        #expect(sessionEmissions == emissionsAfterCreation, "the failure must not move `sessions`")
+        #expect(registry.sessionStates[configuration.id]?.failure != nil)
     }
 }

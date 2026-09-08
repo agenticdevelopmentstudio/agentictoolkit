@@ -207,6 +207,49 @@ public protocol LanguageServerSessionProtocol: Actor {
     /// consumer that cannot wait for that must cancel its own iteration, which
     /// is what `DiagnosticStore.shutdown()` does.
     nonisolated var publishedDiagnostics: AsyncStream<PublishDiagnosticsParams> { get }
+
+    /// Every transition this session's `state` makes, in the order it made
+    /// them.
+    ///
+    /// A stream rather than a poll because a lifecycle failure is a *moment*,
+    /// not a value anyone thinks to go and read: a server whose `start()` threw
+    /// stays in `LanguageServerRegistry.sessions` looking exactly like one that
+    /// started, `$sessions` never emits again, and the only trace of the
+    /// failure is one line in the log. This is the signal that carries it out.
+    ///
+    /// **Ordering.** Transitions arrive in the order they were written, because
+    /// every write goes through one synchronous helper on the actor — the state
+    /// is assigned and yielded in the same actor step, with no suspension
+    /// between them, so no second writer can interleave.
+    ///
+    /// **One consumer, and only one.** `AsyncStream` supports a single
+    /// iterator: two `for await` loops over this property split the transitions
+    /// between them arbitrarily and neither sees them all, which shows up as a
+    /// status indicator that is stuck on a state the server left. The one
+    /// consumer is `LanguageServerRegistry`, which republishes what it reads as
+    /// `sessionStates`; anything that wants a session's state observes the
+    /// registry.
+    ///
+    /// **When it finishes.** At the end of `stop()`, after the terminal state
+    /// has been yielded — deliberately **not** in `teardown()`, which is where
+    /// `publishedDiagnostics` finishes. The asymmetry is forced by `stop()`:
+    /// teardown is where the *transport* dies, but this stream's last word,
+    /// `.stopped`, is written *after* teardown returns. Finishing in teardown
+    /// would yield `.stopped` into a finished continuation, where it is
+    /// silently dropped, and the last thing a status panel ever heard about a
+    /// server the user just disabled would be "running".
+    ///
+    /// It does **not** finish when a running server dies on its own: that path
+    /// publishes `.failed` and leaves the session standing, exactly as
+    /// `publishedDiagnostics` does. A `.failed` nobody can read is the defect
+    /// this stream exists to fix.
+    ///
+    /// **What it is not:** a replacement for `state`. A consumer that wants the
+    /// current value asks the actor; this carries transitions. A late
+    /// subscriber misses what already happened, which is why
+    /// `LanguageServerRegistry` subscribes at the moment it creates a session
+    /// and seeds the initial `.idle` itself.
+    nonisolated var stateChanges: AsyncStream<LanguageServerSessionState> { get }
 }
 
 /// One running language server: the child process, the JSON-RPC plumbing over
@@ -307,6 +350,12 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// process.
     private var server: InitializingServer?
 
+    /// Written **only** through `setState(_:)`, so that every transition is
+    /// published on `stateChanges` by construction rather than by inspection.
+    /// The `.idle` default is the one exception, and it is not a transition:
+    /// nothing is subscribed at initialiser time, and yielding into a stream
+    /// nobody holds would be a lie about ordering. The registry seeds `.idle`
+    /// itself, at the moment it creates the session.
     public private(set) var state: LanguageServerSessionState = .idle
 
     /// The in-flight `start()`, held so `stop()` can wait for it.
@@ -356,6 +405,23 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// guarantee would go with it.
     private nonisolated let diagnosticsContinuation: AsyncStream<PublishDiagnosticsParams>.Continuation
 
+    /// Every transition `state` makes. See the protocol requirement for the
+    /// ordering, single-consumer and finish contracts.
+    public nonisolated let stateChanges: AsyncStream<LanguageServerSessionState>
+
+    /// The write end of `stateChanges`.
+    ///
+    /// `nonisolated let` for the same reason as `diagnosticsContinuation`: it
+    /// is yielded into synchronously from `setState(_:)`, in the same actor
+    /// step as the assignment it reports, so nothing can interleave between
+    /// the write and its publication.
+    ///
+    /// Default (unbounded) buffering, deliberately. A `.bufferingNewest(1)`
+    /// would drop `.starting` whenever `.running` followed it quickly, and
+    /// `.starting` is exactly the transition that distinguishes "still
+    /// handshaking" from "never started".
+    private nonisolated let stateContinuation: AsyncStream<LanguageServerSessionState>.Continuation
+
     /// Drains `InitializingServer.eventSequence` for the one notification this
     /// session re-exposes. Held so `teardown()` can end it.
     ///
@@ -372,6 +438,17 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         let (stream, continuation) = AsyncStream.makeStream(of: PublishDiagnosticsParams.self)
         self.publishedDiagnostics = stream
         self.diagnosticsContinuation = continuation
+        let (states, stateContinuation) = AsyncStream.makeStream(of: LanguageServerSessionState.self)
+        self.stateChanges = states
+        self.stateContinuation = stateContinuation
+    }
+
+    /// The **only** writer of `state`, and the reason `stateChanges` can
+    /// promise ordering: the assignment and the yield are one actor step, so a
+    /// consumer reads transitions in the order they were made.
+    private func setState(_ next: LanguageServerSessionState) {
+        state = next
+        stateContinuation.yield(next)
     }
 
     // MARK: - Lifecycle
@@ -451,7 +528,7 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         // Claimed before the first suspension. From here until this method
         // returns, `stop()` must behave as though a child exists, because for
         // most of that span one does.
-        state = .starting
+        setState(.starting)
 
         let task = Task { try await self.performStart() }
         startTask = task
@@ -563,7 +640,7 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         }
 
         guard !isStopped, case .starting = state else { return }
-        state = .running
+        setState(.running)
     }
 
     /// Stops the server and retires this session permanently.
@@ -589,8 +666,29 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         // that has not already entered this actor.
         isStopped = true
         await teardown()
-        if case .failed = state { return }
-        state = .stopped
+        // A session that had already `.failed` keeps that state; every other
+        // path lands on `.stopped`. Written as one branch rather than an early
+        // `return` so that the finish below is reached on both.
+        if case .failed = state {
+            // Nothing to publish: `.failed` was yielded when it was recorded.
+        } else {
+            setState(.stopped)
+        }
+        // **Here, and deliberately not in `teardown()`** — where
+        // `diagnosticsContinuation` finishes. Teardown is where the transport
+        // dies, but this stream's last word is written *after* teardown
+        // returns, two lines above. Finishing in teardown would yield
+        // `.stopped` into a finished continuation, where it is dropped without
+        // a trace, and the last thing a status panel ever heard about a server
+        // the user just disabled would be "running" — permanently, because a
+        // stopped session makes no further transitions.
+        //
+        // `stop()` is the only finisher, and `isStopped` makes it run its
+        // course once, so this is "finished exactly once, on every stop path"
+        // by construction. A running server that dies on its own does *not*
+        // come through here: it publishes `.failed` and leaves the session
+        // standing, the same contract `publishedDiagnostics` carries.
+        stateContinuation.finish()
     }
 
     /// The server's capabilities, or `nil` if it is not initialized.
@@ -877,7 +975,7 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         case .stopped, .failed: return
         case .idle, .starting, .running: break
         }
-        state = .failed(LanguageServerFailure(error: error, standardErrorText: text))
+        setState(.failed(LanguageServerFailure(error: error, standardErrorText: text)))
     }
 
     // MARK: - Handshake
