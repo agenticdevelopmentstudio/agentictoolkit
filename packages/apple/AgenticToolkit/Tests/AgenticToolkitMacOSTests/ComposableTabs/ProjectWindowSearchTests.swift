@@ -141,10 +141,16 @@ final class ProjectWindowSearchTests: XCTestCase {
         super.tearDown()
     }
 
-    func testTheToolbarIsASpacerAndASearchField() {
+    func testTheToolbarIsASpacerASearchFieldAndHelp() {
         let identifiers = buildToolbarItems(makeController(searchable: true))
 
-        XCTAssertEqual(identifiers, [.flexibleSpace, NSToolbarItem.Identifier("project.toolbar.search")])
+        XCTAssertEqual(
+            identifiers,
+            [
+                .flexibleSpace,
+                NSToolbarItem.Identifier("project.toolbar.search"),
+                NSToolbarItem.Identifier("project.toolbar.help")
+            ])
     }
 
     func testTheSearchFieldIsAddressable() throws {

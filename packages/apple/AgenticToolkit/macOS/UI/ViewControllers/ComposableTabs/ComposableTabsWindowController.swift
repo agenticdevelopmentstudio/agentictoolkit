@@ -11,6 +11,18 @@ import AgenticToolkitCoreMacOS
 /// the UI suite reaches these controls by the string value.
 private extension NSToolbarItem.Identifier {
     static let projectSearch = NSToolbarItem.Identifier("project.toolbar.search")
+    static let projectHelp = NSToolbarItem.Identifier("project.toolbar.help")
+}
+
+/// What a project remembers about its window, under `project_setting`.
+///
+/// Namespaced by hand rather than by a wrapper: unlike pane state, these keys
+/// are not shared with anything a pane writes, so the prefix is documentation
+/// rather than a collision guard.
+private enum ProjectWindowSetting {
+    static let drawerOpen = "drawer.open"
+    static let drawerTab = "drawer.tab"
+    static let drawerWidth = "drawer.width"
 }
 
 /// A project's window. Its geometry persists per project, under a window id
@@ -76,7 +88,12 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     lazy var toolbarDelegate = WindowToolbarBuilder.Delegate(
         items: [
             .flexibleSpace,
-            .search(identifier: .projectSearch, placeholder: "Search")
+            .search(identifier: .projectSearch, placeholder: "Search"),
+            .button(
+                identifier: .projectHelp,
+                symbol: "questionmark.circle",
+                label: "Help",
+                action: #selector(ComposableTabsWindowController.toggleHelp))
         ],
         target: self,
         searchDelegate: self,
@@ -87,6 +104,13 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
 
     /// The titlebar search field, once the toolbar has built it.
     public var searchField: NSSearchField? { toolbarDelegate.searchField }
+
+    /// The window's help, behind the protocol that keeps `NSDrawer`'s
+    /// deprecation out of the chrome that asks for it: the toolbar descriptor,
+    /// its `#selector` and the glyph refresh all talk to `HelpPresenting`,
+    /// whose requirements carry no annotation. Built in `configureWindow(_:)`,
+    /// because a drawer needs a window that exists.
+    private var helpPresenter: (any HelpPresenting)?
 
     /// The pane the search field is currently pointed at, so a redundant
     /// refresh does not throw away what the user has typed.
@@ -173,6 +197,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 self.refreshActivePaneChrome()
             }
             .store(in: &cancellables)
+
         refreshActivePaneChrome()
     }
 
@@ -182,13 +207,29 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         }
     }
 
-    /// A unified toolbar, matching the Notes window. The window title stays
-    /// visible here where it does not in Notes: the title is the project's
-    /// name, which is the one thing the toolbar does not say.
+    /// A unified toolbar, matching the Notes window, and the help drawer. The
+    /// window title stays visible here where it does not in Notes: the title is
+    /// the project's name, which is the one thing the toolbar does not say.
+    ///
+    /// Deliberately deprecated, exactly as `SettingsWindow`'s override is:
+    /// `ProjectHelpDrawerController` wraps `NSDrawer`, and naming it from
+    /// inside a deprecated declaration is what keeps the wrapper's deprecation
+    /// from leaking outward. Nothing of ours calls this override —
+    /// `loadWindow()` calls the base method — so the annotation warns nobody.
+    @available(macOS, deprecated: 10.13, message: "Builds the NSDrawer-backed help presenter")
     public override func configureWindow(_ window: NSWindow) {
         super.configureWindow(window)
         window.toolbar = toolbarDelegate.makeToolbar(identifier: "project.toolbar")
         window.toolbarStyle = .unified
+
+        // The window, not `self.window`: this runs *during* `loadWindow()`, so
+        // the controller's own property is not pointing at it yet.
+        let presenter = ProjectHelpDrawerController(parentWindow: window, project: project)
+        presenter.setHelp(Self.helpContent)
+        presenter.onVisibilityChange = { [weak self] in
+            self?.refreshHelpButtonAppearance()
+        }
+        helpPresenter = presenter
     }
 
     public override func showWindow(_ sender: Any?) {
@@ -202,6 +243,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         installTitlebarAccessoryIfNeeded()
         restoreFocusedLeafForActiveTab()
         refreshActivePaneChrome()
+        refreshHelpButtonAppearance()
     }
 
     // MARK: - Titlebar accessories
@@ -677,6 +719,92 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         )
     }
 
+    // MARK: - Help drawer
+
+    /// What the `?` shows. Static because it is the same for every project: a
+    /// description of the window, not of the repository in it.
+    public static let helpContent = HelpContent(topics: [
+        HelpContent.Topic(
+            title: "Panes",
+            body: """
+                Each pane has its own title bar. The controls on the left close, \
+                minimize and zoom it; the gear on the right holds options for \
+                that pane, including how much space it leaves around its \
+                contents.
+                """),
+        HelpContent.Topic(
+            title: "Minimizing",
+            body: """
+                Minimizing a pane sends it to one edge of the split it lives in, \
+                and the pane beside it takes the space. Left and right leave a \
+                narrow strip of icons; top and bottom leave the title bar. Click \
+                the strip to bring the pane back.
+                """),
+        HelpContent.Topic(
+            title: "Zoom",
+            body: """
+                A zoomed pane fills its whole tab. The other panes are still \
+                there — zoom it again to put them back.
+                """),
+        HelpContent.Topic(
+            title: "Search",
+            body: """
+                The search field searches the pane you are in. It is disabled \
+                over a pane that has nothing to search, and it clears when you \
+                move to another pane.
+                """),
+        HelpContent.Topic(
+            title: "The status bar",
+            body: """
+                The bar along the bottom names where you are: the project, the \
+                tab, the pane, and what is selected inside it.
+                """)
+    ])
+
+    /// Shows or hides the help drawer. `@objc` so the toolbar's `?` can name
+    /// it; no `sender` parameter, because AppKit is happy to send an action to
+    /// a zero-argument selector and the drawer does not care who asked.
+    ///
+    /// Warning-free — and so nameable from a `#selector` — because it goes
+    /// through `HelpPresenting` rather than through `WindowDrawer`.
+    @objc public func toggleHelp() {
+        helpPresenter?.toggleHelp()
+    }
+
+    /// Whether the help drawer is disclosed. `false` before the window has
+    /// loaded, when there is no drawer to disclose.
+    public var isHelpVisible: Bool { helpPresenter?.isHelpVisible ?? false }
+
+    /// The drawer itself, for the tests and the UI suite; `nil` until the
+    /// window has loaded, because a drawer needs a real window to hang off.
+    ///
+    /// Deprecated because `WindowDrawer` is, and naming one is only
+    /// warning-free from inside a declaration carrying the same quarantine.
+    /// This is the only place the window names it: everything the window
+    /// actually *does* with help goes through `HelpPresenting` above, which is
+    /// what keeps the annotation off `toggleHelp()` and its `#selector`.
+    @available(macOS, deprecated: 10.13)
+    public var helpDrawer: WindowDrawer? {
+        (helpPresenter as? ProjectHelpDrawerController)?.drawer
+    }
+
+    /// Filled while open, outlined while closed — the same glyph behaviour the
+    /// settings window's help button has, from the same helper. Driven from
+    /// `onVisibilityChange` and from `showWindow(_:)` rather than only from the
+    /// click, because the drawer also re-asserts itself when the window becomes
+    /// key, and because a custom-view toolbar item does not exist until AppKit
+    /// has asked the delegate for it.
+    private func refreshHelpButtonAppearance() {
+        guard let button = toolbarDelegate.button(for: .projectHelp) else { return }
+        WindowToolbarBuilder.applyDisclosureAppearance(
+            to: button,
+            disclosed: isHelpVisible,
+            outlineSymbol: "questionmark.circle",
+            filledSymbol: "questionmark.circle.fill",
+            showTooltip: "Show Help",
+            hideTooltip: "Hide Help")
+    }
+
 }
 
 // MARK: - MultiTabbedViewControllerDelegate
@@ -769,5 +897,145 @@ extension ComposableTabsWindowController: NSSearchFieldDelegate {
               let pane = activeSplit?.allLeaves().first(where: { $0.nodeID == nodeID })
         else { return }
         pane.search(for: field.stringValue)
+    }
+}
+
+// MARK: - The help drawer
+
+/// The project window's help drawer, and the per-repository preference that
+/// remembers whether it was open, on which tab, and how wide.
+///
+/// The sibling of `ComposableSettings.HelpDrawerController`: same drawer, same
+/// single Help tab, different place to remember it. `WindowDrawer` remembers
+/// nothing on purpose — "Settings remembers its drawer in `UserSettings`; the
+/// project window remembers its own per repository. A preference belongs to
+/// whoever the preference is about." There is one settings window but one
+/// project window *per project*, and they disagree, so this one writes to the
+/// project's own settings bag rather than to `UserSettings`.
+///
+/// **Why this is a type of its own** rather than a conformance on
+/// `ComposableTabsWindowController`: `HelpPresenting` is what keeps `NSDrawer`'s
+/// deprecation off the chrome that asks for help. Its requirements carry no
+/// annotation, so a window holding `any HelpPresenting` can name a toolbar
+/// action in a `#selector`, restyle a glyph and read `isHelpVisible` without a
+/// single warning, while everything that actually touches `WindowDrawer` stays
+/// behind the quarantine below. Folded into the window controller instead, the
+/// quarantine lands on `toggleHelp()` — and this project treats warnings as
+/// errors, so a `#selector` naming it stops the build.
+///
+/// In this file rather than its own, because a new file in a shared tier is a
+/// decision the placement guard makes the human take, and this presenter is one
+/// window's — nothing else refers to it.
+@available(macOS, deprecated: 10.13, message: "Wraps NSDrawer, deprecated since macOS 10.13")
+@MainActor
+final class ProjectHelpDrawerController: NSObject, HelpPresenting {
+
+    private static let helpTabID = "help"
+
+    private let project: ProjectWorkspace
+    private let helpView = HelpContentView()
+
+    /// The drawer itself, for the identifiers on it and the width read back off
+    /// it. The window reaches everything else through `HelpPresenting`.
+    let drawer: WindowDrawer
+
+    var onVisibilityChange: (() -> Void)?
+
+    /// Unused: a drawer comes out of the window's edge, not out of a button.
+    /// `HelpPresenting` still requires it, because the popover presenter does
+    /// need somewhere to hang its help from.
+    var helpAnchorView: NSView?
+
+    /// The remembered preference, not `drawer.isOpen`. The drawer is open
+    /// because the reader asked for it to be open, and for no other reason —
+    /// and AppKit silently drops an `open()` on a window that is not on screen
+    /// yet, which is exactly the moment a restored window asks. Answering from
+    /// the preference makes the button and its glyph right immediately;
+    /// `reapplyVisibility` is what makes the drawer itself catch up.
+    var isHelpVisible: Bool {
+        self.project.setting(ProjectWindowSetting.drawerOpen) == "1"
+    }
+
+    init(parentWindow: NSWindow, project: ProjectWorkspace) {
+        self.project = project
+        let helpView = self.helpView
+        self.drawer = WindowDrawer(
+            parentWindow: parentWindow,
+            accessibilityPrefix: "project.drawer",
+            tabs: [
+                DrawerTab(
+                    id: Self.helpTabID,
+                    title: "Help",
+                    symbolName: "questionmark.circle",
+                    makeView: { helpView })
+            ],
+            contentWidth: Self.rememberedWidth(of: project))
+        super.init()
+
+        // What the drawer re-asserts when the window finally appears, so a
+        // remembered-open drawer opens on launch rather than on the second try.
+        self.drawer.reapplyVisibility = { [weak self] in
+            self?.applyVisibility()
+        }
+        // The drawer announces opening and closing, never resizing, so a width
+        // the user dragged is read back at the last moment it can still matter:
+        // the one that ends the session with it. Registered by selector rather
+        // than by block so the observation is zeroing-weak and needs no
+        // `deinit` to undo — the same reason `WindowDrawer` watches its parent
+        // window that way.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(self.parentWindowWillClose),
+            name: NSWindow.willCloseNotification,
+            object: parentWindow)
+
+        self.applyVisibility()
+    }
+
+    // MARK: - HelpPresenting
+
+    func setHelp(_ content: HelpContent?) {
+        self.helpView.setHelp(content)
+    }
+
+    func toggleHelp() {
+        // `nil` deletes the row, so "never opened it" and "closed it again" are
+        // one state rather than two that have to be kept agreeing.
+        self.project.setSetting(
+            ProjectWindowSetting.drawerOpen, to: self.isHelpVisible ? nil : "1")
+        self.applyVisibility()
+    }
+
+    // MARK: - What the project remembers
+
+    private func applyVisibility() {
+        if self.isHelpVisible {
+            // The remembered tab, so a second tab later needs no change here.
+            // An id naming no tab is ignored by the drawer, which is the right
+            // answer for a preference written by some other build.
+            self.drawer.open(
+                selecting: self.project.setting(ProjectWindowSetting.drawerTab) ?? Self.helpTabID)
+        } else {
+            self.drawer.close()
+        }
+        self.onVisibilityChange?()
+    }
+
+    /// The remembered width, or the default. A value that is not a number is
+    /// treated as no value: nonsense in the database is not a reason to hand
+    /// the user a drawer they cannot drag back.
+    ///
+    /// `static` because the drawer is built with it, before there is a `self`
+    /// to ask.
+    private static func rememberedWidth(of project: ProjectWorkspace) -> CGFloat {
+        guard let raw = project.setting(ProjectWindowSetting.drawerWidth),
+              let width = Double(raw) else { return WindowDrawer.defaultContentWidth }
+        return CGFloat(width)
+    }
+
+    @objc private func parentWindowWillClose() {
+        self.project.setSetting(ProjectWindowSetting.drawerTab, to: self.drawer.selectedTabID)
+        self.project.setSetting(
+            ProjectWindowSetting.drawerWidth, to: String(Double(self.drawer.contentWidth)))
     }
 }

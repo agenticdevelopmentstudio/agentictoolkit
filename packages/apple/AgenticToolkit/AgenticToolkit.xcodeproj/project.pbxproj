@@ -340,6 +340,7 @@
 		5CE1EE9105CDACA98DEF6DB5 /* PinnedEndsLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C16470272D3A02EFD3772340 /* PinnedEndsLine.swift */; };
 		5D20D5C9B253CB6DC63EC8D9 /* MCP in Frameworks */ = {isa = PBXBuildFile; productRef = 5599A12B4A811CA2E4590E67 /* MCP */; };
 		5D6ED81D172A900CE68BE60E /* SystemWindowInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6717C0944EE1895FD8420EAB /* SystemWindowInfo.swift */; };
+		5D70D7995F9A0083A41288C0 /* ProjectDrawerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C9D95AC1CBEA2AD77225CA /* ProjectDrawerTests.swift */; };
 		5E3FAB824D0D5BA3CADF0197 /* RangeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80F6AEF2C35429822C9FB844 /* RangeViewModel.swift */; };
 		5E47BF016CD0D843EF810003 /* MCPServerConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 635A19282B38E0A6A626932E /* MCPServerConfiguration.swift */; };
 		5E64CEBE5E66B5047D420EC5 /* AIPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EF995FC0CC791F38212BEE6 /* AIPlugin.swift */; };
@@ -2121,6 +2122,7 @@
 		D63891B9A5DC2B1BE484BB0A /* SessionSources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSources.swift; sourceTree = "<group>"; };
 		D713796FE212AB499F815BCD /* SessionListViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListViewTests.swift; sourceTree = "<group>"; };
 		D79E82ACCE823C17A1F2BC0F /* ThemeUIReExports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeUIReExports.swift; sourceTree = "<group>"; };
+		D7C9D95AC1CBEA2AD77225CA /* ProjectDrawerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDrawerTests.swift; sourceTree = "<group>"; };
 		D84EF4A4E5F9F11026827540 /* InMemorySyncStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemorySyncStoreTests.swift; sourceTree = "<group>"; };
 		D8BFA956ECF26D7CD7AFD93E /* SyncGRDBSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncGRDBSmokeTests.swift; sourceTree = "<group>"; };
 		D8C2D2F51BD87927C2D3FAD4 /* ModelCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCapability.swift; sourceTree = "<group>"; };
@@ -3010,6 +3012,7 @@
 				68D8A687BA975179C597AA7F /* ComposableTabsViewControllerTests.swift */,
 				03206DE5EF36CF23046AB0B4 /* LayoutNodeThicknessTests.swift */,
 				71942A25CE71F5CEFEDBF694 /* PaneMinimizeGeometryTests.swift */,
+				D7C9D95AC1CBEA2AD77225CA /* ProjectDrawerTests.swift */,
 				7B2C848B48DB529D29C8485C /* ProjectFooterStatusTests.swift */,
 				2052E165D012328A91165A0D /* ProjectPaneContentTests.swift */,
 				C7F673515544E4F33195B0F0 /* ProjectPaneStateStoreTests.swift */,
@@ -5843,6 +5846,7 @@
 				D21E64220F721413CA25BA5D /* PopupMenuChoiceViewTests.swift in Sources */,
 				6792C8B002C89B0D0C3A35A4 /* ProjectDatabaseLayoutTests.swift in Sources */,
 				2DEEC08B5CA73AF9635CE0C7 /* ProjectDatabaseTests.swift in Sources */,
+				5D70D7995F9A0083A41288C0 /* ProjectDrawerTests.swift in Sources */,
 				42FA2A73DCBC152A969D057E /* ProjectFilterTests.swift in Sources */,
 				7D52B2134B493E307A248FF3 /* ProjectFooterStatusTests.swift in Sources */,
 				43139A3CE1A24A0680AF0887 /* ProjectPaneContentTests.swift in Sources */,

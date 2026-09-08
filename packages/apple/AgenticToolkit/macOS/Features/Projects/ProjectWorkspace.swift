@@ -182,6 +182,34 @@ public final class ProjectWorkspace {
         setPaneState(nodeID: nodeID, key: key, value: json)
     }
 
+    // MARK: - Project settings
+
+    /// What this project remembered under `key`, or `nil`.
+    ///
+    /// The same untyped bag `paneState` is, one level up: keyed to the project
+    /// rather than to a pane inside it. This is where a window remembers
+    /// something about *itself* — which is why the settings window's equivalent
+    /// lives in `UserSettings` and this one cannot. There is one settings
+    /// window; there is one project window per project, and they disagree.
+    public func setting(_ key: String) -> String? {
+        do {
+            return try database.setting(repoID: repo.id, key: key)
+        } catch {
+            Self.logger.error("Failed to load project setting: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// A `nil` value deletes the row, so "never set" and "set back to the
+    /// default" are the same state and neither accumulates.
+    public func setSetting(_ key: String, to value: String?) {
+        do {
+            try database.setSetting(repoID: repo.id, key: key, value: value)
+        } catch {
+            Self.logger.error("Failed to save project setting: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     // MARK: - Project directories
 
     /// The extra directories this project's file browser shows, beyond the
