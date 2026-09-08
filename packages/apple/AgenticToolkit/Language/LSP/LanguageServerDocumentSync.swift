@@ -379,8 +379,29 @@ public final class LanguageServerDocumentSync {
     /// which resolves to `/private/var/folders/...`, and `/tmp` resolves to
     /// `/private/tmp`, so a workspace and a document naming the same directory
     /// by different routes would otherwise fail to match.
+    ///
+    /// What is resolved is the deepest part of the path that is *on disk*, with
+    /// whatever is missing appended unresolved. `resolvingSymlinksInPath()` is
+    /// a no-op for a path that does not exist, so resolving the whole path
+    /// normalises a workspace root (which always exists) while leaving a
+    /// document that does not exist alone — and the two then share no prefix.
+    /// A file open in the editor and absent from disk is ordinary: switch to a
+    /// branch that never had it, or restart the server for a buffer that was
+    /// never saved. Walking up to the deepest existing ancestor keeps both
+    /// sides normalised the same way, and is identical to resolving the whole
+    /// path whenever the whole path exists — which is what keeps a symlinked
+    /// *root* matching documents named by its resolved path.
     private static func scopeComponents(of url: URL) -> [String] {
-        url.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        var candidate = url.standardizedFileURL
+        var missingComponents: [String] = []
+        while !FileManager.default.fileExists(atPath: candidate.path) {
+            let parent = candidate.deletingLastPathComponent()
+            // "/" is its own parent: stop rather than loop forever.
+            guard parent.pathComponents != candidate.pathComponents else { break }
+            missingComponents.insert(candidate.lastPathComponent, at: 0)
+            candidate = parent
+        }
+        return candidate.resolvingSymlinksInPath().pathComponents + missingComponents
     }
 
     /// Computed once, on first use rather than in `init`, because resolving

@@ -97,6 +97,20 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     private let behavior: FakeEditorSessionBehavior
     private let log: EditorSessionLog
 
+    /// Answers for the next completion calls, one per call, in call order.
+    /// Falls back to `behavior.completionResponse` once exhausted — which is
+    /// what every test that only makes one request relies on.
+    private var queuedCompletionResponses: [CompletionResponse] = []
+
+    /// How many further `completion(_:)` calls park before answering, and the
+    /// continuations of the ones currently parked.
+    ///
+    /// This is what makes two *overlapping* requests expressible. Without it a
+    /// test can only ever run one request to completion before starting the
+    /// next, which is precisely the interleaving that cannot go wrong.
+    private var gatedCompletionsRemaining = 0
+    private var heldCompletions: [CheckedContinuation<Void, Never>] = []
+
     init(
         configuration: LanguageServerConfiguration,
         behavior: FakeEditorSessionBehavior,
@@ -166,12 +180,44 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         log.record("didClose(\(params.textDocument.uri))")
     }
 
+    /// Answers the next `count` completion calls with these, in order.
+    func enqueueCompletionResponses(_ responses: [CompletionResponse]) {
+        queuedCompletionResponses = responses
+    }
+
+    /// Parks the next `count` completion calls until `releaseHeldCompletions()`.
+    func holdNextCompletions(_ count: Int) {
+        gatedCompletionsRemaining = count
+    }
+
+    /// How many completion calls are parked right now.
+    var heldCompletionCount: Int { heldCompletions.count }
+
+    func releaseHeldCompletions() {
+        let held = heldCompletions
+        heldCompletions = []
+        for continuation in held {
+            continuation.resume()
+        }
+    }
+
     func completion(_ params: CompletionParams) async throws -> CompletionResponse {
         try requireRunning()
         log.record("completion")
         lastCompletionParams = params
+        // The answer is chosen *before* parking, so it belongs to this call
+        // rather than to whichever call happens to resume first.
+        let response = queuedCompletionResponses.isEmpty
+            ? behavior.completionResponse
+            : queuedCompletionResponses.removeFirst()
+        if gatedCompletionsRemaining > 0 {
+            gatedCompletionsRemaining -= 1
+            await withCheckedContinuation { continuation in
+                heldCompletions.append(continuation)
+            }
+        }
         if let error = behavior.completionError { throw error }
-        return behavior.completionResponse
+        return response
     }
 
     func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse {
@@ -334,6 +380,14 @@ private let editorLanguageResourcesLocated: Bool = {
     setenv("PACKAGE_RESOURCE_BUNDLE_PATH", resourceURL.path, 1)
     return true
 }()
+
+/// Puts the override above in place. Call it before anything that constructs a
+/// `CodeLanguage` — which includes `LanguageDetection`, not only the editor —
+/// because that construction is what evaluates `Bundle.module.resourceURL`.
+@discardableResult
+func ensureEditorLanguageResourcesLocated() -> Bool {
+    editorLanguageResourcesLocated
+}
 
 /// A real `TextViewController`, which is what the delegates are handed and what
 /// `completionWindowApplyCompletion` writes through.

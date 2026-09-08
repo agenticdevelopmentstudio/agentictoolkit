@@ -29,17 +29,25 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     private var cachedEntries: [LSPCompletionEntry] = []
     private var cacheAnchorOffset: Int?
 
-    /// Resolved from the server's `completionProvider.triggerCharacters` on the
-    /// first completion request and cached from then on.
+    /// The server's `completionProvider.triggerCharacters`, once resolved.
     ///
-    /// It cannot be resolved eagerly: `completionTriggerCharacters()` is
-    /// synchronous by protocol and `capabilities()` is `async` on the session
-    /// actor, so there is nowhere to await. **This is therefore empty until the
-    /// first request has come back**, which is acceptable — the package also
-    /// triggers on any letter or digit (see `SuggestionTriggerCharacterModel`),
-    /// so completion still works before the set is filled in; only a leading
-    /// `.` or `(` fails to open the window on the very first attempt.
-    private var cachedTriggerCharacters: Set<String> = []
+    /// `nil` means "not resolved yet", which is not the same as "the server
+    /// declares none" — an unresolved set is retried, an empty one is not.
+    /// `resolveTriggerCharacters()` fills this in eagerly when the document's
+    /// editor slot opens, so the set is known before the user types anything.
+    private var resolvedTriggerCharacters: Set<String>?
+
+    /// Identifies the most recent completion request, so a superseded one
+    /// cannot publish over the cache belonging to a newer one.
+    ///
+    /// `completionSuggestionsRequested` suspends twice, and the package does
+    /// not save us: `SuggestionViewModel.showCompletions` cancels the previous
+    /// request's task but only checks cancellation *after* `await
+    /// delegate.completionSuggestionsRequested(...)` returns, so an abandoned
+    /// request's continuation always runs to completion — cache writes and
+    /// cache *wipes* included. Every write below is therefore gated on this
+    /// still naming the request doing the writing.
+    private var currentRequestGeneration = 0
 
     init(document: TextDocument, registry: LanguageServerRegistry) {
         self.document = document
@@ -48,8 +56,48 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
 
     // MARK: - CodeSuggestionDelegate
 
+    /// **This package never calls this method.** It is a `CodeSuggestionDelegate`
+    /// requirement with a default implementation, and grepping the whole of
+    /// `CodeEditSourceEditor` finds only the declaration and that default — no
+    /// call site. The live path is
+    /// `SourceEditorConfiguration.peripherals.codeSuggestionTriggerCharacters`,
+    /// which `SuggestionTriggerCharacterModel` reads off the controller's
+    /// configuration; `FileEditorState` publishes the resolved set and
+    /// `FileEditorContentView.makeEditor` feeds it into that field, and the
+    /// configuration is diffed, so a set that arrives after the editor was
+    /// built still reaches the controller.
+    ///
+    /// Kept because it is where the next reader looks first, and answering it
+    /// honestly costs nothing.
     func completionTriggerCharacters() -> Set<String> {
-        cachedTriggerCharacters
+        resolvedTriggerCharacters ?? []
+    }
+
+    /// Asks the server what characters should open the completion window, and
+    /// caches the answer.
+    ///
+    /// Called when the document's editor slot opens rather than lazily on the
+    /// first completion request, because the request path is not reached until
+    /// the window is *already* open — a set resolved there is resolved too late
+    /// to have opened it. `start()` is joined first, not initiated: the registry
+    /// starts every session in its own `Task`, and a session that is still
+    /// initialising answers `capabilities()` with `nil`. `start()` on a running
+    /// session returns immediately and on a starting one awaits the same task
+    /// the registry is awaiting, so this waits exactly as long as it must.
+    ///
+    /// Returns the empty set when there is no session, no `completionProvider`,
+    /// or the server declares no trigger characters. Only a resolved answer is
+    /// cached, so a call made before the server was up is retried by the next.
+    @discardableResult
+    func resolveTriggerCharacters() async -> Set<String> {
+        if let resolvedTriggerCharacters { return resolvedTriggerCharacters }
+        guard let session = registry.session(forLanguageId: document.languageId) else { return [] }
+        try? await session.start()
+        guard let capabilities = await session.capabilities(),
+              let completionProvider = capabilities.completionProvider else { return [] }
+        let characters = Set(completionProvider.triggerCharacters ?? [])
+        resolvedTriggerCharacters = characters
+        return characters
     }
 
     func completionSuggestionsRequested(
@@ -61,9 +109,10 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // suspension the document may have been edited underneath us, and a
         // request built from a mixture of pre- and post-edit facts is exactly
         // the desynchronisation `DocumentSyncPipeline` exists to avoid.
+        let generation = beginRequest()
         guard let session = registry.session(forLanguageId: document.languageId),
               let offset = utf16Offset(of: cursorPosition) else {
-            clearCache()
+            clearCache(ifCurrent: generation)
             return nil
         }
         let uri = document.uri
@@ -76,14 +125,14 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
 
         guard let capabilities = await session.capabilities(),
               let completionProvider = capabilities.completionProvider else {
-            clearCache()
+            clearCache(ifCurrent: generation)
             return nil
         }
-        // Assigned after an await on purpose, and safe to be: it is a pure
-        // cache of a value that does not change over a session's life, so two
-        // interleaved requests write the same thing and no invariant spans the
-        // suspension.
-        cachedTriggerCharacters = Set(completionProvider.triggerCharacters ?? [])
+        // Assigned after an await without a generation guard on purpose, and
+        // safe to be: it is a pure cache of a value that does not change over a
+        // session's life, so two interleaved requests write the same thing and
+        // no invariant spans the suspension.
+        resolvedTriggerCharacters = Set(completionProvider.triggerCharacters ?? [])
 
         let response: CompletionResponse
         do {
@@ -96,21 +145,27 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
                 )
             )
         } catch {
-            clearCache()
+            clearCache(ifCurrent: generation)
             return nil
         }
 
         let items = response?.items ?? []
         guard !items.isEmpty else {
-            clearCache()
+            clearCache(ifCurrent: generation)
             return nil
         }
 
         let entries = items.map { item in
             LSPCompletionEntry(item: item, requestRange: Self.range(of: item) ?? defaultRange)
         }
-        cachedEntries = entries
-        cacheAnchorOffset = prefixStart
+        // The window itself is still returned when this request has been
+        // superseded — the package decides what to do with a returned value —
+        // but the cache `completionOnCursorMove` filters is left alone, because
+        // it now describes a newer caret than this request was made at.
+        if isCurrent(generation) {
+            cachedEntries = entries
+            cacheAnchorOffset = prefixStart
+        }
 
         // The window is anchored at the start of the token being completed, not
         // at the caret, so it stays put as the user keeps typing.
@@ -214,7 +269,36 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         return start
     }
 
+    // MARK: - Request generations
+
+    /// Claims the next generation for a request that is about to suspend.
+    /// Called before the first `await`, so a later request always wins.
+    private func beginRequest() -> Int {
+        currentRequestGeneration += 1
+        return currentRequestGeneration
+    }
+
+    private func isCurrent(_ generation: Int) -> Bool {
+        generation == currentRequestGeneration
+    }
+
+    /// Empties the cache and invalidates every in-flight request, so a response
+    /// that is still on its way cannot repopulate a cache the user has already
+    /// dismissed. Only the synchronous paths — apply and window-close — may
+    /// clear this unconditionally.
     private func clearCache() {
+        currentRequestGeneration += 1
+        cachedEntries = []
+        cacheAnchorOffset = nil
+    }
+
+    /// Empties the cache only if `generation` is still the newest request.
+    /// Used by every failure path in `completionSuggestionsRequested`: a stale
+    /// request wiping a newer one's entries is the same defect as overwriting
+    /// them, and empty or thrown responses are exactly what a superseded
+    /// one-character prefix tends to produce.
+    private func clearCache(ifCurrent generation: Int) {
+        guard isCurrent(generation) else { return }
         cachedEntries = []
         cacheAnchorOffset = nil
     }

@@ -203,10 +203,7 @@ private struct FileEditorContentView: View {
                         font: appPalette.font(.code),
                         wrapLines: false
                     ),
-                    peripherals: .init(
-                        showGutter: true,
-                        showMinimap: true
-                    )
+                    peripherals: editorState.peripherals(for: uri)
                 ),
                 state: editorState.sourceEditorStateBinding(for: uri),
                 // `SourceEditor` holds both of these `weak`; `FileEditorState.Slot`
@@ -466,6 +463,21 @@ final class FileEditorState: ObservableObject {
     /// How the current file is being shown.
     @Published private(set) var display: Display = .empty
 
+    /// Each open document's completion trigger characters, as its language
+    /// server declares them.
+    ///
+    /// `@Published` because this is the one piece of a slot that arrives
+    /// *after* the slot is built: resolving it needs an `await` on the session
+    /// actor. A change here re-runs `makeEditor`, whose new
+    /// `SourceEditorConfiguration` is diffed against the mounted controller's,
+    /// and `Peripherals.didSetOnController` reacts to this field specifically —
+    /// so a set that lands seconds after the editor was built still reaches it.
+    ///
+    /// Not a hardcoded default: `[".", "(", ":"]` are sourcekit-lsp's answer,
+    /// and every other server has its own. The registry exists precisely
+    /// because that answer differs per language.
+    @Published private(set) var completionTriggerCharacters: [DocumentUri: Set<String>] = [:]
+
     private var slotsByURI: [DocumentUri: Slot] = [:]
 
     /// Every currently cached URI, in the order its editor was mounted —
@@ -485,6 +497,11 @@ final class FileEditorState: ObservableObject {
     /// The in-flight read. Cancelled when a new selection arrives so a slow
     /// file can't land on top of a newer one.
     private var loadTask: Task<Void, Never>?
+
+    /// One per open document, resolving that document's trigger characters.
+    /// Kept so eviction can cancel a resolution for a slot that no longer
+    /// exists, and so tests have something to await.
+    private var triggerCharacterTasks: [DocumentUri: Task<Void, Never>] = [:]
 
     init(
         documentStore: TextDocumentStore,
@@ -520,6 +537,9 @@ final class FileEditorState: ObservableObject {
     // reference.
     isolated deinit {
         loadTask?.cancel()
+        for task in triggerCharacterTasks.values {
+            task.cancel()
+        }
         let scheduler = saveScheduler
         let store = documentStore
         let uris = openOrder
@@ -557,6 +577,21 @@ final class FileEditorState: ObservableObject {
         slotsByURI[uri]?.jumpToDefinitionDelegate
     }
 
+    /// The peripherals half of the editor configuration for one document.
+    ///
+    /// Built here rather than inline in the view because
+    /// `codeSuggestionTriggerCharacters` is the live path by which a language
+    /// server's trigger set reaches the editor — `CodeSuggestionDelegate`'s own
+    /// `completionTriggerCharacters()` is never called by this package — and a
+    /// path that load-bearing should be reachable from a test.
+    func peripherals(for uri: DocumentUri) -> SourceEditorConfiguration.Peripherals {
+        SourceEditorConfiguration.Peripherals(
+            showGutter: true,
+            showMinimap: true,
+            codeSuggestionTriggerCharacters: completionTriggerCharacters[uri] ?? []
+        )
+    }
+
     func sourceEditorStateBinding(for uri: DocumentUri) -> Binding<SourceEditorState> {
         Binding(
             get: { [weak self] in self?.slotsByURI[uri]?.sourceEditorState ?? SourceEditorState() },
@@ -568,6 +603,15 @@ final class FileEditorState: ObservableObject {
     /// assert against the state the load produced rather than poll for it.
     func awaitPendingLoad() async {
         await loadTask?.value
+    }
+
+    /// Test seam: awaits every in-flight trigger-character resolution, so a
+    /// test can assert against the configuration a resolved slot builds rather
+    /// than poll for it.
+    func awaitPendingTriggerCharacterResolution() async {
+        for task in triggerCharacterTasks.values {
+            await task.value
+        }
     }
 
     /// Reads `url` off the main thread and shows it however it classifies. A
@@ -677,6 +721,18 @@ final class FileEditorState: ObservableObject {
         openOrder.append(uri)
         touch(uri)
         evictOldestIfNeeded(keeping: uri)
+
+        // Resolved now rather than on the first completion request: the request
+        // path is only reached once the window is already open, so a trigger
+        // set discovered there is discovered too late to have opened it.
+        if let completionDelegate {
+            triggerCharacterTasks[uri]?.cancel()
+            triggerCharacterTasks[uri] = Task { [weak self] in
+                let characters = await completionDelegate.resolveTriggerCharacters()
+                guard let self, !Task.isCancelled, self.slotsByURI[uri] != nil else { return }
+                self.completionTriggerCharacters[uri] = characters
+            }
+        }
     }
 
     /// Records `uri` as the most recently selected document.
@@ -693,6 +749,8 @@ final class FileEditorState: ObservableObject {
             recencyOrder.removeAll { $0 == victim }
             openOrder.removeAll { $0 == victim }
             slotsByURI.removeValue(forKey: victim)
+            triggerCharacterTasks.removeValue(forKey: victim)?.cancel()
+            completionTriggerCharacters.removeValue(forKey: victim)
             release(uri: victim)
         }
     }

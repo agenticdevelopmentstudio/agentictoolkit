@@ -117,6 +117,25 @@ struct LSPJumpToDefinitionDelegateTests {
         #expect(!result.log.events.contains("definition"))
     }
 
+    // MARK: - Fix round 1, finding 4: the request throws
+
+    @Test("a definition request that throws returns nil rather than an empty link list")
+    func thrownDefinitionRequestReturnsNil() async throws {
+        let result = try await queryLinks(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeDefiningCapabilities(),
+                definitionResponse: .optionA(Location(uri: Self.documentURI, range: Self.declarationRange)),
+                definitionError: .notRunning
+            )
+        )
+
+        // `nil`, not `[]`: the package treats an empty list as "there is
+        // nowhere to go" and an underline appears for a link that goes nowhere.
+        #expect(result.links == nil)
+        // The request really was sent — this is the error path, not the gate.
+        #expect(result.log.events.contains("definition"))
+    }
+
     @Test("a single Location becomes one link at that range")
     func convertsSingleLocation() async throws {
         let result = try await queryLinks(

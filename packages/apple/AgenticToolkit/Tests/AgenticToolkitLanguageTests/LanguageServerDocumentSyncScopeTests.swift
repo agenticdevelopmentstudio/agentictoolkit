@@ -287,4 +287,45 @@ struct LanguageServerDocumentSyncScopeTests {
         let session = try fake(registry, for: configuration.id)
         #expect(openedURIs(in: log.calls(forInstance: session.instanceID)) == [uri])
     }
+
+    // MARK: - 6. A document that is not on disk
+
+    /// What it catches: resolving symlinks on the *whole* path.
+    /// `resolvingSymlinksInPath()` is a no-op for a path that does not exist,
+    /// so a root reached through a symlink normalises while a document under it
+    /// that is not on disk does not — and the two then share no prefix.
+    ///
+    /// This is reachable now, not hypothetically: switch to a branch on which
+    /// an open file does not exist and then restart the server (a settings
+    /// change, or a crash-restart), and the replay silently drops that buffer.
+    /// The editor then shows it with no completion, no go-to-definition, no
+    /// error and nothing in the log.
+    @Test("a document under a symlinked root that is not on disk is still in scope")
+    func missingFileUnderSymlinkedRootIsInScope() async throws {
+        let parent = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let realRoot = parent.appendingPathComponent("real", isDirectory: true)
+        try FileManager.default.createDirectory(at: realRoot, withIntermediateDirectories: true)
+        let linkedRoot = parent.appendingPathComponent("linked", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: linkedRoot, withDestinationURL: realRoot)
+
+        let settings = makeSettingsStore()
+        let log = SessionLog()
+        let documents = TextDocumentStore()
+        let registry = makeRegistry(settings: settings, log: log, workspaceURL: linkedRoot)
+        let sync = LanguageServerDocumentSync(store: documents, registry: registry)
+        sync.start()
+
+        let configuration = makeConfiguration()
+        settings.set([configuration], for: UserSettings.languageServerConfigurations)
+
+        // Named through the link, and deliberately never written to disk.
+        let uri = linkedRoot.appendingPathComponent("Missing.swift").documentUri
+        _ = documents.open(uri: uri, languageId: "swift", text: "abcdef")
+
+        await sync.shutdown()
+
+        let session = try fake(registry, for: configuration.id)
+        #expect(openedURIs(in: log.calls(forInstance: session.instanceID)) == [uri])
+    }
 }

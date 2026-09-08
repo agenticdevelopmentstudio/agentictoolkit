@@ -289,6 +289,161 @@ struct LSPCompletionDelegateTests {
         #expect(controller.textView.string == "let x = print")
     }
 
+    // MARK: - Fix round 1, finding 1: trigger characters
+
+    @Test("the server's trigger characters are resolved without a completion request having been made")
+    func resolvesTriggerCharactersEagerly() async throws {
+        // Deliberately not sourcekit-lsp's `.`, `(`, `:`: a hardcoded default
+        // would pass a test written against the common answer and be wrong for
+        // every other server, which is the whole reason the set is asked for.
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: ["@", "#"])
+            )
+        )
+        _ = try await fixture.startedSession()
+        let document = makeEditorDocument(text: Self.sampleText)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+
+        #expect(delegate.completionTriggerCharacters().isEmpty)
+
+        let resolved = await delegate.resolveTriggerCharacters()
+
+        #expect(resolved == ["@", "#"])
+        #expect(delegate.completionTriggerCharacters() == ["@", "#"])
+        // Resolved from the handshake, not by asking for completions: the
+        // request path is only reached once the window is already open.
+        #expect(!fixture.log.events.contains("completion"))
+    }
+
+    @Test("a server that advertises no completionProvider resolves to no trigger characters")
+    func resolvesNoTriggerCharactersWithoutACompletionProvider() async throws {
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(capabilities: makeDefiningCapabilities())
+        )
+        _ = try await fixture.startedSession()
+        let document = makeEditorDocument(text: Self.sampleText)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+
+        #expect(await delegate.resolveTriggerCharacters().isEmpty)
+    }
+
+    // MARK: - Fix round 1, finding 2: overlapping requests
+
+    @Test("a superseded request cannot wipe the cache a newer one published")
+    func supersededRequestCannotWipeNewerCache() async throws {
+        // The older request answers with nothing — what a one-character prefix
+        // on a cold index usually produces, and the response that sends the
+        // delegate down its `clearCache` path.
+        let overlap = try await startOverlappingRequests(
+            olderResponse: items([]),
+            newerResponse: items(["print", "println"])
+        )
+        _ = await overlap.older.value
+
+        let cached = try #require(overlap.delegate.completionOnCursorMove(
+            textView: overlap.controller,
+            cursorPosition: makeCursor(atOffset: Self.caretOffset)
+        ))
+        // Without a request generation the older continuation's `clearCache()`
+        // runs here and this is `nil` — the window closing under the user's
+        // hands as they type.
+        #expect(cached.map(\.label) == ["print", "println"])
+    }
+
+    @Test("a superseded request cannot overwrite the cache a newer one published")
+    func supersededRequestCannotOverwriteNewerCache() async throws {
+        let overlap = try await startOverlappingRequests(
+            olderResponse: items(["stale"]),
+            newerResponse: items(["print", "println"])
+        )
+        _ = await overlap.older.value
+
+        let cached = try #require(overlap.delegate.completionOnCursorMove(
+            textView: overlap.controller,
+            cursorPosition: makeCursor(atOffset: Self.caretOffset)
+        ))
+        // The older set is anchored at an older caret, so its entries would be
+        // filtered against a prefix they were never requested for.
+        #expect(cached.map(\.label) == ["print", "println"])
+    }
+
+    // MARK: - Fix round 1, finding 4: the request throws
+
+    @Test("a completion request that throws returns nil and leaves nothing cached")
+    func thrownRequestReturnsNil() async throws {
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(),
+                completionResponse: items(["print"]),
+                completionError: .notRunning
+            )
+        )
+        _ = try await fixture.startedSession()
+        let document = makeEditorDocument(text: Self.sampleText)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: Self.sampleText)
+
+        let result = await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: Self.caretOffset)
+        )
+
+        // `nil`, never an empty item list: an empty window swallows the user's
+        // Return key instead of closing.
+        #expect(result == nil)
+        // The request really was sent — this is the error path, not the gate.
+        #expect(fixture.log.events.contains("completion"))
+        #expect(delegate.completionOnCursorMove(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: Self.caretOffset)
+        ) == nil)
+    }
+
+    // MARK: - Fix round 1, finding 6: a textEdit range through a live caret
+
+    @Test("a server-supplied textEdit range is extended forward to the live caret")
+    func appliesTextEditRangeThroughTheLiveCaret() async throws {
+        // sourcekit-lsp answers member completions this way: a `textEdit` whose
+        // range starts before the caret, replacing the partial token.
+        let edit = TextEdit(
+            range: LSPRange(start: Position(line: 0, character: 8), end: Position(line: 0, character: 10)),
+            newText: "print"
+        )
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(),
+                completionResponse: .optionA([CompletionItem(label: "print", textEdit: .optionA(edit))])
+            )
+        )
+        _ = try await fixture.startedSession()
+
+        let atRequest = "let x = pr"
+        let document = makeEditorDocument(text: atRequest)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: atRequest)
+
+        let result = try #require(await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: 10)
+        ))
+
+        // The user keeps typing while the window is open.
+        controller.textView.replaceCharacters(in: NSRange(location: 10, length: 0), with: "in")
+        document.replaceAll(with: "let x = prin")
+
+        delegate.completionWindowApplyCompletion(
+            item: try #require(result.items.first),
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: 12)
+        )
+
+        // The replacement has to run from the edit's own start (8) through the
+        // live caret (12). Honouring the edit's end alone leaves `printin`;
+        // swapping the operands of the `max` leaves the same.
+        #expect(controller.textView.string == "let x = print")
+    }
+
     // MARK: - Shared driver
 
     /// Runs one full request/apply cycle against `Self.sampleText` and returns
@@ -325,4 +480,68 @@ struct LSPCompletionDelegateTests {
         )
         return controller
     }
+
+    // MARK: - Overlapping-request driver
+
+    /// What `startOverlappingRequests` hands back: the delegate both requests
+    /// were made against, the controller they were made through, and the older
+    /// request's task, already released and only needing to be awaited.
+    private struct OverlappingRequests {
+        let delegate: LSPCompletionDelegate
+        let controller: TextViewController
+        let older: Task<Void, Never>
+    }
+
+    /// Starts a completion request, parks it inside the server, runs a second
+    /// one to completion, and releases the parked one.
+    ///
+    /// The interleaving is the point, and it is not reachable by awaiting two
+    /// requests in turn: `SuggestionViewModel` cancels the previous request's
+    /// task but only checks cancellation *after* the delegate call returns, so
+    /// an abandoned request's continuation always runs — which is what makes an
+    /// unguarded write from it reach the cache.
+    private func startOverlappingRequests(
+        olderResponse: CompletionResponse,
+        newerResponse: CompletionResponse
+    ) async throws -> OverlappingRequests {
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(capabilities: makeCompletingCapabilities())
+        )
+        let session = try await fixture.startedSession()
+        await session.enqueueCompletionResponses([olderResponse, newerResponse])
+        await session.holdNextCompletions(1)
+
+        let document = makeEditorDocument(text: Self.sampleText)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: Self.sampleText)
+
+        // The older request, made one keystroke earlier than the newer one.
+        let older = Task { @MainActor in
+            _ = await delegate.completionSuggestionsRequested(
+                textView: controller,
+                cursorPosition: makeCursor(atOffset: Self.caretOffset - 1)
+            )
+        }
+        try await waitForParkedRequest(on: session)
+
+        let newer = try #require(await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: Self.caretOffset)
+        ))
+        #expect(!newer.items.isEmpty)
+
+        await session.releaseHeldCompletions()
+        return OverlappingRequests(delegate: delegate, controller: controller, older: older)
+    }
+
+    /// Waits until the older request has actually reached the server, so the
+    /// two requests are genuinely overlapping rather than accidentally ordered.
+    private func waitForParkedRequest(on session: FakeEditorLanguageServerSession) async throws {
+        for _ in 0..<500 {
+            if await session.heldCompletionCount > 0 { return }
+            try await Task.sleep(for: .milliseconds(4))
+        }
+        Issue.record("the first completion request never reached the server")
+    }
+
 }
