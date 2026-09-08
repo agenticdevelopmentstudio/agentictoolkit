@@ -106,11 +106,6 @@ final class FileBrowserSplitViewControllerTests: XCTestCase {
         let directory = makeDirectory()
         let split = makeSplit(in: directory)
         let reported = expectation(description: "the footer was told about the selection")
-        // `@Published` also delivers its current value on subscribe, so the
-        // callback may run once for the initial empty selection before the
-        // click's own report. Both read back the same answer; neither is a
-        // failure.
-        reported.assertForOverFulfill = false
         var described: String?
         split.onPaneSelectionChange = { [weak split] in
             described = split?.paneSelectionDescription

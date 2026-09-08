@@ -783,4 +783,40 @@ final class NotesSplitViewControllerTests: XCTestCase {
             "the rename has to reach the footer, reading back the new title")
         XCTAssertEqual(note.id, split.selectedNote()?.id, "the selection itself must not have moved")
     }
+
+    /// The other half of the rename rule. `MarkdownEditorController` raises
+    /// `onContentChange` for every un-debounced keystroke, so typing in the
+    /// body reaches this controller exactly as often as typing in the title
+    /// does — but the derived title, and therefore
+    /// `paneSelectionDescription`, has not moved.
+    /// `PaneSelectionDescribing` says to report when the answer "would now
+    /// answer differently", so this must stay silent: a report per keystroke
+    /// is a full footer recompute for a string nobody changed.
+    func testEditingTheSelectedNotesBodyDoesNotTellTheFooterToRecompute() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "# Release notes\n\nbody", markers: [.note])
+        let (split, note, notesManager) = try await makeSplitWithASelectedNote(store: store)
+        XCTAssertEqual(split.paneSelectionDescription, "Release notes")
+        let editorVC = try XCTUnwrap(
+            split.splitViewItems[2].viewController as? NoteEditorViewController)
+        var described: [String?] = []
+        split.onPaneSelectionChange = { [weak split] in
+            described.append(split?.paneSelectionDescription)
+        }
+
+        // Same first line, different body — a rename of nothing.
+        editorVC.editorController.onContentChange?("# Release notes\n\nbody, rewritten")
+
+        // The edit is applied inside an unstructured `Task`, so waiting for it
+        // to land is what makes the absence of a report mean anything.
+        let saved = try await pollUntil {
+            notesManager.notes.first(where: { $0.id == note.id })?.content
+                .hasSuffix("body, rewritten") == true
+        }
+        XCTAssertTrue(saved, "the edit has to reach the manager before silence proves anything")
+        XCTAssertEqual(split.paneSelectionDescription, "Release notes", "the title did not move")
+        XCTAssertEqual(
+            described, [],
+            "a body edit leaves the footer's answer alone, so the footer must not be told")
+    }
 }

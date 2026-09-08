@@ -85,9 +85,17 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
         // store complete first, the same compensation
         // `FileTreeOutlineViewController` and `FileBrowserViewController`
         // already make (`dry`). `removeDuplicates` keeps a re-click on the row
-        // that is already selected from re-rendering the whole path.
+        // that is already selected from re-rendering the whole path, and
+        // `dropFirst` drops the value `@Published` replays on subscribe:
+        // `selection` is constructed empty just above, so that first element
+        // is provably the initial `nil` and nothing real is lost. Without it
+        // the run-loop hop carries the replay past `init` into the next turn,
+        // where the host has since installed `onPaneSelectionChange` — one
+        // "the selection changed" report per pane, for a selection that
+        // never changed.
         selectionObserver = selection.$selectedNode
             .removeDuplicates()
+            .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.onPaneSelectionChange?() }
     }

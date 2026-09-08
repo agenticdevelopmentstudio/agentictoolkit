@@ -695,15 +695,22 @@ extension NotesSplitViewController: NoteEditorViewControllerDelegate {
     public func noteEditorDidChangeContent(_ content: String, for noteID: UUID) {
         guard let note = notesManager.notes.first(where: { $0.id == noteID }) else { return }
         Task { @MainActor in
+            // The answer as it stands, read before the edit lands, so the
+            // report below can be made on whether it *moved* rather than on
+            // whether an edit happened.
+            let before = paneSelectionDescription
             await notesManager.updateNote(note, content: content)
             listVC.reload(notes: notesForCurrentFolder(), keepingSelectedID: noteID)
             // A note's title is its first line, so this edit may have renamed
             // it. The selection never moved, so the list's delegate funnel
-            // above never fires — but `paneSelectionDescription` now answers
-            // differently, which is exactly when `PaneSelectionDescribing`
-            // says to report. Only for the note the footer is naming; an edit
-            // to some other note changes nothing the footer shows.
-            if selectedNote()?.id == noteID {
+            // above never fires — but `paneSelectionDescription` may now
+            // answer differently, which is exactly when
+            // `PaneSelectionDescribing` says to report. Both halves of that
+            // are load-bearing: an edit to some other note changes nothing
+            // the footer shows, and `onContentChange` arrives per keystroke
+            // un-debounced, so an edit to the *body* of this one would
+            // otherwise report a title nobody touched.
+            if selectedNote()?.id == noteID, paneSelectionDescription != before {
                 onPaneSelectionChange?()
             }
         }
