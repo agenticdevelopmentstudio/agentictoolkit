@@ -364,6 +364,15 @@ final class ProjectDrawerTests: XCTestCase {
     /// quitting closes no window and the drawer never changes visibility —
     /// without a terminate observer the drag is simply lost.
     func testQuittingWithTheDrawerStillOutRemembersItsWidth() throws {
+        // `WindowManager.shared` observes `willTerminateNotification` too, and
+        // the latch it sets is process-wide: leave it standing and every later
+        // close in the bundle stops persisting hidden
+        // (`SingleWindowController.windowWillClose`) or stops recording open
+        // state (`ProjectWindowManager.observeClose`). Same guard, same reason,
+        // as `WindowManagerTerminationTests`.
+        XCTAssertFalse(WindowManager.shared.isTerminating)
+        defer { WindowManager.shared.isTerminating = false }
+
         let project = makeProject()
         let controller = makeController(for: project)
         controller.toggleHelp()
