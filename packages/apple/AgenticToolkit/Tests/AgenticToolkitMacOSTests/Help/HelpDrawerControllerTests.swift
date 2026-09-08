@@ -168,6 +168,17 @@ final class HelpDrawerControllerTests: XCTestCase {
         XCTAssertTrue(UserSettings.settingsHelpDrawerVisible.value)
     }
 
+    /// Behind `any HelpPresenting` a missing implementation is invisible: the
+    /// extension's `nil` default answers instead, with nothing to notice. This
+    /// asserts through the existential for that reason.
+    func testTheSettingsDrawerNamesItsTabThroughTheProtocol() {
+        let controller = ComposableSettings.HelpDrawerController(parentWindow: self.window)
+        controller.setHelp(HelpContent(topics: [HelpContent.Topic(title: "T", body: "B")]))
+        let presenter: any HelpPresenting = controller
+
+        XCTAssertEqual(presenter.helpTabID, "help")
+    }
+
     /// A drawer comes out of the window's edge, not out of a button, so the
     /// anchor is accepted and ignored — the protocol still requires it because
     /// the popover presenter genuinely needs one.

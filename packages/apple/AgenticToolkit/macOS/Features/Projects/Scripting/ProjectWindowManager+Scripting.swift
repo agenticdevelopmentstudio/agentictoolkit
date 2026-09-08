@@ -17,8 +17,14 @@ extension ProjectWindowManager {
         self.openWindowControllers.map(ScriptableProjectWindow.init(controller:))
     }
 
+    /// Stops at the match rather than building `scriptableProjectWindows`
+    /// first: the wrappers this would have made for the windows after the
+    /// answer are made and thrown away, and there is a wrapper per open
+    /// project. Same reason for the tab and pane lookups below.
     public func scriptableProjectWindow(uniqueID: String) -> ScriptableProjectWindow? {
-        self.scriptableProjectWindows.first { $0.uniqueID == uniqueID }
+        self.openWindowControllers.lazy
+            .map(ScriptableProjectWindow.init(controller:))
+            .first { $0.uniqueID == uniqueID }
     }
 
     // MARK: - Tabs
@@ -28,7 +34,9 @@ extension ProjectWindowManager {
     }
 
     public func scriptableProjectTab(uniqueID: String) -> ScriptableProjectTab? {
-        self.scriptableProjectTabs.first { $0.uniqueID == uniqueID }
+        self.openWindowControllers.lazy
+            .flatMap(\.scriptingTabs)
+            .first { $0.uniqueID == uniqueID }
     }
 
     // MARK: - Panes
@@ -45,7 +53,14 @@ extension ProjectWindowManager {
         }
     }
 
+    /// Still `in: window` — a pane found this way is a pane a script is about
+    /// to ask for its project and tab, and a wrapper that had to find its own
+    /// window could not answer for anything behind the front tab.
     public func scriptablePane(uniqueID: String) -> ScriptablePane? {
-        self.scriptablePanes.first { $0.uniqueID == uniqueID }
+        self.openWindowControllers.lazy
+            .flatMap { window in
+                window.allPanes().lazy.map { ScriptablePane(pane: $0, in: window) }
+            }
+            .first { $0.uniqueID == uniqueID }
     }
 }

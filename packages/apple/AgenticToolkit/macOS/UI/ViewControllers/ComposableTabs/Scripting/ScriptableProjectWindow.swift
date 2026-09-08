@@ -48,16 +48,6 @@ public final class ScriptableProjectWindow: NSObject {
     }
 
     public override nonisolated var objectSpecifier: NSScriptObjectSpecifier? {
-        final class Box: @unchecked Sendable { var value: NSScriptObjectSpecifier? }
-        let box = Box()
-        MainActor.assumeIsolated {
-            guard let appDescription = NSApp.classDescription as? NSScriptClassDescription else { return }
-            box.value = NSUniqueIDSpecifier(
-                containerClassDescription: appDescription,
-                containerSpecifier: nil,
-                key: "projectWindows",
-                uniqueID: self.uniqueID)
-        }
-        return box.value
+        applicationElementSpecifier(key: "projectWindows") { self.uniqueID }
     }
 }

@@ -21,7 +21,11 @@ extension ComposableSettings {
 
         public static let contentWidth: CGFloat = WindowDrawer.defaultContentWidth
 
-        private static let helpTabID = "help"
+        /// Named apart from the `helpTabID` requirement below: one is the id
+        /// this drawer builds its tab under, the other is the id it is
+        /// showing, and two names one word apart in one class invite a reader
+        /// to assume they are the same thing.
+        private static let helpTabIdentifier = "help"
 
         private let helpView = HelpContentView()
         private let preference: UserSettingObserver<Bool>
@@ -81,7 +85,7 @@ extension ComposableSettings {
                 accessibilityPrefix: "settings.drawer",
                 tabs: [
                     DrawerTab(
-                        id: Self.helpTabID,
+                        id: Self.helpTabIdentifier,
                         title: "Help",
                         symbolName: "questionmark.circle",
                         makeView: { helpView })
@@ -160,12 +164,20 @@ extension ComposableSettings {
             self.preference.value.toggle()
         }
 
+        /// Which tab the drawer is showing. The settings drawer has exactly one
+        /// tab, but this answers from the drawer rather than returning the
+        /// constant: the protocol's whole reason for making this a requirement
+        /// is that a presenter with tabs must not fall through to the `nil`
+        /// default, and a hard-coded answer would go stale the day a second tab
+        /// arrives.
+        public var helpTabID: String? { self.drawer.selectedTabID }
+
         private func applyVisibility() {
             self.isApplyingVisibility = true
             defer { self.isApplyingVisibility = false }
 
             if self.isHelpVisible {
-                self.drawer.open(selecting: Self.helpTabID)
+                self.drawer.open(selecting: Self.helpTabIdentifier)
             } else {
                 self.drawer.close()
             }

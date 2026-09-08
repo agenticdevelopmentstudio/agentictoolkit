@@ -95,20 +95,6 @@ public final class ComposableTabsPaneViewController: PaneViewController {
         return "pane.\(AccessibilityID.slug(kind))"
     }
 
-    // MARK: - Where this pane is (used by Cocoa Scripting)
-
-    /// The project window this pane is inside, when it is in one.
-    ///
-    /// Read from the view's window rather than stored: a pane can be moved
-    /// between splits and tabs, and a stored answer would go stale without
-    /// anything noticing. `nil` in a test harness with no window — and `nil`
-    /// for a pane on a tab that is not the front one, which has never been in
-    /// a view hierarchy. A caller that already knows the window should say so
-    /// rather than ask.
-    public var enclosingProjectWindow: ComposableTabsWindowController? {
-        view.window?.windowController as? ComposableTabsWindowController
-    }
-
     /// Called by the root after any change to the tree. Re-stamping the view is
     /// safe at any time and is what makes a *move* renumber both panes.
     public func assignPaneIndex(_ index: Int?) {

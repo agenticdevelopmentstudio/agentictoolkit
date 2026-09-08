@@ -56,3 +56,44 @@ open class MainActorScriptCommand: NSScriptCommand, @unchecked Sendable {
         return box.result
     }
 }
+
+/// The specifier for an element hanging directly off `application`, built off
+/// the main actor.
+///
+/// AppKit asks for `objectSpecifier` from non-isolated dispatch while
+/// everything it needs is main-thread state, and `NSScriptObjectSpecifier` is
+/// not `Sendable` — so the answer comes back in a Box. Every scriptable wrapper
+/// in this framework needs exactly that, which is why it is written once here
+/// rather than a fifth time in the next wrapper.
+///
+/// - Parameters:
+///   - key: the `application` element key the `.sdef` declares — `"panes"`,
+///     `"projectTabs"`, `"projectWindows"`, `"terminalSessions"`.
+///   - uniqueID: read on the main actor, because every wrapper's id is.
+public func applicationElementSpecifier(
+    key: String,
+    uniqueID: @escaping @MainActor () -> String
+) -> NSScriptObjectSpecifier? {
+    // The Box carries the closure across as well as the result: this file's
+    // own `performDefaultImplementation` explains why `assumeIsolated`'s
+    // `sending` closure wants everything it touches inside one.
+    final class Box: @unchecked Sendable {
+        let key: String
+        let uniqueID: @MainActor () -> String
+        var value: NSScriptObjectSpecifier?
+        init(key: String, uniqueID: @escaping @MainActor () -> String) {
+            self.key = key
+            self.uniqueID = uniqueID
+        }
+    }
+    let box = Box(key: key, uniqueID: uniqueID)
+    MainActor.assumeIsolated {
+        guard let appDescription = NSApp.classDescription as? NSScriptClassDescription else { return }
+        box.value = NSUniqueIDSpecifier(
+            containerClassDescription: appDescription,
+            containerSpecifier: nil,
+            key: box.key,
+            uniqueID: box.uniqueID())
+    }
+    return box.value
+}

@@ -515,6 +515,19 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         return leaves(of: group)
     }
 
+    /// The project tab a pane is on, or `nil` for a pane this window does not
+    /// have.
+    ///
+    /// Here rather than derived from `panes(inTab:)` by the caller: that route
+    /// rebuilds `scriptingTabGroups` once per tab and walks every leaf again
+    /// each time, which is a quadratic answer to a question that is one pass —
+    /// build the groups once, stop at the group that holds the pane.
+    public func tabGroup(containing pane: ComposableTabsPaneViewController) -> ScriptingTab? {
+        scriptingTabGroups.first { group in
+            leaves(of: group).contains { $0 === pane }
+        }
+    }
+
     private func leaves(of group: ScriptingTab) -> [ComposableTabsPaneViewController] {
         group.members.compactMap { splitControllersByTabID[$0.tabID] }.flatMap { $0.allLeaves() }
     }

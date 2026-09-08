@@ -59,9 +59,18 @@ final class ProjectScriptingTests: XCTestCase {
     /// split is the only shape in which the host will honour a minimize at
     /// all, and a root leaf — which is what a default project has — refuses
     /// every edge.
-    private func makeTwoPaneController() -> ComposableTabsWindowController {
+    ///
+    /// The two leaf ids come back with it: they are what the panes were
+    /// *persisted* under, so a test can assert an id against the value that
+    /// went into the database rather than against the expression that reads it
+    /// out again.
+    private func makeTwoPaneController() -> (
+        controller: ComposableTabsWindowController, firstPane: UUID, secondPane: UUID
+    ) {
         let project = makeProject()
         let tabID = UUID()
+        let firstPane = UUID()
+        let secondPane = UUID()
         project.persistTabs(
             [TabRecord(
                 id: tabID,
@@ -69,19 +78,25 @@ final class ProjectScriptingTests: XCTestCase {
                 title: "Tab 1",
                 root: .split(
                     orientation: .horizontal,
-                    first: .leaf(id: UUID(), contentType: alpha),
-                    second: .leaf(id: UUID(), contentType: alpha)
+                    first: .leaf(id: firstPane, contentType: alpha),
+                    second: .leaf(id: secondPane, contentType: alpha)
                 )
             )],
             activeTabID: tabID,
             enabledEdges: [.top]
         )
-        return makeController(for: project)
+        return (makeController(for: project), firstPane, secondPane)
     }
 
     /// A window with two project tabs on one edge, the first of them selected —
     /// so the second tab's panes exist but are not in the view hierarchy.
-    private func makeTwoTabController() -> ComposableTabsWindowController {
+    ///
+    /// Both tab ids come back: `selected tab` is declared `rw` and a test that
+    /// cannot name the *other* tab can only ever write an id the setter
+    /// rejects, which is how the write path went uncovered.
+    private func makeTwoTabController() -> (
+        controller: ComposableTabsWindowController, first: UUID, second: UUID
+    ) {
         let project = makeProject()
         let first = UUID()
         let second = UUID()
@@ -95,7 +110,7 @@ final class ProjectScriptingTests: XCTestCase {
             activeTabID: first,
             enabledEdges: [.top]
         )
-        return makeController(for: project)
+        return (makeController(for: project), first, second)
     }
 
     nonisolated override func tearDown() {
@@ -105,18 +120,22 @@ final class ProjectScriptingTests: XCTestCase {
 
     // MARK: - Panes
 
-    func testAPanesIdIsThePersistedNodeID() throws {
-        let controller = makeController(for: makeProject())
-        let pane = try XCTUnwrap(controller.allPanes().first)
-        let scriptable = ScriptablePane(pane: pane)
+    /// The sdef promises a pane id is "stable across relaunches". So this
+    /// asserts the ids the leaves were *persisted* under, read back off a
+    /// window built from that database — not `pane.nodeID` restated back at
+    /// the expression that produced it.
+    func testAPanesIdIsThePersistedNodeID() {
+        let (controller, firstPane, secondPane) = makeTwoPaneController()
 
-        XCTAssertEqual(scriptable.uniqueID, pane.nodeID.uuidString)
+        XCTAssertEqual(
+            controller.allPanes().map { ScriptablePane(pane: $0, in: controller).uniqueID },
+            [firstPane.uuidString, secondPane.uuidString])
     }
 
     func testAPaneReportsItsNameProjectTabAndSelection() throws {
         let controller = makeController(for: makeProject())
         let pane = try XCTUnwrap(controller.allPanes().first)
-        let scriptable = ScriptablePane(pane: pane)
+        let scriptable = ScriptablePane(pane: pane, in: controller)
 
         XCTAssertEqual(scriptable.name, pane.resolvedTitle)
         XCTAssertFalse(scriptable.name.isEmpty)
@@ -132,7 +151,7 @@ final class ProjectScriptingTests: XCTestCase {
     /// asked the view hierarchy would answer `""` for every pane behind the
     /// front tab — which is most of them in a real window.
     func testAPaneOnABackgroundTabStillNamesItsProjectAndTab() throws {
-        let controller = makeTwoTabController()
+        let (controller, _, _) = makeTwoTabController()
         ProjectWindowManager.shared.adoptForScripting(controller)
         defer { ProjectWindowManager.shared.forgetForScripting(controller) }
 
@@ -149,7 +168,7 @@ final class ProjectScriptingTests: XCTestCase {
     func testMinimizedIsTheEdgeNameOrNo() throws {
         let controller = makeController(for: makeProject())
         let pane = try XCTUnwrap(controller.allPanes().first)
-        let scriptable = ScriptablePane(pane: pane)
+        let scriptable = ScriptablePane(pane: pane, in: controller)
         XCTAssertEqual(scriptable.paneMinimized, "no")
 
         pane.setMinimized(to: .leading)
@@ -160,9 +179,9 @@ final class ProjectScriptingTests: XCTestCase {
     }
 
     func testZoomedIsABoolean() throws {
-        let controller = makeTwoPaneController()
+        let (controller, _, _) = makeTwoPaneController()
         let pane = try XCTUnwrap(controller.allPanes().first)
-        let scriptable = ScriptablePane(pane: pane)
+        let scriptable = ScriptablePane(pane: pane, in: controller)
         XCTAssertFalse(scriptable.paneZoomed)
 
         scriptable.zoomPane()
@@ -172,14 +191,35 @@ final class ProjectScriptingTests: XCTestCase {
         XCTAssertFalse(scriptable.paneZoomed)
     }
 
+    /// `close pane` is the one command that destroys something, and an empty
+    /// `closePane()` leaves every other test in this suite green while the
+    /// command still reports `true`.
+    ///
+    /// The count alone is not enough either: closing the *wrong* pane also
+    /// leaves one behind. The survivor has to be the pane that was not asked
+    /// to close.
+    func testClosingThroughTheScriptableWrapperRemovesThatPane() throws {
+        let (controller, firstPane, secondPane) = makeTwoPaneController()
+        let panes = controller.allPanes()
+        XCTAssertEqual(panes.count, 2, "the seeded two-pane layout did not survive being loaded")
+        let scriptable = ScriptablePane(pane: try XCTUnwrap(panes.first), in: controller)
+        XCTAssertEqual(scriptable.uniqueID, firstPane.uuidString)
+
+        scriptable.closePane()
+
+        let survivors = controller.allPanes()
+        XCTAssertEqual(survivors.count, 1)
+        XCTAssertEqual(survivors.first?.nodeID, secondPane)
+    }
+
     /// Not "the pane did not move": a wrapper whose `minimizePane` is an empty
     /// function passes that. The pane has to actually reach the edge the
     /// script asked for, by the same path the title-bar arrow takes.
     func testMinimizingThroughTheScriptableWrapperGoesThroughTheHost() throws {
-        let controller = makeTwoPaneController()
+        let (controller, _, _) = makeTwoPaneController()
         let panes = controller.allPanes()
         XCTAssertEqual(panes.count, 2, "the seeded two-pane layout did not survive being loaded")
-        let scriptable = ScriptablePane(pane: try XCTUnwrap(panes.first))
+        let scriptable = ScriptablePane(pane: try XCTUnwrap(panes.first), in: controller)
 
         scriptable.minimizePane(to: "leading")
         XCTAssertEqual(scriptable.paneMinimized, "leading")
@@ -191,8 +231,8 @@ final class ProjectScriptingTests: XCTestCase {
     /// Starting from a pane that really is minimized, so "unchanged" and
     /// "restored" are answers this can tell apart.
     func testAnUnknownEdgeNameRestoresRatherThanGuessing() throws {
-        let controller = makeTwoPaneController()
-        let scriptable = ScriptablePane(pane: try XCTUnwrap(controller.allPanes().first))
+        let (controller, _, _) = makeTwoPaneController()
+        let scriptable = ScriptablePane(pane: try XCTUnwrap(controller.allPanes().first), in: controller)
         scriptable.minimizePane(to: "leading")
         XCTAssertEqual(scriptable.paneMinimized, "leading")
 
@@ -204,7 +244,7 @@ final class ProjectScriptingTests: XCTestCase {
     /// stays put. That refusal is the host's, not the wrapper's.
     func testAHostThatRefusesLeavesThePaneWhereItWas() throws {
         let controller = makeController(for: makeProject())
-        let scriptable = ScriptablePane(pane: try XCTUnwrap(controller.allPanes().first))
+        let scriptable = ScriptablePane(pane: try XCTUnwrap(controller.allPanes().first), in: controller)
 
         scriptable.minimizePane(to: "leading")
 
@@ -213,14 +253,20 @@ final class ProjectScriptingTests: XCTestCase {
 
     // MARK: - Tabs
 
+    /// The sdef promises a tab id is "stable across relaunches". These are the
+    /// group ids the two tabs were persisted under, in order — non-empty was
+    /// the whole of what this used to assert, and every wrong id is non-empty.
     func testATabsIdIsThePersistedTabID() throws {
-        let controller = makeController(for: makeProject())
-        let tab = try XCTUnwrap(controller.scriptingTabs.first)
+        let (controller, first, second) = makeTwoTabController()
 
+        XCTAssertEqual(
+            controller.scriptingTabs.map(\.uniqueID),
+            [first.uuidString, second.uuidString])
+
+        let tab = try XCTUnwrap(controller.scriptingTabs.first)
         XCTAssertEqual(tab.name, "Tab 1")
         XCTAssertEqual(tab.tabEdges, ["top"])
         XCTAssertEqual(tab.tabProject, "api-server")
-        XCTAssertFalse(tab.uniqueID.isEmpty)
     }
 
     /// A project-level tab is a group with one member per enabled edge, all
@@ -252,12 +298,17 @@ final class ProjectScriptingTests: XCTestCase {
 
     // MARK: - The window
 
-    func testAWindowsIdIsTheProjectID() {
+    /// Read back out of `git_repo` rather than off the workspace this test is
+    /// holding: "stable across relaunches" is a claim about the persisted row,
+    /// and `project.id` is the very expression the window's id is read through.
+    func testAWindowsIdIsTheProjectID() throws {
         let project = makeProject()
         let controller = makeController(for: project)
         let scriptable = ScriptableProjectWindow(controller: controller)
+        let persisted = try XCTUnwrap(project.database.allRepos().first)
 
-        XCTAssertEqual(scriptable.uniqueID, project.id.uuidString)
+        XCTAssertEqual(scriptable.uniqueID, persisted.id.uuidString)
+        XCTAssertEqual(scriptable.name, persisted.name)
         XCTAssertEqual(scriptable.name, "api-server")
     }
 
@@ -301,16 +352,21 @@ final class ProjectScriptingTests: XCTestCase {
         XCTAssertEqual(content.queries, ["main"])
     }
 
-    func testTheSelectedTabIsReadableAndWritable() throws {
-        let controller = makeController(for: makeProject())
+    /// On a window with two tabs, because `selectTab(id:)` rejects an unknown
+    /// id at its `guard` — so on a one-tab window the only write a test could
+    /// make never reached the loop, and an empty `selectTab(id:)` passed.
+    func testTheSelectedTabIsReadableAndWritable() {
+        let (controller, first, second) = makeTwoTabController()
         let scriptable = ScriptableProjectWindow(controller: controller)
-        let first = try XCTUnwrap(controller.scriptingTabs.first)
 
-        XCTAssertEqual(scriptable.selectedTab, first.uniqueID)
+        XCTAssertEqual(scriptable.selectedTab, first.uuidString)
+
+        scriptable.selectedTab = second.uuidString
+        XCTAssertEqual(scriptable.selectedTab, second.uuidString)
 
         // An id that names no tab is ignored rather than deselecting.
         scriptable.selectedTab = UUID().uuidString
-        XCTAssertEqual(scriptable.selectedTab, first.uniqueID)
+        XCTAssertEqual(scriptable.selectedTab, second.uuidString)
     }
 
     // MARK: - The lookups the bridge uses

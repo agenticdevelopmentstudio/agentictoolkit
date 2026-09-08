@@ -11,30 +11,37 @@ import AgenticDeveloperToolkitUI
 @objc(ScriptablePane)
 public final class ScriptablePane: NSObject {
 
+    /// Held strongly, unlike `ScriptableProjectWindow.controller`, and the
+    /// difference is deliberate rather than an oversight.
+    ///
+    /// That wrapper is weak because a window is a whole object graph — and a
+    /// database handle — that a script has no business keeping alive after it
+    /// closes the window. This one is a wrapper made fresh on every read, and
+    /// Cocoa Scripting re-resolves a specifier through `panes` rather than
+    /// holding a wrapper between events: nothing outlives the reply it was
+    /// built for, so a strong reference here keeps a pane alive for exactly as
+    /// long as answering one question takes. Not even `close pane` changes
+    /// that — the pane is already out of the window's tree by the time this
+    /// wrapper is released.
     public let pane: ComposableTabsPaneViewController
 
-    /// The window the pane was enumerated from, when the caller knew it.
+    /// The window the pane was enumerated from.
     ///
     /// Weak, because the wrapper is a value a script holds and the window is
     /// not its to keep alive.
     private weak var window: ComposableTabsWindowController?
 
-    /// - Parameter window: the window this pane was found in. Pass it whenever
-    ///   the caller already knows: a pane on a tab that is not the front one
-    ///   has never been in a window's view hierarchy, so `view.window` is nil
-    ///   and the pane cannot name its own project or tab. Enumeration always
-    ///   knows; a lookup by id through the same enumeration does too.
-    public init(pane: ComposableTabsPaneViewController, in window: ComposableTabsWindowController? = nil) {
+    /// - Parameter window: the window this pane was found in. Required, not
+    ///   optional: a pane on a tab that is not the front one has never been in
+    ///   a window's view hierarchy, so a wrapper left to find its own window
+    ///   through `view.window` names no project and no tab — for most of the
+    ///   panes in a real window. Enumeration always knows which window it is
+    ///   walking, and a lookup by id goes through the same enumeration, so
+    ///   there is no caller that cannot say.
+    public init(pane: ComposableTabsPaneViewController, in window: ComposableTabsWindowController) {
         self.pane = pane
         self.window = window
         super.init()
-    }
-
-    /// Told, or asked. Asking is the fallback for a pane handed to this
-    /// wrapper without its window — it answers for the front tab and returns
-    /// nil for the rest, which is exactly the gap the parameter closes.
-    private var enclosingWindow: ComposableTabsWindowController? {
-        self.window ?? self.pane.enclosingProjectWindow
     }
 
     // MARK: - Scripting properties
@@ -58,7 +65,7 @@ public final class ScriptablePane: NSObject {
     @objc var paneSelection: String { self.pane.selectionDescription ?? "" }
 
     @objc var paneProject: String {
-        self.enclosingWindow?.project.displayName ?? ""
+        self.window?.project.displayName ?? ""
     }
 
     /// The title of the project tab this pane is on.
@@ -67,10 +74,7 @@ public final class ScriptablePane: NSObject {
     /// than by storing a tab on the pane: a pane moves between tabs, and a
     /// stored answer would go stale with nothing to notice.
     @objc var paneTab: String {
-        guard let window = self.enclosingWindow else { return "" }
-        return window.scriptingTabs.first { tab in
-            window.panes(inTab: tab.uniqueID).contains { $0 === self.pane }
-        }?.name ?? ""
+        self.window?.tabGroup(containing: self.pane)?.title ?? ""
     }
 
     // MARK: - Actions
@@ -105,20 +109,6 @@ public final class ScriptablePane: NSObject {
     // MARK: - Object specifier
 
     public override nonisolated var objectSpecifier: NSScriptObjectSpecifier? {
-        // AppKit asks for this off the main actor; everything it reads is
-        // main-thread state, and `NSScriptObjectSpecifier` is not Sendable, so
-        // the result comes back in a Box. Same shape as
-        // `ScriptableTerminalSession`.
-        final class Box: @unchecked Sendable { var value: NSScriptObjectSpecifier? }
-        let box = Box()
-        MainActor.assumeIsolated {
-            guard let appDescription = NSApp.classDescription as? NSScriptClassDescription else { return }
-            box.value = NSUniqueIDSpecifier(
-                containerClassDescription: appDescription,
-                containerSpecifier: nil,
-                key: "panes",
-                uniqueID: self.uniqueID)
-        }
-        return box.value
+        applicationElementSpecifier(key: "panes") { self.uniqueID }
     }
 }

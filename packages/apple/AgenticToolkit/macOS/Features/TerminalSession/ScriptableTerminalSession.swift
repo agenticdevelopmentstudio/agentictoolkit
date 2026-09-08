@@ -26,23 +26,6 @@ public class ScriptableTerminalSession: NSObject {
     // MARK: - Object Specifier
 
     public override nonisolated var objectSpecifier: NSScriptObjectSpecifier? {
-        // AppKit calls `objectSpecifier` from non-isolated dispatch; the
-        // backing state (NSApp, our @MainActor properties) is main-thread.
-        // NSScriptObjectSpecifier isn't Sendable, so use a Box to ferry the
-        // result out instead of returning from the isolated closure.
-        final class Box: @unchecked Sendable { var value: NSScriptObjectSpecifier? }
-        let box = Box()
-        MainActor.assumeIsolated {
-            guard let appDescription = NSApp.classDescription as? NSScriptClassDescription else {
-                return
-            }
-            box.value = NSUniqueIDSpecifier(
-                containerClassDescription: appDescription,
-                containerSpecifier: nil,
-                key: "terminalSessions",
-                uniqueID: uniqueID
-            )
-        }
-        return box.value
+        applicationElementSpecifier(key: "terminalSessions") { self.uniqueID }
     }
 }

@@ -27,7 +27,10 @@ public final class ScriptableProjectTab: NSObject {
         super.init()
     }
 
-    /// The persisted `project_tabs.id`.
+    /// The persisted `project_tabs.group_id` — the group's id, which is what
+    /// a project tab *is*. Not `project_tabs.id`: that names one member row,
+    /// one per edge the group is drawn on, and a script handed one of those
+    /// would be holding an edge rather than the tab it can see.
     @objc var uniqueID: String { self.id.uuidString }
 
     @objc var name: String { self.title }
@@ -40,16 +43,6 @@ public final class ScriptableProjectTab: NSObject {
     @objc var tabProject: String { self.project }
 
     public override nonisolated var objectSpecifier: NSScriptObjectSpecifier? {
-        final class Box: @unchecked Sendable { var value: NSScriptObjectSpecifier? }
-        let box = Box()
-        MainActor.assumeIsolated {
-            guard let appDescription = NSApp.classDescription as? NSScriptClassDescription else { return }
-            box.value = NSUniqueIDSpecifier(
-                containerClassDescription: appDescription,
-                containerSpecifier: nil,
-                key: "projectTabs",
-                uniqueID: self.uniqueID)
-        }
-        return box.value
+        applicationElementSpecifier(key: "projectTabs") { self.uniqueID }
     }
 }

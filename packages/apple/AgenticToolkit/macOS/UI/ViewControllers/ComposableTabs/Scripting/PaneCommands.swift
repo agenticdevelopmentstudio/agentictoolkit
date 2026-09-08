@@ -1,5 +1,29 @@
 import AppKit
 
+/// Every pane command answers the same first question — "is there a pane with
+/// that id?" — and every one of them has to be able to say *no* in a way a
+/// script can tell apart from a legitimate answer.
+///
+/// `zoom pane` returns a boolean and `minimize pane` returns an edge name, so
+/// "there is no such pane" and "the pane is not zoomed" / "the pane is not
+/// minimized" are the same value on the wire. Cocoa Scripting has a channel
+/// for exactly this, and this is where these commands use it.
+///
+/// `errAENoSuchObject` (-1728) is the code AppleScript itself raises for a
+/// specifier that resolves to nothing — `pane id "nope"` produces it without
+/// any help from us — so a script that already handles a missing pane handles
+/// these commands' failure with the same `on error number -1728`. The Cocoa
+/// alternative, `NSReceiverEvaluationScriptError`, is 1: a number in Cocoa's
+/// own small error space that means nothing to a script author reading
+/// `osascript` output.
+private extension NSScriptCommand {
+
+    func reportNoSuchPane(id identifier: String?) {
+        self.scriptErrorNumber = Int(errAENoSuchObject)
+        self.scriptErrorString = "No pane with id \"\(identifier ?? "")\"."
+    }
+}
+
 /// `close pane "<id>"`.
 ///
 /// The direct parameter is a pane id rather than a specifier, matching the
@@ -10,8 +34,14 @@ import AppKit
 public final class ClosePaneCommand: MainActorScriptCommand, @unchecked Sendable {
 
     public override func performMain() -> Any? {
-        guard let identifier = self.directParameter as? String,
+        let identifier = self.directParameter as? String
+        guard let identifier,
               let pane = ProjectWindowManager.shared.scriptablePane(uniqueID: identifier) else {
+            // The result stays `false` — the sdef asks "was there such a pane?"
+            // and `false` is the honest answer — but a script that asked to
+            // close something that is not there has made a mistake, and the
+            // error is what says so out loud.
+            self.reportNoSuchPane(id: identifier)
             return false
         }
         pane.closePane()
@@ -25,8 +55,10 @@ public final class ClosePaneCommand: MainActorScriptCommand, @unchecked Sendable
 public final class ZoomPaneCommand: MainActorScriptCommand, @unchecked Sendable {
 
     public override func performMain() -> Any? {
-        guard let identifier = self.directParameter as? String,
+        let identifier = self.directParameter as? String
+        guard let identifier,
               let pane = ProjectWindowManager.shared.scriptablePane(uniqueID: identifier) else {
+            self.reportNoSuchPane(id: identifier)
             return false
         }
         pane.zoomPane()
@@ -43,8 +75,10 @@ public final class ZoomPaneCommand: MainActorScriptCommand, @unchecked Sendable 
 public final class MinimizePaneCommand: MainActorScriptCommand, @unchecked Sendable {
 
     public override func performMain() -> Any? {
-        guard let identifier = self.directParameter as? String,
+        let identifier = self.directParameter as? String
+        guard let identifier,
               let pane = ProjectWindowManager.shared.scriptablePane(uniqueID: identifier) else {
+            self.reportNoSuchPane(id: identifier)
             return "no"
         }
         let edge = (self.evaluatedArguments?["Edge"] as? String) ?? "none"
