@@ -67,6 +67,20 @@ final class FileEditorState: ObservableObject {
         let completionDelegate: LSPCompletionDelegate?
         let jumpToDefinitionDelegate: LSPJumpToDefinitionDelegate?
         let annotationCoordinator: LSPEditorAnnotationCoordinator?
+
+        /// The semantic-token highlighter and the tree-sitter client it is
+        /// layered over, held for the same reason as the three above and for
+        /// one more: `SourceEditor.paramsAreEqual` compares highlight providers
+        /// by `ObjectIdentifier`, so a fresh pair on each render would look like
+        /// a different editor every time and tear the whole `Highlighter` down.
+        /// Constructed once here, they are the *same objects* on every render.
+        ///
+        /// The `TreeSitterClient` is stored rather than left to `SourceEditor`'s
+        /// own default because that default is only reached when
+        /// `highlightProviders` is `nil` — passing an array means passing every
+        /// provider in it, tree-sitter included.
+        let semanticTokenProvider: SemanticTokenHighlightProvider?
+        let treeSitterClient: TreeSitterClient?
     }
 
     private let documentStore: TextDocumentStore
@@ -229,6 +243,27 @@ final class FileEditorState: ObservableObject {
         slotsByURI[uri]?.annotationCoordinator
     }
 
+    /// The highlight providers one cached document's editor is built with, in
+    /// priority order, or `nil` to leave `SourceEditor` its own default.
+    ///
+    /// **The order is the feature, and it is the opposite of what "layered over
+    /// tree-sitter" sounds like.** `StyledRangeContainer` resolves an overlap in
+    /// favour of the *lower* provider id, and a provider's id is its index in
+    /// this array — so the semantic provider goes first, at index 0, and
+    /// tree-sitter second. Appended instead, it would compile, run, send
+    /// requests and never paint a character.
+    ///
+    /// `nil` rather than `[TreeSitterClient()]` when there is no semantic
+    /// provider: that is what `SourceEditor` already does with `nil`, and
+    /// building the client here would only add a fresh object per render for
+    /// `paramsAreEqual` to notice.
+    func highlightProviders(for uri: DocumentUri) -> [any HighlightProviding]? {
+        guard let slot = slotsByURI[uri],
+              let semanticTokenProvider = slot.semanticTokenProvider,
+              let treeSitterClient = slot.treeSitterClient else { return nil }
+        return [semanticTokenProvider, treeSitterClient]
+    }
+
     /// The configuration one cached document's editor is built with.
     ///
     /// Built here rather than inline in the view because
@@ -354,14 +389,17 @@ final class FileEditorState: ObservableObject {
             scheduler.schedule(document)
         }
 
-        // All three are per-document, because every offset<->`Position`
+        // All four are per-document, because every offset<->`Position`
         // conversion they do is resolved against this one document. A pane with
         // no language services simply has none of them, and `SourceEditor`
-        // treats a `nil` delegate as "no completion" / "no jump", and an empty
-        // `coordinators:` as "no annotations", rather than failing.
+        // treats a `nil` delegate as "no completion" / "no jump", an empty
+        // `coordinators:` as "no annotations", and a `nil` `highlightProviders:`
+        // as "tree-sitter only", rather than failing.
         var completionDelegate: LSPCompletionDelegate?
         var jumpToDefinitionDelegate: LSPJumpToDefinitionDelegate?
         var annotationCoordinator: LSPEditorAnnotationCoordinator?
+        var semanticTokenProvider: SemanticTokenHighlightProvider?
+        var treeSitterClient: TreeSitterClient?
         if let languageServices {
             completionDelegate = LSPCompletionDelegate(
                 document: document,
@@ -372,6 +410,14 @@ final class FileEditorState: ObservableObject {
                 registry: languageServices.registry,
                 store: languageServices.diagnostics
             )
+            semanticTokenProvider = SemanticTokenHighlightProvider(
+                document: document,
+                registry: languageServices.registry
+            )
+            // Built beside it, not instead of it: the semantic provider paints
+            // only the identifier roles a lexer cannot know, and everything
+            // else on screen is still tree-sitter's.
+            treeSitterClient = TreeSitterClient()
             if let openFile {
                 jumpToDefinitionDelegate = LSPJumpToDefinitionDelegate(
                     document: document,
@@ -389,7 +435,9 @@ final class FileEditorState: ObservableObject {
             changeObservation: changeObservation,
             completionDelegate: completionDelegate,
             jumpToDefinitionDelegate: jumpToDefinitionDelegate,
-            annotationCoordinator: annotationCoordinator
+            annotationCoordinator: annotationCoordinator,
+            semanticTokenProvider: semanticTokenProvider,
+            treeSitterClient: treeSitterClient
         )
         openOrder.append(uri)
         touch(uri)

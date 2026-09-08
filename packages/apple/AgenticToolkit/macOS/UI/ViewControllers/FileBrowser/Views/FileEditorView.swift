@@ -201,11 +201,14 @@ private struct FileEditorContentView: View {
                 configuration: editorState.editorConfiguration(for: uri, palette: appPalette),
                 state: editorState.sourceEditorStateBinding(for: uri),
                 // `SourceEditor` holds the two delegates `weak` and keeps a
-                // coordinator only for as long as its controller lives;
-                // `FileEditorState.Slot` is what keeps all three alive for the
-                // life of the cached editor. `highlightProviders:` is still
-                // deliberately left at its default — it belongs to a later
-                // task, and passing `nil` explicitly here would change nothing.
+                // coordinator only for as long as its controller lives, and it
+                // holds each highlight provider `weak` too;
+                // `FileEditorState.Slot` is what keeps all of them alive for
+                // the life of the cached editor. The providers must also be the
+                // *same objects* on every render — `paramsAreEqual` compares
+                // them by `ObjectIdentifier` — which is why they come from the
+                // slot rather than being built in this expression.
+                highlightProviders: editorState.highlightProviders(for: uri),
                 coordinators: editorState.annotationCoordinator(for: uri).map { [$0] } ?? [],
                 completionDelegate: editorState.completionDelegate(for: uri),
                 jumpToDefinitionDelegate: editorState.jumpToDefinitionDelegate(for: uri)
