@@ -58,6 +58,12 @@ open class PaneViewController: NSViewController {
     private let contentContainer = NSView()
     private var minimizedStrip: PaneMinimizedStripView?
 
+    /// Which edge the live strip was built for. The dock constraint and the
+    /// strip's own hairline side are both decided at construction, so a strip
+    /// built for one horizontal edge is wrong for the other and has to be
+    /// replaced rather than re-shown.
+    private var builtStripEdge: PaneEdge?
+
     /// Held so the rail can switch it off. A pane minimized to a side is pinned
     /// narrower than the title bar's own controls can fit, and a hidden view
     /// still takes part in Auto Layout — so leaving both sides pinned makes the
@@ -292,9 +298,10 @@ open class PaneViewController: NSViewController {
         reset.isEnabled = spacingOverride.isOverridden
         reset.accessibilityID("pane.options.spacing.reset")
         reset.setAccessibilityLabel("Use Default Spacing")
-        // The button outlives this method only through the popover that shows
-        // it, so the action is a closure the button itself carries rather than
-        // a selector on a target the pane would have to keep alive.
+        // Target/action rather than a closure: the pane is the target, and it
+        // outlives every popover the button is ever put in, so the unowned
+        // `target` reference cannot dangle and there is no retain cycle to
+        // break — the pane holds the popover, not the other way round.
         reset.target = self
         reset.action = #selector(resetSpacing)
         spacingResetButton = reset
@@ -328,8 +335,13 @@ open class PaneViewController: NSViewController {
         (contentViewController as? PaneSearchable)?.paneSearch(for: query)
     }
 
+    /// The pane's name has three readers: its own title bar, the gear panel's
+    /// heading, and — through `onTitleChange` — the window footer. Content that
+    /// renames itself calls this, so all three are re-read together rather than
+    /// leaving the panel showing whatever the pane was called at `viewDidLoad`.
     public func refreshTitle() {
         titleBar.title = resolvedTitle
+        optionsPopover?.title = resolvedTitle
         onTitleChange?()
     }
 
@@ -427,6 +439,7 @@ open class PaneViewController: NSViewController {
             contentViewController?.view.isHidden = false
             minimizedStrip?.removeFromSuperview()
             minimizedStrip = nil
+            builtStripEdge = nil
             return
         }
 
@@ -437,10 +450,16 @@ open class PaneViewController: NSViewController {
             titleBar.isHidden = false
             minimizedStrip?.removeFromSuperview()
             minimizedStrip = nil
+            builtStripEdge = nil
             return
         }
 
         titleBar.isHidden = true
+        if builtStripEdge != edge {
+            minimizedStrip?.removeFromSuperview()
+            minimizedStrip = nil
+            builtStripEdge = nil
+        }
         if minimizedStrip == nil {
             let representing = contentViewController as? PaneMinimizedRepresenting
             let strip = PaneMinimizedStripView(
@@ -469,6 +488,7 @@ open class PaneViewController: NSViewController {
                 dockedSide
             ])
             minimizedStrip = strip
+            builtStripEdge = edge
         }
     }
 }

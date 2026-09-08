@@ -79,6 +79,28 @@ final class PaneSpacingOverrideTests: XCTestCase {
         XCTAssertEqual(override.resolved, Spacing(top: 10, leading: 10, bottom: 10, trailing: 10))
     }
 
+    /// A row that parses but says something the control could never have
+    /// produced. `setOverride` clamps on the way in, so the only sources are an
+    /// older build or a hand-edited database — the same sources the unreadable
+    /// row above comes from — and honouring the number would put the pane in a
+    /// state its own slider cannot show or walk back from.
+    func testAnOutOfRangeRowIsClampedRatherThanHonoured() {
+        let store = EphemeralPaneStateStore()
+        store.setPaneStateValue(
+            #"{"top":999,"leading":-4,"bottom":40,"trailing":0}"#,
+            forKey: PaneStateKey.spacingOverride)
+
+        let override = makeOverride(store: store)
+
+        XCTAssertTrue(override.isOverridden)
+        XCTAssertEqual(
+            override.resolved,
+            Spacing(top: PaneSpacingOverride.range.upperBound,
+                    leading: PaneSpacingOverride.range.lowerBound,
+                    bottom: 40,
+                    trailing: 0))
+    }
+
     func testChangesAreAnnouncedOnceEach() {
         let override = makeOverride()
         var announced: [Spacing] = []

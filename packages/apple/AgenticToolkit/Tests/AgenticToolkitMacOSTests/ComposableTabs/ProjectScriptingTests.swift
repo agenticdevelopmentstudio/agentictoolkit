@@ -478,6 +478,32 @@ final class ProjectScriptingTests: XCTestCase {
         XCTAssertEqual(ProjectWindowManager.shared.scriptableProjectWindows.count, 1)
     }
 
+    /// Adoption undoes itself. A host that adopts a window it built and never
+    /// calls `forgetForScripting` must not leave the manager naming a window
+    /// that has closed — `openWindowControllers` would keep reporting it, and
+    /// `openProject(_:)` would take its `if let existing` branch and try to
+    /// re-show a dead controller.
+    ///
+    /// And the close must leave the persisted open flag alone: that flag drives
+    /// `restoreOpenProjects()`, and a window this manager never opened is not
+    /// one it may decide should not reopen. Planted here rather than written by
+    /// the manager, so the assertion is that the close found it and left it.
+    func testAnAdoptedWindowDeregistersItselfWhenItsWindowCloses() {
+        let project = makeProject()
+        project.setSetting(ProjectWindowManager.openWindowKey, to: "1")
+        let controller = makeController(for: project)
+        ProjectWindowManager.shared.adoptForScripting(controller)
+        defer { ProjectWindowManager.shared.forgetForScripting(controller) }
+        XCTAssertEqual(ProjectWindowManager.shared.openWindowControllers.count, 1)
+
+        controller.close()
+
+        XCTAssertTrue(ProjectWindowManager.shared.openWindowControllers.isEmpty,
+                      "an adopted window is deregistered by its own close")
+        XCTAssertEqual(project.setting(ProjectWindowManager.openWindowKey), "1",
+                       "an adopted window's close is not the manager's to record")
+    }
+
     func testTheManagerFindsATabAndAWindowByID() throws {
         let project = makeProject()
         let controller = makeController(for: project)

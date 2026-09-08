@@ -16,7 +16,11 @@ public final class ProjectWindowManager: ProjectOpening {
     /// app last quit. It lives with the project row rather than in app
     /// preferences so it cascades away with the project — a forgotten registry
     /// row can't leave a "reopen me" behind pointing at nothing.
-    private static let openWindowKey = "window.open"
+    ///
+    /// Internal rather than private so a test asserting what a close does *not*
+    /// write names the same key the writer does, instead of a literal that can
+    /// drift away from it silently.
+    static let openWindowKey = "window.open"
 
     private var controllers: [UUID: ComposableTabsWindowController] = [:]
 
@@ -65,20 +69,36 @@ public final class ProjectWindowManager: ProjectOpening {
     /// For a host that builds a project window itself, and for the tests: the
     /// scripting surface is "which project windows are open", and a window this
     /// manager never opened is still open (`principle-of-least-astonishment`).
+    ///
+    /// Adoption undoes itself when the window closes, so a host that adopts and
+    /// then forgets to unregister still cannot leave `openWindowControllers`
+    /// naming a window that is gone — or leave `openProject(_:)` re-showing a
+    /// dead controller. `forgetForScripting(_:)` is for undoing it *sooner*
+    /// than that, not for making the close safe.
+    ///
+    /// It deliberately does not touch the persisted open flag, in either
+    /// direction: that flag drives `restoreOpenProjects()`, and a window this
+    /// manager never opened is not one it may decide should not reopen.
     public func adoptForScripting(_ controller: ComposableTabsWindowController) {
         let id = controller.project.id
         guard controllers[id] == nil else { return }
         controllers[id] = controller
         openOrder.append(id)
+        observeClose(of: controller, repoID: id, recordsOpenState: false)
     }
 
     /// The undo of `adoptForScripting(_:)`. Guarded on identity, so forgetting
-    /// a stale controller cannot evict the live window that replaced it.
+    /// a stale controller cannot evict the live window that replaced it — and
+    /// it takes the adoption's close observer with it, so the eager undo leaks
+    /// no more than the automatic one does.
     public func forgetForScripting(_ controller: ComposableTabsWindowController) {
         let id = controller.project.id
         guard controllers[id] === controller else { return }
         controllers.removeValue(forKey: id)
         openOrder.removeAll { $0 == id }
+        if let observer = closeObservers.removeValue(forKey: id) {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     public func windowController(for repoID: UUID) -> ComposableTabsWindowController? {
@@ -104,7 +124,7 @@ public final class ProjectWindowManager: ProjectOpening {
         openOrder.append(repo.id)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
-        observeClose(of: controller, repoID: repo.id)
+        observeClose(of: controller, repoID: repo.id, recordsOpenState: true)
         setWindowOpen(true, repoID: repo.id)
     }
 
@@ -181,7 +201,16 @@ public final class ProjectWindowManager: ProjectOpening {
 
     /// Drops the controller when its window closes, so reopening the project
     /// builds a fresh window rather than resurrecting a closed one.
-    private func observeClose(of controller: ComposableTabsWindowController, repoID: UUID) {
+    ///
+    /// - Parameter recordsOpenState: whether the close should also clear the
+    ///   persisted "reopen this next launch" flag. True for a window this
+    ///   manager opened; false for one it merely adopted, whose open state is
+    ///   not its to decide. The deregistration itself happens either way.
+    private func observeClose(
+        of controller: ComposableTabsWindowController,
+        repoID: UUID,
+        recordsOpenState: Bool
+    ) {
         guard let window = controller.window else { return }
         // `queue: nil`, not `.main`: a queue makes delivery an *enqueue*, so the
         // block runs a runloop turn after the close. The scan closes a deleted
@@ -201,7 +230,7 @@ public final class ProjectWindowManager: ProjectOpening {
                 // Recording that as "the user closed it" would stop every open
                 // project from reopening next launch, which is the opposite of
                 // what quitting with windows open means.
-                if !WindowManager.shared.isTerminating {
+                if recordsOpenState, !WindowManager.shared.isTerminating {
                     self.setWindowOpen(false, repoID: repoID)
                 }
                 self.controllers.removeValue(forKey: repoID)

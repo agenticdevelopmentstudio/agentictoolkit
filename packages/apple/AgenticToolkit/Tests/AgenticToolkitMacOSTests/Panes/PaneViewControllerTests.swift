@@ -232,6 +232,31 @@ final class PaneViewControllerTests: XCTestCase {
         XCTAssertTrue(pane.contentViewController?.view.isHidden == false)
     }
 
+    /// The reachable path is a rebuild that moves the pane across its parent's
+    /// slots: `reapplyPaneState()` re-resolves the edge from `isFirst` and
+    /// hands the leaf the other horizontal edge, with no restore in between —
+    /// so neither call takes the `guard edge.isHorizontal` teardown, and a
+    /// strip that is merely re-shown keeps the dock constraint and the hairline
+    /// side it was built with.
+    func testFlippingTheRailToTheOtherSideRebuildsIt() throws {
+        let (pane, _) = loadedPane(content: RichContent())
+
+        pane.setMinimized(to: .leading)
+        pane.view.layoutSubtreeIfNeeded()
+        let first = try XCTUnwrap(pane.view.subviews.compactMap { $0 as? PaneMinimizedStripView }.first)
+        XCTAssertEqual(first.frame.minX, 0, accuracy: 0.5, "docked to the pane's leading edge")
+
+        pane.setMinimized(to: .trailing)
+        pane.view.layoutSubtreeIfNeeded()
+        let strips = pane.view.subviews.compactMap { $0 as? PaneMinimizedStripView }
+        XCTAssertEqual(strips.count, 1, "the old rail was taken out, not left underneath")
+        let second = try XCTUnwrap(strips.first)
+        XCTAssertFalse(second === first,
+                       "the rail is rebuilt for the new edge rather than re-shown")
+        XCTAssertEqual(second.frame.maxX, pane.view.bounds.width, accuracy: 0.5,
+                       "and it is docked to the trailing edge it was asked for")
+    }
+
     func testRestoreFromTheRailAsksTheHost() {
         let (pane, host) = loadedPane(content: BareContent())
         pane.setMinimized(to: .trailing)

@@ -88,6 +88,12 @@ public final class MinimizePaneCommand: MainActorScriptCommand, @unchecked Senda
             self.reportNoSuchPane(id: identifier)
             return "no"
         }
+        // `to` is required by the `.sdef`, so AppleScript will not compile
+        // `minimize pane X` without it and this fallback is unreachable from a
+        // compiled script. It is for an Apple event assembled by hand that
+        // omits the parameter or sends something that is not a string — and
+        // restoring is the safe reading of a request that named no edge, since
+        // the alternative is picking a side on the script's behalf.
         let edge = (self.evaluatedArguments?["Edge"] as? String) ?? "none"
         pane.minimizePane(to: edge)
         return pane.paneMinimized

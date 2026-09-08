@@ -359,6 +359,28 @@ final class ProjectDrawerTests: XCTestCase {
         XCTAssertEqual(project.setting("drawer.tab"), "help")
     }
 
+    /// The moment neither of the other two covers: drag it wider and then quit
+    /// from the menu bar with help still out. This is `LSUIElement`, so
+    /// quitting closes no window and the drawer never changes visibility —
+    /// without a terminate observer the drag is simply lost.
+    func testQuittingWithTheDrawerStillOutRemembersItsWidth() throws {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        controller.toggleHelp()
+        try XCTUnwrap(controller.helpDrawer).contentWidth = 480
+        XCTAssertNotEqual(project.setting("drawer.width"), "480.0",
+                          "nothing has announced the drag yet")
+
+        NotificationCenter.default.post(
+            name: NSApplication.willTerminateNotification, object: NSApp)
+
+        XCTAssertEqual(project.setting("drawer.width"), "480.0")
+        XCTAssertEqual(project.setting("drawer.tab"), "help")
+        XCTAssertTrue(controller.isHelpVisible,
+                      "terminating does not close the drawer, so it is not the reader putting it away")
+        XCTAssertEqual(project.setting("drawer.open"), "1")
+    }
+
     /// `setSetting`'s contract is that "never set" and "set back to the
     /// default" are one state. A reader who never touched help has never set
     /// anything.

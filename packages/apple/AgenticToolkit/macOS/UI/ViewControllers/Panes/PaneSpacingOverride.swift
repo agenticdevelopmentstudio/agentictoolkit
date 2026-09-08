@@ -81,10 +81,10 @@ public final class PaneSpacingOverride {
 
     public func setOverride(_ value: Spacing) {
         let stored = StoredSpacing(
-            top: clamped(value.top),
-            leading: clamped(value.leading),
-            bottom: clamped(value.bottom),
-            trailing: clamped(value.trailing)
+            top: Self.clamped(value.top),
+            leading: Self.clamped(value.leading),
+            bottom: Self.clamped(value.bottom),
+            trailing: Self.clamped(value.trailing)
         )
         overrideValue = Spacing(
             top: stored.top,
@@ -109,24 +109,32 @@ public final class PaneSpacingOverride {
         onChange?(resolved)
     }
 
-    private func clamped(_ number: Int) -> Int {
-        min(max(number, Self.range.lowerBound), Self.range.upperBound)
+    /// `static`, so the read path can hold to the same bound the write path
+    /// does — `range` is a claim about what a stored override *is*, not merely
+    /// about what this session's control is allowed to produce.
+    private static func clamped(_ number: Int) -> Int {
+        min(max(number, range.lowerBound), range.upperBound)
     }
 
     /// A row that no longer parses — written by an older build, or edited by
     /// hand — is read as "no override". The cost of being wrong is a pane
     /// spaced like the rest of the app, so there is nothing here worth
     /// stopping for.
+    ///
+    /// A row that parses but carries a number outside `range` is clamped rather
+    /// than discarded: the same sources that can produce an unparseable row can
+    /// produce an out-of-range one, and honouring it would put the pane in a
+    /// state its own control could never have reached and cannot show.
     private static func read(from store: PaneStateStore) -> Spacing? {
         guard let json = store.paneStateValue(forKey: PaneStateKey.spacingOverride),
               let data = json.data(using: .utf8),
               let stored = try? JSONDecoder().decode(StoredSpacing.self, from: data)
         else { return nil }
         return Spacing(
-            top: stored.top,
-            leading: stored.leading,
-            bottom: stored.bottom,
-            trailing: stored.trailing
+            top: clamped(stored.top),
+            leading: clamped(stored.leading),
+            bottom: clamped(stored.bottom),
+            trailing: clamped(stored.trailing)
         )
     }
 }

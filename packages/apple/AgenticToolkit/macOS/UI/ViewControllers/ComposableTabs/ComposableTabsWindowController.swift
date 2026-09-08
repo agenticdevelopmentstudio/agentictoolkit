@@ -536,6 +536,14 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// only filling the field in — a script that sets a query and then reads
     /// the pane back would otherwise see a field that says one thing and a
     /// pane that shows another.
+    ///
+    /// Inert until the toolbar has built the field: before that `searchField`
+    /// is `nil` and `searchTargetNodeID` has never been assigned — only the
+    /// field-creation hook assigns it — so there is nothing to fill in and
+    /// nothing to route to. That is a window that has not been on screen yet,
+    /// which is not a window the scripting surface can name: `project window`
+    /// enumerates the manager's open controllers, every one of which has been
+    /// shown.
     public var searchQuery: String {
         get { searchField?.stringValue ?? "" }
         set {
@@ -1248,6 +1256,17 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
             selector: #selector(self.parentWindowWillClose),
             name: NSWindow.willCloseNotification,
             object: parentWindow)
+        // The third, and the one the other two miss: this is an `LSUIElement`
+        // app, so quitting from the menu bar ends the session without ever
+        // closing the window. A reader who dragged the drawer wider and then
+        // touched nothing else would otherwise lose the width at quit. Same
+        // registration style, and `object: nil` because the notification comes
+        // from the application, not from this window.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(self.applicationWillTerminate),
+            name: NSApplication.willTerminateNotification,
+            object: nil)
 
         self.applyVisibility()
     }
@@ -1347,6 +1366,21 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
         self.persistTabAndWidth()
     }
 
+    /// The third moment, and the only one that arrives while the window is
+    /// still open. Deliberately does **not** set `isTearingDown`: that flag is
+    /// there to stop an AppKit-driven close being read as the reader putting
+    /// help away, and terminating closes nothing — the drawer is still out, and
+    /// its width is exactly what we came to write down.
+    @objc private func applicationWillTerminate() {
+        self.persistTabAndWidth()
+    }
+
+    /// The three moments a dragged width and a chosen tab are written down:
+    /// the drawer's visibility changing, the window closing, and the
+    /// application terminating. Together they cover every way a session can
+    /// end — the last because an `LSUIElement` app quits without closing its
+    /// windows.
+    ///
     /// Silent until help has actually been disclosed once: a project whose
     /// reader never clicked `?` has no opinion about how wide the drawer should
     /// be, and a default row written on its behalf is a preference nobody set.
