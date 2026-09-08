@@ -6,6 +6,13 @@ import AgenticToolkitCore
 import AgenticToolkitCoreUI
 import AgenticToolkitCoreMacOS
 
+/// The toolbar's item identifiers. Private to this file, exactly as
+/// `NotesWindowToolbar` keeps its own: nothing outside names them in code, and
+/// the UI suite reaches these controls by the string value.
+private extension NSToolbarItem.Identifier {
+    static let projectSearch = NSToolbarItem.Identifier("project.toolbar.search")
+}
+
 /// A project's window. Its geometry persists per project, under a window id
 /// built from the repo id: two projects open side by side are two windows the
 /// user has placed differently, and one id for both would mean each remembers
@@ -51,6 +58,22 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// which is nil until the window loads.
     private let content: WindowFooterContentViewController
 
+    /// Built in `init`, never in `configureWindow`: `NSToolbar.delegate` is
+    /// `weak`, so a delegate with no other owner is deallocated the instant
+    /// configuration returns, leaving a toolbar with no items and no error.
+    ///
+    /// Internal rather than private because a custom-view item only exists once
+    /// the delegate has been asked for it, and a test with no window on screen
+    /// has to do the asking itself.
+    let toolbarDelegate: WindowToolbarBuilder.Delegate
+
+    /// The titlebar search field, once the toolbar has built it.
+    public var searchField: NSSearchField? { toolbarDelegate.searchField }
+
+    /// The pane the search field is currently pointed at, so a redundant
+    /// refresh does not throw away what the user has typed.
+    private var searchTargetNodeID: UUID?
+
     /// The strip across the bottom. Public because the UI suite and the
     /// scripting bridge both address it, and neither should have to know it
     /// arrived by composition.
@@ -95,7 +118,18 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         )
         self.tabbed = tabbed
         self.content = content
+        self.toolbarDelegate = WindowToolbarBuilder.Delegate(
+            items: [
+                .flexibleSpace,
+                .search(identifier: .projectSearch, placeholder: "Search")
+            ],
+            target: nil,
+            searchDelegate: nil
+        )
         super.init(windowID: Self.windowID(for: project.id), contentViewController: content)
+
+        self.toolbarDelegate.target = self
+        self.toolbarDelegate.searchDelegate = self
 
         self.windowSpec = WindowSpec(
             defaultSize: NSSize(width: 800, height: 500),
@@ -129,16 +163,25 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 // window. Same shape as `ComposableTabsActivePane`'s observer.
                 guard let self, let changed = notification.object as? NSWindow,
                       changed === self.window else { return }
-                self.refreshFooterStatus()
+                self.refreshActivePaneChrome()
             }
             .store(in: &cancellables)
-        refreshFooterStatus()
+        refreshActivePaneChrome()
     }
 
     isolated deinit {
         if let firstResponderObserver {
             NotificationCenter.default.removeObserver(firstResponderObserver)
         }
+    }
+
+    /// A unified toolbar, matching the Notes window. The window title stays
+    /// visible here where it does not in Notes: the title is the project's
+    /// name, which is the one thing the toolbar does not say.
+    public override func configureWindow(_ window: NSWindow) {
+        super.configureWindow(window)
+        window.toolbar = toolbarDelegate.makeToolbar(identifier: "project.toolbar")
+        window.toolbarStyle = .unified
     }
 
     public override func showWindow(_ sender: Any?) {
@@ -151,6 +194,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         installFirstResponderObserverIfNeeded()
         installTitlebarAccessoryIfNeeded()
         restoreFocusedLeafForActiveTab()
+        refreshActivePaneChrome()
     }
 
     // MARK: - Titlebar accessories
@@ -310,6 +354,12 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             }
         }
         persistAllTabs()
+        // `selectTab(id:on:)` is the programmatic entry point and does not call
+        // the delegate back — only a click on the tab bar does. So the window
+        // has to notice its own change of active tab here, or the footer names
+        // the tab the user just left and the search field still holds a query
+        // aimed at a pane that is no longer in front.
+        refreshActivePaneChrome()
     }
 
     private func makeSplitController(for tabID: UUID) -> ComposableTabsViewController {
@@ -367,7 +417,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         } else {
             focusedLeafByTabID.removeValue(forKey: activeTabID)
         }
-        refreshFooterStatus()
+        refreshActivePaneChrome()
         scheduleFocusPersist()
     }
 
@@ -412,6 +462,31 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
 
     func refreshFooterStatus() {
         content.status = footerStatus
+    }
+
+    /// One refresh for everything that follows *which pane* is active. The
+    /// footer alone refreshes far more often than this — on every selection
+    /// change inside one pane — which is why the two are separate calls and
+    /// not one (`separation-of-concerns`).
+    func refreshActivePaneChrome() {
+        refreshFooterStatus()
+        refreshSearchAvailability()
+    }
+
+    /// The field means "search *this* pane": it is disabled over a pane that
+    /// cannot be searched, carries that pane's placeholder, and is cleared when
+    /// it changes hands. Clearing is guarded on the pane actually changing,
+    /// because the active-pane notification also fires for reasons that are not
+    /// a change of pane, and throwing away a half-typed query then would be a
+    /// bug the user could not explain.
+    private func refreshSearchAvailability() {
+        guard let field = searchField else { return }
+        let pane = activePane
+        field.isEnabled = pane?.isSearchable ?? false
+        field.placeholderString = pane?.searchPlaceholder ?? "Search"
+        guard pane?.nodeID != searchTargetNodeID else { return }
+        searchTargetNodeID = pane?.nodeID
+        field.stringValue = ""
     }
 
     private var activeSplit: ComposableTabsViewController? {
@@ -587,7 +662,7 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
     ) {
         restoreFocusedLeafForActiveTab()
         persistAllTabs()
-        refreshFooterStatus()
+        refreshActivePaneChrome()
     }
 
     public func multiTabbedViewController(
@@ -610,6 +685,11 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
             focusedLeafByTabID.removeValue(forKey: memberID)
         }
         persistAllTabs()
+        // Same reason as `addTabGroup()`: the neighbour the controller
+        // activated arrived without a delegate callback, and a query left
+        // pointing at the closed tab's pane would silently retarget the one
+        // that replaced it.
+        refreshActivePaneChrome()
     }
 
     public func multiTabbedViewController(
@@ -619,5 +699,19 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
         on edge: Edge
     ) {
         persistAllTabs()
+    }
+}
+
+// MARK: - NSSearchFieldDelegate
+
+extension ComposableTabsWindowController: NSSearchFieldDelegate {
+
+    /// Live search: every keystroke goes to the pane. A pane that cannot be
+    /// searched cannot receive one either — the field is disabled — so there is
+    /// no capability check here beyond the one `PaneViewController.search(for:)`
+    /// already makes.
+    public func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSSearchField, field === searchField else { return }
+        activePane?.search(for: field.stringValue)
     }
 }
