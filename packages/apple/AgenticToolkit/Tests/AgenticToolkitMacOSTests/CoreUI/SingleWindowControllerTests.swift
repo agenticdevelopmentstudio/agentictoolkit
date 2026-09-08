@@ -25,6 +25,24 @@ final class SingleWindowControllerTests: XCTestCase {
         override var defaultContentRect: NSRect { NSRect(x: 0, y: 0, width: 321, height: 234) }
     }
 
+    /// A window that grows its own titlebar in `configureWindow`, the way every
+    /// real toolbar-bearing window in this framework does.
+    private final class ToolbarWC: SingleWindowController {
+        init(windowID: String) {
+            super.init(windowID: windowID, contentViewController: FakeVC())
+            self.windowTitle = "Toolbar"
+            self.windowStyleMask = [.titled, .closable, .miniaturizable, .resizable]
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func configureWindow(_ window: NSWindow) {
+            window.toolbar = NSToolbar(identifier: "test.toolbar")
+            window.toolbarStyle = .unified
+        }
+    }
+
     private final class FakeVC: NSViewController {
         private(set) var loadViewCallCount = 0
         override func loadView() {
@@ -44,6 +62,36 @@ final class SingleWindowControllerTests: XCTestCase {
         XCTAssertEqual(window.contentViewController, windowController.viewController)
         XCTAssertTrue(window.styleMask.contains(.miniaturizable))
         XCTAssertEqual(window.minSize, NSSize(width: 100, height: 100))
+    }
+
+    /// A unified toolbar makes the titlebar taller, and AppKit makes room by
+    /// growing the frame downward from a fixed top edge. Position the window
+    /// before that happens and it settles half the toolbar's height below the
+    /// centre it was placed at — so the frame has to be applied after the
+    /// chrome is final, not before.
+    func testAToolbarInstalledDuringConfigureDoesNotPushTheWindowOffCentre() throws {
+        let id = "test.toolbar.centred.\(UUID().uuidString)"
+        WindowManager.shared.frames.register(id: id, spec: WindowSpec(
+            defaultSize: NSSize(width: 480, height: 320),
+            minSize: NSSize(width: 200, height: 150),
+            defaultPosition: .center,
+            persistsFrame: true
+        ))
+        WindowManager.shared.frames.clearSavedState(for: id)
+        defer { WindowManager.shared.frames.clearSavedState(for: id) }
+
+        let windowController = ToolbarWC(windowID: id)
+        windowController.showWindow()
+
+        let window = try XCTUnwrap(windowController.window)
+        XCTAssertNotNil(window.toolbar, "the subclass must actually have installed a toolbar")
+        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else {
+            throw XCTSkip("no screen available in test environment")
+        }
+        XCTAssertEqual(window.frame.midX, visible.midX, accuracy: 2.0,
+                       "a toolbar changes height, not width, so this holds either way")
+        XCTAssertEqual(window.frame.midY, visible.midY, accuracy: 2.0,
+                       "the window must be centred on the frame it ends up with, not the one it briefly had")
     }
 
     func testContentViewControllerLifecycleWiresUp() {

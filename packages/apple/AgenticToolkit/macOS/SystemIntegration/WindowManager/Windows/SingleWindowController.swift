@@ -130,6 +130,20 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
         newWindow.contentViewController = contentViewController
 
         self.window = newWindow
+        // Chrome first, frame second. Each of the three calls below can change
+        // how much of the window is chrome rather than content — a subclass's
+        // `configureWindow` is where a toolbar gets installed, and a unified
+        // toolbar makes the titlebar taller. AppKit grows the frame downward
+        // from a fixed top edge to make room, so a window positioned *before*
+        // its toolbar exists ends up half the toolbar's height below where it
+        // was put, and a *saved* frame — which was recorded with the toolbar in
+        // it — is restored onto a shorter window and then grows past the size
+        // it was saved at, a little more every session.
+        applyToolbarButtonMask(to: newWindow)
+        if let hudConfiguration {
+            applyHUDChrome(hudConfiguration, to: newWindow)
+        }
+        configureWindow(newWindow)
         // WindowManager.restoreFrame handles positioning in every path:
         // saved geometry → restored; no saved state but spec registered →
         // applyDefaultPosition (geometric center via FrameCalculator); no
@@ -137,11 +151,6 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
         // here would override that with AppKit's upper-center (y ≈ 1/3
         // from top), which is what it does despite the misleading name.
         WindowManager.shared.frames.restoreFrame(for: newWindow, id: windowID)
-        applyToolbarButtonMask(to: newWindow)
-        if let hudConfiguration {
-            applyHUDChrome(hudConfiguration, to: newWindow)
-        }
-        configureWindow(newWindow)
         // Wire the delegate last — setting `contentViewController` above
         // resizes the window to the view's size and posts
         // `NSWindowDidResizeNotification`. If the delegate were attached
