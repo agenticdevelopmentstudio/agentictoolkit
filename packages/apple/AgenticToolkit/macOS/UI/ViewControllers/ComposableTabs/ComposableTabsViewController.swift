@@ -84,7 +84,14 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     ///
     /// Not `private`: the `PaneHost` conformance in `ComposableTabsPaneHost.swift`
     /// walks it to decide what a zoom collapses.
-    var layoutChildren: [any ComposableTabsChild]
+    ///
+    /// The `didSet` is what makes `host` true of a tab nobody has looked at.
+    /// Which split holds a pane is a fact about *this* list, not about whether
+    /// a view happens to be on screen, so it is stamped here — where the list
+    /// changes — rather than on the load path.
+    var layoutChildren: [any ComposableTabsChild] {
+        didSet { stampHostOnDirectPanes() }
+    }
     private weak var project: ProjectWorkspace?
     let isRoot: Bool
 
@@ -146,6 +153,22 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         self.project = project
         self.isRoot = isRoot
         super.init(nibName: nil, bundle: nil)
+        // Not redundant with `layoutChildren`'s `didSet`, and deleting it costs
+        // every pane in a freshly built tree its host: Swift runs no property
+        // observer during initialization, and the assignment above happens
+        // before `super.init` because it has to. This is the same stamping,
+        // done at the one moment the observer cannot fire.
+        stampHostOnDirectPanes()
+    }
+
+    /// Tells every pane this split holds directly that this is the split
+    /// holding it. Nested splits stamp their own children the same way, from
+    /// their own `init` and their own `didSet`, so one pass per level covers
+    /// the tree.
+    private func stampHostOnDirectPanes() {
+        for child in layoutChildren {
+            (child as? ComposableTabsPaneViewController)?.host = self
+        }
     }
 
     public convenience init(
@@ -510,8 +533,10 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// `testRemovingAPaneNotInThisSplitIsANoOp` pins that. To close a pane you
     /// do not already own, go through its host's `paneDidRequestClose(_:)`,
     /// which asks the split that actually holds it — that routing is safe
-    /// because `makeItem(for:)` sets `host === enclosingSplit`, so a pane's
-    /// host is always the split that can actually remove it.
+    /// because `host` tracks `layoutChildren`, the same list this method
+    /// searches. It is stamped where that list changes rather than where its
+    /// split items are built, so a pane's host is the split that can actually
+    /// remove it whether or not the tab has ever loaded a view.
     public func remove(_ child: ComposableTabsPaneViewController) {
         guard let index = layoutChildren.firstIndex(where: { $0.viewController === child }) else { return }
 
@@ -858,10 +883,10 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// Sizing comes from whatever the leaf's view registered — or, for a
     /// nested split, from everything underneath it.
     private func makeItem(for viewController: NSViewController) -> NSSplitViewItem {
-        // Every item — the initial ones, an inserted split, a promoted survivor
-        // — is built here, which makes it the one place a pane can be told
-        // which split is holding it.
-        (viewController as? ComposableTabsPaneViewController)?.host = self
+        // Sizing only. This used to be where a pane was told which split holds
+        // it, and that was the bug: every call here is on the load path, so a
+        // restored tab nobody switched to left its panes hostless and every
+        // scripted action on them did nothing. `layoutChildren` owns that now.
         let item = NSSplitViewItem(viewController: viewController)
         let registry = layout.registry
         let descriptor = (viewController as? ComposableTabsPaneViewController)

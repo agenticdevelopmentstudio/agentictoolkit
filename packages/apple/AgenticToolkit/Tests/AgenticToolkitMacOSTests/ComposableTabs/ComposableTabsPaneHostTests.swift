@@ -725,4 +725,167 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         XCTAssertTrue(right.isZoomed)
         XCTAssertTrue(try item(for: try leaf(leftID, in: root)).isCollapsed)
     }
+
+    // MARK: - A tab that has never been displayed
+
+    /// A restored tab loads no view until the user switches to it. Nothing in
+    /// this section calls `loadViewIfNeeded()`, so throughout it there are no
+    /// split view items and no `parent` on any pane — which is the state a
+    /// scripted request finds when it names a pane on a background tab.
+    private func unloadedTree(_ node: LayoutNode) throws -> ComposableTabsViewController {
+        try installLayout()
+        let root = ComposableTabsViewController.make(from: node, project: project, isRoot: true)
+        XCTAssertFalse(root.isViewLoaded, "the fixture stops being the fixture once anything loads")
+        return root
+    }
+
+    private func unloadedSideBySide() throws -> ComposableTabsViewController {
+        try unloadedTree(.split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha),
+            second: .leaf(id: rightID, contentType: beta)
+        ))
+    }
+
+    /// `host` is a fact about which split holds the pane, so it has to be true
+    /// of a tree nobody has looked at. It used to be stamped in
+    /// `makeItem(for:)`, which only ever runs on the load path.
+    func testAPaneOnANeverDisplayedTabAlreadyKnowsItsHost() throws {
+        let root = try unloadedSideBySide()
+        for pane in root.allLeaves() {
+            XCTAssertTrue(pane.host === root, "the split holding the pane is its host, loaded or not")
+        }
+    }
+
+    /// The whole point of the host being right: every scripted action goes
+    /// through it, and a nil host is a silent no-op.
+    func testClosingAPaneOnANeverDisplayedTabRemovesIt() throws {
+        let root = try unloadedSideBySide()
+        let left = try leaf(leftID, in: root)
+
+        left.host?.paneDidRequestClose(left)
+
+        XCTAssertEqual(root.allLeaves().map(\.nodeID), [rightID])
+    }
+
+    /// The other entry point. `init` assigns `layoutChildren` before
+    /// `super.init`, where Swift runs no property observer, so the two paths
+    /// are stamped by different code and each needs its own proof.
+    func testARebuiltNeverDisplayedTabRehostsItsPanes() throws {
+        let root = try unloadedTree(.leaf(id: leftID, contentType: alpha))
+
+        root.rebuild(from: .split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha),
+            second: .leaf(id: rightID, contentType: beta)
+        ))
+
+        XCTAssertFalse(root.isViewLoaded)
+        XCTAssertEqual(root.allLeaves().count, 2)
+        for pane in root.allLeaves() {
+            XCTAssertNotNil(pane.host, "a rebuild re-homes every pane, on screen or not")
+        }
+    }
+
+    /// A nested split is built by its own `init`, so the stamping has to reach
+    /// down the tree rather than only across the root's direct children.
+    func testANestedPaneOnANeverDisplayedTabKnowsItsOwnSplit() throws {
+        let innerID = UUID()
+        let root = try unloadedTree(.split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha),
+            second: .split(
+                id: innerID,
+                orientation: .vertical,
+                first: .leaf(id: topID, contentType: alpha),
+                second: .leaf(id: bottomID, contentType: beta)
+            )
+        ))
+        let inner = try XCTUnwrap(
+            root.layoutChildren.compactMap { $0 as? ComposableTabsViewController }.first)
+
+        XCTAssertTrue(try leaf(leftID, in: root).host === root)
+        XCTAssertTrue(try leaf(topID, in: root).host === inner,
+                      "a nested pane's host is the split that can actually remove it")
+        XCTAssertTrue(try leaf(bottomID, in: root).host === inner)
+    }
+
+    /// The state half of a minimize does not need a split item, and refusing to
+    /// do it because the geometry half cannot run yet is how a scripted
+    /// minimize on a background tab used to evaporate.
+    func testMinimizingAPaneOnANeverDisplayedTabRecordsTheEdge() throws {
+        let root = try unloadedSideBySide()
+        let left = try leaf(leftID, in: root)
+
+        left.host?.paneDidRequestMinimize(left, to: .leading)
+
+        XCTAssertEqual(left.minimizedEdge, .leading)
+        XCTAssertEqual(left.persistedMinimizeEdge, .leading,
+                       "and it survives to the store, which is what displays the tab reads")
+    }
+
+    /// The geometry half, arriving late. `viewDidAppear` is where the root
+    /// restores what the panes remember, and it has never fired for a tab
+    /// nobody has switched to.
+    func testAMinimizeRequestedWhileUnloadedPinsTheItemOnFirstDisplay() throws {
+        let root = try unloadedSideBySide()
+        let left = try leaf(leftID, in: root)
+        left.host?.paneDidRequestMinimize(left, to: .leading)
+
+        root.loadViewIfNeeded()
+        for pane in root.allLeaves() { pane.loadViewIfNeeded() }
+        root.viewDidAppear()
+
+        XCTAssertEqual(try item(for: left).maximumThickness, 32,
+                       "28pt strip + 2pt border either side, applied when the tab first appeared")
+        XCTAssertEqual(try item(for: left).holdingPriority, .defaultHigh)
+    }
+
+    func testRestoringAPaneOnANeverDisplayedTabClearsTheEdge() throws {
+        let root = try unloadedSideBySide()
+        let left = try leaf(leftID, in: root)
+        left.host?.paneDidRequestMinimize(left, to: .leading)
+        XCTAssertEqual(left.minimizedEdge, .leading, "there is nothing to restore otherwise")
+
+        left.host?.paneDidRequestRestore(left)
+
+        XCTAssertNil(left.minimizedEdge)
+        XCTAssertNil(left.persistedMinimizeEdge,
+                     "a restore has to clear the row, or the next display re-minimizes")
+    }
+
+    /// The refusal is not collateral damage of the fix. A vertical split has no
+    /// leading edge to dock to, and that is a real answer whether or not
+    /// anything has been laid out.
+    func testARefusedEdgeIsStillRefusedOnANeverDisplayedTab() throws {
+        let root = try unloadedTree(.split(
+            orientation: .vertical,
+            first: .leaf(id: topID, contentType: alpha),
+            second: .leaf(id: bottomID, contentType: beta)
+        ))
+        let top = try leaf(topID, in: root)
+
+        top.host?.paneDidRequestMinimize(top, to: .leading)
+
+        XCTAssertNil(top.minimizedEdge, "the tree refuses an edge its axis does not have")
+        XCTAssertNil(top.persistedMinimizeEdge)
+    }
+
+    /// `captureThicknessFractions()` runs on the way into a minimize, and on an
+    /// unloaded tree it must write nothing: the fractions sitting in the tree
+    /// are the persisted ones, and overwriting them from geometry that does not
+    /// exist yet is how a restore forgets every divider position in the tab.
+    func testMinimizingOnANeverDisplayedTabDoesNotClobberTheStoredFractions() throws {
+        let root = try unloadedTree(.split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha, thicknessFraction: 0.25),
+            second: .leaf(id: rightID, contentType: beta, thicknessFraction: 0.75)
+        ))
+        let left = try leaf(leftID, in: root)
+
+        left.host?.paneDidRequestMinimize(left, to: .leading)
+
+        XCTAssertEqual(fraction(of: leftID, in: root.snapshotNode()) ?? 0, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(fraction(of: rightID, in: root.snapshotNode()) ?? 0, 0.75, accuracy: 0.0001)
+    }
 }

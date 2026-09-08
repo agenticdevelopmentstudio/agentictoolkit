@@ -68,6 +68,25 @@ public final class ScriptablePane: NSObject {
         self.window?.project.displayName ?? ""
     }
 
+    /// Whether the pane is still in the window it was enumerated from.
+    ///
+    /// Not `@objc`: this is not in the dictionary. It exists because
+    /// `closePane()` can be declined — the layout spec vetoes a tab's last pane
+    /// and any fixed region — and "the request was delivered" is not the same
+    /// answer as "the pane is gone".
+    ///
+    /// Asked of that one window rather than by re-running
+    /// `ProjectWindowManager.shared.scriptablePane(uniqueID:)`: a pane cannot
+    /// have moved to a *different* window between the request and this
+    /// question, so one window's walk is a complete answer, where the manager's
+    /// lookup would walk every open project to reach the same one. A window
+    /// that has gone away has taken its panes with it, so a nil window reads as
+    /// closed.
+    public var isInWindow: Bool {
+        guard let window = self.window else { return false }
+        return window.allPanes().contains { $0 === self.pane }
+    }
+
     /// The title of the project tab this pane is on.
     ///
     /// Found by asking the window which of its tabs contains this pane, rather

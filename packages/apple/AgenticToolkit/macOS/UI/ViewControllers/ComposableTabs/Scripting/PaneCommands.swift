@@ -30,6 +30,13 @@ private extension NSScriptCommand {
 /// commands this app already has (`send message`, `new terminal session`).
 /// A script that has a pane object has its id; a script that has only an id
 /// does not have to build a specifier to use it.
+///
+/// Returns whether the pane is *gone*, not whether the request was delivered.
+/// The tree may legitimately decline — the layout spec vetoes a tab's last pane
+/// and any fixed region — and that refusal reaches the script as `false`, not
+/// as an error: it is a real answer to a real question, and the error channel
+/// stays reserved for a pane that does not exist. `zoom pane` and
+/// `minimize pane` already read their post-state back the same way.
 @objc(ClosePaneCommand)
 public final class ClosePaneCommand: MainActorScriptCommand, @unchecked Sendable {
 
@@ -45,7 +52,7 @@ public final class ClosePaneCommand: MainActorScriptCommand, @unchecked Sendable
             return false
         }
         pane.closePane()
-        return true
+        return !pane.isInWindow
     }
 }
 

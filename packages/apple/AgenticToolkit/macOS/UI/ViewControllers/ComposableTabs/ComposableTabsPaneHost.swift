@@ -49,6 +49,32 @@ extension ComposableTabsViewController: PaneHost {
         return PaneMinimizeGeometry.availableEdges(forNode: leaf.nodeID, in: root.snapshotNode())
     }
 
+    /// The split holding `leaf`, on screen or not.
+    ///
+    /// Deliberately not `leaf.parent`: a pane only becomes a child view
+    /// controller when a split view item is built for it, so `parent` is nil
+    /// for every pane on a tab that has never been displayed. `host` is stamped
+    /// from `layoutChildren` — see its `didSet` — which is true of a tab
+    /// nobody has switched to.
+    private func owningSplit(of leaf: ComposableTabsPaneViewController)
+        -> ComposableTabsViewController? {
+        leaf.host as? ComposableTabsViewController
+    }
+
+    /// A minimize is two halves, and only one of them needs a view.
+    ///
+    /// The pane's own state — and the row `setMinimized(to:)` writes — is set
+    /// unconditionally, because a tab that has never been displayed has no
+    /// split items and refusing on that basis is how a scripted minimize on a
+    /// background tab used to vanish without a trace. The geometry half is
+    /// applied here when there *is* an item, and otherwise by
+    /// `applyPersistedPaneState()` on the tab's first display: that reads
+    /// `persistedMinimizeEdge`, which is exactly what was just written. So the
+    /// request survives to the screen either way.
+    ///
+    /// The `resolvedEdge` guard stays a guard. A tree that has no such edge is
+    /// a real refusal — a genuine answer to a genuine question — not a
+    /// consequence of nothing having loaded yet.
     public func paneDidRequestMinimize(_ pane: PaneViewController, to edge: PaneEdge) {
         guard let leaf = pane as? ComposableTabsPaneViewController,
               let root = rootSplit(),
@@ -56,9 +82,7 @@ extension ComposableTabsViewController: PaneHost {
               // the side, and refuses outright if the axis is not the one the
               // parent split is laid out along.
               let resolved = PaneMinimizeGeometry.resolvedEdge(
-                  forNode: leaf.nodeID, in: root.snapshotNode(), requested: edge),
-              let owner = leaf.parent as? ComposableTabsViewController,
-              let item = owner.splitViewItem(for: leaf)
+                  forNode: leaf.nodeID, in: root.snapshotNode(), requested: edge)
         else { return }
 
         // Unzooming un-collapses items, and AppKit has not laid them out again
@@ -71,16 +95,25 @@ extension ComposableTabsViewController: PaneHost {
 
         // Otherwise read the dividers off the screen while the arrangement they
         // describe is still on it, so restoring gives back what the user had.
+        // On an unloaded tree this writes nothing — it guards `isViewLoaded`
+        // and a real thickness — which is what keeps the persisted fractions
+        // from being overwritten with geometry that does not exist yet.
         if !wasZoomed { root.captureThicknessFractions() }
-        owner.pin(item, to: leaf.minimizedThickness(for: resolved))
+        if let owner = owningSplit(of: leaf), let item = owner.splitViewItem(for: leaf) {
+            owner.pin(item, to: leaf.minimizedThickness(for: resolved))
+        }
         leaf.setMinimized(to: resolved)
     }
 
+    /// The mirror of `paneDidRequestMinimize`, and unconditional for the same
+    /// reason: clearing the pane's row is the half that must land, or the tab's
+    /// first display re-minimizes a pane the script just restored. Un-pinning
+    /// needs an item and waits for one.
     public func paneDidRequestRestore(_ pane: PaneViewController) {
-        guard let leaf = pane as? ComposableTabsPaneViewController,
-              let owner = leaf.parent as? ComposableTabsViewController,
-              let item = owner.splitViewItem(for: leaf) else { return }
-        owner.restoreSizing(of: item)
+        guard let leaf = pane as? ComposableTabsPaneViewController else { return }
+        if let owner = owningSplit(of: leaf), let item = owner.splitViewItem(for: leaf) {
+            owner.restoreSizing(of: item)
+        }
         leaf.setMinimized(to: nil)
     }
 

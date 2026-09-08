@@ -251,6 +251,73 @@ final class ProjectScriptingTests: XCTestCase {
         XCTAssertEqual(scriptable.paneMinimized, "no")
     }
 
+    // MARK: - What `close pane` reports
+
+    /// A hand-built command, since Cocoa Scripting is not running here.
+    /// `MainActorScriptCommandTests` uses the same shape and explains why the
+    /// four-char codes are arbitrary: nothing dispatches this by AppleEvent.
+    private func makeCloseCommand(id identifier: String) throws -> ClosePaneCommand {
+        let description = try XCTUnwrap(NSScriptCommandDescription(
+            suiteName: "AgenticTestSuite",
+            commandName: "closePane",
+            dictionary: [
+                "CommandClass": "NSScriptCommand",
+                "AppleEventCode": "clsP",
+                "AppleEventClassCode": "tstS"
+            ]
+        ))
+        let command = ClosePaneCommand(commandDescription: description)
+        command.directParameter = identifier
+        return command
+    }
+
+    /// The spec vetoes closing a tab's last pane, so `remove(_:)` declines and
+    /// the pane is still there afterwards. The command used to return `true`
+    /// regardless, which is a script being told a pane is gone while looking
+    /// straight at it.
+    func testClosePaneReportsFalseWhenTheTreeRefusesTheClose() throws {
+        let controller = makeController(for: makeProject())
+        ProjectWindowManager.shared.adoptForScripting(controller)
+        defer { ProjectWindowManager.shared.forgetForScripting(controller) }
+        let pane = try XCTUnwrap(controller.allPanes().first)
+
+        let command = try makeCloseCommand(id: pane.nodeID.uuidString)
+        let result = command.performDefaultImplementation()
+
+        XCTAssertEqual(result as? Bool, false, "the pane is still in the window")
+        XCTAssertEqual(controller.allPanes().count, 1)
+        XCTAssertEqual(command.scriptErrorNumber, 0,
+                       "a veto is a legitimate answer; the error channel is for \"no such pane\"")
+    }
+
+    func testClosePaneReportsTrueWhenThePaneIsActuallyGone() throws {
+        let (controller, firstPane, secondPane) = makeTwoPaneController()
+        ProjectWindowManager.shared.adoptForScripting(controller)
+        defer { ProjectWindowManager.shared.forgetForScripting(controller) }
+        XCTAssertEqual(controller.allPanes().count, 2)
+
+        let command = try makeCloseCommand(id: firstPane.uuidString)
+        let result = command.performDefaultImplementation()
+
+        XCTAssertEqual(result as? Bool, true)
+        XCTAssertEqual(controller.allPanes().map(\.nodeID), [secondPane])
+        XCTAssertEqual(command.scriptErrorNumber, 0)
+    }
+
+    /// Round 1's rule, pinned so the honesty fix above does not quietly swap
+    /// which channel a missing pane comes back on.
+    func testClosePaneStillRaisesNoSuchObjectForAPaneThatDoesNotExist() throws {
+        let controller = makeController(for: makeProject())
+        ProjectWindowManager.shared.adoptForScripting(controller)
+        defer { ProjectWindowManager.shared.forgetForScripting(controller) }
+
+        let command = try makeCloseCommand(id: UUID().uuidString)
+        let result = command.performDefaultImplementation()
+
+        XCTAssertEqual(result as? Bool, false)
+        XCTAssertEqual(command.scriptErrorNumber, Int(errAENoSuchObject))
+    }
+
     // MARK: - Tabs
 
     /// The sdef promises a tab id is "stable across relaunches". These are the
