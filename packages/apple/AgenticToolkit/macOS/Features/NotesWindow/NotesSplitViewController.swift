@@ -732,3 +732,22 @@ extension NotesSplitViewController: PaneSelectionDescribing {
         selectedNote()?.title
     }
 }
+
+// MARK: - PaneSearchable
+
+/// A notes pane in a project window is searched from that window's titlebar
+/// field. It lands on the same `setSearchQuery(_:)` the notes window's own
+/// toolbar drives, so there is one filter and one place for it to be wrong —
+/// which is the whole reason this is two forwarding lines and not a filter of
+/// its own.
+extension NotesSplitViewController: PaneSearchable {
+
+    /// Named, unlike the window's generic "Search": in a project window the
+    /// field sits above whichever pane is in front, so the placeholder is the
+    /// only thing that says which one it is about.
+    public var paneSearchPlaceholder: String { "Search Notes" }
+
+    public func paneSearch(for query: String) {
+        setSearchQuery(query)
+    }
+}

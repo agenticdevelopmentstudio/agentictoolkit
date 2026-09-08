@@ -819,4 +819,46 @@ final class NotesSplitViewControllerTests: XCTestCase {
             described, [],
             "a body edit leaves the footer's answer alone, so the footer must not be told")
     }
+
+    // MARK: - What the window's search field reaches
+
+    /// `PaneSearchable` is how the project window's titlebar field reaches this
+    /// pane. Asserted on the rows the list actually shows — via the same
+    /// `listRowCount` the folder-filtering tests use — rather than on the
+    /// forwarding call having happened: a test that only proved
+    /// `setSearchQuery` was called would pass just as well against a filter
+    /// that filtered nothing.
+    func testSearchingFromTheWindowFiltersTheList() async throws {
+        let store = try store()
+        _ = try store.createDocument(content: "release notes", markers: [.note])
+        _ = try store.createDocument(content: "shipping", markers: [.note])
+
+        let notesManager = NotesManager(storage: MarkdownNoteStorage(store: store))
+        await notesManager.loadNotes()
+        let split = NotesSplitViewController(
+            notesManager: notesManager, markdownStore: store, autosaveName: makeAutosaveName())
+        split.loadViewIfNeeded()
+        split.reload()
+        XCTAssertEqual(listRowCount(split), 2, "unfiltered to begin with")
+
+        split.paneSearch(for: "shipping")
+
+        XCTAssertEqual(
+            listRowCount(split), 1,
+            "the window's field has to reach the list's own filter")
+
+        split.paneSearch(for: "")
+
+        XCTAssertEqual(
+            listRowCount(split), 2,
+            "clearing the field has to put the notes back")
+    }
+
+    /// The placeholder is the only thing naming which pane the shared field is
+    /// pointed at, so it is part of the contract, not decoration.
+    func testTheNotesPaneNamesItselfInTheSearchPlaceholder() {
+        let split = makeSplit(autosaveName: makeAutosaveName())
+
+        XCTAssertEqual(split.paneSearchPlaceholder, "Search Notes")
+    }
 }
