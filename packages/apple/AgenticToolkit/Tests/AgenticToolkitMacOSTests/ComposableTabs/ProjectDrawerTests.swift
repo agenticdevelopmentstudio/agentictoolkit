@@ -17,7 +17,12 @@ final class ProjectDrawerTests: XCTestCase {
     /// remembered drawer. The layout is installed before the workspace is made,
     /// because `ProjectWorkspace` captures `ComposableTabsLayout.current` in its
     /// initialiser.
-    private func makeProject() -> ProjectWorkspace {
+    /// - Parameter registered: pass `false` for a workspace whose repo is *not*
+    ///   in `git_repo`. Every row keyed to a project carries a foreign key onto
+    ///   that table, so such a workspace persists nothing and `setSetting`
+    ///   swallows the failure — which is exactly the state in which the `?`
+    ///   button still has to work.
+    private func makeProject(registered: Bool = true) -> ProjectWorkspace {
         let registry = ComposableTabsViewRegistry()
         registry.register(alpha, descriptor: .init(displayName: "Alpha", minimumThickness: 150)) { _ in
             let controller = NSViewController()
@@ -40,8 +45,10 @@ final class ProjectDrawerTests: XCTestCase {
         // to a project carries a foreign key onto `git_repo`, so a workspace
         // over an unregistered repo silently persists nothing — and every
         // "the project remembered it" assertion below would be vacuous.
-        // swiftlint:disable:next force_try
-        try! database.insert(repo)
+        if registered {
+            // swiftlint:disable:next force_try
+            try! database.insert(repo)
+        }
         return ProjectWorkspace(repo: repo, database: database)
     }
 
@@ -68,6 +75,21 @@ final class ProjectDrawerTests: XCTestCase {
                 toolbar, itemForItemIdentifier: identifier, willBeInsertedIntoToolbar: false)
         }
         return identifiers
+    }
+
+    /// The `?` button, ready to be asserted on.
+    ///
+    /// In the app AppKit has built the toolbar's items by the time
+    /// `showWindow(_:)` refreshes the glyph. With no toolbar on screen nothing
+    /// asks the delegate, so the test asks first and then shows the window
+    /// again — the same order, made to happen.
+    private func helpButton(
+        of controller: ComposableTabsWindowController
+    ) throws -> NSButton {
+        buildToolbarItems(controller)
+        controller.showWindow(nil)
+        return try XCTUnwrap(
+            controller.toolbarDelegate.button(for: NSToolbarItem.Identifier("project.toolbar.help")))
     }
 
     nonisolated override func tearDown() {
@@ -144,11 +166,52 @@ final class ProjectDrawerTests: XCTestCase {
         let view = try XCTUnwrap(drawer.view(forTab: "help"))
 
         XCTAssertTrue(view is HelpContentView)
-        let titles = ComposableTabsWindowController.helpContent.topics.map(\.title)
-        XCTAssertFalse(titles.isEmpty, "A help tab with nothing in it is worse than no help tab")
-        for title in titles {
-            XCTAssertTrue(Self.labels(in: view).contains(title))
+        let topics = ComposableTabsWindowController.helpContent.topics
+        XCTAssertFalse(topics.isEmpty, "A help tab with nothing in it is worse than no help tab")
+        let labels = Self.labels(in: view)
+        for topic in topics {
+            XCTAssertTrue(labels.contains(topic.title), "Missing the title of \(topic.title)")
+            // The body too, and not only the heading over it: a `setHelp` that
+            // rendered every title and dropped every word of prose would pass
+            // an assertion on titles alone, and the drawer would be five
+            // headings over nothing.
+            XCTAssertFalse(topic.body.isEmpty, "A topic with no prose is a heading, not help")
+            XCTAssertTrue(labels.contains(topic.body), "Missing the body of \(topic.title)")
         }
+    }
+
+    /// Half the brief's visible contract: the `?` reports the state it toggles.
+    ///
+    /// The symbol is compared by what it draws rather than by name, because
+    /// `NSImage.name()` is `nil` for an image made with
+    /// `init(systemSymbolName:accessibilityDescription:)` — AppKit exposes no
+    /// symbol name to read back — and the rendering of one symbol at one
+    /// configuration is stable within a process.
+    func testTheHelpButtonSwapsItsGlyphAndTooltipWithTheDrawer() throws {
+        let controller = makeController(for: makeProject())
+        let button = try helpButton(of: controller)
+
+        XCTAssertEqual(button.toolTip, "Show Help")
+        XCTAssertEqual(button.image?.tiffRepresentation, Self.glyph("questionmark.circle"))
+
+        controller.toggleHelp()
+        XCTAssertEqual(button.toolTip, "Hide Help")
+        XCTAssertEqual(button.image?.tiffRepresentation, Self.glyph("questionmark.circle.fill"))
+
+        controller.toggleHelp()
+        XCTAssertEqual(button.toolTip, "Show Help")
+        XCTAssertEqual(button.image?.tiffRepresentation, Self.glyph("questionmark.circle"))
+    }
+
+    /// The glyph follows the theme live, rather than staying tinted for the
+    /// palette that happened to be in effect when it was last toggled.
+    func testTheHelpButtonTintFollowsItsOwnScope() throws {
+        let controller = makeController(for: makeProject())
+        let button = try helpButton(of: controller)
+
+        XCTAssertEqual(button.contentTintColor, button.resolvedThemeScope.palette.secondaryTextColor)
+        controller.toggleHelp()
+        XCTAssertEqual(button.contentTintColor, button.resolvedThemeScope.palette.accentColor)
     }
 
     /// The `?` button's contract, in one test: click discloses, click again
@@ -167,6 +230,21 @@ final class ProjectDrawerTests: XCTestCase {
 
         controller.toggleHelp()
         XCTAssertTrue(controller.isHelpVisible)
+        XCTAssertTrue(drawer.isOpen)
+
+        controller.toggleHelp()
+        XCTAssertFalse(controller.isHelpVisible)
+        XCTAssertFalse(drawer.isOpen)
+    }
+
+    /// The `?` has to work even when the write behind it does not — the button
+    /// is not a database row, it is what the reader asked for.
+    func testTheButtonWorksWhenThePreferenceCannotBeSaved() throws {
+        let controller = makeController(for: makeProject(registered: false))
+        let drawer = try XCTUnwrap(controller.helpDrawer)
+
+        controller.toggleHelp()
+        XCTAssertTrue(controller.isHelpVisible, "A swallowed write must not make the ? a no-op")
         XCTAssertTrue(drawer.isOpen)
 
         controller.toggleHelp()
@@ -230,6 +308,84 @@ final class ProjectDrawerTests: XCTestCase {
         let controller = makeController(for: project)
         XCTAssertEqual(
             try XCTUnwrap(controller.helpDrawer).contentWidth, WindowDrawer.defaultContentWidth)
+    }
+
+    /// "On which tab" is part of what a project remembers, and the only test
+    /// that touched `drawer.tab` used it as a generic key. This one is the
+    /// round trip: written on the way out, selected on the way back in.
+    func testTheDrawerRestoresOntoTheRememberedTab() throws {
+        let project = makeProject()
+        let first = makeController(for: project)
+        first.toggleHelp()
+        first.close()
+
+        XCTAssertEqual(project.setting("drawer.tab"), "help")
+
+        let second = makeController(for: project)
+        XCTAssertEqual(try XCTUnwrap(second.helpDrawer).selectedTabID, "help")
+    }
+
+    /// The moment the brief asks for and the window close cannot cover: drag it
+    /// wider, put it away with the `?`, then keep working. Quitting from the
+    /// menu bar never closes the window, so a width only written on window
+    /// close is a width thrown away.
+    func testAWidthDraggedThenPutAwayIsRemembered() throws {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        controller.toggleHelp()
+        try XCTUnwrap(controller.helpDrawer).contentWidth = 460
+        controller.toggleHelp()
+
+        // No `close()`: the window is still open, exactly as it is when the
+        // user quits from the menu bar.
+        XCTAssertEqual(project.setting("drawer.width"), "460.0")
+        XCTAssertEqual(project.setting("drawer.tab"), "help")
+    }
+
+    /// `setSetting`'s contract is that "never set" and "set back to the
+    /// default" are one state. A reader who never touched help has never set
+    /// anything.
+    func testAProjectThatNeverOpenedHelpRemembersNothingAboutIt() {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        controller.close()
+
+        XCTAssertNil(project.setting("drawer.open"))
+        XCTAssertNil(project.setting("drawer.tab"))
+        XCTAssertNil(project.setting("drawer.width"))
+    }
+
+    /// A drawer can be dragged shut by its outer edge, which goes nowhere near
+    /// the `?`. Without reconciling, the remembered preference still says open
+    /// and the next `didBecomeKey` slides it back out — two clicks to close a
+    /// drawer that stays closed.
+    func testADrawerClosedBehindThePresentersBackStaysClosed() throws {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        let drawer = try XCTUnwrap(controller.helpDrawer)
+        controller.toggleHelp()
+        XCTAssertTrue(controller.isHelpVisible)
+
+        // What the drag looks like from here: the drawer closes and announces
+        // it, without the button having been clicked.
+        drawer.close()
+
+        XCTAssertFalse(controller.isHelpVisible)
+        XCTAssertNil(project.setting("drawer.open"))
+
+        // And the re-assert that runs on every window focus leaves it closed.
+        drawer.reapplyVisibility?()
+        XCTAssertFalse(drawer.isOpen)
+        XCTAssertFalse(controller.isHelpVisible)
+    }
+
+    /// What one symbol draws at the configuration `applyDisclosureAppearance`
+    /// uses. `NSImage.name()` is `nil` for a system-symbol image, so this is
+    /// the only way to say *which* glyph the button is showing.
+    private static func glyph(_ symbolName: String) -> Data? {
+        NSImage(systemSymbolName: symbolName, accessibilityDescription: "Help")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .regular))?
+            .tiffRepresentation
     }
 
     private static func labels(in view: NSView) -> [String] {

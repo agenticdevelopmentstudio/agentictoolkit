@@ -112,6 +112,18 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// because a drawer needs a window that exists.
     private var helpPresenter: (any HelpPresenting)?
 
+    /// The same object as `helpPresenter`, at the type that has a drawer on it.
+    ///
+    /// Two references rather than a downcast: the window builds the presenter
+    /// itself and knows the concrete type at that moment, so `helpDrawer` can
+    /// say what it means instead of asking `as?` a question that would answer
+    /// `nil` — silently, and wrongly — if a second `HelpPresenting` were ever
+    /// installed here. The existential still earns its keep: everything the
+    /// window *does* with help goes through it, which is what keeps the
+    /// deprecation off `toggleHelp()` and its `#selector`.
+    @available(macOS, deprecated: 10.13)
+    private var projectHelpDrawer: ProjectHelpDrawerController?
+
     /// The pane the search field is currently pointed at, so a redundant
     /// refresh does not throw away what the user has typed.
     private var searchTargetNodeID: UUID?
@@ -148,6 +160,10 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
 
     /// Keeps the plane behind the panes following the theme.
     private var backdropObserver: ThemePaletteObserver?
+
+    /// Keeps the `?` glyph following the theme. Made once, the first time the
+    /// toolbar has actually built the button — see `refreshHelpButtonAppearance()`.
+    private var helpThemeObserver: ThemePaletteObserver?
 
     public init(project: ProjectWorkspace) {
         self.project = project
@@ -230,6 +246,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             self?.refreshHelpButtonAppearance()
         }
         helpPresenter = presenter
+        projectHelpDrawer = presenter
     }
 
     public override func showWindow(_ sender: Any?) {
@@ -780,12 +797,13 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     ///
     /// Deprecated because `WindowDrawer` is, and naming one is only
     /// warning-free from inside a declaration carrying the same quarantine.
-    /// This is the only place the window names it: everything the window
-    /// actually *does* with help goes through `HelpPresenting` above, which is
-    /// what keeps the annotation off `toggleHelp()` and its `#selector`.
+    /// This and `projectHelpDrawer` are the only places the window names it:
+    /// everything the window actually *does* with help goes through
+    /// `HelpPresenting` above, which is what keeps the annotation off
+    /// `toggleHelp()` and its `#selector`.
     @available(macOS, deprecated: 10.13)
     public var helpDrawer: WindowDrawer? {
-        (helpPresenter as? ProjectHelpDrawerController)?.drawer
+        projectHelpDrawer?.drawer
     }
 
     /// Filled while open, outlined while closed — the same glyph behaviour the
@@ -796,6 +814,24 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// has asked the delegate for it.
     private func refreshHelpButtonAppearance() {
         guard let button = toolbarDelegate.button(for: .projectHelp) else { return }
+        guard helpThemeObserver == nil else {
+            applyHelpButtonAppearance(to: button)
+            return
+        }
+        // `host: button` rather than `self`, for the reason `NotesWindowToolbar`
+        // gives at its own help glyph: the tint comes from the *button's*
+        // resolved `ThemeScope`, and a window controller is not in the view
+        // hierarchy that resolves one. The observer applies immediately on
+        // creation, so this replaces the seeding call rather than preceding it —
+        // and it must not call back into this method, which would make a second
+        // observer before the first is stored.
+        helpThemeObserver = ThemePaletteObserver(host: button) { [weak self, weak button] _ in
+            guard let self, let button else { return }
+            self.applyHelpButtonAppearance(to: button)
+        }
+    }
+
+    private func applyHelpButtonAppearance(to button: NSButton) {
         WindowToolbarBuilder.applyDisclosureAppearance(
             to: button,
             disclosed: isHelpVisible,
@@ -946,18 +982,45 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
     /// need somewhere to hang its help from.
     var helpAnchorView: NSView?
 
-    /// The remembered preference, not `drawer.isOpen`. The drawer is open
-    /// because the reader asked for it to be open, and for no other reason —
-    /// and AppKit silently drops an `open()` on a window that is not on screen
-    /// yet, which is exactly the moment a restored window asks. Answering from
-    /// the preference makes the button and its glyph right immediately;
-    /// `reapplyVisibility` is what makes the drawer itself catch up.
-    var isHelpVisible: Bool {
-        self.project.setting(ProjectWindowSetting.drawerOpen) == "1"
-    }
+    /// What the reader last asked for, in memory — not `drawer.isOpen`, and not
+    /// a `SELECT`. The drawer is open because the reader asked for it to be
+    /// open, and for no other reason: AppKit silently drops an `open()` on a
+    /// window that is not on screen yet, which is exactly the moment a restored
+    /// window asks, so the drawer's own answer is unreliable and
+    /// `reapplyVisibility` is what makes it catch up.
+    ///
+    /// Held here rather than re-read from the database, for the reason
+    /// `ComposableSettings.HelpDrawerController` holds its own preference in a
+    /// `UserSettingObserver`: `setSetting` swallows its errors, so a click that
+    /// asked the database what it had just written would be a silent no-op
+    /// whenever the write failed — and `reapplyVisibility` fires on every
+    /// `didBecomeKey` *and* every `didBecomeMain`, which made two main-thread
+    /// queries out of every window focus.
+    private var isOpen: Bool
+
+    /// Whether help has been disclosed at all in this window's lifetime, which
+    /// is the gate on writing `drawer.tab` and `drawer.width`. `setSetting`'s
+    /// contract is that "never set" and "set back to the default" are one
+    /// state; a reader who never touched help has never set anything, and a
+    /// default row written on every window close is the opposite of that.
+    ///
+    /// It cannot be `isOpen`: the moment the width most needs writing is the
+    /// moment the drawer *closes*, when `isOpen` has just become false.
+    private var hasDisclosedHelp = false
+
+    /// True only while `applyVisibility()` is moving the drawer itself.
+    ///
+    /// The drawer announces every move, including the ones we asked for — and
+    /// including an `open()` AppKit dropped because the window was not on
+    /// screen yet, which looks from the outside exactly like the reader
+    /// dragging the drawer shut. This is what tells those two apart.
+    private var isApplyingVisibility = false
+
+    var isHelpVisible: Bool { self.isOpen }
 
     init(parentWindow: NSWindow, project: ProjectWorkspace) {
         self.project = project
+        self.isOpen = project.setting(ProjectWindowSetting.drawerOpen) == "1"
         let helpView = self.helpView
         self.drawer = WindowDrawer(
             parentWindow: parentWindow,
@@ -977,12 +1040,17 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
         self.drawer.reapplyVisibility = { [weak self] in
             self?.applyVisibility()
         }
-        // The drawer announces opening and closing, never resizing, so a width
-        // the user dragged is read back at the last moment it can still matter:
-        // the one that ends the session with it. Registered by selector rather
-        // than by block so the observation is zeroing-weak and needs no
-        // `deinit` to undo — the same reason `WindowDrawer` watches its parent
-        // window that way.
+        // The drawer announces opening and closing, never resizing — so those
+        // are the moments a dragged width is read back, and the first of the
+        // two the brief names: putting help away ends the session with it just
+        // as surely as closing the window does, and quitting from the menu bar
+        // never closes the window at all.
+        self.drawer.onVisibilityChange = { [weak self] in
+            self?.drawerVisibilityDidChange()
+        }
+        // The second moment. Registered by selector rather than by block so the
+        // observation is zeroing-weak and needs no `deinit` to undo — the same
+        // reason `WindowDrawer` watches its parent window that way.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(self.parentWindowWillClose),
@@ -999,17 +1067,26 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
     }
 
     func toggleHelp() {
-        // `nil` deletes the row, so "never opened it" and "closed it again" are
-        // one state rather than two that have to be kept agreeing.
-        self.project.setSetting(
-            ProjectWindowSetting.drawerOpen, to: self.isHelpVisible ? nil : "1")
+        self.isOpen.toggle()
+        self.writeOpenState()
         self.applyVisibility()
+    }
+
+    /// `nil` deletes the row, so "never opened it" and "closed it again" are one
+    /// state rather than two that have to be kept agreeing. The write is the
+    /// consequence of the decision, never the decision itself — see `isOpen`.
+    private func writeOpenState() {
+        self.project.setSetting(ProjectWindowSetting.drawerOpen, to: self.isOpen ? "1" : nil)
     }
 
     // MARK: - What the project remembers
 
     private func applyVisibility() {
-        if self.isHelpVisible {
+        self.isApplyingVisibility = true
+        defer { self.isApplyingVisibility = false }
+
+        if self.isOpen {
+            self.hasDisclosedHelp = true
             // The remembered tab, so a second tab later needs no change here.
             // An id naming no tab is ignored by the drawer, which is the right
             // answer for a preference written by some other build.
@@ -1019,6 +1096,23 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
             self.drawer.close()
         }
         self.onVisibilityChange?()
+    }
+
+    /// The drawer moved. Either we moved it — in which case there is nothing to
+    /// reconcile, only a width and a tab worth writing down — or the reader
+    /// dragged it shut by its outer edge, which never goes near the `?` and
+    /// would otherwise leave the preference saying "open" and the next
+    /// `didBecomeKey` sliding it back out.
+    ///
+    /// Idempotent on purpose: one move can be announced twice, once from
+    /// `WindowDrawer.close()` and once from `NSDrawer`'s delegate.
+    private func drawerVisibilityDidChange() {
+        if !self.isApplyingVisibility, self.isOpen, !self.drawer.isOpen {
+            self.isOpen = false
+            self.writeOpenState()
+            self.onVisibilityChange?()
+        }
+        self.persistTabAndWidth()
     }
 
     /// The remembered width, or the default. A value that is not a number is
@@ -1033,7 +1127,17 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
         return CGFloat(width)
     }
 
+    /// The last chance to write down a width and a tab, for the session that
+    /// ends with the drawer still out.
     @objc private func parentWindowWillClose() {
+        self.persistTabAndWidth()
+    }
+
+    /// Silent until help has actually been disclosed once: a project whose
+    /// reader never clicked `?` has no opinion about how wide the drawer should
+    /// be, and a default row written on its behalf is a preference nobody set.
+    private func persistTabAndWidth() {
+        guard self.hasDisclosedHelp else { return }
         self.project.setSetting(ProjectWindowSetting.drawerTab, to: self.drawer.selectedTabID)
         self.project.setSetting(
             ProjectWindowSetting.drawerWidth, to: String(Double(self.drawer.contentWidth)))
