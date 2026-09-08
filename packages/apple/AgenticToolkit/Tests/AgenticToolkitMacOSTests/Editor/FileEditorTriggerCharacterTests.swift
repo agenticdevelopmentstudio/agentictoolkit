@@ -169,4 +169,134 @@ struct FileEditorTriggerCharacterTests {
         // Still from the handshake, not from a completion request.
         #expect(!fixture.log.events.contains("completion"))
     }
+
+    // MARK: - Re-resolution driven by a session's state, not its identity
+
+    /// A state transition reaches this pane by a route with two hops no test
+    /// can await — the registry's per-session reader task, and then the
+    /// `$sessionStates` sink that task wakes — so unlike the cases above there
+    /// is no single in-flight task `awaitPendingTriggerCharacterResolution()`
+    /// could cover.
+    private func poll(
+        seconds: TimeInterval = 3,
+        until condition: () async -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return await condition()
+    }
+
+    /// Builds the pane over `fixture`, with its session parked mid-handshake in
+    /// `.starting` and its slot open and already resolved to nothing.
+    ///
+    /// Both tests below need the same starting point, and it is four objects
+    /// and two awaits of setup that says nothing about either (`dry`). What
+    /// each test does *after* this is the test.
+    private func openSlotDuringHandshake(
+        directory: URL,
+        fixture: LSPEditorFixture
+    ) async throws -> (state: FileEditorState, fake: FakeEditorLanguageServerSession, uri: DocumentUri) {
+        let fileURL = directory.appendingPathComponent("A.swift")
+        try "let x = 1\n".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let session = fixture.registry.session(forLanguageId: "swift")
+        let fake = try #require(session as? FakeEditorLanguageServerSession)
+        // Moved off `.idle` before the slot opens. The resolution calls
+        // `start()` itself, and against an `.idle` session held by
+        // `holdsStart` that call parks — the capability read below would never
+        // be reached and the test would pass for the wrong reason. From
+        // `.starting`, `start()` returns at its "already under way" branch.
+        await fake.transition(to: .starting)
+
+        let store = TextDocumentStore()
+        let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: { _ in })
+        let services = ProjectLanguageServices(documentStore: store, registry: fixture.registry)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: services,
+            openFile: nil
+        )
+
+        state.load(from: fileURL)
+        await state.awaitPendingLoad()
+        await state.awaitPendingTriggerCharacterResolution()
+
+        let uri = fileURL.documentUri
+        // Mid-handshake a server has no capabilities to read, so the slot
+        // resolves to nothing. This is the state the pane used to be stuck in
+        // permanently.
+        #expect(state.editorConfiguration(for: uri, palette: palette)
+            .peripherals.codeSuggestionTriggerCharacters.isEmpty)
+        return (state, fake, uri)
+    }
+
+    /// What it catches: `$sessions` as the only trigger for re-resolution. The
+    /// registry installs a session and *then* starts it, so nothing about the
+    /// handshake finishing touches `sessions` — a slot opened while the server
+    /// was still starting keeps the empty set it resolved, forever, and `.`
+    /// never opens the completion window in that buffer.
+    @Test("a slot resolved mid-handshake picks up the trigger characters when the session starts running")
+    func triggerCharactersAreReResolvedWhenASessionReachesRunning() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fixture = LSPEditorFixture(
+            workspaceURL: directory,
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: ["@", "#"]),
+                holdsStart: true
+            )
+        )
+        let (state, fake, uri) = try await openSlotDuringHandshake(directory: directory, fixture: fixture)
+
+        await fake.transition(to: .running)
+
+        let resolved = await poll {
+            state.editorConfiguration(for: uri, palette: palette)
+                .peripherals.codeSuggestionTriggerCharacters == ["@", "#"]
+        }
+        #expect(resolved)
+        // Still resolved from the handshake rather than from a completion
+        // request, as the eager path promises.
+        #expect(!fixture.log.events.contains("completion"))
+    }
+
+    /// The same wire, in the direction that produces no visible change.
+    ///
+    /// A start that threw leaves the session in `sessions` looking exactly like
+    /// a live one, so `$sessions` is silent here too. The assertion is that the
+    /// pane *asked again*: `LSPCompletionDelegate` caches a resolved answer
+    /// against the session's identity, and a failure does not change identity,
+    /// so a re-resolution against a failed server can only ever produce the
+    /// empty set it already had. Counting the capability reads is what
+    /// distinguishes "asked and got nothing" from "never asked".
+    @Test("a slot re-resolves when its session fails rather than keeping a stale answer")
+    func triggerCharactersAreReResolvedWhenASessionFails() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fixture = LSPEditorFixture(
+            workspaceURL: directory,
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: ["@", "#"]),
+                holdsStart: true
+            )
+        )
+        let (state, fake, uri) = try await openSlotDuringHandshake(directory: directory, fixture: fixture)
+        let readsBeforeFailure = await fake.capabilityRequestCount
+
+        await fake.transition(to: .failed(LanguageServerFailure(
+            error: LanguageServerSessionError.serverExited(status: 1),
+            standardErrorText: "error: no such module\n"
+        )))
+
+        let askedAgain = await poll { await fake.capabilityRequestCount > readsBeforeFailure }
+        #expect(askedAgain)
+        #expect(state.editorConfiguration(for: uri, palette: palette)
+            .peripherals.codeSuggestionTriggerCharacters.isEmpty)
+    }
 }

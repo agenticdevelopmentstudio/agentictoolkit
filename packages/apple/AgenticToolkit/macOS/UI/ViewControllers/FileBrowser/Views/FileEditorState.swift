@@ -138,7 +138,8 @@ final class FileEditorState: ObservableObject {
     /// exists, and so tests have something to await.
     private var triggerCharacterTasks: [DocumentUri: Task<Void, Never>] = [:]
 
-    /// Holds the subscription to `registry.$sessions`.
+    /// Holds the subscriptions to `registry.$sessions` and
+    /// `registry.$sessionStates`.
     private var cancellables: Set<AnyCancellable> = []
 
     init(
@@ -167,14 +168,42 @@ final class FileEditorState: ObservableObject {
         // `registry.sessions` still holds the *old* dictionary while the sink
         // runs, and `resolveTriggerCharacters()` reads it back through
         // `registry.session(forLanguageId:)`.
-        languageServices?.registry.$sessions
-            .sink { [weak self] _ in
-                guard let self else { return }
-                for uri in self.slotsByURI.keys {
-                    self.startTriggerCharacterResolution(for: uri)
-                }
-            }
+        //
+        // **Two publishers, because they answer two different questions.**
+        // `$sessions` answers *which server serves this language* — it emits
+        // when a session is created, retired or replaced. `$sessionStates`
+        // answers *what that server is doing* — it emits when the same session
+        // moves between `.idle`, `.starting`, `.running`, `.failed` and
+        // `.stopped`. Trigger characters depend on both, because a session's
+        // capabilities are unreadable until it is running.
+        //
+        // The second sink closes a case the first cannot see. The registry
+        // installs a session in `sessions` and then starts it in a `Task`; the
+        // outcome of that start — running, or a `start()` that threw — never
+        // touches `sessions`, so `$sessions` stays silent through it. A slot
+        // opened during the handshake therefore resolved `[]` (capabilities are
+        // `nil` until the session is running) and, with `$sessions` as the only
+        // trigger, nothing ever asked again: the buffer's trigger characters
+        // stayed empty forever and `.` never opened the completion window.
+        let registry = languageServices?.registry
+        registry?.$sessions
+            .sink { [weak self] _ in self?.resolveTriggerCharactersForOpenSlots() }
             .store(in: &cancellables)
+        registry?.$sessionStates
+            .sink { [weak self] _ in self?.resolveTriggerCharactersForOpenSlots() }
+            .store(in: &cancellables)
+    }
+
+    /// Re-asks every open slot for its completion trigger characters.
+    ///
+    /// One method rather than two identical sink bodies: both publishers mean
+    /// the same thing to this class — *what a slot last resolved may now be
+    /// wrong* — and the resolution is idempotent and republishes nothing when
+    /// the answer is unchanged.
+    private func resolveTriggerCharactersForOpenSlots() {
+        for uri in slotsByURI.keys {
+            startTriggerCharacterResolution(for: uri)
+        }
     }
 
     // Isolated explicitly (SE-0371): a MainActor class's deinit is

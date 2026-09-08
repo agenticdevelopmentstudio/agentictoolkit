@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import os
 import AgenticToolkitCore
 
@@ -8,7 +9,7 @@ import AgenticToolkitCore
 /// means the same window even after the repository has been moved or renamed —
 /// which is the whole reason the registry has ids in the first place.
 @MainActor
-public final class ProjectWindowManager: ProjectOpening {
+public final class ProjectWindowManager: ProjectOpening, ObservableObject {
 
     public static let shared = ProjectWindowManager()
 
@@ -31,6 +32,24 @@ public final class ProjectWindowManager: ProjectOpening {
     /// a script that lists `panes` twice must get the same order twice.
     private var openOrder: [UUID] = []
 
+    /// Which projects have a window open right now, so anything outside a
+    /// project window can follow projects opening and closing — the language
+    /// server settings panel lists one section per open project, and a
+    /// language server exists only inside one.
+    ///
+    /// Ids rather than workspaces. `openWorkspaces` is still the accessor for
+    /// the values, and it reads them out of the controllers; publishing the
+    /// workspaces instead would put a `@Published` array of them beside the
+    /// controllers that own them, and a subscriber holding the last emission
+    /// would then keep a closed project's workspace — and the language servers
+    /// hanging off it — alive past its window.
+    ///
+    /// Derived from `controllers` at every mutation rather than maintained
+    /// alongside it, so the two cannot drift. `closeProject` is not one of
+    /// those sites: it only asks the window to close, and the removal happens
+    /// in the `willCloseNotification` observer below, which is also the path a
+    /// user clicking the red button takes.
+    @Published public private(set) var openWorkspaceIDs: [UUID] = []
     private var closeObservers: [UUID: NSObjectProtocol] = [:]
 
     /// The projects registered by `adoptForScripting(_:)` rather than opened
@@ -102,6 +121,7 @@ public final class ProjectWindowManager: ProjectOpening {
         guard controllers[id] == nil else { return }
         controllers[id] = controller
         openOrder.append(id)
+        openWorkspaceIDs = Array(controllers.keys)
         adoptedForScripting.insert(id)
         observeClose(of: controller, repoID: id, recordsOpenState: false)
     }
@@ -122,6 +142,7 @@ public final class ProjectWindowManager: ProjectOpening {
         guard controllers[id] === controller, adoptedForScripting.contains(id) else { return }
         controllers.removeValue(forKey: id)
         openOrder.removeAll { $0 == id }
+        openWorkspaceIDs = Array(controllers.keys)
         adoptedForScripting.remove(id)
         if let observer = closeObservers.removeValue(forKey: id) {
             NotificationCenter.default.removeObserver(observer)
@@ -159,6 +180,7 @@ public final class ProjectWindowManager: ProjectOpening {
         let controller = ComposableTabsWindowController(project: workspace)
         controllers[repo.id] = controller
         openOrder.append(repo.id)
+        openWorkspaceIDs = Array(controllers.keys)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         observeClose(of: controller, repoID: repo.id, recordsOpenState: true)
@@ -305,6 +327,7 @@ public final class ProjectWindowManager: ProjectOpening {
                 self.controllers.removeValue(forKey: repoID)
                 self.openOrder.removeAll { $0 == repoID }
                 self.adoptedForScripting.remove(repoID)
+                self.openWorkspaceIDs = Array(self.controllers.keys)
                 if let services {
                     Task { await services.shutdown() }
                 }
