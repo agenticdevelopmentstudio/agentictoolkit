@@ -424,6 +424,45 @@ struct LSPCompletionDelegateTests {
         #expect(resolved == ["@", "#"])
     }
 
+    // MARK: - Task 3.7: a dead server keeps its trigger characters
+
+    /// What Task 3.7 fixes: the cache hit at the top of
+    /// `resolveTriggerCharacters()` used to ask only "is this still the same
+    /// session object?" A session that dies without being replaced is still
+    /// that same object — `LanguageServerRegistry.reconcile`'s retire loop
+    /// only reacts to a changed descriptor, never to a session's own outcome —
+    /// so the stale, once-correct set kept coming back forever.
+    @Test("a failed session's cached trigger characters are dropped, not merely bypassed once")
+    func failedSessionDropsCachedTriggerCharacters() async throws {
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: ["@", "#"])
+            )
+        )
+        let session = try await fixture.startedSession()
+        let document = makeEditorDocument(text: Self.sampleText)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+
+        let resolved = await delegate.resolveTriggerCharacters()
+        #expect(resolved == ["@", "#"])
+
+        await session.transition(to: .failed(LanguageServerFailure(
+            error: LanguageServerSessionError.serverExited(status: 1),
+            standardErrorText: "error: crashed\n"
+        )))
+        await waitForRegistryToRecordFailure(of: session, in: fixture)
+
+        // The same session object still serves this document — nothing
+        // retires it — so a cache keyed only on identity would still hit here
+        // and hand back `["@", "#"]`.
+        let resolvedAfterFailure = await delegate.resolveTriggerCharacters()
+        #expect(resolvedAfterFailure.isEmpty)
+        // Not merely bypassed for this one call: `completionTriggerCharacters()`
+        // reads the same stored cache, so a stale set surviving anywhere would
+        // show up here too.
+        #expect(delegate.completionTriggerCharacters().isEmpty)
+    }
+
     // MARK: - Fix round 1, finding 2: overlapping requests
 
     @Test("a superseded request cannot wipe the cache a newer one published")
@@ -647,6 +686,24 @@ struct LSPCompletionDelegateTests {
             try await Task.sleep(for: .milliseconds(4))
         }
         Issue.record("the first trigger resolution never reached the server")
+    }
+
+    /// Waits until the registry's per-session reader has recorded a session's
+    /// transition to `.failed`.
+    ///
+    /// `LanguageServerRegistry.observeState(of:id:)` consumes
+    /// `session.stateChanges` off the actor that yields it, so a read of
+    /// `registry.sessionStates` immediately after `transition(to:)` can still
+    /// see the state from before the transition.
+    private func waitForRegistryToRecordFailure(
+        of session: FakeEditorLanguageServerSession,
+        in fixture: LSPEditorFixture
+    ) async {
+        for _ in 0..<500 {
+            if case .failed = fixture.registry.sessionStates[session.id] { return }
+            try? await Task.sleep(for: .milliseconds(4))
+        }
+        Issue.record("the registry never recorded the session's failure")
     }
 
 }

@@ -43,7 +43,9 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// settings retires the old session and creates a new one for the same
     /// language, and the retired server's trigger characters must not outlive
     /// it. A cached answer is only reused while the session it was read from is
-    /// still the one serving this document.
+    /// still the one serving this document **and** that session is still
+    /// running — the same object can go on serving this document after it has
+    /// died, since nothing removes a failed session from `registry.sessions`.
     ///
     /// A `weak` reference rather than an `ObjectIdentifier`, because an
     /// identifier is an address: once the session it named is deallocated the
@@ -140,11 +142,14 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// one with no trigger characters.
     ///
     /// **This method never retries on its own.** It is safe to call repeatedly
-    /// — an answer already read from the session still serving this document is
-    /// returned without touching the server — and `FileEditorState` calls it
-    /// again whenever `registry.$sessions` changes, which is what turns the
-    /// "no session yet" empty answer into the real one once a server appears.
-    /// A caller without that subscription gets one answer and keeps it.
+    /// — an answer already read from the session still serving this document,
+    /// while that session is still running, is returned without touching the
+    /// server — and `FileEditorState` calls it again whenever
+    /// `registry.$sessions` **or** `registry.$sessionStates` changes, which is
+    /// what turns the "no session yet" empty answer into the real one once a
+    /// server appears, and what turns a stale answer back to empty once a
+    /// server that served it dies. A caller without that subscription gets one
+    /// answer and keeps it.
     ///
     /// **Overlapping calls are ordered by this method, not by its caller.** The
     /// `$sessions` subscription makes them reachable — a server disabled and
@@ -168,7 +173,22 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
             // "none" instead of to the set it was about to publish.
             return storeTriggerCharacters(nil, from: nil, readAt: stamp)
         }
-        if let resolvedTriggerCharacters, resolvedTriggerCharacterSource === session {
+        // `case .running = ...` rather than `== .running`:
+        // `LanguageServerSessionState` is deliberately not `Equatable` — its
+        // `.failed` case carries `any Error` by way of `LanguageServerFailure`
+        // — so a pattern match is what is available, and it reads the same as
+        // the equality this cache hit needs. Stated positively, as "the one
+        // state that hits", rather than by listing every terminal state that
+        // should miss: a state added to the enum tomorrow then defaults to
+        // re-asking the server, not to trusting a cache that has never seen it.
+        //
+        // The identity test still runs first, and still gates the dictionary
+        // read that follows: `session.id` is only a meaningful key into
+        // `registry.sessionStates` when `session` is genuinely the source the
+        // cached answer came from.
+        if let resolvedTriggerCharacters,
+           resolvedTriggerCharacterSource === session,
+           case .running = registry.sessionStates[session.id] {
             return resolvedTriggerCharacters
         }
         try? await session.start()

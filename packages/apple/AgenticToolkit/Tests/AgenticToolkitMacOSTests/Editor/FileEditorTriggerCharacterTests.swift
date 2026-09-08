@@ -299,4 +299,65 @@ struct FileEditorTriggerCharacterTests {
         #expect(state.editorConfiguration(for: uri, palette: palette)
             .peripherals.codeSuggestionTriggerCharacters.isEmpty)
     }
+
+    // MARK: - Task 3.7: a dead server keeps its trigger characters
+
+    /// The end-to-end version of the identity-only cache-hit defect: a
+    /// *running* session — one that has already published a non-empty trigger
+    /// set the editor is using — fails without being replaced. The same
+    /// session object goes on serving this document, so a cache keyed only on
+    /// identity keeps handing back the pre-crash set forever, and `.` keeps
+    /// opening an empty completion window against a server that cannot answer
+    /// it. This asserts the whole user-visible claim: the published
+    /// configuration goes empty on its own, through the `$sessionStates`
+    /// subscription `FileEditorState` already holds — no re-open, no further
+    /// call from the test.
+    @Test("a slot's published trigger set goes empty when its running session fails, with no further action")
+    func triggerCharactersGoEmptyWhenARunningSessionFails() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("A.swift")
+        try "let x = 1\n".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let fixture = LSPEditorFixture(
+            workspaceURL: directory,
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: ["@", "#"])
+            )
+        )
+        let session = try await fixture.startedSession()
+
+        let store = TextDocumentStore()
+        let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: { _ in })
+        let services = ProjectLanguageServices(documentStore: store, registry: fixture.registry)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: services,
+            openFile: nil
+        )
+
+        state.load(from: fileURL)
+        await state.awaitPendingLoad()
+        await state.awaitPendingTriggerCharacterResolution()
+
+        let uri = fileURL.documentUri
+        // Confirms the set is non-empty and cached before the failure, so the
+        // transition below is the thing under test rather than an accident of
+        // the set already being empty.
+        #expect(state.editorConfiguration(for: uri, palette: palette)
+            .peripherals.codeSuggestionTriggerCharacters == ["@", "#"])
+
+        await session.transition(to: .failed(LanguageServerFailure(
+            error: LanguageServerSessionError.serverExited(status: 1),
+            standardErrorText: "error: crashed\n"
+        )))
+
+        // No further action from the test past this point.
+        let becameEmpty = await poll {
+            state.editorConfiguration(for: uri, palette: palette)
+                .peripherals.codeSuggestionTriggerCharacters.isEmpty
+        }
+        #expect(becameEmpty)
+    }
 }
