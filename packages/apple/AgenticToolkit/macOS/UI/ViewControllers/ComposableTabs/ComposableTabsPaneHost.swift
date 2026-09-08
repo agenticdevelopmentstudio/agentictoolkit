@@ -264,9 +264,9 @@ extension ComposableTabsViewController: PaneHost {
         // anything in the tree, so the shape cannot change underneath it.
         let tree = snapshotNode()
         for leaf in leaves {
-            guard let edge = leaf.minimizedEdge,
-                  let owner = leaf.parent as? ComposableTabsViewController,
-                  let item = owner.splitViewItem(for: leaf) else { continue }
+            guard let edge = leaf.minimizedEdge else { continue }
+            let owner = owningSplit(of: leaf)
+            let item = owner.flatMap { $0.splitViewItem(for: leaf) }
             // The stored edge was resolved against the tree the pane used to
             // live in, and a rebuild can change the axis under it — a close
             // that promotes a pane out of a vertical split into a horizontal
@@ -274,15 +274,23 @@ extension ComposableTabsViewController: PaneHost {
             // at the vertical thickness on the horizontal axis: 30pt *wide*,
             // narrower than the title-bar controls that would restore it, and
             // AppKit reports nothing. So the edge is re-asked, never trusted.
+            //
+            // Re-asked whether or not there is an item to pin, because the
+            // answer is a fact about the tree: a tab nobody has displayed can
+            // still have been rearranged under a minimized pane, and leaving
+            // the stale edge on it means its first display draws a rail on a
+            // side the pane is no longer docked to.
             guard let resolved = PaneMinimizeGeometry.resolvedEdge(
                 forNode: leaf.nodeID, in: tree, requested: edge) else {
                 // Nowhere left to minimize toward. Giving the pane back is the
                 // only outcome that leaves the user able to act on it.
-                owner.restoreSizing(of: item)
+                if let owner, let item { owner.restoreSizing(of: item) }
                 leaf.setMinimized(to: nil)
                 continue
             }
-            owner.pin(item, to: leaf.minimizedThickness(for: resolved))
+            if let owner, let item {
+                owner.pin(item, to: leaf.minimizedThickness(for: resolved))
+            }
             // A promotion can also keep the axis and change the side. Telling
             // the pane keeps its chrome on the edge it is actually docked to.
             if resolved != edge { leaf.setMinimized(to: resolved) }

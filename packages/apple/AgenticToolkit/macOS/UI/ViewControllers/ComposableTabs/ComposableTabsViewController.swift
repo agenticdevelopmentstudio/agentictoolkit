@@ -90,8 +90,23 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// a view happens to be on screen, so it is stamped here — where the list
     /// changes — rather than on the load path.
     var layoutChildren: [any ComposableTabsChild] {
-        didSet { stampHostOnDirectPanes() }
+        didSet { stampOwnershipOnChildren() }
     }
+
+    /// The split holding this one, on screen or not.
+    ///
+    /// Deliberately not `parent`: AppKit sets that in `addSplitViewItem` and
+    /// nowhere else, so it is nil at every level of a tab nobody has switched
+    /// to. `host` already covers that case for a *pane*; this is the same fact
+    /// for a *split*, and without it `rootSplit()` stops at whichever split it
+    /// was asked and answers questions about a subtree as if they were about
+    /// the tab. Persisting is the one that bites: `persistTreeToDocument()`
+    /// opens with `guard isRoot`, so the write is not wrong — it simply never
+    /// happens.
+    ///
+    /// Weak, and stamped from `layoutChildren` beside `host`: which split holds
+    /// this one is a fact about that list, not about whether a view has loaded.
+    private(set) weak var layoutParent: ComposableTabsViewController?
     private weak var project: ProjectWorkspace?
     let isRoot: Bool
 
@@ -158,16 +173,17 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         // observer during initialization, and the assignment above happens
         // before `super.init` because it has to. This is the same stamping,
         // done at the one moment the observer cannot fire.
-        stampHostOnDirectPanes()
+        stampOwnershipOnChildren()
     }
 
-    /// Tells every pane this split holds directly that this is the split
-    /// holding it. Nested splits stamp their own children the same way, from
-    /// their own `init` and their own `didSet`, so one pass per level covers
-    /// the tree.
-    private func stampHostOnDirectPanes() {
+    /// Tells every child this split holds directly that this is the split
+    /// holding it — `host` for a pane, `layoutParent` for a nested split.
+    /// Nested splits stamp their own children the same way, from their own
+    /// `init` and their own `didSet`, so one pass per level covers the tree.
+    private func stampOwnershipOnChildren() {
         for child in layoutChildren {
             (child as? ComposableTabsPaneViewController)?.host = self
+            (child as? ComposableTabsViewController)?.layoutParent = self
         }
     }
 
@@ -556,6 +572,10 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         if isViewLoaded, let item = splitViewItems.first(where: { $0.viewController === child }) {
             removeSplitViewItem(item)
         }
+        // Nothing holds it now, and `host` is how everything else asks. Cleared
+        // before the content is released, so the control refresh the setter
+        // triggers still runs against a live pane.
+        child.host = nil
         // The pane is gone from the tree for good, so its content releases what
         // it holds now — otherwise a closed pane's shells and file watchers run
         // on until the last reference happens to drop.
@@ -566,7 +586,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         for remaining in layoutChildren { remaining.thicknessFraction = nil }
         if isViewLoaded { hasAppliedPreferredThicknesses = false }
 
-        if layoutChildren.count == 1, !isRoot, let parentSplit = parent as? ComposableTabsViewController {
+        if layoutChildren.count == 1, !isRoot, let parentSplit = enclosingSplit {
             let survivor = layoutChildren[0]
             // The survivor is promoted into this split's slot, so it is that
             // slot's size it now has to fill.
@@ -767,9 +787,18 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
 
     // MARK: - Tree walking
 
+    /// The split holding this one: AppKit's answer when there is one, ours
+    /// otherwise. See `layoutParent` for why there are two.
+    var enclosingSplit: ComposableTabsViewController? {
+        (parent as? ComposableTabsViewController) ?? layoutParent
+    }
+
     func rootSplit() -> ComposableTabsViewController? {
         var current: ComposableTabsViewController? = self
-        while let parent = current?.parent as? ComposableTabsViewController {
+        // `isRoot` is set at construction and never changes, so the walk stops
+        // at the node that actually is the tab's root rather than at the first
+        // node with no visible parent — which on an unloaded tab is every node.
+        while let node = current, !node.isRoot, let parent = node.enclosingSplit {
             current = parent
         }
         return current

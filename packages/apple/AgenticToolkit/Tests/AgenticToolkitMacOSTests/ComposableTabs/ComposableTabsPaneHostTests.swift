@@ -747,6 +747,32 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         ))
     }
 
+    /// `left` beside a vertical pair — the shallowest tree where the split
+    /// holding a pane is not the root of the tab, which is the whole subject
+    /// of this section.
+    private func unloadedNested(innerID: UUID) throws -> ComposableTabsViewController {
+        try unloadedTree(.split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha),
+            second: .split(
+                id: innerID,
+                orientation: .vertical,
+                first: .leaf(id: topID, contentType: alpha),
+                second: .leaf(id: bottomID, contentType: beta)
+            )
+        ))
+    }
+
+    /// Every leaf id in a snapshot, so a persisted tree can be compared by what
+    /// is in it rather than by its shape.
+    private func leafIDs(of node: LayoutNode) -> [UUID] {
+        switch node.kind {
+        case .leaf: return [node.id]
+        case .split(_, let first, let second):
+            return leafIDs(of: first) + leafIDs(of: second)
+        }
+    }
+
     /// `host` is a fact about which split holds the pane, so it has to be true
     /// of a tree nobody has looked at. It used to be stamped in
     /// `makeItem(for:)`, which only ever runs on the load path.
@@ -887,5 +913,102 @@ final class ComposableTabsPaneHostTests: XCTestCase {
 
         XCTAssertEqual(fraction(of: leftID, in: root.snapshotNode()) ?? 0, 0.25, accuracy: 0.0001)
         XCTAssertEqual(fraction(of: rightID, in: root.snapshotNode()) ?? 0, 0.75, accuracy: 0.0001)
+    }
+
+    // MARK: - A nested tab that has never been displayed
+
+    /// `rootSplit()` walked `parent`, which AppKit sets in `addSplitViewItem`
+    /// and nowhere else — so on a tab nobody has switched to it stopped at
+    /// whichever split it was asked and called that the root of the tab.
+    func testANestedSplitOnANeverDisplayedTabKnowsWhichSplitHoldsIt() throws {
+        let innerID = UUID()
+        let root = try unloadedNested(innerID: innerID)
+        let inner = try XCTUnwrap(
+            root.layoutChildren.compactMap { $0 as? ComposableTabsViewController }.first)
+
+        XCTAssertTrue(inner.layoutParent === root)
+        XCTAssertNil(root.layoutParent, "the root is held by the tab, not by a split")
+        XCTAssertTrue(inner.rootSplit() === root,
+                      "and asking any split for the root has to reach the tab's root")
+    }
+
+    /// `persistTreeToDocument()` opens with `guard isRoot`, so a `rootSplit()`
+    /// that stops at the inner split does not write a wrong tree — it writes
+    /// nothing at all, and the pane a script just closed is back next launch.
+    func testClosingANestedPaneOnANeverDisplayedTabPersistsTheTab() throws {
+        let root = try unloadedNested(innerID: UUID())
+        var persisted: [LayoutNode] = []
+        root.onLayoutDidChange = { persisted.append($0) }
+        let top = try leaf(topID, in: root)
+
+        top.host?.paneDidRequestClose(top)
+
+        let last = try XCTUnwrap(persisted.last, "a close the document never hears about")
+        XCTAssertEqual(Set(leafIDs(of: last)), [leftID, bottomID])
+    }
+
+    /// A non-root split left holding one child collapses into its parent. That
+    /// promotion was gated on `parent`, so on a tab nobody had displayed the
+    /// one-child split just stayed in the tree.
+    func testAnInnerSplitOnANeverDisplayedTabCollapsesWhenItIsDownToOnePane() throws {
+        let root = try unloadedNested(innerID: UUID())
+        let top = try leaf(topID, in: root)
+
+        top.host?.paneDidRequestClose(top)
+
+        XCTAssertEqual(root.allLeaves().map(\.nodeID), [leftID, bottomID])
+        XCTAssertTrue(
+            root.layoutChildren.allSatisfy { $0 is ComposableTabsPaneViewController },
+            "the survivor is promoted into the slot the inner split held")
+        XCTAssertTrue(try leaf(bottomID, in: root).host === root,
+                      "and the promotion re-homes it, so its next close reaches the root")
+    }
+
+    /// A zoom is a fact about the tab. Stored on the inner split it is
+    /// invisible to the root that applies it, and to the next pane that zooms.
+    func testZoomingANestedPaneOnANeverDisplayedTabRecordsItOnTheTabsRoot() throws {
+        let innerID = UUID()
+        let root = try unloadedNested(innerID: innerID)
+        let inner = try XCTUnwrap(
+            root.layoutChildren.compactMap { $0 as? ComposableTabsViewController }.first)
+        let top = try leaf(topID, in: root)
+
+        top.host?.paneDidRequestZoom(top)
+
+        XCTAssertTrue(root.zoomedLeaf === top)
+        XCTAssertNil(inner.zoomedLeaf)
+        XCTAssertTrue(top.isZoomed)
+    }
+
+    /// The promotion changes the axis under a minimized pane: `.bottom` off a
+    /// vertical split, into a horizontal one that has no bottom.
+    /// `reapplyPaneState` re-asks the tree and hands the pane back — and it has
+    /// to do that on a tab with no split items, or the tab's first display
+    /// draws a rail on a side the pane is not docked to.
+    func testAPromotionOnANeverDisplayedTabClearsAnEdgeTheNewSplitDoesNotHave() throws {
+        let root = try unloadedNested(innerID: UUID())
+        let top = try leaf(topID, in: root)
+        let bottom = try leaf(bottomID, in: root)
+        bottom.host?.paneDidRequestMinimize(bottom, to: .bottom)
+        XCTAssertEqual(bottom.minimizedEdge, .bottom, "nothing to correct otherwise")
+
+        top.host?.paneDidRequestClose(top)
+
+        XCTAssertNil(bottom.minimizedEdge,
+                     "a horizontal split has no bottom to dock to")
+        XCTAssertNil(bottom.persistedMinimizeEdge,
+                     "and the row goes with it, or the next launch re-minimizes")
+    }
+
+    /// `layoutChildren`'s `didSet` re-stamps the panes that remain and says
+    /// nothing about the one that left, so a removed pane went on naming the
+    /// split that no longer holds it as the split that can remove it.
+    func testAClosedPaneStopsNamingTheSplitThatUsedToHoldIt() throws {
+        let root = try unloadedSideBySide()
+        let left = try leaf(leftID, in: root)
+
+        left.host?.paneDidRequestClose(left)
+
+        XCTAssertNil(left.host, "nothing holds it, so nothing can be asked to remove it again")
     }
 }
