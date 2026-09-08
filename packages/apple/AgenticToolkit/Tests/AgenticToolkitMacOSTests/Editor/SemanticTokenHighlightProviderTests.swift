@@ -544,6 +544,81 @@ struct SemanticTokenHighlightProviderTests {
         }
     }
 
+    /// ★ The stamp guard on the *failure* path — the one terminus of
+    /// `fetch(stamp:)` that used to skip it.
+    ///
+    /// Every other ending writes through `store(_:stamp:)` and its
+    /// `guard stamp >= highlightsStamp`. `abandonFetch(stamp:)` writes nothing,
+    /// which is why it looked exempt — but it still reaches shared state: it
+    /// fails every parked query. After an edit those queries belong to the fetch
+    /// the edit started, not to the one still sitting inside a server call, so an
+    /// unguarded abandon lets a stale fetch cancel an answer a newer fetch is
+    /// about to give correctly.
+    ///
+    /// Self-healing but not free. `operationCancelled` is the one result
+    /// `HighlightProviderState` re-invalidates and re-queries on, so the range
+    /// does come back — after an invalidate-and-re-query round trip, and after a
+    /// frame in which the text is painted by tree-sitter alone.
+    @Test("a superseded fetch that abandons does not cancel a newer fetch's parked query")
+    func anAbandonedFetchDoesNotCancelANewerFetchsParkedQuery() async throws {
+        let harness = try await makeHarness(
+            text: "let value = 1\n",
+            capabilities: makeSemanticTokenCapabilities(legend: Self.legend)
+        )
+        // The fake picks a response when the call *arrives*, before it parks, so
+        // these belong to the fetches in start order however they resume: the
+        // ragged one to the fetch already in flight, the readable one to the
+        // fetch the edit is about to start.
+        await harness.session.enqueueSemanticTokensResponses([
+            SemanticTokens(data: [0, 4, 5, 3, 0, 0, 4]),
+            Self.makeTokens([WireToken(deltaLine: 0, deltaStartChar: 4, length: 5, typeIndex: 3)])
+        ])
+        await harness.session.holdNextSemanticTokens(2)
+
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        try await waitUntil("the first request to reach the server") {
+            await harness.session.heldSemanticTokensCount == 1
+        }
+
+        // Moves the bar past the in-flight fetch and starts its own.
+        harness.provider.applyEdit(
+            textView: harness.textView,
+            range: NSRange(location: 0, length: 0),
+            delta: 0
+        ) { _ in }
+        try await waitUntil("the second request to reach the server") {
+            await harness.session.heldSemanticTokensCount == 2
+        }
+
+        // Parked with both fetches inside the server call, so it belongs to the
+        // second one — `applyEdit` failed everything that was parked before it.
+        var results: [Result<[HighlightRange], Error>] = []
+        harness.provider.queryHighlightsFor(
+            textView: harness.textView,
+            range: harness.textView.documentRange
+        ) { results.append($0) }
+        #expect(results.isEmpty)
+
+        // Released together, in arrival order, so the superseded fetch resumes
+        // first and gets its chance to fail the query before the newer one
+        // answers it. That ordering is what makes this a test rather than a
+        // coin toss: remove the guard and the first resume wins.
+        await harness.session.releaseHeldSemanticTokens()
+        await harness.provider.awaitPendingFetch()
+
+        try #require(results.count == 1, "expected exactly one completion call, got \(results.count)")
+        guard case .success(let highlights) = results[0] else {
+            Issue.record(
+                """
+                the parked query was cancelled by the superseded fetch; it belongs to the fetch the \
+                edit started, which was holding a readable answer for it
+                """
+            )
+            return
+        }
+        #expect(highlights.map(\.range) == [NSRange(location: 4, length: 5)])
+    }
+
     @Test("a server error settles as no highlights rather than leaving the query parked")
     func aServerErrorSettlesAsNoHighlights() async throws {
         let harness = try await makeHarness(

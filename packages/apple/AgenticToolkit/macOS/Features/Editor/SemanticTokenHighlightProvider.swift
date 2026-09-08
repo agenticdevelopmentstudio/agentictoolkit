@@ -340,7 +340,7 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
                 which is not a multiple of 5. Discarding the response.
                 """
             )
-            abandonFetch()
+            abandonFetch(stamp: stamp)
             return
         }
 
@@ -361,8 +361,21 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     ///
     /// `highlights` and `highlightsStamp` are left untouched: this fetch learned
     /// nothing, so it has no business moving a bar that would refuse a fetch
-    /// that did.
-    private func abandonFetch() {
+    /// that did. The guard reads the bar without moving it — the bar advances
+    /// only on an actual write, which is what makes it mean "the newest answer
+    /// anyone has recorded" rather than "the newest fetch anyone has run".
+    ///
+    /// Guarded on the stamp for the same reason `store(_:stamp:)` is, and it is
+    /// the same rule stated for a failure instead of an answer: **a fetch may
+    /// only act on state no newer fetch has claimed.** Without it, a slow fetch
+    /// resuming with a ragged response fails whatever is parked *now* — which,
+    /// after an edit, is a query belonging to a newer fetch that was about to
+    /// answer it correctly. That self-heals, because `operationCancelled` is a
+    /// retry rather than an answer, but it costs an invalidate-and-re-query
+    /// round trip and it is the one place an answer derived from stale
+    /// information would reach state a newer fetch owns.
+    private func abandonFetch(stamp: Int) {
+        guard stamp >= highlightsStamp else { return }
         failPendingQueries()
     }
 
@@ -493,19 +506,30 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         //
         // **Unreachable by construction today, and kept anyway.** The proof is
         // three facts about the caller and the dependency, all of which have to
-        // hold together: `decodeTokens` is given the *whole* document range; it
-        // `break`s at the first token whose start is at or after that range's
-        // end; and a token's line is non-decreasing through that loop, because
-        // `deltaLine` is a `UInt32`. So the first token naming a line past the
-        // last one ends the loop, and no token after it can name an earlier
-        // line. Nothing with an out-of-range line reaches this function.
+        // hold together: `decodeTokens` is handed a range derived from *this
+        // document's current text* — `whole`, built from `document.text` in
+        // `decode`; it `break`s at the first token whose start is at or after
+        // that range's end; and a token's line is non-decreasing through that
+        // loop, because `deltaLine` is a `UInt32`. So the first token naming a
+        // line past the last one ends the loop, and no token after it can name
+        // an earlier line. Nothing with an out-of-range line reaches this
+        // function.
         //
         // Every one of those three is a fact about a package we do not own,
-        // reached through a range this file chooses. This guard is what makes
-        // `TextDocument`'s clamping conversion harmless if any of them changes —
-        // a range request instead of a full one would break the first, and only
-        // this guard would stand between a clamp and a span of unrelated text
-        // painted at the end of the file. It costs one round trip per token.
+        // reached through a range this file chooses, so this guard is what makes
+        // `TextDocument`'s clamping conversion harmless if any of them changes.
+        //
+        // **What would break fact 1 is not what it looks like.** Switching to a
+        // `semanticTokens/range` request would *not*: `decodeTokens` bounds
+        // tokens against whatever range it is given, so a sub-range of this
+        // document bounds them at least as tightly as `whole` does. What breaks
+        // it is handing that function a range which is not this document's
+        // current text — a sentinel or unbounded range standing in for "no
+        // limit", or a `whole` computed from a snapshot while this function
+        // converts against the live document. Either way a token can name a line
+        // the document does not have, and only this guard stands between
+        // `TextDocument`'s clamp and a span of unrelated text painted at the end
+        // of the file. It costs one round trip per token.
         // `tokensPastTheEndAreTruncatedByTheDecoder` pins the dependency half.
         let lineStart = document.utf16Offset(for: Position(line: range.start.line, character: 0))
         guard document.position(forUTF16Offset: lineStart).line == range.start.line else { return nil }

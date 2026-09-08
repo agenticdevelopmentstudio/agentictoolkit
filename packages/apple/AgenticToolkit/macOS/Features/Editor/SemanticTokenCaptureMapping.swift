@@ -59,7 +59,14 @@ enum SemanticTokenCaptureMapping {
     /// the compiler tell us when `SemanticTokenTypes` grows a case nobody has
     /// ruled on.
     ///
-    /// Adding a row later is a one-line change that breaks no test.
+    /// **Adding a row is a one-line change here and a two-line change in the
+    /// tests, by design.** It is no longer free: promoting one of the nine
+    /// declined types fails `declinedTypesAreDeclined`, and mapping one that is
+    /// already mapped contradicts the argument list of
+    /// `rowsResolveToTheThemeColourTheTableClaims`. Both lists enumerate this
+    /// switch, which is what makes the compiler and the suite disagree with a
+    /// half-made change instead of accepting it silently — so update them with
+    /// the row rather than around it.
     ///
     /// **What the thirteen rows are actually distinguishable as.** `EditorTheme`
     /// has sixteen flat colour fields and `CaptureName` collapses into them, so
@@ -69,9 +76,9 @@ enum SemanticTokenCaptureMapping {
     /// `property`, `enumMember`, `method`, `function`, `macro`) all paint
     /// `variables`. Two colours, thirteen rows. That is a fact about the theme,
     /// not a defect here — but it decides what a new row can possibly buy, so
-    /// `semanticTokenCaptureRowsResolveToTheExpectedThemeColour` pins every row
-    /// to the field it lands in, and will fail if the theme grows a field or
-    /// re-routes a capture.
+    /// `rowsResolveToTheThemeColourTheTableClaims` pins every row to the field
+    /// it lands in, and will fail if the theme grows a field or re-routes a
+    /// capture.
     private static func capture(for type: SemanticTokenTypes) -> CaptureName? {
         switch type {
         // Type-ish. All seven collapse onto `.type` because `CaptureName` has no
