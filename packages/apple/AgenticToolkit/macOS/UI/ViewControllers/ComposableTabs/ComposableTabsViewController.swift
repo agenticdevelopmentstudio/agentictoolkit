@@ -731,9 +731,20 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
 
     /// Empties this subtree without telling any pane it is going away — every
     /// pane here is about to be re-hosted, not closed.
+    ///
+    /// "Not closed" is not "still held". `rebuild(from:)` re-stamps whatever
+    /// lands in the new tree, and only that; a child the new shape leaves out is
+    /// held by nothing, so its back-pointer goes out with it. Same rule as
+    /// `remove(_:)` and `replaceChild(_:with:)` — `layoutChildren`'s `didSet`
+    /// speaks for what is in the list and never for what left.
     private func detachSubtree() {
         for child in layoutChildren {
-            (child as? ComposableTabsViewController)?.detachSubtree()
+            if let split = child as? ComposableTabsViewController {
+                split.detachSubtree()
+                split.layoutParent = nil
+            } else if let leaf = child as? ComposableTabsPaneViewController {
+                leaf.host = nil
+            }
         }
         if isViewLoaded {
             for item in splitViewItems {

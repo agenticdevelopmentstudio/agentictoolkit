@@ -1096,4 +1096,44 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         XCTAssertTrue(inner.rootSplit() === inner,
                       "so it answers for itself rather than for a tab it has left")
     }
+
+    /// The negative of `testARebuiltNeverDisplayedTabRehostsItsPanes`: a rebuild
+    /// re-homes the panes it keeps, and `layoutChildren`'s `didSet` reaches only
+    /// those. A pane the new shape leaves out is held by nothing, and `host` is
+    /// what `ScriptablePane` and `ComposableTabsPaneHost` navigate by — so a
+    /// dropped pane still naming the split that dropped it is a pointer that
+    /// answers wrongly rather than one that refuses.
+    func testARebuildLeavesADroppedPaneNamingNoHost() throws {
+        let root = try unloadedSideBySide()
+        let dropped = try leaf(rightID, in: root)
+        XCTAssertTrue(dropped.host === root, "the fixture starts with the pane hosted")
+
+        root.rebuild(from: .leaf(id: leftID, contentType: alpha))
+
+        XCTAssertEqual(root.allLeaves().map(\.nodeID), [leftID],
+                       "the rebuild kept one pane")
+        XCTAssertNil(dropped.host, "and the one it dropped is held by nothing")
+        XCTAssertNotNil(try leaf(leftID, in: root).host,
+                        "while the one it kept is still hosted — the clear is not a scrub")
+    }
+
+    /// The same for a split. `rootSplit()` walks `layoutParent`, so a discarded
+    /// inner split still naming its old parent walks a reader back into a tree
+    /// that is no longer the tab's.
+    func testARebuildLeavesADiscardedInnerSplitNamingNoParent() throws {
+        let root = try unloadedNested(innerID: UUID())
+        let inner = try XCTUnwrap(
+            root.layoutChildren.compactMap { $0 as? ComposableTabsViewController }.first)
+        XCTAssertTrue(inner.layoutParent === root, "the fixture starts with it parented")
+
+        root.rebuild(from: .split(
+            orientation: .horizontal,
+            first: .leaf(id: leftID, contentType: alpha),
+            second: .leaf(id: rightID, contentType: beta)
+        ))
+
+        XCTAssertNil(inner.layoutParent, "nothing holds the discarded split now")
+        XCTAssertTrue(inner.rootSplit() === inner,
+                      "so it answers for itself rather than for a tab it has left")
+    }
 }
