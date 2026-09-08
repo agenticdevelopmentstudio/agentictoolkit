@@ -544,7 +544,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// hold a single child — that is a tab reduced to one full-size pane.
     ///
     /// `child` must be a **direct** child of this split. Every caller reaches
-    /// this as `enclosingSplit.remove(self)`, so any other pane — a descendant
+    /// this as `enclosingSplitOnScreen.remove(self)`, so any other pane — a descendant
     /// of this split included — is ignored rather than searched for, and
     /// `testRemovingAPaneNotInThisSplitIsANoOp` pins that. To close a pane you
     /// do not already own, go through its host's `paneDidRequestClose(_:)`,
@@ -556,8 +556,10 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     public func remove(_ child: ComposableTabsPaneViewController) {
         guard let index = layoutChildren.firstIndex(where: { $0.viewController === child }) else { return }
 
-        // `rootSplit()` walks up through `parent`, so it has to be resolved
-        // before a collapse detaches this controller from the tree.
+        // `rootSplit()` walks up the tree, so it has to be resolved before a
+        // collapse detaches this controller from it — `layoutParent` is cleared
+        // on the way out (see `replaceChild`), exactly so a detached split
+        // stops answering for a tab it has left.
         let root = rootSplit()
         // Every removal rule — the tab's last pane, a fixed region, a view the
         // spec requires — lives in the spec, so the tree asks it rather than
@@ -612,6 +614,11 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         guard let index = layoutChildren.firstIndex(where: { $0.viewController === old }) else { return }
         replacement.thicknessFraction = old.thicknessFraction
         layoutChildren[index] = replacement
+        // `old` is out of the tree now. `layoutChildren`'s `didSet` stamps what
+        // is in the list and says nothing about what left, so the back-pointer
+        // is cleared here — the same honesty `remove(_:)` gives a closed pane's
+        // `host`, and it matters more, because `rootSplit()` trusts it.
+        old.layoutParent = nil
         guard isViewLoaded,
               let item = splitViewItems.first(where: { $0.viewController === old }) else { return }
         removeSplitViewItem(item)

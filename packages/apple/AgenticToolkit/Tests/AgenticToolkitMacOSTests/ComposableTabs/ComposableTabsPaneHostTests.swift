@@ -747,11 +747,11 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         ))
     }
 
-    /// `left` beside a vertical pair — the shallowest tree where the split
-    /// holding a pane is not the root of the tab, which is the whole subject
-    /// of this section.
-    private func unloadedNested(innerID: UUID) throws -> ComposableTabsViewController {
-        try unloadedTree(.split(
+    /// The nested shape the never-displayed fixtures use: `left` beside a
+    /// vertical pair — the shallowest tree where the split holding a pane is
+    /// not the root of the tab, which is the whole subject of this section.
+    private func nestedNode(innerID: UUID) -> LayoutNode {
+        .split(
             orientation: .horizontal,
             first: .leaf(id: leftID, contentType: alpha),
             second: .split(
@@ -760,7 +760,43 @@ final class ComposableTabsPaneHostTests: XCTestCase {
                 first: .leaf(id: topID, contentType: alpha),
                 second: .leaf(id: bottomID, contentType: beta)
             )
+        )
+    }
+
+    private func unloadedNested(innerID: UUID) throws -> ComposableTabsViewController {
+        try unloadedTree(nestedNode(innerID: innerID))
+    }
+
+    /// The same tree under a spec that floors both views at one instance.
+    /// `installLayout()` is unbounded on purpose — what the spec *answers* is
+    /// `ComposableTabLayoutSpecTests`' subject. A floor is needed here for the
+    /// question one level up, which is this suite's: which tree the controller
+    /// hands the spec. The tab holds two alphas and the inner split holds one,
+    /// so a floor of one is the smallest spec the two trees disagree about.
+    private func boundedNested() throws -> ComposableTabsViewController {
+        let registry = ComposableTabsViewRegistry()
+        registry.register(
+            alpha, descriptor: .init(displayName: "Alpha", minimumThickness: 150)
+        ) { _ in
+            NSViewController()
+        }
+        registry.register(
+            beta, descriptor: .init(displayName: "Beta", minimumThickness: 150)
+        ) { _ in
+            NSViewController()
+        }
+        ComposableTabsLayout.install(try ComposableTabsLayout(
+            registry: registry,
+            spec: .split(
+                axis: .horizontal,
+                children: [.pane(alpha), .pane(beta)],
+                allows: [.unbounded(alpha, min: 1), .unbounded(beta, min: 1)]
+            )
         ))
+        let root = ComposableTabsViewController.make(
+            from: nestedNode(innerID: UUID()), project: project, isRoot: true)
+        XCTAssertFalse(root.isViewLoaded, "the fixture stops being the fixture once anything loads")
+        return root
     }
 
     /// Every leaf id in a snapshot, so a persisted tree can be compared by what
@@ -1010,5 +1046,54 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         left.host?.paneDidRequestClose(left)
 
         XCTAssertNil(left.host, "nothing holds it, so nothing can be asked to remove it again")
+    }
+
+    /// `canRemoveLeaf` asks the spec about a tree, and *which* tree it asks
+    /// about is the whole question. The tab holds two alphas and the inner
+    /// split holds one, so a floor of one alpha is met by the tab and violated
+    /// by the subtree: before `rootSplit()` learned to walk `layoutParent`, a
+    /// close the spec permits was silently refused on a tab nobody had
+    /// displayed.
+    func testTheRemovalVetoOnANeverDisplayedTabIsAskedAboutTheTabNotTheSubtree() throws {
+        let root = try boundedNested()
+        let top = try leaf(topID, in: root)
+        let bottom = try leaf(bottomID, in: root)
+        let inner = try XCTUnwrap(top.host as? ComposableTabsViewController)
+
+        XCTAssertTrue(inner.canRemoveLeaf(top),
+                      "the tab still holds another alpha, so the floor is met")
+        // The same floor, genuinely enforced. `bottom` is the tab's only beta
+        // and both trees agree about that, so this is the line that stops the
+        // one above from passing against a floor that never refuses anything.
+        XCTAssertFalse(inner.canRemoveLeaf(bottom),
+                       "the tab's only beta is what the floor is protecting")
+
+        // The refused close first: the permitted one collapses the inner split,
+        // and `bottom` would no longer be a child of `inner` to refuse.
+        bottom.host?.paneDidRequestClose(bottom)
+        XCTAssertEqual(root.allLeaves().map(\.nodeID), [leftID, topID, bottomID],
+                       "a refused close leaves the tree exactly as it was")
+
+        top.host?.paneDidRequestClose(top)
+        XCTAssertEqual(root.allLeaves().map(\.nodeID), [leftID, bottomID],
+                       "and the veto is what `remove(_:)` gates on, so a wrong answer keeps the pane")
+    }
+
+    /// A collapse detaches the inner split from the tab. `layoutChildren`'s
+    /// `didSet` re-stamps what remains and says nothing about what left, so
+    /// without clearing it the detached split goes on naming a parent that no
+    /// longer holds it — and `rootSplit()`, which now trusts that pointer,
+    /// answers for a tab the split is no longer part of.
+    func testACollapsedSplitStopsNamingTheSplitThatUsedToHoldIt() throws {
+        let root = try unloadedNested(innerID: UUID())
+        let inner = try XCTUnwrap(
+            root.layoutChildren.compactMap { $0 as? ComposableTabsViewController }.first)
+        let top = try leaf(topID, in: root)
+
+        top.host?.paneDidRequestClose(top)
+
+        XCTAssertNil(inner.layoutParent, "nothing holds it now")
+        XCTAssertTrue(inner.rootSplit() === inner,
+                      "so it answers for itself rather than for a tab it has left")
     }
 }

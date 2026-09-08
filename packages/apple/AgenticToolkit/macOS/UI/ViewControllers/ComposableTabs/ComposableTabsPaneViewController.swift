@@ -156,7 +156,15 @@ public final class ComposableTabsPaneViewController: PaneViewController {
 
     // MARK: - Arrange mode
 
-    private var enclosingSplit: ComposableTabsViewController? {
+    /// The split holding this pane, as AppKit knows it. Deliberately not
+    /// `host`: everything under this MARK is the arrange overlay, and the
+    /// overlay is installed only on a pane whose view is in a window, so
+    /// `parent` is set by definition and asking the screen is asking the right
+    /// question. Named apart from `ComposableTabsViewController.enclosingSplit`,
+    /// which answers the same question about a tree nobody has displayed —
+    /// three rounds of this task were spent on readers picking the wrong one of
+    /// several spellings of "the split holding this".
+    private var enclosingSplitOnScreen: ComposableTabsViewController? {
         parent as? ComposableTabsViewController
     }
 
@@ -187,11 +195,11 @@ public final class ComposableTabsPaneViewController: PaneViewController {
         overlay.canAdd = { [weak self] in self?.addChoices().isEmpty == false }
         overlay.canRemove = { [weak self] in
             guard let self else { return false }
-            return self.enclosingSplit?.canRemoveLeaf(self) ?? false
+            return self.enclosingSplitOnScreen?.canRemoveLeaf(self) ?? false
         }
         overlay.availableDirections = { [weak self] in
             guard let self else { return [] }
-            return self.enclosingSplit?.availableMoveDirections(for: self) ?? []
+            return self.enclosingSplitOnScreen?.availableMoveDirections(for: self) ?? []
         }
         overlay.onAdd = { [weak self] in self?.presentAddSheet() }
         overlay.onRemove = { [weak self] in self?.confirmAndRemove() }
@@ -270,7 +278,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     }
 
     private func move(_ direction: ComposableTabsViewController.Direction) {
-        guard let split = enclosingSplit, split.move(self, direction) else {
+        guard let split = enclosingSplitOnScreen, split.move(self, direction) else {
             NSSound.beep()
             return
         }
@@ -280,7 +288,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     /// popup. Distinct, because the same view offered on two axes is one thing
     /// to add — the axis is the sheet's *other* question.
     private func addChoices() -> [ComposableTabsAddPaneViewController.Choice] {
-        guard let split = enclosingSplit else { return [] }
+        guard let split = enclosingSplitOnScreen else { return [] }
         let registry = split.layout.registry
         var seen = Set<ComposableTabsViewID>()
         return split.allowedInsertions(beside: self).compactMap { insertion in
@@ -306,7 +314,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
         }
         let picker = ComposableTabsAddPaneViewController(choices: choices) { [weak self] viewID, direction in
             guard let self else { return }
-            self.enclosingSplit?.split(self, adding: viewID, direction: direction)
+            self.enclosingSplitOnScreen?.split(self, adding: viewID, direction: direction)
         }
         // A popover over the button that opened it, not a sheet off the title
         // bar: the question is about *this* pane, and a sheet drops it at the
@@ -321,7 +329,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     /// Removing a pane can throw work away — a running shell, an unsaved edit —
     /// and the pane's content is the only thing that knows whether it would.
     private func confirmAndRemove() {
-        guard let split = enclosingSplit, split.canRemoveLeaf(self) else {
+        guard let split = enclosingSplitOnScreen, split.canRemoveLeaf(self) else {
             NSSound.beep()
             return
         }
@@ -346,7 +354,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
             MainActor.assumeIsolated {
                 guard response == .alertFirstButtonReturn else { return }
                 // Re-resolved: the sheet was up while the tree could change.
-                self.enclosingSplit?.remove(self)
+                self.enclosingSplitOnScreen?.remove(self)
             }
         }
     }
