@@ -115,6 +115,22 @@ struct LanguageServerDocumentSyncTests {
         }
     }
 
+    /// The shape of the traffic without its payloads, so a test can assert
+    /// *which notifications happened, in order* and have the failure message
+    /// name them.
+    private func kinds(in calls: [RecordedCall]) -> [String] {
+        calls.map { call in
+            switch call {
+            case .start: "start"
+            case .stop: "stop"
+            case .didOpen: "didOpen"
+            case .didChange: "didChange"
+            case .didSave: "didSave"
+            case .didClose: "didClose"
+            }
+        }
+    }
+
     // MARK: - 1. The capability table
 
     /// What it catches: any reading of `textDocumentSync` that treats an absent
@@ -539,7 +555,7 @@ struct LanguageServerDocumentSyncTests {
     /// Runs one save scenario end to end and returns what the server was told.
     private func recordedSaves(
         save: TwoTypeOption<Bool, SaveOptions>?
-    ) async throws -> (saves: [DidSaveTextDocumentParams], text: String) {
+    ) async throws -> (saves: [DidSaveTextDocumentParams], kinds: [String], text: String) {
         let settings = makeSettingsStore()
         let log = SessionLog()
         let documents = TextDocumentStore()
@@ -564,11 +580,12 @@ struct LanguageServerDocumentSyncTests {
         await sync.shutdown()
 
         let session = try fake(registry, for: configuration.id)
-        let saves = log.calls(forInstance: session.instanceID).compactMap { call -> DidSaveTextDocumentParams? in
+        let calls = log.calls(forInstance: session.instanceID)
+        let saves = calls.compactMap { call -> DidSaveTextDocumentParams? in
             guard case .didSave(let params) = call else { return nil }
             return params
         }
-        return (saves, document.text)
+        return (saves, kinds(in: calls), document.text)
     }
 
     /// D8. What it catches: a `didSave` sent on the dirty *and* the clean
@@ -582,15 +599,27 @@ struct LanguageServerDocumentSyncTests {
         #expect(withoutText.saves.first?.textDocument.uri == Self.swiftURI)
         #expect(withoutText.saves.first?.text == nil)
 
+        // The dirty transition sent nothing — said outright rather than left to
+        // be inferred from the count above. `edit(_:at:with:)` raises
+        // `.changed` and then `.dirtyStateChanged(isDirty: true)`, and
+        // `markClean()` raises `.dirtyStateChanged(isDirty: false)`. A pipeline
+        // that treated *any* dirty-state change as a save would record a
+        // `didSave` immediately after the `didChange` as well as the one at the
+        // end, and this sequence names which of the two is wanted.
+        #expect(withoutText.kinds == ["start", "didOpen", "didChange", "didSave"])
+
         let withText = try await recordedSaves(save: .optionB(SaveOptions(includeText: true)))
         #expect(withText.saves.count == 1)
         #expect(withText.saves.first?.text == withText.text)
+        #expect(withText.kinds == ["start", "didOpen", "didChange", "didSave"])
 
         let disabledByFalse = try await recordedSaves(save: .optionA(false))
         #expect(disabledByFalse.saves.isEmpty)
+        #expect(disabledByFalse.kinds == ["start", "didOpen", "didChange"])
 
         let notDeclared = try await recordedSaves(save: nil)
         #expect(notDeclared.saves.isEmpty)
+        #expect(notDeclared.kinds == ["start", "didOpen", "didChange"])
     }
 
     // MARK: - 13. Shutdown

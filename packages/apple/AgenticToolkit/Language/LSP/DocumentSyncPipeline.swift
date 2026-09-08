@@ -242,6 +242,20 @@ actor DocumentSyncPipeline {
             )
 
         case .saved(let uri, let text):
+            // Deliberately *not* gated on `openURIs`, unlike `.changed` and
+            // `.closed` above. This asymmetry is the considered choice, so
+            // please do not "fix" it by adding `openURIs.contains(uri)`: that
+            // is the wrong condition. When `openClose` is false, `openURIs` is
+            // never populated at all — nothing opens, so nothing is recorded —
+            // and the gate would silently stop sending `didSave` to exactly the
+            // servers that opted out of open/close tracking. The correct
+            // condition is the compound `!sync.openClose || openURIs.contains(uri)`,
+            // which is easier to get wrong on a later edit than the one wasted
+            // notification it saves. The cost of not gating is that a server
+            // which never received the open may get a `didSave` for a document
+            // it does not know; that is a no-op it must already tolerate, and
+            // D6 rule 2 in `sendDidChange` repairs the open state on the next
+            // change anyway.
             guard let save = sync.save else { return }
             await sendDidSave(uri: uri, text: save.includeText == true ? text : nil)
 

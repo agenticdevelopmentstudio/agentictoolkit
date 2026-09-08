@@ -144,6 +144,36 @@ public final class LanguageServerDocumentSync {
         }
     }
 
+    /// A net under `shutdown()`, not a replacement for it.
+    ///
+    /// `shutdown()` remains the contract, and only it can *await* the drains —
+    /// a deinit cannot. But a drain loop is `for await event in events` over an
+    /// `.unbounded` stream, so it ends on exactly one thing: `finish()`. An
+    /// owner that is released without calling `shutdown()` would leave every
+    /// drain task running forever, each one strongly holding its session and,
+    /// through it, a live language-server subprocess. That is an expensive
+    /// failure to diagnose from a user report — an orphaned `sourcekit-lsp`
+    /// with no window attached to it — and this class currently has no way to
+    /// defend itself against the mistake, which Task 3.3 is the first place
+    /// able to make.
+    ///
+    /// Finishing the continuations is all that is needed and all that is safe:
+    /// `finish()` is `nonisolated` and synchronous, it delivers the events
+    /// already queued before terminating the loop, and each drain task then
+    /// runs to completion on its own and releases its session. Retiring tasks
+    /// have already had `finish()` called on their pipelines by `retire(_:)`,
+    /// so they need nothing here.
+    ///
+    /// Isolated explicitly (SE-0371): a `@MainActor` class's deinit is
+    /// `nonisolated` by default and `pipelines` is main-actor state, so the
+    /// deinit has to hop to the actor before reading it. Same shape as
+    /// `TextDocumentStoreObservation.deinit`.
+    isolated deinit {
+        for entry in pipelines.values {
+            entry.pipeline.finish()
+        }
+    }
+
     // MARK: - Sessions
 
     private func reconcilePipelines(with sessions: [UUID: any LanguageServerSessionProtocol]) {
@@ -175,17 +205,18 @@ public final class LanguageServerDocumentSync {
         //    it before draining makes ordering free: every queued event lands
         //    behind a server that is either running or known to have failed.
         //
-        // 2. This runs inside `registry.$sessions`' `willSet`, i.e. *before*
-        //    `LanguageServerRegistry.reconcile` creates its own start task for
-        //    the same session. Both tasks are main-actor isolated at the same
-        //    priority, so this one reaches the session first and performs the
-        //    real handshake, and the registry's becomes the no-op.
-        //    `LanguageServerSession.start()` returns immediately — it does not
-        //    wait — when the session is already `.starting`, so whichever call
-        //    loses that race learns nothing about the outcome. This pipeline
-        //    does not depend on winning it: `DocumentSyncPipeline.resolvedSync`
-        //    treats "capabilities are not published yet" as *not yet* rather
-        //    than as "this server wants nothing". See its doc comment.
+        // 2. It does not matter which caller wins the start race, and there is
+        //    a race: this runs inside `registry.$sessions`' `willSet`, i.e.
+        //    *before* `LanguageServerRegistry.reconcile` creates its own start
+        //    task for the same session, and both are main-actor isolated at the
+        //    same priority. Whichever call arrives second joins the first
+        //    rather than returning early — `LanguageServerSession.start()`
+        //    awaits the in-flight `startTask` and reports its outcome — so by
+        //    the time *this* `start()` has returned, the handshake has
+        //    definitively completed or definitively failed. That is what lets
+        //    `DocumentSyncPipeline` resolve the sync capability once, right
+        //    after this await, and read `capabilities()` as a real answer: a
+        //    `nil` there means the server published none, never "not yet".
         let drainTask = Task {
             var startFailure: (any Error)?
             do {
