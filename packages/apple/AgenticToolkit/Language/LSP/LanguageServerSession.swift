@@ -488,10 +488,29 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     ///
     /// It is a *synchronous* actor method on purpose: the check and the handle
     /// it returns are decided in the same actor step, so a `stop()` cannot land
-    /// between them. What can still happen is a `stop()` landing after this
-    /// returns and before the write reaches the descriptor — that write fails
-    /// with a transport error rather than silently succeeding, which is the
-    /// outcome a caller can act on.
+    /// between them. What it does **not** cover is a `stop()` landing after it
+    /// returns and before the write reaches the descriptor, and the two halves
+    /// of this file's traffic fare differently there.
+    ///
+    /// For the four `sendNotification` paths that window is benign: the write
+    /// fails with a transport error rather than silently succeeding, which is
+    /// an outcome a caller can act on.
+    ///
+    /// For the five request methods it is not. A request write that fails after
+    /// `readSequenceFinished()` has already drained its responder resumes one
+    /// `CheckedContinuation` twice — this file's own HIGH-1, a `fatalError`,
+    /// and not an outcome any caller can act on. **That window is narrowed by
+    /// timing, not closed by this gate.** What narrows it is `teardown()`
+    /// step 2: a `shutdownAndExit` round trip is interposed before
+    /// `terminate()`, so a request issued just before a `stop()` normally has a
+    /// reply or a clean refusal before stdin closes. That is a probability, not
+    /// a barrier, and it thins as `shutdownBudgetSeconds` shrinks or as the
+    /// server stops answering `shutdown` at all.
+    ///
+    /// No production caller exists yet — Task 3.2 has not landed — so this is
+    /// recorded for whoever writes the first one rather than claimed closed.
+    /// Closing it properly means an outstanding-request barrier that
+    /// `teardown()` waits on the way it waits on `startTask`.
     private func runningServer() throws -> InitializingServer {
         guard !isStopped, case .running = state, let server else {
             throw LanguageServerSessionError.notRunning
@@ -556,9 +575,16 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     ///    the write closes stdin under `JSONRPCSession`, which then fails the
     ///    request's responder from its write path *and* again from
     ///    `readSequenceFinished()` — one continuation resumed twice, which traps
-    ///    the process. Waiting first makes both unreachable: when step 3 runs,
-    ///    the spawn has happened or been ruled out, and the write has completed
-    ///    or failed on its own.
+    ///    the process. Waiting first covers both in every ordering step 1
+    ///    completes: when step 3 runs the spawn has happened or been ruled out,
+    ///    and the write has completed or failed on its own. When step 1's own
+    ///    budget expires — the case the next paragraph exists to justify —
+    ///    neither half holds. The spawn half is admitted at step 5 below. The
+    ///    write half is weaker still: `startTask.value` completing does not
+    ///    await the budget loser `withWallClockBudget` abandoned, so after an
+    ///    `initialize` budget expiry that loser is still live and its write can
+    ///    still be outstanding when step 3 closes stdin. Both are residues, not
+    ///    covered cases.
     ///
     ///    The task is **not** cancelled first, which is where this departs from
     ///    `MCPClient`. Cancelling would resume `performStart()` immediately
