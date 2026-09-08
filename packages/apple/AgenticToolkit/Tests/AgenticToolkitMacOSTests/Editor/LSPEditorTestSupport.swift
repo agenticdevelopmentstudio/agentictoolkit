@@ -548,14 +548,19 @@ struct LSPEditorFixture {
     let log: EditorSessionLog
     let configuration: LanguageServerConfiguration
 
-    /// - Parameter registersConfiguration: `false` leaves the registry empty,
-    ///   which is how "no server serves this language" is expressed — the
-    ///   registry has no other way to have no session.
+    /// - Parameters:
+    ///   - registersConfiguration: `false` leaves the registry empty, which is
+    ///     how "no server serves this language" is expressed — the registry has
+    ///     no other way to have no session.
+    ///   - configurationID: given explicitly when a test needs two fixtures to
+    ///     hold the *same* server, which is what two windows running one
+    ///     configuration looks like from a status list.
     init(
         workspaceURL: URL = URL(fileURLWithPath: "/", isDirectory: true),
         languageIds: [String] = ["swift"],
         behavior: FakeEditorSessionBehavior = FakeEditorSessionBehavior(),
-        registersConfiguration: Bool = true
+        registersConfiguration: Bool = true,
+        configurationID: UUID = UUID()
     ) {
         let log = EditorSessionLog()
         let settings = SettingsStore(
@@ -571,6 +576,7 @@ struct LSPEditorFixture {
             }
         )
         let configuration = LanguageServerConfiguration(
+            id: configurationID,
             name: "Fake",
             languageIds: languageIds,
             command: "/nonexistent/server",

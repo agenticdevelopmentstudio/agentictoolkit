@@ -37,12 +37,26 @@ struct LanguageServerStatusModelTests {
     /// races to `.running` and a test about `.idle` or `.failed` would be
     /// asserting against whichever side of that race it lost. Held, the session
     /// sits still and the test drives every transition it wants to see.
-    private func makeProject(named name: String) -> ProjectFixture {
-        let editor = LSPEditorFixture(behavior: FakeEditorSessionBehavior(holdsStart: true))
+    private func makeProject(named name: String, configurationID: UUID = UUID()) -> ProjectFixture {
+        let editor = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(holdsStart: true),
+            configurationID: configurationID
+        )
         return ProjectFixture(
             project: LanguageServerStatusModel.Project(id: UUID(), name: name, registry: editor.registry),
             editor: editor
         )
+    }
+
+    /// The model's two inputs driven from one subject, for the tests that do
+    /// not care about the difference between "projects with language services"
+    /// and "open project windows". Every project in this suite has services, so
+    /// the two counts agree; the test that separates them passes its own
+    /// subject for the count.
+    private func makeModel(
+        _ projects: CurrentValueSubject<[LanguageServerStatusModel.Project], Never>
+    ) -> LanguageServerStatusModel {
+        LanguageServerStatusModel(projects: projects, openProjectCount: projects.map(\.count))
     }
 
     private func session(of fixture: ProjectFixture) throws -> FakeEditorLanguageServerSession {
@@ -77,7 +91,7 @@ struct LanguageServerStatusModelTests {
 
         let projects = CurrentValueSubject<[LanguageServerStatusModel.Project], Never>(
             [alpha.project, beta.project])
-        let model = LanguageServerStatusModel(projects: projects)
+        let model = makeModel(projects)
 
         #expect(await poll { model.rows.map(\.kind) == [.running, .running] })
         // Sorted by project name, which is what keeps the list still while a
@@ -103,7 +117,7 @@ struct LanguageServerStatusModelTests {
         try await session(of: alpha).transition(to: .failed(failure))
 
         let projects = CurrentValueSubject<[LanguageServerStatusModel.Project], Never>([alpha.project])
-        let model = LanguageServerStatusModel(projects: projects)
+        let model = makeModel(projects)
 
         #expect(await poll { model.rows.first?.kind == .failed })
         let row = try #require(model.rows.first)
@@ -122,7 +136,7 @@ struct LanguageServerStatusModelTests {
         try await session(of: alpha).transition(to: .running)
 
         let projects = CurrentValueSubject<[LanguageServerStatusModel.Project], Never>([alpha.project])
-        let model = LanguageServerStatusModel(projects: projects)
+        let model = makeModel(projects)
         let list = LanguageServersListViewModel(store: alpha.editor.settings, statusModel: model)
 
         #expect(await poll { list.statusesByConfiguration[alpha.configuration.id]?.count == 1 })
@@ -151,7 +165,7 @@ struct LanguageServerStatusModelTests {
         try await session(of: beta).transition(to: .running)
 
         let projects = CurrentValueSubject<[LanguageServerStatusModel.Project], Never>([])
-        let model = LanguageServerStatusModel(projects: projects)
+        let model = makeModel(projects)
 
         #expect(model.rows.isEmpty)
         #expect(!model.hasOpenProject)
@@ -178,7 +192,7 @@ struct LanguageServerStatusModelTests {
         try await session(of: alpha).transition(to: .running)
 
         let projects = CurrentValueSubject<[LanguageServerStatusModel.Project], Never>([alpha.project])
-        let model = LanguageServerStatusModel(projects: projects)
+        let model = makeModel(projects)
         #expect(await poll { model.rows.map(\.projectName) == ["Alpha"] })
 
         weak var closedRegistry: LanguageServerRegistry?
@@ -198,13 +212,83 @@ struct LanguageServerStatusModelTests {
         #expect(await poll { closedRegistry == nil })
     }
 
-    // MARK: - 3. The panel
+    // MARK: - 3. Ordering
+
+    /// ★ N2, stated as a test.
+    ///
+    /// Two windows on `~/work/api` and `~/archive/api` share a project name,
+    /// and one configuration open in both ties the configuration name and the
+    /// configuration id as well. With every earlier key equal the comparator
+    /// has nothing left to decide on, `sort` is not stable, and the rows are
+    /// built by walking the projects in the order they were delivered — which
+    /// in the host is a dictionary's order, not a list's. So the two rows swap
+    /// on a recompute and the list reorders under the reader's cursor. The
+    /// project id is unique by construction and makes the order total.
+    ///
+    /// Driven by re-delivering the same two projects in the opposite order,
+    /// because that is the only thing about them a test can vary: everything
+    /// the comparator looked at before this fix is identical between them.
+    @Test("two projects with the same name running the same server hold a stable order")
+    func rowsForTwoProjectsSharingANameAndAServerHoldTheirOrder() async throws {
+        let shared = UUID()
+        let first = makeProject(named: "api", configurationID: shared)
+        let second = makeProject(named: "api", configurationID: shared)
+        try await session(of: first).transition(to: .running)
+        try await session(of: second).transition(to: .running)
+
+        let projects = CurrentValueSubject<[LanguageServerStatusModel.Project], Never>(
+            [first.project, second.project])
+        let model = makeModel(projects)
+
+        #expect(await poll { model.rows.count == 2 })
+        let expected = [first.project.id, second.project.id].sorted { $0.uuidString < $1.uuidString }
+        #expect(model.rows.map(\.projectID) == expected)
+        #expect(model.rows.map(\.configurationID) == [shared, shared])
+
+        // Re-subscribes and recomputes synchronously: `@Published` hands a new
+        // subscriber the current value, and `observe` recomputes unconditionally
+        // afterwards. So there is nothing to wait for here — only an order to
+        // check, against the same rows arriving the other way round.
+        projects.send([second.project, first.project])
+        #expect(model.rows.map(\.projectID) == expected)
+
+        projects.send([first.project, second.project])
+        #expect(model.rows.map(\.projectID) == expected)
+    }
+
+    /// ★ N3, stated as a test.
+    ///
+    /// "No project open" is a claim about project windows, and `projects`
+    /// carries only the ones that have language services. A window whose
+    /// services could not be built contributes nothing to that list, and the
+    /// panel would have said there was no project open with the window on
+    /// screen. The count is the input that cannot say that.
+    @Test("an open project with no language services is still an open project")
+    func anOpenProjectWithNoLanguageServicesStillCountsAsOpen() {
+        let projects = CurrentValueSubject<[LanguageServerStatusModel.Project], Never>([])
+        let openProjectCount = CurrentValueSubject<Int, Never>(0)
+        let model = LanguageServerStatusModel(projects: projects, openProjectCount: openProjectCount)
+
+        #expect(!model.hasOpenProject)
+
+        openProjectCount.send(1)
+
+        #expect(model.hasOpenProject)
+        // Nothing to report about it — which is what "Not running" is for.
+        #expect(model.rows.isEmpty)
+    }
+
+    // MARK: - 4. The panel
 
     @Test("the panel adds its sub-panel and carries the help topics that describe it")
     func thePanelAddsItsSubPanelAndItsHelpTopics() async throws {
         let alpha = makeProject(named: "Alpha")
         let projects = CurrentValueSubject<[LanguageServerStatusModel.Project], Never>([alpha.project])
-        let panel = LanguageServersPanelViewController(store: alpha.editor.settings, projects: projects)
+        let panel = LanguageServersPanelViewController(
+            store: alpha.editor.settings,
+            projects: projects,
+            openProjectCount: projects.map(\.count)
+        )
 
         panel.loadViewIfNeeded()
 

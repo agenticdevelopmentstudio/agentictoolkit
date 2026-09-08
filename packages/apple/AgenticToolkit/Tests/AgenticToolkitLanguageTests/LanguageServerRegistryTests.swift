@@ -591,6 +591,53 @@ struct LanguageServerRegistryTests {
         )
     }
 
+    /// ★ N1, stated as a test.
+    ///
+    /// What it catches: a second observation installed over a live one.
+    /// `stateChanges` is single-consumer exactly as `publishedDiagnostics` is —
+    /// two `for await` loops over one `AsyncStream` split its values between
+    /// them instead of each seeing all of them — and an unguarded
+    /// `stateObservations[id] = Task { … }` would also drop the first handle,
+    /// leaving a reader nothing can cancel.
+    ///
+    /// **Asserted on the refusal, because a second reader is invisible from
+    /// anywhere else — which is the finding.** `stateObservations` is keyed by
+    /// id, so a second `Task` overwrites the entry and the count stays at one;
+    /// both readers pass the same identity check and write the same key with
+    /// the same values; and every path that retires an observation clears
+    /// `sessions[id]` in the same step, so the orphan's writes are dropped
+    /// rather than seen. A burst of transitions does not separate them either:
+    /// two readers take alternate values but write them in the order they were
+    /// yielded, so the map still ends on the last one. All three of those were
+    /// run against the unguarded code and passed. That is why the refusal is
+    /// reported rather than inferred.
+    ///
+    /// The transitions below are the other half: refusing must not cost the
+    /// reader that is already there.
+    @Test("a second observation of a live session is refused rather than doubled")
+    func aSecondObservationOfALiveSessionIsRefused() async {
+        let store = makeStore()
+        let registry = makeRegistry(
+            store: store,
+            log: SessionLog(),
+            behavior: FakeSessionBehavior(holdsStart: true)
+        )
+
+        let configuration = makeConfiguration()
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+        guard let session = fake(registry, configuration.id) else {
+            Issue.record("no session was created")
+            return
+        }
+
+        #expect(!registry.observeState(of: session, id: configuration.id))
+
+        await session.transition(to: .starting)
+        #expect(await poll { stateName(registry, configuration.id) == "starting" })
+        await session.transition(to: .running)
+        #expect(await poll { stateName(registry, configuration.id) == "running" })
+    }
+
     /// What it catches: a retire path that drops the session but keeps the
     /// state, which leaves a disabled server permanently listed as running; and
     /// one that forgets to cancel the reader, which is a task parked on a

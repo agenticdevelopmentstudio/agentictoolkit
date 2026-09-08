@@ -32,9 +32,17 @@ public final class LanguageServersPanelViewController: ComposableSettings.Settin
     private let store: SettingsStore
     private let statusModel: LanguageServerStatusModel
 
-    public init(store: SettingsStore, projects: some Publisher<[LanguageServerStatusModel.Project], Never>) {
+    /// - Parameter openProjectCount: how many project windows are open, which
+    ///   is not the same as `projects.count` — a window whose language services
+    ///   could not be built contributes no project here, and the empty state
+    ///   must still say "not running", not "no project open".
+    public init(
+        store: SettingsStore,
+        projects: some Publisher<[LanguageServerStatusModel.Project], Never>,
+        openProjectCount: some Publisher<Int, Never>
+    ) {
         self.store = store
-        self.statusModel = LanguageServerStatusModel(projects: projects)
+        self.statusModel = LanguageServerStatusModel(projects: projects, openProjectCount: openProjectCount)
         super.init(with: ComposableSettings.SettingsPanelDescriptor(
             title: "Language Servers",
             icon: NSImage(systemSymbolName: "curlybraces", accessibilityDescription: nil)
@@ -303,14 +311,14 @@ private struct LanguageServerRow: View {
                 ))
                 .labelsHidden()
                 .help("Enabled")
-                .accessibilityIdentifier("language-servers.enabled.\(configuration.id.uuidString)")
+                .accessibilityIdentifier("language-servers.enabled.\(configuration.id.uuidString.lowercased())")
 
                 Button(action: onRemove) {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
                 .help("Remove server")
-                .accessibilityIdentifier("language-servers.remove.\(configuration.id.uuidString)")
+                .accessibilityIdentifier("language-servers.remove.\(configuration.id.uuidString.lowercased())")
             }
 
             statusArea

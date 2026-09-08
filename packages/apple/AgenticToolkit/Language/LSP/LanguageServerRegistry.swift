@@ -381,7 +381,45 @@ public final class LanguageServerRegistry: ObservableObject {
     /// `[weak self]` so an abandoned registry — one released without
     /// `shutdown()` — is not kept alive by a task parked on a live server's
     /// stream.
-    private func observeState(of session: any LanguageServerSessionProtocol, id: UUID) {
+    ///
+    /// **At most one live observation per id, and a second call is refused.**
+    /// `stateChanges` is single-consumer exactly as `publishedDiagnostics` is:
+    /// two `for await` loops over one `AsyncStream` split its values between
+    /// them rather than each seeing all of them, and the second `Task {}` would
+    /// overwrite the first's handle and leave a writer nothing holds. This is
+    /// the guard `DiagnosticStore.observe(_:)` makes, for the same reason.
+    ///
+    /// Refused rather than cancel-and-replace, because `reconcile` is the sole
+    /// owner of an id's lifetime. Its retire loop drops `sessions`,
+    /// `descriptors`, `sessionStates` and this entry together and cancels the
+    /// observation in the same statement, all of it *before* the create loop
+    /// installs a replacement under the same `UUID` — so the slot is already
+    /// empty and this guard can never block that replacement. Cancel-and-replace
+    /// would instead make a caller that swaps the observation without going
+    /// through that loop look supported, when it is not: `sessions[id]` would
+    /// still hold the outgoing session, the identity check below would fail on
+    /// the replacement's very first value, and a working reader would have been
+    /// cancelled to install one that dies immediately.
+    ///
+    /// Internal rather than private, and returning whether it installed a
+    /// reader, because that return value is the *only* thing a second call
+    /// changes. A second reader is invisible from outside: the entry is keyed
+    /// by id, so overwriting it leaves the count at one, and the identity check
+    /// below means both readers write the same key with the same values. That
+    /// invisibility is the finding — the next caller gets no error, no log and
+    /// no test failure — so the refusal says so in all three ways it can.
+    ///
+    /// - Returns: `false` when `id` already has a live observation, which the
+    ///   only call site — `reconcile`'s create loop, gated
+    ///   `where sessions[id] == nil` — cannot produce.
+    @discardableResult
+    func observeState(of session: any LanguageServerSessionProtocol, id: UUID) -> Bool {
+        guard stateObservations[id] == nil else {
+            Self.logger.fault(
+                "Refused a second state observation for language server \(id, privacy: .public)"
+            )
+            return false
+        }
         stateObservations[id] = Task { [weak self] in
             for await state in session.stateChanges {
                 guard let self else { return }
@@ -389,6 +427,7 @@ public final class LanguageServerRegistry: ObservableObject {
                 self.sessionStates[id] = state
             }
         }
+        return true
     }
 
     /// The `withTaskGroup` every multi-session teardown must go through.

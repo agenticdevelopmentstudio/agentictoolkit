@@ -127,6 +127,13 @@ public final class LanguageServerStatusModel: ObservableObject {
     /// False when no project window is open, which is not the same as "no
     /// server is running": a language server exists only inside a project, so a
     /// panel with no open project has nothing to report rather than bad news.
+    ///
+    /// Driven from the open-project count and **not** from `projects`. The two
+    /// differ: `projects` carries only the open projects that have language
+    /// services, so a window whose services failed to build would be filtered
+    /// out of it and the panel would say "No project open" with that window on
+    /// screen. The count is a claim about project windows, which is what this
+    /// property is a claim about.
     @Published public private(set) var hasOpenProject: Bool = false
 
     /// The last values *delivered* for one project, and the only thing `rows`
@@ -163,9 +170,23 @@ public final class LanguageServerStatusModel: ObservableObject {
 
     private var projectsCancellable: AnyCancellable?
 
-    public init(projects: some Publisher<[Project], Never>) {
+    private var openProjectCountCancellable: AnyCancellable?
+
+    /// - Parameters:
+    ///   - projects: the open projects that have language services, which is
+    ///     what `rows` is built from. A project with no services has no
+    ///     registry, and so nothing this model could say about it.
+    ///   - openProjectCount: how many project windows are open, which is a
+    ///     different question and the only one `hasOpenProject` answers.
+    public init(
+        projects: some Publisher<[Project], Never>,
+        openProjectCount: some Publisher<Int, Never>
+    ) {
         projectsCancellable = projects.sink { [weak self] projects in
             self?.observe(projects)
+        }
+        openProjectCountCancellable = openProjectCount.sink { [weak self] count in
+            self?.hasOpenProject = count > 0
         }
     }
 
@@ -215,7 +236,6 @@ public final class LanguageServerStatusModel: ObservableObject {
             registryObservations[id] = cancellables
         }
 
-        hasOpenProject = !projects.isEmpty
         // Called unconditionally. A list that shrank to nothing produces no
         // registry emission at all, and the closed project's rows would
         // otherwise stay on screen.
@@ -253,14 +273,23 @@ public final class LanguageServerStatusModel: ObservableObject {
         // are built out of dictionaries, whose iteration order is not stable
         // between reads, and a handshake tick is frequent enough that an
         // unsorted list would visibly reshuffle while the user is reading it.
-        // The id is the final tiebreak so two servers sharing a name still
-        // order deterministically.
+        // Both ids are tiebreaks, and both are needed: two windows on
+        // `~/work/api` and `~/archive/api` share a `projectName`, and one
+        // configuration running in both ties `configurationID` as well. With
+        // all three of the first keys equal, `sort` is not stable and `next` is
+        // built off dictionary iteration, so the two rows would swap on any
+        // handshake tick, pass the `next != rows` gate below, and reorder under
+        // the reader's cursor. `projectID` is unique by construction, so
+        // ordering on it last makes the order total.
         next.sort { lhs, rhs in
             if lhs.projectName != rhs.projectName { return lhs.projectName < rhs.projectName }
             if lhs.configurationName != rhs.configurationName {
                 return lhs.configurationName < rhs.configurationName
             }
-            return lhs.configurationID.uuidString < rhs.configurationID.uuidString
+            if lhs.configurationID != rhs.configurationID {
+                return lhs.configurationID.uuidString < rhs.configurationID.uuidString
+            }
+            return lhs.projectID.uuidString < rhs.projectID.uuidString
         }
         // Compared before assigning: `rows` drives a SwiftUI list, and the
         // registries emit on every handshake tick, most of which change nothing

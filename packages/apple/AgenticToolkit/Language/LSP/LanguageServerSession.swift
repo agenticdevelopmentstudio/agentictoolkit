@@ -496,8 +496,8 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
 
         case .starting:
             // The handle exists for exactly this: it is held from the statement
-            // after `state = .starting` — with no suspension in between, so a
-            // joiner that observes `.starting` observes the task too — and
+            // after `setState(.starting)` — with no suspension in between, so
+            // a joiner that observes `.starting` observes the task too — and
             // `teardown()` already waits on it the same way.
             //
             // The one exception is the sliver in which the owning call has
