@@ -7,7 +7,7 @@ import os
 /// the shared services every file editor pane opens documents through and
 /// schedules autosaves on. Modeled directly on `NotesCoordinator`: one
 /// instance per host, constructed once and threaded down through the
-/// injection seam described in `WhippetDocumentPanes`, never constructed
+/// injection seam described in `DocumentPanes`, never constructed
 /// inside a view (a `TextDocumentStore`'s refcounted `open`/`close` only
 /// means anything with exactly one shared instance across the app).
 ///
