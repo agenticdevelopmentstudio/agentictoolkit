@@ -705,5 +705,4 @@ struct LSPCompletionDelegateTests {
         }
         Issue.record("the registry never recorded the session's failure")
     }
-
 }

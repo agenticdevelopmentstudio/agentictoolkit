@@ -295,6 +295,41 @@ struct LanguageServerSessionTests {
         await session.stop()
     }
 
+    /// `capabilities()` must go back to `nil` once a running server has died
+    /// on its own, not just once it has been `stop()`ped.
+    ///
+    /// What it catches: the fall-through Task 3.7's brief traced wrong.
+    /// `teardown()` is the only place that nils `server`, and the spontaneous-
+    /// exit path (`publishStreamEnd` → `fail(with:)`) never calls it — so
+    /// `guard let server else { return nil }` alone leaves `capabilities()`
+    /// handing back the pre-crash `ServerCapabilities` forever after a crash.
+    /// `LSPCompletionDelegate`'s cache-hit guard was fixed to stop returning a
+    /// *cached* answer from a dead session, but the delegate then re-asks
+    /// `capabilities()` itself and would go on re-caching this stale answer
+    /// with a fresh stamp if this method did not also refuse it. This is a
+    /// real subprocess, not `FakeEditorLanguageServerSession` — the fake
+    /// already gated on `.running`, which is exactly why the delegate's tests
+    /// passed against a defect that was still live in production.
+    @Test("capabilities answers nil once a running server has died on its own")
+    func capabilitiesGoesNilAfterARunningServerDiesOnItsOwn() async throws {
+        let session = makeSession(script: Self.exitingServerScript)
+        try await session.start()
+
+        // Confirms the pre-crash capabilities really were on offer, so the
+        // assertion below is about them going away rather than never having
+        // existed.
+        let beforeCrash = await session.capabilities()
+        #expect(beforeCrash?.hoverProvider != nil)
+
+        let failed = await poll { await session.state.failure != nil }
+        #expect(failed)
+
+        let afterCrash = await session.capabilities()
+        #expect(afterCrash == nil)
+
+        await session.stop()
+    }
+
     /// `stop()` is terminal: `SubprocessChannel` is single-launch, so a
     /// restarted session would be a session with no child.
     ///

@@ -693,8 +693,19 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
 
     /// The server's capabilities, or `nil` if it is not initialized.
     /// Tasks 3.3-3.6 gate their features on this.
+    ///
+    /// Gated on `.running`, not merely on `server` being set, and that second
+    /// clause is load-bearing: a server that dies on its own does not go
+    /// through `teardown()` (see `stop()`'s doc), so `server` stays set and
+    /// `InitializingServer.state` stays `.initialized` after a crash. Without
+    /// the `.running` check this method would keep answering the *pre-crash*
+    /// capabilities forever, and every caller above would keep treating a dead
+    /// session as though its features were still on offer. This is also the
+    /// only enforcement point for that: `LSPCompletionDelegate` relies on this
+    /// method returning `nil` for a dead session rather than re-checking
+    /// liveness itself at every call site.
     public func capabilities() async -> ServerCapabilities? {
-        guard let server else { return nil }
+        guard case .running = state, let server else { return nil }
         return await server.capabilities
     }
 

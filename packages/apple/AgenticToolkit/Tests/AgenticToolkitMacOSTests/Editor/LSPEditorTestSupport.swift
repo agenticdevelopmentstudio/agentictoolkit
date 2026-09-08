@@ -287,6 +287,12 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
 
     func capabilities() async -> ServerCapabilities? {
         capabilityRequestCount += 1
+        // Deliberately mirrors `LanguageServerSession.capabilities()`'s own
+        // `.running` gate: the two used to diverge (the real session only
+        // checked `server != nil`), which let a delegate-side fix look tested
+        // when the real session would still hand back stale, pre-crash
+        // capabilities. Whoever relaxes one of these two gates should check
+        // the other.
         guard case .running = state else { return nil }
         // Chosen before parking, so the answer belongs to this call rather than
         // to whichever call happens to resume first.

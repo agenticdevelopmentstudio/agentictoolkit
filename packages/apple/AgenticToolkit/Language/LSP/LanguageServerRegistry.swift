@@ -404,15 +404,19 @@ public final class LanguageServerRegistry: ObservableObject {
     /// **This all rests on a precondition this method does not check: `id` is
     /// never passed unless it is already a key in `sessions`.** The refusal
     /// above keys on `id` alone, while the retire loop this paragraph leans on
-    /// keys on `sessions`; the two agree only because the sole call site sits a
-    /// few statements after `sessions[id] = session`, in the same iteration of
-    /// `reconcile`'s create loop. If that ever stopped holding — a caller
-    /// passing an `id` `sessions` does not have — the refusal above would
-    /// install an entry for it that nothing but `shutdown()` ever removes,
-    /// permanently refusing every later legitimate call for that `id` and
-    /// freezing `sessionStates[id]` at whatever it last was. Documented rather
-    /// than guarded: a check nothing can reach is a branch that will never be
-    /// exercised and will be trusted anyway.
+    /// keys on `sessions`; the two agree in `reconcile`'s create loop because
+    /// that call sits a few statements after `sessions[id] = session`, in the
+    /// same iteration. `Tests/AgenticToolkitLanguageTests/LanguageServerRegistryTests.swift`
+    /// calls this method directly too, so `reconcile`'s create loop is not the
+    /// only call site — but that test fetches its session out of `sessions`
+    /// first, so the precondition still holds there as well. If it ever
+    /// stopped holding anywhere — a caller passing an `id` `sessions` does not
+    /// have — the *first* call for that `id` would install an entry (a refusal
+    /// installs nothing; refusing is what every call *after* the first does),
+    /// and every later legitimate call for that `id` would then be refused
+    /// permanently, freezing `sessionStates[id]` at whatever it last was.
+    /// Documented rather than guarded: a check nothing can reach is a branch
+    /// that will never be exercised and will be trusted anyway.
     ///
     /// Internal rather than private, and returning whether it installed a
     /// reader, because that return value is the only thing a second call

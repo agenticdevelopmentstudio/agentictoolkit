@@ -182,10 +182,15 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // should miss: a state added to the enum tomorrow then defaults to
         // re-asking the server, not to trusting a cache that has never seen it.
         //
-        // The identity test still runs first, and still gates the dictionary
-        // read that follows: `session.id` is only a meaningful key into
-        // `registry.sessionStates` when `session` is genuinely the source the
-        // cached answer came from.
+        // The identity test still runs first, but not because it is what makes
+        // the key meaningful: `session` was just read out of
+        // `registry.session(forLanguageId:)`, i.e. `sessions[configuration.id]`,
+        // and `sessions[k].id == k` holds for every key in that dictionary
+        // regardless of what the `===` test decides — so `session.id` is
+        // always a meaningful key into `registry.sessionStates`. The `===`
+        // test answers a different question, asked first because it is
+        // cheaper to rule out: *which* session the cached answer came from,
+        // so a predecessor's stale cache is not credited to its successor.
         if let resolvedTriggerCharacters,
            resolvedTriggerCharacterSource === session,
            case .running = registry.sessionStates[session.id] {
@@ -194,12 +199,19 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         try? await session.start()
         guard let capabilities = await session.capabilities(),
               let completionProvider = capabilities.completionProvider else {
-            // Either the handshake has not finished — `capabilities()` answers
-            // `nil` until the session is running — or the server declares no
-            // completion at all. Recorded as *unresolved* rather than as an
-            // empty answer, because the cache hit above must not start handing
-            // back `[]` for a server that is still starting; the next
-            // `registry.$sessions` change is what asks again.
+            // `capabilities()` answers `nil` on both sides of `.running`, not
+            // only on the way up: before the handshake finishes (`server` is
+            // set but not yet `.running`), and — since
+            // `LanguageServerSession.capabilities()` gates on `.running`
+            // itself — after the session has died, whether by `stop()` or by
+            // a crash it never asked for. So this guard is what turns a dead
+            // session's stale capabilities into "unresolved" instead of
+            // silently re-caching them; the alternative is the server
+            // declaring no completion support at all. Recorded as
+            // *unresolved* rather than as an empty answer either way, because
+            // the cache hit above must not start handing back `[]` for a
+            // server that is merely starting; the next `registry.$sessions`
+            // or `registry.$sessionStates` change is what asks again.
             return storeTriggerCharacters(nil, from: nil, readAt: stamp)
         }
         return storeTriggerCharacters(
@@ -247,6 +259,20 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // has a real answer, and the two early returns above deliberately
         // record nothing about trigger characters. Under the stamps that costs
         // no other caller anything — an unused stamp is not a claim.
+        //
+        // No liveness check is added here on purpose, even though this write
+        // has none of its own: it does not need one, because the guard above
+        // already stops it from being reached for a dead session, courtesy of
+        // `LanguageServerSession.capabilities()` gating on `.running`. The
+        // division of labour, deliberately kept to one enforcement point
+        // rather than duplicated at every write site: `resolveTriggerCharacters`'s
+        // cache-hit guard stops a dead session's *cached* answer from being
+        // returned; `capabilities()` returning `nil` for a dead session stops
+        // a dead session's answer from being *cached again*, here and
+        // anywhere else that reaches this method. Neither subsumes the
+        // other, and a second liveness guard at this call site would only
+        // teach the next reader that liveness is checked ad hoc rather than
+        // once, at the source.
         _ = storeTriggerCharacters(
             Set(completionProvider.triggerCharacters ?? []),
             from: session,
