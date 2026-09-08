@@ -30,4 +30,26 @@ public protocol HelpPresenting: AnyObject {
     /// by every window using it — so the button can't assume its own click is
     /// the only thing that moves the drawer.
     var onVisibilityChange: (() -> Void)? { get set }
+
+    /// Which of the presenter's tabs is showing, for a scripting surface that
+    /// has to name it. `nil` for a presenter with no tabs — a popover has none.
+    ///
+    /// A requirement and not only an extension member: an existential
+    /// dispatches a protocol requirement dynamically and an extension-only
+    /// member statically, so a presenter that *does* have tabs would answer
+    /// `nil` from behind `any HelpPresenting`, silently.
+    ///
+    /// A `String?` rather than the tab object, deliberately: the id is the
+    /// whole of what a script can say, and returning the object would drag a
+    /// deprecated drawer type into every declaration that named the result —
+    /// which is the same reason the rest of this protocol exists.
+    var helpTabID: String? { get }
+}
+
+public extension HelpPresenting {
+
+    /// No tabs, so nothing to name. Here rather than on each presenter so that
+    /// adding this requirement left the popover — and every other presenter a
+    /// host has written — compiling untouched.
+    var helpTabID: String? { nil }
 }

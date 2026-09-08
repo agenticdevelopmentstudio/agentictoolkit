@@ -448,6 +448,133 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         return split
     }
 
+    // MARK: - Scripting accessors
+
+    /// One project-level tab, the way a reader sees it and therefore the way a
+    /// script does: the *group*, not the member tabs it happens to be drawn as.
+    ///
+    /// A window with two edges enabled draws "Tab 1" on both bars, and vending
+    /// the members would show a script two tabs of that name where there is
+    /// one. Its members are listed too, because everything that enumerates
+    /// panes has to go through them.
+    ///
+    /// A value type, made fresh on each read: it is a copy of what `TabGroup`
+    /// already holds, and a cached one would be a second thing to invalidate
+    /// every time a tab is renamed or an edge is toggled.
+    public struct ScriptingTab {
+
+        /// The persisted `project_tabs.group_id`.
+        public let id: UUID
+        public let title: String
+
+        /// The group's member tabs on edges that are *enabled*, in
+        /// `Edge.allCases` order. Disabling an edge keeps its members so that
+        /// re-enabling restores them, but neither the tab bar nor its panes are
+        /// on screen — so neither is in here.
+        public let members: [(edge: Edge, tabID: UUID)]
+
+        public var edges: [Edge] { self.members.map(\.edge) }
+    }
+
+    /// This window's project-level tabs, in creation order.
+    public var scriptingTabGroups: [ScriptingTab] {
+        tabGroups.map { group in
+            ScriptingTab(
+                id: group.id,
+                title: group.title,
+                members: Edge.allCases.compactMap { edge in
+                    guard tabbed.isEdgeEnabled(edge), let id = group.members[edge] else { return nil }
+                    return (edge: edge, tabID: id)
+                })
+        }
+    }
+
+    /// This window's tabs, as scripting values.
+    public var scriptingTabs: [ScriptableProjectTab] {
+        scriptingTabGroups.map {
+            ScriptableProjectTab(
+                id: $0.id,
+                title: $0.title,
+                edges: $0.edges.map(\.rawValue),
+                project: project.displayName)
+        }
+    }
+
+    /// Every pane in this window, on every tab and every enabled edge.
+    ///
+    /// Order is by tab, then by edge, then by the split tree's own leaf order,
+    /// so a script that reads `panes` twice in a row gets the same order twice.
+    public func allPanes() -> [ComposableTabsPaneViewController] {
+        scriptingTabGroups.flatMap { self.leaves(of: $0) }
+    }
+
+    /// The panes in one project tab, by the tab's scripting id.
+    public func panes(inTab identifier: String) -> [ComposableTabsPaneViewController] {
+        guard let id = UUID(uuidString: identifier),
+              let group = scriptingTabGroups.first(where: { $0.id == id }) else { return [] }
+        return leaves(of: group)
+    }
+
+    private func leaves(of group: ScriptingTab) -> [ComposableTabsPaneViewController] {
+        group.members.compactMap { splitControllersByTabID[$0.tabID] }.flatMap { $0.allLeaves() }
+    }
+
+    /// The titlebar search field's contents. Setting it searches, rather than
+    /// only filling the field in — a script that sets a query and then reads
+    /// the pane back would otherwise see a field that says one thing and a
+    /// pane that shows another.
+    public var searchQuery: String {
+        get { searchField?.stringValue ?? "" }
+        set {
+            searchField?.stringValue = newValue
+            routeSearch(newValue)
+        }
+    }
+
+    /// The active project tab's id as a string, and the setter that selects
+    /// one. The *group's* id, not the member's: that is what `project tab`
+    /// means, and it is what a script was handed when it read the tab.
+    public var selectedTabIdentifier: String {
+        get {
+            guard let activeTabID = tabbed.activeTabID else { return "" }
+            return tabGroups.first { $0.members.values.contains(activeTabID) }?.id.uuidString ?? ""
+        }
+        set { if let id = UUID(uuidString: newValue) { selectTab(id: id) } }
+    }
+
+    /// Selects a project tab, on the first enabled edge it has a member on. An
+    /// id that names no tab is ignored — a window with no selected tab is not a
+    /// state this window has, and it is a worse answer to a typo than doing
+    /// nothing.
+    public func selectTab(id: UUID) {
+        guard let group = tabGroups.first(where: { $0.id == id }) else { return }
+        for edge in Edge.allCases where tabbed.isEdgeEnabled(edge) {
+            if let memberID = group.members[edge] {
+                tabbed.selectTab(id: memberID, on: edge)
+                return
+            }
+        }
+    }
+
+    /// The drawer, as a setting rather than a toggle — a script says what it
+    /// wants, and saying it twice means the same as saying it once
+    /// (`idempotency`).
+    ///
+    /// Warning-free, and so callable from a wrapper that carries no
+    /// quarantine, because it goes through `HelpPresenting` like everything
+    /// else the window does with help.
+    public func setHelpVisible(_ visible: Bool) {
+        guard visible != isHelpVisible else { return }
+        toggleHelp()
+    }
+
+    /// Which drawer tab is showing; `nil` before the window has loaded.
+    ///
+    /// Through the presenter rather than through `helpDrawer`, for the reason
+    /// `toggleHelp()` is: `String?` names no deprecated type, so nothing on
+    /// this path — and nothing that reads it — has to carry the quarantine.
+    public var helpDrawerTabID: String? { helpPresenter?.helpTabID }
+
     // MARK: - Tab-edge accessors (used by Cocoa Scripting bridges)
 
     /// Names of the tab edges currently enabled in this window. Names are
@@ -557,6 +684,21 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     private func refreshSearchAvailability() {
         guard let field = searchField else { return }
         applySearchAvailability(to: field)
+    }
+
+    /// Hands a query to the pane the field is *advertising* — the one whose
+    /// placeholder is showing and whose enablement was computed — not whatever
+    /// is active this instant. If the two ever disagree the keystroke belongs
+    /// to neither, and silently sending it to the newcomer is the bug the
+    /// clear-on-change rule exists to prevent.
+    ///
+    /// One method for both callers, so a script setting `search query` reaches
+    /// exactly the pane a keystroke would (`dry`).
+    private func routeSearch(_ query: String) {
+        guard let nodeID = searchTargetNodeID,
+              let pane = activeSplit?.allLeaves().first(where: { $0.nodeID == nodeID })
+        else { return }
+        pane.search(for: query)
     }
 
     /// Takes the field as a parameter rather than reading `searchField`, so the
@@ -938,15 +1080,7 @@ extension ComposableTabsWindowController: NSSearchFieldDelegate {
     /// already makes.
     public func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSSearchField, field === searchField else { return }
-        // The pane the field is *advertising* — the one whose placeholder is
-        // showing and whose enablement was computed — not whatever is active
-        // this instant. If the two ever disagree the keystroke belongs to
-        // neither, and silently sending it to the newcomer is the bug the
-        // clear-on-change rule exists to prevent (`dry`).
-        guard let nodeID = searchTargetNodeID,
-              let pane = activeSplit?.allLeaves().first(where: { $0.nodeID == nodeID })
-        else { return }
-        pane.search(for: field.stringValue)
+        routeSearch(field.stringValue)
     }
 }
 
@@ -1110,6 +1244,11 @@ final class ProjectHelpDrawerController: NSObject, HelpPresenting {
     func setHelp(_ content: HelpContent?) {
         self.helpView.setHelp(content)
     }
+
+    /// The drawer's own answer, not the remembered preference: the preference
+    /// is what the drawer was *asked* for, and an id naming no tab is ignored
+    /// by the drawer, so the two can legitimately differ.
+    var helpTabID: String? { self.drawer.selectedTabID }
 
     func toggleHelp() {
         self.isOpen.toggle()

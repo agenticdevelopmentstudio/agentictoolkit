@@ -48,20 +48,8 @@ final class ProjectWindowSearchTests: XCTestCase {
         ))
     }
 
-    /// The repo is registered before the workspace is made: every layout row
-    /// carries a foreign key onto `git_repo`, so a workspace over an
-    /// unregistered repo silently persists nothing — and a seeded layout that
-    /// never landed reads back as a brand-new project.
     private func makeWorkspace() -> ProjectWorkspace {
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ProjectSearchTests-\(UUID().uuidString)")
-            .appendingPathComponent("Test.db").path
-        let repo = GitRepo(path: NSTemporaryDirectory(), name: "api-server")
-        // swiftlint:disable:next force_try
-        let database = try! ProjectDatabase(path: path)
-        // swiftlint:disable:next force_try
-        try! database.insert(repo)
-        return ProjectWorkspace(repo: repo, database: database)
+        ProjectWindowTestSupport.makeProject(label: "ProjectSearchTests")
     }
 
     /// A window whose one tab holds two panes side by side, with the *first* of
@@ -106,26 +94,6 @@ final class ProjectWindowSearchTests: XCTestCase {
         return tabbed?.selectedTab(on: .top)?.viewController as? ComposableTabsViewController
     }
 
-    /// AppKit only asks the delegate for items once a toolbar is on a window,
-    /// and a custom-view item is the only place an accessibility identifier can
-    /// live — so the test asks for them itself.
-    ///
-    /// Nothing is refreshed afterwards: the field has to be right the moment it
-    /// exists. A test that hand-ordered a refresh after the ask would be
-    /// arranging an ordering production only probably achieves.
-    @discardableResult
-    private func buildToolbarItems(
-        _ controller: ComposableTabsWindowController
-    ) -> [NSToolbarItem.Identifier] {
-        let toolbar = controller.toolbarDelegate.makeToolbar(identifier: "test.toolbar")
-        let identifiers = controller.toolbarDelegate.toolbarDefaultItemIdentifiers(toolbar)
-        for identifier in identifiers {
-            _ = controller.toolbarDelegate.toolbar(
-                toolbar, itemForItemIdentifier: identifier, willBeInsertedIntoToolbar: false)
-        }
-        return identifiers
-    }
-
     /// The delegate's sender is ignored by every method this file calls
     /// (`multiTabbedViewControllerNeedsNewTab` routes straight into the
     /// controller's own `addTabGroup()` without reading it), so a throwaway
@@ -142,7 +110,7 @@ final class ProjectWindowSearchTests: XCTestCase {
     }
 
     func testTheToolbarIsASpacerASearchFieldAndHelp() {
-        let identifiers = buildToolbarItems(makeController(searchable: true))
+        let identifiers = ProjectWindowTestSupport.buildToolbarItems(makeController(searchable: true))
 
         XCTAssertEqual(
             identifiers,
@@ -155,7 +123,7 @@ final class ProjectWindowSearchTests: XCTestCase {
 
     func testTheSearchFieldIsAddressable() throws {
         let controller = makeController(searchable: true)
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
 
         let field = try XCTUnwrap(controller.searchField)
         XCTAssertEqual(field.accessibilityIdentifier(), "project.toolbar.search")
@@ -166,7 +134,7 @@ final class ProjectWindowSearchTests: XCTestCase {
     /// item — hence no `refreshActivePaneChrome()` anywhere in this test.
     func testASearchablePaneEnablesTheFieldAndNamesIt() throws {
         let controller = makeController(searchable: true)
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
 
         let field = try XCTUnwrap(controller.searchField)
         XCTAssertTrue(field.isEnabled)
@@ -178,7 +146,7 @@ final class ProjectWindowSearchTests: XCTestCase {
     /// be searched" are two states this has to be able to tell apart.
     func testAPaneThatCannotBeSearchedDisablesTheField() throws {
         let controller = makeController(searchable: false)
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
 
         let field = try XCTUnwrap(controller.searchField)
         XCTAssertFalse(field.isEnabled)
@@ -187,7 +155,7 @@ final class ProjectWindowSearchTests: XCTestCase {
 
     func testTypingRoutesToTheActivePane() throws {
         let controller = makeController(searchable: true)
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
         let field = try XCTUnwrap(controller.searchField)
         let content = try XCTUnwrap(searchables.first)
 
@@ -206,7 +174,7 @@ final class ProjectWindowSearchTests: XCTestCase {
     /// show one pane's matches under another pane's name.
     func testChangingPanesClearsTheQuery() throws {
         let controller = makeController(searchable: true)
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
         let field = try XCTUnwrap(controller.searchField)
         field.stringValue = "main"
 
@@ -223,7 +191,7 @@ final class ProjectWindowSearchTests: XCTestCase {
     /// bridge both arrive there.
     func testDisablingTheActiveEdgeRetargetsTheField() throws {
         let controller = makeController(searchable: true)
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
         let field = try XCTUnwrap(controller.searchField)
 
         // Two edges and two tab groups, so the fallback has somewhere to land
@@ -244,7 +212,7 @@ final class ProjectWindowSearchTests: XCTestCase {
     /// search refresh on every frame.
     func testClosingTheFocusedPaneRetargetsTheField() throws {
         let controller = makeTwoPaneController()
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
         let field = try XCTUnwrap(controller.searchField)
         let split = try XCTUnwrap(activeSplit(of: controller))
         let leaves = split.allLeaves()
@@ -260,7 +228,7 @@ final class ProjectWindowSearchTests: XCTestCase {
     /// not throw away what the user has typed.
     func testARedundantRefreshKeepsTheQuery() throws {
         let controller = makeController(searchable: true)
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
         let field = try XCTUnwrap(controller.searchField)
         field.stringValue = "main"
 

@@ -19,6 +19,14 @@ public final class ProjectWindowManager: ProjectOpening {
     private static let openWindowKey = "window.open"
 
     private var controllers: [UUID: ComposableTabsWindowController] = [:]
+
+    /// The order projects were opened in.
+    ///
+    /// `controllers` is a `Dictionary`, whose value order is seeded per
+    /// process; scripting enumerates windows, tabs and panes through this, and
+    /// a script that lists `panes` twice must get the same order twice.
+    private var openOrder: [UUID] = []
+
     private var closeObservers: [UUID: NSObjectProtocol] = [:]
     private weak var coordinator: ProjectsCoordinator?
 
@@ -46,6 +54,33 @@ public final class ProjectWindowManager: ProjectOpening {
         controllers.values.map(\.project)
     }
 
+    /// Every open project window, in the order their projects were opened.
+    public var openWindowControllers: [ComposableTabsWindowController] {
+        openOrder.compactMap { controllers[$0] }
+    }
+
+    /// Registers a window this manager did not open, so scripting can see it.
+    /// Idempotent — adopting twice leaves one entry.
+    ///
+    /// For a host that builds a project window itself, and for the tests: the
+    /// scripting surface is "which project windows are open", and a window this
+    /// manager never opened is still open (`principle-of-least-astonishment`).
+    public func adoptForScripting(_ controller: ComposableTabsWindowController) {
+        let id = controller.project.id
+        guard controllers[id] == nil else { return }
+        controllers[id] = controller
+        openOrder.append(id)
+    }
+
+    /// The undo of `adoptForScripting(_:)`. Guarded on identity, so forgetting
+    /// a stale controller cannot evict the live window that replaced it.
+    public func forgetForScripting(_ controller: ComposableTabsWindowController) {
+        let id = controller.project.id
+        guard controllers[id] === controller else { return }
+        controllers.removeValue(forKey: id)
+        openOrder.removeAll { $0 == id }
+    }
+
     public func windowController(for repoID: UUID) -> ComposableTabsWindowController? {
         controllers[repoID]
     }
@@ -66,6 +101,7 @@ public final class ProjectWindowManager: ProjectOpening {
         let workspace = ProjectWorkspace(repo: repo, database: database)
         let controller = ComposableTabsWindowController(project: workspace)
         controllers[repo.id] = controller
+        openOrder.append(repo.id)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         observeClose(of: controller, repoID: repo.id)
@@ -169,6 +205,7 @@ public final class ProjectWindowManager: ProjectOpening {
                     self.setWindowOpen(false, repoID: repoID)
                 }
                 self.controllers.removeValue(forKey: repoID)
+                self.openOrder.removeAll { $0 == repoID }
                 if let observer = self.closeObservers.removeValue(forKey: repoID) {
                     NotificationCenter.default.removeObserver(observer)
                 }

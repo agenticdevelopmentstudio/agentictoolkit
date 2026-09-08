@@ -35,21 +35,8 @@ final class ProjectDrawerTests: XCTestCase {
             spec: .pane(alpha, allows: [.unbounded(alpha)])
         ))
 
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ProjectDrawerTests-\(UUID().uuidString)")
-            .appendingPathComponent("Test.db").path
-        let repo = GitRepo(path: NSTemporaryDirectory(), name: "api-server")
-        // swiftlint:disable:next force_try
-        let database = try! ProjectDatabase(path: path)
-        // The repo is registered before the workspace is made: every row keyed
-        // to a project carries a foreign key onto `git_repo`, so a workspace
-        // over an unregistered repo silently persists nothing — and every
-        // "the project remembered it" assertion below would be vacuous.
-        if registered {
-            // swiftlint:disable:next force_try
-            try! database.insert(repo)
-        }
-        return ProjectWorkspace(repo: repo, database: database)
+        return ProjectWindowTestSupport.makeProject(
+            label: "ProjectDrawerTests", registered: registered)
     }
 
     /// A window controller whose window exists. `showWindow(_:)` is what wires
@@ -58,23 +45,6 @@ final class ProjectDrawerTests: XCTestCase {
         let controller = ComposableTabsWindowController(project: project)
         controller.showWindow(nil)
         return controller
-    }
-
-    /// AppKit only asks the delegate for its items once the toolbar is on a
-    /// window, and a custom-view item is the only place an accessibility
-    /// identifier can live — so the test does the asking itself. The same
-    /// helper, for the same reason, as `ProjectWindowSearchTests`.
-    @discardableResult
-    private func buildToolbarItems(
-        _ controller: ComposableTabsWindowController
-    ) -> [NSToolbarItem.Identifier] {
-        let toolbar = controller.toolbarDelegate.makeToolbar(identifier: "test.toolbar")
-        let identifiers = controller.toolbarDelegate.toolbarDefaultItemIdentifiers(toolbar)
-        for identifier in identifiers {
-            _ = controller.toolbarDelegate.toolbar(
-                toolbar, itemForItemIdentifier: identifier, willBeInsertedIntoToolbar: false)
-        }
-        return identifiers
     }
 
     /// The `?` button, ready to be asserted on.
@@ -86,7 +56,7 @@ final class ProjectDrawerTests: XCTestCase {
     private func helpButton(
         of controller: ComposableTabsWindowController
     ) throws -> NSButton {
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
         controller.showWindow(nil)
         return try XCTUnwrap(
             controller.toolbarDelegate.button(for: NSToolbarItem.Identifier("project.toolbar.help")))
@@ -125,7 +95,7 @@ final class ProjectDrawerTests: XCTestCase {
     // MARK: - The toolbar button
 
     func testTheToolbarCarriesAHelpButtonAfterTheSearchField() {
-        let identifiers = buildToolbarItems(makeController(for: makeProject()))
+        let identifiers = ProjectWindowTestSupport.buildToolbarItems(makeController(for: makeProject()))
 
         XCTAssertEqual(
             identifiers,
@@ -138,7 +108,7 @@ final class ProjectDrawerTests: XCTestCase {
 
     func testTheHelpButtonIsAddressable() throws {
         let controller = makeController(for: makeProject())
-        buildToolbarItems(controller)
+        ProjectWindowTestSupport.buildToolbarItems(controller)
 
         let button = try XCTUnwrap(
             controller.toolbarDelegate.button(for: NSToolbarItem.Identifier("project.toolbar.help")))
