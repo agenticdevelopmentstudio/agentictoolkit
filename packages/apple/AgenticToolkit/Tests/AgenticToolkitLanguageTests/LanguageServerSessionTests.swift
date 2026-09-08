@@ -188,6 +188,44 @@ struct LanguageServerSessionTests {
         await session.stop()
     }
 
+    /// The semantic-token capabilities, asserted where they matter: in the
+    /// bytes the server actually reads.
+    ///
+    /// Each of these three is a promise about what we will render correctly,
+    /// and each fails *silently* if it is wrong — no error, no log, just the
+    /// wrong characters coloured or a token stream we throw half of away:
+    ///
+    /// - `multilineTokenSupport: false` — `TokenRepresentation`'s decoder ends
+    ///   every token on the line it began on, so a multiline token would be
+    ///   painted as a same-line range of the wrong length.
+    /// - `overlappingTokenSupport: false` — `SemanticTokenHighlightProvider`
+    ///   drops a token that starts before the previous one ended, because the
+    ///   package's own `applyHighlightResult` skips it anyway.
+    /// - `augmentsSyntaxTokens: true` — the library's default, and correct for
+    ///   us: tree-sitter is underneath, so a server that takes the hint sends
+    ///   fewer tokens and we lose nothing. Asserted so that "still the default"
+    ///   stays a decision rather than an accident.
+    ///
+    /// On the wire rather than by reading `LanguageServerSession`'s own static:
+    /// reading the static proves a Swift constant has a value, which is not the
+    /// question. The question is whether it is encoded and sent, and only the
+    /// child's copy of the bytes answers that.
+    @Test("the initialize request declares the semantic token capabilities we can actually honour")
+    func initializeRequestDeclaresSemanticTokenCapabilities() async throws {
+        let session = makeSession(script: Self.echoToStandardErrorScript)
+
+        // As above: the child never answers, so the handshake lapses. The
+        // assertions are about the bytes it saw on the way in.
+        await #expect(throws: (any Error).self) { try await session.start() }
+
+        let wire = await session.standardErrorText()
+        #expect(wire.contains(#""multilineTokenSupport":false"#))
+        #expect(wire.contains(#""overlappingTokenSupport":false"#))
+        #expect(wire.contains(#""augmentsSyntaxTokens":true"#))
+
+        await session.stop()
+    }
+
     // MARK: - 3. Transport error is observable
 
     /// A child that truncates mid-body must land the session in `.failed`

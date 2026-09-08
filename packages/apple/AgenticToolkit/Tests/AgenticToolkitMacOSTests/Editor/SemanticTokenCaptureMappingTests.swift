@@ -3,6 +3,7 @@
 //  AgenticToolkit
 //
 
+import AppKit
 import CodeEditSourceEditor
 import Foundation
 import LanguageServerProtocol
@@ -31,9 +32,11 @@ struct SemanticTokenCaptureMappingTests {
             ("enum", CaptureName.type),
             ("interface", CaptureName.type),
             ("struct", CaptureName.type),
-            ("typeParameter", CaptureName.typeAlternate),
+            // Ruling BG. `.typeAlternate` is the theme's `attributes` slot, so
+            // it would paint `T` like `@MainActor`; a generic parameter reads
+            // as a type, so it is painted as one.
+            ("typeParameter", CaptureName.type),
             ("parameter", CaptureName.parameter),
-            ("variable", CaptureName.variable),
             ("property", CaptureName.property),
             ("enumMember", CaptureName.property),
             ("function", CaptureName.function),
@@ -46,19 +49,28 @@ struct SemanticTokenCaptureMappingTests {
     }
 
     @Test(
-        "the lexical LSP token types are declined",
+        "the declined LSP token types are declined",
         arguments: [
-            // `event` has no `CaptureName` at all. The other seven are places
+            // `event` has no `CaptureName` at all. Seven of the rest are places
             // where tree-sitter is exact and *finer* — a grammar separates
             // `keywordReturn`, `keywordFunction`, `conditional`, `repeat` and
             // `boolean` where LSP has only `keyword` — so taking them over at
             // this priority would make highlighting worse the moment a server
             // appeared.
-            "event", "keyword", "modifier", "comment",
+            //
+            // `variable` is the ninth, and it declines for a stronger reason
+            // (Ruling AZ): it is the one row that could actively *undo* a
+            // grammar. `EditorTheme` paints `.variable` and `.variableBuiltin`
+            // in different colours, so a server's `variable` token for `self`
+            // would outrank tree-sitter's `.variableBuiltin` and strip the
+            // keyword colour `self` has today — while buying nothing, because
+            // an ordinary variable already lands on that same `variables`
+            // colour through the grammar.
+            "variable", "event", "keyword", "modifier", "comment",
             "string", "number", "regexp", "operator"
         ]
     )
-    func lexicalTypesAreDeclined(tokenType: String) {
+    func declinedTypesAreDeclined(tokenType: String) {
         #expect(SemanticTokenCaptureMapping.captureName(forTokenType: tokenType) == nil)
     }
 
@@ -75,4 +87,107 @@ struct SemanticTokenCaptureMappingTests {
     func unknownLegendStringsAreDeclined(tokenType: String) {
         #expect(SemanticTokenCaptureMapping.captureName(forTokenType: tokenType) == nil)
     }
+
+    @Test(
+        "every mapped row resolves to the theme colour the table claims",
+        arguments: [
+            ("namespace", "types"),
+            ("type", "types"),
+            ("class", "types"),
+            ("enum", "types"),
+            ("interface", "types"),
+            ("struct", "types"),
+            ("typeParameter", "types"),
+            ("parameter", "variables"),
+            ("property", "variables"),
+            ("enumMember", "variables"),
+            ("function", "variables"),
+            ("method", "variables"),
+            ("macro", "variables")
+        ]
+    )
+    @MainActor
+    func rowsResolveToTheThemeColourTheTableClaims(tokenType: String, field: String) {
+        let theme = makeSixteenDistinctColourTheme()
+        let controller = makeEditorTextViewController(text: "", theme: theme)
+
+        guard let capture = SemanticTokenCaptureMapping.captureName(forTokenType: tokenType) else {
+            Issue.record("\(tokenType) has left the table; this test lists the table and must be updated with it")
+            return
+        }
+
+        // Through `attributesFor`, which is the package's own public route from
+        // a `CaptureName` to a colour, rather than a reimplementation of
+        // `EditorTheme.mapCapture` here — that method is `private`, and a
+        // test-local copy of it would agree with itself forever.
+        let painted = controller.attributesFor(capture)[.foregroundColor] as? NSColor
+
+        #expect(
+            painted == expectedColour(named: field, in: theme),
+            """
+            \(tokenType) maps to \(capture), which no longer paints the theme's \(field) colour. \
+            Either the theme grew a field and this row can now say something finer, or a capture was \
+            re-routed underneath us. Update the table's comment as well as this list.
+            """
+        )
+    }
+}
+
+// MARK: - The sixteen-colour theme
+
+/// The `EditorTheme` field an expectation names, by name.
+///
+/// A `switch` rather than a `KeyPath`, because `EditorTheme` holds `NSColor` and
+/// is therefore not `Sendable`, which disqualifies a key path from being a test
+/// argument.
+private func expectedColour(named field: String, in theme: EditorTheme) -> NSColor? {
+    switch field {
+    case "types": return theme.types.color
+    case "variables": return theme.variables.color
+    case "keywords": return theme.keywords.color
+    case "attributes": return theme.attributes.color
+    case "text": return theme.text.color
+    default:
+        Issue.record("no EditorTheme field named \(field)")
+        return nil
+    }
+}
+
+/// A theme whose sixteen fields are sixteen different colours.
+///
+/// The shipped palettes reuse colours across fields, so a theme derived from one
+/// cannot tell you *which* field a capture landed in — only that it landed
+/// somewhere that looks plausible. Sixteen distinct greys make the question
+/// answerable.
+private func makeSixteenDistinctColourTheme() -> EditorTheme {
+    // sRGB, not `calibratedWhite`: the editor converts theme colours to HSB
+    // while it builds its views, and that conversion throws on a colour in the
+    // calibrated-white space rather than returning a wrong answer.
+    var next = 0.0
+    func distinct() -> NSColor {
+        next += 1
+        return NSColor(srgbRed: next / 20.0, green: 1 - next / 20.0, blue: 0.5, alpha: 1)
+    }
+    func attribute() -> EditorTheme.Attribute {
+        EditorTheme.Attribute(color: distinct())
+    }
+
+    return EditorTheme(
+        text: attribute(),
+        insertionPoint: distinct(),
+        invisibles: attribute(),
+        background: distinct(),
+        lineHighlight: distinct(),
+        selection: distinct(),
+        keywords: attribute(),
+        commands: attribute(),
+        types: attribute(),
+        attributes: attribute(),
+        variables: attribute(),
+        values: attribute(),
+        numbers: attribute(),
+        strings: attribute(),
+        characters: attribute(),
+        comments: attribute()
+    )
 }

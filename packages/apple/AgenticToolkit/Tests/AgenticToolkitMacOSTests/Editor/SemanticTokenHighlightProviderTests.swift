@@ -120,11 +120,17 @@ struct SemanticTokenHighlightProviderTests {
         _ description: String,
         _ condition: () async -> Bool
     ) async throws {
-        for _ in 0..<400 where await !condition() {
+        // `for _ in 0..<400 where await !condition()` reads like this and is
+        // not: `where` is a filter on the iteration, not a break, so the loop
+        // runs all four hundred times and sleeps through most of them long
+        // after the condition became true.
+        for _ in 0..<400 {
+            if await condition() { return }
             try? await Task.sleep(for: .milliseconds(5))
         }
-        let held = await condition()
-        try #require(held, "timed out waiting for: \(description)")
+        // One last look: the final sleep may have been the one the condition
+        // was waiting on.
+        try #require(await condition(), "timed out waiting for: \(description)")
     }
 
     /// Runs one query and returns what its completion was called with, asserting
@@ -196,16 +202,26 @@ struct SemanticTokenHighlightProviderTests {
         #expect(highlights.first?.capture == .function)
     }
 
-    @Test("a token past the end of the document is dropped and the rest still arrive")
-    func tokensPastTheEndAreDropped() async throws {
+    /// What this pins is `TokenRepresentation`'s truncation, not our own line
+    /// guard — and the name says so because the distinction decides what a
+    /// failure here means.
+    ///
+    /// `decodeTokens` is handed the whole-document range and `break`s at the
+    /// first token whose start is at or past its end, so the out-of-range token
+    /// below never reaches `nsRange(for:)` at all. The guard on that line is
+    /// unreachable by construction today (see its comment) and this test does
+    /// not cover it; what it does cover is the dependency's behaviour, which we
+    /// do not own and which a package bump could change to clamping. Clamping
+    /// would paint a span of text that has nothing to do with the symbol, and
+    /// this is where that would be caught.
+    @Test("the decoder truncates at the end of the document and the earlier tokens still arrive")
+    func tokensPastTheEndAreTruncatedByTheDecoder() async throws {
         let harness = try await makeHarness(
             text: "let value = 1\n",
             capabilities: makeSemanticTokenCapabilities(legend: Self.legend),
             response: Self.makeTokens([
                 WireToken(deltaLine: 0, deltaStartChar: 4, length: 5, typeIndex: 3),
-                // Line 50 of a two-line file. A clamping conversion would put
-                // this at the end of the buffer and paint a span of text that
-                // has nothing to do with the symbol.
+                // Line 50 of a two-line file.
                 WireToken(deltaLine: 50, deltaStartChar: 0, length: 3, typeIndex: 2)
             ])
         )
@@ -461,6 +477,71 @@ struct SemanticTokenHighlightProviderTests {
         await harness.provider.awaitPendingFetch()
         await Task.yield()
         #expect(results.count == 1)
+    }
+
+    /// ★ The test that fails, by crashing the whole test runner, if the token
+    /// array is handed to the decoder unvalidated.
+    ///
+    /// `TokenRepresentation.decodeTokens` strides by five and indexes
+    /// `data[i + 3]` with no bound check, so seven values is not "one and a bit
+    /// tokens", it is an out-of-bounds read on the second stride — a trap, in
+    /// the app, not an error in this pane. A truncated write, a proxy that split
+    /// a frame, or a server bug is all it takes.
+    ///
+    /// The second half of the assertion matters as much as the first: the query
+    /// must fail with `operationCancelled` rather than succeed with `[]`.
+    /// `HighlightProviderState` marks a range valid on *any* success and only
+    /// re-invalidates on that one error, so an empty answer here would claim
+    /// "there is nothing to paint in this document" for the life of the buffer
+    /// on the strength of a response we could not read a single token of.
+    @Test("a token array whose count is not a multiple of five is refused rather than decoded")
+    func aRaggedTokenArrayIsRefusedRatherThanDecoded() async throws {
+        let harness = try await makeHarness(
+            text: "let value = 1\n",
+            capabilities: makeSemanticTokenCapabilities(legend: Self.legend),
+            // One whole token (`value`, legend index 3) and two stray values.
+            // Enough to prove the response is refused as a unit: there is no
+            // knowing *which* five-tuple lost values, so the readable-looking
+            // prefix is not readable either.
+            response: SemanticTokens(data: [0, 4, 5, 3, 0, 0, 4])
+        )
+        await harness.session.holdNextSemanticTokens(1)
+
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        try await waitUntil("the first request to reach the server") {
+            await harness.session.heldSemanticTokensCount == 1
+        }
+
+        // Parked before the malformed answer lands, so this is the query the
+        // failure has to reach.
+        var results: [Result<[HighlightRange], Error>] = []
+        harness.provider.queryHighlightsFor(
+            textView: harness.textView,
+            range: harness.textView.documentRange
+        ) { results.append($0) }
+        #expect(results.isEmpty)
+
+        await harness.session.releaseHeldSemanticTokens()
+        await harness.provider.awaitPendingFetch()
+
+        try #require(results.count == 1, "expected exactly one completion call, got \(results.count)")
+        guard case .failure(let error) = results[0] else {
+            Issue.record(
+                """
+                the query succeeded; any success marks the range permanently valid, which is the one \
+                thing a response we could not read a single token of must not do
+                """
+            )
+            return
+        }
+        // Matched rather than compared: `HighlightProvidingError` is not
+        // `Equatable`, and it is the *identity* of this case that matters —
+        // `operationCancelled` is the only result `HighlightProviderState`
+        // re-invalidates and re-queries on.
+        guard case .operationCancelled? = error as? HighlightProvidingError else {
+            Issue.record("expected HighlightProvidingError.operationCancelled, got \(error)")
+            return
+        }
     }
 
     @Test("a server error settles as no highlights rather than leaving the query parked")

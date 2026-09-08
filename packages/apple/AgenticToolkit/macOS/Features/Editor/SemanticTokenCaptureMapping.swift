@@ -60,28 +60,36 @@ enum SemanticTokenCaptureMapping {
     /// ruled on.
     ///
     /// Adding a row later is a one-line change that breaks no test.
+    ///
+    /// **What the thirteen rows are actually distinguishable as.** `EditorTheme`
+    /// has sixteen flat colour fields and `CaptureName` collapses into them, so
+    /// the table's variety is not the screen's: seven rows (`namespace`, `type`,
+    /// `class`, `enum`, `interface`, `struct`, `typeParameter`) all paint the
+    /// theme's `types` colour, and the other six (`parameter`, `variable`-role
+    /// `property`, `enumMember`, `method`, `function`, `macro`) all paint
+    /// `variables`. Two colours, thirteen rows. That is a fact about the theme,
+    /// not a defect here — but it decides what a new row can possibly buy, so
+    /// `semanticTokenCaptureRowsResolveToTheExpectedThemeColour` pins every row
+    /// to the field it lands in, and will fail if the theme grows a field or
+    /// re-routes a capture.
     private static func capture(for type: SemanticTokenTypes) -> CaptureName? {
         switch type {
-        // Type-ish. All six collapse onto `.type` because `CaptureName` has no
+        // Type-ish. All seven collapse onto `.type` because `CaptureName` has no
         // `class`/`struct`/`enum`/`interface` case and `EditorTheme` has a
         // single `types` colour behind all of them.
-        case .namespace, .type, .class, .enum, .interface, .struct:
+        //
+        // `typeParameter` is here by Ruling BG rather than at `.typeAlternate`,
+        // which is the theme's `attributes` slot: painting `T` like `@MainActor`
+        // is a worse lie than painting it like `Int`, because a generic
+        // parameter *is* a type in every way a reader cares about at a glance.
+        case .namespace, .type, .class, .enum, .interface, .struct, .typeParameter:
             return .type
-
-        // The one judgment call. A generic parameter *is* a type, but painting
-        // it the same colour as the concrete types around it loses what makes
-        // it interesting; `.typeAlternate` is the theme's `attributes` slot,
-        // the only other type-adjacent colour there is.
-        case .typeParameter:
-            return .typeAlternate
 
         // Identifier roles — the whole reason to ask a server at all. These are
         // the distinctions a lexer cannot make, and the ones a grammar gets
         // wrong or leaves as a bare `variable`.
         case .parameter:
             return .parameter
-        case .variable:
-            return .variable
         case .property, .enumMember:
             return .property
         case .method:
@@ -92,10 +100,19 @@ enum SemanticTokenCaptureMapping {
         case .function, .macro:
             return .function
 
-        // Declined. `event` has no `CaptureName` at all. The other seven are
+        // Declined. `event` has no `CaptureName` at all. Seven of the rest are
         // places tree-sitter is exact and finer, so taking them over at this
         // priority would be a downgrade.
-        case .event, .keyword, .modifier, .comment, .string, .number, .regexp, .operator:
+        //
+        // `variable` declines by Ruling AZ, and for a sharper reason than the
+        // lexical seven: it cannot improve on the grammar and it can degrade it.
+        // `EditorTheme` routes `.variable` and `.variableBuiltin` to *different*
+        // colours, so a server's `variable` token for `self` — servers do emit
+        // one — outranks tree-sitter's `.variableBuiltin` and takes away the
+        // keyword colour `self` had before this feature existed. Every other
+        // collapsing row replaces a tree-sitter capture that maps to the same
+        // colour, so those are neutral; this one is not.
+        case .variable, .event, .keyword, .modifier, .comment, .string, .number, .regexp, .operator:
             return nil
         }
     }

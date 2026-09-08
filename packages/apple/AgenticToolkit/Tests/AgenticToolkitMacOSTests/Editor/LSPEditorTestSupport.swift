@@ -593,15 +593,22 @@ func ensureEditorLanguageResourcesLocated() -> Bool {
 /// every content replacement, and `gutterView` is an implicitly-unwrapped
 /// optional built in `loadView()` — so an unloaded controller traps the moment
 /// a completion is applied through it.
+/// The `theme:` parameter exists for the one suite that reads colours back out
+/// rather than text: a palette-derived theme reuses colours across its sixteen
+/// fields, so an assertion about *which* field a capture lands in needs a theme
+/// whose fields are all different. Everything else takes the default.
 @MainActor
-func makeEditorTextViewController(text: String) -> TextViewController {
+func makeEditorTextViewController(
+    text: String,
+    theme: EditorTheme = SemanticPalette(theme: BuiltInThemes.dracula).editorTheme
+) -> TextViewController {
     _ = editorLanguageResourcesLocated
     let controller = TextViewController(
         string: text,
         language: .default,
         configuration: SourceEditorConfiguration(
             appearance: .init(
-                theme: SemanticPalette(theme: BuiltInThemes.dracula).editorTheme,
+                theme: theme,
                 font: .monospacedSystemFont(ofSize: 12, weight: .regular),
                 wrapLines: false
             )

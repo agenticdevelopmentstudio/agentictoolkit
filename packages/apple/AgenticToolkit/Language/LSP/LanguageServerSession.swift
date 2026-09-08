@@ -889,11 +889,7 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// told we support a capability we do not honour sends requests we drop on
     /// the floor, and the failure then surfaces as the editor mysteriously not
     /// working rather than as an error.
-    /// Internal rather than `private` so a test can assert on what is actually
-    /// declared. The semantic-token flags below are a promise to a real server
-    /// about what we will render correctly, and a promise that specific is
-    /// worth an assertion rather than a reading.
-    static let clientCapabilities = ClientCapabilities(
+    private static let clientCapabilities = ClientCapabilities(
         workspace: nil,
         textDocument: TextDocumentClientCapabilities(
             synchronization: TextDocumentSyncClientCapabilities(
@@ -925,20 +921,38 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
                 relatedInformation: true,
                 versionSupport: true
             ),
-            // `multilineTokenSupport` is `true` by default and is corrected
-            // here, because we do not honour it: the decoder we render tokens
-            // through, `TokenRepresentation.decodeTokens`, computes every
-            // token's end as `Position(line: line, character: startChar +
-            // length)` — always the *same* line. A server taking the default
-            // at its word and emitting a token that spans lines would have it
-            // painted as a same-line range of the wrong length, silently
-            // colouring the wrong characters.
+            // Two of this initialiser's defaults are promises we cannot keep,
+            // so both are spelled out as `false` rather than inherited. They
+            // are written here, together, because they fail the same way: a
+            // conforming server takes the declaration at its word, sends what
+            // it was told we could render, and the tokens are silently lost or
+            // silently misplaced. Neither surfaces as an error.
             //
-            // Every other default is left alone. `augmentsSyntaxTokens: true`
-            // in particular is correct for us and must stay: tree-sitter
-            // highlights underneath the semantic layer, so a server that takes
-            // that hint sends fewer tokens and we lose nothing.
-            semanticTokens: SemanticTokensClientCapabilities(multilineTokenSupport: false)
+            // `overlappingTokenSupport` defaults to `true`, and
+            // `SemanticTokenHighlightProvider.decode` drops any token that
+            // starts before the previous one ended — it must, because
+            // `StyledRangeContainer.applyHighlightResult` lays runs end to end
+            // and skips an overlapping one anyway. Declaring `false` turns that
+            // from data loss into a request the server never makes; the drop
+            // stays as a defensive path, and logs, for a server that sends
+            // overlap regardless.
+            //
+            // `multilineTokenSupport` defaults to `true` and is equally wrong:
+            // the decoder we render through, `TokenRepresentation.decodeTokens`,
+            // computes every token's end as `Position(line: line, character:
+            // startChar + length)` — always the *same* line. A multiline token
+            // would be painted as a same-line range of the wrong length,
+            // colouring characters that have nothing to do with the symbol.
+            //
+            // Neither is a default anyone should restore without changing the
+            // renderer first. `augmentsSyntaxTokens: true`, by contrast, is
+            // correct for us and is left inherited: tree-sitter highlights
+            // underneath the semantic layer, so a server that takes that hint
+            // sends fewer tokens and we lose nothing.
+            semanticTokens: SemanticTokensClientCapabilities(
+                overlappingTokenSupport: false,
+                multilineTokenSupport: false
+            )
         ),
         window: nil,
         general: nil,

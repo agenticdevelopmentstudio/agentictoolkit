@@ -3,6 +3,7 @@
 //  AgenticToolkit
 //
 
+import AgenticToolkitCore
 import AgenticToolkitLanguage
 import CodeEditLanguages
 // `@preconcurrency`: `HighlightProviding`'s two callbacks are declared
@@ -18,6 +19,7 @@ import CodeEditLanguages
 import CodeEditTextView
 import Foundation
 import LanguageServerProtocol
+import os
 
 /// Paints one document with `textDocument/semanticTokens/full`, on top of
 /// tree-sitter.
@@ -122,6 +124,14 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         let id: Int
         let range: NSRange
         let completion: @MainActor (Result<[HighlightRange], Error>) -> Void
+        /// The task that will answer this query if nothing else does.
+        ///
+        /// Held so that resolution can cancel it. Left running it would sleep
+        /// out the full timeout after the query it guards has already been
+        /// answered, and sustained typing issues a query per invalidation —
+        /// so the steady-state count is the typing rate times five seconds, of
+        /// tasks that exist only to find nothing and return.
+        var timeout: Task<Void, Never>?
     }
 
     init(
@@ -141,6 +151,12 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     // spelling `FileEditorState.deinit` uses, for the same reason.
     isolated deinit {
         fetchTask?.cancel()
+        // The package drops its `weak` reference to this provider when the pane
+        // closes, and a parked query's timeout would otherwise sleep on for the
+        // rest of its five seconds with nothing left to answer.
+        for query in pendingQueries {
+            query.timeout?.cancel()
+        }
     }
 
     // MARK: - HighlightProviding
@@ -181,9 +197,23 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         pendingQueries.append(PendingQuery(id: id, range: range, completion: completion))
 
         let timeout = queryTimeout
-        Task { @MainActor [weak self] in
+        let task = Task { @MainActor [weak self] in
             try? await Task.sleep(for: timeout)
+            // Cancelled means the query was already answered and this entry is
+            // gone; `resolvePendingQuery` would find nothing, but not waking
+            // the main actor at all is the point of the cancellation.
+            guard !Task.isCancelled else { return }
             self?.resolvePendingQuery(id: id)
+        }
+        // Recorded after the fact because the task needs the id and the entry
+        // needs the task. Nothing can have removed the entry in between — the
+        // task's first act is a sleep and this is the same synchronous
+        // main-actor region — but if that ever stops being true, the entry is
+        // gone and the task has nothing to guard.
+        if let index = pendingQueries.firstIndex(where: { $0.id == id }) {
+            pendingQueries[index].timeout = task
+        } else {
+            task.cancel()
         }
     }
 
@@ -294,7 +324,46 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
             return
         }
 
+        // The token array is untrusted input and `TokenRepresentation` trusts it
+        // completely: `decodeTokens` strides by five and indexes `data[i + 1]`,
+        // `data[i + 2]` and `data[i + 3]` with no bound check at all. A ragged
+        // array — a truncated write, a proxy that split a frame, a server bug —
+        // therefore does not produce bad colours, it traps, and the trap takes
+        // the whole app down rather than this pane. Five values per token is the
+        // wire format; a count that is not a multiple of five is not a response
+        // we can read any part of, because we cannot know which part is missing.
+        if let tokens = response, !tokens.data.count.isMultiple(of: 5) {
+            Self.logger.error(
+                """
+                Language server \(session.name, privacy: .public) answered \
+                semanticTokens/full with \(tokens.data.count, privacy: .public) values, \
+                which is not a multiple of 5. Discarding the response.
+                """
+            )
+            abandonFetch()
+            return
+        }
+
         store(decode(response, legend: legend), stamp: stamp)
+    }
+
+    /// Ends a fetch that produced nothing readable, **without** settling the
+    /// document.
+    ///
+    /// Deliberately not `store([])`. An empty answer is a *settled* answer: the
+    /// package moves the queried range into its `validSet` the moment the
+    /// completion runs and, because nothing outside `CodeEditSourceEditor` can
+    /// reach `Highlighter.invalidate()`, never asks about that range again. So
+    /// claiming "no highlights here" on the strength of a response we could not
+    /// read would paint that claim for the life of the buffer.
+    /// `operationCancelled` is the one result the package retries, so parked
+    /// queries are failed with it and their ranges go back to being invalid.
+    ///
+    /// `highlights` and `highlightsStamp` are left untouched: this fetch learned
+    /// nothing, so it has no business moving a bar that would refuse a fetch
+    /// that did.
+    private func abandonFetch() {
+        failPendingQueries()
     }
 
     /// Records a fetch's answer unless newer information has already landed,
@@ -360,6 +429,7 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
 
         var result: [HighlightRange] = []
         var lastEnd = 0
+        var overlapping = 0
         for token in representation.decodeTokens(in: whole) {
             guard let capture = SemanticTokenCaptureMapping.captureName(forTokenType: token.tokenType) else {
                 // Ruling AU: a token we have nothing to say about produces no
@@ -370,11 +440,18 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
                 continue
             }
             guard let range = nsRange(for: token.range) else { continue }
-            // `StyledRangeContainer.applyHighlightResult` requires ascending,
-            // non-overlapping ranges and silently *skips* anything that
-            // overlaps what came before, which would shift every following run.
-            // Enforced here rather than trusted: the ordering is the server's.
-            guard range.location >= lastEnd else { continue }
+            // We declare `overlappingTokenSupport: false`, so a conforming
+            // server does not send overlap and this never fires. It is kept
+            // because a server is free to ignore what we declared, and
+            // `StyledRangeContainer.applyHighlightResult` would then `continue`
+            // past the overlapping run — dropping it just as silently, one layer
+            // further from anyone who could diagnose it. Counted and logged
+            // below rather than dropped without a word: a server sending what we
+            // said we could not take is a fact worth being able to find.
+            guard range.location >= lastEnd else {
+                overlapping += 1
+                continue
+            }
             // Modifiers are dead end to end, in two independent places:
             // `TokenRepresentation.makeToken` hardcodes `modifiers: Set()` and
             // never reads the bitmask at `data[i + 4]`, and
@@ -382,6 +459,15 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
             // entirely. Decoding them would change no colour, weight or slant.
             result.append(HighlightRange(range: range, capture: capture, modifiers: []))
             lastEnd = range.upperBound
+        }
+        if overlapping > 0 {
+            Self.logger.error(
+                """
+                Dropped \(overlapping, privacy: .public) overlapping semantic token(s) for \
+                \(self.document.uri, privacy: .public); the client declares \
+                overlappingTokenSupport: false.
+                """
+            )
         }
         return result
     }
@@ -405,13 +491,22 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         // always ends a token on the line it started on, so the start line is
         // the whole question.
         //
-        // Belt and braces, and deliberately so: `decodeTokens` also `break`s at
-        // the first token starting at or after the end of the range it is given,
-        // and the range given above is the whole document — so today a token
-        // past the end never reaches here. That is a fact about the *package's*
-        // loop, not about this conversion, and it is the loop that would have to
-        // keep being true for the clamp to stay harmless. This guard is what
-        // makes the clamp harmless here instead.
+        // **Unreachable by construction today, and kept anyway.** The proof is
+        // three facts about the caller and the dependency, all of which have to
+        // hold together: `decodeTokens` is given the *whole* document range; it
+        // `break`s at the first token whose start is at or after that range's
+        // end; and a token's line is non-decreasing through that loop, because
+        // `deltaLine` is a `UInt32`. So the first token naming a line past the
+        // last one ends the loop, and no token after it can name an earlier
+        // line. Nothing with an out-of-range line reaches this function.
+        //
+        // Every one of those three is a fact about a package we do not own,
+        // reached through a range this file chooses. This guard is what makes
+        // `TextDocument`'s clamping conversion harmless if any of them changes —
+        // a range request instead of a full one would break the first, and only
+        // this guard would stand between a clamp and a span of unrelated text
+        // painted at the end of the file. It costs one round trip per token.
+        // `tokensPastTheEndAreTruncatedByTheDecoder` pins the dependency half.
         let lineStart = document.utf16Offset(for: Position(line: range.start.line, character: 0))
         guard document.position(forUTF16Offset: lineStart).line == range.start.line else { return nil }
 
@@ -443,6 +538,7 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     private func resolvePendingQuery(id: Int) {
         guard let index = pendingQueries.firstIndex(where: { $0.id == id }) else { return }
         let query = pendingQueries.remove(at: index)
+        query.timeout?.cancel()
         query.completion(.success(Self.clip(highlights ?? [], to: query.range)))
     }
 
@@ -453,6 +549,7 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         let queries = pendingQueries
         pendingQueries = []
         for query in queries {
+            query.timeout?.cancel()
             query.completion(.success(Self.clip(highlights ?? [], to: query.range)))
         }
     }
@@ -461,7 +558,12 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         let queries = pendingQueries
         pendingQueries = []
         for query in queries {
+            query.timeout?.cancel()
             query.completion(.failure(HighlightProvidingError.operationCancelled))
         }
     }
+}
+
+extension SemanticTokenHighlightProvider: Loggable {
+    static nonisolated let logger = makeLogger()
 }
