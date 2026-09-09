@@ -18,7 +18,10 @@ final class NotesCoordinatorMenuTests: XCTestCase {
     }
 
     private func makeCoordinator() -> NotesCoordinator {
-        let coordinator = NotesCoordinator(storage: EmptyNoteStorage())
+        let coordinator = NotesCoordinator(
+            storage: EmptyNoteStorage(),
+            commandRegistry: CommandRegistry()
+        )
         addTeardownBlock { @MainActor in
             coordinator.notesWindowController.window?.close()
             coordinator.unregister()

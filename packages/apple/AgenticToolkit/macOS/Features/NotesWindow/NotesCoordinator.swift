@@ -31,12 +31,13 @@ public final class NotesCoordinator: AppFeature {
         public static let deleteFolder = "notes.action.deleteFolder"
     }
 
-    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — `nil`
-    ///   gives this feature a private registry and behaves exactly as before.
+    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — required,
+    ///   so a dropped registry is a compile error rather than a palette that
+    ///   silently lost this feature.
     public init(
         storage: NoteStorage,
         statusItemButtonFrameProvider: @escaping () -> NSRect = { .zero },
-        commandRegistry: CommandRegistry? = nil
+        commandRegistry registry: CommandRegistry
     ) {
         let manager = NotesManager(storage: storage)
         self.notesManager = manager
@@ -73,7 +74,6 @@ public final class NotesCoordinator: AppFeature {
             self?.activeNotesViewController != nil
         }
 
-        let registry = commandRegistry ?? CommandRegistry()
         registry.register(AppCommand(
             id: CommandID.showNotes,
             title: "Notes",

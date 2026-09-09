@@ -53,17 +53,23 @@ public final class ProjectsCoordinator: AppFeature {
     }
 
     /// - Parameter commandRegistry: Where this feature's actions are registered
-    ///   so a palette, a shortcut or an extension can reach them by id. Left
-    ///   `nil` — as every pre-existing caller does — the feature makes a private
-    ///   one, which keeps the menu working exactly as before and simply means
-    ///   nothing else can see these commands. Optional rather than required so
-    ///   this stays purely additive for hosts (the demo app, Stenographer) that
-    ///   have no palette to feed.
+    ///   so a palette, a shortcut or an extension can reach them by id.
+    ///
+    ///   **Required, deliberately.** A defaulted private registry would let a
+    ///   caller omit the argument and still get a working menu — while the
+    ///   palette silently lost this entire feature's commands, with no log, no
+    ///   crash and nothing a test could observe, since a private registry is
+    ///   reachable only through the closures its own menu items captured. That
+    ///   is the exact silent-wrong-behaviour the rest of this design refuses
+    ///   (`execute` throws rather than no-op'ing; `isEnabled(id:)` answers
+    ///   `false`, not `true`, for an id nobody registered). Requiring the
+    ///   parameter moves the failure to compile time, where it costs one line
+    ///   to fix.
     public init(
         database: ProjectDatabase,
         scanner: GitRepoScanner? = nil,
         opener: ProjectOpening? = nil,
-        commandRegistry: CommandRegistry? = nil
+        commandRegistry registry: CommandRegistry
     ) throws {
         self.database = database
         self.injectedScanner = scanner
@@ -72,7 +78,6 @@ public final class ProjectsCoordinator: AppFeature {
 
         self.repos = (try? database.allRepos()) ?? []
 
-        let registry = commandRegistry ?? CommandRegistry()
         registry.register(AppCommand(
             id: CommandID.openProject,
             title: "Open Project…",

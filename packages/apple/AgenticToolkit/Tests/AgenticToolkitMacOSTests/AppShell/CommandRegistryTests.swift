@@ -367,14 +367,34 @@ struct CoordinatorCommandRoutingTests {
         #expect(registry.allCommands.count == 3)
     }
 
-    @Test("A coordinator built without a registry still has working menu items")
-    func coordinatorWithoutARegistryStillWorks() {
-        let coordinator = TerminalCoordinator()
+    @Test("Every contribution resolves through the caller's registry, never a private one")
+    func contributionsResolveThroughTheCallersRegistry() {
+        let registry = CommandRegistry()
+        let coordinator = TerminalCoordinator(commandRegistry: registry)
         defer { coordinator.unregister() }
 
         #expect(coordinator.menuContributions.count == 4)
-        // Enabled means the private fallback registry really was populated —
-        // an unregistered id would answer `false` here.
         #expect(coordinator.menuContributions.allSatisfy { $0.isEnabled() })
+
+        // The negative control, and the reason `commandRegistry` is required
+        // rather than defaulted: disabling a command *on the caller's registry*
+        // must reach the menu items. A coordinator that had quietly fallen back
+        // to a private registry would ignore this entirely and leave all four
+        // items enabled — which is exactly the silent half-populated palette an
+        // optional parameter made possible.
+        registry.register(AppCommand(
+            id: TerminalCoordinator.CommandID.newWindow,
+            title: "New Terminal Window",
+            category: "Terminal",
+            isEnabled: { false },
+            run: {}
+        ))
+
+        let windowItems = coordinator.menuContributions.filter { $0.title == "New Terminal Window" }
+        #expect(windowItems.count == 2)
+        #expect(windowItems.allSatisfy { !$0.isEnabled() })
+        #expect(coordinator.menuContributions
+            .filter { $0.title != "New Terminal Window" }
+            .allSatisfy { $0.isEnabled() })
     }
 }

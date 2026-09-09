@@ -15,14 +15,21 @@ class Features {
     let windowContextsCoordinator: WindowContextsCoordinator
     let settingsCoordinator: ComposableSettings.AppCoordinator
 
+    /// Every named action this app can run, in one place. Built before any
+    /// coordinator so all three register into the same registry — which is what
+    /// a command palette, a shortcut or an extension would enumerate.
+    let commandRegistry: CommandRegistry
     let menuManager: MenuManager
 
     init() {
+        let commandRegistry = CommandRegistry()
+        self.commandRegistry = commandRegistry
+
         self.appearanceManager = AppearanceManager()
         self.permissionWalkthrough = PermissionWalkthrough()
         let aiPluginsCoordinator = AIPluginsCoordinator(appName: "AgenticPluginTester")
         self.aiPluginsCoordinator = aiPluginsCoordinator
-        self.terminalCoordinator = TerminalCoordinator()
+        self.terminalCoordinator = TerminalCoordinator(commandRegistry: commandRegistry)
         self.windowContextsCoordinator = WindowContextsCoordinator()
 
         // Chat runs through the loaded plugins: the config provider reports the
@@ -35,7 +42,7 @@ class Features {
                 pluginManager: aiPluginsCoordinator.pluginManager,
                 configProvider: chatConfigProvider
             )
-        })
+        }, commandRegistry: commandRegistry)
 
         self.settingsCoordinator = ComposableSettings.AppCoordinator(
             windowTitle: "Agentic Toolkit Settings",
@@ -43,7 +50,8 @@ class Features {
                 AppearanceSettingsPanelViewController(),
                 GeneralSettingsPanelViewController(),
                 PermissionsSettingsPanelViewController()
-            ]
+            ],
+            commandRegistry: commandRegistry
         )
 
         self.menuManager = MenuManager()

@@ -15,13 +15,13 @@ extension ComposableSettings {
             public static let showSettings = "settings.action.showSettings"
         }
 
-        /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — `nil`
-        ///   gives this feature a private registry and behaves exactly as
-        ///   before.
+        /// - Parameter commandRegistry: See `ProjectsCoordinator.init` —
+        ///   required, so a dropped registry is a compile error rather than a
+        ///   palette that silently lost this feature.
         public init(
             windowTitle: String = "Settings",
             settingsPanels: [any ComposableSettingsPanel],
-            commandRegistry: CommandRegistry? = nil
+            commandRegistry registry: CommandRegistry
         ) {
             let settingsWindow = ComposableSettings.SettingsWindow()
             settingsWindow.windowTitle = windowTitle
@@ -37,7 +37,6 @@ extension ComposableSettings {
             self.settingsWindow = settingsWindow
             super.init()
 
-            let registry = commandRegistry ?? CommandRegistry()
             registry.register(AppCommand(
                 id: CommandID.showSettings,
                 title: "Settings…",

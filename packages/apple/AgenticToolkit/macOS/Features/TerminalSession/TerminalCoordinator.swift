@@ -22,15 +22,14 @@ public final class TerminalCoordinator: AppFeature, TerminalSessionWindowLifecyc
         public static let toggleSidebar = "terminal.action.toggleSidebar"
     }
 
-    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — `nil`
-    ///   gives this feature a private registry and behaves exactly as before,
-    ///   which is what keeps `TerminalCoordinator()` compiling unchanged.
-    public init(commandRegistry: CommandRegistry? = nil) {
+    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — required,
+    ///   so a dropped registry is a compile error rather than a palette that
+    ///   silently lost this feature.
+    public init(commandRegistry registry: CommandRegistry) {
         super.init()
 
         self.scriptingKeys.insert("terminalSessions")
 
-        let registry = commandRegistry ?? CommandRegistry()
         registry.register(AppCommand(
             id: CommandID.newWindow,
             title: "New Terminal Window",

@@ -21,16 +21,16 @@ public final class AIChatCoordinator: AppFeature {
         public static let showWindow = "aichat.action.showWindow"
     }
 
-    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — `nil`
-    ///   gives this feature a private registry and behaves exactly as before.
+    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — required,
+    ///   so a dropped registry is a compile error rather than a palette that
+    ///   silently lost this feature.
     public init(
         makeSession: @escaping () -> any ChatSession,
-        commandRegistry: CommandRegistry? = nil
+        commandRegistry registry: CommandRegistry
     ) {
         self.makeSession = makeSession
         super.init()
 
-        let registry = commandRegistry ?? CommandRegistry()
         registry.register(AppCommand(
             id: CommandID.showWindow,
             title: "AI Chat",
@@ -65,11 +65,11 @@ public final class AIChatCoordinator: AppFeature {
     /// migrate, then deleted.
     public convenience init(
         makeBackend: @escaping () -> ChatBackend,
-        commandRegistry: CommandRegistry? = nil
+        commandRegistry registry: CommandRegistry
     ) {
         self.init(
             makeSession: { ChatBackendSession(backend: makeBackend()) },
-            commandRegistry: commandRegistry
+            commandRegistry: registry
         )
     }
 
