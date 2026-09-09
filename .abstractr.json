@@ -17,6 +17,17 @@
       "holds": "AgenticToolkitCore. Foundation only \u2014 no UI, no platform APIs."
     },
     {
+      "name": "apple-language",
+      "paths": [
+        "packages/apple/AgenticToolkit/Language/"
+      ],
+      "depends_on": [
+        "apple-core"
+      ],
+      "shared": true,
+      "holds": "AgenticToolkitLanguage. The text-document model and the LSP client \u2014 Foundation, AgenticToolkitCore and the ChimeHQ JSONRPC/LanguageServerProtocol/LanguageClient stack. No AppKit, so it is daemon-safe; the AppKit face of a TextDocument is TextDocumentStorage one tier up in apple-macos. LanguageServerProtocol's Position/Range/TextEdit/Diagnostic vocabulary is the document model's vocabulary, which is why the two live in one framework rather than two."
+    },
+    {
       "name": "apple-pluginkit",
       "paths": [
         "packages/apple/AgenticToolkit/AIPluginKit/"
@@ -101,6 +112,19 @@
       "holds": "AgenticToolkitSyncGRDB. The GRDB-backed sync implementation."
     },
     {
+      "name": "apple-markdown",
+      "paths": [
+        "packages/apple/AgenticToolkit/Markdown/"
+      ],
+      "depends_on": [
+        "apple-database",
+        "apple-sync",
+        "apple-syncgrdb"
+      ],
+      "shared": true,
+      "holds": "AgenticToolkitMarkdown. The GRDB-backed markdown note store, built for macOS and iOS, re-exporting AgenticDeveloperToolkit. Storage and sync only \u2014 no UI."
+    },
+    {
       "name": "apple-macos",
       "paths": [
         "packages/apple/AgenticToolkit/macOS/"
@@ -112,7 +136,9 @@
         "apple-permissions",
         "apple-permissionsui",
         "apple-pluginkit",
-        "apple-database"
+        "apple-database",
+        "apple-language",
+        "apple-markdown"
       ],
       "shared": true,
       "holds": "AgenticToolkitMacOS. The feature-rich framework the host app, plugins, Whippet and Stenographer all consume."
@@ -132,7 +158,9 @@
         "apple-pluginkit",
         "apple-database",
         "apple-sync",
-        "apple-syncgrdb"
+        "apple-syncgrdb",
+        "apple-language",
+        "apple-markdown"
       ],
       "shared": false,
       "holds": "Test bundles. Nothing depends on these."
@@ -561,7 +589,7 @@
       ],
       "depends_on": [],
       "shared": false,
-      "holds": "The Xcode/SwiftPM scaffolding around the frameworks: the workspace and xcodeproj, their shared schemes, project.yml, the Makefile, .swiftlint.yml and .swiftpm mirrors. Longest-prefix match sends every framework directory to its own tier, so only the build scaffolding lands here."
+      "holds": "The Xcode/SwiftPM scaffolding around the frameworks: the workspace and xcodeproj, their shared schemes, project.yml, the Makefile, .swiftlint.yml and .swiftpm mirrors. Longest-prefix match sends every framework directory \u2014 including Language/ and Markdown/, which landed here for want of a tier until they got one \u2014 to its own tier, so only the build scaffolding lands here."
     },
     {
       "name": "platform-stubs",
