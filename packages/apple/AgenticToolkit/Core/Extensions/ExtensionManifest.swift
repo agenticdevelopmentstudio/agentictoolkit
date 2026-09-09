@@ -264,6 +264,22 @@ extension ExtensionManifest {
             decodingFailures = failures
         }
 
+        /// Encoding is deliberately lossy, in two distinct ways, and neither
+        /// is an oversight.
+        ///
+        /// `decodingFailures` is diagnostic state derived at decode time, not
+        /// manifest content: no `package.json` on disk carries such a key, so
+        /// re-encoding it would invent one. It is therefore absent from
+        /// `CodingKeys` and never written.
+        ///
+        /// The lossiness is wider than that, though. A `contributes.*` entry
+        /// that failed to decode is gone from the encoded JSON *entirely* —
+        /// not merely un-annotated — because this type only ever held the
+        /// entries that decoded. So a round-trip through `encode` is **not** a
+        /// faithful copy of the manifest that came in.
+        ///
+        /// Anything that must rewrite a manifest on disk therefore copies the
+        /// original bytes; it does not re-encode this type.
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(themes, forKey: .themes)
@@ -283,6 +299,12 @@ extension ExtensionManifest {
         /// JSON, sidestepping `UnkeyedDecodingContainer`'s cursor-stuck
         /// failure mode) and is then decoded into `Element` on its own, so
         /// one bad element only costs itself.
+        ///
+        /// A lone object where an array was expected is accepted as a
+        /// one-element array: VS Code's schema for `contributes.configuration`
+        /// is `object | object[]`, and the single-object form is what most
+        /// real extensions ship. Refusing it would hand the generated
+        /// settings panel almost nothing.
         private static func decodeLenientArray<Element: Decodable>(
             _ type: Element.Type,
             from container: KeyedDecodingContainer<CodingKeys>,
@@ -291,7 +313,13 @@ extension ExtensionManifest {
             failures: inout [DecodingFailure]
         ) -> [Element] {
             guard container.contains(key) else { return [] }
-            guard let raw = try? container.decode([JSONValue].self, forKey: key) else {
+
+            let raw: [JSONValue]
+            if let array = try? container.decode([JSONValue].self, forKey: key) {
+                raw = array
+            } else if let single = try? container.decode(JSONValue.self, forKey: key), case .object = single {
+                raw = [single]
+            } else {
                 failures.append(DecodingFailure(key: manifestKey, index: nil, reason: "expected an array"))
                 return []
             }
@@ -381,13 +409,29 @@ extension ExtensionManifest {
         public let command: String
         public let title: String
         public let category: String?
-        /// VS Code also allows an object form (`{light, dark}`) for this
-        /// field; only the plain-string form is modeled. An object-form icon
-        /// fails this command's own decode — which `decodeLenientArray`
-        /// turns into one `decodingFailure` naming the command's index,
-        /// rather than the object form sinking the whole extension.
+        /// VS Code also allows an object form (`{light, dark}`) here, and
+        /// published extensions use it constantly. Only the plain-string form
+        /// is modeled, so the object form decodes to `nil` rather than
+        /// throwing: `decodeLenientArray` isolates at element granularity, so
+        /// a throw from this one field would cost the whole command — its
+        /// identifier, its title, its place in the palette — over a
+        /// decoration. Dropping the icon is the smaller loss, and the only
+        /// one this host can act on.
         public let icon: String?
         public let enablement: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case command, title, category, icon, enablement
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            command = try container.decode(String.self, forKey: .command)
+            title = try container.decode(String.self, forKey: .title)
+            category = try container.decodeIfPresent(String.self, forKey: .category)
+            icon = try? container.decode(String.self, forKey: .icon)
+            enablement = try container.decodeIfPresent(String.self, forKey: .enablement)
+        }
     }
 
     public struct Keybinding: Codable, Sendable, Equatable {

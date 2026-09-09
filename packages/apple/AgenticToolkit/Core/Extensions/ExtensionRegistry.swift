@@ -61,7 +61,19 @@ public final class ExtensionRegistry {
     /// the engine gate, and applies the contributions of every enabled
     /// extension. Never throws: one bad extension does not sink the rest,
     /// it is recorded in `failures` instead.
+    ///
+    /// Safe to call more than once: the reset covers the contributions an
+    /// earlier call applied as well as the two arrays. Clearing only the
+    /// arrays would leave every contribution installed twice while the
+    /// registry's own state said once, and the single `withdraw` on a later
+    /// disable would leave one copy behind.
     public func loadAll() {
+        for loaded in extensions {
+            for point in contributionPoints {
+                point.withdraw(extensionIdentifier: loaded.identifier)
+            }
+        }
+
         extensions = []
         failures = []
 
@@ -135,7 +147,7 @@ public final class ExtensionRegistry {
         if let existing = claimedIdentifiers[manifest.identifier] {
             // swiftlint:disable:next line_length
             logger.warning("Skipping duplicate extension '\(manifest.identifier, privacy: .public)' at \(directory.path, privacy: .public); already loaded from \(existing.path, privacy: .public)")
-            record(.manifestMalformed("duplicate identifier, already loaded from \(existing.path)"), at: directory)
+            record(.duplicateIdentifier(existing: existing.path), at: directory)
             return
         }
         claimedIdentifiers[manifest.identifier] = directory
@@ -166,6 +178,19 @@ public final class ExtensionRegistry {
             } catch {
                 // swiftlint:disable:next line_length
                 logger.error("Contribution point '\(point.contributionKey, privacy: .public)' failed to apply '\(manifest.identifier, privacy: .public)': \(error.localizedDescription, privacy: .public)")
+                // The console is not a UI. This layer collects what went
+                // wrong rather than throwing it, so a point that refuses is
+                // recorded where a caller can see it — otherwise the
+                // extension lists as healthy while a contribution it declared
+                // is silently absent. Loading does not abort: the extension
+                // stays loaded and the remaining points still apply.
+                failures.append(ExtensionLoadFailure(
+                    directory: directory,
+                    reason: .contributionPointFailed(
+                        key: point.contributionKey,
+                        message: error.localizedDescription
+                    )
+                ))
             }
         }
     }
@@ -182,7 +207,16 @@ public final class ExtensionRegistry {
     /// Enables or disables `identifier`, applying or withdrawing its
     /// contributions through every registered point in the same call so the
     /// setting and the live contribution state never disagree.
+    ///
+    /// A call that does not change the state does nothing at all. Callers
+    /// re-emit their current value routinely — a `Toggle` bound through a
+    /// setter, a settings panel writing every row on save — and applying
+    /// twice would leave a contribution point holding two copies of the same
+    /// contribution, which one `withdraw` cannot undo.
     public func setEnabled(_ enabled: Bool, for identifier: String) {
+        let wasEnabled = isEnabled(identifier)
+        guard wasEnabled != enabled else { return }
+
         var disabled = UserSettings.disabledExtensionIdentifiers.value
         if enabled {
             disabled.remove(identifier)
@@ -205,18 +239,39 @@ public final class ExtensionRegistry {
 
     // MARK: - Uninstall
 
-    /// Withdraws `identifier`'s contributions and removes its directory from
-    /// disk. Throws only the file-system error; withdrawal itself cannot
-    /// fail (see `ContributionPoint.withdraw`).
+    /// Removes `identifier`'s directory from disk and withdraws its
+    /// contributions. Throws only the file-system error; withdrawal itself
+    /// cannot fail (see `ContributionPoint.withdraw`).
+    ///
+    /// An uninstall either happens or it does not. The delete — the one
+    /// fallible step — runs first, and everything in memory follows it, so a
+    /// throw leaves the extension fully intact: still in `extensions`, still
+    /// contributed, still on disk. Half-uninstalled is the worse state,
+    /// because the UI would show the extension gone while the next
+    /// `loadAll()` resurrects it with no explanation.
+    ///
+    /// An identifier this registry does not know is not an error — a caller
+    /// uninstalling something already gone gets a silent no-op with no side
+    /// effects, not a throw.
     public func uninstall(_ identifier: String) throws {
+        guard let index = extensions.firstIndex(where: { $0.identifier == identifier }) else { return }
+        let directory = extensions[index].directory
+
+        try FileManager.default.removeItem(at: directory)
+
+        extensions.remove(at: index)
         for point in contributionPoints {
             point.withdraw(extensionIdentifier: identifier)
         }
 
-        guard let index = extensions.firstIndex(where: { $0.identifier == identifier }) else { return }
-        let directory = extensions[index].directory
-        extensions.remove(at: index)
-        try FileManager.default.removeItem(at: directory)
+        // Clear the tombstone too. `disabledExtensionIdentifiers` is a set of
+        // identifiers, not of installs, so an identifier left in it outlives
+        // the extension: reinstalling later comes back disabled with nothing
+        // in any UI to explain why, breaking the "freshly installed is on by
+        // default" promise the setting is shaped around.
+        var disabled = UserSettings.disabledExtensionIdentifiers.value
+        disabled.remove(identifier)
+        UserSettings.disabledExtensionIdentifiers.value = disabled
     }
 }
 
@@ -249,4 +304,15 @@ public enum ExtensionLoadError: Error, Sendable, Equatable {
     case manifestMalformed(String)
     case engineRangeUnparsable(String)
     case engineIncompatible(required: String, host: String)
+    /// A second directory claiming an identifier an earlier search path had
+    /// already loaded. Nothing is wrong with this manifest — `existing` is
+    /// the path of the copy that won, because "which one is live" is the only
+    /// question a user staring at a duplicate install actually has.
+    case duplicateIdentifier(existing: String)
+    /// A registered `ContributionPoint` threw from `apply`. `key` is that
+    /// point's `contributionKey` and `message` the thrown error's
+    /// description: this enum is `Equatable` and so cannot carry an
+    /// `any Error`, and a point's identity plus its reason is what a log line
+    /// or a settings row needs anyway. The extension itself stayed loaded.
+    case contributionPointFailed(key: String, message: String)
 }

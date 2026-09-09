@@ -103,6 +103,9 @@ struct ExtensionManifestTests {
             from: Data(Self.minimalManifestJSON.utf8)
         )
 
+        // No publisher, so `identifier` falls back to the bare name — the
+        // identity every setting, uninstall and withdrawal keys on.
+        #expect(manifest.identifier == "bare")
         #expect(manifest.contributes == nil)
         #expect(manifest.activationEvents.isEmpty)
         #expect(manifest.capabilities == nil)
@@ -182,6 +185,105 @@ struct ExtensionManifestTests {
         #expect(contributes.decodingFailures.count == 1)
         let failure = try #require(contributes.decodingFailures.first)
         #expect(failure.key == "contributes.themes")
+        #expect(failure.index == 1)
+    }
+
+    @Test("an object-form command icon drops the icon, not the command")
+    func objectFormCommandIconKeepsTheCommand() throws {
+        let json = """
+        {
+            "commands": [
+                {
+                    "command": "acme.doThing",
+                    "title": "Do Thing",
+                    "category": "Acme",
+                    "enablement": "editorTextFocus",
+                    "icon": { "light": "./light.svg", "dark": "./dark.svg" }
+                },
+                { "command": "acme.other", "title": "Other", "icon": "./plain.svg" }
+            ]
+        }
+        """
+        let contributes = try JSONDecoder().decode(
+            ExtensionManifest.Contributions.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(contributes.commands.count == 2)
+        let themed = try #require(contributes.commands.first)
+        #expect(themed.command == "acme.doThing")
+        #expect(themed.title == "Do Thing")
+        #expect(themed.category == "Acme")
+        #expect(themed.enablement == "editorTextFocus")
+        #expect(themed.icon == nil)
+
+        // The sibling with a string icon is untouched.
+        #expect(contributes.commands.last?.icon == "./plain.svg")
+        #expect(contributes.decodingFailures.isEmpty)
+    }
+
+    @Test("the single-object form of contributes.configuration decodes as one element")
+    func singleObjectConfigurationDecodes() throws {
+        let json = """
+        {
+            "configuration": {
+                "title": "Acme",
+                "properties": {
+                    "acme.enabled": { "type": "boolean", "default": true }
+                }
+            }
+        }
+        """
+        let contributes = try JSONDecoder().decode(
+            ExtensionManifest.Contributions.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(contributes.configuration.count == 1)
+        #expect(contributes.configuration.first?.title == "Acme")
+        #expect(contributes.configuration.first?.properties["acme.enabled"]?.type == "boolean")
+        #expect(contributes.decodingFailures.isEmpty)
+    }
+
+    @Test("a keyed location whose value is not an array is one failure naming that location")
+    func keyedLocationThatIsNotAnArrayIsIsolated() throws {
+        let json = """
+        { "menus": { "editor/context": 42 } }
+        """
+        let contributes = try JSONDecoder().decode(
+            ExtensionManifest.Contributions.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(contributes.menus.isEmpty)
+        #expect(contributes.decodingFailures.count == 1)
+        let failure = try #require(contributes.decodingFailures.first)
+        #expect(failure.key == "contributes.menus.editor/context")
+        #expect(failure.index == nil)
+    }
+
+    @Test("a malformed element inside a keyed location costs only itself")
+    func malformedElementInsideAKeyedLocationIsIsolated() throws {
+        let json = """
+        {
+            "menus": {
+                "commandPalette": [
+                    { "command": "acme.doThing", "when": "editorTextFocus" },
+                    { "when": "editorTextFocus" }
+                ]
+            }
+        }
+        """
+        let contributes = try JSONDecoder().decode(
+            ExtensionManifest.Contributions.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(contributes.menus["commandPalette"]?.count == 1)
+        #expect(contributes.menus["commandPalette"]?.first?.command == "acme.doThing")
+        #expect(contributes.decodingFailures.count == 1)
+        let failure = try #require(contributes.decodingFailures.first)
+        #expect(failure.key == "contributes.menus.commandPalette")
         #expect(failure.index == 1)
     }
 }
