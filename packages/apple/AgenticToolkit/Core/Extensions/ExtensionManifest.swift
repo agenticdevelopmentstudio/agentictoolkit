@@ -301,10 +301,19 @@ extension ExtensionManifest {
         /// one bad element only costs itself.
         ///
         /// A lone object where an array was expected is accepted as a
-        /// one-element array: VS Code's schema for `contributes.configuration`
-        /// is `object | object[]`, and the single-object form is what most
-        /// real extensions ship. Refusing it would hand the generated
-        /// settings panel almost nothing.
+        /// one-element array. `contributes.configuration` is why: VS Code's
+        /// schema for it is `object | object[]`, and the single-object form is
+        /// what most real extensions ship, so refusing it would hand the
+        /// generated settings panel almost nothing.
+        ///
+        /// That lenience is not confined to `configuration` — this is the one
+        /// decode path every array-shaped `contributes` key takes, so a lone
+        /// object is now accepted for `commands` and `themes` too, where VS
+        /// Code's own schema requires an array. Deliberate: the alternative
+        /// threads a per-key flag through every call site to reject an input
+        /// no correct manifest produces, and the only consequence of accepting
+        /// it is that this host loads something VS Code would have rejected —
+        /// never that a correct manifest decodes wrongly.
         private static func decodeLenientArray<Element: Decodable>(
             _ type: Element.Type,
             from container: KeyedDecodingContainer<CodingKeys>,
