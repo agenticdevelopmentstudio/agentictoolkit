@@ -29,7 +29,10 @@ public final class KeyboardSettingsPanelViewController: ComposableSettings.Setti
     public override var helpContent: ComposableSettings.PanelHelp? {
         ComposableSettings.PanelHelp(topics: [
             .init(
-                title: "Show All Commands",
+                // Titled for the row it explains — "Command Palette:" — not for
+                // the command that opens the palette, which the user does not
+                // see from here. Same reasoning as the row label below.
+                title: "Command Palette",
                 body: "Opens the command palette: a search field listing every command in "
                     + "the app, including the ones extensions add. This shortcut is "
                     + "registered system-wide, so it works while another app is frontmost "

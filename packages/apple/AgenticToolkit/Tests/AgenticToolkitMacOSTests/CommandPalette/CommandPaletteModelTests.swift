@@ -34,11 +34,15 @@ struct CommandPaletteModelTests {
 
     /// The order the two ordering tests register their commands in.
     ///
-    /// Forty-eight slots, and the count is the point: Swift's `sorted(by:)` is
-    /// an introsort that falls back to plain insertion sort below roughly twenty
-    /// elements, and insertion sort *is* stable — so on two or four rows an
-    /// implementation with no tiebreaker is indistinguishable from one with it,
-    /// and a test at that size proves nothing. Forty-eight is well clear.
+    /// Forty-eight slots, and the count is *not* what makes the tiebreaker
+    /// visible — no count is. Swift's `sorted(by:)` has been a stable modified
+    /// timsort at every size since Swift 5, so deleting the `$0.offset` term in
+    /// `CommandPaletteModel.matches(for:in:)` changes no answer this suite can
+    /// observe, at forty-eight rows or at five thousand; the comment on that
+    /// sort says why the term stays regardless. What the size buys is ordinary
+    /// coverage — forty-eight rows over two rank buckets exercise every *other*
+    /// way the ordering can come out wrong — and a tripwire: the day the stdlib
+    /// withdraws the guarantee, this is the test that goes red.
     ///
     /// Strided rather than ascending, because the other way a test like this
     /// fools you is by registering in an order the sort would have produced

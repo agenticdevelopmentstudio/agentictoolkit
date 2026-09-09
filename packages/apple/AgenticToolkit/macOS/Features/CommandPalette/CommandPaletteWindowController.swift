@@ -155,7 +155,14 @@ extension CommandPaletteWindowController: NSWindowDelegate {
     /// with Escape and running a command all four ways out of the palette go
     /// through `close()` and end in `windowWillClose` below — one dismissal
     /// path, not four (`dry`).
+    ///
+    /// The guard is what keeps that one path from running twice: closing a key
+    /// window resigns key on the way out, so an unguarded `close()` here
+    /// re-enters and `windowWillClose` — hence `reset()` — fires twice per
+    /// dismissal. Bounded at depth two, but a reset that runs twice is one
+    /// that can be observed running at the wrong time.
     public func windowDidResignKey(_ notification: Notification) {
+        guard window?.isVisible == true else { return }
         close()
     }
 

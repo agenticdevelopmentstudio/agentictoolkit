@@ -35,6 +35,11 @@ public final class CommandPaletteCoordinator: AppFeature {
     /// for. Retained afterwards: reopening reuses the one panel.
     private var windowController: CommandPaletteWindowController?
 
+    /// Whether `start()` has claimed the global shortcut and `stop()` has not
+    /// yet given it back. Kept here because the library cannot be asked how
+    /// many handlers it is holding — see `start()`.
+    private var hasClaimedGlobalShortcut = false
+
     // MARK: - Lifecycle
 
     /// - Parameter commandRegistry: The registry to list and to dispatch
@@ -72,7 +77,16 @@ public final class CommandPaletteCoordinator: AppFeature {
     /// that builds one would otherwise do for the length of its run. `start()`
     /// is the lifecycle hook for a long-running service, and the host calls it
     /// once per launch on every registered feature.
+    ///
+    /// Guarded, because `onKeyDown` *appends*: the Carbon registration dedupes
+    /// but the handler list does not, so a second unguarded call would leave
+    /// two handlers on one hotkey and open the palette twice per keypress.
+    /// Nothing in this app starts a feature twice — but `AppFeatureRegistry`
+    /// is shared framework surface and `startAll()` is public, so the
+    /// invariant belongs here rather than in the callers (`idempotency`).
     public override func start() {
+        guard !hasClaimedGlobalShortcut else { return }
+        hasClaimedGlobalShortcut = true
         KeyboardShortcuts.onKeyDown(for: .showCommandPalette) { [weak self] in
             self?.showPalette()
         }
@@ -81,6 +95,8 @@ public final class CommandPaletteCoordinator: AppFeature {
     /// Give the shortcut back. `removeHandler` drops the stored handler *and*
     /// unregisters the Carbon hotkey, which is what makes `start()` reversible.
     public override func stop() {
+        guard hasClaimedGlobalShortcut else { return }
+        hasClaimedGlobalShortcut = false
         KeyboardShortcuts.removeHandler(for: .showCommandPalette)
     }
 
