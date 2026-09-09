@@ -362,6 +362,11 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     /// Whether the window's first responder lives inside this pane, so a
     /// removal can re-home focus rather than leaving the window without one.
     var containsFirstResponder: Bool {
+        // A pane that was never shown has no view, and asking for one here
+        // would build the whole content graph — on the removal path, purely to
+        // throw it away. It also cannot hold the first responder, so the
+        // answer is already known (`assignPaneIndex(_:)` guards the same way).
+        guard isViewLoaded else { return false }
         guard let responder = view.window?.firstResponder as? NSView else { return false }
         var current: NSView? = responder
         while let candidate = current {

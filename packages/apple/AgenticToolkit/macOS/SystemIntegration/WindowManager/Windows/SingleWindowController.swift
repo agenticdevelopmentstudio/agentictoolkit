@@ -103,9 +103,17 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
     /// creation.
     open var minSize: NSSize?
 
-    /// Called after the window has been fully constructed and its frame
-    /// restored. Override for post-creation mutation (e.g. wiring extra
-    /// observers). Runs *before* the window is ordered in.
+    /// Called once the window exists and its content view controller is set,
+    /// and *before* its saved frame is restored or it is ordered in. Override
+    /// for post-creation mutation — installing a toolbar, wiring extra
+    /// observers.
+    ///
+    /// Running before the frame restore is deliberate, and `loadWindow()`
+    /// spells out why: chrome installed here changes how much of the window is
+    /// titlebar, so the frame has to be restored onto the window this method
+    /// has finished shaping. The cost is that `window.frame` in here is the
+    /// default rect, not the restored one — anything that needs the final
+    /// geometry has to read it later than this.
     open func configureWindow(_ window: NSWindow) {}
 
     // MARK: - NSWindowController lazy-load hook

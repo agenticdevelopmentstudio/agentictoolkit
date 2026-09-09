@@ -605,8 +605,20 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         get { Edge.allCases.filter { tabbed.isEdgeEnabled($0) }.map(\.rawValue) }
         set {
             let normalized = Set(newValue.map { $0.lowercased() })
-            for edge in Edge.allCases {
-                setEdgeEnabled(edge, normalized.contains(edge.rawValue))
+            // Enables first, then disables. `setEdgeEnabled` refuses to turn
+            // off the last enabled edge — a window with no tab bar anywhere
+            // has nowhere to put a tab — and that rule is stated per call, so
+            // in `Edge.allCases` order it also refuses perfectly legal
+            // *sets*: assigning `["bottom"]` to a window enabled only at the
+            // top asks to disable top before bottom exists, the refusal
+            // stands, and the window is left with both. Doing every enable
+            // before any disable means the last-edge rule is only ever reached
+            // by an assignment that genuinely names no edge at all.
+            for edge in Edge.allCases where normalized.contains(edge.rawValue) {
+                setEdgeEnabled(edge, true)
+            }
+            for edge in Edge.allCases where !normalized.contains(edge.rawValue) {
+                setEdgeEnabled(edge, false)
             }
         }
     }
@@ -1046,8 +1058,8 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
     /// this callback claims to report.
     public func multiTabbedViewController(
         _ controller: MultiTabbedViewController,
-        activeTabDidChange id: UUID,
-        on edge: Edge
+        activeTabDidChange id: UUID?,
+        on edge: Edge?
     ) {
         refreshActivePaneChrome()
     }
@@ -1075,9 +1087,9 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
         // The neighbour's `activeTabDidChange` already fired — but *inside* the
         // loop above, before `splitControllersByTabID` was pruned, so it
         // recomputed against panes that were still on the books. This tail is
-        // the only refresh that sees settled state. And when the last member
-        // leaves an edge with no fallback, `setActiveTab(nil)` names no tab and
-        // fires nothing at all, so this is the only refresh there is.
+        // the only refresh that sees settled state, including in the case where
+        // the last member leaves an edge with no fallback and the callback
+        // arrived carrying `nil`.
         refreshActivePaneChrome()
     }
 

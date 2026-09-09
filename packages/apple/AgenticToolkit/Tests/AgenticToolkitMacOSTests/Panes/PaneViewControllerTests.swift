@@ -276,6 +276,59 @@ final class PaneViewControllerTests: XCTestCase {
         XCTAssertTrue(pane.titleBar.controls.isZoomed)
     }
 
+    /// The four pins that hold the content to its container, counted off the
+    /// view they are installed on — deactivating removes them from it, so the
+    /// count is the state.
+    private func activeContentPins(of pane: TestPane) throws -> Int {
+        let content = try XCTUnwrap(pane.contentViewController?.view)
+        let container = try XCTUnwrap(content.superview)
+        return container.constraints.filter {
+            ($0.firstItem === content || $0.secondItem === content) && $0.isActive
+        }.count
+    }
+
+    /// Hidden is not un-laid-out: content with its own minimum size goes on
+    /// demanding it from a container squeezed to a rail's width, and the engine
+    /// breaks whichever constraint it likes to get out.
+    func testMinimizedContentIsTakenOutOfTheLayoutAndPutBack() throws {
+        let (pane, _) = loadedPane(content: RichContent())
+        XCTAssertEqual(try activeContentPins(of: pane), 4)
+
+        pane.setMinimized(to: .leading)
+        XCTAssertEqual(try activeContentPins(of: pane), 0,
+                       "a rail-width container is asked to satisfy nothing")
+
+        pane.setMinimized(to: .top)
+        XCTAssertEqual(try activeContentPins(of: pane), 0,
+                       "the same for the shapes that keep the title bar")
+
+        pane.setMinimized(to: nil)
+        XCTAssertEqual(try activeContentPins(of: pane), 4,
+                       "and they are back before the content is visible again")
+    }
+
+    /// `setMinimized` can arrive before the pane has ever been shown — a host
+    /// re-applying a remembered layout to a tab nobody has opened. Touching
+    /// `view` there loads it, and `viewDidLoad` re-enters the same method
+    /// through `restorePersistedState()`: the inner call builds the rail
+    /// `minimizedStrip` keeps, and the outer call adds a second one that
+    /// nothing tracks and no restore can remove.
+    func testMinimizingBeforeTheViewLoadsLeavesOneRailNotTwo() {
+        let pane = TestPane(content: RichContent())
+        pane.setMinimized(to: .leading)
+        XCTAssertFalse(pane.isViewLoaded, "asking for the appearance must not build the view")
+
+        pane.loadViewIfNeeded()
+        let strips = pane.view.subviews.compactMap { $0 as? PaneMinimizedStripView }
+        XCTAssertEqual(strips.count, 1)
+        XCTAssertEqual(pane.minimizedEdge, .leading, "and the edge survived the deferral")
+        XCTAssertTrue(pane.titleBar.isHidden)
+
+        // The one rail that exists is the one the pane can still take away.
+        pane.setMinimized(to: nil)
+        XCTAssertTrue(pane.view.subviews.compactMap { $0 as? PaneMinimizedStripView }.isEmpty)
+    }
+
     // MARK: - Persistence
 
     func testMinimizeAndZoomAreWrittenThroughTheStore() {

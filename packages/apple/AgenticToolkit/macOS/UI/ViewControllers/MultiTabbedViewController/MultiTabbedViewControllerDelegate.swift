@@ -28,10 +28,17 @@ public protocol MultiTabbedViewControllerDelegate: AnyObject {
     /// user picked this tab" and carries the heavier duties a host attaches to
     /// that (restoring focus, persisting). A host that only needs to know
     /// *which pane is in front now* implements this one and nothing else.
+    ///
+    /// `id` and `edge` are optional because "no tab is active" is one of the
+    /// states this reports: disabling the edge that held the active tab, or
+    /// closing the last tab on the last enabled edge, leaves the controller
+    /// showing nothing. Naming only the non-nil transitions would make the
+    /// host's idea of the front pane go stale exactly when there is no front
+    /// pane — the one case where stale chrome is visibly wrong.
     func multiTabbedViewController(
         _ controller: MultiTabbedViewController,
-        activeTabDidChange id: UUID,
-        on edge: Edge
+        activeTabDidChange id: UUID?,
+        on edge: Edge?
     )
 
     /// User clicked the close button on a tab on `edge`. The host can veto
@@ -63,8 +70,8 @@ extension MultiTabbedViewControllerDelegate {
     ) {}
     public func multiTabbedViewController(
         _ controller: MultiTabbedViewController,
-        activeTabDidChange id: UUID,
-        on edge: Edge
+        activeTabDidChange id: UUID?,
+        on edge: Edge?
     ) {}
     public func multiTabbedViewController(
         _ controller: MultiTabbedViewController,

@@ -592,6 +592,45 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         XCTAssertFalse(try item(for: try leaf(rightID, in: root)).isCollapsed)
     }
 
+    /// The other half of the rule above. `setZoomedLeaf(nil)` is not free — it
+    /// calls `setZoomed(false)` on the pane, which *deletes* the row that
+    /// remembers the zoom — so clearing it before asking whether the close is
+    /// allowed made every refused click cost the pane its zoom. A refused close
+    /// has to leave the pane exactly as it found it.
+    func testARefusedCloseKeepsTheZoomItWouldOtherwiseThrowAway() throws {
+        let root = try boundedSideBySide()
+        let left = try leaf(leftID, in: root)
+        root.paneDidRequestZoom(left)
+        XCTAssertTrue(root.zoomedLeaf === left)
+
+        root.paneDidRequestClose(left)
+
+        XCTAssertEqual(root.allLeaves().map(\.nodeID), [leftID, rightID],
+                       "the spec's floor still refuses the close")
+        XCTAssertTrue(root.zoomedLeaf === left, "and the refusal changed nothing else")
+        XCTAssertTrue(left.isZoomed)
+        XCTAssertEqual(left.stateStore.paneStateValue(forKey: PaneStateKey.zoomed), "1",
+                       "including the row the pane comes back zoomed from")
+    }
+
+    /// The same tree as `sideBySide()`, under the floored spec — so every close
+    /// in it is refused. `boundedNested()` is the unloaded equivalent; zooming
+    /// needs split items, which do not exist until the view does.
+    private func boundedSideBySide() throws -> ComposableTabsViewController {
+        try installBoundedLayout()
+        let root = ComposableTabsViewController.make(
+            from: .split(
+                orientation: .horizontal,
+                first: .leaf(id: leftID, contentType: alpha),
+                second: .leaf(id: rightID, contentType: beta)
+            ),
+            project: project,
+            isRoot: true)
+        root.loadViewIfNeeded()
+        for pane in root.allLeaves() { pane.loadViewIfNeeded() }
+        return root
+    }
+
     // MARK: - Surviving a rebuild of the split items
 
     /// Every structural mutation re-creates split items through
@@ -767,13 +806,9 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         try unloadedTree(nestedNode(innerID: innerID))
     }
 
-    /// The same tree under a spec that floors both views at one instance.
-    /// `installLayout()` is unbounded on purpose — what the spec *answers* is
-    /// `ComposableTabLayoutSpecTests`' subject. A floor is needed here for the
-    /// question one level up, which is this suite's: which tree the controller
-    /// hands the spec. The tab holds two alphas and the inner split holds one,
-    /// so a floor of one is the smallest spec the two trees disagree about.
-    private func boundedNested() throws -> ComposableTabsViewController {
+    /// `installLayout()` with a floor of one instance per view, which is the
+    /// smallest spec that refuses a close.
+    private func installBoundedLayout() throws {
         let registry = ComposableTabsViewRegistry()
         registry.register(
             alpha, descriptor: .init(displayName: "Alpha", minimumThickness: 150)
@@ -793,6 +828,16 @@ final class ComposableTabsPaneHostTests: XCTestCase {
                 allows: [.unbounded(alpha, min: 1), .unbounded(beta, min: 1)]
             )
         ))
+    }
+
+    /// The same tree under a spec that floors both views at one instance.
+    /// `installLayout()` is unbounded on purpose — what the spec *answers* is
+    /// `ComposableTabLayoutSpecTests`' subject. A floor is needed here for the
+    /// question one level up, which is this suite's: which tree the controller
+    /// hands the spec. The tab holds two alphas and the inner split holds one,
+    /// so a floor of one is the smallest spec the two trees disagree about.
+    private func boundedNested() throws -> ComposableTabsViewController {
+        try installBoundedLayout()
         let root = ComposableTabsViewController.make(
             from: nestedNode(innerID: UUID()), project: project, isRoot: true)
         XCTAssertFalse(root.isViewLoaded, "the fixture stops being the fixture once anything loads")
@@ -828,6 +873,25 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         left.host?.paneDidRequestClose(left)
 
         XCTAssertEqual(root.allLeaves().map(\.nodeID), [rightID])
+    }
+
+    /// And it removes it without building anything. The removal path asks each
+    /// pane whether it holds the first responder, and reading `view` to answer
+    /// would construct the whole content graph — a terminal, a file browser —
+    /// purely to throw it away a line later. A pane with no view cannot hold
+    /// the responder anyway, so the answer is already known.
+    func testClosingAPaneOnANeverDisplayedTabBuildsNoViewToDoIt() throws {
+        let root = try unloadedSideBySide()
+        let left = try leaf(leftID, in: root)
+
+        XCTAssertFalse(left.containsFirstResponder, "no view, so no responder inside one")
+        XCTAssertFalse(left.isViewLoaded, "and asking did not build one")
+
+        left.host?.paneDidRequestClose(left)
+
+        XCTAssertEqual(root.allLeaves().map(\.nodeID), [rightID])
+        XCTAssertFalse(left.isViewLoaded, "nor did closing it")
+        XCTAssertFalse(root.isViewLoaded, "the tab is still one nobody has opened")
     }
 
     /// The other entry point. `init` assigns `layoutChildren` before

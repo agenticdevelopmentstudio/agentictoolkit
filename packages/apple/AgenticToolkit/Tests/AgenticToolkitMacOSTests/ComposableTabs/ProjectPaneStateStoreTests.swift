@@ -236,7 +236,12 @@ final class ProjectPaneStateStoreTests: XCTestCase {
     func testAPanesOwnFrameSpacingSurvives() throws {
         let spacing = Spacing(top: 12, leading: 12, bottom: 12, trailing: 12)
         let first = try makeTree()
-        try leaf(leftID, in: first).spacingOverride.setOverride(spacing)
+        let override = try leaf(leftID, in: first).spacingOverride
+        override.setOverride(spacing)
+        // The steppers are continuous, so the write waits for the pause a held
+        // arrow key never takes. In the app the popover closing ends the
+        // gesture; here the read below is what ends it.
+        override.flushPendingPersist()
 
         let restored = try leaf(leftID, in: try makeTree())
 
@@ -248,6 +253,7 @@ final class ProjectPaneStateStoreTests: XCTestCase {
         let first = try makeTree()
         let left = try leaf(leftID, in: first)
         left.spacingOverride.setOverride(Spacing(uniform: 12))
+        left.spacingOverride.flushPendingPersist()
         XCTAssertNotNil(project.paneState(nodeID: leftID, key: "chrome.spacing.override"),
                         "the row the reset has to remove")
 

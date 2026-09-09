@@ -32,12 +32,30 @@ extension ComposableTabsViewController: PaneHost {
 
     public func paneDidRequestClose(_ pane: PaneViewController) {
         guard let leaf = pane as? ComposableTabsPaneViewController else { return }
+        // `remove` owns every rule about removal — the spec's veto, the
+        // degenerate-split collapse, re-homing the first responder — and a
+        // refused close has to leave the pane exactly as it found it. Clearing
+        // the zoom is not free: `setZoomedLeaf(nil)` calls `setZoomed(false)`
+        // on the pane, which deletes the row that remembers it was zoomed. So
+        // the two conditions `remove` refuses on are asked here first, and a
+        // pane the spec will not let go of keeps its zoom instead of quietly
+        // losing it on every rejected click.
+        //
+        // And a refusal is said out loud. `PaneHost` gives the pane no
+        // `canClose` to grey its button with, deliberately — the host decides,
+        // and it may decide differently a moment later — so the only place the
+        // "no" can be reported is here, where it is made. Arrange mode's
+        // `confirmAndRemove()` already beeps at exactly this refusal; the title
+        // bar's close button reached the same rule and said nothing, which
+        // reads as a dead button rather than a protected pane.
+        guard layoutChildren.contains(where: { $0.viewController === leaf }),
+              (rootSplit() ?? self).canRemoveLeaf(leaf) else {
+            NSSound.beep()
+            return
+        }
         // The pane is about to stop existing; a zoom pointing at it would leave
         // every other pane collapsed with nothing to restore them.
         if rootSplit()?.zoomedLeaf === leaf { setZoomedLeaf(nil) }
-        // `remove` owns every rule about removal — the spec's veto, the
-        // degenerate-split collapse, re-homing the first responder. Asking it
-        // is the whole implementation.
         remove(leaf)
     }
 

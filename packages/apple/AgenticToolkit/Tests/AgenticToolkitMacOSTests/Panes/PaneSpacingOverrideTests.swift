@@ -52,7 +52,12 @@ final class PaneSpacingOverrideTests: XCTestCase {
 
     func testTheOverrideRoundTripsThroughTheStore() {
         let store = EphemeralPaneStateStore()
-        makeOverride(store: store).setOverride(Spacing(top: 1, leading: 2, bottom: 3, trailing: 4))
+        let override = makeOverride(store: store)
+        override.setOverride(Spacing(top: 1, leading: 2, bottom: 3, trailing: 4))
+        // The write is coalesced, so the row is not there until the pause the
+        // gesture never takes here has passed. Flushing is what a caller about
+        // to read the store back through a second override does.
+        override.flushPendingPersist()
 
         let reloaded = makeOverride(store: store)
         XCTAssertTrue(reloaded.isOverridden)
@@ -64,9 +69,11 @@ final class PaneSpacingOverrideTests: XCTestCase {
     /// come back as anything but zero.
     func testGuttersAreNotPartOfAPanesOverride() {
         let store = EphemeralPaneStateStore()
-        makeOverride(store: store).setOverride(
+        let override = makeOverride(store: store)
+        override.setOverride(
             Spacing(top: 1, leading: 1, bottom: 1, trailing: 1, betweenColumns: 9, betweenRows: 9)
         )
+        override.flushPendingPersist()
         XCTAssertEqual(makeOverride(store: store).resolved.betweenColumns, 0)
         XCTAssertEqual(makeOverride(store: store).resolved.betweenRows, 0)
     }
@@ -123,6 +130,75 @@ final class PaneSpacingOverrideTests: XCTestCase {
         XCTAssertEqual(override.insets.left, 2)
         XCTAssertEqual(override.insets.bottom, 3)
         XCTAssertEqual(override.insets.right, 4)
+    }
+
+    // MARK: - Coalescing the write
+
+    /// The steppers are continuous, so a held arrow key used to produce a JSON
+    /// encode plus a synchronous write per tick. Every tick still changes the
+    /// value the pane draws with — only the row waits.
+    func testAGestureIsOneWriteRatherThanOnePerTick() {
+        let store = CountingPaneStateStore()
+        let override = makeOverride(store: store)
+
+        for edge in 1...8 { override.setOverride(Spacing(uniform: edge)) }
+
+        XCTAssertEqual(store.writes, 0, "nothing is on disk while the gesture is still running")
+        XCTAssertEqual(override.resolved, Spacing(top: 8, leading: 8, bottom: 8, trailing: 8),
+                       "the value the pane draws with is never the one that waits")
+
+        override.flushPendingPersist()
+
+        XCTAssertEqual(store.writes, 1, "eight ticks, one row")
+        XCTAssertEqual(makeOverride(store: store).resolved,
+                       Spacing(top: 8, leading: 8, bottom: 8, trailing: 8),
+                       "and the row that lands is the last value, not the first")
+    }
+
+    /// The failure this ordering exists to prevent: a queued write from the
+    /// gesture just before a reset landing *after* the deletion and putting the
+    /// override straight back.
+    func testResettingCancelsAWriteTheGestureBeforeItEarned() {
+        let store = CountingPaneStateStore()
+        let override = makeOverride(store: store)
+
+        override.setOverride(Spacing(uniform: 5))
+        override.reset()
+        override.flushPendingPersist()
+
+        XCTAssertFalse(override.isOverridden)
+        XCTAssertNil(store.paneStateValue(forKey: PaneStateKey.spacingOverride))
+    }
+
+    /// Flushing with nothing pending must not write — otherwise a caller that
+    /// flushes defensively would re-create a row `reset()` just deleted.
+    func testFlushingWithNothingPendingWritesNothing() {
+        let store = CountingPaneStateStore()
+        let override = makeOverride(store: store)
+
+        override.flushPendingPersist()
+        override.setOverride(Spacing(uniform: 2))
+        override.flushPendingPersist()
+        override.flushPendingPersist()
+
+        XCTAssertEqual(store.writes, 1)
+    }
+
+    /// Counts what reaches the store, so "one gesture, one write" is an
+    /// assertion rather than a claim in a comment.
+    @MainActor
+    private final class CountingPaneStateStore: PaneStateStore {
+        private let backing = EphemeralPaneStateStore()
+        private(set) var writes = 0
+
+        func paneStateValue(forKey key: String) -> String? {
+            backing.paneStateValue(forKey: key)
+        }
+
+        func setPaneStateValue(_ value: String?, forKey key: String) {
+            if value != nil { writes += 1 }
+            backing.setPaneStateValue(value, forKey: key)
+        }
     }
 
     // MARK: - The pane
@@ -194,6 +270,24 @@ final class PaneSpacingOverrideTests: XCTestCase {
 
         XCTAssertFalse(pane.spacingOverride.isOverridden)
         XCTAssertEqual(control?.value, Spacing(uniform: 10), "the picture follows the value back")
+    }
+
+    /// The coalescing is only safe because something ends the gesture. The
+    /// steppers live in the gear popover and nowhere else, so the popover
+    /// closing is that moment — and closing the window closes it too.
+    func testDismissingTheGearWritesWhatTheGestureLeftWaiting() {
+        let store = CountingPaneStateStore()
+        let pane = TestPane(content: PlainContent(), stateStore: store)
+        pane.loadViewIfNeeded()
+        let control = pane.makeOptionRows().first as? SpacingControl
+
+        control?.onChange?(Spacing(uniform: 2))
+        XCTAssertEqual(store.writes, 0, "still mid-gesture")
+
+        pane.optionsPopover?.onDidClose?()
+
+        XCTAssertEqual(store.writes, 1)
+        XCTAssertNotNil(store.paneStateValue(forKey: PaneStateKey.spacingOverride))
     }
 
     /// The rule this task exists for, in both directions.

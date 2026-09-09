@@ -50,6 +50,33 @@ public final class PaneSpacingOverride {
     private let store: PaneStateStore
     private let inheritedProvider: @MainActor () -> Spacing
 
+    /// The write the user's current gesture has not finished earning.
+    ///
+    /// The spacing steppers are continuous — `SpacingControl` sets
+    /// `isContinuous` and a 0.06s repeat interval — so holding an arrow key
+    /// down produces about seventeen values a second, and every one of them
+    /// used to become a JSON encode plus a synchronous SQLite write on the
+    /// main thread. Coalescing them costs nothing anyone can see: the resolved
+    /// value and `onChange` are still applied on the spot, so the pane redraws
+    /// at every tick; only the row lags, and by less than the pause between
+    /// two deliberate presses (`ComposableTabsViewController` debounces divider
+    /// drags the same way, for the same reason).
+    ///
+    /// Captured strongly by the work item on purpose, so a pane torn down
+    /// mid-gesture still writes what the user chose. The cycle that makes is
+    /// broken by the item itself, which clears this on its way out.
+    private var pendingPersist: DispatchWorkItem?
+
+    /// The value that write would carry. Held beside the work item so a flush
+    /// can do the write itself: `DispatchWorkItem.perform()` does nothing once
+    /// the item has been cancelled, and cancelling is exactly what a flush has
+    /// to do first to stop the timer running it a second time.
+    private var pendingStored: StoredSpacing?
+
+    /// Long enough to swallow an autorepeat run, short enough that a single
+    /// click is on disk before anything a person could do next.
+    private static let persistDelay: DispatchTimeInterval = .milliseconds(300)
+
     /// Fires with the *resolved* value whenever it changes, from either
     /// direction — so a listener applies what it is given and never has to ask
     /// which of the two scopes won.
@@ -92,10 +119,7 @@ public final class PaneSpacingOverride {
             bottom: stored.bottom,
             trailing: stored.trailing
         )
-        if let data = try? JSONEncoder().encode(stored),
-           let json = String(data: data, encoding: .utf8) {
-            store.setPaneStateValue(json, forKey: PaneStateKey.spacingOverride)
-        }
+        schedulePersist(of: stored)
         onChange?(resolved)
     }
 
@@ -105,8 +129,42 @@ public final class PaneSpacingOverride {
     /// button says.
     public func reset() {
         overrideValue = nil
+        // Cancelled, not merely superseded: a queued write from the gesture
+        // just before the reset would otherwise land after the deletion and
+        // put the override straight back.
+        pendingPersist?.cancel()
+        pendingPersist = nil
+        pendingStored = nil
         store.setPaneStateValue(nil, forKey: PaneStateKey.spacingOverride)
         onChange?(resolved)
+    }
+
+    /// Writes a coalesced override now instead of when its timer says so.
+    ///
+    /// For anything that needs the row and the in-memory value to agree at a
+    /// known moment — a test, or a caller about to read the store back through
+    /// a second `PaneSpacingOverride` on the same pane. Nothing pending is a
+    /// no-op, so it is always safe to call.
+    public func flushPendingPersist() {
+        pendingPersist?.cancel()
+        writePendingOverride()
+    }
+
+    private func schedulePersist(of stored: StoredSpacing) {
+        pendingStored = stored
+        pendingPersist?.cancel()
+        let work = DispatchWorkItem { [self] in writePendingOverride() }
+        pendingPersist = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.persistDelay, execute: work)
+    }
+
+    private func writePendingOverride() {
+        pendingPersist = nil
+        guard let stored = pendingStored else { return }
+        pendingStored = nil
+        guard let data = try? JSONEncoder().encode(stored),
+              let json = String(data: data, encoding: .utf8) else { return }
+        store.setPaneStateValue(json, forKey: PaneStateKey.spacingOverride)
     }
 
     /// `static`, so the read path can hold to the same bound the write path

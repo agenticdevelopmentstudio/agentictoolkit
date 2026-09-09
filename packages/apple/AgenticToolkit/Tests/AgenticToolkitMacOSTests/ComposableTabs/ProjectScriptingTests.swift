@@ -504,6 +504,62 @@ final class ProjectScriptingTests: XCTestCase {
                        "an adopted window's close is not the manager's to record")
     }
 
+    /// Assigning the whole set is not the same as setting each edge in turn.
+    /// `setEdgeEnabled` refuses to turn off the *last* enabled edge, and that
+    /// rule is stated per call — so walking `Edge.allCases` in order asks to
+    /// disable top before bottom exists, the refusal stands, and a script that
+    /// said "bottom" gets a window with two tab bars. Every enable has to
+    /// happen before any disable.
+    func testMovingTheTabBarToAnotherEdgeIsOneAssignment() {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        XCTAssertEqual(controller.enabledTabEdgeNames, ["top"])
+
+        controller.enabledTabEdgeNames = ["bottom"]
+
+        XCTAssertEqual(controller.enabledTabEdgeNames, ["bottom"],
+                       "the edge the script named, and only it")
+    }
+
+    /// The last-edge rule still holds where it is supposed to: an assignment
+    /// that names no edge at all would leave the window with no tab bar, no
+    /// tabs, and no control anywhere to bring one back.
+    func testEmptyingTheEdgesLeavesTheLastTabBarAlone() {
+        let project = makeProject()
+        let controller = makeController(for: project)
+
+        controller.enabledTabEdgeNames = []
+
+        XCTAssertEqual(controller.enabledTabEdgeNames, ["top"])
+    }
+
+    /// `forgetForScripting` is the undo of `adoptForScripting`, and only of
+    /// that. The two registrations are not interchangeable: an opened window's
+    /// close observer also clears the persisted "reopen me" flag, so undoing
+    /// that registration through the wrong door would leave the project marked
+    /// open for ever and reopening at every launch with no window to close it.
+    func testForgettingCannotUndoAWindowTheManagerOpenedItself() throws {
+        let project = makeProject()
+        let manager = ProjectWindowManager()
+        let coordinator = try ProjectsCoordinator(database: project.database)
+        manager.attach(to: coordinator)
+
+        manager.openProject(project.repo)
+        let controller = try XCTUnwrap(manager.windowController(for: project.id))
+
+        manager.forgetForScripting(controller)
+
+        XCTAssertEqual(manager.openWindowControllers.count, 1,
+                       "an opened window is not an adopted one, so there is nothing here to undo")
+
+        // The proof that the *right* observer is still the one installed: it is
+        // the one that clears the flag, and only an opened window has it.
+        XCTAssertEqual(project.setting(ProjectWindowManager.openWindowKey), "1")
+        controller.close()
+        XCTAssertTrue(manager.openWindowControllers.isEmpty)
+        XCTAssertNil(project.setting(ProjectWindowManager.openWindowKey))
+    }
+
     func testTheManagerFindsATabAndAWindowByID() throws {
         let project = makeProject()
         let controller = makeController(for: project)

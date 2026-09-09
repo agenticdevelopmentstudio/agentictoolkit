@@ -70,7 +70,10 @@ open class PaneViewController: NSViewController {
     /// item's 32pt maximum unsatisfiable, and AppKit recovers by breaking a
     /// constraint inside the title bar it happens to pick.
     private var titleBarTrailing: NSLayoutConstraint?
-    private var optionsPopover: WindowConfigPopover?
+    /// Internal rather than private so a test can close it: the gear is the
+    /// only way the spacing gesture ends, and nothing outside the framework
+    /// has any business reaching it.
+    private(set) var optionsPopover: WindowConfigPopover?
 
     /// This pane's spacing, and where it comes from. `lazy` because it asks
     /// `inheritedPaneSpacing`, which a subclass overrides — so it cannot be
@@ -238,6 +241,11 @@ open class PaneViewController: NSViewController {
             preferredEdge: .minY,
             makeControls: { [weak self] in self?.makeOptionRows() ?? [] }
         )
+        // The spacing steppers coalesce their writes, so the last tick of a
+        // gesture is still waiting when the user dismisses the popover. The
+        // popover closing *is* the end of the gesture — and closing the window
+        // closes it too — so this is where the pane stops waiting and writes.
+        popover.onDidClose = { [weak self] in self?.spacingOverride.flushPendingPersist() }
         optionsPopover = popover
         popover.gearButton.accessibilityID("pane.options")
         popover.gearButton.setAccessibilityLabel("Pane Options")
@@ -422,12 +430,37 @@ open class PaneViewController: NSViewController {
 
     // MARK: - Appearance
 
+    /// The content's four pins to `contentContainer`, on or off together.
+    /// Nothing to do for a pane whose content view controller declined to
+    /// exist — there is no content to pin.
+    private func setContentEdgeConstraints(active: Bool) {
+        guard let edges = contentEdgeConstraints else { return }
+        let all = [edges.top, edges.leading, edges.bottom, edges.trailing]
+        if active {
+            NSLayoutConstraint.activate(all)
+        } else {
+            NSLayoutConstraint.deactivate(all)
+        }
+    }
+
     /// The three shapes a pane can be in, in one place, so they cannot disagree.
     ///
     /// - whole: title bar over content.
     /// - minimized top or bottom: the title bar, and nothing under it.
     /// - minimized leading or trailing: a rail one icon wide, instead of both.
+    ///
+    /// Does nothing until the view exists, the same guard
+    /// `refreshControlAvailability()` makes and for a sharper reason: every
+    /// branch below touches `view`, so on an unloaded pane this method *loads*
+    /// it — and `viewDidLoad` ends by calling `restorePersistedState()`, which
+    /// re-enters here. The rail built by the inner call is the one
+    /// `minimizedStrip` ends up holding; the outer call then adds a second
+    /// rail to the same view that nothing tracks and nothing can remove.
+    /// `minimizedEdge` and the store are already written by the time this is
+    /// called, so skipping is lossless: whenever the view does load,
+    /// `restorePersistedState()` applies exactly this.
     private func applyMinimizedAppearance() {
+        guard isViewLoaded else { return }
         titleBar.controls.isMinimized = minimizedEdge != nil
         // Only the rail is narrower than the title bar; every other shape shows
         // it, so it goes back to spanning the pane.
@@ -437,6 +470,7 @@ open class PaneViewController: NSViewController {
             titleBar.isHidden = false
             contentContainer.isHidden = false
             contentViewController?.view.isHidden = false
+            setContentEdgeConstraints(active: true)
             minimizedStrip?.removeFromSuperview()
             minimizedStrip = nil
             builtStripEdge = nil
@@ -445,6 +479,14 @@ open class PaneViewController: NSViewController {
 
         contentContainer.isHidden = true
         contentViewController?.view.isHidden = true
+        // Hidden is not un-laid-out: AppKit still solves for a hidden view, so
+        // content with its own minimum size goes on demanding it from a
+        // container the host has just squeezed to a rail's width, and the
+        // engine breaks whichever constraint it likes to get out. Releasing
+        // the four pins takes the content out of the pane's layout entirely
+        // while it has no space to be in, and `setMinimized(to: nil)` puts
+        // them back before it is visible again.
+        setContentEdgeConstraints(active: false)
 
         guard edge.isHorizontal else {
             titleBar.isHidden = false

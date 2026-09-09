@@ -32,6 +32,14 @@ public final class ProjectWindowManager: ProjectOpening {
     private var openOrder: [UUID] = []
 
     private var closeObservers: [UUID: NSObjectProtocol] = [:]
+
+    /// The projects registered by `adoptForScripting(_:)` rather than opened
+    /// here. Membership is what `forgetForScripting(_:)` checks, because the
+    /// two registrations are not interchangeable: an adopted window's observer
+    /// only unregisters it, while an opened window's observer also clears the
+    /// persisted "reopen me" flag. Tearing the second one down through the
+    /// undo of the first would leave the project reopening for ever.
+    private var adoptedForScripting: Set<UUID> = []
     private weak var coordinator: ProjectsCoordinator?
 
     public init() {}
@@ -84,18 +92,27 @@ public final class ProjectWindowManager: ProjectOpening {
         guard controllers[id] == nil else { return }
         controllers[id] = controller
         openOrder.append(id)
+        adoptedForScripting.insert(id)
         observeClose(of: controller, repoID: id, recordsOpenState: false)
     }
 
-    /// The undo of `adoptForScripting(_:)`. Guarded on identity, so forgetting
-    /// a stale controller cannot evict the live window that replaced it — and
-    /// it takes the adoption's close observer with it, so the eager undo leaks
+    /// The undo of `adoptForScripting(_:)`, and only of that. Guarded on
+    /// identity, so forgetting a stale controller cannot evict the live window
+    /// that replaced it, and guarded on *how* the controller was registered,
+    /// so it cannot undo an `openProject(_:)`: that registration owns the
+    /// observer which clears the persisted open flag on close, and removing it
+    /// would leave the project marked open for ever and reopening at every
+    /// launch. A controller this manager opened is silently left alone —
+    /// there is nothing here for the caller to undo.
+    ///
+    /// It takes the adoption's close observer with it, so the eager undo leaks
     /// no more than the automatic one does.
     public func forgetForScripting(_ controller: ComposableTabsWindowController) {
         let id = controller.project.id
-        guard controllers[id] === controller else { return }
+        guard controllers[id] === controller, adoptedForScripting.contains(id) else { return }
         controllers.removeValue(forKey: id)
         openOrder.removeAll { $0 == id }
+        adoptedForScripting.remove(id)
         if let observer = closeObservers.removeValue(forKey: id) {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -235,6 +252,7 @@ public final class ProjectWindowManager: ProjectOpening {
                 }
                 self.controllers.removeValue(forKey: repoID)
                 self.openOrder.removeAll { $0 == repoID }
+                self.adoptedForScripting.remove(repoID)
                 if let observer = self.closeObservers.removeValue(forKey: repoID) {
                     NotificationCenter.default.removeObserver(observer)
                 }
