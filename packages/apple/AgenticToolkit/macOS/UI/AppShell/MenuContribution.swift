@@ -1,4 +1,6 @@
 import AppKit
+import OSLog
+import AgenticToolkitCore
 
 /// One menu item a feature wants the host's `MenuManager` to install.
 /// Coordinators return `[MenuContribution]` from `menuContributions()`;
@@ -67,4 +69,88 @@ public struct MenuContribution {
         self.isHidden = isHidden
         self.action = action
     }
+
+    /// Build a menu item that runs a **registered command** instead of a
+    /// closure written inline here. Additive: the closure initializer above is
+    /// untouched and every existing call site keeps compiling.
+    ///
+    /// `action` and `isEnabled` are synthesized rather than stored as a
+    /// `commandID`, so `MenuManager` needs no change at all — it still reads
+    /// `contribution.action` / `contribution.isEnabled` and hands them to
+    /// `ClosureMenuItemTarget` exactly as before. The lookup is deliberately
+    /// *late*: both closures ask the registry each time they run, so a menu
+    /// item built before its command is registered still works, and a command
+    /// replaced later (an extension reloading, in Stage 5) takes effect without
+    /// rebuilding the menu.
+    ///
+    /// An id nothing has registered makes the item disabled, never
+    /// silently-inert-but-enabled — `CommandRegistry.isEnabled(id:)` answers
+    /// `false` for an unknown id.
+    ///
+    /// ## Why this is main-actor-safe
+    ///
+    /// `action` and `isEnabled` are plain `() -> Void` / `() -> Bool` — neither
+    /// `@Sendable` nor `@MainActor` — while `CommandRegistry` is `@MainActor`.
+    /// Under `SWIFT_STRICT_CONCURRENCY: complete` the guarantee that makes the
+    /// registry calls below legal is **closure isolation inheritance**: this
+    /// initializer is `@MainActor`, and a non-`@Sendable` closure literal formed
+    /// inside an actor-isolated context is itself isolated to that actor. So
+    /// both closures are statically main-actor-isolated at the point they are
+    /// written — no `MainActor.assumeIsolated`, no `Task` hop, and no dynamic
+    /// check that could trap at runtime.
+    ///
+    /// That isolation cannot be lost afterwards, which is the other half of the
+    /// argument: because the closure types are non-`@Sendable` (and
+    /// `MenuContribution` is itself non-`Sendable`), the compiler will not let
+    /// either value cross into a different isolation domain, so there is no
+    /// path by which they could be called off the main actor. It is the same
+    /// guarantee the existing closure call sites already rely on — every
+    /// coordinator forms its `action` inside a `@MainActor` `init` and calls
+    /// `@MainActor` methods from it — and the consumer end matches: the only
+    /// caller of `action` is `@MainActor ClosureMenuItemTarget
+    /// .performMenuAction(_:)`, and of `isEnabled`, its `validateMenuItem(_:)`.
+    ///
+    /// - Parameters:
+    ///   - commandID: The id to dispatch through `registry`.
+    ///   - registry: The registry to look `commandID` up in. Captured strongly:
+    ///     a menu lives as long as the app, and a registry the menu could
+    ///     outlive would turn every item into a no-op.
+    @MainActor
+    public init(
+        slot: Slot,
+        title: String,
+        commandID: String,
+        registry: CommandRegistry,
+        order: Int = 0,
+        key: String = "",
+        modifiers: NSEvent.ModifierFlags = .command,
+        isHidden: (() -> Bool)? = nil
+    ) {
+        self.slot = slot
+        self.title = title
+        self.order = order
+        self.key = key
+        self.modifiers = modifiers
+        self.isHidden = isHidden
+        self.isEnabled = { registry.isEnabled(id: commandID) }
+        self.action = {
+            do {
+                try registry.execute(id: commandID)
+            } catch {
+                // Reachable only if AppKit fires an item its own
+                // `validateMenuItem(_:)` said was disabled, or if the id was
+                // never registered. Neither is recoverable here and neither
+                // should pass unnoticed, so it is logged rather than swallowed;
+                // `execute` itself still throws for callers that can react.
+                let reason = String(describing: error)
+                MenuContribution.logger.error(
+                    "Menu item '\(title, privacy: .public)' failed: \(reason, privacy: .public)"
+                )
+            }
+        }
+    }
+}
+
+extension MenuContribution: Loggable {
+    public static nonisolated let logger = makeLogger()
 }

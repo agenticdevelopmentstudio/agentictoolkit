@@ -10,9 +10,18 @@ extension ComposableSettings {
 
         public let settingsWindow: ComposableSettings.SettingsWindow
 
+        /// The ids this feature's actions answer to.
+        public enum CommandID {
+            public static let showSettings = "settings.action.showSettings"
+        }
+
+        /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — `nil`
+        ///   gives this feature a private registry and behaves exactly as
+        ///   before.
         public init(
             windowTitle: String = "Settings",
-            settingsPanels: [any ComposableSettingsPanel]
+            settingsPanels: [any ComposableSettingsPanel],
+            commandRegistry: CommandRegistry? = nil
         ) {
             let settingsWindow = ComposableSettings.SettingsWindow()
             settingsWindow.windowTitle = windowTitle
@@ -28,10 +37,23 @@ extension ComposableSettings {
             self.settingsWindow = settingsWindow
             super.init()
 
+            let registry = commandRegistry ?? CommandRegistry()
+            registry.register(AppCommand(
+                id: CommandID.showSettings,
+                title: "Settings…",
+                category: "Settings",
+                run: { [weak self] in self?.showWindow() }
+            ))
+
             self.menuContributions = [
-                MenuContribution(slot: .app, title: "Settings…", order: 10, key: ",") { [weak self] in
-                    self?.showWindow()
-                }
+                MenuContribution(
+                    slot: .app,
+                    title: "Settings…",
+                    commandID: CommandID.showSettings,
+                    registry: registry,
+                    order: 10,
+                    key: ","
+                )
             ]
 
             self.scriptingKeys = [

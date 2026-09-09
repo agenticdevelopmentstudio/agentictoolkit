@@ -13,17 +13,47 @@ public final class AIChatCoordinator: AppFeature {
     public private(set) var viewModel: AIChatViewModel?
     public private(set) var windowController: AIChatWindowController?
 
-    public init(makeSession: @escaping () -> any ChatSession) {
+    /// The ids this feature's actions answer to. One command, two menu items:
+    /// the Window entry and the status-item entry are the same action, and the
+    /// registry is what lets them say so instead of each holding its own copy
+    /// of the closure (`dry`).
+    public enum CommandID {
+        public static let showWindow = "aichat.action.showWindow"
+    }
+
+    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — `nil`
+    ///   gives this feature a private registry and behaves exactly as before.
+    public init(
+        makeSession: @escaping () -> any ChatSession,
+        commandRegistry: CommandRegistry? = nil
+    ) {
         self.makeSession = makeSession
         super.init()
 
+        let registry = commandRegistry ?? CommandRegistry()
+        registry.register(AppCommand(
+            id: CommandID.showWindow,
+            title: "AI Chat",
+            category: "AI Chat",
+            run: { [weak self] in self?.showWindow() }
+        ))
+
         self.menuContributions = [
-            MenuContribution(slot: .window, title: "AI Chat", order: 30, key: "3") { [weak self] in
-                self?.showWindow()
-            },
-            MenuContribution(slot: .statusItem(section: 1), title: "AI Chat", order: 20) { [weak self] in
-                self?.showWindow()
-            }
+            MenuContribution(
+                slot: .window,
+                title: "AI Chat",
+                commandID: CommandID.showWindow,
+                registry: registry,
+                order: 30,
+                key: "3"
+            ),
+            MenuContribution(
+                slot: .statusItem(section: 1),
+                title: "AI Chat",
+                commandID: CommandID.showWindow,
+                registry: registry,
+                order: 20
+            )
         ]
 
         self.scriptingKeys.insert("scriptingAIChatVisible")
@@ -33,8 +63,14 @@ public final class AIChatCoordinator: AppFeature {
     /// Legacy convenience: wraps a `ChatBackend` factory in `ChatBackendSession`.
     /// Prefer `init(makeSession:)`. Retained until AgenticToolkitApp & Whippet
     /// migrate, then deleted.
-    public convenience init(makeBackend: @escaping () -> ChatBackend) {
-        self.init(makeSession: { ChatBackendSession(backend: makeBackend()) })
+    public convenience init(
+        makeBackend: @escaping () -> ChatBackend,
+        commandRegistry: CommandRegistry? = nil
+    ) {
+        self.init(
+            makeSession: { ChatBackendSession(backend: makeBackend()) },
+            commandRegistry: commandRegistry
+        )
     }
 
     // MARK: - Public API

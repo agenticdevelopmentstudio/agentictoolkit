@@ -20,9 +20,23 @@ public final class NotesCoordinator: AppFeature {
     /// inject a closure that returns the current button frame.
     private let statusItemButtonFrameProvider: () -> NSRect
 
+    /// The ids this feature's actions answer to. "Notes" appears twice in the
+    /// menus (Window and the status item) and is one command here.
+    public enum CommandID {
+        public static let showNotes = "notes.action.showNotes"
+        public static let showQuickNote = "notes.action.showQuickNote"
+        public static let newFolder = "notes.action.newFolder"
+        public static let importMarkdownFile = "notes.action.importMarkdownFile"
+        public static let deleteNote = "notes.action.deleteNote"
+        public static let deleteFolder = "notes.action.deleteFolder"
+    }
+
+    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — `nil`
+    ///   gives this feature a private registry and behaves exactly as before.
     public init(
         storage: NoteStorage,
-        statusItemButtonFrameProvider: @escaping () -> NSRect = { .zero }
+        statusItemButtonFrameProvider: @escaping () -> NSRect = { .zero },
+        commandRegistry: CommandRegistry? = nil
     ) {
         let manager = NotesManager(storage: storage)
         self.notesManager = manager
@@ -59,52 +73,103 @@ public final class NotesCoordinator: AppFeature {
             self?.activeNotesViewController != nil
         }
 
+        let registry = commandRegistry ?? CommandRegistry()
+        registry.register(AppCommand(
+            id: CommandID.showNotes,
+            title: "Notes",
+            category: "Notes",
+            run: { [weak self] in self?.showNotesWindow() }
+        ))
+        registry.register(AppCommand(
+            id: CommandID.showQuickNote,
+            title: "Quick Note",
+            category: "Notes",
+            run: { [weak self] in self?.showQuickNoteWindow() }
+        ))
+        // `hasNotesTarget` moves from the four `MenuContribution`s onto the four
+        // commands: it is the command that knows when it applies, and a palette
+        // row has to ask the same question the menu item asked.
+        registry.register(AppCommand(
+            id: CommandID.newFolder,
+            title: "New Folder",
+            category: "Notes",
+            isEnabled: hasNotesTarget,
+            run: { [weak self] in
+                self?.activeNotesViewController?.createFolderUnderSelection()
+            }
+        ))
+        registry.register(AppCommand(
+            id: CommandID.importMarkdownFile,
+            title: "Import Markdown File…",
+            category: "Notes",
+            isEnabled: hasNotesTarget,
+            run: { [weak self] in
+                // The presenter is the notes view itself, so the open
+                // panel is a sheet on whichever window is showing notes —
+                // and, because the same view receives the text, an import
+                // started from a project window's notes pane lands there
+                // instead of in a standalone window the user cannot see.
+                guard let presenter = self?.activeNotesViewController else { return }
+                MarkdownFileImporter.present(from: presenter) { [weak presenter] text in
+                    guard let text else { return } // cancel or undecodable — no dialog
+                    presenter?.createNote(content: text)
+                }
+            }
+        ))
+        registry.register(AppCommand(
+            id: CommandID.deleteNote,
+            title: "Delete Note",
+            category: "Notes",
+            isEnabled: hasNotesTarget,
+            run: { [weak self] in
+                self?.activeNotesViewController?.deleteSelectedNote()
+            }
+        ))
+        registry.register(AppCommand(
+            id: CommandID.deleteFolder,
+            title: "Delete Folder",
+            category: "Notes",
+            isEnabled: hasNotesTarget,
+            run: { [weak self] in
+                self?.activeNotesViewController?.deleteSelectedFolder()
+            }
+        ))
+
         self.menuContributions = [
-            MenuContribution(slot: .window, title: "Notes", order: 40, key: "4") { [weak self] in
-                self?.showNotesWindow()
-            },
-            MenuContribution(slot: .statusItem(section: 0), title: "Notes", order: 10) { [weak self] in
-                self?.showNotesWindow()
-            },
-            MenuContribution(slot: .statusItem(section: 0), title: "Quick Note", order: 20) { [weak self] in
-                self?.showQuickNoteWindow()
-            },
             MenuContribution(
-                slot: .file, title: "New Folder", order: 10, key: "n", modifiers: [.command, .shift],
-                isEnabled: hasNotesTarget,
-                action: { [weak self] in
-                    self?.activeNotesViewController?.createFolderUnderSelection()
-                }
+                slot: .window, title: "Notes",
+                commandID: CommandID.showNotes, registry: registry,
+                order: 40, key: "4"
             ),
             MenuContribution(
-                slot: .file, title: "Import Markdown File…", order: 20,
-                isEnabled: hasNotesTarget,
-                action: { [weak self] in
-                    // The presenter is the notes view itself, so the open
-                    // panel is a sheet on whichever window is showing notes —
-                    // and, because the same view receives the text, an import
-                    // started from a project window's notes pane lands there
-                    // instead of in a standalone window the user cannot see.
-                    guard let presenter = self?.activeNotesViewController else { return }
-                    MarkdownFileImporter.present(from: presenter) { [weak presenter] text in
-                        guard let text else { return } // cancel or undecodable — no dialog
-                        presenter?.createNote(content: text)
-                    }
-                }
+                slot: .statusItem(section: 0), title: "Notes",
+                commandID: CommandID.showNotes, registry: registry,
+                order: 10
             ),
             MenuContribution(
-                slot: .file, title: "Delete Note", order: 30,
-                isEnabled: hasNotesTarget,
-                action: { [weak self] in
-                    self?.activeNotesViewController?.deleteSelectedNote()
-                }
+                slot: .statusItem(section: 0), title: "Quick Note",
+                commandID: CommandID.showQuickNote, registry: registry,
+                order: 20
             ),
             MenuContribution(
-                slot: .file, title: "Delete Folder", order: 40,
-                isEnabled: hasNotesTarget,
-                action: { [weak self] in
-                    self?.activeNotesViewController?.deleteSelectedFolder()
-                }
+                slot: .file, title: "New Folder",
+                commandID: CommandID.newFolder, registry: registry,
+                order: 10, key: "n", modifiers: [.command, .shift]
+            ),
+            MenuContribution(
+                slot: .file, title: "Import Markdown File…",
+                commandID: CommandID.importMarkdownFile, registry: registry,
+                order: 20
+            ),
+            MenuContribution(
+                slot: .file, title: "Delete Note",
+                commandID: CommandID.deleteNote, registry: registry,
+                order: 30
+            ),
+            MenuContribution(
+                slot: .file, title: "Delete Folder",
+                commandID: CommandID.deleteFolder, registry: registry,
+                order: 40
             )
         ]
 

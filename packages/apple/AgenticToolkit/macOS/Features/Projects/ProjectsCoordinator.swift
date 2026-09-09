@@ -43,10 +43,27 @@ public final class ProjectsCoordinator: AppFeature {
     private weak var opener: ProjectOpening?
     private var progressWindow: ProjectScanProgressWindow?
 
+    /// The ids this feature's actions answer to. Named once here rather than
+    /// spelled at each of the register/contribute pairs: they are the contract
+    /// `contributes.menus` (4.5) and the extension host (Stage 5) address, so a
+    /// typo in one of two copies would be a silently dead menu item.
+    public enum CommandID {
+        public static let openProject = "projects.action.openProject"
+        public static let scanForProjects = "projects.action.scanForProjects"
+    }
+
+    /// - Parameter commandRegistry: Where this feature's actions are registered
+    ///   so a palette, a shortcut or an extension can reach them by id. Left
+    ///   `nil` — as every pre-existing caller does — the feature makes a private
+    ///   one, which keeps the menu working exactly as before and simply means
+    ///   nothing else can see these commands. Optional rather than required so
+    ///   this stays purely additive for hosts (the demo app, Stenographer) that
+    ///   have no palette to feed.
     public init(
         database: ProjectDatabase,
         scanner: GitRepoScanner? = nil,
-        opener: ProjectOpening? = nil
+        opener: ProjectOpening? = nil,
+        commandRegistry: CommandRegistry? = nil
     ) throws {
         self.database = database
         self.injectedScanner = scanner
@@ -55,16 +72,36 @@ public final class ProjectsCoordinator: AppFeature {
 
         self.repos = (try? database.allRepos()) ?? []
 
+        let registry = commandRegistry ?? CommandRegistry()
+        registry.register(AppCommand(
+            id: CommandID.openProject,
+            title: "Open Project…",
+            category: "Projects",
+            run: { [weak self] in self?.showProjectChooser() }
+        ))
+        registry.register(AppCommand(
+            id: CommandID.scanForProjects,
+            title: "Scan for Projects",
+            category: "Projects",
+            run: { [weak self] in self?.scan() }
+        ))
+
         self.menuContributions = [
-            MenuContribution(slot: .file, title: "Open Project…", order: 0, key: "o") { [weak self] in
-                self?.showProjectChooser()
-            },
+            MenuContribution(
+                slot: .file,
+                title: "Open Project…",
+                commandID: CommandID.openProject,
+                registry: registry,
+                order: 0,
+                key: "o"
+            ),
             MenuContribution(
                 slot: .file,
                 title: "Scan for Projects",
+                commandID: CommandID.scanForProjects,
+                registry: registry,
                 order: 10,
-                isHidden: { [weak self] in self?.isScanning ?? false },
-                action: { [weak self] in self?.scan() }
+                isHidden: { [weak self] in self?.isScanning ?? false }
             )
         ]
     }

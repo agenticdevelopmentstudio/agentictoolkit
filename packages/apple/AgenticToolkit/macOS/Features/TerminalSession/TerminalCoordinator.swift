@@ -14,24 +14,63 @@ public final class TerminalCoordinator: AppFeature, TerminalSessionWindowLifecyc
 
     // MARK: - Public API
 
-    public override init() {
+    /// The ids this feature's actions answer to. "New Terminal Window" appears
+    /// twice in the menus (File and the status item) and is one command here.
+    public enum CommandID {
+        public static let newWindow = "terminal.action.newWindow"
+        public static let newSession = "terminal.action.newSession"
+        public static let toggleSidebar = "terminal.action.toggleSidebar"
+    }
+
+    /// - Parameter commandRegistry: See `ProjectsCoordinator.init` — `nil`
+    ///   gives this feature a private registry and behaves exactly as before,
+    ///   which is what keeps `TerminalCoordinator()` compiling unchanged.
+    public init(commandRegistry: CommandRegistry? = nil) {
         super.init()
 
         self.scriptingKeys.insert("terminalSessions")
-        self.menuContributions =  [
-            MenuContribution(slot: .file, title: "New Terminal Window", order: 0, key: "t") { [weak self] in
-                self?.openNewTerminalWindow()
-            },
-            MenuContribution(slot: .file, title: "New Terminal Session", order: 10) { [weak self] in
-                self?.openNewTerminalSession()
-            },
-            MenuContribution(slot: .view, title: "Toggle Sidebar", order: 0, key: "s",
-                             modifiers: [.command, .option]) { [weak self] in
-                self?.toggleSidebar()
-            },
-            MenuContribution(slot: .statusItem(section: 1), title: "New Terminal Window", order: 30) { [weak self] in
-                self?.openNewTerminalWindow()
-            }
+
+        let registry = commandRegistry ?? CommandRegistry()
+        registry.register(AppCommand(
+            id: CommandID.newWindow,
+            title: "New Terminal Window",
+            category: "Terminal",
+            run: { [weak self] in self?.openNewTerminalWindow() }
+        ))
+        registry.register(AppCommand(
+            id: CommandID.newSession,
+            title: "New Terminal Session",
+            category: "Terminal",
+            run: { [weak self] in self?.openNewTerminalSession() }
+        ))
+        registry.register(AppCommand(
+            id: CommandID.toggleSidebar,
+            title: "Toggle Sidebar",
+            category: "Terminal",
+            run: { [weak self] in self?.toggleSidebar() }
+        ))
+
+        self.menuContributions = [
+            MenuContribution(
+                slot: .file, title: "New Terminal Window",
+                commandID: CommandID.newWindow, registry: registry,
+                order: 0, key: "t"
+            ),
+            MenuContribution(
+                slot: .file, title: "New Terminal Session",
+                commandID: CommandID.newSession, registry: registry,
+                order: 10
+            ),
+            MenuContribution(
+                slot: .view, title: "Toggle Sidebar",
+                commandID: CommandID.toggleSidebar, registry: registry,
+                order: 0, key: "s", modifiers: [.command, .option]
+            ),
+            MenuContribution(
+                slot: .statusItem(section: 1), title: "New Terminal Window",
+                commandID: CommandID.newWindow, registry: registry,
+                order: 30
+            )
         ]
 
         self.newItemProviders = [
