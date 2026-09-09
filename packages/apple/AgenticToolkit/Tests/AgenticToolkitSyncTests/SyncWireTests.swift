@@ -18,7 +18,12 @@ final class SyncWireTests: XCTestCase {
 
     func testDecodesPullResponseFixture() throws {
         let response = try JSONDecoder().decode(SyncPullResponse.self, from: fixture("pull-response"))
-        XCTAssertEqual(response.manifest.count, 6)
+        // Three, not the six this asserted until 2026-09: the manifest advertised
+        // chat.chats/chat_messages/chat_participants for a release after the backend's
+        // sync registry stopped carrying them. The count is vendored from the backend
+        // fixture, which its own sync-fixture-reality.int.test.ts now checks against the
+        // live /sync/pull route — so a number that drifts here fails there first.
+        XCTAssertEqual(response.manifest.count, 3)
         XCTAssertEqual(response.changes.count, 2)
         XCTAssertEqual(response.changes[0].op, .upsert)
         XCTAssertEqual(response.changes[1].op, .delete)

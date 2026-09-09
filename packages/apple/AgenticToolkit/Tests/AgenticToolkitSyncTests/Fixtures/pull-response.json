@@ -1,8 +1,5 @@
 {
   "manifest": [
-    { "resource": "chat.chats", "schemaVersion": 1 },
-    { "resource": "chat.chat_messages", "schemaVersion": 1 },
-    { "resource": "chat.chat_participants", "schemaVersion": 1 },
     { "resource": "content.contacts", "schemaVersion": 1 },
     { "resource": "content.lists", "schemaVersion": 1 },
     { "resource": "content.list_items", "schemaVersion": 1 }
