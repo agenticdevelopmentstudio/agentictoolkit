@@ -541,7 +541,12 @@ final class ProjectScriptingTests: XCTestCase {
     func testForgettingCannotUndoAWindowTheManagerOpenedItself() throws {
         let project = makeProject()
         let manager = ProjectWindowManager()
-        let coordinator = try ProjectsCoordinator(database: project.database)
+        // A registry of its own: this test is about which registration a
+        // window close undoes, and nothing here reads a command back out.
+        let coordinator = try ProjectsCoordinator(
+            database: project.database,
+            commandRegistry: CommandRegistry()
+        )
         manager.attach(to: coordinator)
 
         manager.openProject(project.repo)
