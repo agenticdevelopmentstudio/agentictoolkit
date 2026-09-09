@@ -227,20 +227,44 @@ public enum VSCodeThemeImporter {
 
     // MARK: - JSONC
 
+    /// The encodings a theme file can legally arrive in, in the order they are
+    /// tried. UTF-8 is what every real theme uses; the rest are legal JSON and
+    /// cost one decode attempt each.
+    private static let candidateEncodings: [String.Encoding] = [
+        .utf8,
+        .utf16,
+        .utf16BigEndian,
+        .utf16LittleEndian,
+        .utf32BigEndian,
+        .utf32LittleEndian
+    ]
+
     private static func jsonObject(from data: Data) throws -> Any {
-        // VS Code reads theme files as JSONC; `JSONSerialization` does not. The
-        // preprocessor needs text, so a payload that is not UTF-8 — UTF-16/32 is
-        // legal JSON — goes straight to `JSONSerialization`, which detects those
-        // encodings itself. A non-UTF-8 file is rarer than a commented one, and
-        // this way neither is a hard failure.
-        guard var text = String(data: data, encoding: .utf8) else {
-            return try JSONSerialization.jsonObject(with: data)
+        // VS Code reads theme files as JSONC; `JSONSerialization` does not, and the
+        // preprocessor that closes that gap needs *text*. Transcoding is what keeps
+        // JSONC support from depending on the file's encoding: handing raw UTF-16/32
+        // bytes to `JSONSerialization` parses them, but only if they are strict JSON,
+        // so a commented theme would fail purely for not having been saved as UTF-8.
+        //
+        // First candidate that yields a parseable document wins, rather than first
+        // that merely decodes: UTF-16 bytes for ASCII text also decode as UTF-8 (the
+        // interleaved NULs are valid UTF-8), and `.utf16` accepts any even-length
+        // payload as big-endian, so "decodes" alone would let an earlier candidate
+        // swallow a later one's file and turn a good theme into a syntax error.
+        for encoding in candidateEncodings {
+            guard var text = String(data: data, encoding: encoding) else { continue }
+            // A BOM can survive decoding as U+FEFF, and `JSONSerialization` rejects
+            // the document over it; VS Code's parser skips it.
+            if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
+            let stripped = removingTrailingCommas(removingComments(text))
+            if let object = try? JSONSerialization.jsonObject(with: Data(stripped.utf8)) {
+                return object
+            }
         }
-        // A UTF-8 BOM survives decoding as U+FEFF and `JSONSerialization` rejects
-        // the document over it; VS Code's parser skips it.
-        if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
-        let stripped = removingTrailingCommas(removingComments(text))
-        return try JSONSerialization.jsonObject(with: Data(stripped.utf8))
+        // Nothing decoded into a parseable document. The raw bytes go to
+        // `JSONSerialization` so the error describes the caller's actual file rather
+        // than one of the transcodings attempted above.
+        return try JSONSerialization.jsonObject(with: data)
     }
 
     /// Removes `//` and `/* … */` comments, leaving anything inside a string

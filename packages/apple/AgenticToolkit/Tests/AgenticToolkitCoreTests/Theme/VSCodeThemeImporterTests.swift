@@ -15,7 +15,6 @@ private final class InMemoryThemeStorage: ThemeStorage {
     var onExternalChange: (() -> Void)?
 }
 
-@MainActor
 @Suite
 struct VSCodeThemeImporterTests {
 
@@ -190,6 +189,37 @@ struct VSCodeThemeImporterTests {
         #expect(jsonc.roleOverrides == strict.roleOverrides)
     }
 
+    @Test("a UTF-16 payload parses to the same theme as the UTF-8 one")
+    func utf16PayloadMatchesUTF8() throws {
+        let expected = try parse(Self.minimalJSON)
+        let utf16 = try #require(Self.minimalJSON.data(using: .utf16))
+        let transcoded = try VSCodeThemeImporter.parse(utf16, label: "Acme Dark", uiTheme: "vs-dark")
+
+        #expect(palette(transcoded) == palette(expected))
+        #expect(transcoded.appearance == expected.appearance)
+        #expect(transcoded.roleOverrides == expected.roleOverrides)
+    }
+
+    @Test("a UTF-16 JSONC payload is transcoded and preprocessed, not parsed as strict JSON")
+    func utf16JSONCIsPreprocessed() throws {
+        let expected = try parse(Self.jsoncJSON)
+        let utf16 = try #require(Self.jsoncJSON.data(using: .utf16))
+        let transcoded = try VSCodeThemeImporter.parse(utf16, label: "Acme Dark", uiTheme: "vs-dark")
+
+        #expect(palette(transcoded) == palette(expected))
+        #expect(transcoded.roleOverrides == expected.roleOverrides)
+    }
+
+    @Test("a UTF-8 BOM is skipped rather than failing the document")
+    func utf8BOMIsSkipped() throws {
+        let expected = try parse(Self.minimalJSON)
+        let bommed = Data([0xEF, 0xBB, 0xBF]) + Data(Self.minimalJSON.utf8)
+        let theme = try VSCodeThemeImporter.parse(bommed, label: "Acme Dark", uiTheme: "vs-dark")
+
+        #expect(palette(theme) == palette(expected))
+        #expect(theme.roleOverrides == expected.roleOverrides)
+    }
+
     @Test("#RRGGBBAA, #RRGGBB, #RGB and #RGBA all parse, with or without the leading hash")
     func colourForms() throws {
         let theme = try parse(Self.themeJSON("""
@@ -294,7 +324,7 @@ struct VSCodeThemeImporterTests {
         let extras = [
             """
             "tokenColors": [
-                { "scope": "comment", "settings": { "foreground": "#5C6370", "fontStyle": "italic" } }
+                { "scope": "comment", "settings": { "foreground": "#5C6370", "fontStyle": "italic" } },
             ]
             """,
             "\"semanticTokenColors\": { \"variable.readonly\": \"#E5C07B\" }"
@@ -401,6 +431,25 @@ struct VSCodeThemeImporterTests {
                 label: "x", uiTheme: "vs-dark"
             )
         }
+
+        // Present but unreadable is the same failure as absent, and it reports the
+        // same key: a number where a colour belongs, and a CSS colour name, which
+        // VS Code itself does not accept in a theme file either.
+        let nonString = Self.themeJSON("""
+            "editor.foreground": 42,
+            "editor.background": "#011627"
+        """)
+        #expect(throws: VSCodeThemeParseError.missingColor("editor.foreground")) {
+            _ = try VSCodeThemeImporter.parse(Data(nonString.utf8), label: "x", uiTheme: "vs-dark")
+        }
+
+        let namedColour = Self.themeJSON("""
+            "editor.foreground": "rebeccapurple",
+            "editor.background": "#011627"
+        """)
+        #expect(throws: VSCodeThemeParseError.missingColor("editor.foreground")) {
+            _ = try VSCodeThemeImporter.parse(Data(namedColour.utf8), label: "x", uiTheme: "vs-dark")
+        }
     }
 
     @Test("a missing ANSI key is rejected, and the error carries every missing name")
@@ -435,6 +484,9 @@ struct VSCodeThemeImporterTests {
 
     // MARK: - ThemeStore wiring
 
+    // `ThemeStore` and the storage double are both main-actor isolated; nothing
+    // else in this suite touches either, so the annotation belongs here.
+    @MainActor
     @Test("importVSCodeTheme stores a locked imported theme that shows up in the catalog")
     func storeImportLocksTheTheme() throws {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
