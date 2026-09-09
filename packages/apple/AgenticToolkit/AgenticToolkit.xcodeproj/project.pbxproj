@@ -259,6 +259,7 @@
 		3A9F7E9837216316A434A162 /* PersistedWindowState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AC870990D2D1C5B720CEE15 /* PersistedWindowState.swift */; };
 		3AA5608A715B68B29C10DD7D /* AIProviderMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC959528CF23522D84FE859F /* AIProviderMigration.swift */; };
 		3B25357CB5BF1CE9ADEF2894 /* ScriptableProjectTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1123E1D2D4B6AA8398E6B4 /* ScriptableProjectTab.swift */; };
+		3C1C7AC8334B182786140849 /* VSCodeThemeImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8748B4F811CCE16DBD2435B /* VSCodeThemeImporter.swift */; };
 		3C1CFAA23B69766F1848AD74 /* PopupMenuChoiceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C5ED7659A9B0B9B315F084B /* PopupMenuChoiceView.swift */; };
 		3C22269B016718B690F889F1 /* InMemorySyncStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D84EF4A4E5F9F11026827540 /* InMemorySyncStoreTests.swift */; };
 		3C33554A1DA3707F9DACAAFE /* AgenticToolkitMarkdown-macOS.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9BE5AA37E98B6801FE1D1948 /* AgenticToolkitMarkdown-macOS.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -299,6 +300,7 @@
 		449FCC7A607AA97A04F126F8 /* MarkdownRemoteWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3860A37A22BA7423296A49D /* MarkdownRemoteWriter.swift */; };
 		44A57C73AD49D4B30AA8482A /* SystemWindowShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C48F7CD91D0F1AE1F9CB1C72 /* SystemWindowShortcutManager.swift */; };
 		450F94C2448538A9F7EDA245 /* AgenticToolkitPermissionsUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FB251437E922B5A8689625BF /* AgenticToolkitPermissionsUI.framework */; };
+		4566BDB02A3EA4F6D77AFA24 /* VSCodeThemeImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15D5670058AD11006F261292 /* VSCodeThemeImporterTests.swift */; };
 		45EAA5980E86BE9C855B3245 /* AgenticToolkitCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FF857DF2BB3D2BE006BBA101 /* AgenticToolkitCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		45EDE783960402B880C0EC15 /* NotesCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F8BF5ECB3A67AF18E4AB7A1 /* NotesCoordinator.swift */; };
 		4635DCB7F3A90EBADC0E8A8C /* ThemedSplitViewOrientationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E1C2B0EA16A48550F5B15EA /* ThemedSplitViewOrientationTests.swift */; };
@@ -1806,6 +1808,7 @@
 		14F0D7A30AF00561219B8FCF /* ContextVisualizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextVisualizationView.swift; sourceTree = "<group>"; };
 		156797041CCFC6775B8D556D /* ExtensionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionRegistry.swift; sourceTree = "<group>"; };
 		1582FFA3C37E29B8B3A8FCD0 /* ExtensionRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionRegistryTests.swift; sourceTree = "<group>"; };
+		15D5670058AD11006F261292 /* VSCodeThemeImporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeThemeImporterTests.swift; sourceTree = "<group>"; };
 		162B10FD3D11B001EFBD490C /* PluginConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginConfigStore.swift; sourceTree = "<group>"; };
 		163955666D4666A8F5517801 /* AIProviderConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfiguration.swift; sourceTree = "<group>"; };
 		1728EF32C9F388F3A2106441 /* FileTypesSettingsPanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypesSettingsPanelViewController.swift; sourceTree = "<group>"; };
@@ -2256,6 +2259,7 @@
 		B6F3B2DDE9E4F4930EF59CDC /* NSWindow+FitHeight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSWindow+FitHeight.swift"; sourceTree = "<group>"; };
 		B778B8D9F7C5605505C85761 /* ProjectDatabaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDatabaseTests.swift; sourceTree = "<group>"; };
 		B80E4CA204954CD2D5B64C67 /* CheckboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckboxView.swift; sourceTree = "<group>"; };
+		B8748B4F811CCE16DBD2435B /* VSCodeThemeImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeThemeImporter.swift; sourceTree = "<group>"; };
 		B8C6F25D5AEDC37D45C4D7D3 /* ActivateAppCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivateAppCommand.swift; sourceTree = "<group>"; };
 		B90D88AC28BC23DCD8CB4FD2 /* SingleWindowControllerRefitSeamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleWindowControllerRefitSeamTests.swift; sourceTree = "<group>"; };
 		B96CF5B3737039A880292A4F /* AIProviderConfigSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfigSyncTests.swift; sourceTree = "<group>"; };
@@ -3950,6 +3954,7 @@
 				1C317B81A4A0F44D95F82B8C /* MCP */,
 				4B0877E124B10C96FDED896A /* RPC */,
 				27852FE10F3225077090F465 /* SettingsStore */,
+				C9733C5E82604ABABA1F723D /* Theme */,
 				E704045A9988FA8B0269C338 /* ArtificialAnalysisStoreTests.swift */,
 				996BC129EFE3C2D78BE1C0D2 /* CGFloatClampedTests.swift */,
 				9640D313E020C0A0C615326E /* KeychainHelperTests.swift */,
@@ -4181,6 +4186,7 @@
 			children = (
 				535C29391D95F9C3C2E4D2CC /* ThemeReExports.swift */,
 				934FAAEB406E8B94F56B793A /* UserSettingsThemeStorage.swift */,
+				B8748B4F811CCE16DBD2435B /* VSCodeThemeImporter.swift */,
 			);
 			path = Theme;
 			sourceTree = "<group>";
@@ -4234,6 +4240,14 @@
 			);
 			name = AgenticToolkitSyncTests;
 			path = Tests/AgenticToolkitSyncTests;
+			sourceTree = "<group>";
+		};
+		C9733C5E82604ABABA1F723D /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				15D5670058AD11006F261292 /* VSCodeThemeImporterTests.swift */,
+			);
+			path = Theme;
 			sourceTree = "<group>";
 		};
 		CBFDB4F04B8EEFB30C3C1C72 /* WindowManager */ = {
@@ -5812,6 +5826,7 @@
 				61A374E12E3597603FF24D90 /* TestSupport.swift in Sources */,
 				ADFE7FCEC85C273B15879EE3 /* UserDefaultsSettingsStoreTests.swift in Sources */,
 				9D58667B3FCF530A95E6FA0E /* VSCodeEngineRangeTests.swift in Sources */,
+				4566BDB02A3EA4F6D77AFA24 /* VSCodeThemeImporterTests.swift in Sources */,
 				2E502A3D8E63420790F6C73B /* WallClockBudgetTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -6286,6 +6301,7 @@
 				FECEF27DBCC5D212DB5A3083 /* UserSettingsThemeStorage.swift in Sources */,
 				E7A14B0946F7D6C09AD0D791 /* VSCodeEngineRange.swift in Sources */,
 				DB4DA3A8B749076403865BC5 /* VSCodeHeuristic.swift in Sources */,
+				3C1C7AC8334B182786140849 /* VSCodeThemeImporter.swift in Sources */,
 				8586B32158522BDA9FE0F5DD /* WallClockBudget.swift in Sources */,
 				09850732077655840883CDBB /* WarpHeuristic.swift in Sources */,
 				282C238B07C73C6080DEF653 /* XcodeHeuristic.swift in Sources */,
