@@ -35,7 +35,15 @@ private final class RecordingContributionPoint: ContributionPoint {
 /// that says no is observable.
 @MainActor
 private final class ThrowingContributionPoint: ContributionPoint {
-    struct Refused: Error {}
+    /// Deliberately a bare `Error` with an associated value and no
+    /// `LocalizedError` conformance — the shape every first-party contribution
+    /// point is likely to throw. Its `localizedDescription` is Foundation's
+    /// "The operation couldn't be completed…" boilerplate, so the recorded
+    /// message below is only readable if the registry uses
+    /// `String(describing:)`.
+    enum Refused: Error {
+        case pointSaidNo(String)
+    }
 
     let contributionKey = "throwing"
     private(set) var withdrawnIdentifiers: [String] = []
@@ -45,7 +53,7 @@ private final class ThrowingContributionPoint: ContributionPoint {
         from manifest: ExtensionManifest,
         at directory: URL
     ) throws {
-        throw Refused()
+        throw Refused.pointSaidNo(manifest.identifier)
     }
 
     func withdraw(extensionIdentifier: String) {
@@ -362,11 +370,65 @@ struct ExtensionRegistryTests {
             #expect(registry.failures.count == 1)
             if case .contributionPointFailed(let key, let message) = registry.failures.first?.reason {
                 #expect(key == "throwing")
-                #expect(!message.isEmpty)
+                // Exactly, not merely non-empty: the boilerplate
+                // `localizedDescription` is also non-empty, and pinning the
+                // payload is the only thing that keeps the message useful.
+                #expect(message == "pointSaidNo(\"acme.refused\")")
             } else {
                 let reason = String(describing: registry.failures.first?.reason)
                 Issue.record("expected contributionPointFailed, got \(reason)")
             }
+        }
+    }
+
+    @Test("re-enabling an extension re-derives its contribution failures rather than duplicating them")
+    func togglingDoesNotAccumulateContributionFailures() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest(manifestJSON(name: "refused"), named: "refused-ext", in: root)
+
+            let throwing = ThrowingContributionPoint()
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(throwing)
+            registry.loadAll()
+
+            #expect(registry.failures.count == 1)
+
+            // Disabled: nothing is contributed, so nothing is refused.
+            registry.setEnabled(false, for: "acme.refused")
+            #expect(registry.failures.isEmpty)
+
+            // Re-enabled: refused again, and recorded once — not twice.
+            registry.setEnabled(true, for: "acme.refused")
+            #expect(registry.failures.count == 1)
+
+            registry.setEnabled(false, for: "acme.refused")
+            registry.setEnabled(true, for: "acme.refused")
+            #expect(registry.failures.count == 1)
+        }
+    }
+
+    @Test("uninstall drops the contribution failures naming the directory it removed")
+    func uninstallDropsContributionFailures() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest(manifestJSON(name: "refused"), named: "refused-ext", in: root)
+
+            let throwing = ThrowingContributionPoint()
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(throwing)
+            registry.loadAll()
+
+            #expect(registry.failures.count == 1)
+
+            try registry.uninstall("acme.refused")
+
+            #expect(registry.extensions.isEmpty)
+            #expect(registry.failures.isEmpty)
         }
     }
 

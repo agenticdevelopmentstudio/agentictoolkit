@@ -32,6 +32,18 @@ public final class ExtensionRegistry {
     public static let declaredVSCodeVersion = SemanticVersion(major: 1, minor: 95, patch: 0)
 
     public private(set) var extensions: [LoadedExtension] = []
+
+    /// Everything that went wrong, whether or not the extension itself
+    /// loaded. An entry does **not** imply the extension is absent from
+    /// `extensions`: a `contributionPointFailed` entry names one contribution
+    /// a loaded, enabled extension could not install, and its extension is
+    /// still in `extensions` and still working in every other respect.
+    ///
+    /// Rebuilt wholesale by `loadAll()`. Between loads the only entries that
+    /// change are `contributionPointFailed` ones, which are re-derived per
+    /// directory every time contributions are applied and dropped when the
+    /// extension is uninstalled — so a repeated enable/disable cycle cannot
+    /// accumulate duplicates, and no entry outlives the directory it names.
     public private(set) var failures: [ExtensionLoadFailure] = []
 
     private let searchPaths: [URL]
@@ -172,26 +184,59 @@ public final class ExtensionRegistry {
         from manifest: ExtensionManifest,
         at directory: URL
     ) {
+        // Applying is what decides which contributions of this directory
+        // failed, so the previous answer is discarded first rather than added
+        // to (`idempotency`). Without this, a re-enable through `setEnabled`
+        // — which reaches here with no `loadAll()` in between to clear
+        // `failures` — appends a second identical entry every toggle, and a
+        // settings panel lists one refusal N times.
+        removeContributionFailures(at: directory)
+
         for point in contributionPoints {
             do {
                 try point.apply(contributions, from: manifest, at: directory)
             } catch {
                 // swiftlint:disable:next line_length
-                logger.error("Contribution point '\(point.contributionKey, privacy: .public)' failed to apply '\(manifest.identifier, privacy: .public)': \(error.localizedDescription, privacy: .public)")
+                logger.error("Contribution point '\(point.contributionKey, privacy: .public)' failed to apply '\(manifest.identifier, privacy: .public)': \(String(describing: error), privacy: .public)")
                 // The console is not a UI. This layer collects what went
                 // wrong rather than throwing it, so a point that refuses is
                 // recorded where a caller can see it — otherwise the
                 // extension lists as healthy while a contribution it declared
                 // is silently absent. Loading does not abort: the extension
                 // stays loaded and the remaining points still apply.
+                //
+                // `String(describing:)`, not `localizedDescription`. Every
+                // conformer of `ContributionPoint` is first-party code in this
+                // repo, and a plain `enum … : Error` bridges to an `NSError`
+                // whose `localizedDescription` is "The operation couldn't be
+                // completed. (Module.SomeError error 0.)" — which names
+                // neither the case nor the reason. `String(describing:)` gives
+                // the case and its associated values, and it is already this
+                // file's idiom for a *recorded* payload (`record(_:at:)`'s log
+                // line, `ExtensionManifest.DecodingFailure.reason`). The two
+                // Foundation-error cases above keep `localizedDescription`
+                // because `CocoaError` and `DecodingError` genuinely localize.
                 failures.append(ExtensionLoadFailure(
                     directory: directory,
                     reason: .contributionPointFailed(
                         key: point.contributionKey,
-                        message: error.localizedDescription
+                        message: String(describing: error)
                     )
                 ))
             }
+        }
+    }
+
+    /// Drops every `contributionPointFailed` entry naming `directory`.
+    ///
+    /// Scoped to that one case on purpose: the other cases are load-time
+    /// verdicts that only `loadAll()` may rebuild, and a directory that
+    /// carries one of them never got far enough to apply a contribution.
+    private func removeContributionFailures(at directory: URL) {
+        failures.removeAll { failure in
+            guard failure.directory == directory else { return false }
+            if case .contributionPointFailed = failure.reason { return true }
+            return false
         }
     }
 
@@ -234,6 +279,10 @@ public final class ExtensionRegistry {
             for point in contributionPoints {
                 point.withdraw(extensionIdentifier: identifier)
             }
+            // A disabled extension contributes nothing, so a record saying one
+            // of its contributions was refused describes a state that no
+            // longer exists. Re-enabling re-derives it.
+            removeContributionFailures(at: loaded.directory)
         }
     }
 
@@ -263,6 +312,11 @@ public final class ExtensionRegistry {
         for point in contributionPoints {
             point.withdraw(extensionIdentifier: identifier)
         }
+        // The directory is gone from disk; a failure entry still naming it
+        // would point a settings row at nothing. `ExtensionLoadFailure` carries
+        // only the directory, so a UI could not even join it back to an
+        // identifier to hide it for itself.
+        removeContributionFailures(at: directory)
 
         // Clear the tombstone too. `disabledExtensionIdentifiers` is a set of
         // identifiers, not of installs, so an identifier left in it outlives
@@ -289,15 +343,23 @@ public struct LoadedExtension: Sendable, Equatable {
     public var identifier: String { manifest.identifier }
 }
 
-/// One extension directory that failed to load, and why.
+/// One thing that went wrong for one extension directory, and why. Not
+/// necessarily a directory that failed to *load*: `contributionPointFailed`
+/// names a single refused contribution of an extension that loaded fine, so a
+/// UI rendering this list must read `reason` before it claims the extension is
+/// unavailable.
 public struct ExtensionLoadFailure: Sendable, Equatable {
     public let directory: URL
     public let reason: ExtensionLoadError
 }
 
-/// Why a single extension directory failed to load. Every case names enough
-/// to explain the failure to a user or log line without re-reading the
-/// manifest.
+/// Why a load — or one contribution within an otherwise successful load — did
+/// not succeed. Every case names enough to explain itself to a user or a log
+/// line without re-reading the manifest.
+///
+/// Every case but the last describes a directory that produced no
+/// `LoadedExtension` at all. `contributionPointFailed` is the exception, and
+/// it says so on itself.
 public enum ExtensionLoadError: Error, Sendable, Equatable {
     case manifestMissing
     case manifestUnreadable(String)
