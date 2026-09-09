@@ -62,6 +62,21 @@ public final class CommandPaletteModel {
         applyQuery()
     }
 
+    /// Clear the filter and re-read the registry, in one filtering pass.
+    ///
+    /// What a host calls when it shows the palette and again when it dismisses
+    /// it, so neither the last visit's typing nor its selection survives into
+    /// the next one.
+    ///
+    /// Not `query = ""` followed by `reload()`: that filters twice, the first
+    /// time against a snapshot the second call is about to replace. Taking the
+    /// snapshot first and letting `query`'s `didSet` do the single pass is the
+    /// same answer for half the work.
+    public func reset() {
+        commands = registry.allCommands
+        query = ""
+    }
+
     // MARK: - Selection
 
     /// Move down one row, stopping at the last.
@@ -91,6 +106,16 @@ public final class CommandPaletteModel {
 
     // MARK: - Running
 
+    /// The command Return would run, or `nil` when nothing is selected.
+    ///
+    /// Exposed so a host can take the selection *before* it dismisses: dismissal
+    /// resets this model, and a palette that dispatched afterwards would run
+    /// whatever row 0 of the cleared list happened to be.
+    public var selectedCommand: AppCommand? {
+        guard let index = selectedIndex, matches.indices.contains(index) else { return nil }
+        return matches[index]
+    }
+
     /// Run the selected command through the registry.
     ///
     /// - Returns: `false` when there is no selection, or when the selected
@@ -104,8 +129,21 @@ public final class CommandPaletteModel {
     ///   (`fail-fast`).
     @discardableResult
     public func runSelection() throws -> Bool {
-        guard let index = selectedIndex, matches.indices.contains(index) else { return false }
-        let command = matches[index]
+        guard let command = selectedCommand else { return false }
+        return try run(command)
+    }
+
+    /// Run `command` through the registry, whatever the selection is now.
+    ///
+    /// The half of `runSelection()` that survives a dismissal: a host that has
+    /// already taken `selectedCommand` calls this after closing, so the command
+    /// runs in front of nothing rather than behind a panel about to vanish.
+    ///
+    /// - Returns: `false` when `command.isEnabled()` refuses — see
+    ///   `runSelection()`.
+    /// - Throws: Whatever `CommandRegistry.execute(id:)` throws.
+    @discardableResult
+    public func run(_ command: AppCommand) throws -> Bool {
         guard command.isEnabled() else { return false }
         try registry.execute(id: command.id)
         return true
@@ -136,6 +174,14 @@ public final class CommandPaletteModel {
         // The offset tiebreaker is what makes this stable: `sorted(by:)` gives
         // no stability guarantee, and two same-rank rows swapping places
         // between keystrokes is a list the eye cannot follow.
+        //
+        // Insurance, not a live fix: Swift's sort is a modified timsort and is
+        // stable in practice at every size, so deleting `.enumerated()` and the
+        // `$0.offset` term changes no answer today and no test can see it. What
+        // the tests *can* see — and what proves this line is load-bearing — is
+        // the same suite run against a deliberately unstable sort: with the
+        // tiebreaker it passes, without it the order comes back scrambled. Keep
+        // the tiebreaker; the guarantee is the stdlib's to withdraw.
         return ranked.enumerated()
             .sorted { ($0.element.rank, $0.offset) < ($1.element.rank, $1.offset) }
             .map(\.element.command)

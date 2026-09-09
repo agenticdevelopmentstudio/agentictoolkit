@@ -104,12 +104,12 @@ public final class CommandPaletteViewController: NSViewController {
     // MARK: - Public API
 
     /// Clear the filter, re-read the registry and rebuild the list. What a host
-    /// calls each time it shows the palette, so an opening palette never shows
-    /// the last visit's typing or a command set that has moved on since.
+    /// calls each time it shows *and* dismisses the palette, so an opening
+    /// palette never shows the last visit's typing or a command set that has
+    /// moved on since.
     public func reset() {
         searchField.stringValue = ""
-        model.query = ""
-        model.reload()
+        model.reset()
         tableView.reloadData()
         syncSelection()
     }
@@ -124,12 +124,16 @@ public final class CommandPaletteViewController: NSViewController {
 
     private func configureSearchField() {
         searchField.placeholderString = "Type a command"
+        // The two controls a UI test drives. The palette has no title and no
+        // static text of its own, so an identifier is the only handle on it.
+        searchField.accessibilityID("command-palette.search-field")
         searchField.delegate = self
         searchField.sendsWholeSearchString = false
         searchField.sendsSearchStringImmediately = true
     }
 
     private func configureTable() {
+        tableView.accessibilityID("command-palette.table")
         tableView.headerView = nil
         tableView.rowHeight = 24
         // Empty selection is reachable and real: a query that matches nothing
@@ -176,19 +180,31 @@ public final class CommandPaletteViewController: NSViewController {
     }
 
     private func runSelection() {
+        // Taken before the dismissal below, not after: dismissing resets the
+        // model, and a command read back afterwards would be row 0 of the
+        // cleared list rather than the row the user was looking at.
+        guard let command = model.selectedCommand else { return }
+        // A disabled row runs nothing and does not dismiss: the palette stays
+        // open, still showing why nothing happened (the row is dimmed).
+        guard command.isEnabled() else { return }
+
+        // Dismiss first, dispatch second. A command that opens or activates a
+        // window must not do it behind a floating panel that is about to
+        // vanish, and the palette's own "Show All Commands" row would otherwise
+        // re-show the palette only for this method to close it again.
+        onRun()
+
         do {
-            // A disabled row answers `false` and stays put: the palette is still
-            // open, still showing why nothing happened (the row is dimmed).
-            guard try model.runSelection() else { return }
+            try model.run(command)
         } catch {
-            // The selected command was unregistered between the last reload and
-            // this Return. Nothing here can fix that, and a palette that closed
-            // silently would look like the command had run.
+            // The command was unregistered between the last reload and this
+            // Return. The palette has already gone — dismissal cannot wait on
+            // an outcome that is only known after dispatch — so the log is the
+            // whole report, and this is a wiring mistake rather than anything
+            // the user did.
             let reason = String(describing: error)
             Self.logger.error("Command palette failed to run selection: \(reason, privacy: .public)")
-            return
         }
-        onRun()
     }
 
     private func syncSelection() {

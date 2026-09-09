@@ -30,6 +30,35 @@ struct CommandPaletteModelTests {
         return registry
     }
 
+    // MARK: - The ordering fixture
+
+    /// The order the two ordering tests register their commands in.
+    ///
+    /// Forty-eight slots, and the count is the point: Swift's `sorted(by:)` is
+    /// an introsort that falls back to plain insertion sort below roughly twenty
+    /// elements, and insertion sort *is* stable — so on two or four rows an
+    /// implementation with no tiebreaker is indistinguishable from one with it,
+    /// and a test at that size proves nothing. Forty-eight is well clear.
+    ///
+    /// Strided rather than ascending, because the other way a test like this
+    /// fools you is by registering in an order the sort would have produced
+    /// anyway. 29 is coprime with 48, so the stride visits every slot exactly
+    /// once and leaves an order that is neither ascending by id nor
+    /// alphabetical by title.
+    private var scrambledSlots: [Int] { (0..<48).map { ($0 * 29) % 48 } }
+
+    /// One command for `scrambledSlots`. `prefixed` decides its rank against the
+    /// query `"widget"`: a title that *starts* "Widget" ranks 0, one that merely
+    /// contains it ranks 1.
+    private func widgetCommand(slot: Int, prefixed: Bool) -> AppCommand {
+        let number = String(format: "%02d", slot)
+        return command(
+            id: "test.widget.\(number)",
+            title: prefixed ? "Widget Slot \(number)" : "Configure Widget \(number)",
+            category: "Widgets"
+        )
+    }
+
     // MARK: - Filtering
 
     @Test("An empty query lists every command, in registration order")
@@ -67,30 +96,37 @@ struct CommandPaletteModelTests {
         #expect(model.matches.map(\.id) == ["test.one", "test.two", "test.three", "test.four"])
     }
 
-    @Test("Commands of equal rank keep registration order")
+    @Test("Forty-eight commands of equal rank all keep registration order")
     func tiesKeepRegistrationOrder() {
-        let model = CommandPaletteModel(registry: registry([
-            command(id: "test.second", title: "Terminal Zoom"),
-            command(id: "test.first", title: "Terminal Settings")
-        ]))
+        let commands = scrambledSlots.map { widgetCommand(slot: $0, prefixed: false) }
+        let model = CommandPaletteModel(registry: registry(commands))
 
-        model.query = "terminal"
-        #expect(model.matches.map(\.id) == ["test.second", "test.first"])
+        model.query = "widget"
+        #expect(model.matches.count == 48)
+        #expect(model.matches.map(\.id) == commands.map(\.id))
+        // The fixture is only a test of stability while it is out of order:
+        // if registration order were also alphabetical order, a sort that had
+        // lost its tiebreaker would pass the line above by coincidence.
+        #expect(commands.map(\.id) != commands.map(\.id).sorted())
     }
 
-    @Test("The same query over the same commands gives the same order every time")
+    @Test("Rank decides between buckets; registration order decides inside one")
     func rankingIsStableAcrossInvocations() {
-        let commands = [
-            command(id: "test.one", title: "Open Recent", category: "File"),
-            command(id: "test.two", title: "Open Folder", category: "File"),
-            command(id: "test.three", title: "Reopen Editor", category: "File"),
-            command(id: "test.four", title: "Close All", category: "Open Windows")
-        ]
+        // Two buckets of twenty-four, interleaved on the way in: every "Widget
+        // Slot NN" ranks 0 and every "Configure Widget NN" ranks 1, so the
+        // answer is the whole first bucket in registration order followed by the
+        // whole second, and no other order is correct.
+        let commands = scrambledSlots.enumerated().map {
+            widgetCommand(slot: $0.element, prefixed: $0.offset.isMultiple(of: 2))
+        }
+        let expected = commands.filter { $0.title.hasPrefix("Widget") }.map(\.id)
+            + commands.filter { !$0.title.hasPrefix("Widget") }.map(\.id)
 
-        let first = CommandPaletteModel.matches(for: "open", in: commands).map(\.id)
-        let second = CommandPaletteModel.matches(for: "open", in: commands).map(\.id)
+        let first = CommandPaletteModel.matches(for: "widget", in: commands).map(\.id)
+        let second = CommandPaletteModel.matches(for: "widget", in: commands).map(\.id)
         #expect(first == second)
-        #expect(first == ["test.one", "test.two", "test.three", "test.four"])
+        #expect(first == expected)
+        #expect(first.count == 48)
     }
 
     @Test("Matching ignores case")
@@ -258,6 +294,69 @@ struct CommandPaletteModelTests {
         model.reload()
 
         #expect(model.matches.map(\.id) == ["test.one", "test.three"])
+    }
+
+    // MARK: - Dismissal
+
+    /// The palette resets on every dismissal (`windowWillClose` →
+    /// `CommandPaletteViewController.reset()` → here), so a closed palette holds
+    /// none of the last visit's state. This is that behaviour at the only seam
+    /// reachable without a window server.
+    @Test("reset clears the query, re-reads the registry and re-selects the top row")
+    func resetClearsTheQueryAndRereadsTheRegistry() {
+        let registry = registry([
+            command(id: "test.one", title: "Alpha"),
+            command(id: "test.two", title: "Alphabet")
+        ])
+        let model = CommandPaletteModel(registry: registry)
+
+        model.query = "alpha"
+        model.moveSelectionDown()
+        #expect(model.selectedIndex == 1)
+
+        registry.register(command(id: "test.three", title: "Bravo"))
+        model.reset()
+
+        #expect(model.query.isEmpty)
+        #expect(model.matches.map(\.id) == ["test.one", "test.two", "test.three"])
+        #expect(model.selectedIndex == 0)
+    }
+
+    @Test("A command taken before the dismissal still runs after it")
+    func aCapturedCommandSurvivesTheReset() throws {
+        var ranSecond = false
+        let model = CommandPaletteModel(registry: registry([
+            command(id: "test.one", title: "Alpha"),
+            command(id: "test.two", title: "Bravo", run: { ranSecond = true })
+        ]))
+
+        model.moveSelectionDown()
+        let selected = try #require(model.selectedCommand)
+        #expect(selected.id == "test.two")
+
+        // What the view controller does, in order: take the selection, dismiss
+        // (which resets), then dispatch. Reading the selection back after the
+        // reset instead would run "Alpha" — row 0 of the cleared list.
+        model.reset()
+        #expect(model.selectedCommand?.id == "test.one")
+
+        let didRun = try model.run(selected)
+        #expect(didRun)
+        #expect(ranSecond)
+    }
+
+    @Test("run refuses a disabled command, whatever the selection is")
+    func runRefusesADisabledCommand() throws {
+        var ran = false
+        let disabled = command(id: "test.two", title: "Bravo", isEnabled: { false }, run: { ran = true })
+        let model = CommandPaletteModel(registry: registry([
+            command(id: "test.one", title: "Alpha"),
+            disabled
+        ]))
+
+        let didRun = try model.run(disabled)
+        #expect(!didRun)
+        #expect(!ran)
     }
 
     @Test("A command re-registered under an existing id is listed once")

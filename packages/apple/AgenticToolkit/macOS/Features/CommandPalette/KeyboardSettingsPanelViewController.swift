@@ -55,7 +55,10 @@ public final class KeyboardSettingsPanelViewController: ComposableSettings.Setti
         // binding, records a new one and persists it — but it brings no label,
         // so the row is assembled the way every other labelled row here is.
         let row = ComposableSettings.HorizontalStackView()
-        row.addArrangedSubview(ComposableSettings.makeRowLabel("Show All Commands:"))
+        // "Command Palette:", not the command's own title "Show All Commands":
+        // this row binds the shortcut that *opens* the palette, and the surface
+        // the user is looking for it from is the View menu's "Command Palette…".
+        row.addArrangedSubview(ComposableSettings.makeRowLabel("Command Palette:"))
         row.addArrangedSubview(recorder)
         group.addSettingSubview(row)
 

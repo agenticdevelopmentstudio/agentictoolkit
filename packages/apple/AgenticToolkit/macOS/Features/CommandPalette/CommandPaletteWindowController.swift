@@ -47,13 +47,31 @@ public final class CommandPaletteWindowController: NSWindowController {
         window.level = .floating
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // A palette has no title-bar furniture. `.titled` is here for the frame
+        // and `.fullSizeContentView` draws the search field up into the title
+        // band, so the traffic lights would otherwise sit on top of the field's
+        // magnifying glass. Nothing is lost: Escape, a click away and running a
+        // command all dismiss, so the close button was never the way out, and a
+        // 640x400 chooser has nothing to say about minimising or zooming.
+        for button: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(button)?.isHidden = true
+        }
+
+        super.init(window: window)
+
         // Clicking away dismisses. This is the one place the palette departs
         // from Quick Note, deliberately: a note being typed must survive a
         // distraction, whereas a palette left floating behind another app is a
         // stale list of commands about a window that is no longer in front.
-        window.hidesOnDeactivate = true
-
-        super.init(window: window)
+        //
+        // `windowDidResignKey` and not `hidesOnDeactivate`: hiding is not
+        // dismissing. AppKit *restores* a hidden-on-deactivate window on the
+        // app's next activation, which would bring the palette back on its own
+        // — same query, same selection, no first responder, because nothing on
+        // that path calls `show()`. Closing is permanent, and
+        // `isReleasedWhenClosed = false` above keeps the panel alive to be
+        // re-shown.
+        window.delegate = self
 
         // Framed with the window's own rect: a zero-frame container view
         // collapses the window to Auto Layout's intrinsic minimum the moment it
@@ -90,9 +108,15 @@ public final class CommandPaletteWindowController: NSWindowController {
         guard let window else { return }
         paletteController.reset()
         position(window)
+        // Activate *before* taking key, the one place this departs from Quick
+        // Note's ordering: the palette opens from a system-global shortcut with
+        // another app frontmost, and activating afterwards lets AppKit hand key
+        // back to whichever window of this app held it last — which, now that
+        // resigning key closes the palette, would shut it again the instant it
+        // opened.
+        NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
         paletteController.focusSearchField()
         logger.debug("Command palette shown")
     }
@@ -118,6 +142,31 @@ public final class CommandPaletteWindowController: NSWindowController {
             y: visibleFrame.maxY - visibleFrame.height * Self.topInsetFraction - size.height
         )
         window.setFrameOrigin(origin)
+    }
+}
+
+// MARK: - Dismissal
+
+extension CommandPaletteWindowController: NSWindowDelegate {
+
+    /// Losing the keyboard means the user is doing something else: dismiss.
+    ///
+    /// Clicking another window and switching apps both land here, so together
+    /// with Escape and running a command all four ways out of the palette go
+    /// through `close()` and end in `windowWillClose` below — one dismissal
+    /// path, not four (`dry`).
+    public func windowDidResignKey(_ notification: Notification) {
+        close()
+    }
+
+    /// Every dismissal clears the palette.
+    ///
+    /// Here rather than only in `show()` because a closed palette should not be
+    /// sitting on the last visit's query and selection at all: `runSelection`
+    /// takes what it needs from the model *before* asking for the dismissal
+    /// that clears it.
+    public func windowWillClose(_ notification: Notification) {
+        paletteController.reset()
     }
 }
 

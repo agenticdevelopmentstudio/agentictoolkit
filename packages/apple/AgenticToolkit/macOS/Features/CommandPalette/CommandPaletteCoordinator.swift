@@ -57,14 +57,43 @@ public final class CommandPaletteCoordinator: AppFeature {
                 order: 0, key: "p", modifiers: [.command, .shift]
             )
         ]
+        // ⇧⌘P is safe as a menu key equivalent where it could not be as the
+        // global shortcut below: a key equivalent only fires while this app is
+        // frontmost, so VS Code's own binding is not taken away from anything.
+    }
 
-        // ⇧⌘P here is safe where the global shortcut below could not be: a menu
-        // key equivalent only fires while this app is frontmost, so VS Code's
-        // own binding is not taken away from anything.
+    // MARK: - AppFeature
+
+    /// Claim the system-global shortcut.
+    ///
+    /// Here and not in `init` because `KeyboardShortcuts.onKeyDown` registers a
+    /// real, machine-wide Carbon hotkey: constructing a coordinator must not
+    /// take ⌃⌥C away from every other app, which is exactly what a test bundle
+    /// that builds one would otherwise do for the length of its run. `start()`
+    /// is the lifecycle hook for a long-running service, and the host calls it
+    /// once per launch on every registered feature.
+    public override func start() {
         KeyboardShortcuts.onKeyDown(for: .showCommandPalette) { [weak self] in
             self?.showPalette()
         }
     }
+
+    /// Give the shortcut back. `removeHandler` drops the stored handler *and*
+    /// unregisters the Carbon hotkey, which is what makes `start()` reversible.
+    public override func stop() {
+        KeyboardShortcuts.removeHandler(for: .showCommandPalette)
+    }
+
+    /// Whether the global shortcut is claimed right now.
+    ///
+    /// Internal, and the tests are the reason: the property worth asserting
+    /// about this feature is that *constructing* it claims no machine-wide
+    /// hotkey, and there is no other way to see that from outside.
+    var isGlobalShortcutInstalled: Bool {
+        KeyboardShortcuts.isEnabled(for: .showCommandPalette)
+    }
+
+    // MARK: - Showing
 
     /// Bring the palette up, building it the first time.
     ///

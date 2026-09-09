@@ -15,6 +15,12 @@ import Testing
 ///
 /// Each test unregisters its coordinator: `AppFeature.init()` enrols itself in
 /// the process-global `AppFeatureRegistry.shared`, which outlives the test.
+///
+/// Nothing here calls `start()`, and that is deliberate rather than incidental:
+/// `start()` claims a real, system-global Carbon hotkey, so a test that called
+/// it would take ⌃⌥C away from the whole machine for the length of the run.
+/// `constructionClaimsNoGlobalHotkey` below is what holds that property in
+/// place — moving the registration back into `init` fails it.
 @Suite("CommandPaletteCoordinator")
 @MainActor
 struct CommandPaletteCoordinatorTests {
@@ -32,6 +38,19 @@ struct CommandPaletteCoordinatorTests {
         let command = registry.command(id: "workbench.action.showCommands")
         #expect(command?.title == "Show All Commands")
         #expect(command?.category == "View")
+    }
+
+    @Test("Constructing the coordinator claims no system-global hotkey")
+    func constructionClaimsNoGlobalHotkey() {
+        let registry = CommandRegistry()
+        let coordinator = CommandPaletteCoordinator(commandRegistry: registry)
+        defer { coordinator.unregister() }
+
+        // Construction is inert; `start()` is where the machine-wide ⌃⌥C is
+        // claimed and `stop()` is where it is given back. A coordinator built
+        // in a test bundle has no business holding a hotkey the rest of the
+        // process — and the rest of the machine — can see.
+        #expect(!coordinator.isGlobalShortcutInstalled)
     }
 
     @Test("The registered command is enabled, so dispatching it cannot be refused")
