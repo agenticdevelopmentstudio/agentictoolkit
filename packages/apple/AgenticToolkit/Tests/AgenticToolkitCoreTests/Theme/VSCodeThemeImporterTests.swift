@@ -319,8 +319,13 @@ struct VSCodeThemeImporterTests {
         #expect(theme.roleOverrides.isEmpty)
     }
 
-    @Test("tokenColors and semanticTokenColors are carried past without touching the result")
-    func syntaxKeysAreIgnored() throws {
+    /// `tokenColors` *is* read now (see the syntax-style section below), but
+    /// only into `syntax.` keys: it must not move a palette field or a semantic
+    /// role. `semanticTokenColors` stays ignored outright — the source editor
+    /// highlights with tree-sitter, which has no semantic-token vocabulary to
+    /// map onto.
+    @Test("the syntax keys touch nothing but the syntax styles")
+    func syntaxKeysTouchNothingElse() throws {
         let extras = [
             """
             "tokenColors": [
@@ -333,7 +338,14 @@ struct VSCodeThemeImporterTests {
         let without = try parse(Self.themeJSON(Self.standardPalette))
 
         #expect(palette(withSyntax) == palette(without))
-        #expect(withSyntax.roleOverrides == without.roleOverrides)
+        #expect(withSyntax.roleOverrides.filter { !$0.key.hasPrefix("syntax.") } == without.roleOverrides)
+
+        // `comment` is an ancestor of the `comment.line` the chain asks for, so
+        // it resolves; `variable.readonly` is not a TextMate scope at all.
+        #expect(withSyntax.syntaxStyles.keys.sorted(by: { $0.rawValue < $1.rawValue }) == [.comments])
+
+        let semanticOnly = try parse(Self.themeJSON(Self.standardPalette, extras: [extras[1]]))
+        #expect(semanticOnly.syntaxStyles.isEmpty)
     }
 
     @Test("an include key is ignored rather than resolved or rejected")
@@ -480,6 +492,289 @@ struct VSCodeThemeImporterTests {
         #expect(throws: VSCodeThemeParseError.foregroundMatchesBackground) {
             _ = try VSCodeThemeImporter.parse(Data(json.utf8), label: "x", uiTheme: "vs-dark")
         }
+    }
+
+    // MARK: - tokenColors → syntax styles
+
+    /// The standard palette plus a raw `tokenColors` array literal. Spelled as
+    /// raw JSON rather than composed from a per-entry builder because document
+    /// *order* is load-bearing in half these tests, and a builder that hides
+    /// the order hides the thing under test.
+    private static func themeWithTokens(_ tokenColors: String) -> String {
+        themeJSON(standardPalette, extras: ["\"tokenColors\": \(tokenColors)"])
+    }
+
+    /// `theme.syntaxStyles` flattened to `"#RRGGBBAA[+bold][+italic]"` per role.
+    /// One literal per expectation reads better than an `RGBAColor` construction
+    /// plus two flags, and a dictionary of *tuples* would not be `Equatable`.
+    private func styles(_ json: String) throws -> [SyntaxRole: String] {
+        try parse(json).syntaxStyles.mapValues { style in
+            style.color.hexString + (style.bold ? "+bold" : "") + (style.italic ? "+italic" : "")
+        }
+    }
+
+    private func style(_ json: String, _ role: SyntaxRole) throws -> String? {
+        try styles(json)[role]
+    }
+
+    /// Both forms occur in the wild — 1681 comma-separated string scopes across
+    /// the 20-theme corpus these scope chains were measured on — and neither is
+    /// a dialect of the other, so both are parsed and must agree.
+    @Test("array-form and comma-separated string-form scopes agree")
+    func bothScopeForms() throws {
+        let arrayForm = Self.themeWithTokens("""
+            [
+                { "scope": ["keyword.control", "entity.name.function"],
+                  "settings": { "foreground": "#C792EA" } }
+            ]
+        """)
+        // The whitespace after the comma is deliberate: pieces are trimmed.
+        let stringForm = Self.themeWithTokens("""
+            [
+                { "scope": "keyword.control, entity.name.function",
+                  "settings": { "foreground": "#C792EA" } }
+            ]
+        """)
+
+        let expected: [SyntaxRole: String] = [.keywords: "#C792EAFF", .commands: "#C792EAFF"]
+        #expect(try styles(arrayForm) == expected)
+        #expect(try styles(stringForm) == expected)
+    }
+
+    /// VS Code resolves the *most specific* applicable selector, so an ancestor
+    /// rule must not beat a rule naming the scope outright no matter which came
+    /// first in the file.
+    @Test("the longest matching selector wins, whichever order it is declared in")
+    func longestSelectorWins() throws {
+        let generalFirst = Self.themeWithTokens("""
+            [
+                { "scope": ["keyword"], "settings": { "foreground": "#111111" } },
+                { "scope": ["keyword.control"], "settings": { "foreground": "#222222" } }
+            ]
+        """)
+        let specificFirst = Self.themeWithTokens("""
+            [
+                { "scope": ["keyword.control"], "settings": { "foreground": "#222222" } },
+                { "scope": ["keyword"], "settings": { "foreground": "#111111" } }
+            ]
+        """)
+
+        #expect(try style(generalFirst, .keywords) == "#222222FF")
+        #expect(try style(specificFirst, .keywords) == "#222222FF")
+    }
+
+    /// The tie-break, and the only place document order shows: VS Code lets a
+    /// later `tokenColors` entry override an earlier one naming the same scope.
+    @Test("two rules with the same selector resolve to the later one")
+    func laterRuleWinsATie() throws {
+        let json = Self.themeWithTokens("""
+            [
+                { "scope": ["keyword.control"], "settings": { "foreground": "#111111" } },
+                { "scope": ["keyword.control"], "settings": { "foreground": "#222222", "fontStyle": "bold" } }
+            ]
+        """)
+        #expect(try style(json, .keywords) == "#222222FF+bold")
+    }
+
+    /// A descendant selector applies only inside an ancestor context this code
+    /// has no way to know it is in. Matching on its last component would paint
+    /// every function name with the colour meant for tag names.
+    @Test("a descendant selector is skipped, and a shorter valid rule wins instead")
+    func descendantSelectorIsSkipped() throws {
+        let withFallback = Self.themeWithTokens("""
+            [
+                { "scope": ["entity.name"], "settings": { "foreground": "#111111" } },
+                { "scope": ["meta.tag entity.name.function"], "settings": { "foreground": "#222222" } }
+            ]
+        """)
+        #expect(try style(withFallback, .commands) == "#111111FF")
+
+        let alone = Self.themeWithTokens("""
+            [
+                { "scope": ["meta.tag entity.name.function"], "settings": { "foreground": "#222222" } }
+            ]
+        """)
+        #expect(try style(alone, .commands) == nil)
+    }
+
+    /// The two forms interact: a comma-separated string scope can name one
+    /// usable selector and one descendant selector, and only the descendant is
+    /// dropped.
+    @Test("a descendant piece of a string scope is dropped without taking the rest with it")
+    func descendantPieceOfAStringScope() throws {
+        let json = Self.themeWithTokens("""
+            [
+                { "scope": "constant.numeric, meta.tag entity.name.function",
+                  "settings": { "foreground": "#333333" } }
+            ]
+        """)
+        #expect(try style(json, .numbers) == "#333333FF")
+        #expect(try style(json, .commands) == nil)
+    }
+
+    /// `underline` and `strikethrough` have nowhere to go —
+    /// `EditorTheme.Attribute` is colour + bold + italic — and `normal` /
+    /// `regular` name the absence of emphasis, which is already the default.
+    @Test(
+        "fontStyle yields only the emphasis EditorTheme can carry",
+        arguments: [
+            ("\"fontStyle\": \"italic\", ", "#C792EAFF+italic"),
+            ("\"fontStyle\": \"bold italic\", ", "#C792EAFF+bold+italic"),
+            ("\"fontStyle\": \"italic bold\", ", "#C792EAFF+bold+italic"),
+            ("\"fontStyle\": \"bold\", ", "#C792EAFF+bold"),
+            ("\"fontStyle\": \"underline\", ", "#C792EAFF"),
+            ("\"fontStyle\": \"normal\", ", "#C792EAFF"),
+            ("\"fontStyle\": \"regular\", ", "#C792EAFF"),
+            ("\"fontStyle\": \"bold underline\", ", "#C792EAFF+bold"),
+            ("\"fontStyle\": \"\", ", "#C792EAFF"),
+            ("", "#C792EAFF")
+        ]
+    )
+    func fontStyleEmphasis(_ member: String, _ expected: String) throws {
+        let json = Self.themeWithTokens("""
+            [
+                { "scope": ["keyword.control"], "settings": { \(member)"foreground": "#C792EA" } }
+            ]
+        """)
+        #expect(try style(json, .keywords) == expected)
+    }
+
+    /// The one role whose scope chain has two steps. Sixteen of the twenty
+    /// themes surveyed state `entity.name.type`; the Night Owl family states
+    /// only `support.type`, and this is the shape that makes it 20/20.
+    @Test("types falls back to support.type when nothing matches entity.name.type")
+    func typesFallsBackToSupportType() throws {
+        let nightOwlShape = Self.themeWithTokens("""
+            [
+                { "scope": ["support.type"], "settings": { "foreground": "#FFCB8B" } }
+            ]
+        """)
+        #expect(try style(nightOwlShape, .types) == "#FFCB8BFF")
+
+        // The chain is ordered, not a set: the first step wins when both are
+        // stated, however specific the second one's selector is.
+        let bothStated = Self.themeWithTokens("""
+            [
+                { "scope": ["support.type"], "settings": { "foreground": "#FFCB8B" } },
+                { "scope": ["entity.name.type"], "settings": { "foreground": "#ADDB67" } }
+            ]
+        """)
+        #expect(try style(bothStated, .types) == "#ADDB67FF")
+    }
+
+    /// An entry with no usable colour is not a rule at all — not a rule with a
+    /// default colour, and not a reason to reject the theme. A theme VS Code
+    /// renders must import.
+    @Test("an entry whose foreground is unusable is ignored, and a shorter valid rule wins")
+    func unusableForegroundIsIgnored() throws {
+        let unparseable = Self.themeWithTokens("""
+            [
+                { "scope": ["keyword"], "settings": { "foreground": "#111111" } },
+                { "scope": ["keyword.control"], "settings": { "foreground": "rebeccapurple" } }
+            ]
+        """)
+        #expect(try style(unparseable, .keywords) == "#111111FF")
+
+        // Emphasis with no colour: this grammar stores a style *on* a colour,
+        // so there is nothing to hang the `bold` on.
+        let styleOnly = Self.themeWithTokens("""
+            [
+                { "scope": ["keyword"], "settings": { "foreground": "#111111" } },
+                { "scope": ["keyword.control"], "settings": { "fontStyle": "bold" } }
+            ]
+        """)
+        #expect(try style(styleOnly, .keywords) == "#111111FF")
+
+        // A `foreground` that is not a string at all.
+        let notAString = Self.themeWithTokens("""
+            [
+                { "scope": ["keyword"], "settings": { "foreground": "#111111" } },
+                { "scope": ["keyword.control"], "settings": { "foreground": 16711680 } }
+            ]
+        """)
+        #expect(try style(notAString, .keywords) == "#111111FF")
+    }
+
+    /// Shorthand hex is the normalizer's job, not a second one's: the same
+    /// `#RGB` / `#RGBA` expansion the `colors{}` keys get.
+    @Test("a tokenColors foreground goes through the same hex normalizer as colors{}")
+    func shorthandForegroundIsNormalized() throws {
+        let json = Self.themeWithTokens("""
+            [
+                { "scope": ["string.quoted.double"], "settings": { "foreground": "#ABC" } }
+            ]
+        """)
+        #expect(try style(json, .strings) == "#AABBCCFF")
+    }
+
+    /// The overwhelmingly common case for the built-in and `.itermcolors`
+    /// paths: no `tokenColors` at all, so the editor derives all ten from the
+    /// ANSI palette exactly as it did before this existed.
+    @Test("a theme with no tokenColors declares no syntax styles and is otherwise unchanged")
+    func noTokenColors() throws {
+        let theme = try parse(Self.minimalJSON, label: "Acme Dark", uiTheme: "vs-dark")
+
+        #expect(theme.syntaxStyles.isEmpty)
+        #expect(theme.roleOverrides.keys.contains(where: { $0.hasPrefix("syntax.") }) == false)
+
+        // Task 4.4's palette assertions, restated: adding a second half to the
+        // import must not disturb the first.
+        #expect(theme.foreground.hexString == "#D8DEE9FF")
+        #expect(theme.background.hexString == "#2E3440FF")
+        #expect(theme.cursor.hexString == "#FF00FFFF")
+        #expect(theme.selection.hexString == "#4C566AFF")
+        #expect(theme.ansi.count == ColorTheme.ansiColorCount)
+        #expect(theme.hasValidPalette)
+        #expect(theme.name == "Acme Dark")
+        #expect(theme.appearance == .dark)
+    }
+
+    /// `tokenColors` is documented as an array of objects, and a theme that
+    /// says otherwise is malformed — but malformed *here* costs syntax colours,
+    /// not the theme. Nothing in this half throws.
+    @Test("a malformed tokenColors is ignored rather than thrown on")
+    func malformedTokenColorsIsIgnored() throws {
+        #expect(try parse(Self.themeWithTokens("\"keyword.control\"")).syntaxStyles.isEmpty)
+        #expect(try parse(Self.themeWithTokens("{ \"scope\": \"keyword\" }")).syntaxStyles.isEmpty)
+        #expect(try parse(Self.themeWithTokens("null")).syntaxStyles.isEmpty)
+        #expect(try parse(Self.themeWithTokens("[]")).syntaxStyles.isEmpty)
+
+        // A junk element costs itself and nothing else.
+        let mixed = Self.themeWithTokens("""
+            [
+                "keyword.control",
+                42,
+                null,
+                { "settings": { "foreground": "#111111" } },
+                { "scope": ["comment.line"], "settings": "#222222" },
+                { "scope": [17, "comment.line"], "settings": { "foreground": "#333333" } }
+            ]
+        """)
+        #expect(try style(mixed, .comments) == "#333333FF")
+        #expect(try styles(mixed).count == 1)
+    }
+
+    /// The import's two halves land in one `ColorTheme`, and neither erases the
+    /// other: `withSyntaxStyles` replaces `syntax.` keys only.
+    @Test("syntax styles and semantic role overrides coexist in one theme")
+    func syntaxAndRoleOverridesCoexist() throws {
+        let json = Self.themeJSON(
+            """
+                "editor.foreground": "#D6DEEB",
+                "editor.background": "#011627",
+                "sideBar.background": "#001122"
+            """,
+            extras: ["""
+                "tokenColors": [
+                    { "scope": ["comment.line"], "settings": { "foreground": "#637777", "fontStyle": "italic" } }
+                ]
+            """]
+        )
+        let theme = try parse(json)
+
+        #expect(theme.roleOverrides[ThemeRole.surface.rawValue]?.hexString == "#001122FF")
+        #expect(try styles(json) == [.comments: "#637777FF+italic"])
+        #expect(SemanticPalette(theme: theme).declares(.surface))
     }
 
     // MARK: - ThemeStore wiring
