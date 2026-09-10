@@ -244,14 +244,17 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         cursorPosition: CursorPosition
     ) async -> (windowPosition: CursorPosition, items: [CodeSuggestionEntry])? {
         // Everything the request needs is read before the first `await`: the
-        // session, the URI, the language id and the cursor offset. After a
-        // suspension the document may have been edited underneath us, and a
-        // request built from a mixture of pre- and post-edit facts is exactly
-        // the desynchronisation `DocumentSyncPipeline` exists to avoid.
+        // cursor offset, the URI, the language id, the snippets for it and
+        // the session. After a suspension the document may have been edited
+        // underneath us, and a request built from a mixture of pre- and
+        // post-edit facts is exactly the desynchronisation
+        // `DocumentSyncPipeline` exists to avoid.
         let generation = beginRequest()
         let triggerStamp = nextTriggerReadStamp()
-        guard let session = registry.session(forLanguageId: document.languageId),
-              let offset = utf16Offset(of: cursorPosition) else {
+        // The caret first, and alone: an offset that cannot be located is the
+        // one failure with no window to show. There is no `prefixStart` to
+        // anchor one at and no range to insert into, so nothing below can run.
+        guard let offset = utf16Offset(of: cursorPosition) else {
             clearCache(ifCurrent: generation)
             return nil
         }
@@ -263,11 +266,36 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
             start: document.position(forUTF16Offset: prefixStart),
             end: position
         )
+        // Read here, above every server guard, because a snippet needs no
+        // server. The languages snippet packs target — HTML, Markdown, YAML, a
+        // plain config format — are exactly the ones least likely to have a
+        // language server installed, and a window that never opens for them
+        // would make the feature invisible where it matters most.
+        let snippetItems = snippets?.snippets(forLanguage: languageId).map { $0.completionItem() } ?? []
+
+        // No server for this language. Everything below is about talking to
+        // one, so the snippets are the whole answer.
+        guard let session = registry.session(forLanguageId: languageId) else {
+            return publish(
+                items: [],
+                snippetItems: snippetItems,
+                defaultRange: defaultRange,
+                prefixStart: prefixStart,
+                generation: generation
+            )
+        }
 
         guard let capabilities = await session.capabilities(),
               let completionProvider = capabilities.completionProvider else {
-            clearCache(ifCurrent: generation)
-            return nil
+            // A server that does not complete — or has not finished its
+            // handshake — is not a reason to withhold the user's snippets.
+            return publish(
+                items: [],
+                snippetItems: snippetItems,
+                defaultRange: defaultRange,
+                prefixStart: prefixStart,
+                generation: generation
+            )
         }
         // The trigger set is on its way past, so it is taken — through the
         // same guard `resolveTriggerCharacters` writes under, because this
@@ -275,7 +303,7 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // fresher resolution must not undo it.
         //
         // This path is opportunistic, not authoritative: it writes only when it
-        // has a real answer, and the two early returns above deliberately
+        // has a real answer, and the early returns above deliberately
         // record nothing about trigger characters. Under the stamps that costs
         // no other caller anything — an unused stamp is not a claim.
         //
@@ -309,22 +337,57 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
                 )
             )
         } catch {
-            clearCache(ifCurrent: generation)
-            return nil
+            // A failed request says nothing about the snippets: they were read
+            // from disk at install time and are just as valid now.
+            return publish(
+                items: [],
+                snippetItems: snippetItems,
+                defaultRange: defaultRange,
+                prefixStart: prefixStart,
+                generation: generation
+            )
         }
 
-        let items = response?.items ?? []
-        // Appended after the server's items, at equal relevance rather than
-        // interleaved by it: the server knows this document and a snippet file
-        // does not, so anything it has to say outranks a snippet that merely
-        // matches the prefix. Not pre-filtered by what has been typed either —
-        // `completionOnCursorMove` filters the whole cached set on `filterKey`,
-        // and a second filter here would only be a different one.
-        let snippetItems = snippets?.snippets(forLanguage: languageId).map { $0.completionItem() } ?? []
+        return publish(
+            items: response?.items ?? [],
+            snippetItems: snippetItems,
+            defaultRange: defaultRange,
+            prefixStart: prefixStart,
+            generation: generation
+        )
+    }
+
+    /// The window for a completed request: the server's items first, snippets
+    /// after, everything anchored at `prefixStart`.
+    ///
+    /// The single exit for all four ways `completionSuggestionsRequested` can
+    /// finish — no server, no completion capability, a request that threw, and
+    /// a request that answered. Each of those differs only in how many server
+    /// items it has, which is a value, not a control path; funnelling them
+    /// through here is what stops the merge, the cache write and the anchoring
+    /// from being repeated four times and drifting.
+    ///
+    /// `nil`, with the cache cleared, when there is nothing at all to show —
+    /// the only condition under which the package should not open a window.
+    private func publish(
+        items: [CompletionItem],
+        snippetItems: [CompletionItem],
+        defaultRange: LSPRange,
+        prefixStart: Int,
+        generation: Int
+    ) -> (windowPosition: CursorPosition, items: [CodeSuggestionEntry])? {
+        // Snippets come after the server's items, at equal relevance rather
+        // than interleaved by it: the server knows this document and a snippet
+        // file does not, so anything it has to say outranks a snippet that
+        // merely matches the prefix. Not pre-filtered by what has been typed
+        // either — `completionOnCursorMove` filters the whole cached set on
+        // `filterKey`, and a second filter here would only be a different one.
+        //
         // Snippets count towards there being a window at all. A server that
         // answers with nothing — mid-keyword, or one that only completes after
         // a `.` — must not silence snippets the user installed for exactly
-        // those places.
+        // those places, and neither must a server that is absent, mute or
+        // broken.
         guard !items.isEmpty || !snippetItems.isEmpty else {
             clearCache(ifCurrent: generation)
             return nil

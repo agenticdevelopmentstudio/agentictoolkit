@@ -195,6 +195,18 @@ struct SnippetFileTests {
         }
     }
 
+    @Test("the parse failure describes itself to a person")
+    func parseFailureDescribesItself() {
+        // `SnippetStore` records `localizedDescription` for every error a read
+        // can throw, and an `Error` with no `LocalizedError` conformance gets
+        // Foundation's "The operation couldn't be completed. (… error 0.)" —
+        // which names nothing the user could fix.
+        let description = SnippetFileParseError.notAnObject.localizedDescription
+        #expect(!description.isEmpty)
+        #expect(!description.contains("couldn't be completed"))
+        #expect(description.contains("JSON object"))
+    }
+
     /// The `abusaidm.html-snippets` shape: a file that is mostly commented-out
     /// snippets and does not parse even after the comments are stripped.
     /// Shortened to the shape — a dangling comma and an unclosed object are

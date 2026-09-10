@@ -19,6 +19,12 @@ public struct SnippetFileFailure: Sendable, Equatable {
     /// what the extension author has to fix is the string in `package.json`.
     public let path: String
     public let reason: String
+
+    public init(extensionIdentifier: String, path: String, reason: String) {
+        self.extensionIdentifier = extensionIdentifier
+        self.path = path
+        self.reason = reason
+    }
 }
 
 /// The `contributes.snippets` contribution point: every extension-supplied
@@ -103,13 +109,25 @@ public final class SnippetStore: ContributionPoint {
                     SnippetFileFailure(
                         extensionIdentifier: identifier,
                         path: entry.path,
-                        reason: String(describing: error)
+                        // `localizedDescription`, not `String(describing:)`:
+                        // this string is shown to a person. The latter prints a
+                        // whole `NSError` dump for a failed read and the bare
+                        // case name for a parse error, which is the wrong half
+                        // of each. `SnippetFileParseError` is a `LocalizedError`
+                        // so both sides of that read as sentences.
+                        reason: error.localizedDescription
                     )
                 )
             }
         }
 
-        if !byLanguage.isEmpty { snippetsByExtension[identifier] = byLanguage }
+        // Assigned unconditionally. An extension whose files all parsed to
+        // nothing usable is still an extension that contributed: guarding on
+        // emptiness reads as a check on whether it did, buys nothing —
+        // `snippets(forLanguage:)` answers `[]` either way and `withdraw`
+        // removes the key regardless — and leaves one more state to reason
+        // about.
+        snippetsByExtension[identifier] = byLanguage
         failures.append(contentsOf: recorded)
     }
 

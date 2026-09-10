@@ -21,6 +21,24 @@ public enum SnippetFileParseError: Error, Equatable {
     case notAnObject
 }
 
+/// A sentence for the extensions panel, not a case name.
+///
+/// The conformance is here rather than a `switch` at the call site because
+/// `SnippetStore` records `error.localizedDescription` for *every* error a read
+/// can throw — Cocoa's file errors already describe themselves, and this is
+/// what makes ours do the same. Without it Foundation invents "The operation
+/// couldn't be completed. (…SnippetFileParseError error 0.)", which tells a
+/// user nothing about what to fix in their snippets file.
+extension SnippetFileParseError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .notAnObject:
+            return "The file's root is not a JSON object. A snippets file is an "
+                 + "object whose keys are snippet names."
+        }
+    }
+}
+
 /// Reads one VS Code snippets file — the `path` of a `contributes.snippets`
 /// entry — into `ExtensionSnippet`s.
 ///

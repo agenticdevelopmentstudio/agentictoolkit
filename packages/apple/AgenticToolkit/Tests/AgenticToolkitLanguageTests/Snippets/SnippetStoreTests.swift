@@ -131,7 +131,11 @@ struct SnippetStoreTests {
         let directory = try makeExtensionDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         try write(Self.logSnippets, to: "snippets/swift.json", in: directory)
-        let asAFilePath = URL(fileURLWithPath: directory.path)
+        // `isDirectory: false` explicitly, because plain
+        // `URL(fileURLWithPath:)` asks the file system and the directory now
+        // exists — it would be flagged as a directory and the test would pass
+        // whether the fix is present or not.
+        let asAFilePath = URL(fileURLWithPath: directory.path, isDirectory: false)
 
         let store = SnippetStore()
         try apply(
