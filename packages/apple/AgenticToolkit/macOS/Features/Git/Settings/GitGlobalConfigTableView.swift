@@ -11,6 +11,12 @@ public final class GitGlobalConfigTableView: NSView {
     public var onUnset: ((_ key: String) -> Void)?
     public private(set) var entries: [GitConfigEntry] = []
 
+    /// The row `beginAddingEntry` appended, if its edit has not committed yet.
+    /// A placeholder is held back until both halves are non-empty (see
+    /// `commitEdit`); every other row is a live entry, where the same guard
+    /// would wrongly block a legitimate clear.
+    private var placeholderRow: Int?
+
     let tableView = ThemedTableView()
     let errorLabel = ThemedLabel(role: .secondaryText, textRole: .caption)
 
@@ -18,7 +24,7 @@ public final class GitGlobalConfigTableView: NSView {
     private let addButton = NSButton(
         title: "", image: NSImage(systemSymbolName: "plus", accessibilityDescription: "Add")!,
         target: nil, action: nil)
-    private let removeButton = NSButton(
+    let removeButton = NSButton(
         title: "", image: NSImage(systemSymbolName: "minus", accessibilityDescription: "Remove")!,
         target: nil, action: nil)
 
@@ -42,6 +48,7 @@ public final class GitGlobalConfigTableView: NSView {
 
     public func setEntries(_ entries: [GitConfigEntry]) {
         self.entries = entries
+        placeholderRow = nil
         tableView.reloadData()
         updateButtons()
     }
@@ -53,8 +60,9 @@ public final class GitGlobalConfigTableView: NSView {
 
     public func beginAddingEntry() {
         entries.append(GitConfigEntry(key: "", value: ""))
-        tableView.reloadData()
         let row = entries.count - 1
+        placeholderRow = row
+        tableView.reloadData()
         tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         tableView.editColumn(0, row: row, with: nil, select: true)
     }
@@ -63,24 +71,55 @@ public final class GitGlobalConfigTableView: NSView {
         guard let key = selectedKey else { return }
         if key.isEmpty {
             entries.removeAll { $0.key.isEmpty }
+            placeholderRow = nil
             tableView.reloadData()
+            updateButtons()
             return
         }
         onUnset?(key)
     }
 
-    /// Applies one edited cell. An empty key is a row still being typed; an
-    /// entry is only sent upward once both halves are non-empty.
+    /// Applies one edited cell.
+    ///
+    /// The row `beginAddingEntry` appended (`placeholderRow`) is held back
+    /// until both halves are non-empty: committing it early with an empty
+    /// value would write a junk key into the user's real git config the
+    /// moment they tab off the key cell. Once it fully commits it stops
+    /// being the placeholder.
+    ///
+    /// Every other row is a live entry. Renaming its key must unset the old
+    /// key before setting the new one, or the old key survives in git config
+    /// after vanishing from the table. Blanking its key is not a delete --
+    /// the cell reverts to the stored key rather than committing an empty
+    /// one. Clearing its *value* to empty, in contrast, is a legitimate
+    /// clear and still fires `onSet`.
     func commitEdit(row: Int, key: String, value: String) {
         guard row >= 0, row < entries.count else { return }
+
+        if row == placeholderRow {
+            entries[row] = GitConfigEntry(key: key, value: value)
+            guard !key.isEmpty, !value.isEmpty else { return }
+            placeholderRow = nil
+            onSet?(key, value)
+            return
+        }
+
+        let oldKey = entries[row].key
+        guard !key.isEmpty else {
+            let keyColumn = tableView.column(withIdentifier: Self.keyColumn)
+            tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: keyColumn))
+            return
+        }
+
         entries[row] = GitConfigEntry(key: key, value: value)
-        guard !key.isEmpty else { return }
+        if key != oldKey {
+            onUnset?(oldKey)
+        }
         onSet?(key, value)
     }
 
     private func setUp() {
         translatesAutoresizingMaskIntoConstraints = false
-        accessibilityID("settings.git.config-table")
 
         let columns: [(NSUserInterfaceItemIdentifier, String, CGFloat)] = [
             (Self.keyColumn, "Key", 220),
@@ -96,6 +135,7 @@ public final class GitGlobalConfigTableView: NSView {
         tableView.delegate = self
         tableView.usesAlternatingRowBackgroundColors = false
         tableView.allowsMultipleSelection = false
+        tableView.accessibilityID("settings.git.config-table")
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -184,10 +224,17 @@ extension GitGlobalConfigTableView: NSTextFieldDelegate {
         guard let field = notification.object as? NSTextField else { return }
         let row = field.tag
         guard row >= 0, row < entries.count else { return }
+        // A `setEntries` refresh landing mid-edit can detach the field's row
+        // view before this notification arrives; `column(for:)` then answers
+        // -1, which must not fall through to the value branch below.
         let column = tableView.column(for: field)
+        guard column >= 0 else { return }
         let isKey = column == tableView.column(withIdentifier: Self.keyColumn)
         let key = isKey ? field.stringValue : entries[row].key
         let value = isKey ? entries[row].value : field.stringValue
+        // A config key cannot carry surrounding whitespace, so it is trimmed;
+        // a value legitimately can, so trimming it would corrupt what the
+        // user typed.
         commitEdit(row: row, key: key.trimmingCharacters(in: .whitespaces), value: value)
     }
 }
