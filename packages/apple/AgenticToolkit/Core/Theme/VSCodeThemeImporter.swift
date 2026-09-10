@@ -247,9 +247,10 @@ public enum VSCodeThemeImporter {
     ///
     /// A rule applies when its selector *is* the query or is an ancestor of it,
     /// and the most specific — longest — applicable selector wins. Rules arrive
-    /// in document order and `>=` keeps the later of two equal-length matches,
-    /// which is VS Code's tie-break: a later `tokenColors` entry overrides an
-    /// earlier one naming the same scope.
+    /// in document order and a held selector only wins if it is *strictly*
+    /// longer, so an equal-length later rule replaces it — VS Code's tie-break:
+    /// a later `tokenColors` entry overrides an earlier one naming the same
+    /// scope.
     private static func style(for query: String, in rules: [SyntaxRule]) -> SyntaxStyle? {
         var best: SyntaxRule?
         for rule in rules where query == rule.selector || query.hasPrefix(rule.selector + ".") {

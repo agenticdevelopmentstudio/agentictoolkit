@@ -137,12 +137,24 @@ struct SyntaxRoleOverridesTests {
     /// leave a key in a shape that is no longer written — a stale
     /// `syntax.keywords.bold` would outrank the fresh `syntax.keywords` under
     /// the greatest-key rule and the editor would still paint bold.
+    /// The fixture also carries a `syntax.`-prefixed key the grammar *rejects*.
+    /// It survives, deliberately: replacement is defined by the same parser
+    /// `syntaxStyles` reads with, so the two can never disagree about what a
+    /// syntax key is. The key is inert — no style, no `ThemeRole` — and a later
+    /// widening of this grammar (an `underline` flag, say) may want to own it,
+    /// which deleting it here would have made impossible.
     @Test("withSyntaxStyles replaces every existing syntax key for the role")
     func replacesRatherThanMerges() {
-        let subject = theme(["syntax.keywords.bold": color(1), ThemeRole.accent.rawValue: color(9)])
+        let subject = theme([
+            "syntax.keywords.bold": color(1),
+            "syntax.keywords.underline": color(8),
+            ThemeRole.accent.rawValue: color(9)
+        ])
         let restyled = subject.withSyntaxStyles([.keywords: SyntaxStyle(color: color(2))])
 
-        #expect(restyled.roleOverrides.keys.filter { $0.hasPrefix("syntax.") } == ["syntax.keywords"])
+        #expect(restyled.roleOverrides.keys.filter { $0.hasPrefix("syntax.") }.sorted()
+            == ["syntax.keywords", "syntax.keywords.underline"])
+        #expect(restyled.roleOverrides["syntax.keywords.underline"] == color(8))
         #expect(restyled.syntaxStyles == [.keywords: SyntaxStyle(color: color(2))])
         #expect(restyled.roleOverrides[ThemeRole.accent.rawValue] == color(9))
     }
@@ -154,6 +166,41 @@ struct SyntaxRoleOverridesTests {
 
         #expect(cleared.syntaxStyles.isEmpty)
         #expect(cleared.roleOverrides == [ThemeRole.accent.rawValue: color(9)])
+    }
+
+    // MARK: - Serialization
+
+    /// The narrow unit under the claim the whole storage decision rests on:
+    /// syntax colours were put *inside* `ColorTheme` because `ColorTheme` is
+    /// what travels. `roleOverrides` is decoded wholesale, so all four written
+    /// shapes must come back byte-for-byte — compared as a whole dictionary,
+    /// which is what catches a shape being dropped or normalised rather than
+    /// merely mis-flagged. The `ThemeStore` export/import/duplicate path over
+    /// the same claim is pinned in `VSCodeThemeImporterTests`.
+    @Test("every syntax key shape survives a bare ColorTheme JSON round-trip")
+    func syntaxKeysSurviveCodable() throws {
+        var subject = theme([:]).withSyntaxStyles([
+            .keywords: SyntaxStyle(color: color(1)),
+            .commands: SyntaxStyle(color: color(2), bold: true),
+            .strings: SyntaxStyle(color: color(3), italic: true),
+            .comments: SyntaxStyle(color: color(4), bold: true, italic: true)
+        ])
+        // A plain role override rides along, so this also fails if the round
+        // trip ever filtered `roleOverrides` down to one kind of key or the other.
+        subject.roleOverrides[ThemeRole.accent.rawValue] = color(9)
+
+        let encoded = try JSONEncoder().encode(subject)
+        let decoded = try JSONDecoder().decode(ColorTheme.self, from: encoded)
+
+        #expect(decoded.syntaxStyles == subject.syntaxStyles)
+        #expect(decoded.roleOverrides == subject.roleOverrides)
+
+        // `syntaxKeysDeclareNoRole` pins the invisibility before serialization;
+        // this pins it after, so a decoder that someday coerced keys is caught.
+        let palette = SemanticPalette(theme: decoded)
+        for role in ThemeRole.allCases {
+            #expect(palette.declares(role) == (role == .accent), "ThemeRole.\(role.rawValue)")
+        }
     }
 
     // MARK: - Determinism (case 7)
@@ -173,10 +220,38 @@ struct SyntaxRoleOverridesTests {
         let expected = SyntaxStyle(color: color(3), italic: true)
         #expect(subject.syntaxStyles == [.keywords: expected])
 
-        // Repeated reads of the same theme agree, whatever order the dictionary
-        // hands its keys over in.
-        for _ in 0..<20 {
-            #expect(subject.syntaxStyles == [.keywords: expected])
+        // Re-reading that same dictionary cannot answer differently — an
+        // instance's iteration order is fixed for its lifetime — so the storage
+        // is what has to vary: every insertion order of the three keys, each
+        // over four dictionaries grown to a different capacity first, since
+        // capacity is what actually decides which bucket a key lands in and so
+        // the order `syntaxStyles` meets the keys in. The expected colour is
+        // keyed off the insertion seed, so the assertion names *which* key won:
+        // a "last seen wins" implementation lands a different colour, not
+        // merely a different flag.
+        let orders = [
+            ["syntax.keywords", "syntax.keywords.bold", "syntax.keywords.italic"],
+            ["syntax.keywords", "syntax.keywords.italic", "syntax.keywords.bold"],
+            ["syntax.keywords.bold", "syntax.keywords", "syntax.keywords.italic"],
+            ["syntax.keywords.bold", "syntax.keywords.italic", "syntax.keywords"],
+            ["syntax.keywords.italic", "syntax.keywords", "syntax.keywords.bold"],
+            ["syntax.keywords.italic", "syntax.keywords.bold", "syntax.keywords"]
+        ]
+        for order in orders {
+            for fillers in [0, 8, 32, 128] {
+                var overrides: [String: RGBAColor] = [:]
+                // Grown then emptied: `Dictionary` never shrinks, so what is
+                // left is three keys in a table four sizes apart.
+                for filler in 0..<fillers { overrides["filler.\(filler)"] = color(filler % 100) }
+                for filler in 0..<fillers { overrides.removeValue(forKey: "filler.\(filler)") }
+                for (index, key) in order.enumerated() { overrides[key] = color(index + 1) }
+
+                let seed = (order.firstIndex(of: "syntax.keywords.italic") ?? 0) + 1
+                #expect(
+                    theme(overrides).syntaxStyles == [.keywords: SyntaxStyle(color: color(seed), italic: true)],
+                    "insertion order \(order), fillers: \(fillers)"
+                )
+            }
         }
     }
 }

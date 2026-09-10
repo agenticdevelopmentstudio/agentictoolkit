@@ -799,4 +799,60 @@ struct VSCodeThemeImporterTests {
         #expect(store.customThemes.map(\.id) == [imported.id])
         #expect(store.allThemes.contains(where: { $0.id == imported.id }))
     }
+
+    /// The claim the storage decision rests on, executed rather than reasoned
+    /// about: syntax colours live inside `roleOverrides` so that the two
+    /// ordinary things a user does with an imported theme — export it, and
+    /// duplicate it to edit, since an import is locked — carry them along. If
+    /// this were false the editor would repaint the moment a theme was
+    /// duplicated, which is precisely the failure a side store would have had.
+    ///
+    /// All four written key shapes travel at once and are compared as a whole
+    /// dictionary, because a one-key round trip would still pass with a shape
+    /// dropped or normalised.
+    @MainActor
+    @Test("exportJSON, importJSON and duplicate all carry every syntax key shape")
+    func syntaxKeysSurviveExportImportAndDuplicate() throws {
+        let accent = RGBAColor(hexString: "FF8800FF")!
+        var original = try parse(Self.minimalJSON).withSyntaxStyles([
+            .keywords: SyntaxStyle(color: RGBAColor(hexString: "112233FF")!, bold: true, italic: true),
+            .commands: SyntaxStyle(color: RGBAColor(hexString: "445566FF")!, bold: true),
+            .strings: SyntaxStyle(color: RGBAColor(hexString: "778899FF")!, italic: true),
+            .comments: SyntaxStyle(color: RGBAColor(hexString: "AABBCCFF")!)
+        ])
+        original.roleOverrides[ThemeRole.accent.rawValue] = accent
+
+        let store = ThemeStore(storage: InMemoryThemeStorage())
+        let exported = try store.exportJSON(original)
+
+        // The reader's tolerance for a hand-edited `syntax.comments.italic.bold`
+        // only means something if the key a user opens the file and finds is the
+        // canonical one, so the on-disk spelling is pinned and not just the
+        // in-memory equality.
+        let text = try #require(String(data: exported, encoding: .utf8))
+        #expect(text.contains("\"syntax.keywords.bold.italic\""))
+
+        // `importJSON` is the real user path for an exported file.
+        let decoded = try store.importJSON(data: exported)
+        #expect(decoded.syntaxStyles == original.syntaxStyles)
+        // The plain role override survives beside them, so this fails too if the
+        // round trip ever kept one kind of key and dropped the other.
+        #expect(decoded.roleOverrides[ThemeRole.accent.rawValue] == accent)
+
+        // Still invisible to the role system on the far side of the encoder:
+        // `accent` is the one role this theme states, and the four syntax keys
+        // add none of the others.
+        let palette = SemanticPalette(theme: decoded)
+        for role in ThemeRole.allCases {
+            #expect(palette.declares(role) == (role == .accent), "ThemeRole.\(role.rawValue)")
+        }
+
+        let copy = store.duplicate(decoded)
+        #expect(copy.syntaxStyles == original.syntaxStyles)
+        #expect(copy.roleOverrides[ThemeRole.accent.rawValue] == accent)
+        // A duplicate that came back locked would mean this is not the
+        // duplicate-to-edit scenario the design exists for.
+        #expect(copy.isBuiltIn == false)
+        #expect(copy.isImported == false)
+    }
 }

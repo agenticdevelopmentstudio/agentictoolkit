@@ -120,8 +120,13 @@ extension ColorTheme {
         return styles
     }
 
-    /// A copy carrying exactly `styles`: every existing `syntax.` key is
-    /// replaced, and every other `roleOverrides` entry is left alone.
+    /// A copy carrying exactly `styles`: every key this grammar recognises as a
+    /// syntax key is replaced, and every other `roleOverrides` entry is left
+    /// alone — including a `syntax.`-prefixed key the grammar rejects, because
+    /// this shares its parser with `syntaxStyles` and two functions disagreeing
+    /// about what a syntax key *is* would be the real bug, where an inert key
+    /// (ignored on read, invisible to `SemanticPalette`) is only clutter that a
+    /// later widening of this grammar may yet want to own.
     ///
     /// Replacing rather than merging is the point (`idempotency`): re-importing
     /// a theme, or importing over one that already carried syntax keys, must
