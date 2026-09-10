@@ -341,8 +341,13 @@ struct ExtensionsSettingsPanelTests {
                 _ = detail.view
                 let text = labels(in: detail.view)
                 // One element of an array is named by its index, because that is
-                // what the author has to go and count.
-                #expect(text.contains { $0.hasPrefix("contributes.themes[0] could not be read:") })
+                // what the author has to go and count — and the whole sentence
+                // is pinned, reason included: a `String(describing:)` over the
+                // `DecodingError` would satisfy any prefix assertion while
+                // putting `keyNotFound(CodingKeys(stringValue: "path"…` on
+                // screen.
+                #expect(text.contains(
+                    "contributes.themes[0] could not be read: no “path”"))
                 // A keyed container carries no index, and "[nil]" or "[0]" would
                 // both be a lie about a value that is not in an array at all.
                 #expect(text.contains(
@@ -413,6 +418,51 @@ struct ExtensionsSettingsPanelTests {
         // as if it were a rival would be nonsense.
         #expect(ExtensionDetailPanel.line(for: within, viewedFrom: "test.pack")
             == "This extension claims .widget more than once; widget2 does not apply to it.")
+    }
+
+    @Test("both sides of a file-extension conflict read it from their own panel")
+    func bothSidesOfAConflictReadItFromTheirOwnPanel() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            // Both claim ".wdgt". `rebuild()` walks identifiers sorted, so
+            // "test.alpha" takes it and "test.beta" loses — the same winner
+            // every launch, whatever order the folder happens to list. The
+            // extension is spelled unlike either language id, so a sentence
+            // that named the wrong one of the three could not read as right.
+            try installExtension(
+                named: "alpha",
+                contributes: #"{ "languages": [{ "id": "widget", "extensions": [".wdgt"] }] }"#,
+                in: root
+            )
+            try installExtension(
+                named: "beta",
+                contributes: #"{ "languages": [{ "id": "gadget", "extensions": [".wdgt"] }] }"#,
+                in: root
+            )
+
+            try withPanel(searchPaths: [root]) { coordinator, panel in
+                try #require(coordinator.languagePoint.conflicts.count == 1)
+                let byIdentifier = Dictionary(
+                    uniqueKeysWithValues: panel.extensionPanels.map { ($0.extensionIdentifier, $0) })
+                let winner = try #require(byIdentifier["test.alpha"])
+                let loser = try #require(byIdentifier["test.beta"])
+
+                // Read off the screen, not off the static: what decides which
+                // of the two sentences a panel gets is the *call site* passing
+                // its own identifier as `viewedFrom`. Pass `conflict.loser`
+                // there instead and both panels say "mapped by test.alpha",
+                // which every unit assertion on `line(for:viewedFrom:)` would
+                // still let through.
+                // The dot is gone by now: `normalizedExtension` strips it, so
+                // the sentence names the extension the way the lookup table
+                // keys it.
+                #expect(labels(in: winner.view).contains(
+                    "wdgt is mapped by this extension; test.beta's gadget does not apply to it."))
+                #expect(labels(in: loser.view).contains(
+                    "wdgt is mapped by test.alpha; test.beta's gadget does not apply to it."))
+            }
+        }
     }
 
     // MARK: - The problems panel
@@ -512,23 +562,26 @@ struct ExtensionsSettingsPanelTests {
         try withInMemorySettings {
             let root = try makeTempDirectory()
             defer { try? FileManager.default.removeItem(at: root) }
-            // Five, because the nit is about the *fourth* of five: with fewer
-            // rows than that, "the row that took its place" and "the top of the
-            // list" can be the same index and the assertion proves nothing.
+            // Five rows, and the *second* of them is the one uninstalled: index
+            // 1 of the four that remain is neither the first nor the last, so
+            // "the row that took its place", "the top of the list" and "the end
+            // of the list" are three different answers. Removing the fourth of
+            // five would make the first and third of those the same index, and
+            // a clamp that always lands at the end would pass.
             for name in ["alpha", "bravo", "charlie", "delta", "echo"] {
                 try installExtension(named: name, in: root)
             }
 
             try withPanel(searchPaths: [root]) { coordinator, panel in
                 try #require(panel.extensionPanels.count == 5)
-                let fourth = panel.extensionPanels[3]
-                let identifier = fourth.extensionIdentifier
+                let second = panel.extensionPanels[1]
+                let identifier = second.extensionIdentifier
 
                 // The real removal, then the callback the alert's Uninstall
                 // button fires. The alert itself needs a window and a modal
                 // loop; the rebuild it asks for is what is under test.
                 try coordinator.registry.uninstall(identifier)
-                fourth.onUninstalled()
+                second.onUninstalled()
 
                 let remaining = panel.extensionPanels
                 try #require(remaining.count == 4)
@@ -537,8 +590,11 @@ struct ExtensionsSettingsPanelTests {
                 // the list: `rebuildPanels()` used to select 0 unconditionally,
                 // which reads as the panel throwing the reader out of the list
                 // as a reward for uninstalling something.
-                #expect(panel.currentPanelTitle == remaining[3].descriptor.title)
+                #expect(panel.currentPanelTitle == remaining[1].descriptor.title)
                 #expect(panel.currentPanelTitle != remaining[0].descriptor.title)
+                // …and not the end of the list either, which is where a clamp
+                // that ignored the removed index would land.
+                #expect(panel.currentPanelTitle != remaining[remaining.count - 1].descriptor.title)
             }
         }
     }

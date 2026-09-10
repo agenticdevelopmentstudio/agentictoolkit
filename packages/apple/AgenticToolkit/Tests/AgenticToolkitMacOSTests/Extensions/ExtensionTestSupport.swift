@@ -65,9 +65,42 @@ enum ExtensionFixtures {
     /// anticipated.
     static let malformedThemeJSON = #"{ "name": "Broken" }"#
 
+    /// The one folder every fixture in this file lives under.
+    ///
+    /// A sandbox rather than `temporaryDirectory` itself, because the process
+    /// temp root is shared with every other suite in this 65-suite bundle *and*
+    /// with previous runs. That matters beyond tidiness: production resolves a
+    /// declared theme path with `URL(fileURLWithPath:relativeTo:)`, so a base
+    /// that lost its directory flag resolves one level *up* — into this root —
+    /// and a single leftover `themes/one.json` there would let that broken
+    /// resolution succeed. A mutation that should kill a dozen tests would kill
+    /// eleven, and the miss would look like a fact about the code.
+    static let sandboxRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("AgenticToolkitExtensionTests", isDirectory: true)
+
+    /// A folder of this run's own, named for the suite that asked and unique to
+    /// the call. Callers remove it; nothing here is ever read by a later run.
+    ///
+    /// **`isDirectory: false` is deliberate, and it is the point of this
+    /// helper.** It is what the returned URL already was — the URL is built
+    /// before the folder exists, and `URL(fileURLWithPath:)` sets that flag by
+    /// *consulting disk* — but spelled rather than inherited from an accident of
+    /// ordering, so an innocuous-looking edit cannot silently flip it.
+    ///
+    /// A flagless base is what `ThemeContributionPoint.apply` is written to
+    /// survive: the registry may hand it one, `URL(fileURLWithPath:relativeTo:)`
+    /// would then resolve every declared theme path one level too high, and the
+    /// `isDirectory: true` re-make at the top of `apply` is the whole defence.
+    /// Handing production a base that is already well-formed would retire that
+    /// defence from every test here at once — the fixture would be doing the
+    /// subject's job for it, which is the same defect as a fixture that reaches
+    /// its path by the subject's own route.
+    ///
+    /// Writing is unaffected either way: `write` uses `appendingPathComponent`,
+    /// which appends to the path whatever the flag says.
     static func makeTemporaryDirectory(_ label: String) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(label)-\(UUID().uuidString)")
+        let directory = sandboxRoot
+            .appendingPathComponent("\(label)-\(UUID().uuidString)", isDirectory: false)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }

@@ -207,6 +207,78 @@ struct ThemeContributionPointTests {
         #expect(storage.activeThemeID == "vscode.test.pack.One")
     }
 
+    @Test("a theme whose file broke keeps its previous copy, and the selection")
+    func aThemeWhoseFileBrokeKeepsItsPreviousCopy() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: directory)
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/day.json", in: directory)
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+        let declaration = try manifest(name: "pack", themes: """
+        [
+            \(themeEntry(label: "Night", path: "./themes/night.json")),
+            \(themeEntry(label: "Day", path: "./themes/day.json"))
+        ]
+        """)
+        try apply(declaration, to: point, at: directory)
+        storage.activeThemeID = "vscode.test.pack.Night"
+
+        // Night's file is replaced by a broken one and the app is relaunched.
+        // Day still parses, so `imported == 1` and Ruling GO's wholesale throw
+        // never fires — this is the gap GO does not cover.
+        try write(ExtensionFixtures.malformedThemeJSON, to: "themes/night.json", in: directory)
+        try apply(declaration, to: point, at: directory)
+
+        // Night is still *declared*, so reconciliation has no business deleting
+        // it (Ruling GS): a declaration is evidence of what the extension
+        // provides, a failed load is evidence about nothing. Reconciling
+        // against the ids written this call instead would delete the previous
+        // launch's working copy of exactly the theme whose file just broke —
+        // and take the user's selection with it, because `delete(id:)` clears
+        // `activeThemeID`.
+        #expect(storage.customThemes.map(\.id)
+            == ["vscode.test.pack.Night", "vscode.test.pack.Day"])
+        #expect(storage.activeThemeID == "vscode.test.pack.Night")
+        // …and the breakage is still reported, so keeping the theme is not the
+        // same as pretending nothing happened.
+        #expect(point.importFailures.map(\.path) == ["./themes/night.json"])
+    }
+
+    @Test("a theme dropped from the manifest goes away, and its sibling stays")
+    func aThemeDroppedFromTheManifestGoesAway() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: directory)
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/day.json", in: directory)
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+        try apply(
+            try manifest(name: "pack", themes: """
+            [
+                \(themeEntry(label: "Night", path: "./themes/night.json")),
+                \(themeEntry(label: "Day", path: "./themes/day.json"))
+            ]
+            """),
+            to: point,
+            at: directory
+        )
+
+        // The update ships without Night. Its file is still on disk — being
+        // undeclared is the whole signal, and `pruneOrphans` cannot see it
+        // because the extension is still installed.
+        try apply(
+            try manifest(
+                name: "pack", themes: "[\(themeEntry(label: "Day", path: "./themes/day.json"))]"),
+            to: point,
+            at: directory
+        )
+
+        #expect(storage.customThemes.map(\.id) == ["vscode.test.pack.Day"])
+    }
+
     // MARK: - Withdrawal
 
     @Test("withdraw deletes only that extension's themes")

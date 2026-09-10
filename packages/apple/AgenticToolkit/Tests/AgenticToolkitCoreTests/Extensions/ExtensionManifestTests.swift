@@ -208,6 +208,12 @@ struct ExtensionManifestTests {
         let failure = try #require(contributes.decodingFailures.first)
         #expect(failure.key == "contributes.themes")
         #expect(failure.index == 1)
+        // `reason` is rendered verbatim at the extension author in the settings
+        // panel, so it is prose naming the offending key — never
+        // `String(describing:)` over the `DecodingError`, which would put
+        // `typeMismatch(Swift.String, Swift.DecodingError.Context(codingPath:…`
+        // on screen.
+        #expect(failure.reason == "“uiTheme” is not String")
     }
 
     @Test("an object-form command icon drops the icon, not the command")
@@ -307,5 +313,9 @@ struct ExtensionManifestTests {
         let failure = try #require(contributes.decodingFailures.first)
         #expect(failure.key == "contributes.menus.commandPalette")
         #expect(failure.index == 1)
+        // The keyed-container path has its own `catch`, so it needs its own
+        // assertion: routing only the array one through `describe` would leave
+        // this line rendering a compiler dump and nothing would say so.
+        #expect(failure.reason == "no “command”")
     }
 }

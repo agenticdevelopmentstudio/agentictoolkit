@@ -124,16 +124,30 @@ public final class ThemeContributionPoint: ContributionPoint {
             throw ThemeContributionError.everyThemeFailed(count: contributions.themes.count)
         }
 
-        // Reconcile this extension's whole set, not just the ids it declares
-        // now: an update that renames "Night" to "Midnight" writes the new id
-        // and leaves the old one looking exactly like a theme the extension
-        // still provides. `pruneOrphans` cannot see it — the extension is
-        // installed — so a successful apply is the only place it can go.
+        // Reconcile this extension's whole set against what it *declares*: an
+        // update that renames "Night" to "Midnight" writes the new id and
+        // leaves the old one looking exactly like a theme the extension still
+        // provides. `pruneOrphans` cannot see it — the extension is installed —
+        // so a successful apply is the only place it can go.
+        //
+        // Declared, never `written` — the ids that happened to load *this*
+        // call (Ruling GS, refining GO one level down). Two themes where one
+        // file broke on relaunch imports one, so GO's `imported == 0` throw
+        // does not fire, and reconciling against `written` would then delete
+        // the previous launch's *working* copy of the theme whose file just
+        // broke, taking `activeThemeID` with it. A declaration is evidence of
+        // what the extension provides; a load failure is evidence about
+        // nothing, and the user's recourse would be to reinstall the extension
+        // that just failed.
+        //
         // Scoped to this extension's attribution: another extension's themes,
         // and the user's own, are never this call's to delete.
         let attribution = Self.attribution(for: identifier)
+        let declared = Set(contributions.themes.map {
+            Self.themeID(extensionIdentifier: identifier, label: $0.label)
+        })
         for theme in themeStore.customThemes
-        where theme.attribution == attribution && !written.contains(theme.id) {
+        where theme.attribution == attribution && !declared.contains(theme.id) {
             themeStore.delete(id: theme.id)
         }
     }
@@ -174,7 +188,6 @@ public final class ThemeContributionPoint: ContributionPoint {
     /// clears `activeThemeID`, so deleting the row a relaunch is about to put
     /// back under the same id would silently deselect a theme the user chose.
     /// Replacing in place keeps both the selection and the list order.
-    @discardableResult
     private func store(_ parsed: ColorTheme, label: String, extensionIdentifier: String) -> String {
         var theme = parsed
         theme.id = Self.themeID(extensionIdentifier: extensionIdentifier, label: label)

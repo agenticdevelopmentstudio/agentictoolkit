@@ -339,10 +339,46 @@ extension ExtensionManifest {
                     let data = try JSONEncoder().encode(item)
                     result.append(try JSONDecoder().decode(Element.self, from: data))
                 } catch {
-                    failures.append(DecodingFailure(key: manifestKey, index: index, reason: String(describing: error)))
+                    failures.append(DecodingFailure(key: manifestKey, index: index, reason: describe(error)))
                 }
             }
             return result
+        }
+
+        /// A decoding failure in words the extension author can act on.
+        ///
+        /// `reason` is rendered verbatim in the settings panel's Decisions
+        /// group, so `String(describing:)` over a `DecodingError` would put the
+        /// compiler's spelling of an enum case in front of the author —
+        /// `keyNotFound(CodingKeys(stringValue: "path", intValue: nil), …)`.
+        /// `localizedDescription` is no better here: Foundation renders every
+        /// one of these as "The data couldn't be read because it is missing.",
+        /// naming neither the key nor the entry. So each case is written out,
+        /// and every one of them names the thing the author has to go and fix.
+        private static func describe(_ error: Error) -> String {
+            guard let decoding = error as? DecodingError else { return error.localizedDescription }
+            switch decoding {
+            case .keyNotFound(let key, _):
+                return "no “\(key.stringValue)”"
+            case .typeMismatch(let type, let context):
+                return "\(subject(of: context)) is not \(type)"
+            case .valueNotFound(_, let context):
+                return "\(subject(of: context)) is null"
+            case .dataCorrupted(let context):
+                return context.debugDescription
+            @unknown default:
+                return error.localizedDescription
+            }
+        }
+
+        /// What a `DecodingError.Context`'s coding path names.
+        ///
+        /// Empty whenever the *element itself* is the wrong shape, because each
+        /// element is decoded on its own and its path starts there — and
+        /// “” would name nothing at all.
+        private static func subject(of context: DecodingError.Context) -> String {
+            let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+            return path.isEmpty ? "this entry" : "“\(path)”"
         }
 
         /// Same posture as `decodeLenientArray`, for the menu/view/
@@ -377,8 +413,9 @@ extension ExtensionManifest {
                         decoded.append(try JSONDecoder().decode(Element.self, from: data))
                     } catch {
                         let locationKey = "\(manifestKeyPrefix).\(location)"
-                        let reason = String(describing: error)
-                        failures.append(DecodingFailure(key: locationKey, index: index, reason: reason))
+                        failures.append(
+                            DecodingFailure(key: locationKey, index: index, reason: describe(error))
+                        )
                     }
                 }
                 result[location] = decoded
