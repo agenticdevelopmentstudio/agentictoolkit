@@ -198,10 +198,15 @@ struct LSPCompletionSnippetTests {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = try makeStore(language: "swift", in: directory)
+        let fixture = makeServerlessFixture()
 
-        let result = try #require(await request(snippets: store, fixture: makeServerlessFixture()))
+        let result = try #require(await request(snippets: store, fixture: fixture))
 
         #expect(result.items.map(\.label) == ["log"])
+        // Nothing was sent, either: a registry with no session must not be
+        // reached through some other path. Without this the test cannot tell
+        // itself apart from the two below, which produce the same window.
+        #expect(fixture.log.events.isEmpty)
     }
 
     @Test("snippets appear when the server declares no completion provider")
@@ -215,6 +220,9 @@ struct LSPCompletionSnippetTests {
         let result = try #require(await request(snippets: store, fixture: fixture))
 
         #expect(result.items.map(\.label) == ["log"])
+        // The gate is the point: no `textDocument/completion` was sent to a
+        // server that said it does not answer them.
+        #expect(!fixture.log.events.contains("completion"))
     }
 
     @Test("snippets appear when the completion request throws")
@@ -230,6 +238,8 @@ struct LSPCompletionSnippetTests {
         // A request that failed says nothing about the snippets: they were read
         // from disk at install time and are just as valid now.
         #expect(result.items.map(\.label) == ["log"])
+        // The request really was sent — this is the error path, not the gate.
+        #expect(fixture.log.events.contains("completion"))
     }
 
     // MARK: - …and still nothing to show
