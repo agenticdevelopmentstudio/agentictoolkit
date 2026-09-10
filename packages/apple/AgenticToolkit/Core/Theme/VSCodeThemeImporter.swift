@@ -19,6 +19,10 @@ public enum VSCodeThemeParseError: Error, Equatable {
     /// invisible — the same rejection `ITermColorsParser` and
     /// `ThemeStore.importJSON` perform.
     case foregroundMatchesBackground
+    /// An `include` chain went deeper than `maximumIncludeDepth`. Carries the
+    /// limit rather than the depth reached: the limit is the fact the author
+    /// can act on, and a cycle has no depth to report.
+    case includeChainTooDeep(limit: Int)
 }
 
 /// Parses VS Code colour-theme JSON files (a `contributes.themes` entry's
@@ -50,14 +54,133 @@ public enum VSCodeThemeImporter {
     ///   - uiTheme: The manifest entry's `uiTheme`, which decides appearance.
     /// - Throws: `VSCodeThemeParseError` when the document is malformed or a
     ///   required colour is missing (fail-fast; never repaired).
+    ///
+    /// An `include` key is *not* resolved here and cannot be: resolving one
+    /// needs a directory to resolve it against, and raw bytes have none. Use
+    /// `parse(contentsOf:label:uiTheme:containedIn:)` for a theme on disk,
+    /// which is every production caller.
     public static func parse(
         _ data: Data,
         label: String,
         uiTheme: String
     ) throws -> ColorTheme {
+        try theme(from: try object(from: data), label: label, uiTheme: uiTheme)
+    }
+
+    /// Parses the VS Code colour-theme file at `url`, resolving its `include`
+    /// chain first.
+    ///
+    /// - Parameters:
+    ///   - url: The theme file.
+    ///   - label: The manifest entry's `label`, used as the theme's name.
+    ///   - uiTheme: The manifest entry's `uiTheme`, which decides appearance.
+    ///   - root: The directory the whole chain must stay inside — the
+    ///     extension's own folder for a contributed theme. `nil` narrows it to
+    ///     the theme file's own directory, which is the right default for a
+    ///     file the user picked themselves.
+    public static func parse(
+        contentsOf url: URL,
+        label: String,
+        uiTheme: String,
+        containedIn root: URL? = nil
+    ) throws -> ColorTheme {
+        let root = root ?? url.deletingLastPathComponent()
+        let document = try resolvedRoot(at: url, containedIn: root, depth: 0)
+        return try theme(from: document, label: label, uiTheme: uiTheme)
+    }
+
+    // MARK: - Includes
+
+    /// How many `include` hops are followed before the chain is refused.
+    ///
+    /// VS Code allows nesting and real packs use two or three levels, so the
+    /// bound is generous rather than tight. It is a bound and not a visited-set
+    /// because that is all a cycle needs: `a → b → a` exhausts it and is
+    /// refused, and no legitimate theme comes close.
+    private static let maximumIncludeDepth = 8
+
+    /// One theme document with its `include` chain merged in.
+    ///
+    /// Themes routinely ship one shared base file plus small per-variant files
+    /// that inherit from it — `{"include": "./base.json", "colors": {…}}`.
+    /// Parsing the variant alone sees one overridden colour, throws
+    /// `missingColor("editor.foreground")`, and reports a well-formed theme
+    /// pack as broken.
+    ///
+    /// The include path is extension-controlled, so it goes through the same
+    /// containment check as the manifest's own `path` — an `include` of
+    /// `../../../../.ssh/config` is the identical escape.
+    private static func resolvedRoot(
+        at url: URL,
+        containedIn root: URL,
+        depth: Int
+    ) throws -> [String: Any] {
+        let own = try object(from: Data(contentsOf: url))
+        guard let include = own["include"] as? String, !include.isEmpty else { return own }
+        guard depth < maximumIncludeDepth else {
+            throw VSCodeThemeParseError.includeChainTooDeep(limit: maximumIncludeDepth)
+        }
+        // Relative to the *including file's* directory, contained in the
+        // extension's — which are usually not the same folder, since the
+        // including file typically sits in `themes/`.
+        let includeURL = try ExtensionResourcePath.resolve(
+            include,
+            relativeTo: url.deletingLastPathComponent(),
+            containedIn: root
+        )
+        let base = try resolvedRoot(at: includeURL, containedIn: root, depth: depth + 1)
+        return merging(own, onto: base)
+    }
+
+    /// `overriding` layered onto `base`, by VS Code's own inheritance rules.
+    ///
+    /// `colors` merges key by key with the including file winning — the whole
+    /// point of the pattern is a variant that restates three keys out of
+    /// eighty. `tokenColors` concatenates with the base's rules *first*,
+    /// because `style(for:in:)` resolves equal-length selectors in document
+    /// order and lets the later one win, which is exactly VS Code's tie-break.
+    /// Every other key is a plain override.
+    private static func merging(
+        _ overriding: [String: Any],
+        onto base: [String: Any]
+    ) -> [String: Any] {
+        var result = base
+        // `include` is consumed here and must not survive into the merged
+        // document, or a re-entrant parse would follow it a second time.
+        for (key, value) in overriding where key != "include" {
+            result[key] = value
+        }
+
+        let baseColors = base["colors"] as? [String: Any]
+        let ownColors = overriding["colors"] as? [String: Any]
+        if baseColors != nil || ownColors != nil {
+            result["colors"] = (baseColors ?? [:]).merging(ownColors ?? [:]) { _, own in own }
+        }
+
+        let baseTokens = base["tokenColors"] as? [Any]
+        let ownTokens = overriding["tokenColors"] as? [Any]
+        if baseTokens != nil || ownTokens != nil {
+            result["tokenColors"] = (baseTokens ?? []) + (ownTokens ?? [])
+        }
+        return result
+    }
+
+    // MARK: - The document
+
+    /// The deserialized root object, or `notAnObject`.
+    private static func object(from data: Data) throws -> [String: Any] {
         guard let root = try JSONCPreprocessor.jsonObject(from: data) as? [String: Any] else {
             throw VSCodeThemeParseError.notAnObject
         }
+        return root
+    }
+
+    /// The theme one fully-resolved document describes.
+    private static func theme(
+        from root: [String: Any],
+        label: String,
+        uiTheme: String
+    ) throws -> ColorTheme {
         guard let colors = root["colors"] as? [String: Any] else {
             throw VSCodeThemeParseError.missingColors
         }
@@ -96,15 +219,6 @@ public enum VSCodeThemeImporter {
         )
         // `tokenColors` sits beside `colors` at the root, not inside it.
         return theme.withSyntaxStyles(syntaxStyles(in: root))
-    }
-
-    /// Parses the VS Code colour-theme file at `url`.
-    public static func parse(
-        contentsOf url: URL,
-        label: String,
-        uiTheme: String
-    ) throws -> ColorTheme {
-        try parse(Data(contentsOf: url), label: label, uiTheme: uiTheme)
     }
 
     // MARK: - Appearance

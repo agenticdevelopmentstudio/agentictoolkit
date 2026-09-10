@@ -777,6 +777,155 @@ struct VSCodeThemeImporterTests {
         #expect(SemanticPalette(theme: theme).declares(.surface))
     }
 
+    // MARK: - include inheritance
+
+    /// A directory of this suite's own, one level below the process temp root
+    /// so an `include` written `../…` in a test has somewhere legal to land.
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VSCodeThemeImporterTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    private func write(_ contents: String, to relativePath: String, in directory: URL) throws {
+        let url = directory.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    @Test("an include supplies everything the including file does not restate")
+    func includeSuppliesTheBase() throws {
+        // The base-plus-variants pattern: one shared file, small per-variant
+        // files that override a handful of keys. Parsed alone the variant has
+        // no `editor.foreground` at all and the import fails.
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(Self.minimalJSON, to: "base.json", in: directory)
+        try write(
+            ##"{ "include": "./base.json", "colors": { "editor.background": "#111111" } }"##,
+            to: "variant.json",
+            in: directory
+        )
+
+        let theme = try VSCodeThemeImporter.parse(
+            contentsOf: directory.appendingPathComponent("variant.json"),
+            label: "Variant",
+            uiTheme: "vs-dark"
+        )
+
+        // Inherited, overridden, and inherited-in-the-same-object: the merge is
+        // key by key inside `colors`, not a wholesale replacement of it.
+        #expect(theme.foreground.hexString == "#D8DEE9FF")
+        #expect(theme.background.hexString == "#111111FF")
+        #expect(theme.cursor.hexString == "#FF00FFFF")
+        #expect(theme.ansi.count == 16)
+    }
+
+    @Test("an including file's tokenColors win over the base's for the same scope")
+    func includeConcatenatesTokenColorsWithTheIncluderLast() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(
+            Self.themeJSON(Self.standardPalette, extras: ["""
+                "tokenColors": [
+                    { "scope": "comment.line", "settings": { "foreground": "#111111" } },
+                    { "scope": "keyword.control", "settings": { "foreground": "#222222" } }
+                ]
+            """]),
+            to: "base.json",
+            in: directory
+        )
+        try write("""
+        {
+            "include": "./base.json",
+            "tokenColors": [
+                { "scope": "comment.line", "settings": { "foreground": "#333333" } }
+            ]
+        }
+        """, to: "variant.json", in: directory)
+
+        let theme = try VSCodeThemeImporter.parse(
+            contentsOf: directory.appendingPathComponent("variant.json"),
+            label: "Variant",
+            uiTheme: "vs-dark"
+        )
+
+        // The base's rules come first and the includer's last, so the equal-
+        // length tie-break in `style(for:in:)` hands the win to the includer —
+        // VS Code's rule. The base's other rule survives untouched.
+        #expect(theme.syntaxStyles[.comments]?.color.hexString == "#333333FF")
+        #expect(theme.syntaxStyles[.keywords]?.color.hexString == "#222222FF")
+    }
+
+    @Test("an include chain deeper than the bound is refused rather than followed forever")
+    func includeCycleIsBounded() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // A two-file cycle, which is the cheapest thing the bound has to stop.
+        try write(#"{ "include": "./b.json", "colors": {} }"#, to: "a.json", in: directory)
+        try write(#"{ "include": "./a.json", "colors": {} }"#, to: "b.json", in: directory)
+
+        #expect(throws: VSCodeThemeParseError.includeChainTooDeep(limit: 8)) {
+            _ = try VSCodeThemeImporter.parse(
+                contentsOf: directory.appendingPathComponent("a.json"),
+                label: "Cycle",
+                uiTheme: "vs-dark"
+            )
+        }
+    }
+
+    @Test("an include that escapes the containment root is refused")
+    func includeCannotEscapeTheContainmentRoot() throws {
+        // With no explicit root the theme file's own directory is the boundary
+        // — the right default for a file the user picked themselves, and the
+        // reason a hand-imported theme cannot be talked into reading a sibling.
+        let parent = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        try write(Self.minimalJSON, to: "outside/secret.json", in: parent)
+        try write(
+            #"{ "include": "../outside/secret.json", "colors": {} }"#,
+            to: "themes/variant.json",
+            in: parent
+        )
+
+        let variant = parent.appendingPathComponent("themes/variant.json")
+        // Premise: the decoy is real and is exactly where the escape lands.
+        let escaped = URL(fileURLWithPath: "../outside/secret.json", relativeTo: variant)
+            .resolvingSymlinksInPath().standardizedFileURL
+        #expect(FileManager.default.isReadableFile(atPath: escaped.path))
+
+        #expect(throws: ExtensionResourcePathError.self) {
+            _ = try VSCodeThemeImporter.parse(contentsOf: variant, label: "Escaper", uiTheme: "vs-dark")
+        }
+
+        // And it is permitted once the caller widens the root to the folder
+        // that legitimately holds both — which is what the themes contribution
+        // point passes.
+        let widened = try VSCodeThemeImporter.parse(
+            contentsOf: variant,
+            label: "Escaper",
+            uiTheme: "vs-dark",
+            containedIn: parent
+        )
+        #expect(widened.foreground.hexString == "#D8DEE9FF")
+    }
+
+    @Test("a file with no include still parses from disk")
+    func noIncludeStillParses() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(Self.minimalJSON, to: "theme.json", in: directory)
+
+        let theme = try VSCodeThemeImporter.parse(
+            contentsOf: directory.appendingPathComponent("theme.json"),
+            label: "Acme Dark",
+            uiTheme: "vs-dark"
+        )
+        #expect(palette(theme) == palette(try parse(Self.minimalJSON)))
+    }
+
     // MARK: - ThemeStore wiring
 
     // `ThemeStore` and the storage double are both main-actor isolated; nothing

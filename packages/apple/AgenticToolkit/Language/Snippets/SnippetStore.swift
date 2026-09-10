@@ -86,24 +86,34 @@ public final class SnippetStore: ContributionPoint {
         var byLanguage: [String: [ExtensionSnippet]] = [:]
         var recorded: [SnippetFileFailure] = []
 
-        // Re-made as an explicit directory URL before anything is resolved
-        // against it. `URL(fileURLWithPath:relativeTo:)` resolves relative to
-        // the base's *parent* unless the base is known to be a directory, and
-        // a `URL` built by a caller that did not say so — `URL(fileURLWithPath:)`
-        // with no `isDirectory:` — silently reads every snippet file one level
-        // too high.
-        let base = URL(fileURLWithPath: directory.path, isDirectory: true)
-
         for entry in contributions.snippets {
-            // The entry's path is relative to the extension's own folder.
-            // `URL(fileURLWithPath:relativeTo:)` rather than a `./` strip:
-            // nearly every real entry is written `./snippets/x.json`, but not
-            // all of them are, and a strip that assumes the prefix mangles the
-            // ones that are not.
-            let url = URL(fileURLWithPath: entry.path, relativeTo: base)
             do {
+                // The entry's path is relative to the extension's own folder,
+                // and may not leave it. `ExtensionResourcePath` owns both
+                // halves — the is-directory base that stops every file being
+                // read one level too high, and the symlink-resolving
+                // containment check that stops `../../../.ssh/config` being
+                // read at all and typed into the user's buffer as a snippet
+                // body. The themes point and the host's entry point resolve
+                // their own declared paths through the same function.
+                let url = try ExtensionResourcePath.resolve(entry.path, inside: directory)
                 let snippets = try SnippetFile.parse(contentsOf: url, extensionIdentifier: identifier)
-                byLanguage[entry.language, default: []].append(contentsOf: snippets)
+                for snippet in snippets {
+                    // Filed under every language the snippet's own `scope`
+                    // names, falling back to the manifest entry's `language`
+                    // when it names none. Bucketing by `entry.language` alone
+                    // disagreed with the `applies(to:)` filter that lookup runs:
+                    // a snippet scoped `typescript` inside a file declared
+                    // `javascript` sat in the `javascript` bucket, where the
+                    // filter rejected it, and no `typescript` lookup ever
+                    // reached that bucket — so it was offered nowhere.
+                    // `applies(to:)` stays the single source of truth for what
+                    // a snippet applies to; this only makes membership agree
+                    // with it.
+                    for language in snippet.scopes.isEmpty ? [entry.language] : snippet.scopes {
+                        byLanguage[language, default: []].append(snippet)
+                    }
+                }
             } catch {
                 recorded.append(
                     SnippetFileFailure(

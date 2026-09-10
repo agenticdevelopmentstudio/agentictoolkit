@@ -54,10 +54,17 @@ public struct ExtensionSnippet: Sendable, Equatable {
 
     /// Whether this snippet is offered for `language`.
     ///
-    /// The manifest entry's `language` already decided that this snippet's
-    /// *file* belongs to a language; a per-snippet `scope` narrows further,
-    /// and only narrows — a snippet with no scope is offered wherever its
-    /// file is.
+    /// The single source of truth for what a snippet applies to. `SnippetStore`
+    /// files each snippet under every language named here — falling back to the
+    /// manifest entry's `language` when `scopes` is empty — precisely so that
+    /// bucket membership and this predicate cannot disagree. They did: a
+    /// snippet scoped `typescript` inside a file declared `javascript` was
+    /// filed under `javascript`, where this rejected it, and was reachable from
+    /// no language at all.
+    ///
+    /// A `scope` therefore *redirects* as readily as it narrows — VS Code's own
+    /// behaviour for a `.code-snippets` file, whose entries carry their own
+    /// scopes and are not bound by the manifest's `language`.
     public func applies(to language: String) -> Bool {
         scopes.isEmpty || scopes.contains(language)
     }

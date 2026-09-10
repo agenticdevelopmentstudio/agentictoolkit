@@ -80,6 +80,61 @@ struct SnippetFileTests {
         #expect(try #require(snippets.first).scopes == ["typescript", "typescriptreact", "javascript"])
     }
 
+    // MARK: - Array-form prefix
+
+    @Test("an array prefix becomes one snippet per trigger word")
+    func arrayPrefixBecomesOneSnippetPerTriggerWord() throws {
+        // The shape the ES7+ React/Redux snippet packs ship, where one snippet
+        // answers to several trigger words. A `prefix` cast that accepted only
+        // `String` dropped every one of them — with no failure record, so the
+        // panel reported the file as fully imported.
+        let snippets = try parse("""
+        {
+            "Component": {
+                "prefix": ["rfc", "rface"],
+                "body": "export const $1 = () => {}",
+                "description": "A function component",
+                "scope": "typescriptreact"
+            }
+        }
+        """)
+
+        #expect(snippets.map(\.prefix) == ["rfc", "rface"])
+        // Everything but the trigger word is shared, and the order is the
+        // file's — not sorted, because that is what the author wrote.
+        #expect(snippets.map(\.name) == ["Component", "Component"])
+        #expect(snippets.allSatisfy { $0.body == "export const $1 = () => {}" })
+        #expect(snippets.allSatisfy { $0.description == "A function component" })
+        #expect(snippets.allSatisfy { $0.scopes == ["typescriptreact"] })
+    }
+
+    @Test("a string prefix still yields exactly one snippet")
+    func stringPrefixStillYieldsOne() throws {
+        let snippets = try parse(#"{"Log": {"prefix": "log", "body": "…"}}"#)
+        #expect(snippets.map(\.prefix) == ["log"])
+    }
+
+    @Test("a stray non-string in a prefix array costs that element, not the snippet")
+    func strayPrefixElementCostsOnlyItself() throws {
+        // The same leniency `body(from:)`'s array handling has always had, and
+        // the same rule `selectors(in:)` applies to a theme's `scope`.
+        let snippets = try parse(#"{"Log": {"prefix": ["log", 7, ""], "body": "…"}}"#)
+        #expect(snippets.map(\.prefix) == ["log"])
+    }
+
+    @Test("a prefix array with nothing usable in it skips the snippet")
+    func emptyPrefixArrayIsSkipped() throws {
+        let snippets = try parse("""
+        {
+            "Unusable": { "prefix": [], "body": "…" },
+            "Also unusable": { "prefix": [7], "body": "…" },
+            "Usable": { "prefix": "ok", "body": "fine" }
+        }
+        """)
+
+        #expect(snippets.map(\.name) == ["Usable"])
+    }
+
     // MARK: - Entries that cannot be summoned
 
     @Test("a snippet with no prefix is skipped, and its siblings are kept")
@@ -325,10 +380,14 @@ struct ExtensionSnippetTests {
         #expect(snippet().applies(to: "swift"))
     }
 
-    @Test("a scope narrows, and only narrows")
-    func scopeNarrows() {
+    @Test("a scope is membership in the languages it names, and nothing wider")
+    func scopeIsMembership() {
+        // Membership, not narrowing: the named language need not be the one
+        // the manifest entry declared, and `SnippetStore` files the snippet
+        // under its scopes so the two agree.
         let scoped = snippet(scopes: ["typescript", "javascript"])
         #expect(scoped.applies(to: "typescript"))
+        #expect(scoped.applies(to: "javascript"))
         #expect(!scoped.applies(to: "swift"))
     }
 }

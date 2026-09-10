@@ -606,4 +606,153 @@ struct ThemeContributionPointTests {
         let ids6 = storage.customThemes.map(\.id)
         #expect(ids6 == ["vscode.test.pack.One"])
     }
+
+    // MARK: - Containment
+
+    @Test("a theme path that escapes the extension directory is refused")
+    func escapingThemePathIsRefused() throws {
+        // The decoy is a real, readable, *valid* theme file outside the
+        // extension folder — written and located by a route the point does not
+        // use. Without the containment check any readable JSON on the machine
+        // carrying a `colors` object becomes a theme in the user's picker, and
+        // anything else becomes a failure row that confirms the file exists.
+        let parent = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let extensionDirectory = parent.appendingPathComponent("ext", isDirectory: true)
+        try FileManager.default.createDirectory(at: extensionDirectory, withIntermediateDirectories: true)
+        try write(ExtensionFixtures.goodThemeJSON, to: "outside/secret.json", in: parent)
+
+        let decoy = parent.appendingPathComponent("outside/secret.json")
+        #expect(FileManager.default.isReadableFile(atPath: decoy.path))
+        let escaped = URL(fileURLWithPath: "../outside/secret.json", relativeTo: extensionDirectory)
+            .resolvingSymlinksInPath().standardizedFileURL
+        #expect(escaped.path == decoy.resolvingSymlinksInPath().standardizedFileURL.path)
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+
+        // Every declared theme failed, so the point's own wholesale refusal
+        // fires — which is the honest report, and is what the registry records.
+        #expect(throws: ThemeContributionError.everyThemeFailed(count: 1)) {
+            try apply(
+                try manifest(
+                    name: "escaper",
+                    themes: "[\(themeEntry(label: "Stolen", path: "../outside/secret.json"))]"
+                ),
+                to: point,
+                at: extensionDirectory
+            )
+        }
+
+        #expect(storage.customThemes.isEmpty)
+        #expect(point.importFailures.map(\.path) == ["../outside/secret.json"])
+    }
+
+    @Test("a sibling directory sharing a name prefix does not count as inside")
+    func siblingWithSharedNamePrefixIsRefused() throws {
+        // A containment check written on string prefixes lets this through,
+        // and the attacker picks the sibling directory's name.
+        let parent = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let extensionDirectory = parent.appendingPathComponent("ext", isDirectory: true)
+        try FileManager.default.createDirectory(at: extensionDirectory, withIntermediateDirectories: true)
+        try write(ExtensionFixtures.goodThemeJSON, to: "ext-evil/secret.json", in: parent)
+
+        let decoy = parent.appendingPathComponent("ext-evil/secret.json")
+        #expect(decoy.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(
+            extensionDirectory.resolvingSymlinksInPath().standardizedFileURL.path))
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+
+        #expect(throws: ThemeContributionError.everyThemeFailed(count: 1)) {
+            try apply(
+                try manifest(
+                    name: "sibling",
+                    themes: "[\(themeEntry(label: "Stolen", path: "../ext-evil/secret.json"))]"
+                ),
+                to: point,
+                at: extensionDirectory
+            )
+        }
+
+        #expect(storage.customThemes.isEmpty)
+        #expect(point.importFailures.map(\.path) == ["../ext-evil/secret.json"])
+    }
+
+    // MARK: - Include inheritance
+
+    /// The variant half of a base-plus-variants theme pack: it inherits
+    /// everything and overrides one colour.
+    private static let variantThemeJSON = """
+    {
+        "include": "../base.json",
+        "colors": { "editor.background": "#111111" }
+    }
+    """
+
+    @Test("a theme that includes a base file one directory up imports")
+    func includeResolvesAgainstTheThemeFileAndImports() throws {
+        // The shape many packs ship: `themes/dark.json` inheriting from a
+        // shared `base.json` beside it or above it. Parsed on its own the
+        // variant declares one colour, `editor.foreground` is missing, and a
+        // well-formed pack reports as broken.
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(ExtensionFixtures.goodThemeJSON, to: "base.json", in: directory)
+        try write(Self.variantThemeJSON, to: "themes/variant.json", in: directory)
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+
+        try apply(
+            try manifest(name: "pack", themes: "[\(themeEntry(label: "Variant", path: "./themes/variant.json"))]"),
+            to: point,
+            at: directory
+        )
+
+        #expect(point.importFailures.isEmpty)
+        let theme = try #require(storage.customThemes.first)
+        // The base supplied the foreground; the variant overrode the
+        // background, and only the background.
+        #expect(theme.foreground.hexString == "#D8DEE9FF")
+        #expect(theme.background.hexString == "#111111FF")
+    }
+
+    @Test("an include that escapes the extension directory is refused")
+    func escapingIncludeIsRefused() throws {
+        // An `include` is an extension-controlled path with exactly the escape
+        // hazard the manifest's own `path` has, and it reaches the file system
+        // one hop later where nothing was watching.
+        let parent = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let extensionDirectory = parent.appendingPathComponent("ext", isDirectory: true)
+        try FileManager.default.createDirectory(at: extensionDirectory, withIntermediateDirectories: true)
+        try write(ExtensionFixtures.goodThemeJSON, to: "outside/secret.json", in: parent)
+        try write(
+            ##"{ "include": "../../outside/secret.json", "colors": { "editor.background": "#111111" } }"##,
+            to: "themes/variant.json",
+            in: extensionDirectory
+        )
+
+        #expect(FileManager.default.isReadableFile(
+            atPath: parent.appendingPathComponent("outside/secret.json").path))
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+
+        #expect(throws: ThemeContributionError.everyThemeFailed(count: 1)) {
+            try apply(
+                try manifest(
+                    name: "escaper",
+                    themes: "[\(themeEntry(label: "Variant", path: "./themes/variant.json"))]"
+                ),
+                to: point,
+                at: extensionDirectory
+            )
+        }
+
+        #expect(storage.customThemes.isEmpty)
+        #expect(point.importFailures.map(\.path) == ["./themes/variant.json"])
+    }
 }

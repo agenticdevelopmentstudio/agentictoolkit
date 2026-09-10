@@ -160,8 +160,8 @@ struct SnippetStoreTests {
         #expect(store.snippets(forLanguage: "python").isEmpty)
     }
 
-    @Test("a per-snippet scope narrows within the file's language")
-    func scopeNarrowsWithinLanguage() throws {
+    @Test("a per-snippet scope decides which language offers the snippet")
+    func scopeDecidesTheBucket() throws {
         let directory = try makeExtensionDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         try write(Self.scopedSnippets, to: "snippets/ts.json", in: directory)
@@ -169,13 +169,124 @@ struct SnippetStoreTests {
         let store = SnippetStore()
         try apply(try manifest(snippetEntries: [("typescript", "./snippets/ts.json")]), at: directory, to: store)
 
-        // The file is declared for `typescript`; the scoped snippet inside it
-        // says `typescriptreact`, so only the unscoped one is offered here.
+        // The unscoped snippet falls back to the manifest entry's language.
         #expect(store.snippets(forLanguage: "typescript").map(\.prefix) == ["any"])
-        // And the scoped one is not offered for its own scope either — the
-        // manifest entry, not the scope, decides which languages the file
-        // participates in at all.
-        #expect(store.snippets(forLanguage: "typescriptreact").isEmpty)
+        // And the scoped one is offered for the scope it named. It used to be
+        // offered nowhere: filed under the manifest's `typescript` where
+        // `applies(to:)` rejected it, and never looked for under
+        // `typescriptreact`. Bucket membership and the filter now agree.
+        #expect(store.snippets(forLanguage: "typescriptreact").map(\.prefix) == ["cmp"])
+    }
+
+    @Test("a snippet scoped to a different language than its file is still reachable")
+    func scopeMayRedirectAwayFromTheManifestLanguage() throws {
+        // The `.code-snippets` shape: one file declared under a language, whose
+        // entries carry their own scopes. Filing by the manifest's language
+        // alone made every such entry unreachable — the `javascript` lookup
+        // filtered it out, and the `typescript` lookup never read that bucket.
+        let directory = try makeExtensionDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(
+            #"{"Interface": {"prefix": "iface", "body": "interface $1 {}", "scope": "typescript"}}"#,
+            to: "snippets/mixed.code-snippets",
+            in: directory
+        )
+
+        let store = SnippetStore()
+        try apply(
+            try manifest(snippetEntries: [("javascript", "./snippets/mixed.code-snippets")]),
+            at: directory,
+            to: store
+        )
+
+        #expect(store.snippets(forLanguage: "typescript").map(\.prefix) == ["iface"])
+        #expect(store.snippets(forLanguage: "javascript").isEmpty)
+        #expect(store.failures.isEmpty)
+    }
+
+    @Test("a multi-scope snippet is offered by every language it names, once each")
+    func multiScopeSnippetIsFiledUnderEachScope() throws {
+        let directory = try makeExtensionDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(
+            #"{"Log": {"prefix": "log", "body": "…", "scope": "javascript,typescript"}}"#,
+            to: "snippets/both.json",
+            in: directory
+        )
+
+        let store = SnippetStore()
+        try apply(
+            try manifest(snippetEntries: [("javascript", "./snippets/both.json")]),
+            at: directory,
+            to: store
+        )
+
+        #expect(store.snippets(forLanguage: "javascript").map(\.prefix) == ["log"])
+        #expect(store.snippets(forLanguage: "typescript").map(\.prefix) == ["log"])
+    }
+
+    // MARK: - Containment
+
+    @Test("a snippet path that escapes the extension directory is refused")
+    func escapingPathIsRefused() throws {
+        // The decoy is a real, readable file of valid snippet JSON, written
+        // *outside* the extension folder by a route the store does not use —
+        // so a refusal here cannot be a refusal of some other path. Without the
+        // containment check its contents become live snippets: the extension
+        // picks both the trigger word and the body, so an arbitrary file's
+        // contents get typed verbatim into the user's document.
+        let parent = try makeExtensionDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let directory = parent.appendingPathComponent("ext", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try write(#"{"Secret": {"prefix": "leak", "body": "hunter2"}}"#, to: "outside/secret.json", in: parent)
+
+        // Premise: the decoy exists, is readable, and is exactly where the
+        // escape resolves to.
+        let decoy = parent.appendingPathComponent("outside/secret.json")
+        #expect(FileManager.default.isReadableFile(atPath: decoy.path))
+        let escaped = URL(fileURLWithPath: "../outside/secret.json", relativeTo: directory)
+            .resolvingSymlinksInPath().standardizedFileURL
+        #expect(escaped.path == decoy.resolvingSymlinksInPath().standardizedFileURL.path)
+
+        let store = SnippetStore()
+        try apply(
+            try manifest(snippetEntries: [("swift", "../outside/secret.json")]),
+            at: directory,
+            to: store
+        )
+
+        #expect(store.snippets(forLanguage: "swift").isEmpty)
+        #expect(store.failures.map(\.path) == ["../outside/secret.json"])
+        #expect(!store.failures.isEmpty)
+    }
+
+    @Test("a sibling directory sharing a name prefix does not count as inside")
+    func siblingWithSharedNamePrefixIsRefused() throws {
+        // A containment check written on string prefixes lets this through,
+        // and the attacker picks the sibling's name.
+        let parent = try makeExtensionDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let directory = parent.appendingPathComponent("ext", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try write(#"{"Secret": {"prefix": "leak", "body": "hunter2"}}"#, to: "ext-evil/secret.json", in: parent)
+
+        let decoy = parent.appendingPathComponent("ext-evil/secret.json")
+        #expect(FileManager.default.isReadableFile(atPath: decoy.path))
+        // The prefix relation this test exists to defeat, pinned: a rename that
+        // broke it would leave this a duplicate of the `../outside/` case.
+        #expect(decoy.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(
+            directory.resolvingSymlinksInPath().standardizedFileURL.path))
+
+        let store = SnippetStore()
+        try apply(
+            try manifest(snippetEntries: [("swift", "../ext-evil/secret.json")]),
+            at: directory,
+            to: store
+        )
+
+        #expect(store.snippets(forLanguage: "swift").isEmpty)
+        #expect(store.failures.map(\.path) == ["../ext-evil/secret.json"])
     }
 
     @Test("two files for the same language are both read")

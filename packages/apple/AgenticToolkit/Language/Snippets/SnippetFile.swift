@@ -64,9 +64,9 @@ public enum SnippetFile {
         // Sorted by name because a deserialized JSON object has no order left
         // to preserve, and an unordered result would reshuffle the completion
         // list between launches for no reason the user could see.
-        return root.keys.sorted().compactMap { name in
-            guard let object = root[name] as? [String: Any] else { return nil }
-            return snippet(named: name, from: object, extensionIdentifier: extensionIdentifier)
+        return root.keys.sorted().flatMap { name -> [ExtensionSnippet] in
+            guard let object = root[name] as? [String: Any] else { return [] }
+            return snippets(named: name, from: object, extensionIdentifier: extensionIdentifier)
         }
     }
 
@@ -80,29 +80,67 @@ public enum SnippetFile {
 
     // MARK: - One snippet
 
-    /// One snippet object, or `nil` for an entry that could never be summoned.
+    /// One snippet object as snippets — one per declared prefix, or none for
+    /// an entry that could never be summoned.
+    ///
+    /// **One entry can be several snippets.** VS Code's `prefix` takes an
+    /// array as readily as a string, and packs that ship one snippet under
+    /// several trigger words (`"prefix": ["rfc", "rface"]`) are common enough
+    /// that a string-only cast dropped them wholesale — with no failure record,
+    /// because a rejected entry and an absent one looked identical from here.
+    /// `ExtensionSnippet` is one prefix by construction (`prefix` is what the
+    /// completion item's label, filter text and lookup key all are), so an
+    /// array becomes one snippet per element rather than a new plural field.
     ///
     /// Two things make an entry unusable, and both are skipped rather than
     /// thrown for: a missing or non-textual `body` (there is nothing to
-    /// insert) and a missing `prefix` (there is nothing to type). Skipping is
-    /// right where throwing is not, because these are individual entries in a
-    /// file whose *other* entries are fine — the file itself parsed.
-    private static func snippet(
+    /// insert) and a missing, non-textual or empty `prefix` (there is nothing
+    /// to type). Skipping is right where throwing is not, because these are
+    /// individual entries in a file whose *other* entries are fine — the file
+    /// itself parsed.
+    private static func snippets(
         named name: String,
         from object: [String: Any],
         extensionIdentifier: String
-    ) -> ExtensionSnippet? {
-        guard let prefix = object["prefix"] as? String, let body = body(from: object["body"]) else {
-            return nil
+    ) -> [ExtensionSnippet] {
+        let prefixes = prefixes(from: object["prefix"])
+        guard !prefixes.isEmpty, let body = body(from: object["body"]) else {
+            return []
         }
-        return ExtensionSnippet(
-            name: name,
-            prefix: prefix,
-            body: body,
-            description: object["description"] as? String,
-            scopes: scopes(from: object["scope"] as? String),
-            extensionIdentifier: extensionIdentifier
-        )
+        let description = object["description"] as? String
+        let scopes = scopes(from: object["scope"] as? String)
+        return prefixes.map { prefix in
+            ExtensionSnippet(
+                name: name,
+                prefix: prefix,
+                body: body,
+                description: description,
+                scopes: scopes,
+                extensionIdentifier: extensionIdentifier
+            )
+        }
+    }
+
+    /// Every trigger word an entry declares, in declaration order.
+    ///
+    /// The same string-or-array tolerance `body(from:)` has carried all along,
+    /// applied to the other half of the pair. Empties are dropped and the order
+    /// is the file's: a prefix nobody can type is not a prefix, and a snippet
+    /// list that reshuffles between launches is worse than one whose order is
+    /// arbitrary but fixed.
+    private static func prefixes(from value: Any?) -> [String] {
+        let declared: [String]
+        switch value {
+        case let text as String:
+            declared = [text]
+        // Element-wise rather than `as? [String]`, so one stray `null` in an
+        // otherwise good array costs that element and not the whole entry.
+        case let list as [Any]:
+            declared = list.compactMap { $0 as? String }
+        default:
+            return []
+        }
+        return declared.filter { !$0.isEmpty }
     }
 
     /// The snippet body as one string.

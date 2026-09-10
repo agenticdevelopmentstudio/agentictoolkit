@@ -81,21 +81,9 @@ public final class ThemeContributionPoint: ContributionPoint {
         // runs zero times, GO's throw is conditioned below, and `declared` is
         // empty so reconciliation deletes them all. Which is the right answer.
 
-        // `directory` arrives from the registry and may have been built with a
-        // plain `URL(fileURLWithPath:)`, which carries no is-directory flag —
-        // and `URL(fileURLWithPath:relativeTo:)` then resolves against its
-        // *parent*, reading every theme one level too high. Re-make the base
-        // with the flag set before resolving anything against it.
-        let base = URL(fileURLWithPath: directory.path, isDirectory: true)
-
         var imported = 0
         var written: Set<String> = []
         for theme in contributions.themes {
-            // `relativeTo:` rather than stripping a "./" prefix and appending:
-            // most manifests write "./themes/x.json" but not all do, and a
-            // strip that assumes the prefix mangles the ones that do not.
-            let url = URL(fileURLWithPath: theme.path, relativeTo: base)
-
             // Two themes under one label share an id, so the second would
             // quietly replace the first and both would count as imported —
             // one file in the folder with nothing to show for it and no
@@ -114,10 +102,23 @@ public final class ThemeContributionPoint: ContributionPoint {
             }
 
             do {
+                // `ExtensionResourcePath` owns both halves of resolving a
+                // declared path: the is-directory base — `directory` arrives
+                // from the registry and may carry no is-directory flag, which
+                // makes `relativeTo:` resolve against its *parent* and read
+                // every theme one level too high — and the symlink-resolving
+                // containment check that refuses `../../../secret.json`. The
+                // snippets point and the host's entry point resolve theirs
+                // through the same function.
+                let url = try ExtensionResourcePath.resolve(theme.path, inside: directory)
                 let parsed = try VSCodeThemeImporter.parse(
                     contentsOf: url,
                     label: theme.label,
-                    uiTheme: theme.uiTheme
+                    uiTheme: theme.uiTheme,
+                    // The extension's whole folder, not the theme file's own:
+                    // an `include` is legitimately written `../base.json` from
+                    // inside `themes/`, and may go no further.
+                    containedIn: directory
                 )
                 written.insert(store(parsed, label: theme.label, extensionIdentifier: identifier))
                 imported += 1

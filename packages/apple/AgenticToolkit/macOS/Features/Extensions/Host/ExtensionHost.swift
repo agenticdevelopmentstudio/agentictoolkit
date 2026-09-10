@@ -794,46 +794,27 @@ public final class ExtensionHost {
             throw ExtensionHostError.noEntryPoint(identifier: identifier)
         }
 
-        // `isDirectory: true` spelled out. The single-argument initializers
-        // consult the file system for that flag, and a base that lost it
-        // resolves every relative path one level *up* — out of the extension
-        // directory, which is precisely what the containment check below
-        // exists to prevent.
-        let base = URL(fileURLWithPath: loadedExtension.directory.path, isDirectory: true)
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-
-        // Symlinks first, then `..` removal, and the same treatment for both
-        // sides: on macOS the temporary directory alone is a symlink
-        // (`/var` → `/private/var`), so a base and a candidate normalized
-        // differently would compare unequal for every path and the check would
-        // refuse everything — or, resolved the other way round, would accept an
-        // escape through a symlink planted inside the extension.
-        let candidate = URL(fileURLWithPath: browser, relativeTo: base)
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-
-        guard Self.url(candidate, isContainedIn: base) else {
-            throw ExtensionHostError.entryPointEscapesExtensionDirectory(
-                identifier: identifier,
-                declared: browser,
-                resolved: candidate.path
-            )
+        // The base re-making, the symlink/`..` normalization of both sides and
+        // the component-wise containment check all live in
+        // `ExtensionResourcePath` now: the snippets, themes and theme-`include`
+        // points resolve extension-declared paths under exactly the same rule,
+        // and three of the four were missing the escape half of it.
+        //
+        // The error is re-thrown as this host's own rather than let through,
+        // because the host's is the one that names *which* extension failed —
+        // a path resolver has no identifier to report.
+        do {
+            return try ExtensionResourcePath.resolve(browser, inside: loadedExtension.directory)
+        } catch let error as ExtensionResourcePathError {
+            switch error {
+            case .escapesExtensionDirectory(let declared, let resolved):
+                throw ExtensionHostError.entryPointEscapesExtensionDirectory(
+                    identifier: identifier,
+                    declared: declared,
+                    resolved: resolved
+                )
+            }
         }
-
-        return candidate
-    }
-
-    /// Whether `candidate` is strictly below `base`.
-    ///
-    /// Compares path *components*, not string prefixes: `/tmp/ext-evil` has
-    /// `/tmp/ext` as a string prefix and is not inside it, and a check that
-    /// missed that would let an attacker choose a sibling directory name.
-    private static func url(_ candidate: URL, isContainedIn base: URL) -> Bool {
-        let baseComponents = base.pathComponents
-        let candidateComponents = candidate.pathComponents
-        guard candidateComponents.count > baseComponents.count else { return false }
-        return Array(candidateComponents.prefix(baseComponents.count)) == baseComponents
     }
 
     /// Reads the entry point off the main thread. A bundled web extension is
