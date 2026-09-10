@@ -366,6 +366,10 @@ struct ConfigurationContributionPointTests {
         #expect(Int(settingsFieldString: "9,223,372,036,854,775,807", locale: english) == Int.max)
         #expect(Int(settingsFieldString: "9,223,372,036,854,775,808", locale: english) == nil)
         #expect(Int(settingsFieldString: "9223372036854775808", locale: english) == nil)
+        // The negative boundary, where a guard made stricter is likeliest to
+        // start refusing good input: -2^63 is exactly representable, so it is
+        // an accept, not a reject.
+        #expect(Int(settingsFieldString: "-9,223,372,036,854,775,808", locale: english) == Int.min)
 
         #expect(Double(settingsFieldString: "nan", locale: english) == nil)
         #expect(Double(settingsFieldString: "not a number", locale: english) == nil)
@@ -395,5 +399,36 @@ struct ConfigurationContributionPointTests {
             Notification(name: NSControl.textDidEndEditingNotification, object: field.textField))
         #expect(setting.value == 10)
         #expect(field.textField.stringValue == "10")
+    }
+
+    // MARK: - 28 — the exactness guard, at the boundary no string can reach
+
+    @Test("a saturating NSNumber is refused, not clamped to Int.max")
+    func exactIntRefusesASaturatedNumber() {
+        // No text this file's formatter accepts parses to a number at or past
+        // 2^63, so the guard cannot be driven to its own boundary through a
+        // string — it is reached here directly. `int64Value` clamps 2^63 to
+        // `Int64.max`, whose `Double` is 2^63 again, so a double-shaped check
+        // sees nothing wrong. `decimalValue` does.
+        #expect(Int.settingsExactInt(from: NSNumber(value: 9_223_372_036_854_775_808.0)) == nil)
+        // -2^63 - 2048, the first double below the negative boundary: doubles
+        // are 2048 apart up here, so -...809.0 would round back to -2^63 and
+        // test nothing.
+        #expect(Int.settingsExactInt(from: NSNumber(value: -9_223_372_036_854_777_856.0)) == nil)
+
+        // Too large for a `Decimal`, which answers NaN. The comparison must not
+        // be what decides that: a NaN that compared equal would store the
+        // clamped `Int.max` for a value a thousand times past it.
+        #expect(NSNumber(value: 1e300).decimalValue.isNaN)
+        #expect(Int.settingsExactInt(from: NSNumber(value: 1e300)) == nil)
+
+        // And the values either side of the clamp are still accepted, from
+        // both an integer-backed and a double-backed `NSNumber`.
+        #expect(Int.settingsExactInt(from: NSNumber(value: Int64.max)) == Int.max)
+        #expect(Int.settingsExactInt(from: NSNumber(value: Int64.min)) == Int.min)
+        #expect(Int.settingsExactInt(from: NSNumber(value: 9_007_199_254_740_993 as Int64))
+            == 9_007_199_254_740_993)
+        #expect(Int.settingsExactInt(from: NSNumber(value: 1.5)) == nil)
+        #expect(Int.settingsExactInt(from: NSNumber(value: Double.nan)) == nil)
     }
 }

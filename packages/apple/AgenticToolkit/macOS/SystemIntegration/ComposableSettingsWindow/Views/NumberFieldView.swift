@@ -121,26 +121,44 @@ extension Int: SettingsNumberValue {
         // neither of them but the whole-string requirement in
         // `settingsLocaleNumber`, because a prefix is already an integer and
         // would pass every check below.
-        //
-        // `doubleValue` decides only finiteness and wholeness, both of which a
-        // double represents faithfully. The value itself comes from
-        // `int64Value`: a double rounds above 2^53, so a typed
-        // 9,007,199,254,740,993 would be stored as ...992 with nothing here
-        // able to object, the rounded double being a perfectly good integer.
-        //
-        // `int64Value` clamps instead of failing, and the clamp is invisible to
-        // any test made of `Double`s: `Double(Int64.max)` rounds **up** to 2^63
-        // (measured), so a saturated `Int64.max` and a true 2^63 are the same
-        // double, and `approximate.magnitude < 2^63` would throw away a
-        // legitimately typed `Int.max` along with the overflow. `decimalValue`
-        // is the comparison that separates them — it holds every `Int64`
-        // exactly, so it equals `Decimal(exact)` only when nothing was clamped,
-        // and it answers NaN rather than trapping on a double too large for it.
+        guard let value = Self.settingsExactInt(from: number) else { return nil }
+        self = value
+    }
+
+    /// The `Int` an `NSNumber` stands for exactly, or `nil` if it stands for
+    /// anything else — a fraction, a non-finite value, or a magnitude no `Int`
+    /// can hold.
+    ///
+    /// `doubleValue` decides only finiteness and wholeness, both of which a
+    /// double represents faithfully. The value itself comes from `int64Value`,
+    /// because a double rounds above 2^53: a typed 9,007,199,254,740,993 would
+    /// otherwise be stored as ...992, the rounded double being a perfectly good
+    /// integer that nothing downstream could object to.
+    ///
+    /// `int64Value` clamps rather than failing, though, and the clamp is
+    /// invisible to any test made of `Double`s: `Double(Int64.max)` rounds
+    /// **up** to 2^63 (measured), so a saturated `Int64.max` and a true 2^63
+    /// are the same double — and `approximate.magnitude < 2^63` would throw
+    /// away a legitimately typed `Int.max` along with the overflow.
+    /// `decimalValue` is the one representation of the three that can see the
+    /// clamp: it holds every `Int64` exactly, so it equals `Decimal(exact)`
+    /// only when nothing was clamped. Its NaN is checked rather than left to
+    /// the comparison, because that branch fails in the unsafe direction — a
+    /// `Decimal` comparison that answered `true` for NaN would store `Int.max`
+    /// for a 1e300 input, which is the overflow this function exists to refuse.
+    ///
+    /// Internal rather than private so a test can reach the boundary directly:
+    /// no string this file's formatter accepts produces a saturating
+    /// `NSNumber`, so the guard is otherwise unfalsifiable from outside.
+    static func settingsExactInt(from number: NSNumber) -> Int? {
         let approximate = number.doubleValue
         guard approximate.isFinite, approximate == approximate.rounded() else { return nil }
         let exact = number.int64Value
-        guard number.decimalValue == Decimal(exact), let value = Int(exactly: exact) else { return nil }
-        self = value
+        let decimal = number.decimalValue
+        guard !decimal.isNaN, decimal == Decimal(exact), let value = Int(exactly: exact) else {
+            return nil
+        }
+        return value
     }
 
     public var settingsFieldString: String { String(self) }
