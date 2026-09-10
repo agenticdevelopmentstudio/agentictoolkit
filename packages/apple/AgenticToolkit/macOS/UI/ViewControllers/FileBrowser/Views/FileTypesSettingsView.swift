@@ -108,41 +108,27 @@ public enum CustomFileTypeMappings {
     }
 }
 
-// MARK: - Built-in File Type Entry
+// MARK: - Built-in File Type Icons
 
-/// A read-only display entry for a built-in language from CodeEditLanguages.
-private struct BuiltInFileType: Identifiable {
-    public let id: String
-    public let fileExtension: String
-    public let languageName: String
-    public let iconName: String
+/// The extension→SF Symbol table the file browser draws from.
+///
+/// One table, three readers: the file tree (`FileTreeNode.fileIconName`), the
+/// settings panel's built-in rows (`BuiltInFileType.allBuiltIn`) and the
+/// mappings an extension contributes (`LanguageContributionPoint`). It was two
+/// copies until the third reader arrived, and they had already drifted — the
+/// tree's copy did not know `mkd`, `mjs` or `shtml` — which is the whole
+/// argument for it being one.
+///
+/// Returns `nil` rather than a fallback for an extension it does not know:
+/// each reader's fallback is its own. The tree and the settings list want a
+/// blank `doc`; a contributed mapping wants `doc.text`, because it is
+/// *replacing* a built-in row rather than being one.
+public enum FileTypeIcons {
 
-    /// Derives built-in entries from CodeEditLanguages definitions.
-    public static func allBuiltIn() -> [BuiltInFileType] {
-        var entries: [BuiltInFileType] = []
-        for lang in CodeLanguage.allLanguages {
-            for ext in lang.extensions.sorted() {
-                // Skip empty extensions and internal languages
-                guard !ext.isEmpty else { continue }
-                entries.append(BuiltInFileType(
-                    // The language belongs in the id: several languages claim
-                    // the same extension (`.h`, `.m`, `.ts`), and an id shared
-                    // by two rows makes `ForEach` render one of them twice.
-                    id: "builtin-\(lang.tsName)-\(ext)",
-                    fileExtension: ext,
-                    languageName: lang.tsName.capitalized,
-                    iconName: iconForExtension(ext)
-                ))
-            }
-        }
-        return entries.sorted {
-            $0.fileExtension.localizedCaseInsensitiveCompare($1.fileExtension) == .orderedAscending
-        }
-    }
-
-    /// Maps a file extension to an SF Symbol icon, matching the logic in FileTreeNode.
-    private static func iconForExtension(_ ext: String) -> String {
-        switch ext.lowercased() {
+    /// The SF Symbol for a file extension, or `nil` if there is no better
+    /// answer than the caller's default. `fileExtension` may be in any case.
+    public static func builtInIcon(for fileExtension: String) -> String? {
+        switch fileExtension.lowercased() {
         case "swift":
             return "swift"
         case "json":
@@ -172,7 +158,40 @@ private struct BuiltInFileType: Identifiable {
         case "gitignore":
             return "eye.slash"
         default:
-            return "doc"
+            return nil
+        }
+    }
+}
+
+// MARK: - Built-in File Type Entry
+
+/// A read-only display entry for a built-in language from CodeEditLanguages.
+private struct BuiltInFileType: Identifiable {
+    public let id: String
+    public let fileExtension: String
+    public let languageName: String
+    public let iconName: String
+
+    /// Derives built-in entries from CodeEditLanguages definitions.
+    public static func allBuiltIn() -> [BuiltInFileType] {
+        var entries: [BuiltInFileType] = []
+        for lang in CodeLanguage.allLanguages {
+            for ext in lang.extensions.sorted() {
+                // Skip empty extensions and internal languages
+                guard !ext.isEmpty else { continue }
+                entries.append(BuiltInFileType(
+                    // The language belongs in the id: several languages claim
+                    // the same extension (`.h`, `.m`, `.ts`), and an id shared
+                    // by two rows makes `ForEach` render one of them twice.
+                    id: "builtin-\(lang.tsName)-\(ext)",
+                    fileExtension: ext,
+                    languageName: lang.tsName.capitalized,
+                    iconName: FileTypeIcons.builtInIcon(for: ext) ?? "doc"
+                ))
+            }
+        }
+        return entries.sorted {
+            $0.fileExtension.localizedCaseInsensitiveCompare($1.fileExtension) == .orderedAscending
         }
     }
 }

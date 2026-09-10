@@ -10,7 +10,7 @@ import Testing
 /// parse is half of what these tests pin, and a hand-built `Contributions`
 /// would agree with a decoder that had stopped carrying `extensions` at all.
 ///
-/// `.serialized` because four of these tests write
+/// `.serialized` because three of these tests write
 /// `CustomFileTypeMappings`' global state — the active defaults key, the
 /// persisted array and the contributed provider — and swift-testing would
 /// otherwise run them concurrently.
@@ -150,11 +150,29 @@ struct LanguageContributionPointTests {
         #expect(point.mapping(for: "conf")?.languageName == "conf")
     }
 
-    @Test("every contributed mapping carries the placeholder icon")
-    func iconIsThePlaceholder() throws {
+    @Test("a claimed extension the file browser already knows keeps its icon")
+    func aKnownExtensionKeepsItsBuiltInIcon() throws {
+        let point = LanguageContributionPoint()
+        try apply(
+            manifest(name: "mdx", languages: #"[{ "id": "mdx", "extensions": [".md"] }]"#),
+            to: point
+        )
+
+        // The name is the contribution; the icon is not the extension's to
+        // take away. Stamping the placeholder here would turn every Markdown
+        // file in the tree into a blank page the moment an MDX or a linter
+        // extension was installed.
+        #expect(point.mapping(for: "md")?.languageName == "mdx")
+        #expect(point.mapping(for: "md")?.iconName == FileTypeIcons.builtInIcon(for: "md"))
+        #expect(point.mapping(for: "md")?.iconName == "doc.richtext")
+    }
+
+    @Test("a claimed extension nothing knows falls back to the placeholder icon")
+    func anUnknownExtensionGetsThePlaceholderIcon() throws {
         let point = LanguageContributionPoint()
         try apply(manifest(name: "icons", languages: #"[{ "id": "ruby", "extensions": [".rb"] }]"#), to: point)
 
+        #expect(FileTypeIcons.builtInIcon(for: "rb") == nil)
         #expect(point.mapping(for: "rb")?.iconName == "doc.text")
     }
 
@@ -175,6 +193,87 @@ struct LanguageContributionPointTests {
         #expect(row.languageID == "dockerfile")
         #expect(row.keys == ["filenames"])
         #expect(row.skippedExtensions.isEmpty)
+        // Declared *a* matcher, just not one this host can key on — a
+        // different row from an entry that declared none at all.
+        #expect(row.declaredNoMatcher == false)
+    }
+
+    @Test("an entry declaring no matcher at all is still reported")
+    func anEntryWithNoMatcherIsReported() throws {
+        let point = LanguageContributionPoint()
+        try apply(
+            manifest(name: "empty", languages: #"[{ "id": "ghost", "aliases": ["Ghost"] }]"#),
+            to: point
+        )
+
+        let row = try #require(point.dropped.first)
+        #expect(point.dropped.count == 1)
+        #expect(row.languageID == "ghost")
+        #expect(row.keys.isEmpty)
+        #expect(row.declaredNoMatcher)
+    }
+
+    @Test("mimetypes is reported, and an entry carrying only mimetypes still declared no matcher")
+    func mimetypesIsReported() throws {
+        let point = LanguageContributionPoint()
+        try apply(
+            manifest(
+                name: "mime",
+                languages: """
+                [
+                    { "id": "jsonl", "mimetypes": ["application/x-ndjson"] },
+                    { "id": "ruby", "extensions": [".rb"], "mimetypes": ["text/x-ruby"] }
+                ]
+                """
+            ),
+            to: point
+        )
+
+        #expect(point.dropped.count == 2)
+        let mimeOnly = try #require(point.dropped.first)
+        #expect(mimeOnly.languageID == "jsonl")
+        #expect(mimeOnly.keys == ["mimetypes"])
+        // A MIME type labels a document; it never picks a language for a file
+        // on disk, here or in VS Code. So this entry declared no matcher.
+        #expect(mimeOnly.declaredNoMatcher)
+
+        let alongsideExtensions = point.dropped[1]
+        #expect(alongsideExtensions.languageID == "ruby")
+        #expect(alongsideExtensions.keys == ["mimetypes"])
+        #expect(alongsideExtensions.declaredNoMatcher == false)
+        #expect(point.mapping(for: "rb")?.languageName == "ruby")
+    }
+
+    @Test("dropped rows are replaced on re-apply, not accumulated")
+    func droppedRowsAreReplacedNotAccumulated() throws {
+        let point = LanguageContributionPoint()
+        let docker = try manifest(
+            name: "docker",
+            languages: #"[{ "id": "dockerfile", "filenames": ["Dockerfile"] }]"#
+        )
+        try apply(docker, to: point)
+        try apply(docker, to: point)
+
+        #expect(point.dropped.count == 1)
+    }
+
+    @Test("withdrawing clears that extension's dropped rows and leaves another's")
+    func withdrawingClearsOnlyItsOwnDroppedRows() throws {
+        let point = LanguageContributionPoint()
+        try apply(
+            manifest(name: "docker", languages: #"[{ "id": "dockerfile", "filenames": ["Dockerfile"] }]"#),
+            to: point
+        )
+        try apply(
+            manifest(name: "shell", languages: #"[{ "id": "shellscript", "firstLine": "^#!" }]"#),
+            to: point
+        )
+        #expect(point.dropped.count == 2)
+
+        point.withdraw(extensionIdentifier: "acme.docker")
+
+        #expect(point.dropped.count == 1)
+        #expect(point.dropped.first?.extensionIdentifier == "acme.shell")
     }
 
     @Test("filenamePatterns and firstLine are reported together, in manifest order")
@@ -252,6 +351,19 @@ struct LanguageContributionPointTests {
 
     // MARK: - Conflicts
 
+    @Test("one entry spelling the same extension twice does not conflict with itself")
+    func anEntryCannotConflictWithItself() throws {
+        let point = LanguageContributionPoint()
+        try apply(
+            manifest(name: "dupes", languages: #"[{ "id": "ruby", "extensions": [".rb", "rb", ".RB"] }]"#),
+            to: point
+        )
+
+        #expect(point.mapping(for: "rb")?.languageName == "ruby")
+        #expect(point.conflicts.isEmpty)
+        #expect(point.dropped.isEmpty)
+    }
+
     @Test("within one manifest the first entry claiming an extension wins")
     func firstEntryInAManifestWins() throws {
         let point = LanguageContributionPoint()
@@ -277,18 +389,42 @@ struct LanguageContributionPointTests {
         #expect(conflict.losingLanguageID == "second")
     }
 
-    @Test("across extensions the first applied wins")
-    func firstAppliedExtensionWins() throws {
-        let point = LanguageContributionPoint()
-        try apply(manifest(name: "early", languages: #"[{ "id": "early", "extensions": [".foo"] }]"#), to: point)
-        try apply(manifest(name: "late", languages: #"[{ "id": "late", "extensions": [".foo"] }]"#), to: point)
+    @Test("across extensions the lowest identifier wins, whichever order they were applied in")
+    func lowestIdentifierWinsRegardlessOfApplyOrder() throws {
+        // Load order is `contentsOfDirectory` order — nobody chose it and
+        // nothing preserves it — so it must not decide which language a file
+        // is labelled with.
+        for reversed in [false, true] {
+            let point = LanguageContributionPoint()
+            let alpha = try manifest(name: "alpha", languages: #"[{ "id": "alpha", "extensions": [".foo"] }]"#)
+            let omega = try manifest(name: "omega", languages: #"[{ "id": "omega", "extensions": [".foo"] }]"#)
+            for pending in (reversed ? [omega, alpha] : [alpha, omega]) {
+                try apply(pending, to: point)
+            }
 
-        #expect(point.mapping(for: "foo")?.languageName == "early")
-        let conflict = try #require(point.conflicts.first)
+            #expect(point.mapping(for: "foo")?.languageName == "alpha")
+            let conflict = try #require(point.conflicts.first)
+            #expect(point.conflicts.count == 1)
+            #expect(conflict.winner == "acme.alpha")
+            #expect(conflict.loser == "acme.omega")
+            #expect(conflict.losingLanguageID == "omega")
+        }
+    }
+
+    @Test("toggling an extension off and on does not hand a contested extension to a competitor")
+    func disablingAndReenablingKeepsTheWinner() throws {
+        let point = LanguageContributionPoint()
+        let alpha = try manifest(name: "alpha", languages: #"[{ "id": "alpha", "extensions": [".foo"] }]"#)
+        try apply(alpha, to: point)
+        try apply(manifest(name: "omega", languages: #"[{ "id": "omega", "extensions": [".foo"] }]"#), to: point)
+
+        // What `ExtensionRegistry.setEnabled` does to disable and re-enable.
+        point.withdraw(extensionIdentifier: "acme.alpha")
+        try apply(alpha, to: point)
+
+        #expect(point.mapping(for: "foo")?.languageName == "alpha")
         #expect(point.conflicts.count == 1)
-        #expect(conflict.winner == "acme.early")
-        #expect(conflict.loser == "acme.late")
-        #expect(conflict.losingLanguageID == "late")
+        #expect(point.conflicts.first?.winner == "acme.alpha")
     }
 
     // MARK: - Withdrawal
@@ -315,17 +451,36 @@ struct LanguageContributionPointTests {
         #expect(point.mapping(for: "rb")?.languageName == "ruby")
     }
 
-    @Test("applying twice leaves one copy and keeps the extension's precedence")
+    @Test("applying twice leaves one copy")
     func reapplyingIsIdempotent() throws {
         let point = LanguageContributionPoint()
-        let early = try manifest(name: "early", languages: #"[{ "id": "early", "extensions": [".foo"] }]"#)
-        try apply(early, to: point)
-        try apply(manifest(name: "late", languages: #"[{ "id": "late", "extensions": [".foo"] }]"#), to: point)
-        try apply(early, to: point)
+        let alpha = try manifest(name: "alpha", languages: #"[{ "id": "alpha", "extensions": [".foo"] }]"#)
+        try apply(alpha, to: point)
+        try apply(manifest(name: "omega", languages: #"[{ "id": "omega", "extensions": [".foo"] }]"#), to: point)
+        try apply(alpha, to: point)
 
-        #expect(point.mapping(for: "foo")?.languageName == "early")
+        #expect(point.mapping(for: "foo")?.languageName == "alpha")
         #expect(point.conflicts.count == 1)
         #expect(point.dropped.isEmpty)
+    }
+
+    @Test("re-applying with a shorter extensions list stops resolving the dropped value")
+    func shrinkingTheExtensionsListLosesTheDroppedValue() throws {
+        let point = LanguageContributionPoint()
+        try apply(
+            manifest(name: "shrink", languages: #"[{ "id": "both", "extensions": [".aaa", ".bbb"] }]"#),
+            to: point
+        )
+        #expect(point.mapping(for: "bbb")?.languageName == "both")
+
+        try apply(
+            manifest(name: "shrink", languages: #"[{ "id": "both", "extensions": [".aaa"] }]"#),
+            to: point
+        )
+
+        // A merge-shaped `apply` would leave `.bbb` answering forever.
+        #expect(point.mapping(for: "aaa")?.languageName == "both")
+        #expect(point.mapping(for: "bbb") == nil)
     }
 
     // MARK: - Precedence through CustomFileTypeMappings

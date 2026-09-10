@@ -261,38 +261,11 @@ public final class FileTreeNode: Identifiable, ObservableObject, Hashable, @unch
             return custom.iconName
         }
 
-        switch ext {
-        case "swift":
-            return "swift"
-        case "json":
-            return "curlybraces"
-        case "md", "markdown":
-            return "doc.richtext"
-        case "txt", "text":
-            return "doc.text"
-        case "plist":
-            return "list.bullet.rectangle"
-        case "xcodeproj", "xcworkspace":
-            return "hammer.fill"
-        case "entitlements":
-            return "lock.shield"
-        case "png", "jpg", "jpeg", "gif", "svg", "ico":
-            return "photo"
-        case "yaml", "yml", "toml":
-            return "gearshape.2"
-        case "sh", "zsh", "bash":
-            return "terminal"
-        case "py":
-            return "chevron.left.forwardslash.chevron.right"
-        case "js", "ts":
-            return "chevron.left.forwardslash.chevron.right"
-        case "css", "html":
-            return "globe"
-        case "gitignore":
-            return "eye.slash"
-        default:
-            return "doc"
-        }
+        // One shared table (`FileTypeIcons`), not a switch of its own: this
+        // copy and the settings panel's had already drifted apart — this one
+        // did not know `mkd`, `mjs` or `shtml` — and a contributed mapping now
+        // reads the same table, so a third copy would be a third drift.
+        return FileTypeIcons.builtInIcon(for: ext) ?? "doc"
     }
 
     // MARK: - Width Calculation

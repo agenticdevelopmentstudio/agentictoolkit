@@ -18,7 +18,7 @@ public struct DroppedLanguageMatcher: Sendable, Equatable {
 
     /// The manifest keys dropped, in the order
     /// `LanguageContributionPoint.unrepresentableKeys(of:)` reports them:
-    /// `filenames`, `filenamePatterns`, `firstLine`, `icon`,
+    /// `filenames`, `filenamePatterns`, `firstLine`, `mimetypes`, `icon`,
     /// `configuration`, then `extensions` when *individual* values were
     /// unrepresentable.
     ///
@@ -34,22 +34,41 @@ public struct DroppedLanguageMatcher: Sendable, Equatable {
     /// `package.json`, not its normalised form.
     public let skippedExtensions: [String]
 
+    /// The entry declared no matcher of any kind — no `extensions`, no
+    /// `filenames`, no `filenamePatterns`, no `firstLine` — so nothing could
+    /// ever have matched a file, here or in VS Code.
+    ///
+    /// A field rather than "`keys` is empty": an entry that declared
+    /// `filenames` and nothing else contributed nothing here either, and the
+    /// two are different rows a panel has to phrase differently. Loading that
+    /// distinction onto the emptiness of `keys` would make every reader learn
+    /// the convention.
+    public let declaredNoMatcher: Bool
+
     public init(
         extensionIdentifier: String,
         languageID: String,
         keys: [String],
-        skippedExtensions: [String]
+        skippedExtensions: [String],
+        declaredNoMatcher: Bool
     ) {
         self.extensionIdentifier = extensionIdentifier
         self.languageID = languageID
         self.keys = keys
         self.skippedExtensions = skippedExtensions
+        self.declaredNoMatcher = declaredNoMatcher
     }
 }
 
-/// Two language entries claiming the same file extension. First registered
-/// wins — within one manifest that is manifest order, across manifests it is
-/// the order they were applied in.
+/// Two language entries claiming the same file extension, and which one is in
+/// force.
+///
+/// Across extensions the lowest identifier wins, compared with `<` on the
+/// identifier string; within one manifest, the first entry in manifest order
+/// wins. A stable arbitrary winner beats a faithful one here: a user who sees
+/// the wrong language on a file needs that answer to stay put while they work
+/// out why, and load order — `contentsOfDirectory` order — changes when an
+/// unrelated extension is installed or an extension is toggled off and on.
 public struct LanguageContributionConflict: Sendable, Equatable {
     public let fileExtension: String
     /// The extension identifier whose mapping is in force.
@@ -91,13 +110,17 @@ public final class LanguageContributionPoint: ContributionPoint {
 
     // MARK: - Constants
 
-    /// Every contributed mapping carries this icon.
+    /// The icon a contributed mapping falls back to.
     ///
-    /// A placeholder, not a lookup: the manifest's `icon` is a `{light, dark}`
-    /// pair of *file paths* into the extension, and `iconName` is an SF Symbol
-    /// name. There is no conversion between the two, so the icon is dropped
-    /// (and reported) and every contributed row shows the generic document
-    /// symbol.
+    /// Only a fallback: the mapping takes `FileTypeIcons.builtInIcon(for:)`
+    /// when the file browser already knows the extension, because a
+    /// contributed mapping outranks the built-in row and would otherwise
+    /// *downgrade* it — an extension declaring a Markdown flavour with
+    /// `extensions: [".md"]` would turn every `.md` file in the tree from
+    /// `doc.richtext` into a blank page. The extension supplies no icon this
+    /// host can use — the manifest's `icon` is a `{light, dark}` pair of file
+    /// paths, and `iconName` is an SF Symbol name — so it should not be
+    /// costing the user the one they had.
     private static let placeholderIconName = "doc.text"
 
     // MARK: - Properties
@@ -105,24 +128,24 @@ public final class LanguageContributionPoint: ContributionPoint {
     /// Each applied extension's language entries, in manifest order.
     private var languagesByExtension: [String: [ExtensionManifest.Language]] = [:]
 
-    /// The identifiers in the order they were first applied, which is the
-    /// order conflicts are resolved in. A dictionary has none of its own, and
-    /// "first registered wins" is only meaningful against a recorded order.
-    private var applicationOrder: [String] = []
-
     /// The resolved lookup table, behind a lock.
     ///
-    /// Not main-actor state, even though everything that builds it is:
-    /// `FileTreeNode.fileIconName` — one of the two callers that reach this
-    /// through `CustomFileTypeMappings.mapping(for:)` — is a nonisolated
-    /// member of an `@unchecked Sendable` class and runs while a directory is
-    /// being enumerated off the main actor. A main-actor-isolated provider
-    /// could not be called from there at all, and one that hopped through
-    /// `MainActor.assumeIsolated` would trap there.
+    /// Not main-actor state, even though everything that builds it is.
+    /// `CustomFileTypeMappings.contributedProvider` is a nonisolated
+    /// `@Sendable` closure, and one of the two callers that reach it —
+    /// `FileTreeNode.fileIconName` — is a nonisolated member of an
+    /// `@unchecked Sendable` class, so a main-actor-isolated `mapping(for:)`
+    /// cannot be called from there at all. Once the lookup is `nonisolated`
+    /// the compiler can no longer prove main-thread access, and the lock is
+    /// what makes the table legal under `SWIFT_STRICT_CONCURRENCY: complete`
+    /// — not belt-and-braces, but the thing that type-checks. (Both readers
+    /// do run on the main thread today; that is not something the compiler,
+    /// or a future caller, is bound by.)
     private nonisolated let table = ContributedMappings()
 
     /// Matchers that could not be represented, across every applied
-    /// extension, in application order then manifest order.
+    /// extension, ordered by extension identifier then manifest order — the
+    /// same order `rebuild()` resolves conflicts in.
     public private(set) var dropped: [DroppedLanguageMatcher] = []
 
     /// File extensions claimed more than once, with the claim that won.
@@ -144,12 +167,13 @@ public final class LanguageContributionPoint: ContributionPoint {
     /// rather than read, so there is no manifest-relative path to resolve and
     /// nothing to open. Read as an omission it looks like a bug; it is not.
     ///
-    /// Replaces whatever this extension contributed before, so applying twice
-    /// leaves one copy. Deliberately *not* a call to `withdraw` first, unlike
-    /// the snippet point: withdrawal also drops the extension's place in
-    /// `applicationOrder`, and a reloaded extension would silently lose every
-    /// file extension it had won against an extension applied after it.
-    /// Replacing the entry in place keeps precedence stable across a reload.
+    /// Withdraws this extension's prior contributions first, so applying
+    /// twice leaves one copy — the registry withdraws before it reloads, but
+    /// an idempotent apply means that ordering is not this class's to depend
+    /// on. Withdrawal costs the extension nothing: a contested file extension
+    /// is decided by identifier, not by when the extension was applied, so
+    /// there is no position to lose and no winner that can flip because the
+    /// user toggled an extension off and on.
     ///
     /// Never throws. A language entry that contributes nothing usable is a
     /// `dropped` row, not a failure — there is no input here that costs the
@@ -161,9 +185,7 @@ public final class LanguageContributionPoint: ContributionPoint {
         at _: URL
     ) throws {
         let identifier = manifest.identifier
-        if !applicationOrder.contains(identifier) {
-            applicationOrder.append(identifier)
-        }
+        withdraw(extensionIdentifier: identifier)
         languagesByExtension[identifier] = contributions.languages
         rebuild()
     }
@@ -177,7 +199,6 @@ public final class LanguageContributionPoint: ContributionPoint {
     /// these tables are small enough that correctness is the cheaper trade.
     public func withdraw(extensionIdentifier: String) {
         guard languagesByExtension.removeValue(forKey: extensionIdentifier) != nil else { return }
-        applicationOrder.removeAll { $0 == extensionIdentifier }
         rebuild()
     }
 
@@ -200,6 +221,12 @@ public final class LanguageContributionPoint: ContributionPoint {
     /// state, and so the host decides when the hook goes live. `weak` so a
     /// discarded point stops answering rather than being kept alive forever by
     /// a global.
+    ///
+    /// There is no counterpart: this overwrites whatever provider is already
+    /// installed, and the global keeps pointing at this point until something
+    /// else calls `install()`. One provider is all the store has room for, so
+    /// the host calls this exactly once — from the extensions coordinator's
+    /// `init` (Task 4.6), which is this point's only owner.
     public func install() {
         CustomFileTypeMappings.contributedProvider = { [weak self] fileExtension in
             self?.mapping(for: fileExtension)
@@ -216,19 +243,32 @@ public final class LanguageContributionPoint: ContributionPoint {
         var droppedRows: [DroppedLanguageMatcher] = []
         var conflictRows: [LanguageContributionConflict] = []
 
-        for identifier in applicationOrder {
+        // Sorted, not the order the extensions were applied in: that order is
+        // `FileManager.contentsOfDirectory`'s, which changes when an unrelated
+        // extension is installed and again when one is toggled off and on, and
+        // it would silently relabel every file of a contested extension.
+        // Lexicographic is just as arbitrary a winner, but it is the same
+        // winner every launch, and `SnippetStore` already sorts identifiers
+        // for the same reason.
+        for identifier in languagesByExtension.keys.sorted() {
             for language in languagesByExtension[identifier] ?? [] {
                 // VS Code shows the first alias as the language's display
                 // name and falls back to the id; `languageName` is a display
                 // string, so it follows the same rule.
                 let displayName = language.aliases?.first ?? language.id
                 var skipped: [String] = []
+                var claimed: Set<String> = []
 
                 for declared in language.extensions ?? [] {
                     guard let normalized = Self.normalizedExtension(declared) else {
                         skipped.append(declared)
                         continue
                     }
+                    // `[".foo", "foo"]` is one claim written twice, not a
+                    // collision: reporting it as a conflict with itself is
+                    // noise in a panel whose job is to name real ones. First
+                    // occurrence wins, as everywhere else here.
+                    guard claimed.insert(normalized).inserted else { continue }
                     if let winner = resolved[normalized] {
                         conflictRows.append(
                             LanguageContributionConflict(
@@ -245,24 +285,26 @@ public final class LanguageContributionPoint: ContributionPoint {
                         mapping: CustomFileTypeMapping(
                             fileExtension: normalized,
                             languageName: displayName,
-                            iconName: Self.placeholderIconName
+                            iconName: FileTypeIcons.builtInIcon(for: normalized) ?? Self.placeholderIconName
                         )
                     )
                 }
 
                 var keys = Self.unrepresentableKeys(of: language)
                 if !skipped.isEmpty { keys.append("extensions") }
-                // An entry with nothing to drop produces no row — including
-                // one that declared no matcher at all. A row naming no keys
-                // and no skipped values tells a reader nothing they could act
-                // on.
-                guard !keys.isEmpty else { continue }
+                let declaredNoMatcher = Self.declaresNoMatcher(language)
+                // An entry that declared no matcher at all still gets a row,
+                // with no keys: "this extension declared language X and none
+                // of it came across" is exactly what the panel exists to say,
+                // and roughly one published entry in ten is that entry.
+                guard !keys.isEmpty || declaredNoMatcher else { continue }
                 droppedRows.append(
                     DroppedLanguageMatcher(
                         extensionIdentifier: identifier,
                         languageID: language.id,
                         keys: keys,
-                        skippedExtensions: skipped
+                        skippedExtensions: skipped,
+                        declaredNoMatcher: declaredNoMatcher
                     )
                 )
             }
@@ -273,19 +315,30 @@ public final class LanguageContributionPoint: ContributionPoint {
         conflicts = conflictRows
     }
 
-    /// The keys of a language entry this build cannot honour at all.
-    ///
-    /// `mimetypes` is in VS Code's schema and is equally unrepresentable
-    /// here, but `ExtensionManifest.Language` does not model it, so it cannot
-    /// be reported: it is gone before this point sees the entry.
+    /// The keys of a language entry this build cannot honour at all, in the
+    /// order VS Code's `contributes.languages` schema lists them.
     private static func unrepresentableKeys(of language: ExtensionManifest.Language) -> [String] {
         var keys: [String] = []
         if language.filenames?.isEmpty == false { keys.append("filenames") }
         if language.filenamePatterns?.isEmpty == false { keys.append("filenamePatterns") }
         if language.firstLine?.isEmpty == false { keys.append("firstLine") }
+        if language.mimetypes?.isEmpty == false { keys.append("mimetypes") }
         if language.icon != nil { keys.append("icon") }
         if language.configuration?.isEmpty == false { keys.append("configuration") }
         return keys
+    }
+
+    /// Whether the entry declared nothing that could match a file — in this
+    /// host or in VS Code.
+    ///
+    /// `mimetypes` is not a matcher: VS Code uses it to label a document, not
+    /// to pick a language for a file on disk, so an entry carrying only
+    /// `mimetypes` still declared no matcher.
+    private static func declaresNoMatcher(_ language: ExtensionManifest.Language) -> Bool {
+        language.extensions?.isEmpty != false
+            && language.filenames?.isEmpty != false
+            && language.filenamePatterns?.isEmpty != false
+            && language.firstLine?.isEmpty != false
     }
 
     /// The lookup key for one declared `extensions` value, or `nil` when the

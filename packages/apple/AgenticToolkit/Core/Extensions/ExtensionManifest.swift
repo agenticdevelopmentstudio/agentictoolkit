@@ -405,6 +405,11 @@ extension ExtensionManifest {
         public let filenames: [String]?
         public let filenamePatterns: [String]?
         public let firstLine: String?
+        /// Carried only so it can be *reported* as dropped: nothing in this
+        /// host maps a file by MIME type, and without the key an entry that
+        /// declared only `mimetypes` would be indistinguishable from one that
+        /// declared nothing at all.
+        public let mimetypes: [String]?
         public let configuration: String?
         public let icon: LanguageIcon?
 
