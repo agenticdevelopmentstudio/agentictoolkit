@@ -171,12 +171,14 @@ final class DisclosureCardTests: XCTestCase {
     private func bare(
         isCollapsed: Bool,
         summary: [DisclosureCardView.SummaryPart] = [],
-        titleIcon: String? = nil
+        titleIcon: String? = nil,
+        titleIconIsVisible: Bool = true
     ) -> DisclosureCardView {
         let card = DisclosureCardView(
             title: "mike@example.com",
             titleIsAccent: true,
             titleIcon: titleIcon,
+            titleIconIsVisible: titleIconIsVisible,
             summary: summary,
             status: .init(
                 symbolName: "octagon.fill", colorName: "red", accessibilityLabel: "Spent"
@@ -288,6 +290,32 @@ final class DisclosureCardTests: XCTestCase {
         // that sits flush against the line's leading edge. Against the frame
         // this reads as a two-point negative indent that no card actually has.
         XCTAssertEqual(name.alignmentRect(forFrame: name.frame).minX, 0, accuracy: 0.5)
+    }
+
+    func testAnUnmarkedCardKeepsTheSymbolsColumnSoTheNamesStayInLine() {
+        // A stack of account cards marks the one that is logged in. The others
+        // must not step left to fill the gap, or the addresses read down the
+        // window as a ragged edge — so an unmarked card still builds the symbol
+        // and still holds its width, and only declines to paint it.
+        let marked = bare(isCollapsed: false, titleIcon: "person.crop.circle")
+        let unmarked = bare(
+            isCollapsed: false, titleIcon: "person.crop.circle", titleIconIsVisible: false)
+
+        guard let markedName = field("mike@example.com", in: marked),
+              let unmarkedName = field("mike@example.com", in: unmarked),
+              let unmarkedLine = unmarkedName.superview,
+              let symbol = unmarkedLine.subviews.compactMap({ $0 as? NSImageView }).first
+        else {
+            return XCTFail("both cards set a name on a line of their own, in front of a symbol")
+        }
+
+        // Unpainted, not absent: `isHidden` would take the width away with the
+        // picture, which is the ragged edge this is here to prevent.
+        XCTAssertFalse(symbol.isHidden, "the icon view stands, it is merely not drawn")
+        XCTAssertEqual(symbol.alphaValue, 0, accuracy: 0.001)
+        XCTAssertGreaterThan(symbol.frame.width, 0, "an unpainted symbol still occupies its column")
+        XCTAssertEqual(unmarkedName.frame.minX, markedName.frame.minX, accuracy: 0.5,
+                       "marked or not, the name starts in the same place")
     }
 
     // MARK: - The standing is a corner badge

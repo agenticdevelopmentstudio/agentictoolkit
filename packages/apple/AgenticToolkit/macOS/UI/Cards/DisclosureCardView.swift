@@ -60,6 +60,14 @@ import AppKit
 /// left out of the accessibility tree: a card whose address is read out does not
 /// also need to announce that it is a card about a person.
 ///
+/// `titleIconIsVisible` is how a *stack* of such cards marks one of them — the
+/// account that is logged in, say — without the others' names stepping left to
+/// fill the gap. The unmarked card still builds the symbol and still holds its
+/// width; it simply does not paint it. Passing `titleIcon: nil` instead would
+/// take the column away with the symbol, and a list of addresses that start in
+/// two different places is harder to read than one with a blank in front of
+/// most of them.
+///
 /// ## The standing is a corner badge, not a masthead item
 ///
 /// A card's status is stamped on its top-right corner — centred on the corner's
@@ -198,6 +206,9 @@ public final class DisclosureCardView: NSView, Themeable {
     private let titleIsAccent: Bool
     /// The SF Symbol drawn in front of the name, if any.
     private let titleSymbol: String?
+    /// Whether the symbol is painted. False still reserves its width — see the
+    /// type's own documentation for why that is not the same as no symbol.
+    private let titleSymbolIsVisible: Bool
     private let summary: [SummaryPart]
     private let status: StatusSymbol?
     private let scaledSize: CGFloat
@@ -240,6 +251,7 @@ public final class DisclosureCardView: NSView, Themeable {
         title: String,
         titleIsAccent: Bool,
         titleIcon: String? = nil,
+        titleIconIsVisible: Bool = true,
         subtitle: String? = nil,
         summary: [SummaryPart] = [],
         status: StatusSymbol? = nil,
@@ -250,6 +262,7 @@ public final class DisclosureCardView: NSView, Themeable {
     ) {
         self.titleIsAccent = titleIsAccent
         self.titleSymbol = titleIcon
+        self.titleSymbolIsVisible = titleIconIsVisible
         self.summary = summary
         self.status = status
         self.scaledSize = scaledSize
@@ -415,6 +428,10 @@ public final class DisclosureCardView: NSView, Themeable {
         titleIconView.translatesAutoresizingMaskIntoConstraints = false
         titleIconView.imageScaling = .scaleProportionallyDown
         titleIconView.isHidden = titleSymbol == nil
+        // Present and unpainted, not absent: the image is what gives the view
+        // its width, so hiding it would close the column the unmarked names are
+        // lining up against.
+        titleIconView.alphaValue = titleSymbolIsVisible ? 1 : 0
         if let titleSymbol {
             titleIconView.image = NSImage(
                 systemSymbolName: titleSymbol, accessibilityDescription: nil

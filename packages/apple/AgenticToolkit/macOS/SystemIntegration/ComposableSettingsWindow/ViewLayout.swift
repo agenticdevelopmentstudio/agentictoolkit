@@ -42,7 +42,7 @@ extension ComposableSettings {
             self.values = values
         }
 
-        subscript(_ index: LayoutKey) -> Double {
+        public subscript(_ index: LayoutKey) -> Double {
             guard let value = values[index] else {
                 return 0.0
             }
