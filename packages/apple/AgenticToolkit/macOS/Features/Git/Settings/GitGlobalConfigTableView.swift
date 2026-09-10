@@ -17,6 +17,18 @@ public final class GitGlobalConfigTableView: NSView {
     /// would wrongly block a legitimate clear.
     private var placeholderRow: Int?
 
+    /// True between `controlTextDidBeginEditing` and `controlTextDidEndEditing`
+    /// for any cell in this table. `setEntries` checks it before touching
+    /// `entries`: that call assigns `entries` before `tableView.reloadData()`,
+    /// so a `controlTextDidEndEditing` landing mid-reload would read the
+    /// *new* entries at the field's *old* row index and commit the user's
+    /// half-typed text against a setting they never touched.
+    private var isEditingField = false
+
+    /// A reload that arrived while `isEditingField` was true, applied once
+    /// the in-flight edit finishes.
+    private var pendingEntries: [GitConfigEntry]?
+
     let tableView = ThemedTableView()
     let errorLabel = ThemedLabel(role: .secondaryText, textRole: .caption)
 
@@ -46,7 +58,18 @@ public final class GitGlobalConfigTableView: NSView {
         return entries[row].key
     }
 
+    /// Replaces the displayed entries and reloads the table -- unless a cell
+    /// is currently being edited, in which case the replacement is held back
+    /// until that edit commits (see `isEditingField`'s doc comment for why).
     public func setEntries(_ entries: [GitConfigEntry]) {
+        guard !isEditingField else {
+            pendingEntries = entries
+            return
+        }
+        applyEntries(entries)
+    }
+
+    private func applyEntries(_ entries: [GitConfigEntry]) {
         self.entries = entries
         placeholderRow = nil
         tableView.reloadData()
@@ -58,7 +81,21 @@ public final class GitGlobalConfigTableView: NSView {
         errorLabel.isHidden = message.isEmpty
     }
 
+    /// Appends a new placeholder row and begins editing its key cell.
+    ///
+    /// A second call while the previous placeholder has not committed
+    /// re-focuses that same row instead of appending another. Two outstanding
+    /// placeholders used to demote the first one to an ordinary live row --
+    /// `placeholderRow` can only ever point at one row -- whose empty key
+    /// then bypassed the "wait for both halves non-empty" guard in
+    /// `commitEdit`, so committing it wrote an empty-named key straight to
+    /// the user's real git config.
     public func beginAddingEntry() {
+        if let existing = placeholderRow {
+            tableView.selectRowIndexes(IndexSet(integer: existing), byExtendingSelection: false)
+            tableView.editColumn(0, row: existing, with: nil, select: true)
+            return
+        }
         entries.append(GitConfigEntry(key: "", value: ""))
         let row = entries.count - 1
         placeholderRow = row
@@ -79,33 +116,46 @@ public final class GitGlobalConfigTableView: NSView {
         onUnset?(key)
     }
 
+    /// A key `git config` will accept: shaped `section.name`, optionally
+    /// `section.subsection.name`. A bare word like `email` is rejected by
+    /// both `--unset` and a plain set, so it is refused here, before either
+    /// ever reaches git -- in particular before the destructive `onUnset`
+    /// half of a rename fires. Without this check, renaming `user.email` to
+    /// `email` would unset the old key (which succeeds) and then fail to set
+    /// the new one (which git rejects), permanently losing the setting with
+    /// no way back: the write queue orders a rename's two halves but does not
+    /// roll one back if the other fails.
+    private static func isWellFormedKey(_ key: String) -> Bool {
+        key.contains(".")
+    }
+
     /// Applies one edited cell.
     ///
     /// The row `beginAddingEntry` appended (`placeholderRow`) is held back
-    /// until both halves are non-empty: committing it early with an empty
-    /// value would write a junk key into the user's real git config the
-    /// moment they tab off the key cell. Once it fully commits it stops
-    /// being the placeholder.
+    /// until both halves are non-empty and the key is well-formed (see
+    /// `commitEdit`); committing it early would write a junk key into the
+    /// user's real git config the moment they tab off the key cell. Once it
+    /// fully commits it stops being the placeholder.
     ///
     /// Every other row is a live entry. Renaming its key must unset the old
     /// key before setting the new one, or the old key survives in git config
-    /// after vanishing from the table. Blanking its key is not a delete --
-    /// the cell reverts to the stored key rather than committing an empty
-    /// one. Clearing its *value* to empty, in contrast, is a legitimate
-    /// clear and still fires `onSet`.
+    /// after vanishing from the table. Blanking its key, or typing one that
+    /// is not well-formed, is not a delete -- the cell reverts to the stored
+    /// key rather than committing an invalid one. Clearing its *value* to
+    /// empty, in contrast, is a legitimate clear and still fires `onSet`.
     func commitEdit(row: Int, key: String, value: String) {
         guard row >= 0, row < entries.count else { return }
 
         if row == placeholderRow {
             entries[row] = GitConfigEntry(key: key, value: value)
-            guard !key.isEmpty, !value.isEmpty else { return }
+            guard !key.isEmpty, Self.isWellFormedKey(key), !value.isEmpty else { return }
             placeholderRow = nil
             onSet?(key, value)
             return
         }
 
         let oldKey = entries[row].key
-        guard !key.isEmpty else {
+        guard !key.isEmpty, Self.isWellFormedKey(key) else {
             let keyColumn = tableView.column(withIdentifier: Self.keyColumn)
             tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: keyColumn))
             return
@@ -220,7 +270,18 @@ extension GitGlobalConfigTableView: NSTableViewDelegate {
 }
 
 extension GitGlobalConfigTableView: NSTextFieldDelegate {
+    public func controlTextDidBeginEditing(_ notification: Notification) {
+        isEditingField = true
+    }
+
     public func controlTextDidEndEditing(_ notification: Notification) {
+        isEditingField = false
+        defer {
+            if let pending = pendingEntries {
+                pendingEntries = nil
+                applyEntries(pending)
+            }
+        }
         guard let field = notification.object as? NSTextField else { return }
         let row = field.tag
         guard row >= 0, row < entries.count else { return }

@@ -5,11 +5,19 @@ import XCTest
 
 @MainActor
 final class GitSettingsPanelViewControllerTests: XCTestCase {
+    /// Discriminates only the descriptor title literal `"Git"` passed to
+    /// `super.init(with:)`. Nothing about the view, the queue, or help
+    /// content is exercised here.
     func testPanelDescribesItselfAsGit() {
         let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
         XCTAssertEqual(panel.descriptor.title, "Git")
     }
 
+    /// Discriminates the six `accessibilityID` calls made synchronously
+    /// inside `viewDidLoad`'s three `settingsView.addGroup` calls -- one per
+    /// interactive control, plus the executable-status label itself (the
+    /// brief requires this id; it was previously set but never asserted
+    /// here).
     func testLoadingTheViewInstallsTheThreeGroups() {
         let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
         panel.loadViewIfNeeded()
@@ -17,6 +25,7 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
         let expectedIdentifiers = [
             "settings.git.executable-field",
             "settings.git.choose-executable",
+            "settings.git.executable-status",
             "settings.git.timeout-field",
             "settings.git.include-submodules",
             "settings.git.config-table"
@@ -26,9 +35,24 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
         }
     }
 
+    /// The **second** assertion in each pair is what actually discriminates:
+    /// it fails if `UserSettingObserver` (the executable group's live
+    /// re-subscription) or the "Found: " branch of `refreshExecutableStatus`
+    /// is reverted. The **first** assertion in each pair is non-discriminating
+    /// on its own -- the synchronous priming call in `makeExecutableGroup`
+    /// already renders "not found" before the observer ever fires -- so both
+    /// pairs are kept together rather than relying on either alone.
+    ///
+    /// Uses `Self.freshGitDefaults()` (F6): the previous version wrote
+    /// straight to `UserDefaults.standard` under the developer's real
+    /// `git.executable_path` key and relied on `defer` alone to restore it --
+    /// a crash or a killed test run between the write and the `defer` left
+    /// the developer's real setting corrupted. Pointing `UserSettings.shared`
+    /// at an isolated, suite-named `UserDefaults` domain for the duration of
+    /// this test removes that risk instead of merely bounding it.
     func testExecutableStatusReflectsTheSetting() async {
-        let previous = UserSettings.gitExecutablePath.value
-        defer { UserSettings.gitExecutablePath.value = previous }
+        let (_, restore) = Self.freshGitDefaults()
+        defer { restore() }
         let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
         panel.loadViewIfNeeded()
         UserSettings.gitExecutablePath.value = "/nonexistent/git"
@@ -37,6 +61,93 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
         UserSettings.gitExecutablePath.value = "/usr/bin/git"
         await Self.drain()
         XCTAssertTrue(panel.executableStatusLabel.stringValue.contains("Found"))
+    }
+
+    /// Discriminates `enqueueWrite`/`processNextWriteIfNeeded`'s FIFO
+    /// ordering (`GitSettingsPanelViewController.pendingWrites`): a rename
+    /// fires `onUnset(oldKey)` immediately followed, synchronously, by
+    /// `onSet(newKey, value)` (see `GitGlobalConfigTableView.commitEdit`).
+    /// Reverting `removeFirst()` to anything that does not preserve arrival
+    /// order, or starting a second operation before the first's `Task`
+    /// completes, fails this test without needing to touch git at all --
+    /// the queue takes an opaque `@Sendable () async throws -> Void`
+    /// (see `pendingWrites`' doc comment for why this seam, not a `GitClient`
+    /// stub, is what makes the queue testable).
+    func testEnqueuedWritesRunInFIFOOrder() async {
+        let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
+        let recorder = Recorder()
+
+        panel.enqueueWrite { recorder.record("unset old key") }
+        panel.enqueueWrite { recorder.record("set new key") }
+
+        await Self.drainQueue(panel)
+
+        XCTAssertEqual(recorder.entries, ["unset old key", "set new key"])
+    }
+
+    /// Discriminates the `guard !isProcessingWrites` in
+    /// `processNextWriteIfNeeded`: a write enqueued *while another is still
+    /// running* (the "third edit arriving mid-drain" scenario the review
+    /// flagged) must land after every write that was already queued ahead of
+    /// it, not jump the line. `A` suspends on `gate` so the test can observe
+    /// -- deterministically, via `pendingWrites`/`isProcessingWrites`, not a
+    /// fixed sleep -- the exact moment `A` is running and `B` is queued but
+    /// not yet started, enqueue `C` at that moment, then let `A` finish.
+    ///
+    /// `A`'s own closure cannot call `panel.enqueueWrite` directly: it is
+    /// `@Sendable`, and capturing the non-`Sendable`, `@MainActor` panel
+    /// inside it does not type-check under Swift 6 strict concurrency (which
+    /// is exactly why the write queue takes an opaque operation closure in
+    /// the first place -- see `pendingWrites`' doc comment). `gate` is an
+    /// `actor`, so it is `Sendable` on its own.
+    func testAWriteEnqueuedWhileAnotherIsRunningIsAppendedAfterAlreadyQueuedWrites() async {
+        let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
+        let recorder = Recorder()
+        let gate = Gate()
+
+        panel.enqueueWrite {
+            recorder.record("A")
+            await gate.waitUntilSignaled()
+        }
+        panel.enqueueWrite { recorder.record("B") }
+
+        // Poll for the moment `A` is running and `B` is the sole queued
+        // write -- i.e. mid-drain -- rather than assuming a fixed number of
+        // yields gets there.
+        for _ in 0..<10_000 {
+            if panel.isProcessingWrites, panel.pendingWrites.count == 1 { break }
+            await Task.yield()
+        }
+        XCTAssertTrue(panel.isProcessingWrites, "expected A to still be running")
+        XCTAssertEqual(panel.pendingWrites.count, 1, "expected exactly B to be queued behind A")
+
+        panel.enqueueWrite { recorder.record("C") }
+        await gate.signal()
+
+        await Self.drainQueue(panel)
+
+        XCTAssertEqual(recorder.entries, ["A", "B", "C"])
+    }
+
+    /// Discriminates the `do`/`catch` around `try await operation()` in
+    /// `processNextWriteIfNeeded`: one write throwing must not stop the queue
+    /// or reorder what follows it (this is the mechanism F3's fix relies on
+    /// -- a rejected rename shows an error but does not wedge later,
+    /// unrelated edits).
+    func testAFailingWriteDoesNotHaltOrReorderTheQueue() async {
+        let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
+        let recorder = Recorder()
+        struct Boom: Error {}
+
+        panel.enqueueWrite {
+            recorder.record("failing write")
+            throw Boom()
+        }
+        panel.enqueueWrite { recorder.record("later write") }
+
+        await Self.drainQueue(panel)
+
+        XCTAssertEqual(recorder.entries, ["failing write", "later write"])
     }
 
     private static func accessibilityIdentifiers(in view: NSView) -> Set<String> {
@@ -55,5 +166,76 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
         await withCheckedContinuation { continuation in
             DispatchQueue.main.async { continuation.resume() }
         }
+    }
+
+    /// Polls until the panel's write queue has fully drained (no operation
+    /// running, nothing left queued) rather than guessing how many
+    /// `DispatchQueue.main` turns a chain of queued `Task`s needs. Bounded so
+    /// a genuinely broken queue fails the test instead of hanging it.
+    private static func drainQueue(_ panel: GitSettingsPanelViewController) async {
+        for _ in 0..<10_000 {
+            if !panel.isProcessingWrites, panel.pendingWrites.isEmpty { return }
+            await Task.yield()
+        }
+        XCTFail("write queue never drained")
+    }
+
+    /// Points `UserSettings.shared` at a fresh, isolated `UserDefaults`
+    /// domain and re-creates the `gitExecutablePath` static bound to it,
+    /// following `ExternalThemeChangeObservationTests.freshDefaults()`. Both
+    /// halves matter for the same reason that file documents: `UserSetting`
+    /// captures whichever `UserSettings.shared` is live when the static is
+    /// first touched, so rebinding only `shared` would leave
+    /// `gitExecutablePath` observing a store this test never writes to.
+    private static func freshGitDefaults() -> (defaults: UserDefaults, restore: () -> Void) {
+        let suiteName = "AgenticToolkitMacOSTests.GitSettingsPanelViewControllerTests"
+        let previousShared = UserSettings.shared
+        let previousExecutablePath = UserSettings.gitExecutablePath
+
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        UserSettings.shared = UserSettings(with: UserDefaultsSettingsStorageProvider(defaults: defaults))
+        UserSettings.gitExecutablePath = UserSetting<String>("git.executable_path", default: "/usr/bin/git")
+
+        return (defaults, {
+            UserSettings.gitExecutablePath = previousExecutablePath
+            UserSettings.shared = previousShared
+            defaults.removePersistentDomain(forName: suiteName)
+        })
+    }
+}
+
+/// Records the order operations run in, from inside a `@Sendable` closure
+/// running on whatever executor the write queue's `Task`s use. `unchecked`
+/// because every write in these tests is enqueued and drained on the main
+/// actor, one at a time -- `processNextWriteIfNeeded`'s own
+/// `!isProcessingWrites` guard is the thing under test, so nothing here runs
+/// two operations concurrently against this recorder.
+private final class Recorder: @unchecked Sendable {
+    private(set) var entries: [String] = []
+
+    func record(_ entry: String) {
+        entries.append(entry)
+    }
+}
+
+/// A one-shot async gate, used to hold a queued write operation suspended at
+/// a known point so a test can observe the write queue mid-drain instead of
+/// guessing at timing. Actor-isolated (rather than a lock or a `Task.sleep`)
+/// so it is safely `Sendable` on its own without an `@unchecked` escape
+/// hatch, and so a signal that arrives before anyone is waiting is not lost.
+private actor Gate {
+    private var isSignaled = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilSignaled() async {
+        if isSignaled { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func signal() {
+        isSignaled = true
+        continuation?.resume()
+        continuation = nil
     }
 }
