@@ -1016,7 +1016,13 @@ struct ExtensionHostTests {
     /// exception handler either — so the completion callback was never called
     /// and `activate()` waited for a settle that had already happened. A vague
     /// message is the requirement; hanging is not one of the options.
-    @Test
+    ///
+    /// The time limit is part of the test. The defect this guards is a *hang*,
+    /// so a regression presents as an `xcodebuild` that stops printing while
+    /// naming this test - the failure shape most likely to be read as a wedged
+    /// machine and re-run. A minute is far longer than the test needs (it
+    /// finishes in milliseconds) and far shorter than a person's patience.
+    @Test(.timeLimit(.minutes(1)))
     func aRejectionWhoseDescriptionThrowsFailsActivationRatherThanHanging() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -1048,6 +1054,50 @@ struct ExtensionHostTests {
             #expect(message.contains("could not be described"), "message was: \(message)")
         }
         #expect(!host.isActivated)
+    }
+
+    /// An extension that replaces `Function.prototype.call` must not be able to
+    /// make the host report an activation that never happened.
+    ///
+    /// `.call` resolves dynamically, and the extension's own top-level code
+    /// runs before its `activate` is ever reached - so a module that assigns
+    /// `Function.prototype.call = function () {}` at the top level used to make
+    /// `activate.call(exports, context)` return `undefined` without calling
+    /// anything. The shim saw no thenable, reported success, and the host
+    /// recorded a clean activation for an extension whose `activate` never ran:
+    /// the exact false success the shim exists to prevent. It needs no malice -
+    /// a bundled SES/lockdown shim or a call-instrumenting polyfill does it by
+    /// accident.
+    ///
+    /// The console line is the assertion. `isActivated` alone would pass
+    /// against the defect, because the defect *is* a reported activation; only
+    /// evidence from inside `activate` separates the two.
+    @Test
+    func anExtensionThatReplacesFunctionPrototypeCallCannotFakeActivation() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            Function.prototype.call = function () {};
+            exports.activate = function () {
+                console.log('activate really ran');
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(
+            recorder.texts == ["activate really ran"],
+            "activation was reported without activate() running: \(recorder.texts)"
+        )
+        #expect(host.isActivated)
     }
 
     /// The other half of M1, and the one 5.3 depends on: activation is not
@@ -1206,6 +1256,56 @@ struct ExtensionHostTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(recorder.texts == ["waiting", "settled anyway"])
+        #expect(!host.isActivated)
+    }
+
+    /// Cancelling an activation is terminal: the host refuses to activate
+    /// again, and `dispose()` is what follows.
+    ///
+    /// Cancellation ends the *call*, not the activation - the extension's
+    /// promise is still pending inside a runtime nothing can un-run. A retry is
+    /// the reflex response to a cancellation, and a host that allowed one would
+    /// evaluate the module into a second runtime beside the abandoned one:
+    /// `context` overwritten under a still-running activation, `timerTasks`
+    /// holding the old instance's entries while their IDs are dispatched
+    /// against the new runtime, and `runningTimerCount` counting both.
+    @Test
+    func aCancelledHostRefusesToActivateAgain() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                console.log('waiting');
+                return new Promise(function () {});
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        let activation = Task { @MainActor in try await host.activate() }
+        for _ in 0..<100 where recorder.texts.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(recorder.texts == ["waiting"])
+
+        await #expect(throws: ExtensionHostError.activationCancelled(identifier: "test.alpha")) {
+            activation.cancel()
+            try await activation.value
+        }
+
+        await #expect(throws: ExtensionHostError.activationCancelled(identifier: "test.alpha")) {
+            try await host.activate()
+        }
+
+        // The refusal is a refusal, not a second evaluation that then failed:
+        // the module never ran again, so the console never saw a second line.
+        #expect(recorder.texts == ["waiting"])
         #expect(!host.isActivated)
     }
 

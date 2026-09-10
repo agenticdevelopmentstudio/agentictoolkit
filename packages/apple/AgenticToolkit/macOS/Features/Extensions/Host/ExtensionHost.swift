@@ -108,6 +108,27 @@ public final class ExtensionHost {
     /// otherwise evaluate the module a second time.
     private var activationTask: Task<Void, Error>?
 
+    /// A cancelled activation was abandoned, not undone, so this host can
+    /// never activate again.
+    ///
+    /// Cancellation stops the *call*: it resumes the suspended `activate()`
+    /// with `activationCancelled` and leaves the extension's own `activate()`
+    /// promise pending inside a runtime that is still there, still holding the
+    /// context and whatever timers the module started. Nothing can reach into
+    /// JavaScript and un-run it. So a retry - and cancellation is the one
+    /// failure a caller retries by reflex - would evaluate the module a second
+    /// time into a *second* runtime: `context` would be overwritten while the
+    /// abandoned activation still ran in the old one, `timerTasks` would keep
+    /// the abandoned instance's entries while `fireTimer` dispatched their old
+    /// IDs against the new runtime, and `runningTimerCount` would count both
+    /// instances, so the teardown invariant would stop meaning one host-worth
+    /// of timers.
+    ///
+    /// `dispose()` is what follows a cancellation. It is the operation that
+    /// really does undo a runtime, and it is already safe to call on a host in
+    /// this state.
+    private var activationAbandoned = false
+
     /// Resumes the suspended `activate()`. Taken-and-nilled by
     /// `finishActivation`, so activation ends exactly once however it ends:
     /// the shim's callback, a JavaScript exception thrown before that callback
@@ -180,10 +201,15 @@ public final class ExtensionHost {
     /// round trip during activation, and a host that gave up at *n* seconds
     /// would be reporting a failure that did not happen. There are two escapes
     /// instead. `dispose()` ends it and tears the host down; **cancelling the
-    /// calling task ends it and leaves the host usable**, throwing
-    /// `activationCancelled` — cancellation is the first thing a Swift caller
-    /// reaches for, and an `activate()` that ignored it would turn an ordinary
-    /// timeout-and-give-up into a hang.
+    /// calling task ends it**, throwing `activationCancelled` — cancellation
+    /// is the first thing a Swift caller reaches for, and an `activate()` that
+    /// ignored it would turn an ordinary timeout-and-give-up into a hang.
+    ///
+    /// **Cancellation is terminal, and `dispose()` is what follows it.** It
+    /// ends the call, not the activation: the extension's promise is still
+    /// pending inside a runtime this host cannot un-run, so a later
+    /// `activate()` throws `activationCancelled` rather than evaluating the
+    /// module into a second runtime beside the abandoned one.
     ///
     /// Calling twice is a no-op, and two concurrent calls are one activation.
     /// VS Code activates an extension once, callers re-emit activation events
@@ -202,6 +228,12 @@ public final class ExtensionHost {
             throw ExtensionHostError.hostDisposed(identifier: identifier)
         }
         guard !isActivated else { return }
+        // After `isActivated`, deliberately: a cancellation that lands as an
+        // activation is already succeeding must not refuse a host that did
+        // activate.
+        guard !activationAbandoned else {
+            throw ExtensionHostError.activationCancelled(identifier: identifier)
+        }
 
         if let activationTask {
             try await awaitActivation(activationTask)
@@ -234,6 +266,7 @@ public final class ExtensionHost {
             // must not reach the *next* one: by the time this hop runs, the
             // owner's `defer` may have cleared the task it belongs to.
             guard let self, self.activationTask == task else { return }
+            self.activationAbandoned = true
             self.finishActivation(.failure(.activationCancelled(identifier: self.identifier)))
         }
 

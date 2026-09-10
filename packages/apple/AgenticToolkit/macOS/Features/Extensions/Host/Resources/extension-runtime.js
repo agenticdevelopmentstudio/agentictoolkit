@@ -29,6 +29,32 @@
     // extension code cannot call back into the app through it.
     var host = global.__host;
 
+    // The intrinsics the verdict depends on, captured while this file is the
+    // only code that has ever run in this context.
+    //
+    // `.call` resolves dynamically through `Function.prototype`, and the
+    // extension's own top-level code runs before its `activate` is ever
+    // reached. Measured in real JavaScriptCore: an extension whose top level
+    // does `Function.prototype.call = function () {}` makes
+    // `activate.call(exports, context)` return `undefined` without calling
+    // anything, so the shim sees no thenable, reports `done(true, '')`, and the
+    // host records a clean activation for an extension whose `activate` never
+    // ran. That false success is the exact outcome this file exists to prevent,
+    // and it needs no malice: a bundled SES/lockdown shim or a
+    // call-instrumenting polyfill does it by accident.
+    //
+    // So the three paths that can produce a wrong *verdict* go through
+    // `reflectApply` instead: the module wrapper in `run`, `activate` and
+    // `then` in `callActivate`, and `tail`'s slice, which feeds them their
+    // arguments.
+    //
+    // This is not a sandbox, and widening it would imply one. Everything else
+    // here still resolves its methods dynamically, because everything else
+    // degrades a console line or a formatted value rather than the answer to
+    // "did this extension activate?".
+    var reflectApply = Reflect.apply;
+    var arraySlice = Array.prototype.slice;
+
     // =====================================================================
     // MARK: - Value formatting (console)
     // =====================================================================
@@ -277,7 +303,7 @@
     }
 
     function tail(args) {
-        return Array.prototype.slice.call(args, 2);
+        return reflectApply(arraySlice, args, [2]);
     }
 
     global.setTimeout = function (callback, delay) {
@@ -724,11 +750,17 @@
     // rather than guessed, so the next person can weigh an addition instead of
     // rediscovering it:
     //
-    //   * Only the **path** is percent-encoded. A space in a query or a
-    //     fragment survives as itself where WHATWG writes `%20`. The query is
-    //     the half that round-trips through `URLSearchParams`, whose own
-    //     serializer owns its escaping, and rewriting `_search` on the way in
-    //     would give that value two owners.
+    //   * The **query** is not percent-encoded: a space in it survives as
+    //     itself where WHATWG writes `%20`. It is the half that round-trips
+    //     through `URLSearchParams`, whose own serializer owns that escaping,
+    //     and rewriting `_search` on the way in would give one value two
+    //     owners. The path and the fragment are both encoded.
+    //   * A non-special scheme with an empty path gains a slash it should not
+    //     have: `new URL('//other', 'vscode-resource://a/b').href` reads back
+    //     `vscode-resource://other/` where WHATWG gives
+    //     `vscode-resource://other`. Worth knowing because webview extensions
+    //     really do use that scheme; the rule behind it (an empty path with a
+    //     host becomes `/`) is right for the special schemes and for `file:`.
     //   * The host is taken as written: no IDNA, no IPv4 shorthand
     //     canonicalization (`http://1.1` stays `1.1` where WHATWG gives
     //     `1.0.0.1`), and no forbidden-host-character check.
@@ -954,19 +986,48 @@
     // to something that fetches it needs the same string the browser would
     // have produced. `%` is deliberately absent, so an already-encoded path
     // survives instead of being encoded twice.
-    var PATH_ESCAPES = /[\u0000-\u001F\u007F-\uFFFF "<>`{}]/g;
+    //
+    // The surrogate *pair* alternative comes first and is load-bearing.
+    // Without it the single-unit class matches each half of an astral
+    // character separately, `encodeURIComponent` refuses a lone half, and
+    // the fallback hands the pair back unencoded: a path ending in an emoji
+    // reads back as itself where WHATWG gives `%F0%9F%98%80`. An emoji in a
+    // file name is the shape an extension is most likely to produce, and it
+    // was the one the single-unit class missed - BMP non-ASCII was always
+    // encoded correctly.
+    var PATH_ESCAPES = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u0000-\u001F\u007F-\uFFFF "<>`{}]/g;
 
-    function percentEncodePath(path) {
-        return path.replace(PATH_ESCAPES, function (character) {
+    // WHATWG's "fragment percent-encode set": C0 controls, space, `"`, `<`,
+    // `>` and a backtick, plus everything above ASCII. Narrower than the
+    // path set - `{` and `}` are legal in a fragment - and the same pair
+    // alternative for the same reason.
+    var FRAGMENT_ESCAPES = /[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u0000-\u001F\u007F-\uFFFF "<>`]/g;
+
+    function percentEncode(text, escapes) {
+        return text.replace(escapes, function (character) {
             try {
                 return encodeURIComponent(character);
             } catch (error) {
-                // A lone surrogate has no UTF-8 encoding and
-                // `encodeURIComponent` refuses it. Left as written rather than
-                // replaced by something that reads like a real character.
+                // A *genuine* lone surrogate - an unpaired half, which the
+                // alternative above cannot match - has no UTF-8 encoding
+                // and `encodeURIComponent` refuses it. Left as written
+                // rather than replaced by something that reads like a real
+                // character.
                 return character;
             }
         });
+    }
+
+    function percentEncodePath(path) {
+        return percentEncode(path, PATH_ESCAPES);
+    }
+
+    // The fragment has no second owner to defer to, which is what separates
+    // it from the query: `_search` round-trips through `URLSearchParams`,
+    // whose own serializer owns that escaping, and nothing at all owns
+    // `_hash`.
+    function percentEncodeFragment(fragment) {
+        return percentEncode(fragment, FRAGMENT_ESCAPES);
     }
 
     // Lexical `.`/`..` removal, RFC 3986 section 5.2.4, and then the path
@@ -1022,7 +1083,7 @@
         }
         url._pathname = normalizePath(match[5] || '');
         url._search = match[6] === undefined ? '' : match[6];
-        url._hash = match[7] === undefined ? '' : match[7];
+        url._hash = match[7] === undefined ? '' : percentEncodeFragment(match[7]);
     }
 
     function parseRelative(url, text, base) {
@@ -1030,7 +1091,9 @@
         var reference = text;
 
         var hashIndex = reference.indexOf('#');
-        url._hash = hashIndex === -1 ? '' : reference.slice(hashIndex + 1);
+        url._hash = hashIndex === -1
+            ? ''
+            : percentEncodeFragment(reference.slice(hashIndex + 1));
         if (hashIndex !== -1) {
             reference = reference.slice(0, hashIndex);
         }
@@ -1142,7 +1205,8 @@
         function () { return this._hash === '' ? '' : '#' + this._hash; },
         function (value) {
             var text = String(value);
-            this._hash = text.charAt(0) === '#' ? text.slice(1) : text;
+            this._hash = percentEncodeFragment(
+                text.charAt(0) === '#' ? text.slice(1) : text);
         });
 
     defineURLAccessor('searchParams', function () { return this._params; });
@@ -1198,7 +1262,7 @@
     // file.
     function run(wrapper, filename, dirname) {
         var module = { exports: {} };
-        wrapper.call(module.exports, module.exports, require, module, filename, dirname);
+        reflectApply(wrapper, module.exports, [module.exports, require, module, filename, dirname]);
         return module.exports;
     }
 
@@ -1209,16 +1273,15 @@
     // that has no timeout by design. A `describeThrown` that threw there would
     // leave `done` uncalled and hang activation with nothing logged.
     //
-    // Describing a value means reading it, and the reads that can throw are
-    // ordinary: `value instanceof Error` runs a Proxy's `getPrototypeOf` trap,
-    // `value.stack` runs a getter on a decorated `Error`, and `Object.keys` /
-    // `value[key]` / `value.constructor` inside `format` run any getter the
-    // object has. Rejecting with a domain object is common; so is an `Error`
-    // someone attached a lazy `stack` to.
-    //
-    // So every read lives inside the `try`, and the fallback reads nothing:
-    // `typeof` is the one question about a value that cannot run user code,
-    // and string concatenation of two strings cannot throw either.
+    // Describing a value means reading it, and any read can run extension
+    // code: `instanceof` runs a Proxy's `getPrototypeOf` trap, a property
+    // access runs a getter, and `format` walks whatever it is handed. Listing
+    // those reads would be a claim that expires the next time `format` grows a
+    // branch, so here is the one that does not: **the entire body is inside one
+    // `try`, and the `catch` performs `typeof` and concatenates two literals.**
+    // `typeof` is the one question about a value that cannot run user code, and
+    // concatenating two strings cannot throw. Total by construction, whatever
+    // `format` becomes.
     function describeThrown(value) {
         try {
             return value instanceof Error
@@ -1263,7 +1326,7 @@
         }
         var result;
         try {
-            result = activate.call(exports, activationContext);
+            result = reflectApply(activate, exports, [activationContext]);
         } catch (error) {
             done(false, describeThrown(error));
             return true;
@@ -1290,11 +1353,10 @@
         // Calling `done` twice is harmless by design: the host takes and nils
         // the continuation before resuming it, so the second call is a no-op.
         try {
-            then.call(
-                result,
+            reflectApply(then, result, [
                 function () { done(true, ''); },
                 function (reason) { done(false, describeThrown(reason)); }
-            );
+            ]);
         } catch (error) {
             done(false, describeThrown(error));
         }
