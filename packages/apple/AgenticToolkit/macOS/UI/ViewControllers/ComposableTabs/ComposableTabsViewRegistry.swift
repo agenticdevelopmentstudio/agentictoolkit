@@ -140,6 +140,24 @@ public final class ComposableTabsViewRegistry {
         entries[viewID] = Entry(descriptor: descriptor, factory: factory)
     }
 
+    /// Removes a registered view, answering whether anything was there.
+    ///
+    /// `.placeholder` is refused and logged: every registry must always
+    /// resolve it, because a project is allowed to name content the running
+    /// app does not have and losing the pane would lose the layout with it.
+    /// Refused rather than thrown — the callers are teardown paths (an
+    /// extension disabled, an extension uninstalled) where there is nothing
+    /// useful to do with an error.
+    @discardableResult
+    public func unregister(_ viewID: ComposableTabsViewID) -> Bool {
+        guard viewID != .placeholder else {
+            Self.logger.error(
+                "Refusing to unregister \(viewID.rawValue, privacy: .public) — every registry resolves it")
+            return false
+        }
+        return entries.removeValue(forKey: viewID) != nil
+    }
+
     public var registeredViewIDs: [ComposableTabsViewID] {
         entries.keys.sorted { $0.rawValue < $1.rawValue }
     }

@@ -671,14 +671,79 @@ extension ExtensionManifest {
         public let id: String
         public let name: String
         public let when: String?
+        /// `"tree"` or `"webview"`. Absent means a tree — VS Code's own
+        /// default, and what most entries rely on rather than spell.
+        public let type: String?
         public let icon: String?
         public let contextualTitle: String?
+        /// `visible`, `collapsed` or `hidden`, relative to the sibling views
+        /// inside one VS Code container. Carried, never mapped: this host
+        /// arranges panes into a split tree the user built, so there is no
+        /// container for a view to be relative within.
+        public let visibility: String?
+        /// A *weight* against its siblings, not a fraction of anything.
+        /// Carried for the same reason, and for the sharper one that mapping
+        /// it onto `preferredThicknessFraction` would silently get the layout
+        /// wrong.
+        public let initialSize: Double?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, name, when, type, icon, contextualTitle, visibility, initialSize
+        }
+
+        /// `id` and `name` are strict; everything else is `try?`.
+        ///
+        /// Not tidying — a measured hazard this task would otherwise have
+        /// introduced. `decodeLenientDictionary` isolates a failure at the
+        /// *view*, so any throw from here costs the whole entry: its id, its
+        /// name, its place in the pane list. With `initialSize` added as a
+        /// plain `Double?`, a manifest spelling it `"2"` as a string throws
+        /// (verified) and loses a view that decoded perfectly well before this
+        /// change. The same reasoning `Command.icon` already records, and the
+        /// same shape `ConfigurationProperty.init(from:)` settled one level
+        /// down: a field whose JSON does not fit is dropped, and the view
+        /// arrives without it rather than not arriving at all.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            name = try container.decode(String.self, forKey: .name)
+            when = try? container.decode(String.self, forKey: .when)
+            type = try? container.decode(String.self, forKey: .type)
+            icon = try? container.decode(String.self, forKey: .icon)
+            contextualTitle = try? container.decode(String.self, forKey: .contextualTitle)
+            visibility = try? container.decode(String.self, forKey: .visibility)
+            initialSize = try? container.decode(Double.self, forKey: .initialSize)
+        }
     }
 
     public struct ViewContainer: Codable, Sendable, Equatable {
         public let id: String
         public let title: String
-        public let icon: String
+        /// Optional, and that is the fix rather than the modelling.
+        ///
+        /// Declared non-optional, a container that omits its icon throws,
+        /// `decodeLenientDictionary` catches it at the element, and the whole
+        /// container disappears — its title, its id, and with the id gone,
+        /// every view targeting it becomes an unknown-container note. Losing a
+        /// container over a missing decoration is the wrong trade.
+        public let icon: String?
+        public let when: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, title, icon, when
+        }
+
+        /// `id` and `title` are strict — a container with neither an identity
+        /// nor a label is nothing a view could target or a person could read —
+        /// and the two decorations are `try?`, so a wrong-typed one costs
+        /// itself instead of the container. Same shape as `View` above.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            title = try container.decode(String.self, forKey: .title)
+            icon = try? container.decode(String.self, forKey: .icon)
+            when = try? container.decode(String.self, forKey: .when)
+        }
     }
 
     public struct LanguageModelTool: Codable, Sendable, Equatable {
