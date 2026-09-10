@@ -1280,7 +1280,13 @@ struct ExtensionHostTests {
     /// `context` overwritten under a still-running activation, `timerTasks`
     /// holding the old instance's entries while their IDs are dispatched
     /// against the new runtime, and `runningTimerCount` counting both.
-    @Test
+    ///
+    /// Time-limited for LO-D's reason, and it is not hypothetical here:
+    /// removing the guard makes the retry evaluate a module whose `activate`
+    /// returns a promise that never settles, so the regression is a *hang*
+    /// unless something bounds it. Measured - that is how the guard's mutation
+    /// presented before this trait was added.
+    @Test(.timeLimit(.minutes(1)))
     func aCancelledHostRefusesToActivateAgain() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
