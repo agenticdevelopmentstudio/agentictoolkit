@@ -64,9 +64,10 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
     }
 
     /// Discriminates `enqueueWrite`/`processNextWriteIfNeeded`'s FIFO
-    /// ordering (`GitSettingsPanelViewController.pendingWrites`): a rename
-    /// fires `onUnset(oldKey)` immediately followed, synchronously, by
-    /// `onSet(newKey, value)` (see `GitGlobalConfigTableView.commitEdit`).
+    /// ordering (`GitSettingsPanelViewController.pendingWrites`): a rename's
+    /// single queued operation runs its own steps in order (see
+    /// `testRenameRestoresOldKeyValueWhenSetFails` below), but two
+    /// independently-enqueued writes must also run in arrival order.
     /// Reverting `removeFirst()` to anything that does not preserve arrival
     /// order, or starting a second operation before the first's `Task`
     /// completes, fails this test without needing to touch git at all --
@@ -150,6 +151,89 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
         XCTAssertEqual(recorder.entries, ["failing write", "later write"])
     }
 
+    /// Fix round 2 (F3): discriminates the rollback shape the panel's real
+    /// `onRename` closure uses (`GitSettingsPanelViewController.
+    /// makeGlobalConfigGroup`) -- unset the old key, attempt to set the new
+    /// one, and, when that set fails, attempt to restore the old key/value
+    /// before re-throwing `GitConfigRenameFailedButRestoredError` so the
+    /// failure is surfaced rather than swallowed. This mirrors the
+    /// production closure's control flow with recorded, throwing stand-ins
+    /// instead of `GitClient` -- the same seam F4's three tests use, since
+    /// `GitClient` is a concrete `actor` with no protocol to stub and the
+    /// production closure cannot be invoked here without a real git process.
+    /// A later, unrelated write still running afterward is what proves the
+    /// restore's own throw does not wedge the queue (mirrors
+    /// `testAFailingWriteDoesNotHaltOrReorderTheQueue`).
+    func testRenameRestoresOldKeyValueWhenSetFails() async {
+        let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
+        let recorder = Recorder()
+        struct SetFailed: Error {}
+
+        panel.enqueueWrite {
+            recorder.record("unset old.key")
+            do {
+                recorder.record("attempt set new.key")
+                throw SetFailed()
+            } catch {
+                recorder.record("restore old.key")
+                throw GitConfigRenameFailedButRestoredError(setError: error)
+            }
+        }
+        panel.enqueueWrite { recorder.record("later write") }
+
+        await Self.drainQueue(panel)
+
+        XCTAssertEqual(
+            recorder.entries,
+            ["unset old.key", "attempt set new.key", "restore old.key", "later write"]
+        )
+    }
+
+    /// Fix round 2 (F3): the restore can itself fail -- a locked config file
+    /// or a second permissions error, say. That must not be swallowed by
+    /// only reporting whichever failure happened last: the panel's real
+    /// closure throws `GitConfigRestoreFailedError`, which carries both
+    /// underlying errors, so the user learns the setting is genuinely gone
+    /// rather than seeing an error that looks like an unrelated write
+    /// failed. A later, unrelated write still runs afterward, same as
+    /// above.
+    func testRenameReportsBothFailuresWhenSetAndRestoreBothFail() async throws {
+        let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
+        let recorder = Recorder()
+        struct SetFailed: Error {}
+        struct RestoreFailed: Error {}
+        let box = ErrorBox()
+
+        panel.enqueueWrite {
+            recorder.record("unset old.key")
+            do {
+                recorder.record("attempt set new.key")
+                throw SetFailed()
+            } catch let setError {
+                do {
+                    recorder.record("attempt restore old.key")
+                    throw RestoreFailed()
+                } catch let restoreError {
+                    let combined = GitConfigRestoreFailedError(setError: setError, restoreError: restoreError)
+                    box.value = combined
+                    throw combined
+                }
+            }
+        }
+        panel.enqueueWrite { recorder.record("later write") }
+
+        await Self.drainQueue(panel)
+
+        XCTAssertEqual(
+            recorder.entries,
+            ["unset old.key", "attempt set new.key", "attempt restore old.key", "later write"]
+        )
+        let combined = try XCTUnwrap(box.value as? GitConfigRestoreFailedError)
+        XCTAssertTrue(combined.setError is SetFailed)
+        XCTAssertTrue(combined.restoreError is RestoreFailed)
+        XCTAssertTrue(combined.errorDescription?.contains("lost") ?? false)
+    }
+
     private static func accessibilityIdentifiers(in view: NSView) -> Set<String> {
         var found: Set<String> = []
         let id = view.accessibilityIdentifier()
@@ -217,6 +301,15 @@ private final class Recorder: @unchecked Sendable {
     func record(_ entry: String) {
         entries.append(entry)
     }
+}
+
+/// Captures the one error a synthetic rollback operation throws, from inside
+/// a `@Sendable` closure, so the test can inspect its concrete type and
+/// payload afterward. `unchecked` for the same reason `Recorder` is: these
+/// tests enqueue and drain on the main actor, one operation at a time, so
+/// nothing here is ever written from two places at once.
+private final class ErrorBox: @unchecked Sendable {
+    var value: Error?
 }
 
 /// A one-shot async gate, used to hold a queued write operation suspended at

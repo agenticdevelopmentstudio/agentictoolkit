@@ -2,6 +2,33 @@ import AgenticToolkitCore
 import AgenticToolkitCoreUI
 import AppKit
 
+/// Thrown by a rename's queued operation when the new key fails to set
+/// *and* restoring the old key/value also fails -- the setting is genuinely
+/// gone. Carries both underlying errors, rather than only the restore
+/// failure, so `showError`'s message tells the user their setting was lost,
+/// not merely that a second, unrelated-looking write failed.
+struct GitConfigRestoreFailedError: LocalizedError {
+    let setError: Error
+    let restoreError: Error
+
+    var errorDescription: String? {
+        "Could not rename this setting (\(setError.localizedDescription)), and restoring its previous value "
+            + "also failed (\(restoreError.localizedDescription)). This setting has been lost from "
+            + "~/.gitconfig."
+    }
+}
+
+/// Thrown by a rename's queued operation when the new key fails to set but
+/// restoring the old key/value succeeds -- nothing was lost, but the rename
+/// itself did not happen and the user should know why the row reverted.
+struct GitConfigRenameFailedButRestoredError: LocalizedError {
+    let setError: Error
+
+    var errorDescription: String? {
+        "Could not rename this setting (\(setError.localizedDescription)). Its previous value was restored."
+    }
+}
+
 /// Settings › Git: which executable runs, how status refreshes behave, and
 /// the user's global configuration.
 @MainActor
@@ -14,15 +41,16 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
     private var reloadTask: Task<Void, Never>?
 
     /// Global-configuration writes queued from the table, in the order they
-    /// were fired. Renaming a row in `GitGlobalConfigTableView` fires
-    /// `onUnset(oldKey)` immediately followed, synchronously, by
-    /// `onSet(newKey, value)` -- see that type's `commitEdit`. Reloading after
-    /// each write independently would race: the unset's own reload could read
-    /// global config *before* the set's write has landed and redisplay the row
-    /// as gone, only to have that stale read clobber the (later-arriving)
-    /// correct one. Queuing every write and reloading exactly once, after the
-    /// queue drains rather than after each entry, keeps a rename's two halves
-    /// atomic from the table's point of view.
+    /// were fired. A rename in `GitGlobalConfigTableView` fires `onRename`,
+    /// which this panel enqueues as a *single* operation that unsets the old
+    /// key, sets the new one, and -- if that set fails -- restores the old
+    /// key/value before re-throwing (see `makeGlobalConfigGroup`). Reloading
+    /// after each write independently would also race: an unset's own reload
+    /// could read global config *before* a later write has landed and
+    /// redisplay the row as gone, only to have that stale read clobber the
+    /// (later-arriving) correct one. Queuing every write and reloading
+    /// exactly once, after the queue drains rather than after each entry,
+    /// keeps a rename's steps atomic from the table's point of view.
     ///
     /// Not `private`: `GitSettingsPanelViewControllerTests` enqueues
     /// instrumented operations directly to test ordering and draining without
@@ -163,23 +191,24 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
             withText: "Edits are written with git config --global as you commit each cell."
         ))
         // The table already refuses to commit a placeholder with an empty key
-        // (see `GitGlobalConfigTableView.commitEdit`), but this callback does
+        // (see `GitGlobalConfigTableView.commitEdit`), but these callbacks do
         // not trust that alone before handing a key to git: an empty key
         // reaching `unsetGlobalConfig` becomes `git config --global --unset
         // ""` (an error git shows the user), and reaching `setGlobalConfig`
         // becomes a real, permanent write of an empty-named setting to
-        // ~/.gitconfig. Both closures capture `self` weakly: if this panel is
-        // ever deallocated between a rename's two queued halves, the second
-        // one silently no-ops (`self?.client...` short-circuits) rather than
-        // erroring, leaving the old key unset and the new key never set.
-        // Unreachable today -- every panel is constructed once at launch and
-        // held for the process's lifetime by `Features.settingsCoordinator`
-        // -- so this is recorded, not fixed: capturing `client` (an actor,
-        // not `self`) would close the hole without needing `self` at all, but
-        // would also keep this closure alive past a panel nothing else still
-        // holds a reference to, trading an unreachable bug for a reachable
-        // retain cycle. Revisit if panels ever become lazily created or
-        // replaced.
+        // ~/.gitconfig. Every closure here captures `self` weakly: if this
+        // panel is ever deallocated between a write being enqueued and it
+        // actually running, that write silently no-ops (`self?.client...`
+        // short-circuits) rather than erroring -- whatever it was supposed to
+        // do (unset, set, or, for a rename, restore the old key) silently
+        // never happens. Unreachable today -- every panel is constructed once
+        // at launch and held for the process's lifetime by
+        // `Features.settingsCoordinator` -- so this is recorded, not fixed:
+        // capturing `client` (an actor, not `self`) would close the hole
+        // without needing `self` at all, but would also keep these closures
+        // alive past a panel nothing else still holds a reference to, trading
+        // an unreachable bug for a reachable retain cycle. Revisit if panels
+        // ever become lazily created or replaced.
         configTable.onSet = { [weak self] key, value in
             guard !key.isEmpty else { return }
             self?.enqueueWrite { [weak self] in try await self?.client.setGlobalConfig(key: key, value: value) }
@@ -187,6 +216,32 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
         configTable.onUnset = { [weak self] key in
             guard !key.isEmpty else { return }
             self?.enqueueWrite { [weak self] in try await self?.client.unsetGlobalConfig(key: key) }
+        }
+        // A rename is one queued operation, not two: unset the old key, set
+        // the new one, and -- if the set fails after the unset already
+        // succeeded -- put the old key/value back before re-throwing. Both
+        // steps run inside the same `enqueueWrite` call so a third edit can
+        // never land between the unset and the restore (F4's queue is what
+        // makes that guarantee; a second `enqueueWrite` for the restore would
+        // not). If the restore also fails, both errors are reported together
+        // (`GitConfigRestoreFailedError`) rather than the second masking the
+        // first -- losing a setting must be loud, never silent.
+        configTable.onRename = { [weak self] oldKey, oldValue, newKey, newValue in
+            guard !oldKey.isEmpty, !newKey.isEmpty else { return }
+            self?.enqueueWrite { [weak self] in
+                guard let client = self?.client else { return }
+                try await client.unsetGlobalConfig(key: oldKey)
+                do {
+                    try await client.setGlobalConfig(key: newKey, value: newValue)
+                } catch {
+                    do {
+                        try await client.setGlobalConfig(key: oldKey, value: oldValue)
+                    } catch let restoreError {
+                        throw GitConfigRestoreFailedError(setError: error, restoreError: restoreError)
+                    }
+                    throw GitConfigRenameFailedButRestoredError(setError: error)
+                }
+            }
         }
         group.addSettingSubview(configTable)
         return group
@@ -215,7 +270,7 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
     /// Appends one config write to `pendingWrites` and, if nothing is running,
     /// starts draining the queue. See `pendingWrites`' doc comment for why the
     /// queue -- rather than a reload per call -- is what keeps a rename's
-    /// `onUnset`/`onSet` pair from racing each other's refresh.
+    /// unset/set/restore steps from racing each other's refresh.
     func enqueueWrite(_ operation: @escaping @Sendable () async throws -> Void) {
         pendingWrites.append(operation)
         processNextWriteIfNeeded()

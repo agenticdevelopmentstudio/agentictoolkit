@@ -4,11 +4,16 @@ import AppKit
 
 /// A two-column, in-place editable table of git global configuration. It
 /// owns no git knowledge: the panel feeds it entries and receives edits
-/// through `onSet` / `onUnset`.
+/// through `onSet` / `onUnset` / `onRename`.
 @MainActor
 public final class GitGlobalConfigTableView: NSView {
     public var onSet: ((_ key: String, _ value: String) -> Void)?
     public var onUnset: ((_ key: String) -> Void)?
+    /// Fired when a live row's key changes, instead of a separate `onUnset`
+    /// followed by `onSet`. Carries both halves' key *and* value so the
+    /// panel can restore `oldKey`/`oldValue` if setting `newKey`/`newValue`
+    /// fails after the unset half already succeeded -- see `commitEdit`.
+    public var onRename: ((_ oldKey: String, _ oldValue: String, _ newKey: String, _ newValue: String) -> Void)?
     public private(set) var entries: [GitConfigEntry] = []
 
     /// The row `beginAddingEntry` appended, if its edit has not committed yet.
@@ -119,12 +124,12 @@ public final class GitGlobalConfigTableView: NSView {
     /// A key `git config` will accept: shaped `section.name`, optionally
     /// `section.subsection.name`. A bare word like `email` is rejected by
     /// both `--unset` and a plain set, so it is refused here, before either
-    /// ever reaches git -- in particular before the destructive `onUnset`
-    /// half of a rename fires. Without this check, renaming `user.email` to
-    /// `email` would unset the old key (which succeeds) and then fail to set
-    /// the new one (which git rejects), permanently losing the setting with
-    /// no way back: the write queue orders a rename's two halves but does not
-    /// roll one back if the other fails.
+    /// ever reaches git -- in particular before the destructive unset half
+    /// of a rename fires. This is a cheap, local first line of defense, not
+    /// the only one: `onRename`'s contract additionally has the panel
+    /// restore the old key/value if the *new* key is well-formed but the
+    /// set still fails for some other reason (a locked config file, a
+    /// permissions error, and so on) -- see that property's doc comment.
     private static func isWellFormedKey(_ key: String) -> Bool {
         key.contains(".")
     }
@@ -137,12 +142,13 @@ public final class GitGlobalConfigTableView: NSView {
     /// user's real git config the moment they tab off the key cell. Once it
     /// fully commits it stops being the placeholder.
     ///
-    /// Every other row is a live entry. Renaming its key must unset the old
-    /// key before setting the new one, or the old key survives in git config
-    /// after vanishing from the table. Blanking its key, or typing one that
-    /// is not well-formed, is not a delete -- the cell reverts to the stored
-    /// key rather than committing an invalid one. Clearing its *value* to
-    /// empty, in contrast, is a legitimate clear and still fires `onSet`.
+    /// Every other row is a live entry. Renaming its key fires `onRename`
+    /// (not a separate `onUnset` followed by `onSet`) so the panel can
+    /// restore the old key/value in one queued operation if the new key
+    /// fails to set. Blanking its key, or typing one that is not
+    /// well-formed, is not a delete -- the cell reverts to the stored key
+    /// rather than committing an invalid one. Clearing its *value* to empty,
+    /// in contrast, is a legitimate clear and still fires `onSet`.
     func commitEdit(row: Int, key: String, value: String) {
         guard row >= 0, row < entries.count else { return }
 
@@ -155,6 +161,7 @@ public final class GitGlobalConfigTableView: NSView {
         }
 
         let oldKey = entries[row].key
+        let oldValue = entries[row].value
         guard !key.isEmpty, Self.isWellFormedKey(key) else {
             let keyColumn = tableView.column(withIdentifier: Self.keyColumn)
             tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: keyColumn))
@@ -163,9 +170,10 @@ public final class GitGlobalConfigTableView: NSView {
 
         entries[row] = GitConfigEntry(key: key, value: value)
         if key != oldKey {
-            onUnset?(oldKey)
+            onRename?(oldKey, oldValue, key, value)
+        } else {
+            onSet?(key, value)
         }
-        onSet?(key, value)
     }
 
     private func setUp() {
