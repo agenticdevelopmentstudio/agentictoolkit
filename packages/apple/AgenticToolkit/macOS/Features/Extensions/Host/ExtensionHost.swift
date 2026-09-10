@@ -175,16 +175,28 @@ public final class ExtensionHost {
     /// threw would otherwise be indistinguishable from one that succeeded.
     ///
     /// An extension whose `activate()` promise never settles suspends this call
-    /// for as long as it stays unsettled. That is deliberate, and the escape is
-    /// `dispose()`, which fails the activation — not a timeout, because there is
+    /// for as long as it stays unsettled. There is no timeout, because there is
     /// no honest number: a real extension may legitimately await a network
     /// round trip during activation, and a host that gave up at *n* seconds
-    /// would be reporting a failure that did not happen.
+    /// would be reporting a failure that did not happen. There are two escapes
+    /// instead. `dispose()` ends it and tears the host down; **cancelling the
+    /// calling task ends it and leaves the host usable**, throwing
+    /// `activationCancelled` — cancellation is the first thing a Swift caller
+    /// reaches for, and an `activate()` that ignored it would turn an ordinary
+    /// timeout-and-give-up into a hang.
     ///
     /// Calling twice is a no-op, and two concurrent calls are one activation.
     /// VS Code activates an extension once, callers re-emit activation events
     /// routinely, and re-evaluating the module would leave two sets of
     /// registrations behind that one `dispose()` cannot undo (`idempotency`).
+    /// The corollary is that cancellation is shared too: there is one
+    /// activation with one outcome, so a second caller who cancels ends it for
+    /// the first as well.
+    ///
+    /// - Throws: `ExtensionHostError.activationCancelled` if the calling task
+    ///   is cancelled, in place of `CancellationError` — every error this host
+    ///   raises names the extension, because a failure reaches the user
+    ///   through a list of extensions.
     public func activate() async throws {
         guard !isDisposed else {
             throw ExtensionHostError.hostDisposed(identifier: identifier)
@@ -192,14 +204,52 @@ public final class ExtensionHost {
         guard !isActivated else { return }
 
         if let activationTask {
-            try await activationTask.value
+            try await awaitActivation(activationTask)
             return
         }
 
         let task = Task { @MainActor in try await self.performActivation() }
         activationTask = task
         defer { activationTask = nil }
-        try await task.value
+        try await awaitActivation(task)
+    }
+
+    /// Awaits the one in-flight activation, and makes cancelling *this* call
+    /// actually end it.
+    ///
+    /// `performActivation` runs in an unstructured task, and `task.value`
+    /// forwards nothing: without this, a caller who wrapped `activate()` in a
+    /// cancellable task would cancel only their own wrapper while the
+    /// activation ran on — forever, for a promise that never settles.
+    private func awaitActivation(_ task: Task<Void, Error>) async throws {
+        // Everything the handler has to touch is main-actor state, and the
+        // handler itself runs on whatever executor cancelled — so it hops, and
+        // the hop is also what makes the capture legal. A plain `@Sendable`
+        // closure may not capture this host; a `@Sendable @MainActor` one may,
+        // because it can only ever run where the host's state already lives,
+        // and a closure *value* is `Sendable` even when what it closes over is
+        // not.
+        let endActivation: @Sendable @MainActor () -> Void = { [weak self] in
+            // A cancellation that arrives as the activation is already ending
+            // must not reach the *next* one: by the time this hop runs, the
+            // owner's `defer` may have cleared the task it belongs to.
+            guard let self, self.activationTask == task else { return }
+            self.finishActivation(.failure(.activationCancelled(identifier: self.identifier)))
+        }
+
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            // Both halves are load-bearing, because there are two places an
+            // activation can be when cancellation lands. `cancel()` reaches
+            // the one still reading the entry point off disk, which has no
+            // continuation to resume yet and is stopped by the check in
+            // `performActivation`; `endActivation` reaches the one suspended
+            // on `activate()`'s promise, which a `CheckedContinuation` will
+            // never notice cancellation from on its own.
+            task.cancel()
+            Task { @MainActor in endActivation() }
+        }
     }
 
     private func performActivation() async throws {
@@ -210,6 +260,13 @@ public final class ExtensionHost {
         // exists, so it is the one place a `dispose()` can land unnoticed.
         guard !isDisposed else {
             throw ExtensionHostError.hostDisposed(identifier: identifier)
+        }
+
+        // And the one place a cancellation can, for the same reason: past this
+        // line there is a context and a running module, and stopping is
+        // `dispose()`'s job rather than a `return`.
+        guard !Task.isCancelled else {
+            throw ExtensionHostError.activationCancelled(identifier: identifier)
         }
 
         let context = try makeContext()
@@ -244,13 +301,39 @@ public final class ExtensionHost {
     /// Callable before or after `activate()`. Before is the normal case, and
     /// definitions made then are applied the moment the runtime exists.
     ///
-    /// - Throws: `ExtensionHostError.vscodeMemberNotDefinable` if the namespace
-    ///   is not one the shim knows — which is a programming error in the
-    ///   adaptor, caught here rather than surfacing as a member that silently
-    ///   went on throwing.
-    public func defineVSCodeMember(namespacePath: String, name: String, implementation: Any) throws {
+    /// `fileID` and `line` are the call's own, and they are the answer to
+    /// *when* the throw below happens. The shim owns the list of namespaces
+    /// that exist, so a namespace can only be checked against it once a
+    /// runtime is running; before `activate()` — again, the normal case —
+    /// there is nothing to check against, and the refusal arrives later, from
+    /// inside `activate()`, where it would otherwise read as a failed
+    /// activation of the *extension*. Carrying the origin means the error
+    /// still names the adaptor's line however late it is raised. Copying the
+    /// shim's namespace list into Swift would report it earlier and would be a
+    /// second source of truth for something one file already owns; a drifting
+    /// copy is worse than a late error.
+    ///
+    /// - Throws: `ExtensionHostError.hostDisposed` if the host has been torn
+    ///   down — a definition appended then would go onto a list nothing will
+    ///   ever replay. `ExtensionHostError.vscodeMemberNotDefinable` if the
+    ///   namespace is not one the shim knows, which is a programming error in
+    ///   the adaptor: immediately when the host is already running, and
+    ///   otherwise from the `activate()` that first installs a runtime.
+    public func defineVSCodeMember(
+        namespacePath: String,
+        name: String,
+        implementation: Any,
+        fileID: String = #fileID,
+        line: Int = #line
+    ) throws {
+        guard !isDisposed else {
+            throw ExtensionHostError.hostDisposed(identifier: identifier)
+        }
         let definition = VSCodeMemberDefinition(
-            namespacePath: namespacePath, name: name, implementation: implementation)
+            namespacePath: namespacePath,
+            name: name,
+            implementation: implementation,
+            origin: "\(fileID):\(line)")
         vscodeMemberDefinitions.append(definition)
         if let runtime {
             try apply(definition, to: runtime)
@@ -261,6 +344,8 @@ public final class ExtensionHost {
         let namespacePath: String
         let name: String
         let implementation: Any
+        /// Where `defineVSCodeMember` was called, `file:line`.
+        let origin: String
     }
 
     private func apply(_ definition: VSCodeMemberDefinition, to runtime: JSValue) throws {
@@ -274,7 +359,10 @@ public final class ExtensionHost {
                 identifier: identifier,
                 namespacePath: definition.namespacePath,
                 name: definition.name,
-                message: message
+                // The shim's complaint, then where the definition came from.
+                // This is routinely thrown from `activate()`, long after the
+                // call that is actually wrong.
+                message: "\(message) Defined at \(definition.origin)."
             )
         }
     }
@@ -292,12 +380,16 @@ public final class ExtensionHost {
     /// Safe to call more than once, and safe to call on a host that never
     /// activated.
     ///
-    /// **Calling it is mandatory.** Dropping the last reference to a host does
-    /// most of this on its own — `deinit` is the net below — but it cannot do
-    /// the part that matters: a repeating timer's `Task` keeps the host alive
-    /// until the task ends, so a host with a live `setInterval` is never
-    /// deallocated and its `deinit` never runs. Teardown is an act, not a
-    /// consequence of going out of scope.
+    /// **Calling it is mandatory**, and not because `deinit` cannot cancel the
+    /// timers — it can, including a repeating one, since `scheduleTimer`'s task
+    /// captures the host weakly and so nothing a live `setInterval` holds keeps
+    /// this object alive. What `deinit` cannot do is happen *at a known time*.
+    /// This is synchronous and immediate; an `isolated deinit` hops to the main
+    /// actor and runs whenever the last release happens to land, which for a
+    /// host still referenced by a view model or an in-flight task is some later
+    /// turn of the run loop or never. And only this clears `onConsoleMessage`
+    /// and releases the context, which is the largest thing the host owns.
+    /// Teardown is an act, not a consequence of going out of scope.
     public func dispose() {
         isDisposed = true
 
@@ -329,10 +421,13 @@ public final class ExtensionHost {
 
     /// The net under `dispose()`, for the host that was dropped without one.
     ///
-    /// It can only ever catch the *non-repeating* case — see `dispose()` — but
-    /// that case is real: a host whose `activate()` threw, dropped by a caller
-    /// that never learned it had timers to cancel, would otherwise leave a
-    /// `setTimeout(fn, 3600000)` task asleep for the rest of the hour.
+    /// It catches every timer, repeating included: `scheduleTimer` builds its
+    /// task with `[weak self]`, so the host holds the tasks and no task holds
+    /// the host, and a host with a live `setInterval` deallocates like any
+    /// other. What it does not catch is *when* — see `dispose()`. The case it
+    /// exists for is real either way: a host whose `activate()` threw, dropped
+    /// by a caller that never learned it had timers to cancel, would otherwise
+    /// leave a `setTimeout(fn, 3600000)` task asleep for the rest of the hour.
     ///
     /// `isolated deinit` because everything it touches is main-actor state.
     isolated deinit {
@@ -630,9 +725,14 @@ public final class ExtensionHost {
             let hadActivate = runtime.invokeMethod(
                 "callActivate", withArguments: [exports, activationContext as Any, done])
 
-            // Only reachable if the bridge itself failed — the shim catches
-            // everything the extension can throw. Without it a shim that never
-            // called `done` would hang activation instead of failing it.
+            // Load-bearing, and not only for a broken bridge: the shim reads
+            // `result.then` outside any `try`, so a thenable whose `.then`
+            // *getter* throws — extension-controlled, and the shape a Proxy or
+            // a lazily-defined property produces — leaves `callActivate`
+            // through this line rather than through `done`. Verified in real
+            // JSC: `invokeMethod` returns `undefined`, `done` was never called,
+            // and the exception arrives here. Delete it and that extension
+            // hangs activation instead of failing it.
             if let message = pendingException {
                 pendingException = nil
                 finishActivation(
@@ -648,9 +748,13 @@ public final class ExtensionHost {
 
     /// Ends the suspended `activate()`, once and only once.
     ///
-    /// Three callers race for it — the shim's completion block, the bridge's
-    /// own failure path, and `dispose()` — and a `CheckedContinuation` resumed
-    /// twice is a crash, not a warning.
+    /// Four callers race for it — the shim's completion block, the bridge's
+    /// own failure path, `dispose()`, and a cancelled caller — and a
+    /// `CheckedContinuation` resumed twice is a crash, not a warning. The
+    /// cancellation case is the one that makes this more than a formality: it
+    /// resumes an activation whose JavaScript is still running, so the
+    /// extension's promise settling afterwards *will* call `done` on a
+    /// continuation that is already gone.
     private func finishActivation(_ result: Result<Void, ExtensionHostError>) {
         guard let resume = activationContinuation else { return }
         activationContinuation = nil
@@ -857,6 +961,13 @@ public enum ExtensionHostError: Error, Sendable, Equatable {
     /// happens to every extension that reaches for a `vscode` member.
     case activationThrew(identifier: String, message: String)
 
+    /// The task awaiting `activate()` was cancelled. Its own case rather than
+    /// `CancellationError` because every failure here names the extension it
+    /// belongs to, and because it says something `CancellationError` does not:
+    /// the extension's `activate()` may still be running in JavaScript, and
+    /// the host is still usable — `dispose()` is what stops it.
+    case activationCancelled(identifier: String)
+
     /// The runtime shim is missing from this framework's bundle. A build
     /// problem, not an extension problem.
     case runtimeUnavailable(identifier: String)
@@ -897,6 +1008,11 @@ extension ExtensionHostError: LocalizedError {
             return "'\(identifier)' threw while its code was loading: \(message)"
         case let .activationThrew(identifier, message):
             return "'\(identifier)' threw from activate(): \(message)"
+        case let .activationCancelled(identifier):
+            return """
+                '\(identifier)' did not finish activating: the task awaiting it was cancelled. The \
+                extension's own activate() may still be running; tear the host down to stop it.
+                """
         case let .runtimeUnavailable(identifier):
             return "'\(identifier)' could not be started: the extension runtime is missing from this build."
         case let .runtimeShimFailed(identifier, message):

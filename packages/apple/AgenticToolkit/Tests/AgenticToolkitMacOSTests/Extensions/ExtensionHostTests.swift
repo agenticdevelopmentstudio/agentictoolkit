@@ -1007,6 +1007,49 @@ struct ExtensionHostTests {
         }
     }
 
+    /// A rejection reason that fights back.
+    ///
+    /// Reporting a rejection means *describing* the reason, and describing an
+    /// arbitrary value runs the extension's own code: a getter, a `Proxy` trap,
+    /// a decorated `stack`. A throw from any of them happens inside a promise
+    /// reaction job, where there is no `catch` to reach and no JavaScriptCore
+    /// exception handler either — so the completion callback was never called
+    /// and `activate()` waited for a settle that had already happened. A vague
+    /// message is the requirement; hanging is not one of the options.
+    @Test
+    func aRejectionWhoseDescriptionThrowsFailsActivationRatherThanHanging() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                var reason = {};
+                Object.defineProperty(reason, 'detail', {
+                    enumerable: true,
+                    get: function () { throw new Error('describing me throws'); }
+                });
+                return Promise.reject(reason);
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        do {
+            try await host.activate()
+            Issue.record("A rejection must fail activation even when its reason cannot be described.")
+        } catch let error as ExtensionHostError {
+            guard case let .activationThrew(identifier, message) = error else {
+                Issue.record("Expected activationThrew, got \(error)")
+                return
+            }
+            #expect(identifier == "test.alpha")
+            #expect(message.contains("could not be described"), "message was: \(message)")
+        }
+        #expect(!host.isActivated)
+    }
+
     /// The other half of M1, and the one 5.3 depends on: activation is not
     /// signalled until `activate()` has actually finished.
     ///
@@ -1106,6 +1149,122 @@ struct ExtensionHostTests {
             try await activation.value
         }
         #expect(!host.isActivated)
+    }
+
+    /// Cancellation is the second escape, and the one a caller owns.
+    ///
+    /// `performActivation` runs in an unstructured task, so awaiting
+    /// `task.value` forwards nothing on its own: a caller who wrapped
+    /// `activate()` in a cancellable task used to cancel only their own
+    /// wrapper while the activation went on waiting for a promise that never
+    /// settles. The cancellation has to reach the continuation.
+    ///
+    /// The second half is the one that matters. The extension's promise is
+    /// still running when the cancellation lands, and it settles a moment
+    /// later into a continuation that is already gone — and a
+    /// `CheckedContinuation` resumed twice is a crash, not a warning. Letting
+    /// it settle, rather than stopping at the throw, is the whole point of the
+    /// test: reaching the last line is the assertion.
+    @Test
+    func cancellingAnActivationEndsItAndALaterSettleIsHarmless() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                console.log('waiting');
+                return new Promise(function (resolve) {
+                    setTimeout(function () { console.log('settled anyway'); resolve(); }, 60);
+                });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        let activation = Task { @MainActor in try await host.activate() }
+
+        // Bounded, so a regression that never reached the promise at all fails
+        // here rather than hanging.
+        for _ in 0..<100 where recorder.texts.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(recorder.texts == ["waiting"])
+
+        activation.cancel()
+
+        await #expect(throws: ExtensionHostError.activationCancelled(identifier: "test.alpha")) {
+            try await activation.value
+        }
+        #expect(!host.isActivated)
+
+        for _ in 0..<100 where recorder.texts.count < 2 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(recorder.texts == ["waiting", "settled anyway"])
+        #expect(!host.isActivated)
+    }
+
+    /// Cancelling an activation stops the *waiting*, not the JavaScript: the
+    /// context is still there, the extension's timer is still counted, and
+    /// `dispose()` is still the only thing that ends either. A cancellation
+    /// that tore down half the host would leave teardown with nothing to do
+    /// and this test with nothing to observe.
+    @Test
+    func disposeStillWorksAfterACancelledActivation() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                console.log('waiting');
+                setTimeout(function () { console.log('much later'); }, 10000);
+                return new Promise(function () {});
+            };
+            """,
+            in: directory
+        )
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        let activation = Task { @MainActor in try await host.activate() }
+        for _ in 0..<100 where recorder.texts.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        await #expect(throws: ExtensionHostError.activationCancelled(identifier: "test.alpha")) {
+            activation.cancel()
+            try await activation.value
+        }
+
+        // Cancellation left the JavaScript side exactly as it was.
+        #expect(host.runningTimerCount == 1)
+        weak var released: JSContext?
+        released = host.javaScriptContext
+        #expect(released != nil)
+
+        host.dispose()
+
+        #expect(host.isDisposed)
+        #expect(host.javaScriptContext == nil)
+        #expect(released == nil, "dispose() must release the JSContext after a cancelled activation too")
+
+        var attempts = 0
+        while host.runningTimerCount != 0 && attempts < 50 {
+            try await Task.sleep(for: .milliseconds(10))
+            attempts += 1
+        }
+        #expect(host.runningTimerCount == 0)
+
+        await #expect(throws: ExtensionHostError.hostDisposed(identifier: "test.alpha")) {
+            try await host.activate()
+        }
     }
 
     // MARK: - The 5.3-5.7 seam
@@ -1212,8 +1371,34 @@ struct ExtensionHostTests {
             // The refusal lists what *does* exist, so the author of the adaptor
             // does not have to go read the shim to find the spelling.
             #expect(message.contains("vscode.commands"))
+            // And it names the call site that asked for it. The definition is
+            // replayed at activation, so the throw happens far from the line
+            // that is wrong; without the captured origin the message describes
+            // a mistake with no address.
+            #expect(message.contains("ExtensionHostTests.swift:"), "message was: \(message)")
         }
         #expect(!host.isActivated)
+    }
+
+    /// A member defined on a disposed host is refused rather than accepted and
+    /// dropped. Definitions are kept and replayed into the context the *next*
+    /// activation makes — and a disposed host never activates again, so
+    /// without the guard the call succeeded, silently, and the member it
+    /// promised existed nowhere.
+    @Test
+    func definingAMemberOnADisposedHostIsRefused() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(source: "exports.activate = function () {};", in: directory)
+        try await host.activate()
+        host.dispose()
+
+        let nothing: @convention(block) () -> Void = {}
+        #expect(throws: ExtensionHostError.hostDisposed(identifier: "test.alpha")) {
+            try host.defineVSCodeMember(
+                namespacePath: "vscode.window", name: "showSomethingReal", implementation: nothing)
+        }
     }
 
     // MARK: - Coercion and formatting
@@ -1428,7 +1613,7 @@ struct ExtensionHostTests {
                 return
             }
             // Line 3 of the file above, named as the file the author wrote.
-            #expect(message.contains("web.js:3"), "stack was: \(message)")
+            #expect(message.contains("web.js:3:"), "stack was: \(message)")
         }
     }
 
@@ -1459,7 +1644,7 @@ struct ExtensionHostTests {
                 Issue.record("Expected activationThrew, got \(error)")
                 return
             }
-            #expect(message.contains("web.js:3"), "stack was: \(message)")
+            #expect(message.contains("web.js:3:"), "stack was: \(message)")
         }
     }
 

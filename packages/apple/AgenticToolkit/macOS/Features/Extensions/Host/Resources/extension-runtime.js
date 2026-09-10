@@ -372,6 +372,21 @@
     // neither the namespace nor the extension nor a member. A namespace that
     // stringifies to something saying what it is beats both that throw and a
     // bare `undefined`.
+    //
+    // Two properties of what this returns, for whoever edits it next:
+    //
+    //   1. **These must not be the built-ins.** `hasUserDefinedToString`, the
+    //      `%s` half of the console formatter, decides between `String(value)`
+    //      and an inspection by checking the `toString` it finds against
+    //      `BUILT_IN_TO_STRINGS`. Returning `Object.prototype.toString` here
+    //      would look like a tidy simplification and would quietly turn
+    //      `console.log('%s', vscode.window)` from
+    //      `[VSCodeNamespace vscode.window]` into `{}`.
+    //   2. **Identity is not stable.** A fresh closure per access means
+    //      `vscode.toString !== vscode.toString`. Nothing here depends on
+    //      that, and caching one closure per (path, key) would be equally
+    //      correct — but interop that compares function identity across two
+    //      reads would see it, so it is a fact rather than an accident.
     function probeValue(path, table, key) {
         switch (key) {
         case 'toString':
@@ -380,8 +395,19 @@
         case 'inspect':
             return function () { return '[VSCodeNamespace ' + path + ']'; };
         case 'hasOwnProperty':
-        case 'propertyIsEnumerable':
             return function (probed) { return Object.prototype.hasOwnProperty.call(table, probed); };
+        case 'propertyIsEnumerable':
+            // Not an alias for `hasOwnProperty`: it answers the narrower
+            // question, which is the same answer only for as long as every
+            // member is an enumerable data property. `defineMember` writes
+            // plain assignments today, but a member installed with
+            // `Object.defineProperty` would make the two diverge, and the
+            // wrong one of them would be the one that had never been written
+            // down as a shortcut.
+            return function (probed) {
+                var descriptor = Object.getOwnPropertyDescriptor(table, probed);
+                return descriptor !== undefined && descriptor.enumerable === true;
+            };
         case 'isPrototypeOf':
             return function () { return false; };
         default:
@@ -693,10 +719,34 @@
     // input for anything it cannot parse. Failing loudly on an exotic URL is
     // the same trade the NotImplemented stubs make — a wrong `hostname` read
     // back from a silently mangled parse is the expensive outcome.
+    //
+    // What is still a subset, measured against Node's WHATWG implementation
+    // rather than guessed, so the next person can weigh an addition instead of
+    // rediscovering it:
+    //
+    //   * Only the **path** is percent-encoded. A space in a query or a
+    //     fragment survives as itself where WHATWG writes `%20`. The query is
+    //     the half that round-trips through `URLSearchParams`, whose own
+    //     serializer owns its escaping, and rewriting `_search` on the way in
+    //     would give that value two owners.
+    //   * The host is taken as written: no IDNA, no IPv4 shorthand
+    //     canonicalization (`http://1.1` stays `1.1` where WHATWG gives
+    //     `1.0.0.1`), and no forbidden-host-character check.
+    //   * Backslashes are ordinary path characters. WHATWG treats them as
+    //     slashes in a special URL.
 
     var SPECIAL_PORTS = {
         'http:': '80', 'https:': '443', 'ws:': '80', 'wss:': '443', 'ftp:': '21', 'file:': ''
     };
+
+    // WHATWG's "special scheme" set is exactly the keys above, and it decides
+    // more than the default port: how many slashes may precede an authority,
+    // and whether an empty host is a failure. `hasOwnProperty` rather than a
+    // truthiness test, because `file:`'s value is the empty string and a
+    // scheme spelled `toString:` must not inherit an answer from a prototype.
+    function schemeIsSpecial(protocol) {
+        return Object.prototype.hasOwnProperty.call(SPECIAL_PORTS, protocol);
+    }
 
     function encodeFormComponent(text) {
         return encodeURIComponent(text).replace(/%20/g, '+').replace(/[!'()~]/g, function (character) {
@@ -896,7 +946,31 @@
         }
     }
 
-    // Lexical `.`/`..` removal, RFC 3986 section 5.2.4.
+    // The WHATWG "path percent-encode set", plus everything above ASCII, minus
+    // the two characters that cannot reach a path here (`?` and `#` are split
+    // off before parsing). A space is the one that matters in practice:
+    // `new URL('./a b', base).pathname` has to read back `/a%20b`, because an
+    // extension that builds a path from a file name and then hands the result
+    // to something that fetches it needs the same string the browser would
+    // have produced. `%` is deliberately absent, so an already-encoded path
+    // survives instead of being encoded twice.
+    var PATH_ESCAPES = /[\u0000-\u001F\u007F-\uFFFF "<>`{}]/g;
+
+    function percentEncodePath(path) {
+        return path.replace(PATH_ESCAPES, function (character) {
+            try {
+                return encodeURIComponent(character);
+            } catch (error) {
+                // A lone surrogate has no UTF-8 encoding and
+                // `encodeURIComponent` refuses it. Left as written rather than
+                // replaced by something that reads like a real character.
+                return character;
+            }
+        });
+    }
+
+    // Lexical `.`/`..` removal, RFC 3986 section 5.2.4, and then the path
+    // percent-encode set.
     function normalizePath(path) {
         if (path === '') {
             return '';
@@ -923,7 +997,7 @@
         if (trailing && joined.charAt(joined.length - 1) !== '/') {
             joined += '/';
         }
-        return joined;
+        return percentEncodePath(joined);
     }
 
     function resolveAgainst(base, reference) {
@@ -992,18 +1066,40 @@
             // `https://a.com/p/` folds the host into the path and `hostname`
             // reads back `a.com` — which is the one silent mis-parse in a file
             // whose whole policy is to fail loudly instead.
-            var borrowed = ABSOLUTE_PATTERN.exec(
-                (base instanceof URL ? base : new URL(String(base)))._protocol + text
-            );
+            var baseURL = base instanceof URL ? base : new URL(String(base));
+            var reference = text;
+            // WHATWG's "special authority slashes" state skips a *run* of
+            // slashes between a special scheme and its authority, so
+            // `///x` against `https://a.com/p/` is host `x` and path `/`, not
+            // an empty host and a path of `/x` — another `hostname` that reads
+            // back wrong. `file:` is excluded because its own state machine
+            // keeps the extra slash (`file:///x` is host-less by design), and
+            // so is every non-special scheme.
+            if (schemeIsSpecial(baseURL._protocol) && baseURL._protocol !== 'file:') {
+                reference = '//' + reference.replace(/^\/+/, '');
+            }
+            var borrowed = ABSOLUTE_PATTERN.exec(baseURL._protocol + reference);
             if (!borrowed) {
                 throw new TypeError("Invalid URL: '" + text + "'");
             }
             parseAbsolute(this, borrowed);
+            // `//` alone, or `//?q`: a special scheme with no host is a parse
+            // failure in WHATWG rather than a URL whose `hostname` is empty,
+            // and this file would rather throw with the input in the message
+            // than hand back something that cannot be requested.
+            if (this._hostname === '' && schemeIsSpecial(this._protocol) && this._protocol !== 'file:') {
+                throw new TypeError("Invalid URL: '" + text + "'");
+            }
         } else {
             parseRelative(this, text, base);
         }
 
-        if (this._pathname === '' && this._hostname !== '') {
+        // `file:` always has an authority position, empty host or not — the
+        // `href` getter below already writes its `//` unconditionally — so it
+        // gets the same empty-path treatment a host-ful URL gets. Without it
+        // `new URL('file:')` reads back `file://`, which is a URL with an
+        // empty *host* rather than an empty path.
+        if (this._pathname === '' && (this._hostname !== '' || this._protocol === 'file:')) {
             this._pathname = '/';
         }
 
@@ -1106,8 +1202,31 @@
         return module.exports;
     }
 
+    // Total by construction, because one of its callers is a promise reaction
+    // job — a place where a throw reaches *nothing*. There is no `catch` above
+    // a reaction, JSC does not route the derived promise's rejection to the
+    // context's exception handler, and the host is suspended on a continuation
+    // that has no timeout by design. A `describeThrown` that threw there would
+    // leave `done` uncalled and hang activation with nothing logged.
+    //
+    // Describing a value means reading it, and the reads that can throw are
+    // ordinary: `value instanceof Error` runs a Proxy's `getPrototypeOf` trap,
+    // `value.stack` runs a getter on a decorated `Error`, and `Object.keys` /
+    // `value[key]` / `value.constructor` inside `format` run any getter the
+    // object has. Rejecting with a domain object is common; so is an `Error`
+    // someone attached a lazy `stack` to.
+    //
+    // So every read lives inside the `try`, and the fallback reads nothing:
+    // `typeof` is the one question about a value that cannot run user code,
+    // and string concatenation of two strings cannot throw either.
     function describeThrown(value) {
-        return value instanceof Error ? format(value, 0, []) : 'Non-Error thrown: ' + format(value, 0, []);
+        try {
+            return value instanceof Error
+                ? format(value, 0, [])
+                : 'Non-Error thrown: ' + format(value, 0, []);
+        } catch (error) {
+            return 'A rejection reason that could not be described (' + (typeof value) + ').';
+        }
     }
 
     // Calls the extension's `activate` and reports how it *ended*, which is not
@@ -1122,9 +1241,14 @@
     // prevent, so the rejection is caught here, where it is visible, and handed
     // back through `done`.
     //
-    // `done` is called exactly once on every path, including the one where
-    // there is no `activate` to call: the host suspends until it arrives, so a
-    // path that skipped it would hang activation rather than fail it.
+    // `done` is called on every path, including the one where there is no
+    // `activate` to call: the host suspends until it arrives, so a path that
+    // skipped it would hang activation rather than fail it. Once is the normal
+    // case; a thenable that calls both arms, rejects twice, or throws from
+    // `then` after already settling can produce a second call, and that is
+    // deliberate — the host resumes its continuation once and ignores the
+    // rest, so calling `done` twice costs nothing and never calling it costs
+    // an activation that never returns.
     function callActivate(exports, activationContext, done) {
         var activate;
         try {
@@ -1144,16 +1268,36 @@
             done(false, describeThrown(error));
             return true;
         }
+        // Deliberately outside a `try`: this read is still inside the host's
+        // `invokeMethod`, so a `.then` getter that throws escapes to the
+        // context's exception handler and the host's `pendingException`
+        // fallback turns it into a failed activation. That fallback is the
+        // only thing covering this line — see `callActivate` in
+        // ExtensionHost.swift.
         var then = result === null || result === undefined ? undefined : result.then;
         if (typeof then !== 'function') {
             done(true, '');
             return true;
         }
-        then.call(
-            result,
-            function () { done(true, ''); },
-            function (reason) { done(false, describeThrown(reason)); }
-        );
+        // Past this line the synchronous window is over: the arms run as
+        // promise reaction jobs, where a throw is caught by nothing and would
+        // strand `done`. Two defences, and together they are the whole reason
+        // this call cannot hang activation. The arms themselves do only two
+        // things — call `describeThrown`, which is total, and call `done`,
+        // which is the host's block — so neither arm has a throw site left.
+        // The `try` covers `then` itself, which is extension code and may
+        // throw before either arm runs, or after one of them already has.
+        // Calling `done` twice is harmless by design: the host takes and nils
+        // the continuation before resuming it, so the second call is a no-op.
+        try {
+            then.call(
+                result,
+                function () { done(true, ''); },
+                function (reason) { done(false, describeThrown(reason)); }
+            );
+        } catch (error) {
+            done(false, describeThrown(error));
+        }
         return true;
     }
 
