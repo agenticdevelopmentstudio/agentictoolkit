@@ -25,11 +25,6 @@ public final class ViewsContributionPoint: ContributionPoint {
 
     private struct Registration {
         let identifier: String
-        /// `displayName ?? name`, kept for the placeholder's second line.
-        /// Reading it back off the manifest at factory time would mean holding
-        /// the manifest, and the manifest is the one thing here that is
-        /// allowed to have gone away.
-        let displayName: String
         let containers: [ContributedViewContainer]
         let views: [ContributedView]
     }
@@ -79,6 +74,9 @@ public final class ViewsContributionPoint: ContributionPoint {
             return
         }
 
+        // Captured by value below rather than read back off the manifest at
+        // factory time: the manifest is the one thing here that is allowed to
+        // have gone away by the time a pane is built.
         let displayName = manifest.displayName ?? manifest.name
         for view in built.views {
             registry.register(
@@ -100,7 +98,6 @@ public final class ViewsContributionPoint: ContributionPoint {
 
         registrations.append(Registration(
             identifier: manifest.identifier,
-            displayName: displayName,
             containers: built.containers,
             views: built.views
         ))
@@ -178,6 +175,11 @@ public final class ExtensionViewPlaceholderViewController: NSViewController {
         explanation.cell?.usesSingleLineMode = false
         explanation.lineBreakMode = .byWordWrapping
         explanation.maximumNumberOfLines = 0
+        // The width a multi-line `NSTextField` computes its intrinsic *height*
+        // against. The `widthAnchor` below bounds the field but does not tell
+        // it that, so without this AppKit can settle on a single-line
+        // intrinsic size and lay the sentence out clipped.
+        explanation.preferredMaxLayoutWidth = 320
         explanation.alignment = .center
         title.alignment = .center
         attribution.alignment = .center

@@ -109,12 +109,40 @@ struct ContributedViewsBuilderTests {
     @Test("a mapped codicon becomes an SF Symbol name")
     func codiconResolvesToASymbol() throws {
         let built = try view(#"{ "id": "acme.find", "name": "Find", "icon": "$(search)" }"#)
-        #expect(built.symbolName != nil)
-        #expect(built.symbolName == CodiconSymbols.table["search"])
+        // A literal, not `CodiconSymbols.table["search"]`: comparing the output
+        // to the table it came from moves both sides together and passes even
+        // if `search` were mapped to a real-but-wrong symbol.
+        #expect(built.symbolName == "magnifyingglass")
         #expect(built.iconPath == nil)
 
         let emitted = try notes(#"{ "id": "acme.find", "name": "Find", "icon": "$(search)" }"#)
         #expect(!emitted.contains { $0.kind == .unmappedIcon || $0.kind == .fileIcon })
+    }
+
+    @Test("an animated codicon names the same glyph as the still one")
+    func codiconAnimationModifierIsIgnored() throws {
+        // `$(sync~spin)` asks for an animation of the `sync` glyph, not for a
+        // different glyph, so the tilde and what follows it are not part of the
+        // name being looked up.
+        let built = try view(#"{ "id": "acme.spin", "name": "Spin", "icon": "$(search~spin)" }"#)
+        #expect(built.symbolName == "magnifyingglass")
+        #expect(!(try notes(#"{ "id": "acme.spin", "name": "Spin", "icon": "$(search~spin)" }"#))
+            .contains { $0.kind == .unmappedIcon })
+    }
+
+    @Test("an empty icon is neither a symbol, nor a path, nor a complaint")
+    func blankIconIsNeitherSymbolNorPath() throws {
+        let entry = #"{ "id": "acme.blank", "name": "Blank", "icon": "  " }"#
+        let built = try view(entry)
+        #expect(built.symbolName == nil)
+        #expect(built.iconPath == nil)
+        // Whitespace is not a file the extension ships, so a `fileIcon` note
+        // here would send a reader looking for an image that never existed.
+        #expect((try notes(entry)).isEmpty)
+
+        let empty = try view(#"{ "id": "acme.paren", "name": "Paren", "icon": "$()" }"#)
+        #expect(empty.symbolName == nil)
+        #expect(empty.iconPath == nil)
     }
 
     @Test("a vendor-private icon name resolves to nothing, and says so")
@@ -154,40 +182,59 @@ struct ContributedViewsBuilderTests {
 
     // MARK: - 7 — Ruling FD, the container decides the axis
 
-    @Test("a view in a panel container prefers the vertical axis")
-    func panelContainerMakesTheViewVertical() throws {
-        let built = try view(
-            #"{ "id": "acme.bottom", "name": "Bottom" }"#,
-            target: "acme.strip",
-            viewsContainers: #"{ "panel": [{ "id": "acme.strip", "title": "Strip", "icon": "i.svg" }] }"#)
-        #expect(built.preferredAxisIsVertical)
-    }
-
-    @Test("a view in an activity-bar container prefers the horizontal axis")
-    func activitybarMakesItHorizontal() throws {
+    /// One case rather than four, and carrying **both** polarities, because
+    /// each `!preferredAxisIsVertical` assertion standing on its own would pass
+    /// with the axis logic replaced by a hard-coded `false`.
+    @Test("the container the view lands in is the only thing that decides the axis")
+    func axisFollowsTheContainerLocation() throws {
         let containers = #"""
-        { "activitybar": [{ "id": "acme.side", "title": "Side", "icon": "i.svg" }] }
+        {
+            "panel": [{ "id": "acme.strip", "title": "Strip", "icon": "i.svg" }],
+            "activitybar": [{ "id": "acme.side", "title": "Side", "icon": "i.svg" }]
+        }
         """#
-        let built = try view(
-            #"{ "id": "acme.tree", "name": "Tree" }"#,
-            target: "acme.side",
-            viewsContainers: containers)
-        #expect(!built.preferredAxisIsVertical)
+        let entry = #"{ "id": "acme.view", "name": "View" }"#
+        let expectations: [(target: String, isVertical: Bool)] = [
+            ("acme.strip", true),           // self-declared, in the panel location
+            ("acme.side", false),           // self-declared, on the activity bar
+            ("explorer", false),            // a VS Code built-in
+            ("someoneElsesContainer", false) // nobody declares it
+        ]
+
+        for expectation in expectations {
+            let built = try view(
+                entry, target: expectation.target, viewsContainers: containers)
+            #expect(
+                built.preferredAxisIsVertical == expectation.isVertical,
+                "\(expectation.target) should be \(expectation.isVertical ? "vertical" : "horizontal")")
+        }
     }
 
-    @Test("a view targeting a VS Code built-in is horizontal and unremarkable")
-    func builtInTargetMakesItHorizontal() throws {
+    /// Ruling FD says a view's axis follows its container's *location*, and
+    /// enumerates the built-in target ids as horizontal. `panel` is both: it is
+    /// the `viewsContainers` key that means the bottom strip **and** a built-in
+    /// container id a view may target with no `viewsContainers` at all. This
+    /// resolves it to vertical, applying the ruling's reasoning — the panel is
+    /// the bottom strip — rather than its enumeration, and that departure is
+    /// deliberate. Do not "fix" it back to horizontal without reading Ruling
+    /// FD's justification: a bottom-strip pane laid out along the horizontal
+    /// axis is the wrong shape for the surface it lives on.
+    @Test("a view targeting the built-in panel id lands in the bottom strip")
+    func builtInPanelTargetIsVertical() throws {
+        let entry = #"{ "id": "acme.bottom", "name": "Bottom" }"#
+        #expect(try view(entry, target: "panel").preferredAxisIsVertical)
+        #expect(!(try notes(entry, target: "panel")).contains { $0.kind == .unknownContainer })
+    }
+
+    @Test("a view targeting a VS Code built-in is not treated as an orphan")
+    func builtInTargetIsNotAnUnknownContainer() throws {
         let entry = #"{ "id": "acme.files", "name": "Files" }"#
-        #expect(!(try view(entry, target: "explorer").preferredAxisIsVertical))
         #expect(!(try notes(entry, target: "explorer")).contains { $0.kind == .unknownContainer })
     }
 
-    @Test("a view targeting a container nobody declares is noted, and horizontal")
-    func unknownContainerGetsANoteAndHorizontal() throws {
+    @Test("a view targeting a container nobody declares is noted")
+    func unknownContainerGetsANote() throws {
         let entry = #"{ "id": "acme.orphan", "name": "Orphan" }"#
-        let built = try view(entry, target: "someoneElsesContainer")
-        #expect(!built.preferredAxisIsVertical)
-
         let emitted = try notes(entry, target: "someoneElsesContainer")
         let note = try #require(emitted.first { $0.kind == .unknownContainer })
         #expect(note.detail.contains("someoneElsesContainer"))
@@ -267,6 +314,32 @@ struct ContributedViewsBuilderTests {
         #expect(note.detail.contains("explorer"))
     }
 
+    @Test("across two targets, the first that wins is the sorted one, not the declared one")
+    func duplicateViewIDAcrossTargetsIsResolvedInSortedOrder() throws {
+        // The case above cannot tell "first wins" apart from "first in the
+        // JSON wins", because both entries sit in one array. Here they sit in
+        // two, `zeta` is written first, and `views` decodes into a dictionary
+        // — which has no order at all to be first in. So the only thing that
+        // can decide the winner is the target sort, and `explorer` sorts
+        // before `zeta`. Flip that sort and this fails; delete it and it
+        // becomes a coin toss that fails most runs.
+        let built = try build(views: #"""
+        {
+            "zeta": [{ "id": "acme.dupe", "name": "FromZeta" }],
+            "explorer": [{ "id": "acme.dupe", "name": "FromExplorer" }]
+        }
+        """#)
+
+        try #require(built.views.count == 1)
+        #expect(built.views[0].name == "FromExplorer")
+
+        // The note names the target that won, which is the fact a reader of
+        // the Extensions UI needs and the one this ordering decides.
+        let note = try #require(built.notes.first { $0.kind == .duplicateViewID })
+        #expect(note.detail.contains("explorer"))
+        #expect(!note.detail.contains("zeta"))
+    }
+
     // MARK: - 11 — the regression test for the manifest fix
 
     @Test("a container that declares no icon still survives decoding")
@@ -302,6 +375,34 @@ struct ContributedViewsBuilderTests {
         #expect(built.views[0].initialSize == nil)
         #expect(built.views[0].visibility == nil)
         #expect(built.views[0].name == "Sized")
+
+        // Ruling GF. Keeping the view is only half the trade; the other half is
+        // that the field it lost is on the record. A `nil` here has to be
+        // distinguishable from a field the author never declared, and the note
+        // is the only thing that distinguishes them.
+        let malformed = built.notes.filter { $0.kind == .malformedField }
+        #expect(malformed.count == 2)
+        #expect(malformed.allSatisfy { $0.viewID == "acme.sized" })
+        #expect(malformed.contains { $0.detail.contains("initialSize") })
+        #expect(malformed.contains { $0.detail.contains("visibility") })
+    }
+
+    @Test("a field nobody declared is absence, not a lost declaration")
+    func anAbsentOrNullFieldIsNotNoted() throws {
+        // The counterweight to the case above: if every `nil` produced a note,
+        // `malformedField` would say nothing, because 374 of the corpus's
+        // entries omit at least one of these keys. An explicit `null` is a
+        // declaration withdrawn by its author and counts as absence too.
+        let built = try build(views: #"""
+        {
+            "explorer": [
+                { "id": "acme.plain", "name": "Plain" },
+                { "id": "acme.nulled", "name": "Nulled", "when": null, "initialSize": null }
+            ]
+        }
+        """#)
+        try #require(built.views.count == 2)
+        #expect(!built.notes.contains { $0.kind == .malformedField })
     }
 
     @Test("a container's when clause is carried")

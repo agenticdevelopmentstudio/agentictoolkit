@@ -686,6 +686,18 @@ extension ExtensionManifest {
         /// it onto `preferredThicknessFraction` would silently get the layout
         /// wrong.
         public let initialSize: Double?
+        /// The keys this entry declared and this decoder could not read,
+        /// in declaration order of the type rather than of the JSON.
+        ///
+        /// Dropping a field silently would trade a loud failure for a quiet
+        /// one: before the widened decoder, a `when` given as a number threw,
+        /// `decodeLenientDictionary` caught it, and a `DecodingFailure` was
+        /// recorded with the key and the reason. Keeping the view is the right
+        /// trade, but a `String?` cannot tell "absent" from "present and
+        /// unreadable", so the difference is carried here instead and
+        /// `ContributedViewsBuilder` turns each entry into a `malformedField`
+        /// note (Ruling GF).
+        public let unreadableKeys: [String]
 
         private enum CodingKeys: String, CodingKey {
             case id, name, when, type, icon, contextualTitle, visibility, initialSize
@@ -707,12 +719,30 @@ extension ExtensionManifest {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(String.self, forKey: .id)
             name = try container.decode(String.self, forKey: .name)
-            when = try? container.decode(String.self, forKey: .when)
-            type = try? container.decode(String.self, forKey: .type)
-            icon = try? container.decode(String.self, forKey: .icon)
-            contextualTitle = try? container.decode(String.self, forKey: .contextualTitle)
-            visibility = try? container.decode(String.self, forKey: .visibility)
-            initialSize = try? container.decode(Double.self, forKey: .initialSize)
+
+            // A key that is absent was never declared and is nobody's problem;
+            // a key that is present and will not decode is a lost declaration,
+            // and the difference is the whole point of recording it.
+            var unreadable: [String] = []
+            func read<T: Decodable>(_ type: T.Type, _ key: CodingKeys) -> T? {
+                guard container.contains(key) else { return nil }
+                // An explicit `null` is a declaration withdrawn, not one this
+                // host failed to read, so it is absence rather than a note.
+                if (try? container.decodeNil(forKey: key)) == true { return nil }
+                guard let value = try? container.decode(T.self, forKey: key) else {
+                    unreadable.append(key.stringValue)
+                    return nil
+                }
+                return value
+            }
+
+            when = read(String.self, .when)
+            type = read(String.self, .type)
+            icon = read(String.self, .icon)
+            contextualTitle = read(String.self, .contextualTitle)
+            visibility = read(String.self, .visibility)
+            initialSize = read(Double.self, .initialSize)
+            unreadableKeys = unreadable
         }
     }
 
@@ -737,6 +767,14 @@ extension ExtensionManifest {
         /// nor a label is nothing a view could target or a person could read —
         /// and the two decorations are `try?`, so a wrong-typed one costs
         /// itself instead of the container. Same shape as `View` above.
+        ///
+        /// No `unreadableKeys` here, though, and that asymmetry is deliberate.
+        /// Under Ruling FD nothing renders a container: its `icon` is carried
+        /// raw and its `when` is never evaluated, so a container decoration
+        /// that arrives unreadable compromises nothing a readable one would
+        /// have delivered. It is the same reason containers get no notes at
+        /// all. A view's dropped `when` is a different matter, because a view
+        /// becomes a registered, always-offered pane.
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(String.self, forKey: .id)

@@ -12,6 +12,10 @@ public struct ContributedViewContainer: Sendable, Equatable {
     public let location: String
     public let containerID: String
     public let title: String
+    /// Raw, as declared, and deliberately unresolved: nothing renders a
+    /// container (Ruling FD), so a container's `$(codicon)` is carried for a
+    /// future host rather than looked up here — which is why
+    /// `CodiconSymbols.table` covers names this builder never asks for.
     public let icon: String?
     public let when: String?
 
@@ -108,6 +112,18 @@ public struct ContributedViewNote: Sendable, Equatable {
         case unknownContainer
         /// The same extension declared the same view id more than once.
         case duplicateViewID
+        /// A field was declared with JSON the decoder could not read — an
+        /// `initialSize` spelled `"2"`, an `icon` given as a light/dark object
+        /// — so the view kept its identity and lost that field.
+        ///
+        /// This note is the whole reason `ExtensionManifest.View` records
+        /// `unreadableKeys`. Without it the widened decoder would trade a loud
+        /// failure (the element thrown out, a `DecodingFailure` recorded) for a
+        /// silent one, and a dropped `when` would leave a pane offered
+        /// unconditionally with nothing anywhere saying its author tried to
+        /// condition it — the exact failure `whenNotEvaluated` exists to
+        /// prevent, one level down.
+        case malformedField
     }
 
     public let extensionIdentifier: String
@@ -133,10 +149,10 @@ public struct ContributedViewNote: Sendable, Equatable {
 /// answer to the question rather than a second one (`dry`).
 public enum CodiconSymbols {
 
-    /// `nil` for any name with no faithful equivalent, which is the answer for
-    /// every vendor-private name a manifest happens to spell like a codicon
-    /// (`gitlens-graph`, `colab-logo`) as well as for the brand marks SF
-    /// Symbols does not contain.
+    /// `nil` for any name with no faithful equivalent: every vendor-private
+    /// name a manifest happens to spell like a codicon (`gitlens-graph`,
+    /// `colab-logo`), and every real codicon whose glyph has no generic
+    /// subject — see the rule on `table`.
     ///
     /// - Parameter codicon: the bare name, without the `$(…)` wrapper.
     public static func symbolName(forCodicon codicon: String) -> String? {
@@ -147,14 +163,23 @@ public enum CodiconSymbols {
     /// platform: a wrong SF Symbol name is an invisible icon at runtime, not a
     /// build error, so nothing but a test catches it (`fail-fast`).
     ///
+    /// **The rule.** A codicon is mapped when the glyph it draws has a generic
+    /// subject a symbol can name — a cloud, a terminal, a clock. It is left
+    /// unmapped when the glyph *is* a mark (`github`) or a control rather than
+    /// a subject (`debug-gripper`, a drag handle on VS Code's floating debug
+    /// toolbar). An unmapped name becomes an `unmappedIcon` note and a pane
+    /// with no icon, which is honest where a stand-in glyph would not be.
+    ///
+    /// Note what the rule is *not*: "no third-party brands". `azure` and
+    /// `terminal-powershell` are both branded names and both are mapped,
+    /// because what those codicons draw is a cloud and a terminal. It is the
+    /// Octocat that has no generic subject, not the word GitHub.
+    ///
     /// Only long-established symbols are used. The deployment target is macOS
     /// 14 and the build machine is newer, so `NSImage(systemSymbolName:)`
     /// answering here does not by itself prove the name existed in SF Symbols
     /// 5; choosing names that predate it is what does.
     public static let table: [String: String] = [
-        // A cloud is what an Azure panel lists, and the glyph says so without
-        // pretending to be the brand mark. `github` gets no such treatment
-        // below: nothing generic reads as GitHub.
         "azure": "cloud",
         "bell": "bell",
         "bookmark": "bookmark",
@@ -198,8 +223,6 @@ public enum CodiconSymbols {
         "symbol-class": "cube",
         "symbol-file": "doc",
         "tag": "tag",
-        // The shell, not the vendor: PowerShell has no mark here, and the
-        // pane is a terminal either way.
         "terminal-powershell": "terminal",
         "type-hierarchy": "square.stack.3d.up"
     ]
@@ -277,9 +300,19 @@ public enum ContributedViewsBuilder {
             }
             seenViewIDs[declared.id] = entry.target
 
-            let location = locationsByContainerID[entry.target]
-                ?? (builtInContainerIDs.contains(entry.target) ? entry.target : nil)
-            if location == nil {
+            // Two vocabularies meet here and they are not the same one. For a
+            // self-declared target, `declaredLocation` is a `viewsContainers`
+            // *key* (`activitybar`, `panel`, `secondarySidebar`); for a
+            // built-in target there is no such key and the *container id*
+            // (`explorer`, `scm`, `panel`, …) is all there is. Both spell the
+            // bottom strip `panel`, which is a coincidence this states rather
+            // than relies on silently: a seventh built-in id would otherwise be
+            // compared against a location constant with nothing to say so.
+            let declaredLocation = locationsByContainerID[entry.target]
+            let isKnownTarget =
+                declaredLocation != nil || builtInContainerIDs.contains(entry.target)
+            let isBottomStrip = (declaredLocation ?? entry.target) == bottomPanelLocation
+            if !isKnownTarget {
                 notes.append(ContributedViewNote(
                     extensionIdentifier: identifier,
                     viewID: declared.id,
@@ -304,6 +337,22 @@ public enum ContributedViewsBuilder {
             let icon = resolveIcon(
                 declared.icon, viewID: declared.id, identifier: identifier, notes: &notes)
 
+            // Ruling GF. `View`'s decoder keeps the view and drops a field
+            // whose JSON does not fit; this is where the drop stops being
+            // silent. Without it a `when` given as a number would leave a pane
+            // offered unconditionally with nothing recording that its author
+            // tried to condition it — and `when` is on three quarters of the
+            // corpus's view entries.
+            for key in declared.unreadableKeys {
+                notes.append(ContributedViewNote(
+                    extensionIdentifier: identifier,
+                    viewID: declared.id,
+                    kind: .malformedField,
+                    detail: "declares \(key) in a form this host cannot read; the pane is "
+                        + "offered without it."
+                ))
+            }
+
             if let when = declared.when, !when.isEmpty {
                 notes.append(ContributedViewNote(
                     extensionIdentifier: identifier,
@@ -326,7 +375,7 @@ public enum ContributedViewsBuilder {
                 when: declared.when,
                 visibility: declared.visibility,
                 initialSize: declared.initialSize,
-                preferredAxisIsVertical: location == bottomPanelLocation
+                preferredAxisIsVertical: isBottomStrip
             ))
         }
 

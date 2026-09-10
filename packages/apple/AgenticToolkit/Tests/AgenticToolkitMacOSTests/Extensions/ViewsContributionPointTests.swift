@@ -50,16 +50,30 @@ struct ViewsContributionPointTests {
         try point.apply(contributions, from: manifest, at: Self.unusedDirectory)
     }
 
+    /// Names the temporary directories `ProjectWindowTestSupport` makes for
+    /// this suite, and is what `removeWorkspaceDirectories` finds them by.
+    private static let workspaceLabel = "ViewsContributionPointTests"
+
     /// A registered project, because `ComposableTabsViewContext` carries one
     /// and a factory cannot be reached without it.
-    private func makeWorkspace() throws -> ProjectWorkspace {
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ViewsContributionPointTests-\(UUID().uuidString)")
-            .appendingPathComponent("Test.db").path
-        let repo = GitRepo(path: NSTemporaryDirectory(), name: "Test")
-        let database = try ProjectDatabase(path: path)
-        try database.insert(repo)
-        return ProjectWorkspace(repo: repo, database: database)
+    ///
+    /// `ProjectWindowTestSupport.makeProject` is the bundle's one answer to
+    /// this and predates this suite; a second private copy would be a second
+    /// answer to a settled question (`dry`).
+    private func makeWorkspace() -> ProjectWorkspace {
+        ProjectWindowTestSupport.makeProject(label: Self.workspaceLabel, named: "Test")
+    }
+
+    /// The helper owns the UUID and returns only the workspace, so cleanup
+    /// cannot go by a returned URL — it goes by the label prefix, which is why
+    /// the label is a constant rather than a string spelled at the call site.
+    private func removeWorkspaceDirectories() {
+        let root = FileManager.default.temporaryDirectory
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil)) ?? []
+        for entry in entries where entry.lastPathComponent.hasPrefix(Self.workspaceLabel) {
+            try? FileManager.default.removeItem(at: entry)
+        }
     }
 
     private func labels(in view: NSView) -> [String] {
@@ -88,7 +102,7 @@ struct ViewsContributionPointTests {
         try apply(try manifest(name: "views", views: #"""
         {
             "explorer": [
-                { "id": "test.alpha", "name": "Alpha" },
+                { "id": "test.alpha", "name": "Alpha", "initialSize": 2 },
                 { "id": "test.beta", "name": "Beta", "icon": "$(search)" }
             ]
         }
@@ -99,7 +113,14 @@ struct ViewsContributionPointTests {
             #expect(registry.isRegistered(registryID))
             #expect(registry.descriptor(for: registryID).displayName == name)
             #expect(registry.descriptor(for: registryID).isCollapsible)
+            // Ruling FC, at the only place it can be observed. `initialSize` is
+            // a VS Code *weight* among siblings, not a fraction of the window,
+            // so `Alpha`'s `2` is carried on the metadata and deliberately not
+            // handed to the registry as a thickness it does not mean.
+            #expect(registry.descriptor(for: registryID).preferredThicknessFraction == nil)
         }
+        #expect(point.views(for: "test.views").first { $0.viewID == "test.alpha" }?
+            .initialSize == 2)
         #expect(registry.descriptor(for: "extension.test.views.test.beta").symbolName != nil)
         #expect(point.views(for: "test.views").count == 2)
     }
@@ -111,15 +132,19 @@ struct ViewsContributionPointTests {
         let registry = ComposableTabsViewRegistry()
         let point = ViewsContributionPoint(registry: registry)
         try apply(
+            // Both `when`s are load-bearing: each produces one Ruling FB note,
+            // so the note assertions below are over two notes rather than over
+            // an empty array that satisfies anything asked of it.
             try manifest(name: "first", views: #"""
-            { "explorer": [{ "id": "test.one", "name": "One" }] }
+            { "explorer": [{ "id": "test.one", "name": "One", "when": "isMac" }] }
             """#),
             to: point)
         try apply(
             try manifest(name: "second", views: #"""
-            { "explorer": [{ "id": "test.two", "name": "Two" }] }
+            { "explorer": [{ "id": "test.two", "name": "Two", "when": "isMac" }] }
             """#),
             to: point)
+        try #require(point.notes.count == 2)
 
         point.withdraw(extensionIdentifier: "test.first")
 
@@ -128,6 +153,9 @@ struct ViewsContributionPointTests {
         #expect(registry.isRegistered(.placeholder))
         #expect(point.views(for: "test.first").isEmpty)
         #expect(point.views(for: "test.second").count == 1)
+        // The count catches a `removeAll` that removed nothing; the predicate
+        // catches one that removed the wrong extension's.
+        #expect(point.notes.count == 1)
         #expect(point.notes.allSatisfy { $0.extensionIdentifier == "test.second" })
     }
 
@@ -163,10 +191,11 @@ struct ViewsContributionPointTests {
             """#),
             to: point)
 
+        defer { removeWorkspaceDirectories() }
         let controller = registry.makeContentViewController(
             for: "extension.test.pane.test.pane",
             nodeID: UUID(),
-            project: try makeWorkspace(),
+            project: makeWorkspace(),
             paneNumber: 1)
 
         let placeholder = try #require(controller as? ExtensionViewPlaceholderViewController)
