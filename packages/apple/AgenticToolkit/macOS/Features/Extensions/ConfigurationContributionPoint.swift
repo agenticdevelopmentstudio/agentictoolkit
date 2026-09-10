@@ -222,8 +222,13 @@ private final class GeneratedSettingsPanel: ComposableSettings.SettingsPanelView
 /// Text that does not parse is not a setting with an unusual value; it is a
 /// setting with no value at all, and storing it would replace a working
 /// default with something the extension cannot read.
+///
+/// Internal rather than private so a test can drive a commit through the view
+/// the panel actually built: counting `TextAreaEditView` descendants cannot
+/// tell this class from its superclass, so with it private the validation
+/// could be deleted outright and the suite would stay green.
 @MainActor
-private final class JSONTextAreaEditView: ComposableSettings.TextAreaEditView {
+final class JSONTextAreaEditView: ComposableSettings.TextAreaEditView {
 
     /// Held again here — the superclass's is private — so an invalid edit has
     /// something to revert to.

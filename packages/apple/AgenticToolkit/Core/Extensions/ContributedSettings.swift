@@ -185,7 +185,18 @@ public enum ContributedSettingsBuilder {
     /// `ContributionPoint.apply` is handed its contributions as a parameter
     /// rather than reaching back through the manifest for them, and a point
     /// that ignored that parameter in favour of `manifest.contributes` would
-    /// be answering a question it was not asked.
+    /// be answering a question it was not asked — which is exactly what the
+    /// reference implementation, `SnippetStore.apply`, avoids by reading
+    /// `contributions.snippets`. The registry happens to pass
+    /// `manifest.contributes` at both of today's call sites, so the two are
+    /// identical in practice; the parameter is the contract and the manifest
+    /// is the current caller's implementation detail, and honouring the
+    /// parameter is what keeps room for a caller that synthesises
+    /// contributions rather than decoding them.
+    ///
+    /// `public` is the module boundary, not a guess at a future need: this
+    /// type is `AgenticToolkitCore` and its only consumer,
+    /// `ConfigurationContributionPoint`, is `AgenticToolkitMacOS`.
     ///
     /// - Parameter fallbackTitle: the title a section with none borrows —
     ///   `displayName ?? name`. 21 of the corpus's 741 sections have no title.

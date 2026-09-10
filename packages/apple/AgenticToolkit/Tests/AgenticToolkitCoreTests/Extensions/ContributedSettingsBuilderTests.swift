@@ -437,4 +437,138 @@ struct ContributedSettingsBuilderTests {
             """.utf8))
         #expect(ContributedSettingsBuilder.sections(for: none).declaration == .undeclared)
     }
+
+    // MARK: - 24 — note order
+
+    @Test("notes come out in sorted-key order, not the dictionary's order")
+    func notesFollowSortedKeyOrderNotDisplayOrder() throws {
+        // Five note-producing properties, each a different kind, with `order`
+        // reversing their display order. Notes follow the *key*, so a build
+        // that emitted them in display order — or in whatever order the
+        // properties dictionary happened to hash into this process — fails.
+        let built = try build(configuration: """
+        {
+            "title": "Notes",
+            "properties": {
+                "e.five": {
+                    "type": "string", "order": 1,
+                    "enum": ["a", "b"], "default": "a", "enumDescriptions": ["A", "B"]
+                },
+                "d.four": {
+                    "type": "string", "order": 2,
+                    "enum": ["a", 2], "default": "a"
+                },
+                "c.three": { "type": ["boolean", "string"], "order": 3, "default": "x" },
+                "b.two": { "type": "widget", "order": 4, "default": "x" },
+                "a.one": { "type": "boolean", "order": 5 }
+            }
+        }
+        """)
+        let section = try #require(built.declaration.sections.first)
+        #expect(section.settings.map(\.key) == ["e.five", "d.four", "c.three", "b.two", "a.one"])
+        #expect(built.notes.map(\.key) == ["a.one", "b.two", "c.three", "d.four", "e.five"])
+        #expect(built.notes.map(\.kind) == [
+            .missingDefault, .unrenderableType, .mixedUnionType,
+            .nonStringEnum, .enumDescriptionsDropped
+        ])
+    }
+
+    // MARK: - 25 — the corpus shapes the decoder was changed for
+
+    @Test("a type spelled [\"number\", null] is still a number")
+    func nullMemberInATypeUnionSurvives() throws {
+        // Four corpus properties spell nullability with a JSON null rather
+        // than the string "null". Decoded into [String] the whole property
+        // throws; here it collapses to `number` like its written-out sibling.
+        let nullMember = try setting("a.size", """
+        { "type": ["number", null], "default": 1.5 }
+        """)
+        guard case .number(let value, _, _) = nullMember.kind else {
+            Issue.record("expected a number, got \(nullMember.kind)")
+            return
+        }
+        #expect(value == 1.5)
+
+        let spelled = try setting("a.size", """
+        { "type": ["number", "null"], "default": 1.5 }
+        """)
+        #expect(spelled.kind == nullMember.kind)
+    }
+
+    @Test("a property survives a field it spells wrongly, and its siblings survive it entirely")
+    func aMistypedFieldCostsOnlyThatField() throws {
+        // Eight corpus properties write `"order": "0"`. The property arrives
+        // without an order rather than not arriving.
+        let built = try build(configuration: """
+        {
+            "title": "Lenient",
+            "properties": {
+                "a.first": { "type": "boolean", "default": false, "order": "0" },
+                "b.second": { "type": "boolean", "default": false, "order": 1 }
+            }
+        }
+        """)
+        let section = try #require(built.declaration.sections.first)
+        #expect(section.settings.map(\.key) == ["b.second", "a.first"])
+        #expect(section.settings.map(\.order) == [1, nil])
+
+        // And a property that is not an object at all takes only itself down:
+        // decoded as one dictionary, it would take every sibling with it.
+        let broken = try build(configuration: """
+        {
+            "title": "Broken",
+            "properties": {
+                "a.rubbish": "not an object",
+                "b.fine": { "type": "boolean", "default": true }
+            }
+        }
+        """)
+        #expect(broken.declaration.sections.first?.settings.map(\.key) == ["b.fine"])
+    }
+
+    @Test("a property round-trips through encode and back, union type and all")
+    func propertyEncodingIsAFixedPoint() throws {
+        let json = """
+        {
+            "type": ["string", "null"],
+            "default": "b",
+            "description": "A choice.",
+            "enum": ["a", "b", null],
+            "enumItemLabels": [null, "Bee"],
+            "scope": "window",
+            "order": 3,
+            "minimum": 0,
+            "maximum": 10,
+            "editPresentation": "multilineText"
+        }
+        """
+        let decoder = JSONDecoder()
+        let first = try decoder.decode(
+            ExtensionManifest.ConfigurationProperty.self, from: Data(json.utf8))
+        let second = try decoder.decode(
+            ExtensionManifest.ConfigurationProperty.self,
+            from: try JSONEncoder().encode(first))
+        #expect(second == first)
+        #expect(second.type == .union(["string", "null"]))
+        #expect(second.effectiveType == "string")
+
+        // The other spelling of `type` has its own encode branch.
+        let single = try decoder.decode(
+            ExtensionManifest.ConfigurationProperty.self,
+            from: Data("{ \"type\": \"boolean\", \"default\": true }".utf8))
+        let again = try decoder.decode(
+            ExtensionManifest.ConfigurationProperty.self,
+            from: try JSONEncoder().encode(single))
+        #expect(again == single)
+        #expect(again.type == .single("boolean"))
+    }
+
+    // MARK: - 26 — the note for a property that declares no default
+
+    @Test("a property with no default says so, and the row takes the type's zero")
+    func missingDefaultIsReported() throws {
+        #expect(try notes("a.flag", "{ \"type\": \"boolean\" }").map(\.kind) == [.missingDefault])
+        #expect(try setting("a.flag", "{ \"type\": \"boolean\" }").kind == .toggle(default: false))
+        #expect(try notes("a.name", "{ \"type\": \"string\" }").map(\.kind) == [.missingDefault])
+    }
 }

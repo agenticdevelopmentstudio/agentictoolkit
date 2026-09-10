@@ -480,6 +480,14 @@ extension ExtensionManifest {
 
         private enum CodingKeys: String, CodingKey { case title, id, order, properties }
 
+        /// A property key, so the properties can be decoded one at a time.
+        private struct PropertyKey: CodingKey {
+            let stringValue: String
+            var intValue: Int? { nil }
+            init(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { nil }
+        }
+
         /// Every field is `try?` rather than `decodeIfPresent`, because
         /// `decodeLenientArray` isolates failures at the *section*: one
         /// mistyped scalar here throws out of this initializer and takes
@@ -487,13 +495,31 @@ extension ExtensionManifest {
         /// to 186 properties in the corpus, and eight properties there
         /// already spell `order` as the string `"0"`. Losing a section's
         /// place in a sorted list is the smaller failure by far.
+        ///
+        /// The properties are decoded **one at a time** for the same reason
+        /// one level down: decoded as a `[String: ConfigurationProperty]`,
+        /// a single unusable property throws and the whole dictionary — every
+        /// sibling in a section that can hold 186 of them — is lost with it.
+        /// Isolating each property is also what makes strictness affordable
+        /// later: with the blast radius bounded at one property, tightening a
+        /// field is a one-line change instead of a new way to lose a section.
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             title = try? container.decode(String.self, forKey: .title)
             id = try? container.decode(String.self, forKey: .id)
             order = try? container.decode(Int.self, forKey: .order)
-            properties = (try? container.decode(
-                [String: ConfigurationProperty].self, forKey: .properties)) ?? [:]
+
+            var decoded: [String: ConfigurationProperty] = [:]
+            if let properties = try? container.nestedContainer(
+                keyedBy: PropertyKey.self, forKey: .properties) {
+                for key in properties.allKeys {
+                    if let property = try? properties.decode(
+                        ConfigurationProperty.self, forKey: key) {
+                        decoded[key.stringValue] = property
+                    }
+                }
+            }
+            properties = decoded
         }
     }
 
@@ -597,12 +623,28 @@ extension ExtensionManifest {
             case deprecationMessage, markdownDeprecationMessage, editPresentation
         }
 
-        /// `try?` per field, for the reason `Configuration.init(from:)` gives:
-        /// a throw here is charged to the whole section, so a property that
-        /// spells one annotation wrongly must still arrive with the rest of
-        /// its siblings. Every field this drops is annotation — a label, a
-        /// blurb, a sort position — never the value or the type the row is
-        /// built from.
+        /// `try?` per field — **every** field, the value-bearing ones
+        /// included. A field whose JSON does not fit its declared Swift type
+        /// is dropped, and the property arrives without it rather than not
+        /// arriving at all.
+        ///
+        /// The consequence, stated because it is not free: a manifest
+        /// spelling `"minimum": "0"` as a string gets a row with *no* lower
+        /// bound, and nothing tells the user — `ContributedSettingNote`
+        /// records classification compromises, not decode losses.
+        ///
+        /// Strictness on the value fields was measured and rejected. Across
+        /// all 7,464 corpus properties the only fields that ever fail a
+        /// strict decode are `order` (8) and `markdownDescription` (1);
+        /// `type`, `default`, `enum`, `minimum`, `maximum`, `scope`,
+        /// `deprecationMessage`, `editPresentation` and `enumItemLabels`
+        /// never fail anywhere. So strictness would buy a fail-fast guarantee
+        /// against a case that does not occur, and pay for it by throwing —
+        /// which, before `Configuration.init(from:)` began decoding its
+        /// properties one at a time, cost a whole section. That isolation is
+        /// now in place, which is what makes this decision cheap to revisit:
+        /// tightening a field here can no longer take a property's siblings
+        /// with it.
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             type = try? container.decode(PropertyType.self, forKey: .type)

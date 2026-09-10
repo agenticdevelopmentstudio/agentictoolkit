@@ -229,4 +229,127 @@ struct ConfigurationContributionPointTests {
         #expect(!rightSetting.existsInStore())
         #expect(point.contributingExtensions == [first.identifier, second.identifier])
     }
+
+    // MARK: - 24 — the escape hatch's whole point
+
+    @Test("the escape hatch reverts text that is not JSON, and accepts a bare fragment")
+    func jsonRowRevertsInvalidTextAndAcceptsAFragment() throws {
+        let point = ConfigurationContributionPoint()
+        let manifest = try manifest(name: "hatch", configuration: """
+        { "title": "Hatch", "properties": { "h.tags": { "type": "array", "default": [1, 2] } } }
+        """)
+        try apply(manifest, to: point)
+        let setting = UserSetting(
+            ContributedSettingsBuilder.storageName(
+                forKey: "h.tags", ofExtension: manifest.identifier),
+            default: "")
+        defer { setting.remove() }
+
+        let panel = try #require(point.panel(for: manifest.identifier))
+        // The view the panel actually built, not one made here: a test that
+        // constructs its own cannot notice the panel building the wrong class.
+        let editor = try #require(
+            descendants(JSONTextAreaEditView.self, in: panel.settingsView).first)
+        let original = editor.textView.string
+
+        editor.textView.string = "{ not json"
+        editor.commit()
+        #expect(editor.textView.string == original)
+        // Nothing was stored: the value's only consumer parses it, so text
+        // that does not parse is not a setting with an odd value.
+        #expect(!setting.existsInStore())
+
+        // `.fragmentsAllowed` is what lets a contributed default of `3` or
+        // `"auto"` be edited at all; without it the row would reject exactly
+        // the text it was given.
+        editor.textView.string = "3"
+        editor.commit()
+        #expect(setting.value == "3")
+        editor.textView.string = "\"auto\""
+        editor.commit()
+        #expect(setting.value == "\"auto\"")
+    }
+
+    // MARK: - 25 — the Double half of the number field
+
+    @Test("a double field writes whole numbers without a fraction and refuses non-numbers")
+    func doubleFieldRendersWholeNumbersAndRefusesNonFinite() throws {
+        let setting = UserSetting("extensions.test.numberfield.double", default: 2.0)
+        defer { setting.remove() }
+
+        let field = ComposableSettings.NumberFieldView(
+            viewModel: ComposableSettings.ViewModel(title: "double", setting: setting),
+            minimum: 0,
+            maximum: 1_000)
+        // A manifest that said `2` must not be shown back as `2.0`.
+        #expect(field.textField.stringValue == "2")
+
+        field.textField.stringValue = "1.5"
+        field.commit()
+        #expect(setting.value == 1.5)
+
+        // `nan` parses as a Double and then makes every clamp comparison
+        // false — a bounded field would accept it and rewrite on every cycle.
+        field.textField.stringValue = "nan"
+        field.commit()
+        #expect(setting.value == 1.5)
+        #expect(field.textField.stringValue == "1.5")
+
+        field.textField.stringValue = "inf"
+        field.commit()
+        #expect(setting.value == 1.5)
+    }
+
+    // MARK: - 26 — locale, and the ordering that makes it safe
+
+    @Test("a locale's decimal comma is read, and POSIX text is never re-read as grouping")
+    func localeParsingIsTriedOnlyAfterPOSIX() throws {
+        let german = Locale(identifier: "de_DE")
+        let english = Locale(identifier: "en_US")
+
+        // The bug: a comma-decimal edit used to be discarded as a typo.
+        #expect(Double(settingsFieldString: "1,5", locale: german) == 1.5)
+        #expect(Int(settingsFieldString: "1,024", locale: english) == 1_024)
+
+        // The hazard: the writer is POSIX and `sync()` puts its output back
+        // into the field, so POSIX text must survive a de_DE read untouched.
+        // The locale parse alone cannot read it — hence POSIX first.
+        #expect(Double(settingsFieldString: "1.5", locale: german) == 1.5)
+        #expect(Double.settingsLocaleNumber(from: "1.5", locale: german) == nil)
+
+        // An integer field stores an integer or nothing: `allowsFloats` is
+        // false for `Int`, so a fractional edit is refused, not rounded.
+        #expect(Int.settingsAllowsFloats == false)
+        #expect(Int(settingsFieldString: "1.5", locale: english) == nil)
+        #expect(Int(settingsFieldString: "1,5", locale: german) == nil)
+
+        #expect(Double(settingsFieldString: "nan", locale: english) == nil)
+        #expect(Double(settingsFieldString: "not a number", locale: english) == nil)
+    }
+
+    // MARK: - 27 — the forwarder other repos link
+
+    @Test("an integer field still commits through its delegate after the rewrite")
+    func integerFieldViewForwardsItsDelegateCallback() throws {
+        let setting = UserSetting("extensions.test.numberfield.integerfield", default: 4)
+        defer { setting.remove() }
+
+        let field = ComposableSettings.IntegerFieldView(
+            viewModel: ComposableSettings.RangeViewModel(
+                title: "padding", setting: setting, minValue: 0, maxValue: 10))
+        #expect(field.textField.stringValue == "4")
+
+        field.textField.stringValue = "7"
+        field.controlTextDidEndEditing(
+            Notification(name: NSControl.textDidEndEditingNotification, object: field.textField))
+        #expect(setting.value == 7)
+
+        // The view model's two bounds still clamp, which is the whole of what
+        // this class promised before it became a forwarder.
+        field.textField.stringValue = "99"
+        field.controlTextDidEndEditing(
+            Notification(name: NSControl.textDidEndEditingNotification, object: field.textField))
+        #expect(setting.value == 10)
+        #expect(field.textField.stringValue == "10")
+    }
 }
