@@ -356,6 +356,17 @@ struct ConfigurationContributionPointTests {
             Int(settingsFieldString: "9,007,199,254,740,993", locale: english)
                 == 9_007_199_254_740_993)
 
+        // The two ends of that change. `Int.max` grouped is the largest value
+        // the locale path can carry, and it only survives because the value
+        // comes from `int64Value` — its `Double` is 2^63, out of range. One
+        // past it must be refused, in the spelling with separators exactly as
+        // in the one without: a field that says no to "9223372036854775808"
+        // and yes to the same digits with commas teaches nothing a user could
+        // act on.
+        #expect(Int(settingsFieldString: "9,223,372,036,854,775,807", locale: english) == Int.max)
+        #expect(Int(settingsFieldString: "9,223,372,036,854,775,808", locale: english) == nil)
+        #expect(Int(settingsFieldString: "9223372036854775808", locale: english) == nil)
+
         #expect(Double(settingsFieldString: "nan", locale: english) == nil)
         #expect(Double(settingsFieldString: "not a number", locale: english) == nil)
     }

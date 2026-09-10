@@ -94,6 +94,12 @@ extension SettingsNumberValue {
     }
 }
 
+/// The POSIX-first ordering here is unobservable, and deliberately untested for
+/// that reason: `Int(_:)`'s grammar reads the same under any `.decimal`
+/// formatter and `settingsFieldString` emits no separators, so neither branch
+/// can see a string the other would read differently. `Double`'s ordering *is*
+/// pinned (test 26), and this one needs the same net the day
+/// `Int.settingsFieldString` learns to group.
 extension Int: SettingsNumberValue {
     public init?(settingsFieldString text: String, locale: Locale) {
         // Trimmed because a field's text arrives with whatever the user's
@@ -121,10 +127,19 @@ extension Int: SettingsNumberValue {
         // `int64Value`: a double rounds above 2^53, so a typed
         // 9,007,199,254,740,993 would be stored as ...992 with nothing here
         // able to object, the rounded double being a perfectly good integer.
+        //
+        // `int64Value` clamps instead of failing, and the clamp is invisible to
+        // any test made of `Double`s: `Double(Int64.max)` rounds **up** to 2^63
+        // (measured), so a saturated `Int64.max` and a true 2^63 are the same
+        // double, and `approximate.magnitude < 2^63` would throw away a
+        // legitimately typed `Int.max` along with the overflow. `decimalValue`
+        // is the comparison that separates them — it holds every `Int64`
+        // exactly, so it equals `Decimal(exact)` only when nothing was clamped,
+        // and it answers NaN rather than trapping on a double too large for it.
         let approximate = number.doubleValue
         guard approximate.isFinite, approximate == approximate.rounded() else { return nil }
         let exact = number.int64Value
-        guard Double(exact) == approximate, let value = Int(exactly: exact) else { return nil }
+        guard number.decimalValue == Decimal(exact), let value = Int(exactly: exact) else { return nil }
         self = value
     }
 
