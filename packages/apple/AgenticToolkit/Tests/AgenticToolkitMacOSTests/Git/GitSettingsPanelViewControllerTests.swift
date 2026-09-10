@@ -179,7 +179,7 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
     /// fails this test directly. A later, unrelated write still running
     /// afterward is what proves the restore's own throw does not wedge the
     /// queue (mirrors `testAFailingWriteDoesNotHaltOrReorderTheQueue`).
-    func testRenameRestoresOldKeyValueWhenSetFails() async {
+    func testRenameRestoresOldKeyValueWhenSetFails() async throws {
         let panel = GitSettingsPanelViewController(client: GitClient(configuration: .default))
         let recorder = Recorder()
         struct SetFailed: Error {}
@@ -205,6 +205,16 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
         XCTAssertEqual(
             recorder.entries,
             ["unset:old.key", "set:new.key=new.value", "set:old.key=old.value", "later write"]
+        )
+        // Pins the rethrow on the restore-succeeded branch. Every entry above
+        // is recorded *before* that `throw` runs, so without this the line
+        // could be deleted -- swallowing the failure entirely -- and the
+        // assertion above would still pass. A rename that failed and rolled
+        // back is still a rename that failed, and the user has to be told.
+        let message = try XCTUnwrap(panel.lastWriteErrorMessage)
+        XCTAssertTrue(
+            message.contains("previous value was restored"),
+            "expected the restored-after-failure error, got: \(message)"
         )
     }
 
