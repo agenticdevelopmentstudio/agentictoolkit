@@ -75,26 +75,38 @@ enum ExtensionFixtures {
     /// and a single leftover `themes/one.json` there would let that broken
     /// resolution succeed. A mutation that should kill a dozen tests would kill
     /// eleven, and the miss would look like a fact about the code.
+    ///
+    /// **Nothing may ever write at this root.** That is the whole invariant the
+    /// sandbox rests on, and it is not enforceable by the type system: every
+    /// fixture path is at least one level below a `<label>-<uuid>` folder, so a
+    /// resolution that slips one level up lands where no writer can have put a
+    /// file, and fails loudly. Put a file directly here — even in a `defer`,
+    /// even as a marker — and the next base-resolution regression passes.
     static let sandboxRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("AgenticToolkitExtensionTests", isDirectory: true)
 
     /// A folder of this run's own, named for the suite that asked and unique to
     /// the call. Callers remove it; nothing here is ever read by a later run.
     ///
-    /// **`isDirectory: false` is deliberate, and it is the point of this
-    /// helper.** It is what the returned URL already was — the URL is built
-    /// before the folder exists, and `URL(fileURLWithPath:)` sets that flag by
-    /// *consulting disk* — but spelled rather than inherited from an accident of
-    /// ordering, so an innocuous-looking edit cannot silently flip it.
+    /// **`isDirectory: false` is deliberate, and the reason is one sentence: a
+    /// fixture must hand the subject the worst legal input, not a
+    /// pre-normalised one** (Ruling GT, and `write`'s note below one step on).
+    /// A base flagged `true` is a base somebody else already made well-formed;
+    /// the registry is under no obligation to, and `ThemeContributionPoint.apply`
+    /// and `SnippetStore.apply` both open by re-making the base with
+    /// `isDirectory: true` precisely because a flagless one resolves every
+    /// declared path a level too high. Flagging it here would be the fixture
+    /// doing the subject's job for it.
     ///
-    /// A flagless base is what `ThemeContributionPoint.apply` is written to
-    /// survive: the registry may hand it one, `URL(fileURLWithPath:relativeTo:)`
-    /// would then resolve every declared theme path one level too high, and the
-    /// `isDirectory: true` re-make at the top of `apply` is the whole defence.
-    /// Handing production a base that is already well-formed would retire that
-    /// defence from every test here at once — the fixture would be doing the
-    /// subject's job for it, which is the same defect as a fixture that reaches
-    /// its path by the subject's own route.
+    /// Not a kill count. Dropping the re-make reddens most of these suites, but
+    /// almost all of that is collateral — the one test that *specifies* the
+    /// invariant, `relativeThemePathResolvesAgainstTheExtensionDirectory`,
+    /// builds its own flagless base and holds either way.
+    ///
+    /// `false` is also what the returned URL already was, since the URL is built
+    /// before the folder exists and the single-argument `appendingPathComponent`
+    /// sets the flag by *consulting disk*. Spelling it means an innocuous edit
+    /// cannot silently flip it.
     ///
     /// Writing is unaffected either way: `write` uses `appendingPathComponent`,
     /// which appends to the path whatever the flag says.

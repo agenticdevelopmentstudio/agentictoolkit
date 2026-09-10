@@ -14,6 +14,10 @@ private final class RecordingContributionPoint: ContributionPoint {
     private(set) var appliedIdentifiers: [String] = []
     /// Every `apply` call in order, repeats included.
     private(set) var applyCalls: [String] = []
+    /// What the most recent `apply` was handed. A point cannot reconcile
+    /// against a declaration it was never shown, so *what* arrives is as much
+    /// the registry's contract as *whether* it arrives.
+    private(set) var lastContributions: ExtensionManifest.Contributions?
     private(set) var withdrawnIdentifiers: [String] = []
 
     func apply(
@@ -23,6 +27,7 @@ private final class RecordingContributionPoint: ContributionPoint {
     ) throws {
         applyCalls.append(manifest.identifier)
         appliedIdentifiers.append(manifest.identifier)
+        lastContributions = contributions
     }
 
     func withdraw(extensionIdentifier: String) {
@@ -275,6 +280,89 @@ struct ExtensionRegistryTests {
             registry.loadAll()
 
             #expect(point.appliedIdentifiers == ["acme.enabled"])
+        }
+    }
+
+    @Test("an extension with no contributes key still reaches every point, with an empty block")
+    func manifestWithoutContributesStillApplies() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest(
+                """
+                {
+                    "name": "quiet",
+                    "publisher": "acme",
+                    "version": "1.0.0",
+                    "engines": { "vscode": "^1.74.0" }
+                }
+                """,
+                named: "quiet-ext",
+                in: root
+            )
+
+            let point = RecordingContributionPoint()
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(point)
+            registry.loadAll()
+
+            // Absent and empty are the same statement. Skipping the points for
+            // an absent key means an update that *drops* `contributes` is never
+            // announced, so a point holding persisted state — themes — can
+            // never reconcile it away: the previous version's contributions
+            // outlive the declaration that justified them, permanently, because
+            // the extension is still installed and so still off-limits to
+            // `pruneOrphans`.
+            #expect(point.appliedIdentifiers == ["acme.quiet"])
+            let contributions = try #require(point.lastContributions)
+            #expect(contributions == ExtensionManifest.Contributions.empty)
+            // Nil cannot also mean "failed to decode" — `decodeIfPresent`
+            // throws on any shape but absent-or-null, and a manifest that
+            // throws never reaches a contribution point at all. That is the
+            // fact this whole path rests on; the case below is the proof.
+            #expect(contributions.decodingFailures.isEmpty)
+        }
+    }
+
+    @Test("a contributes key of the wrong shape sinks the manifest rather than reading as empty")
+    func malformedContributesIsNotAnEmptyDeclaration() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            // `contributes` is a list, not an object. `decodeIfPresent` throws
+            // rather than answering nil, so this is `manifestMalformed` and no
+            // point hears about it — which is the only reason handing points an
+            // empty block for an absent key is safe. Were it to arrive as
+            // "declares nothing", an unparseable file would delete the user's
+            // themes.
+            try writeManifest(
+                """
+                {
+                    "name": "broken",
+                    "publisher": "acme",
+                    "version": "1.0.0",
+                    "engines": { "vscode": "^1.74.0" },
+                    "contributes": []
+                }
+                """,
+                named: "broken-ext",
+                in: root
+            )
+
+            let point = RecordingContributionPoint()
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(point)
+            registry.loadAll()
+
+            #expect(point.applyCalls.isEmpty)
+            #expect(registry.extensions.isEmpty)
+            guard case .manifestMalformed = registry.failures.first?.reason else {
+                let reason = String(describing: registry.failures.first?.reason)
+                Issue.record("expected manifestMalformed, got \(reason)")
+                return
+            }
         }
     }
 

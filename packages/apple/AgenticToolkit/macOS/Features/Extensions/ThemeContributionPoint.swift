@@ -55,7 +55,31 @@ public final class ThemeContributionPoint: ContributionPoint {
         at directory: URL
     ) throws {
         let identifier = manifest.identifier
-        guard !contributions.themes.isEmpty else { return }
+
+        // Applying is what decides which of this extension's themes failed, so
+        // the previous answer is discarded rather than added to: apply twice —
+        // a reload, a disable/enable — and the settings panel would otherwise
+        // list one broken file twice. Every other point in this subsystem says
+        // the same thing in its own words; this one is the outlier being
+        // brought into line.
+        //
+        // **Not `withdraw(extensionIdentifier:)`, which is how the other four
+        // do it.** This point's state is the *user's*: `withdraw` deletes their
+        // persisted themes and `delete(id:)` clears `activeThemeID` with them,
+        // so opening `apply` with a withdrawal would re-run the F7
+        // delete-then-re-add on every single launch — the churn `store`'s
+        // `update`-in-place exists to prevent. The clear is narrowed to the
+        // diagnostics, which are the only thing here this class owns.
+        importFailures.removeAll { $0.extensionIdentifier == identifier }
+
+        // No `themes.isEmpty` early return. An update that drops the key
+        // declares *nothing*, which is not the same as having nothing to say:
+        // the reconciliation below is exactly what has to run, and returning
+        // above it orphaned every theme the extension ever contributed, with no
+        // route out but uninstalling it (`pruneOrphans` cannot see them — the
+        // extension is still installed). The empty case falls through: the loop
+        // runs zero times, GO's throw is conditioned below, and `declared` is
+        // empty so reconciliation deletes them all. Which is the right answer.
 
         // `directory` arrives from the registry and may have been built with a
         // plain `URL(fileURLWithPath:)`, which carries no is-directory flag —
@@ -120,7 +144,13 @@ public final class ThemeContributionPoint: ContributionPoint {
         // away as a side effect of one broken file (Ruling GO). The user's
         // recourse would be to reinstall the extension — the thing that just
         // failed.
-        if imported == 0 {
+        //
+        // Conditioned on something having been declared, rather than moving the
+        // guard back above the loop: Ruling GO's sentence is "everything this
+        // extension declared failed", and an extension that declared nothing
+        // has not failed at anything. Keeping the throw where it is keeps GO
+        // literally true and lets the empty case reach the reconciliation.
+        if imported == 0 && !contributions.themes.isEmpty {
             throw ThemeContributionError.everyThemeFailed(count: contributions.themes.count)
         }
 

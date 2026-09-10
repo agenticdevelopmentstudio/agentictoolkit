@@ -210,6 +210,40 @@ extension ExtensionManifest {
         /// they appeared under and why. Never silently dropped.
         public let decodingFailures: [DecodingFailure]
 
+        /// A `contributes` block that declares nothing.
+        ///
+        /// `ExtensionRegistry` hands this to every contribution point when a
+        /// manifest carries no `contributes` key at all, instead of skipping
+        /// the points entirely. *Absent* and *empty* are the same statement —
+        /// "this extension declares nothing" — and a point that is never told
+        /// cannot reconcile away what a previous version of the same extension
+        /// declared, which is how an update that drops the key orphans its
+        /// themes permanently. Every point is already idempotent per extension
+        /// and so already correct under this value.
+        ///
+        /// This is only sound because `contributes == nil` cannot mean "failed
+        /// to decode". `decodeIfPresent` returns nil for an absent key or a
+        /// literal `null` and *throws* for every other shape, so a malformed
+        /// `contributes` sinks the whole manifest at
+        /// `ExtensionRegistry.load`'s decode and never reaches a contribution
+        /// point at all. Were that not so, an unparseable file would read here
+        /// as "declares nothing" and delete the user's themes.
+        public static let empty = Contributions()
+
+        private init() {
+            themes = []
+            snippets = []
+            languages = []
+            commands = []
+            keybindings = []
+            menus = [:]
+            configuration = []
+            views = [:]
+            viewsContainers = [:]
+            languageModelTools = []
+            decodingFailures = []
+        }
+
         private enum CodingKeys: String, CodingKey {
             case themes, snippets, languages, commands, keybindings, menus
             case configuration, views, viewsContainers, languageModelTools
@@ -361,13 +395,51 @@ extension ExtensionManifest {
             case .keyNotFound(let key, _):
                 return "no “\(key.stringValue)”"
             case .typeMismatch(let type, let context):
-                return "\(subject(of: context)) is not \(type)"
+                guard let name = jsonName(of: type) else {
+                    return "\(subject(of: context)) is the wrong kind of value"
+                }
+                return "\(subject(of: context)) is not \(name)"
             case .valueNotFound(_, let context):
                 return "\(subject(of: context)) is null"
             case .dataCorrupted(let context):
                 return context.debugDescription
             @unknown default:
                 return error.localizedDescription
+            }
+        }
+
+        /// The JSON shape a Swift type stands for, in the words the manifest
+        /// author writes their file in — or `nil` when there is no such shape.
+        ///
+        /// A `DecodingError.typeMismatch` carries the Swift type the decoder
+        /// wanted, and interpolating it puts `Dictionary<String, Any>` in front
+        /// of somebody editing a `package.json`. The author edits JSON, so the
+        /// sentence they read is about JSON.
+        ///
+        /// The nouns are JSON's own rather than a settings panel's ("a group of
+        /// settings"): this one table serves `themes`, `commands`, `menus` and
+        /// `languages` as well as `configuration`, where an object is not a
+        /// group of settings — and `decodeLenientDictionary` twenty lines below
+        /// already says "expected an object", so anything else would have one
+        /// file contradicting itself within a screen (Ruling GU).
+        ///
+        /// `nil` for everything else, and the caller must then say nothing
+        /// about the type at all rather than falling back to `\(type)`. A type
+        /// outside this table is a first-party `Decodable` with a custom
+        /// `init(from:)`, so naming it would describe this app's internals
+        /// rather than the author's file — which is G1's defect surviving in
+        /// exactly the place nobody anticipated it.
+        private static func jsonName(of type: Any.Type) -> String? {
+            switch type {
+            case is String.Type: return "text"
+            case is Bool.Type: return "true or false"
+            case is Double.Type, is Float.Type: return "a number"
+            // Every width and both signednesses in one row; `JSONDecoder`
+            // throws whichever one the property declared.
+            case is any FixedWidthInteger.Type: return "a whole number"
+            case is [String: Any].Type: return "an object"
+            case is [Any].Type: return "a list"
+            default: return nil
             }
         }
 

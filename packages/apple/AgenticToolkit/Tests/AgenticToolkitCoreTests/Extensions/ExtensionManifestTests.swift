@@ -213,7 +213,40 @@ struct ExtensionManifestTests {
         // `String(describing:)` over the `DecodingError`, which would put
         // `typeMismatch(Swift.String, Swift.DecodingError.Context(codingPath:…`
         // on screen.
-        #expect(failure.reason == "“uiTheme” is not String")
+        //
+        // `text`, not `String`: the author wrote JSON and is being told what to
+        // write instead, so the noun is JSON's (Ruling GU). Interpolating the
+        // Swift type leaks the same compiler vocabulary one word later.
+        #expect(failure.reason == "“uiTheme” is not text")
+    }
+
+    @Test("a themes entry that is not an object at all names itself, not an empty key")
+    func aThemesEntryThatIsNotAnObjectNamesItself() throws {
+        // A bare string *inside* the array, not instead of it: `"themes":
+        // "night.json"` trips the `expected an array` guard and never reaches
+        // the element loop, so it would not exercise this at all.
+        let json = #"{ "themes": ["night.json"] }"#
+        let contributes = try JSONDecoder().decode(
+            ExtensionManifest.Contributions.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(contributes.themes.isEmpty)
+        #expect(contributes.decodingFailures.count == 1)
+        let failure = try #require(contributes.decodingFailures.first)
+        #expect(failure.key == "contributes.themes")
+        #expect(failure.index == 0)
+        // Two claims, and they are one sentence.
+        //
+        // "this entry": every element is decoded on its own, so an element that
+        // is itself the wrong shape throws with an *empty* coding path. Naming
+        // the path anyway renders `“” is not …` — a sentence naming nothing, in
+        // front of an extension author.
+        //
+        // "an object": the type in the error is `Dictionary<String, Any>`, and
+        // this branch — not the near-miss `String` above — is where a Swift
+        // type name reads as a raw compiler artefact.
+        #expect(failure.reason == "this entry is not an object")
     }
 
     @Test("an object-form command icon drops the icon, not the command")

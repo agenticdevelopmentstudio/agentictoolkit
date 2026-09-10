@@ -169,8 +169,15 @@ public final class ExtensionRegistry {
         // swiftlint:disable:next line_length
         logger.info("Loaded extension '\(manifest.identifier, privacy: .public)' from \(directory.path, privacy: .public)")
 
-        guard isEnabled(loaded.identifier), let contributes = manifest.contributes else { return }
-        applyContributions(contributes, from: manifest, at: directory)
+        // A manifest with no `contributes` key still reaches every point, with
+        // `.empty`. Absent and empty are the same statement — this extension
+        // declares nothing — and a point that is never told cannot reconcile
+        // away what the *previous* version of the same extension declared, so
+        // an update that drops the key would orphan its contributions
+        // permanently. See `Contributions.empty` for why nil cannot also mean
+        // "failed to decode", which is the fact this rests on.
+        guard isEnabled(loaded.identifier) else { return }
+        applyContributions(manifest.contributes ?? .empty, from: manifest, at: directory)
     }
 
     private func record(_ reason: ExtensionLoadError, at directory: URL) {
@@ -273,8 +280,10 @@ public final class ExtensionRegistry {
         guard let loaded = extensions.first(where: { $0.identifier == identifier }) else { return }
 
         if enabled {
-            guard let contributes = loaded.manifest.contributes else { return }
-            applyContributions(contributes, from: loaded.manifest, at: loaded.directory)
+            // `.empty` for an absent `contributes`, as at load: re-enabling
+            // must put every point back in the same state loading would.
+            applyContributions(
+                loaded.manifest.contributes ?? .empty, from: loaded.manifest, at: loaded.directory)
         } else {
             for point in contributionPoints {
                 point.withdraw(extensionIdentifier: identifier)

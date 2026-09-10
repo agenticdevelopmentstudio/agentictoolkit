@@ -279,6 +279,72 @@ struct ThemeContributionPointTests {
         #expect(storage.customThemes.map(\.id) == ["vscode.test.pack.Day"])
     }
 
+    @Test("applying twice lists a broken theme once, not twice")
+    func applyingTwiceListsABrokenThemeOnce() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(ExtensionFixtures.malformedThemeJSON, to: "themes/night.json", in: directory)
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/day.json", in: directory)
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+        let declaration = try manifest(name: "pack", themes: """
+        [
+            \(themeEntry(label: "Night", path: "./themes/night.json")),
+            \(themeEntry(label: "Day", path: "./themes/day.json"))
+        ]
+        """)
+
+        // Nothing changed between the two calls — this is a reload, or a
+        // disable/enable, or any caller that does not know the registry
+        // withdraws first. `apply` is public API on a public class and the
+        // ordering is the caller's to get wrong.
+        try apply(declaration, to: point, at: directory)
+        try apply(declaration, to: point, at: directory)
+
+        // One broken file is one line in the Decisions group. Accumulating
+        // would print it twice, since `decisionLines()` emits one line per
+        // element and reads none of these as a history.
+        #expect(point.importFailures.map(\.path) == ["./themes/night.json"])
+        // And the clear is narrowed to the diagnostics: Day survives being
+        // applied a second time, because the fix is not a `withdraw` at the top.
+        #expect(storage.customThemes.map(\.id) == ["vscode.test.pack.Day"])
+    }
+
+    @Test("an extension that stops declaring themes loses all of them")
+    func anExtensionThatStopsDeclaringThemesLosesThemAll() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: directory)
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/day.json", in: directory)
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+        try apply(
+            try manifest(name: "pack", themes: """
+            [
+                \(themeEntry(label: "Night", path: "./themes/night.json")),
+                \(themeEntry(label: "Day", path: "./themes/day.json"))
+            ]
+            """),
+            to: point,
+            at: directory
+        )
+        storage.activeThemeID = "vscode.test.pack.Night"
+
+        // The update stops shipping themes altogether. Both files are still on
+        // disk; being undeclared is the whole signal, exactly as when *one* is
+        // dropped. Zero is the case an `isEmpty` early return let escape — and
+        // it escaped permanently, because `pruneOrphans` cannot see these
+        // either: the extension is still installed.
+        try apply(try manifest(name: "pack", themes: "[]"), to: point, at: directory)
+
+        #expect(storage.customThemes.isEmpty)
+        // `delete(id:)` clears the selection with the theme, so storage is never
+        // left pointing at an id that no longer resolves.
+        #expect(storage.activeThemeID == nil)
+    }
+
     // MARK: - Withdrawal
 
     @Test("withdraw deletes only that extension's themes")
