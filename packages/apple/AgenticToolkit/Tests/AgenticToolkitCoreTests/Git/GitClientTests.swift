@@ -87,11 +87,44 @@ struct GitClientTests {
         }
 
         /// The developer's real global config, read only so a test can assert it was
-        /// left byte-for-byte alone.
-        static func realGlobalConfigBytes() -> Data? {
-            try? Data(contentsOf: FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".gitconfig"))
+        /// left alone.
+        ///
+        /// Three outcomes, kept apart on purpose. An earlier version returned
+        /// `Data?` and folded "no such file" and "could not be read" together into
+        /// `nil`, which made the safety assertion pass by saying `nil == nil` on any
+        /// machine where the file was unreadable — the one case where it most needed
+        /// to speak up.
+        enum RealGlobalConfig: Equatable {
+            case absent
+            case contents(Data)
+            case unreadable(String)
+
+            static func read() -> RealGlobalConfig {
+                let url = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".gitconfig")
+                guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
+                do {
+                    return .contents(try Data(contentsOf: url))
+                } catch {
+                    return .unreadable(error.localizedDescription)
+                }
+            }
         }
+    }
+
+    @Test("the global-config redirect is in effect, so the safety assertions mean something")
+    func globalConfigRedirectIsInEffect() async throws {
+        let isolated = try IsolatedGlobalConfig()
+        defer { isolated.tearDown() }
+        #expect(ProcessInfo.processInfo.environment["GIT_CONFIG_GLOBAL"] == isolated.file.path)
+
+        // Exactly the seeded entry and nothing else. This is what makes the two
+        // "must be untouched" assertions below non-vacuous: the seeded key exists
+        // only in the redirected file, and any key from the developer's own
+        // `~/.gitconfig` — a `user.name`, an alias — would show up here if git were
+        // still reading it.
+        let entries = try await GitClient(configuration: .default).globalConfig()
+        #expect(entries.map(\.key) == [IsolatedGlobalConfig.seededKey])
     }
 
     @Test("status reports the modified file")
@@ -179,7 +212,7 @@ struct GitClientTests {
     func setGlobalConfig() async throws {
         let isolated = try IsolatedGlobalConfig()
         defer { isolated.tearDown() }
-        let untouchedBefore = IsolatedGlobalConfig.realGlobalConfigBytes()
+        let untouchedBefore = IsolatedGlobalConfig.RealGlobalConfig.read()
         let client = GitClient(configuration: .default)
         try await client.setGlobalConfig(key: "atkgitclienttest.added", value: "added-value")
 
@@ -188,7 +221,7 @@ struct GitClientTests {
         // The write landed in the redirected file, not anywhere else.
         let written = try String(contentsOf: isolated.file, encoding: .utf8)
         #expect(written.contains("added-value"))
-        #expect(IsolatedGlobalConfig.realGlobalConfigBytes() == untouchedBefore,
+        #expect(IsolatedGlobalConfig.RealGlobalConfig.read() == untouchedBefore,
                 "the developer's real ~/.gitconfig must be untouched")
     }
 
@@ -196,14 +229,14 @@ struct GitClientTests {
     func unsetGlobalConfig() async throws {
         let isolated = try IsolatedGlobalConfig()
         defer { isolated.tearDown() }
-        let untouchedBefore = IsolatedGlobalConfig.realGlobalConfigBytes()
+        let untouchedBefore = IsolatedGlobalConfig.RealGlobalConfig.read()
         let client = GitClient(configuration: .default)
         #expect(try await client.globalConfig().contains { $0.key == IsolatedGlobalConfig.seededKey })
 
         try await client.unsetGlobalConfig(key: IsolatedGlobalConfig.seededKey)
 
         #expect(try await client.globalConfig().isEmpty)
-        #expect(IsolatedGlobalConfig.realGlobalConfigBytes() == untouchedBefore,
+        #expect(IsolatedGlobalConfig.RealGlobalConfig.read() == untouchedBefore,
                 "the developer's real ~/.gitconfig must be untouched")
     }
 }

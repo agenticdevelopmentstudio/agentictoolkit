@@ -9,6 +9,14 @@ import Foundation
 /// git usage — by the app and by agents driving it — countable, attributable
 /// and bounded by a single timeout.
 ///
+/// **"Bottleneck" is about accounting, not about serialization.** This actor
+/// holds no isolated mutable state, and every verb suspends at
+/// `await SubprocessChannel.run`, which releases the actor for the whole
+/// lifetime of the child. Ten concurrent callers therefore run ten concurrent
+/// git processes, not one at a time — intentionally, since a `status` on one
+/// repository has no reason to wait behind a `worktree list` on another. If a
+/// limit is ever wanted, this is where it goes.
+///
 /// An actor rather than a struct so the door is a single, identifiable place at
 /// runtime as well as in the source, and so later work (rate limiting, caching,
 /// an in-memory ring of recent invocations) has somewhere to live that does not
@@ -109,7 +117,8 @@ public actor GitClient {
         return GitConfigEntry.parse(nullSeparated: output)
     }
 
-    /// Sets one key in the user's global git configuration.
+    /// Sets one key in the user's global git configuration. The value is
+    /// redacted in `GitCommandLog`; see `GitCommandLog.redactedArguments`.
     public func setGlobalConfig(key: String, value: String, caller: GitCaller = GitCaller()) async throws {
         _ = try await execute(
             verb: "config",
@@ -136,10 +145,26 @@ public actor GitClient {
 
     /// The single place this framework spawns git.
     ///
-    /// Every exit — success, non-zero status, timeout, failure to launch — is
-    /// recorded in `GitCommandLog` before it is turned into a return value or a
-    /// `GitClientError`, so the log is a complete census of attempts rather
-    /// than of successes.
+    /// Every exit is recorded in `GitCommandLog` before it becomes a return
+    /// value or an error, so the log is a complete census of *attempts* rather
+    /// than of successes — a missing executable and a cancelled caller each
+    /// leave a record, which is the state of affairs someone reading the log is
+    /// most likely trying to explain.
+    ///
+    /// The failure mapping is **total, by construction**: the `do` block ends
+    /// in an unqualified `catch`, so no error can leave this method unrecorded
+    /// or as a type outside `GitClientError`. Enumerating error types is what
+    /// leaves gaps — `SubprocessChannel` can finish its stdout stream with a
+    /// raw POSIX `NSError`, and its decoder with a `MessageFramingError`, and
+    /// neither is anything a caller of `status(in:)` should have to know about.
+    ///
+    /// **`CancellationError` is the one exception, and it is deliberate.** It
+    /// is recorded and then rethrown *unchanged*, because a cancelled task must
+    /// keep seeing cancellation: wrapping it would break `Task.isCancelled`
+    /// propagation and structured-concurrency cleanup for every caller,
+    /// starting with a SwiftUI `.task` that is torn down while a `status` is in
+    /// flight. It is therefore possible for a `GitClient` verb to throw
+    /// something that is not a `GitClientError`, and only this.
     private func execute(
         verb: String,
         arguments: [String],
@@ -149,6 +174,11 @@ public actor GitClient {
     ) async throws -> String {
         let executablePath = configuration.executableURL.path
         guard FileManager.default.isExecutableFile(atPath: executablePath) else {
+            // Recorded even though nothing was spawned. A user who types a
+            // wrong path into Settings makes every git call fail here, and an
+            // empty log is the least useful thing to hand them.
+            GitCommandLog.record(verb: verb, arguments: arguments, directory: directory, caller: caller,
+                                 duration: 0, exitStatus: nil)
             throw GitClientError.executableNotFound(path: executablePath)
         }
         let channelConfiguration = SubprocessChannel.Configuration(
@@ -167,24 +197,28 @@ public actor GitClient {
         do {
             result = try await SubprocessChannel.run(channelConfiguration, budget: configuration.timeout)
         } catch is WallClockBudgetExceeded {
-            record(verb: verb, arguments: arguments, directory: directory, caller: caller,
-                   duration: Date().timeIntervalSince(started), exitStatus: nil)
-            throw GitClientError.timedOut(verb: verb)
-        } catch let error as SubprocessChannel.ChannelError {
-            // The child never started — most often because `directory` does not
-            // exist. There is no exit status to report, and a caller cares that
-            // the verb failed rather than how far it got, so this joins
-            // `commandFailed` under a status git itself can never produce.
-            record(verb: verb, arguments: arguments, directory: directory, caller: caller,
-                   duration: Date().timeIntervalSince(started), exitStatus: nil)
-            throw GitClientError.commandFailed(
-                verb: verb,
-                exitStatus: -1,
-                standardError: error.localizedDescription
+            GitCommandLog.record(
+                verb: verb, arguments: arguments, directory: directory, caller: caller,
+                duration: Date().timeIntervalSince(started), exitStatus: nil
             )
+            throw GitClientError.timedOut(verb: verb)
+        } catch let error as CancellationError {
+            GitCommandLog.record(
+                verb: verb, arguments: arguments, directory: directory, caller: caller,
+                duration: Date().timeIntervalSince(started), exitStatus: nil
+            )
+            throw error
+        } catch {
+            GitCommandLog.record(
+                verb: verb, arguments: arguments, directory: directory, caller: caller,
+                duration: Date().timeIntervalSince(started), exitStatus: nil
+            )
+            throw GitClientError.launchFailed(verb: verb, reason: error.localizedDescription)
         }
-        record(verb: verb, arguments: arguments, directory: directory, caller: caller,
-               duration: result.duration, exitStatus: result.exitStatus)
+        GitCommandLog.record(
+            verb: verb, arguments: arguments, directory: directory, caller: caller,
+            duration: result.duration, exitStatus: result.exitStatus
+        )
         guard result.exitStatus == 0 else {
             throw GitClientError.commandFailed(
                 verb: verb,
@@ -192,33 +226,16 @@ public actor GitClient {
                 standardError: result.standardError
             )
         }
-        // `String(bytes:encoding:)` rather than `String(decoding:as:)`: a
-        // repository can hold paths that are not valid UTF-8, and silently
-        // replacing them with U+FFFD would hand a parser a path that matches
-        // nothing on disk. Latin-1 accepts every byte, so a non-UTF-8 capture
-        // degrades to something recoverable instead of to an empty string.
+        // `String(bytes:encoding:)` rather than `String(decoding:as:)` to decode
+        // a capture the same way `SubprocessChannel.standardErrorText()` does;
+        // one framework, one ladder. It is not a correctness win, and neither
+        // ladder round-trips a capture git could not express in UTF-8:
+        // `String(decoding:)` would replace the offending bytes with U+FFFD and
+        // hand the parser a path that matches nothing on disk, while a single
+        // invalid byte here re-reads the *whole* capture as Latin-1 and
+        // mojibakes every legitimate multi-byte character in it.
         return String(bytes: result.standardOutput, encoding: .utf8)
             ?? String(bytes: result.standardOutput, encoding: .isoLatin1)
             ?? ""
-    }
-
-    /// Wraps `GitCommandLog.record` only to keep `execute` readable; it adds
-    /// nothing and hides nothing.
-    private func record(
-        verb: String,
-        arguments: [String],
-        directory: URL?,
-        caller: GitCaller,
-        duration: TimeInterval,
-        exitStatus: Int32?
-    ) {
-        GitCommandLog.record(
-            verb: verb,
-            arguments: arguments,
-            directory: directory,
-            caller: caller,
-            duration: duration,
-            exitStatus: exitStatus
-        )
     }
 }
