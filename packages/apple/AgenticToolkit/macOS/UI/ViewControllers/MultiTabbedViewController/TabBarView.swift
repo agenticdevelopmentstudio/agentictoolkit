@@ -24,8 +24,6 @@ final class TabBarView: NSView {
     struct ItemModel {
         let id: UUID
         var item: TabItem
-        @MainActor
-        var title: String { item.title }
     }
 
     // MARK: - Callbacks (set by MultiTabbedViewController)
@@ -184,9 +182,11 @@ final class TabBarView: NSView {
         }
     }
 
+    /// The caller (`MultiTabbedViewController.renameTab`) already refuses to
+    /// call this for a `.viewController` item, so there is nothing left to
+    /// guard against here.
     func renameItem(id: UUID, title: String) {
         if let idx = items.firstIndex(where: { $0.id == id }) {
-            guard case .title = items[idx].item else { return }
             items[idx].item = .title(title)
             buttons[id]?.title = title
         }
@@ -195,14 +195,44 @@ final class TabBarView: NSView {
     // MARK: - Building
 
     private func rebuildButtons() {
+        // Captured before the stack is torn down below, so the reconciliation
+        // loop can tell whether a hosted controller's view is still sitting
+        // in the wrapper *this bar* gave it, as opposed to one another bar
+        // handed it in the meantime (see the loop's comment).
+        let previousHostViews = hostViews
+
         for view in stack.arrangedSubviews { view.removeFromSuperview() }
         buttons.removeAll()
         hostViews.removeAll()
-        let liveIDs = Set(items.map(\.id))
-        for (id, controller) in hostedControllers where !liveIDs.contains(id) {
-            controller.removeFromParent()
+
+        // Reconcile hosted children against the new items on both id *and*
+        // payload: an id that is gone, or whose `.viewController` payload
+        // changed identity (or reverted to `.title`), gets its old
+        // controller torn down here — otherwise it stays parented forever
+        // and keeps inflating `updateThickness()`.
+        var currentControllers: [UUID: NSViewController] = [:]
+        for item in items {
+            guard case let .viewController(controller) = item.item else { continue }
+            currentControllers[item.id] = controller
+        }
+        for (id, oldController) in hostedControllers where currentControllers[id] !== oldController {
+            // A cross-edge move (insert on the new edge before removing from
+            // the old one, since there is no edge-to-edge `moveTab`) already
+            // reparents this controller's view onto the *new* bar's wrapper
+            // when that bar rebuilds first — so by the time this bar notices
+            // the id is gone, `oldController.view`'s superview is the other
+            // bar's wrapper, not the one this bar itself handed it a moment
+            // ago. Tearing it down here as well would rip the view out of
+            // the new bar's display and cut the controller's
+            // `preferredContentSizeDidChange` routing, so only tear down a
+            // controller this bar's own (now-detached) wrapper still held.
+            if oldController.view.superview === previousHostViews[id] {
+                oldController.view.removeFromSuperview()
+                oldController.removeFromParent()
+            }
             hostedControllers[id] = nil
         }
+
         for item in items {
             let view: NSView
             switch item.item {
@@ -213,6 +243,13 @@ final class TabBarView: NSView {
                 button.onClose = { [weak self] id in self?.onClose?(id) }
                 buttons[item.id] = button
                 view = button
+                stack.addArrangedSubview(view)
+                // Vertical bars: each button fills the bar's interior width
+                // so labels and close buttons line up flush.
+                if stack.orientation == .vertical {
+                    view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8).isActive = true
+                    view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -8).isActive = true
+                }
             case let .viewController(controller):
                 if controller.parent !== hostController { hostController?.addChild(controller) }
                 hostedControllers[item.id] = controller
@@ -224,20 +261,33 @@ final class TabBarView: NSView {
                 host.onSelect = { [weak self] id in self?.onSelect?(id) }
                 hostViews[item.id] = host
                 view = host
-            }
-            stack.addArrangedSubview(view)
-
-            // Vertical bars: each button fills the bar's interior width so
-            // labels and close buttons line up flush.
-            if stack.orientation == .vertical {
-                view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8).isActive = true
-                view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -8).isActive = true
+                stack.addArrangedSubview(view)
+                // A hosted item's content view reports no intrinsic size, so
+                // without explicit pins it collapses on whichever axis
+                // `updateThickness()` doesn't cover — the length axis on
+                // every bar (only the bar's own thickness is ever sized from
+                // `preferredContentSize`), and additionally the thickness
+                // axis itself on a horizontal bar, which has no counterpart
+                // to the leading/trailing fill below.
+                switch edge {
+                case .top, .bottom:
+                    host.topAnchor.constraint(equalTo: stack.topAnchor).isActive = true
+                    host.bottomAnchor.constraint(equalTo: stack.bottomAnchor).isActive = true
+                case .left, .right:
+                    host.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8).isActive = true
+                    host.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -8).isActive = true
+                }
             }
         }
         updateThickness()
     }
 
-    /// The bar is as thick as its thickest hosted item needs, never thinner than the button default.
+    /// The bar is as thick as its thickest hosted item needs, never thinner
+    /// than the button default. Also gives every hosted item a concrete
+    /// extent along the bar's length axis, driven by the same
+    /// `preferredContentSize` — the axis `thicknessConstraint` never
+    /// touches, and the only place a size change (`preferredContentSizeDidChange`)
+    /// has to reach after the item's view already exists.
     func updateThickness() {
         let sizes = hostedControllers.values.map(\.preferredContentSize)
         let constant: CGFloat
@@ -248,6 +298,16 @@ final class TabBarView: NSView {
             constant = max(Self.preferredThickness(for: edge), (sizes.map(\.width).max() ?? 0) + 16)
         }
         thicknessConstraint?.constant = constant
+
+        for (id, controller) in hostedControllers {
+            guard let host = hostViews[id] else { continue }
+            switch edge {
+            case .top, .bottom:
+                host.setLength(max(controller.preferredContentSize.width, 0), axis: .horizontal)
+            case .left, .right:
+                host.setLength(max(controller.preferredContentSize.height, 0), axis: .vertical)
+            }
+        }
     }
 }
 
@@ -260,6 +320,7 @@ final class TabBarView: NSView {
 private final class TabItemHostView: NSView {
     let id: UUID
     var onSelect: ((UUID) -> Void)?
+    private var lengthConstraint: NSLayoutConstraint?
 
     init(id: UUID, content: NSView) {
         self.id = id
@@ -280,6 +341,22 @@ private final class TabItemHostView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         onSelect?(id)
+    }
+
+    /// Gives the host a concrete extent along the bar's length axis — the
+    /// stack's main axis, which a bare hosted content view reports no
+    /// intrinsic size for and would otherwise collapse to zero on. Replaces
+    /// any previous length constraint rather than layering a new one on top,
+    /// so a later `preferredContentSize` change (routed back here through
+    /// `TabBarView.updateThickness()`) updates the same constraint instead
+    /// of accumulating conflicting ones.
+    func setLength(_ constant: CGFloat, axis: NSLayoutConstraint.Orientation) {
+        lengthConstraint?.isActive = false
+        let constraint = axis == .horizontal
+            ? widthAnchor.constraint(equalToConstant: constant)
+            : heightAnchor.constraint(equalToConstant: constant)
+        constraint.isActive = true
+        lengthConstraint = constraint
     }
 }
 

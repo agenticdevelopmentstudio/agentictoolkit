@@ -77,7 +77,7 @@ open class MultiTabbedViewController: NSViewController {
         .left: EdgeState(enabled: false)
     ]
 
-    var tabBars: [Edge: TabBarView] = [:]
+    private(set) var tabBars: [Edge: TabBarView] = [:]
 
     private let centerContainer = ThemedBackgroundView(role: .windowBackground)
     private var mountedCenterController: NSViewController?
