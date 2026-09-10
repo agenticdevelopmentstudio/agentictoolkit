@@ -52,6 +52,17 @@ public enum CustomFileTypeMappings {
     /// Invalidated when `save` is called.
     nonisolated(unsafe) private static var cache: [String: CustomFileTypeMapping]?
 
+    /// Consulted when the user's own mappings do not claim an extension, so a
+    /// user mapping always outranks one an installed extension contributed.
+    /// Set by the host once at startup, the same way `activeDefaultsKey` is —
+    /// see `LanguageContributionPoint.install()`.
+    ///
+    /// Contributed mappings deliberately do not go through `save`: that array
+    /// is persisted in UserDefaults, outlives the extension that wrote into
+    /// it, and is the exact array `FileTypesSettingsView` presents as the
+    /// user's own editable rows.
+    nonisolated(unsafe) public static var contributedProvider: (@Sendable (String) -> CustomFileTypeMapping?)?
+
     /// Loads custom mappings from UserDefaults.
     public static func load() -> [CustomFileTypeMapping] {
         guard let data = UserDefaults.standard.data(forKey: activeDefaultsKey) else {
@@ -71,12 +82,29 @@ public enum CustomFileTypeMappings {
     ///
     /// Uses a cached dictionary for fast lookups during file tree rendering,
     /// avoiding repeated JSON decoding from UserDefaults.
+    ///
+    /// Falls through to `contributedProvider` only when the user's own
+    /// mappings do not claim the extension: precedence is user > extension >
+    /// built-in, the one order in which an installed extension cannot
+    /// silently change a mapping the user typed themselves. The provider is
+    /// handed the already-lowercased key, and is never asked about the empty
+    /// string — both call sites guard on that.
     public static func mapping(for fileExtension: String) -> CustomFileTypeMapping? {
         if cache == nil {
             let mappings = load()
-            cache = Dictionary(uniqueKeysWithValues: mappings.map { ($0.fileExtension.lowercased(), $0) })
+            // `uniquingKeysWith:`, not `uniqueKeysWithValues:`, which traps on
+            // a duplicate key. The settings UI permits two rows whose
+            // extensions differ only in case — `CustomFileTypeMapping.id` is
+            // the raw string, so "MD" and "md" are two distinct rows to
+            // SwiftUI — and lowercasing here collides them. First wins, so the
+            // behaviour matches the order the user sees in the list.
+            cache = Dictionary(
+                mappings.map { ($0.fileExtension.lowercased(), $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
         }
-        return cache?[fileExtension.lowercased()]
+        let key = fileExtension.lowercased()
+        return cache?[key] ?? contributedProvider?(key)
     }
 }
 
