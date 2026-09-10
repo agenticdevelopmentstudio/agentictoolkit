@@ -410,6 +410,72 @@ struct ExtensionHostTests {
         #expect(recorder.texts.count == ticksBeforeTeardown)
     }
 
+    /// The half of teardown no callback can show you.
+    ///
+    /// Written because a mutation found the hole: deleting `task.cancel()` from
+    /// `dispose()` killed nothing, since a disposed host's timer declines to
+    /// fire for two other reasons anyway. What cancellation buys is that the
+    /// task stops *now* — and with a ten-second period, "it woke up and decided
+    /// not to fire" is not an explanation available to a test that finishes in
+    /// half a second.
+    @Test
+    func teardownStopsTheClockRatherThanOnlyDecliningToFire() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                setInterval(function () { console.log('tick'); }, 10000);
+            };
+            """,
+            in: directory
+        )
+        try await host.activate()
+        #expect(host.runningTimerCount == 1)
+
+        host.dispose()
+
+        // Cancellation makes the pending `Task.sleep` throw at once, so the
+        // task finishes within a few scheduling hops. An uncancelled one is
+        // still asleep, and stays asleep for the rest of its ten seconds.
+        var attempts = 0
+        while host.runningTimerCount != 0 && attempts < 50 {
+            try await Task.sleep(for: .milliseconds(10))
+            attempts += 1
+        }
+        #expect(host.runningTimerCount == 0)
+    }
+
+    /// The counter is not write-only: a one-shot timer that fires normally
+    /// takes it back down too, so a zero after teardown means something.
+    @Test
+    func aTimerThatFiresNormallyStopsBeingCounted() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                setTimeout(function () { console.log('fired'); }, 20);
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        #expect(host.runningTimerCount == 1)
+
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(recorder.texts == ["fired"])
+        #expect(host.runningTimerCount == 0)
+    }
+
     /// `clearTimeout` from inside the extension reaches the Swift clock, not
     /// just the shim's own table.
     @Test
@@ -573,6 +639,26 @@ struct ExtensionHostTests {
         #expect(access.count == 3)
         #expect(ledger.accesses(for: "test.alpha").count == 1)
         #expect(ledger.accesses(for: "someone.else").isEmpty)
+    }
+
+    /// The stamp is the *first* access, not the latest.
+    ///
+    /// Task 5.8's question is whether the extension tripped on a member during
+    /// activation or only later, and a stamp that moved on every reach would
+    /// answer neither. Exercised on the ledger directly: a second reach through
+    /// JavaScript would be indistinguishable from the first within one clock
+    /// tick, and this needs the two to be measurably apart.
+    @Test
+    func repeatedAccessKeepsTheFirstStampAndCountsTheRest() async throws {
+        let ledger = NotImplementedLedger()
+
+        let first = ledger.record(memberPath: "vscode.window.showQuickPick", extensionIdentifier: "test.alpha")
+        try await Task.sleep(for: .milliseconds(20))
+        let second = ledger.record(memberPath: "vscode.window.showQuickPick", extensionIdentifier: "test.alpha")
+
+        #expect(second.firstAccess == first.firstAccess)
+        #expect(second.count == 2)
+        #expect(ledger.accesses.count == 1)
     }
 
     /// Two different members are two rows, so the recording is a record and

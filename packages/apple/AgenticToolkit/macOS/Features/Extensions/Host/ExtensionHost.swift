@@ -83,6 +83,28 @@ public final class ExtensionHost {
     /// every one of these, and a cancelled task cannot reach JavaScript again.
     private var timerTasks: [Int32: Task<Void, Never>] = [:]
 
+    /// Started and not yet finished. Kept separately from `timerTasks` because
+    /// that dictionary says which timers are *addressable*, and teardown empties
+    /// it in one line whether or not the tasks behind it actually stopped.
+    private var runningTimerTasks = 0
+
+    /// How many of the extension's clocks are still turning.
+    ///
+    /// This exists because teardown has two independent defences and only one
+    /// of them is visible from outside. A disposed host's timer callback cannot
+    /// run in any case — the task re-checks `isDisposed` when it wakes, and
+    /// `fireTimer` finds no runtime — so a test that only watched for the
+    /// callback would pass just as happily against a `dispose()` that cancelled
+    /// nothing. What cancellation actually buys is that the task stops *now*:
+    /// without it, `setInterval(fn, 3600000)` leaves a task asleep for the rest
+    /// of that hour, holding this host weakly and waking once more to decide it
+    /// has nothing to do. Mutation testing found exactly that hole, and this is
+    /// what closes it.
+    ///
+    /// Internal, not public: it is a teardown assertion and a debugging read,
+    /// and nothing outside this framework has a use for it yet.
+    var runningTimerCount: Int { runningTimerTasks }
+
     /// Set by the context's `exceptionHandler`, read and cleared around every
     /// evaluation. A `JSContext` reports an uncaught exception by calling the
     /// handler and returning a nil-ish value, so `try` alone catches nothing:
@@ -424,7 +446,9 @@ public final class ExtensionHost {
         timerTasks[timerID]?.cancel()
 
         let seconds = max(0, delayMilliseconds) / 1000
+        runningTimerTasks += 1
         timerTasks[timerID] = Task { @MainActor [weak self] in
+            defer { self?.timerTaskDidFinish() }
             while true {
                 do {
                     try await Task.sleep(for: .seconds(seconds))
@@ -441,6 +465,10 @@ public final class ExtensionHost {
                 if !repeats { return }
             }
         }
+    }
+
+    private func timerTaskDidFinish() {
+        runningTimerTasks = max(0, runningTimerTasks - 1)
     }
 
     private func cancelTimer(timerID: Int32) {
