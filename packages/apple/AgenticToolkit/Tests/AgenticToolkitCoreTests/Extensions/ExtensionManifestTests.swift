@@ -89,7 +89,7 @@ struct ExtensionManifestTests {
         #expect(contributes.keybindings.count == 1)
         #expect(contributes.menus["commandPalette"]?.count == 1)
         #expect(contributes.configuration.count == 1)
-        #expect(contributes.configuration.first?.properties["acme.enabled"]?.type == "boolean")
+        #expect(contributes.configuration.first?.properties["acme.enabled"]?.effectiveType == "boolean")
         #expect(contributes.views["explorer"]?.count == 1)
         #expect(contributes.viewsContainers["activitybar"]?.count == 1)
         #expect(contributes.languageModelTools.count == 1)
@@ -241,7 +241,7 @@ struct ExtensionManifestTests {
 
         #expect(contributes.configuration.count == 1)
         #expect(contributes.configuration.first?.title == "Acme")
-        #expect(contributes.configuration.first?.properties["acme.enabled"]?.type == "boolean")
+        #expect(contributes.configuration.first?.properties["acme.enabled"]?.effectiveType == "boolean")
         #expect(contributes.decodingFailures.isEmpty)
     }
 

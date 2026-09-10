@@ -470,29 +470,159 @@ extension ExtensionManifest {
 
     public struct Configuration: Codable, Sendable, Equatable {
         public let title: String?
+        /// The section's `id`, carried but not acted on: 89 of the corpus's
+        /// 741 sections declare one, and a key that decodes to nothing is a
+        /// key the next reader has to rediscover is absent by choice rather
+        /// than by oversight.
+        public let id: String?
         public let order: Int?
         public let properties: [String: ConfigurationProperty]
 
-        private enum CodingKeys: String, CodingKey { case title, order, properties }
+        private enum CodingKeys: String, CodingKey { case title, id, order, properties }
 
+        /// Every field is `try?` rather than `decodeIfPresent`, because
+        /// `decodeLenientArray` isolates failures at the *section*: one
+        /// mistyped scalar here throws out of this initializer and takes
+        /// every sibling property in the section with it. A section holds up
+        /// to 186 properties in the corpus, and eight properties there
+        /// already spell `order` as the string `"0"`. Losing a section's
+        /// place in a sorted list is the smaller failure by far.
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            title = try container.decodeIfPresent(String.self, forKey: .title)
-            order = try container.decodeIfPresent(Int.self, forKey: .order)
-            properties = try container.decodeIfPresent([String: ConfigurationProperty].self, forKey: .properties) ?? [:]
+            title = try? container.decode(String.self, forKey: .title)
+            id = try? container.decode(String.self, forKey: .id)
+            order = try? container.decode(Int.self, forKey: .order)
+            properties = (try? container.decode(
+                [String: ConfigurationProperty].self, forKey: .properties)) ?? [:]
         }
     }
 
     public struct ConfigurationProperty: Codable, Sendable, Equatable {
-        public let type: String?
+
+        /// A JSON Schema `type`, which VS Code allows to be one name or a
+        /// union of them.
+        ///
+        /// Modelled rather than spelled `String?` because the union form is
+        /// live — 383 of the corpus's 7,464 properties use it — and a
+        /// `String?` throws a `typeMismatch` on every one. That throw does
+        /// not cost the property alone: `decodeLenientArray` isolates at the
+        /// section, so it costs every sibling property in the section too.
+        public enum PropertyType: Codable, Sendable, Equatable {
+            case single(String)
+            /// The union's members as declared, with every non-string member
+            /// dropped.
+            ///
+            /// Dropped rather than modelled because in practice a non-string
+            /// member is always JSON `null` — four corpus properties spell
+            /// nullability as `["number", null]` rather than
+            /// `["number", "null"]` — and `null` is exactly the member
+            /// `effectiveType` discards anyway. So the two spellings collapse
+            /// to the same answer, at the cost of an encode that is not
+            /// byte-faithful for those four; `Contributions.encode` already
+            /// documents that this type does not round-trip a manifest.
+            case union([String])
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                if let name = try? container.decode(String.self) {
+                    self = .single(name)
+                    return
+                }
+                var names: [String] = []
+                for member in try container.decode([JSONValue].self) {
+                    if case .string(let name) = member { names.append(name) }
+                }
+                self = .union(names)
+            }
+
+            public func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                switch self {
+                case .single(let name): try container.encode(name)
+                case .union(let members): try container.encode(members)
+                }
+            }
+        }
+
+        public let type: PropertyType?
         public let `default`: JSONValue?
         public let description: String?
         public let markdownDescription: String?
         public let `enum`: [JSONValue]?
         public let enumDescriptions: [String]?
+        public let markdownEnumDescriptions: [String]?
+        /// One label per `enum` member, positionally. Optional *per element*
+        /// because a manifest writes `null` for a member it wants labelled by
+        /// its own raw value: `[null, null, null, "…"]` appears in the corpus,
+        /// and a plain `[String]` throws on it — taking the section with it.
+        public let enumItemLabels: [String?]?
         public let scope: String?
+        public let order: Int?
         public let minimum: Double?
         public let maximum: Double?
+        public let deprecationMessage: String?
+        public let markdownDeprecationMessage: String?
+        /// `"multilineText"` asks for an editor rather than a one-line field.
+        /// It is the only value VS Code defines and the only one the corpus
+        /// uses.
+        public let editPresentation: String?
+
+        /// The one type this property can be rendered as, or `nil` when the
+        /// manifest does not settle it.
+        ///
+        /// A union collapses to its single non-`null` member: `["string",
+        /// "null"]` is a string that may be unset. A union whose members
+        /// genuinely disagree (`["boolean", "string"]`) has no single answer
+        /// and returns `nil` — the caller's cue to fall back to editing the
+        /// value as JSON text.
+        public var effectiveType: String? {
+            switch type {
+            case .single(let name):
+                return name
+            case .union(let members):
+                var distinct: [String] = []
+                for member in members where member != "null" && !distinct.contains(member) {
+                    distinct.append(member)
+                }
+                return distinct.count == 1 ? distinct[0] : nil
+            case nil:
+                return nil
+            }
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case type, `default`, description, markdownDescription
+            case `enum`, enumDescriptions, markdownEnumDescriptions, enumItemLabels
+            case scope, order, minimum, maximum
+            case deprecationMessage, markdownDeprecationMessage, editPresentation
+        }
+
+        /// `try?` per field, for the reason `Configuration.init(from:)` gives:
+        /// a throw here is charged to the whole section, so a property that
+        /// spells one annotation wrongly must still arrive with the rest of
+        /// its siblings. Every field this drops is annotation — a label, a
+        /// blurb, a sort position — never the value or the type the row is
+        /// built from.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            type = try? container.decode(PropertyType.self, forKey: .type)
+            `default` = try? container.decode(JSONValue.self, forKey: .default)
+            description = try? container.decode(String.self, forKey: .description)
+            markdownDescription = try? container.decode(String.self, forKey: .markdownDescription)
+            `enum` = try? container.decode([JSONValue].self, forKey: .enum)
+            enumDescriptions = try? container.decode([String].self, forKey: .enumDescriptions)
+            markdownEnumDescriptions = try? container.decode(
+                [String].self, forKey: .markdownEnumDescriptions)
+            enumItemLabels = try? container.decode([String?].self, forKey: .enumItemLabels)
+            scope = try? container.decode(String.self, forKey: .scope)
+            order = try? container.decode(Int.self, forKey: .order)
+            minimum = try? container.decode(Double.self, forKey: .minimum)
+            maximum = try? container.decode(Double.self, forKey: .maximum)
+            deprecationMessage = try? container.decode(String.self, forKey: .deprecationMessage)
+            markdownDeprecationMessage = try? container.decode(
+                String.self, forKey: .markdownDeprecationMessage)
+            editPresentation = try? container.decode(String.self, forKey: .editPresentation)
+        }
     }
 
     public struct View: Codable, Sendable, Equatable {
