@@ -592,4 +592,67 @@ struct LanguageServerSessionTests {
         #expect(await recorder.states == ["starting", "failed"])
         #expect(await session.state.failure != nil)
     }
+
+    // MARK: - The outstanding-request barrier
+
+    /// `teardown()` must not close the transport under a request that is still
+    /// on the wire.
+    ///
+    /// The hazard is `JSONRPCSession`'s: a request write that fails *after*
+    /// `readSequenceFinished()` has already drained its responder resumes one
+    /// `CheckedContinuation` twice, which is `SWIFT TASK CONTINUATION MISUSE`
+    /// — a `fatalError` that kills the app, not a recoverable error. Until
+    /// this branch nothing in production issued a request, so the missing
+    /// barrier was latent; `LSPHoverController`, `LSPCompletionDelegate` and
+    /// `LSPJumpToDefinitionDelegate` now all do, which makes "the user hovers
+    /// as the server is retired" a shipping crash.
+    ///
+    /// This measures the barrier rather than the crash, because the crash is
+    /// a microsecond-wide race that no test can schedule reliably: the
+    /// scripted server answers `initialize` and then swallows everything, so
+    /// the hover below stays outstanding for as long as the session lets it,
+    /// and `stop()` returning early is exactly the defect. Wall-clock, not
+    /// instrumentation, because the counter is teardown's private business.
+    @Test("teardown waits for a request that is still on the wire")
+    func teardownWaitsForOutstandingRequests() async throws {
+        let session = makeSession(script: Self.respondingServerScript)
+        try await session.start()
+
+        // Never answered: the child's `cat >/dev/null` eats it.
+        let hover = Task { try? await session.hover(TextDocumentPositionParams(
+            uri: "file:///tmp/outstanding.swift",
+            position: Position(line: 0, character: 0)
+        )) }
+        // Long enough for the request to be counted and written, short next to
+        // the barrier budget it is about to be measured against.
+        try await Task.sleep(for: .milliseconds(300))
+
+        let started = Date()
+        await session.stop()
+        let elapsed = Date().timeIntervalSince(started)
+
+        // The default barrier is 2s; the other budgets this session uses are
+        // 0.5s shutdown and 1s abandoned-start, and the scripted child dies on
+        // SIGTERM at once. A teardown with no barrier lands well under 1.5s.
+        #expect(elapsed >= 1.5, "stop() returned in \(elapsed)s; it did not wait for the request")
+        #expect(elapsed < 12, "stop() took \(elapsed)s; the barrier is not bounded")
+
+        _ = await hover.value
+    }
+
+    /// The barrier must be a wait *for* something, not a fixed cost on every
+    /// teardown. With nothing outstanding it has to fall straight through, or
+    /// `LanguageServerRegistry.stopAll` pays the full budget per session at
+    /// app quit.
+    @Test("teardown does not wait when no request is outstanding")
+    func teardownDoesNotWaitWithNothingOutstanding() async throws {
+        let session = makeSession(script: Self.respondingServerScript)
+        try await session.start()
+
+        let started = Date()
+        await session.stop()
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(elapsed < 1.5, "stop() took \(elapsed)s with nothing outstanding")
+    }
 }

@@ -309,6 +309,18 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         /// wait is what makes the child reapable, and the bound is what stops
         /// a server that never answers `initialize` from wedging app quit.
         public var abandonedStartBudgetSeconds: TimeInterval
+        /// How long `teardown()` waits for requests already on the wire before
+        /// it closes the transport under them. See `teardown()` step 2: the
+        /// wait is what keeps a request write from failing into a responder
+        /// `readSequenceFinished()` has already drained — one
+        /// `CheckedContinuation` resumed twice, which traps the process — and
+        /// the bound is what stops a server that answers nothing from wedging
+        /// app quit.
+        ///
+        /// Larger than `shutdownBudgetSeconds` on purpose: a request the user
+        /// just issued has a reply coming, where a `shutdown` a server is
+        /// ignoring never will.
+        public var outstandingRequestBudgetSeconds: TimeInterval
         /// How long the exit status of a server whose stdout has already ended
         /// is waited for. Bounded because a child that has exited while a
         /// grandchild it backgrounded still holds the descriptors makes the
@@ -329,6 +341,7 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
             initializeBudgetSeconds: TimeInterval = 30,
             shutdownBudgetSeconds: TimeInterval = 2,
             abandonedStartBudgetSeconds: TimeInterval = 1,
+            outstandingRequestBudgetSeconds: TimeInterval = 2,
             exitStatusBudgetSeconds: TimeInterval = 1,
             clientName: String = "AgenticToolkit",
             clientVersion: String = "1.0.0"
@@ -343,6 +356,7 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
             self.initializeBudgetSeconds = initializeBudgetSeconds
             self.shutdownBudgetSeconds = shutdownBudgetSeconds
             self.abandonedStartBudgetSeconds = abandonedStartBudgetSeconds
+            self.outstandingRequestBudgetSeconds = outstandingRequestBudgetSeconds
             self.exitStatusBudgetSeconds = exitStatusBudgetSeconds
             self.clientName = clientName
             self.clientVersion = clientVersion
@@ -394,6 +408,33 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     private let configuration: Configuration
     private var channel: SubprocessChannel?
     private var bridge: LanguageServerChannel?
+
+    /// How many request round trips are on the wire right now.
+    ///
+    /// The counterpart of `startTask` for the *other* half of this file's
+    /// traffic, and it exists for the same reason: a request publishes a write
+    /// to the child's stdin from inside a suspension, where no guard on this
+    /// actor can see it, so teardown cannot be sound beside one — only after
+    /// it. Requests only, not notifications: a notification write that fails
+    /// after the transport is gone throws a transport error its caller can act
+    /// on, where a request write that fails after `readSequenceFinished()` has
+    /// drained its responder resumes one `CheckedContinuation` twice, which is
+    /// a `fatalError`.
+    ///
+    /// Maintained only by `trackingOutstandingRequest(_:)`, whose `defer` is
+    /// what makes the decrement unconditional across return, throw and
+    /// cancellation alike.
+    private var outstandingRequests = 0
+
+    /// Teardowns parked on `outstandingRequests` reaching zero.
+    ///
+    /// Keyed rather than a bare array so that resuming one is a
+    /// `removeValue(forKey:)` — exactly-once by construction, which is the
+    /// property this whole change exists to protect and therefore the last
+    /// place to reintroduce a double resume. More than one entry is possible:
+    /// `stop()` is idempotent but not serialised, and `start()`'s failure path
+    /// tears down too.
+    private var requestBarrierWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     /// Where the stream-end handler records what it saw, **synchronously**.
     ///
@@ -659,10 +700,12 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// Stops the server and retires this session permanently.
     ///
     /// Teardown is ordered, and every unbounded half is bounded: wait out the
-    /// `start()` this call is racing, then `shutdown` + `exit` (both inside
-    /// `InitializingServer.shutdownAndExit()`, under `shutdownBudgetSeconds`),
-    /// then `SubprocessChannel.terminate()` as the backstop, which always runs.
-    /// The order is argued step by step on `teardown()`.
+    /// `start()` this call is racing, then the requests already on the wire
+    /// (under `outstandingRequestBudgetSeconds`), then `shutdown` + `exit`
+    /// (both inside `InitializingServer.shutdownAndExit()`, under
+    /// `shutdownBudgetSeconds`), then `SubprocessChannel.terminate()` as the
+    /// backstop, which always runs. The order is argued step by step on
+    /// `teardown()`.
     ///
     /// `terminate()` costs up to 2.5 s flat per channel, is **not** cancellable,
     /// and the budgets do not share between channels — so a caller stopping
@@ -749,18 +792,24 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     /// For the five request methods it is not. A request write that fails after
     /// `readSequenceFinished()` has already drained its responder resumes one
     /// `CheckedContinuation` twice — this file's own HIGH-1, a `fatalError`,
-    /// and not an outcome any caller can act on. **That window is narrowed by
-    /// timing, not closed by this gate.** What narrows it is `teardown()`
-    /// step 2: a `shutdownAndExit` round trip is interposed before
-    /// `terminate()`, so a request issued just before a `stop()` normally has a
-    /// reply or a clean refusal before stdin closes. That is a probability, not
-    /// a barrier, and it thins as `shutdownBudgetSeconds` shrinks or as the
-    /// server stops answering `shutdown` at all.
+    /// and not an outcome any caller can act on.
     ///
-    /// No production caller exists yet — Task 3.2 has not landed — so this is
-    /// recorded for whoever writes the first one rather than claimed closed.
-    /// Closing it properly means an outstanding-request barrier that
-    /// `teardown()` waits on the way it waits on `startTask`.
+    /// **That window is closed by a barrier, not by this gate.** Every request
+    /// goes through `trackingOutstandingRequest(_:)`, which counts the round
+    /// trip in `outstandingRequests` for its whole duration, and `teardown()`
+    /// step 2 waits for that count to reach zero before it touches the
+    /// transport — the same shape as its step 1 wait on `startTask`, and for
+    /// the identical reason: work that publishes a write from inside a
+    /// suspension cannot be torn down beside it, only after it.
+    ///
+    /// The barrier is bounded by `outstandingRequestBudgetSeconds`, so what
+    /// survives is the residue rather than the defect: a server that answers
+    /// *nothing* for the whole budget still has its transport closed under a
+    /// request, and the narrow write-versus-drain interleaving is possible
+    /// again from there. That is the same trade the other budgets in this file
+    /// make — an app that cannot quit is not a better outcome than a rare
+    /// crash — and it is reached only after a deliberate wait, where before
+    /// there was none at all.
     private func runningServer() throws -> InitializingServer {
         guard !isStopped, case .running = state, let server else {
             throw LanguageServerSessionError.notRunning
@@ -784,24 +833,110 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         try await runningServer().sendNotification(.textDocumentDidClose(params))
     }
 
+    /// Runs one request round trip against the running server, counted for its
+    /// whole duration so `teardown()` can wait it out.
+    ///
+    /// The gate and the increment happen in the same actor step — `runningServer()`
+    /// is synchronous and nothing suspends before `outstandingRequests += 1` —
+    /// so a request that passes the gate is *always* visible to a teardown
+    /// that runs afterwards. Getting that ordering wrong the other way round
+    /// is the whole bug: a request counted only after its first suspension
+    /// leaves a window in which the gate has said yes, the write is on its way,
+    /// and teardown sees a count of zero.
+    ///
+    /// The `defer` is what makes the decrement unconditional. A request that
+    /// throws — `.notRunning` cannot reach here, but a transport error or a
+    /// cancellation can — must still release the barrier, or the first failed
+    /// request makes every later teardown pay the full budget for nothing.
+    private func trackingOutstandingRequest<T: Sendable>(
+        _ send: (InitializingServer) async throws -> T
+    ) async throws -> T {
+        let server = try runningServer()
+        outstandingRequests += 1
+        defer { finishOutstandingRequest() }
+        return try await send(server)
+    }
+
+    /// Retires one round trip and, if it was the last, releases every parked
+    /// teardown.
+    ///
+    /// Synchronous and isolated, so the decrement and the resumes are one
+    /// actor step: nothing can start a new request between "the count reached
+    /// zero" and "the waiters were released", which would otherwise let a
+    /// teardown wake to a transport that is busy again.
+    ///
+    /// Each waiter is resumed exactly once because the dictionary is emptied
+    /// before any resume runs — the resumes cannot re-enter and find an entry
+    /// that is still there.
+    private func finishOutstandingRequest() {
+        outstandingRequests -= 1
+        guard outstandingRequests == 0, !requestBarrierWaiters.isEmpty else { return }
+        let waiters = requestBarrierWaiters
+        requestBarrierWaiters.removeAll()
+        for waiter in waiters.values { waiter.resume() }
+    }
+
+    /// Suspends until no request is on the wire. Unbounded on its own;
+    /// `teardown()` is what bounds it.
+    ///
+    /// The guard and the registration are one actor step —
+    /// `withCheckedContinuation` runs its body synchronously, before it
+    /// suspends — so there is no window in which the count drops to zero
+    /// between "there is something to wait for" and "here is the waiter",
+    /// which would park a teardown nothing would ever wake.
+    ///
+    /// The wait drains rather than treading water because nothing can be
+    /// *added* to it while it runs: every path that reaches `teardown()` has
+    /// already made the session unusable to `runningServer()` first — `stop()`
+    /// sets `isStopped` before its first suspension, and `start()`'s failure
+    /// branch publishes `.failed` before it tears down — so a request arriving
+    /// mid-teardown throws `.notRunning` instead of joining the count. Without
+    /// that, a busy editor could hold the barrier open until the budget
+    /// expired and the wait would buy nothing.
+    ///
+    /// When `teardown()`'s budget wins the race, the waiter registered here
+    /// stays in the dictionary and the abandoned task stays suspended on it.
+    /// That is deliberate and it is bounded: `teardown()` goes on to terminate
+    /// the child, `JSONRPCSession` drains every outstanding responder, the
+    /// count reaches zero and the waiter is resumed and dropped. One
+    /// continuation per abandoned teardown, released by the very step the
+    /// abandonment was in aid of.
+    private func awaitOutstandingRequests() async {
+        guard outstandingRequests > 0 else { return }
+        let id = UUID()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            requestBarrierWaiters[id] = continuation
+        }
+    }
+
     public func completion(_ params: CompletionParams) async throws -> CompletionResponse {
-        try await runningServer().sendRequest(.completion(params, ClientRequest.NullHandler))
+        try await trackingOutstandingRequest {
+            try await $0.sendRequest(.completion(params, ClientRequest.NullHandler))
+        }
     }
 
     public func hover(_ params: TextDocumentPositionParams) async throws -> HoverResponse {
-        try await runningServer().sendRequest(.hover(params, ClientRequest.NullHandler))
+        try await trackingOutstandingRequest {
+            try await $0.sendRequest(.hover(params, ClientRequest.NullHandler))
+        }
     }
 
     public func definition(_ params: TextDocumentPositionParams) async throws -> DefinitionResponse {
-        try await runningServer().sendRequest(.definition(params, ClientRequest.NullHandler))
+        try await trackingOutstandingRequest {
+            try await $0.sendRequest(.definition(params, ClientRequest.NullHandler))
+        }
     }
 
     public func diagnostics(_ params: DocumentDiagnosticParams) async throws -> DocumentDiagnosticReport {
-        try await runningServer().sendRequest(.diagnostics(params, ClientRequest.NullHandler))
+        try await trackingOutstandingRequest {
+            try await $0.sendRequest(.diagnostics(params, ClientRequest.NullHandler))
+        }
     }
 
     public func semanticTokensFull(_ params: SemanticTokensParams) async throws -> SemanticTokensResponse {
-        try await runningServer().sendRequest(.semanticTokensFull(params, ClientRequest.NullHandler))
+        try await trackingOutstandingRequest {
+            try await $0.sendRequest(.semanticTokensFull(params, ClientRequest.NullHandler))
+        }
     }
 
     // MARK: - Teardown
@@ -826,14 +961,14 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     ///    request's responder from its write path *and* again from
     ///    `readSequenceFinished()` — one continuation resumed twice, which traps
     ///    the process. Waiting first covers both in every ordering step 1
-    ///    completes: when step 3 runs the spawn has happened or been ruled out,
+    ///    completes: when step 4 runs the spawn has happened or been ruled out,
     ///    and the write has completed or failed on its own. When step 1's own
     ///    budget expires — the case the next paragraph exists to justify —
-    ///    neither half holds. The spawn half is admitted at step 5 below. The
+    ///    neither half holds. The spawn half is admitted at step 6 below. The
     ///    write half is weaker still: `startTask.value` completing does not
     ///    await the budget loser `withWallClockBudget` abandoned, so after an
     ///    `initialize` budget expiry that loser is still live and its write can
-    ///    still be outstanding when step 3 closes stdin. Both are residues, not
+    ///    still be outstanding when step 4 closes stdin. Both are residues, not
     ///    covered cases.
     ///
     ///    The task is **not** cancelled first, which is where this departs from
@@ -849,32 +984,54 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
     ///    cutting it short costs it nothing real; its error still reaches its
     ///    own caller, because `start()` awaits the task's completion and
     ///    rethrows from there.
-    /// 2. **Graceful `shutdown` + `exit`, under `shutdownBudgetSeconds`.** A
+    /// 2. **Wait out the requests already on the wire, bounded.** Step 1's
+    ///    argument, one traffic path over. A request write is published from
+    ///    inside a suspension too — `JSONRPCSession` registers the responder,
+    ///    then hops through the data channel and onto `SubprocessChannel` to do
+    ///    the write — and closing stdin beside one is what makes the write path
+    ///    fail a responder that `readSequenceFinished()` has *already* drained.
+    ///    One `CheckedContinuation` resumed twice is
+    ///    `SWIFT TASK CONTINUATION MISUSE`, a `fatalError` that takes the app
+    ///    with it. `runningServer()`'s gate cannot cover this: it decides
+    ///    before the write, and the hazard is after. Only waiting can.
+    ///
+    ///    Notifications are deliberately **not** waited on. A notification
+    ///    write that loses this race fails with a transport error its caller
+    ///    can act on; there is no responder to resume twice, so there is
+    ///    nothing here to protect.
+    ///
+    ///    Before step 3, not after: the whole point is to let requests finish
+    ///    while the transport is still whole, and a `shutdown` request racing
+    ///    the user's `hover` is a worse ordering than the reverse. The bound is
+    ///    `outstandingRequestBudgetSeconds`, and the residue when it expires is
+    ///    stated on `runningServer()`.
+    /// 3. **Graceful `shutdown` + `exit`, under `shutdownBudgetSeconds`.** A
     ///    server that ignores `shutdown`, or that is already dead, is not a
-    ///    teardown failure — step 3 is the answer to both.
-    /// 3. **`terminate()`, unconditional.** The backstop, and what makes this
+    ///    teardown failure — step 4 is the answer to both.
+    /// 4. **`terminate()`, unconditional.** The backstop, and what makes this
     ///    actor the only owner of the child.
-    /// 4. **`drain()`.** `terminate()` finishes the frame stream itself after
+    /// 5. **`drain()`.** `terminate()` finishes the frame stream itself after
     ///    waiting out its own pump-drain grace, so this is already finishing or
     ///    done. Waiting is what delivers the frames a graceful child wrote
     ///    between SIGTERM and `exit`. It is bounded in every ordering because
-    ///    `bridge` is only non-nil once step 3 has a launched channel to
+    ///    `bridge` is only non-nil once step 4 has a launched channel to
     ///    terminate.
-    /// 5. **`terminate()` again.** Only step 1's budget expiring can make this
+    /// 6. **`terminate()` again.** Only step 1's budget expiring can make this
     ///    more than a no-op: an abandoned start that resumes afterwards and
-    ///    completes its spawn leaves a child step 3 could not have seen. A
+    ///    completes its spawn leaves a child step 4 could not have seen. A
     ///    second `terminate()` on a live channel reaps it, and
     ///    `SubprocessChannel.terminate()` is idempotent — a second call awaits
     ///    the first call's own termination task rather than repeating the 2.5 s.
-    ///    This is `MCPClient.teardown()`'s step 5, one transport over.
+    ///    This is `MCPClient.teardown()`'s closing `terminate()`, one transport
+    ///    over.
     ///
     ///    What it does not close is the sliver in which an abandoned start
-    ///    resumes and spawns *between* steps 3 and 5. Closing that needs a
+    ///    resumes and spawns *between* steps 4 and 6. Closing that needs a
     ///    terminate-before-launch barrier inside `SubprocessChannel`, which is
     ///    out of this task's scope; reaching it at all requires a start wedged
     ///    for the whole of `abandonedStartBudgetSeconds` that then resumes
     ///    within microseconds.
-    /// 6. **End `publishedDiagnostics`.** Last, so the notifications step 4
+    /// 7. **End `publishedDiagnostics`.** Last, so the notifications step 5
     ///    delivered are yielded before the consumer's `for await` terminates.
     ///    This is the only place the continuation is finished, which is what
     ///    makes "finished exactly once, on every stop path" true by
@@ -884,6 +1041,15 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
             _ = try? await withWallClockBudget(configuration.abandonedStartBudgetSeconds) {
                 _ = try? await startTask.value
             }
+        }
+
+        // Step 2. Bounded the same way step 1 is, and by the same argument: a
+        // request that will never be answered must not be allowed to make app
+        // quit hang. The budget losing is not a failure to report — it means
+        // the residue on `runningServer()` is back in play for the remaining
+        // requests, which is what the steps below then do their best with.
+        _ = try? await withWallClockBudget(configuration.outstandingRequestBudgetSeconds) {
+            await self.awaitOutstandingRequests()
         }
 
         if let server {
