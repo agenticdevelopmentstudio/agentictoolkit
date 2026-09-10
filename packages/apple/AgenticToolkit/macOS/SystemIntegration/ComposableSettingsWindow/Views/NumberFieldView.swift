@@ -24,8 +24,14 @@ public protocol SettingsNumberValue: Codable, Sendable, Comparable {
     init?(settingsFieldString: String, locale: Locale)
     var settingsFieldString: String { get }
     /// Whether a decimal separator belongs in this kind of number. Read when
-    /// parsing: it is what makes an `Int` field refuse `"1,5"` outright
-    /// instead of quietly keeping the `1`.
+    /// parsing, where its one decision is what to do with an *integral-valued
+    /// fractional spelling* — en_US `"1.0"`, de_DE `"1,0"`. `Int(_:)` refuses
+    /// those, so they reach the locale parse, and `false` is what turns them
+    /// away there: a field that quietly accepted a spelling its type cannot
+    /// hold teaches the user the wrong thing about the field.
+    ///
+    /// A genuinely fractional `"1,5"` is refused whatever this says — see the
+    /// guard in `Int.init(settingsFieldString:locale:)`.
     static var settingsAllowsFloats: Bool { get }
 }
 
@@ -50,6 +56,19 @@ extension SettingsNumberValue {
     /// changes locale, which matters because the value is stored numerically
     /// and re-rendered from scratch on every launch.
     ///
+    /// `getObjectValue(_:for:range:error:)` rather than `number(from:)`
+    /// because the range it reports back is the only thing that makes a
+    /// *partial* parse visible. A formatter stops at the first character it
+    /// cannot use and answers with the prefix it read: en_US with
+    /// `allowsFloats == false` reads `"1.5"` as `1`, having consumed one
+    /// character of three, and `"12abc"` as `12`. `number(from:)` happens to
+    /// discard those today, but nothing in its contract promises it in every
+    /// locale, and an `Int` field that stored the `1` of a `"1,5"` the user
+    /// typed would be storing a number nobody asked for — a value-shaped
+    /// check downstream cannot catch it, because the prefix is a perfectly
+    /// good integer. Requiring the consumed range to cover the whole string
+    /// makes that refusal this file's, enforced rather than inherited.
+    ///
     /// A formatter per call rather than a cached one: `NumberFormatter` is a
     /// non-`Sendable` class and this is a `nonisolated` context on a value
     /// type, so a shared instance would need isolating. A human typing into a
@@ -59,7 +78,19 @@ extension SettingsNumberValue {
         formatter.locale = locale
         formatter.numberStyle = .decimal
         formatter.allowsFloats = settingsAllowsFloats
-        return formatter.number(from: text)
+
+        var parsed: AnyObject?
+        // `NSRange` counts UTF-16, which is also what the formatter reports
+        // back, so the two ends of this comparison are in the same units.
+        let whole = NSRange(location: 0, length: text.utf16.count)
+        var consumed = whole
+        do {
+            try formatter.getObjectValue(&parsed, for: text, range: &consumed)
+        } catch {
+            return nil
+        }
+        guard consumed == whole else { return nil }
+        return parsed as? NSNumber
     }
 }
 
@@ -75,16 +106,26 @@ extension Int: SettingsNumberValue {
         guard let number = Self.settingsLocaleNumber(from: trimmed, locale: locale) else {
             return nil
         }
-        // A fractional edit of an integer setting is rejected, not rounded.
-        // `allowsFloats == false` above is the first refusal and this is the
-        // second: whatever a locale makes of `"1,5"`, an integer field stores
-        // an integer or it stores nothing, and a silent 1 or 2 is a value the
-        // user did not type.
-        let value = number.doubleValue
-        guard value.isFinite, value == value.rounded(), let exact = Int(exactly: value) else {
-            return nil
-        }
-        self = exact
+        // A fractional edit of an integer setting is rejected, not rounded: an
+        // integer field stores an integer or it stores nothing, and a silent 1
+        // or 2 is a value the user did not type. `allowsFloats == false` above
+        // turns away the integral-valued spellings (`"1.0"`, `"1,0"`); this
+        // turns away a fractional value from any locale the flag does not
+        // cover. What turns away a *truncated* parse — the `1` of `"1,5"` — is
+        // neither of them but the whole-string requirement in
+        // `settingsLocaleNumber`, because a prefix is already an integer and
+        // would pass every check below.
+        //
+        // `doubleValue` decides only finiteness and wholeness, both of which a
+        // double represents faithfully. The value itself comes from
+        // `int64Value`: a double rounds above 2^53, so a typed
+        // 9,007,199,254,740,993 would be stored as ...992 with nothing here
+        // able to object, the rounded double being a perfectly good integer.
+        let approximate = number.doubleValue
+        guard approximate.isFinite, approximate == approximate.rounded() else { return nil }
+        let exact = number.int64Value
+        guard Double(exact) == approximate, let value = Int(exactly: exact) else { return nil }
+        self = value
     }
 
     public var settingsFieldString: String { String(self) }

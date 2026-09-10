@@ -317,11 +317,44 @@ struct ConfigurationContributionPointTests {
         #expect(Double(settingsFieldString: "1.5", locale: german) == 1.5)
         #expect(Double.settingsLocaleNumber(from: "1.5", locale: german) == nil)
 
+        // And this is the pair that actually pins the ordering. Three decimal
+        // digits, not one: de_DE's grouping separator is `.` with a group size
+        // of three, so `"1.234"` — ordinary writer output — is well-formed
+        // grouping to a de_DE formatter and comes back a thousand times too
+        // big, while the `"1.5"` above is a one-digit group the formatter
+        // rejects on its own and therefore passes whichever way round the
+        // ladder is. Simplifying this case to `"1.5"` would silently remove the
+        // only regression net the POSIX-first ordering has.
+        #expect(Double(settingsFieldString: "1.234", locale: german) == 1.234)
+        #expect(Double.settingsLocaleNumber(from: "1.234", locale: german)?.doubleValue == 1234)
+
         // An integer field stores an integer or nothing: `allowsFloats` is
         // false for `Int`, so a fractional edit is refused, not rounded.
         #expect(Int.settingsAllowsFloats == false)
         #expect(Int(settingsFieldString: "1.5", locale: english) == nil)
         #expect(Int(settingsFieldString: "1,5", locale: german) == nil)
+
+        // The one decision `allowsFloats` makes on its own. `Int(_:)` refuses
+        // an integral value spelled with a fraction, so `"1.0"` reaches the
+        // locale parse with nothing but the flag between it and a stored 1 —
+        // the two lines above would still pass with the flag flipped, these
+        // two would not.
+        #expect(Int(settingsFieldString: "1.0", locale: english) == nil)
+        #expect(Int(settingsFieldString: "1,0", locale: german) == nil)
+
+        // A partial parse is refused here rather than left to the formatter:
+        // en_US reads `"12abc"` as the prefix 12 and reports consuming two
+        // characters of five, and a prefix would pass every value-shaped check
+        // an integer field can make.
+        #expect(Int.settingsLocaleNumber(from: "12abc", locale: english) == nil)
+        #expect(Int(settingsFieldString: "12abc", locale: english) == nil)
+
+        // Grouped input keeps its exactness: routed through a `Double` this
+        // would be stored as ...992, and `Int(exactly:)` would not object,
+        // because the rounded double is itself a whole number.
+        #expect(
+            Int(settingsFieldString: "9,007,199,254,740,993", locale: english)
+                == 9_007_199_254_740_993)
 
         #expect(Double(settingsFieldString: "nan", locale: english) == nil)
         #expect(Double(settingsFieldString: "not a number", locale: english) == nil)
