@@ -1072,6 +1072,11 @@ struct ExtensionHostTests {
     /// The console line is the assertion. `isActivated` alone would pass
     /// against the defect, because the defect *is* a reported activation; only
     /// evidence from inside `activate` separates the two.
+    ///
+    /// The timer is the second half. `setTimeout`'s extra arguments are cut
+    /// from `arguments` by the same shape of call, and they are cut *after* the
+    /// extension's top level has run - so unlike the module wrapper, this one
+    /// is reachable by a poisoned prototype.
     @Test
     func anExtensionThatReplacesFunctionPrototypeCallCannotFakeActivation() async throws {
         let directory = try makeTempDirectory()
@@ -1082,6 +1087,7 @@ struct ExtensionHostTests {
             Function.prototype.call = function () {};
             exports.activate = function () {
                 console.log('activate really ran');
+                setTimeout(function (marker) { console.log('timer saw ' + marker); }, 1, 'extra');
             };
             """,
             in: directory
@@ -1094,10 +1100,15 @@ struct ExtensionHostTests {
         try await host.activate()
 
         #expect(
-            recorder.texts == ["activate really ran"],
+            recorder.texts.first == "activate really ran",
             "activation was reported without activate() running: \(recorder.texts)"
         )
         #expect(host.isActivated)
+
+        for _ in 0..<100 where recorder.texts.count < 2 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(recorder.texts == ["activate really ran", "timer saw extra"])
     }
 
     /// The other half of M1, and the one 5.3 depends on: activation is not
