@@ -54,7 +54,24 @@ public struct VSCodeEngineRange: Sendable, Hashable, CustomStringConvertible {
     public func accepts(_ version: SemanticVersion) -> Bool {
         switch requirement {
         case .caret(let floor):
-            let ceiling = SemanticVersion(major: floor.major + 1, minor: 0, patch: 0)
+            // `floor.major + 1` is a *trapping* add. What keeps it off a
+            // hostile manifest's `Int.max` is `SemanticVersion.init?(String)`
+            // refusing that number in the first place — the guard is there, at
+            // the one place a version is admitted from text, so every consumer
+            // inherits it rather than re-deriving it here.
+            //
+            // This still reports the overflow rather than trusting that
+            // upstream guard, because `SemanticVersion`'s *memberwise*
+            // initialiser is public and unbounded: today no initialiser on
+            // this type can reach it with such a floor, but the day one takes
+            // a `SemanticVersion` directly, the difference between this branch
+            // and a bare `+` is a crash. Overflow means the floor is already
+            // the largest major expressible, so "below the next major" admits
+            // every version at or above it — there is no next major to be
+            // below.
+            let (nextMajor, overflowed) = floor.major.addingReportingOverflow(1)
+            guard !overflowed else { return version >= floor }
+            let ceiling = SemanticVersion(major: nextMajor, minor: 0, patch: 0)
             return version >= floor && version < ceiling
         case .atLeast(let floor):
             return version >= floor

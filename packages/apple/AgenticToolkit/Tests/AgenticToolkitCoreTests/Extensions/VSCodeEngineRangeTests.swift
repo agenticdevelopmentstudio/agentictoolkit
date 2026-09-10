@@ -48,4 +48,37 @@ struct VSCodeEngineRangeTests {
         let atLeast = try #require(VSCodeEngineRange(">= 1.74.0"))
         #expect(atLeast.accepts(SemanticVersion(major: 1, minor: 74, patch: 0)))
     }
+
+    /// Every requirement form is fed a major a caret ceiling cannot survive.
+    ///
+    /// `^` is the one that does the arithmetic (`floor.major + 1`, a trapping
+    /// add), but `>=` and the exact form are listed too because they share the
+    /// shape: all three parse their operand with `SemanticVersion.init?`, which
+    /// is where the guard lives, so all three must reject the same input. A
+    /// range this type cannot evaluate is a load failure that names the raw
+    /// string — `ExtensionRegistry` records `.engineRangeUnparsable` and skips
+    /// the extension — not a trap inside `Features.init()`.
+    @Test(
+        "rejects a version whose major cannot be incremented",
+        arguments: [
+            "^\(Int.max)",
+            ">=\(Int.max)",
+            "\(Int.max)",
+            "^\(Int.max).0.0",
+            "^2147483648"
+        ]
+    )
+    func rejectsOverflowingMajors(_ input: String) {
+        #expect(VSCodeEngineRange(input) == nil)
+    }
+
+    /// The largest major this type still evaluates, exercised through
+    /// `accepts` rather than parsing alone — the trapping add is in `accepts`,
+    /// so a boundary that parses must also be safe to compare against.
+    @Test("evaluates the largest major it accepts without trapping")
+    func acceptsTheLargestPermittedMajor() throws {
+        let range = try #require(VSCodeEngineRange("^2147483647"))
+        #expect(range.accepts(SemanticVersion(major: 2_147_483_647, minor: 9, patch: 9)))
+        #expect(!range.accepts(SemanticVersion(major: 1, minor: 95, patch: 0)))
+    }
 }
