@@ -26,13 +26,20 @@ open class MultiTabbedViewController: NSViewController {
 
     public struct Tab {
         public let id: UUID
-        public var title: String
+        public var item: TabItem
         public var viewController: NSViewController
 
-        public init(id: UUID = UUID(), title: String, viewController: NSViewController) {
+        @MainActor
+        public var title: String { item.title }
+
+        public init(id: UUID = UUID(), item: TabItem, viewController: NSViewController) {
             self.id = id
-            self.title = title
+            self.item = item
             self.viewController = viewController
+        }
+
+        public init(id: UUID = UUID(), title: String, viewController: NSViewController) {
+            self.init(id: id, item: .title(title), viewController: viewController)
         }
     }
 
@@ -70,7 +77,7 @@ open class MultiTabbedViewController: NSViewController {
         .left: EdgeState(enabled: false)
     ]
 
-    private var tabBars: [Edge: TabBarView] = [:]
+    var tabBars: [Edge: TabBarView] = [:]
 
     private let centerContainer = ThemedBackgroundView(role: .windowBackground)
     private var mountedCenterController: NSViewController?
@@ -105,6 +112,7 @@ open class MultiTabbedViewController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         for edge in Edge.allCases {
             let bar = TabBarView(edge: edge)
+            bar.hostController = self
             tabBars[edge] = bar
             wireCallbacks(for: bar)
         }
@@ -134,6 +142,13 @@ open class MultiTabbedViewController: NSViewController {
             syncTabBar(for: edge)
         }
         refreshCenterContent()
+    }
+
+    /// A hosted item's `preferredContentSize` changing is how it tells the
+    /// bar it needs more room — grow the bar that hosts it to match.
+    open override func preferredContentSizeDidChange(for viewController: NSViewController) {
+        super.preferredContentSizeDidChange(for: viewController)
+        for bar in tabBars.values { bar.updateThickness() }
     }
 
     // MARK: - Edge enable/disable
@@ -193,7 +208,8 @@ open class MultiTabbedViewController: NSViewController {
     public func renameTab(id: UUID, title: String) {
         guard let edge = edge(forTabID: id), let state = edgeStates[edge] else { return }
         guard let idx = state.tabs.firstIndex(where: { $0.id == id }) else { return }
-        state.tabs[idx].title = title
+        guard case .title = state.tabs[idx].item else { return }
+        state.tabs[idx].item = .title(title)
         tabBars[edge]?.renameItem(id: id, title: title)
     }
 
@@ -397,7 +413,7 @@ open class MultiTabbedViewController: NSViewController {
 
     private func syncTabBar(for edge: Edge) {
         guard let state = edgeStates[edge], let bar = tabBars[edge] else { return }
-        let items = state.tabs.map { TabBarView.ItemModel(id: $0.id, title: $0.title) }
+        let items = state.tabs.map { TabBarView.ItemModel(id: $0.id, item: $0.item) }
         bar.setItems(items, selectedID: activeTabID)
     }
 

@@ -23,7 +23,9 @@ final class TabBarView: NSView {
 
     struct ItemModel {
         let id: UUID
-        var title: String
+        var item: TabItem
+        @MainActor
+        var title: String { item.title }
     }
 
     // MARK: - Callbacks (set by MultiTabbedViewController)
@@ -45,6 +47,13 @@ final class TabBarView: NSView {
     private let stack = NSStackView()
     private let edgeDivider = NSView()
     private var buttons: [UUID: TabButton] = [:]
+
+    /// The controller `rebuildButtons()` parents hosted view controllers to
+    /// — set by `MultiTabbedViewController` right after it creates the bar.
+    weak var hostController: NSViewController?
+    private(set) var thicknessConstraint: NSLayoutConstraint?
+    private var hostedControllers: [UUID: NSViewController] = [:]
+    private var hostViews: [UUID: TabItemHostView] = [:]
 
     // MARK: - Init
 
@@ -89,7 +98,7 @@ final class TabBarView: NSView {
         switch edge {
         case .top:
             NSLayoutConstraint.activate([
-                heightAnchor.constraint(equalToConstant: thickness),
+                makeThicknessConstraint(thickness),
                 stack.topAnchor.constraint(equalTo: topAnchor),
                 stack.leadingAnchor.constraint(equalTo: leadingAnchor),
                 stack.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -102,7 +111,7 @@ final class TabBarView: NSView {
             ])
         case .bottom:
             NSLayoutConstraint.activate([
-                heightAnchor.constraint(equalToConstant: thickness),
+                makeThicknessConstraint(thickness),
                 edgeDivider.leadingAnchor.constraint(equalTo: leadingAnchor),
                 edgeDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
                 edgeDivider.topAnchor.constraint(equalTo: topAnchor),
@@ -115,7 +124,7 @@ final class TabBarView: NSView {
             ])
         case .left:
             NSLayoutConstraint.activate([
-                widthAnchor.constraint(equalToConstant: thickness),
+                makeThicknessConstraint(thickness),
                 stack.topAnchor.constraint(equalTo: topAnchor),
                 // Pack buttons from the top; the leftover column height
                 // stays empty instead of stretching the buttons.
@@ -130,7 +139,7 @@ final class TabBarView: NSView {
             ])
         case .right:
             NSLayoutConstraint.activate([
-                widthAnchor.constraint(equalToConstant: thickness),
+                makeThicknessConstraint(thickness),
                 edgeDivider.topAnchor.constraint(equalTo: topAnchor),
                 edgeDivider.bottomAnchor.constraint(equalTo: bottomAnchor),
                 edgeDivider.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -146,6 +155,17 @@ final class TabBarView: NSView {
         }
     }
 
+    /// Builds this edge's height/width constraint and keeps it, so later
+    /// hosted-item growth (`updateThickness()`) is a constant update rather
+    /// than a teardown.
+    private func makeThicknessConstraint(_ constant: CGFloat) -> NSLayoutConstraint {
+        let constraint = edge == .top || edge == .bottom
+            ? heightAnchor.constraint(equalToConstant: constant)
+            : widthAnchor.constraint(equalToConstant: constant)
+        thicknessConstraint = constraint
+        return constraint
+    }
+
     // MARK: - Public mutation
 
     func setItems(_ items: [ItemModel], selectedID: UUID?) {
@@ -159,11 +179,15 @@ final class TabBarView: NSView {
         for (buttonID, button) in buttons {
             button.isHighlighted = (buttonID == id)
         }
+        for (itemID, controller) in hostedControllers {
+            (controller as? TabBarHostedItem)?.isHighlighted = (itemID == id)
+        }
     }
 
     func renameItem(id: UUID, title: String) {
         if let idx = items.firstIndex(where: { $0.id == id }) {
-            items[idx].title = title
+            guard case .title = items[idx].item else { return }
+            items[idx].item = .title(title)
             buttons[id]?.title = title
         }
     }
@@ -173,21 +197,89 @@ final class TabBarView: NSView {
     private func rebuildButtons() {
         for view in stack.arrangedSubviews { view.removeFromSuperview() }
         buttons.removeAll()
+        hostViews.removeAll()
+        let liveIDs = Set(items.map(\.id))
+        for (id, controller) in hostedControllers where !liveIDs.contains(id) {
+            controller.removeFromParent()
+            hostedControllers[id] = nil
+        }
         for item in items {
-            let button = TabButton(id: item.id, title: item.title)
-            button.isHighlighted = (item.id == selectedID)
-            button.onSelect = { [weak self] id in self?.onSelect?(id) }
-            button.onClose = { [weak self] id in self?.onClose?(id) }
-            stack.addArrangedSubview(button)
-            buttons[item.id] = button
+            let view: NSView
+            switch item.item {
+            case let .title(title):
+                let button = TabButton(id: item.id, title: title)
+                button.isHighlighted = (item.id == selectedID)
+                button.onSelect = { [weak self] id in self?.onSelect?(id) }
+                button.onClose = { [weak self] id in self?.onClose?(id) }
+                buttons[item.id] = button
+                view = button
+            case let .viewController(controller):
+                if controller.parent !== hostController { hostController?.addChild(controller) }
+                hostedControllers[item.id] = controller
+                if let hosted = controller as? TabBarHostedItem {
+                    hosted.isHighlighted = (item.id == selectedID)
+                    hosted.onClose = { [weak self, id = item.id] in self?.onClose?(id) }
+                }
+                let host = TabItemHostView(id: item.id, content: controller.view)
+                host.onSelect = { [weak self] id in self?.onSelect?(id) }
+                hostViews[item.id] = host
+                view = host
+            }
+            stack.addArrangedSubview(view)
 
             // Vertical bars: each button fills the bar's interior width so
             // labels and close buttons line up flush.
             if stack.orientation == .vertical {
-                button.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8).isActive = true
-                button.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -8).isActive = true
+                view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8).isActive = true
+                view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -8).isActive = true
             }
         }
+        updateThickness()
+    }
+
+    /// The bar is as thick as its thickest hosted item needs, never thinner than the button default.
+    func updateThickness() {
+        let sizes = hostedControllers.values.map(\.preferredContentSize)
+        let constant: CGFloat
+        switch edge {
+        case .top, .bottom:
+            constant = max(Self.preferredThickness(for: edge), (sizes.map(\.height).max() ?? 0) + 4)
+        case .left, .right:
+            constant = max(Self.preferredThickness(for: edge), (sizes.map(\.width).max() ?? 0) + 16)
+        }
+        thicknessConstraint?.constant = constant
+    }
+}
+
+// MARK: - TabItemHostView
+
+/// Wraps a hosted item's view so a click anywhere on it selects the tab.
+/// The close button inside a hosted item receives its own `mouseDown` first
+/// (it is a subview), so a close click does not also select.
+@MainActor
+private final class TabItemHostView: NSView {
+    let id: UUID
+    var onSelect: ((UUID) -> Void)?
+
+    init(id: UUID, content: NSView) {
+        self.id = id
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func mouseDown(with event: NSEvent) {
+        onSelect?(id)
     }
 }
 
