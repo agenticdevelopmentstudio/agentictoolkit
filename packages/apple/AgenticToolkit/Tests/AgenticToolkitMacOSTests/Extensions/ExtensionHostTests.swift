@@ -1844,4 +1844,51 @@ struct ExtensionHostTests {
             "TypeError"
         ])
     }
+
+    /// The percent-encoder, where it used to disagree with WHATWG.
+    ///
+    /// Two gaps, both measured against Node's `URL` before and after: the path
+    /// class matched surrogate *halves*, so `encodeURIComponent` refused each
+    /// one and the fallback handed an astral character back unencoded - an
+    /// emoji in a file name being the shape an extension is most likely to
+    /// produce; and the fragment was not encoded at all, unlike the query,
+    /// which defers to `URLSearchParams` because that really is a second owner.
+    ///
+    /// `#a{b}c` is here to hold the two sets apart: braces are legal in a
+    /// fragment and encoding them would be a new disagreement in the other
+    /// direction.
+    @Test
+    func theURLEncoderMatchesWHATWGForAstralCharactersAndFragments() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                console.log(new URL('./a😀bé c', 'https://a.com/').href);
+                console.log(new URL('https://a.com/p#f g').href);
+                console.log(new URL('https://a.com/p#a{b}c').href);
+                console.log(new URL('https://a.com/p#😀').href);
+                var setter = new URL('https://a.com/p');
+                setter.hash = 'x y';
+                console.log(setter.href);
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == [
+            "https://a.com/a%F0%9F%98%80b%C3%A9%20c",
+            "https://a.com/p#f%20g",
+            "https://a.com/p#a{b}c",
+            "https://a.com/p#%F0%9F%98%80",
+            "https://a.com/p#x%20y"
+        ])
+    }
 }
