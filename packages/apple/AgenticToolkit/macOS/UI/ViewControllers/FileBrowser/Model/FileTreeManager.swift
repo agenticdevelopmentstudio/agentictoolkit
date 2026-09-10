@@ -1,3 +1,4 @@
+import AgenticToolkitCore
 import Combine
 import Foundation
 import SwiftUI

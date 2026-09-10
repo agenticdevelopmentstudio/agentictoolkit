@@ -1,3 +1,4 @@
+import AgenticToolkitCore
 import Foundation
 import Combine
 
