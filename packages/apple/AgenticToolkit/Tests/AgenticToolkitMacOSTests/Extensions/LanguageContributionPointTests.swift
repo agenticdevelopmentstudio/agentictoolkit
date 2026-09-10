@@ -244,6 +244,51 @@ struct LanguageContributionPointTests {
         #expect(point.mapping(for: "rb")?.languageName == "ruby")
     }
 
+    @Test("every dropped key at once is reported in VS Code's schema order")
+    func droppedKeysFollowTheSchemaOrder() throws {
+        let point = LanguageContributionPoint()
+        try apply(
+            manifest(
+                name: "everything",
+                languages: """
+                [
+                    {
+                        "id": "kitchen-sink",
+                        "extensions": [".rb", "cspell.json"],
+                        "filenames": ["Rakefile"],
+                        "filenamePatterns": ["*.gemspec"],
+                        "firstLine": "^#!.*\\bruby\\b",
+                        "mimetypes": ["text/x-ruby"],
+                        "configuration": "./nowhere/language-configuration.json",
+                        "icon": { "light": "./icons/light.svg", "dark": "./icons/dark.svg" }
+                    }
+                ]
+                """
+            ),
+            to: point
+        )
+
+        // Asserted as one literal, in order: `DroppedLanguageMatcher.keys`
+        // promises the order VS Code's `contributes.languages` schema lists
+        // the keys in, and a per-key assertion would let any of them move.
+        // `extensions` is last because it means "some individual values were
+        // skipped", not "the key was dropped".
+        let row = try #require(point.dropped.first)
+        #expect(point.dropped.count == 1)
+        #expect(row.keys == [
+            "filenames",
+            "filenamePatterns",
+            "firstLine",
+            "mimetypes",
+            "icon",
+            "configuration",
+            "extensions"
+        ])
+        #expect(row.skippedExtensions == ["cspell.json"])
+        #expect(row.declaredNoMatcher == false)
+        #expect(point.mapping(for: "rb")?.languageName == "kitchen-sink")
+    }
+
     @Test("dropped rows are replaced on re-apply, not accumulated")
     func droppedRowsAreReplacedNotAccumulated() throws {
         let point = LanguageContributionPoint()

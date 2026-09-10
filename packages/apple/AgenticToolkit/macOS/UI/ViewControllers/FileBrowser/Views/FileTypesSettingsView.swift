@@ -115,9 +115,12 @@ public enum CustomFileTypeMappings {
 /// One table, three readers: the file tree (`FileTreeNode.fileIconName`), the
 /// settings panel's built-in rows (`BuiltInFileType.allBuiltIn`) and the
 /// mappings an extension contributes (`LanguageContributionPoint`). It was two
-/// copies until the third reader arrived, and they had already drifted — the
-/// tree's copy did not know `mkd`, `mjs` or `shtml` — which is the whole
-/// argument for it being one.
+/// copies until the third reader arrived, and they had already drifted, which
+/// is the whole argument for it being one. The tree's copy was the poorer of
+/// the two by ten extensions — `mkd`, `mkdn`, `mdwn`, `mdown`, `cjs`, `mjs`,
+/// `cts`, `mts`, `htm` and `shtml` — so unifying on this table changes what
+/// the tree draws for exactly those ten, in each case from a blank `doc` to
+/// the icon the settings panel was already showing.
 ///
 /// Returns `nil` rather than a fallback for an extension it does not know:
 /// each reader's fallback is its own. The tree and the settings list want a

@@ -262,9 +262,13 @@ public final class FileTreeNode: Identifiable, ObservableObject, Hashable, @unch
         }
 
         // One shared table (`FileTypeIcons`), not a switch of its own: this
-        // copy and the settings panel's had already drifted apart — this one
-        // did not know `mkd`, `mjs` or `shtml` — and a contributed mapping now
-        // reads the same table, so a third copy would be a third drift.
+        // copy and the settings panel's had already drifted apart, and a
+        // contributed mapping now reads the same table, so a third copy would
+        // be a third drift. Adopting the shared table changes ten extensions
+        // here, each of them a file that used to draw a blank `doc`: `mkd`,
+        // `mkdn`, `mdwn` and `mdown` now draw `doc.richtext` with the rest of
+        // Markdown; `cjs`, `mjs`, `cts` and `mts` draw the code symbol with
+        // `js` and `ts`; `htm` and `shtml` draw the globe with `html`.
         return FileTypeIcons.builtInIcon(for: ext) ?? "doc"
     }
 
