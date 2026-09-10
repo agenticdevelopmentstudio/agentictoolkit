@@ -22,6 +22,12 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     private let document: TextDocument
     private let registry: LanguageServerRegistry
 
+    /// Extension-contributed snippets, or `nil` when no extension host is
+    /// wired up. Their items carry `insertTextFormat == .snippet`, so they
+    /// reach the text view through `insertionText(for:)` exactly as a
+    /// server's own snippet completions do.
+    private let snippets: SnippetStore?
+
     /// The entries the last request produced, and the UTF-16 offset the token
     /// they complete starts at. `completionOnCursorMove` filters this set by
     /// whatever has been typed since, which is what makes that method able to
@@ -101,9 +107,21 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     private var triggerReadClock = 0
     private var resolvedTriggerReadStamp = 0
 
-    init(document: TextDocument, registry: LanguageServerRegistry) {
+    /// `snippets` is optional and defaults to absent because an editor is
+    /// perfectly usable with no extensions installed, and nothing in this
+    /// class should behave differently when there are none: with no store the
+    /// completion list is exactly what the server sent, as it was before
+    /// extension snippets existed. Injected rather than reached for — the
+    /// store belongs to whoever owns the `ExtensionRegistry`, not to a
+    /// per-document delegate.
+    init(
+        document: TextDocument,
+        registry: LanguageServerRegistry,
+        snippets: SnippetStore? = nil
+    ) {
         self.document = document
         self.registry = registry
+        self.snippets = snippets
     }
 
     // MARK: - CodeSuggestionDelegate
@@ -238,6 +256,7 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
             return nil
         }
         let uri = document.uri
+        let languageId = document.languageId
         let prefixStart = identifierStart(before: offset)
         let position = document.position(forUTF16Offset: offset)
         let defaultRange = LSPRange(
@@ -295,12 +314,26 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         }
 
         let items = response?.items ?? []
-        guard !items.isEmpty else {
+        // Appended after the server's items, at equal relevance rather than
+        // interleaved by it: the server knows this document and a snippet file
+        // does not, so anything it has to say outranks a snippet that merely
+        // matches the prefix. Not pre-filtered by what has been typed either —
+        // `completionOnCursorMove` filters the whole cached set on `filterKey`,
+        // and a second filter here would only be a different one.
+        let snippetItems = snippets?.snippets(forLanguage: languageId).map { $0.completionItem() } ?? []
+        // Snippets count towards there being a window at all. A server that
+        // answers with nothing — mid-keyword, or one that only completes after
+        // a `.` — must not silence snippets the user installed for exactly
+        // those places.
+        guard !items.isEmpty || !snippetItems.isEmpty else {
             clearCache(ifCurrent: generation)
             return nil
         }
 
-        let entries = items.map { item in
+        // Snippet items carry no `textEdit` — a snippet file has no document
+        // range to name — so `range(of:)` answers `nil` for them and they take
+        // the same `defaultRange` the server's rangeless items take.
+        let entries = (items + snippetItems).map { item in
             LSPCompletionEntry(item: item, requestRange: Self.range(of: item) ?? defaultRange)
         }
         // The window itself is still returned when this request has been
