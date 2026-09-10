@@ -513,6 +513,65 @@ struct ExtensionsSettingsPanelTests {
             == "2 extension problems")
     }
 
+    @Test("a scan that could not name every extension says what that cost")
+    func anIncompleteScanSaysTheThemesWereLeftInPlace() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try installExtension(named: "alpha", in: root)
+            try write(
+                "{ not valid json",
+                to: "package.json",
+                in: root.appendingPathComponent("broken-ext")
+            )
+
+            try withPanel(searchPaths: [root]) { coordinator, panel in
+                try #require(coordinator.registry.establishedIdentifiers == nil)
+                let problems = try #require(
+                    panel.panels.compactMap { $0 as? ExtensionLoadProblemsPanel }.first)
+
+                // The cause was already on screen; this is the consequence.
+                // A prune that silently did nothing leaves the themes of an
+                // extension the user really did delete sitting in the picker
+                // with nothing anywhere to explain them.
+                #expect(labels(in: problems.view)
+                    .contains(ExtensionLoadProblemsPanel.incompleteScanNote))
+            }
+        }
+    }
+
+    @Test("a failure that names its extension does not claim anything was left in place")
+    func aNameableFailureSaysNothingAboutThemes() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try installExtension(named: "alpha", in: root)
+            // A failure, but not an unnameable one: the manifest decoded, so
+            // the prune ran normally and there is no consequence to report.
+            try write(
+                """
+                {
+                    "name": "toonew",
+                    "publisher": "test",
+                    "version": "1.0.0",
+                    "engines": { "vscode": "^99.0.0" },
+                    "contributes": { "commands": [] }
+                }
+                """,
+                to: "package.json",
+                in: root.appendingPathComponent("toonew-1.0.0")
+            )
+
+            try withPanel(searchPaths: [root]) { coordinator, panel in
+                #expect(coordinator.registry.establishedIdentifiers != nil)
+                let problems = try #require(
+                    panel.panels.compactMap { $0 as? ExtensionLoadProblemsPanel }.first)
+                #expect(!labels(in: problems.view)
+                    .contains(ExtensionLoadProblemsPanel.incompleteScanNote))
+            }
+        }
+    }
+
     // MARK: - The Contributes summary
 
     @Test("the contributes summary counts and names every non-empty key")

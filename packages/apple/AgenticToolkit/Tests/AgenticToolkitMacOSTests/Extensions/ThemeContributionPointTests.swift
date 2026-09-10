@@ -528,11 +528,37 @@ struct ThemeContributionPointTests {
             id: "user.imported", attribution: "user:mike", in: directory))
         let point = ThemeContributionPoint(themeStore: store)
 
-        // No extension at all installed — the harshest input a prune can get.
+        // No extension at all installed — the harshest *instruction* a prune
+        // can be given, and a legitimate one: a scan that read every folder
+        // and found nothing says exactly this. Its opposite is `nil`, in the
+        // test below.
         point.pruneOrphans(installedIdentifiers: [])
 
         let ids5 = storage.customThemes.map(\.id)
         #expect(ids5 == ["user.mine", "user.imported"])
+    }
+
+    @Test("prune orphans does nothing at all when the scan could not name everyone")
+    func pruneOrphansDoesNothingWhenTheScanCouldNotNameEveryone() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/one.json", in: directory)
+
+        let storage = ExtensionTestThemeStorage()
+        let point = ThemeContributionPoint(themeStore: ThemeStore(storage: storage))
+        let entry = themeEntry(label: "One", path: "./themes/one.json")
+        try apply(try manifest(name: "gone", themes: "[\(entry)]"), to: point, at: directory)
+        try #require(storage.customThemes.count == 1)
+
+        // `nil`, not `[]`, and the difference is the whole point: one
+        // `package.json` in a search path would not parse, so this launch
+        // cannot tell an extension that was deleted while the app was closed
+        // from the one it could not read — and must therefore take nothing
+        // away. The empty set above says "delete them all"; this says "I do
+        // not know" (I1/I2).
+        point.pruneOrphans(installedIdentifiers: nil)
+
+        #expect(storage.customThemes.map(\.id) == ["vscode.test.gone.One"])
     }
 
     // MARK: - Path resolution

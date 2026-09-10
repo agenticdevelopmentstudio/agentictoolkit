@@ -603,4 +603,79 @@ struct ExtensionRegistryTests {
             #expect(registry.isEnabled("acme.gone"))
         }
     }
+
+    // MARK: - Which failures know whose extension they were
+
+    @Test("a manifest that did not parse leaves the scan unable to name that directory")
+    func aMalformedManifestMakesTheWholeScanUnnameable() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest("{ not valid json", named: "broken-ext", in: root)
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            #expect(registry.failures.count == 1)
+            // The identifier lives inside the file that would not parse, and
+            // the folder name is not it: "broken-ext" is not "acme.broken",
+            // and no rule says it has to be.
+            #expect(registry.failures.first?.identifier == nil)
+            // So the answer for the whole scan is "I do not know", even
+            // though the other extension loaded perfectly: nothing here can
+            // tell "acme.broken was uninstalled" from "acme.broken is the
+            // folder that would not parse".
+            #expect(registry.establishedIdentifiers == nil)
+        }
+    }
+
+    @Test("an extension this host cannot run is still an extension it can name")
+    func engineFailuresStillReportTheirIdentifiers() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest(manifestJSON(name: "too-new", engine: "^2.0.0"), named: "too-new-ext", in: root)
+            try writeManifest(manifestJSON(name: "weird", engine: "~1.74.0"), named: "weird-ext", in: root)
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            // Both engine cases decode the manifest first, so both know whose
+            // extension they are — and neither is an error about the
+            // extension at all: it is installed, intact, and simply not
+            // applicable to this host. Dropping the identifier here is what
+            // made a host downgrade delete a live extension's themes.
+            #expect(registry.failures.count == 2)
+            #expect(Set(registry.failures.compactMap(\.identifier)) == ["acme.too-new", "acme.weird"])
+            #expect(registry.establishedIdentifiers == ["acme.good", "acme.too-new", "acme.weird"])
+        }
+    }
+
+    @Test("a refused contribution does not make the scan unnameable")
+    func aRefusedContributionKeepsTheScanComplete() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(ThrowingContributionPoint())
+            registry.loadAll()
+
+            // This extension loaded and is in `extensions`; only one of its
+            // contributions was refused. A nil identifier here would be the
+            // widest hole of all — `everyThemeFailed` is an ordinary entry,
+            // and it would switch the prune off for every other extension
+            // for as long as one theme file stayed broken.
+            #expect(registry.extensions.count == 1)
+            #expect(registry.failures.count == 1)
+            #expect(registry.failures.first?.identifier == "acme.good")
+            #expect(registry.establishedIdentifiers == ["acme.good"])
+        }
+    }
 }

@@ -20,6 +20,39 @@ import Foundation
 /// main-actor state (the theme store, settings panels, the tabs registry).
 /// `AnyObject` because `ExtensionRegistry` holds these by identity: applying
 /// and withdrawing the same extension must reach the same conformer.
+///
+/// **A point that writes to persisted, user-owned state must distinguish
+/// "the extension declares nothing" from "I could not read what it
+/// declares"** (Ruling GX). The first is an instruction; the second is an
+/// absence of information, and acting on it deletes the user's data. A point
+/// whose state is in-memory and rebuilt from the manifests each launch is
+/// exempt, because a wrong answer there costs a session rather than data.
+///
+/// This is a property of the contract rather than advice about one method,
+/// and it is written here because the same mistake has now been found four
+/// times — every time in `ThemeContributionPoint`, the only conformer whose
+/// state is persisted and the user's:
+///
+/// - **Ruling GO** — every declared theme file failing to open was read as
+///   "this extension has no themes", so one broken file took the previous
+///   launch's working copies with it.
+/// - **Ruling GS** — reconciliation ran against the ids that happened to
+///   load *this* call rather than the ones the manifest *declares*, so a
+///   file that broke on relaunch deleted the working copy of that same
+///   theme, and `activeThemeID` with it.
+/// - **Ruling GV** — a manifest with no `contributes` key skipped every
+///   point instead of being handed `Contributions.empty`, so an update that
+///   dropped the key orphaned its themes with no route out but uninstalling
+///   the extension.
+/// - **I1/I2** — `pruneOrphans` was handed the identifiers that *decoded*,
+///   so an extension whose manifest stopped parsing — or one merely
+///   incompatible with this host, which is not an error at all — lost every
+///   theme with its folder still on disk. Hence
+///   `ThemeContributionPoint.pruneOrphans(installedIdentifiers:)` takes an
+///   Optional and prunes nothing when the scan could not name everyone.
+///
+/// A future point that persisted the user's keymap, or cached snippets to
+/// disk, would inherit all four on its first day.
 @MainActor
 public protocol ContributionPoint: AnyObject {
     /// The manifest key this point consumes, e.g. "themes". Used only for

@@ -47,6 +47,32 @@ struct ExtensionsCoordinatorTests {
     }
     """
 
+    /// An extension whose `engines.vscode` this host does not satisfy. It is
+    /// installed, intact and on disk — a host downgrade or a raised engine
+    /// floor puts any extension here — and it never reaches a contribution
+    /// point, so the only trace of it this launch is a failure entry.
+    private static let incompatibleManifestJSON = """
+    {
+        "name": "oldhost",
+        "publisher": "test",
+        "version": "1.0.0",
+        "engines": { "vscode": "^99.0.0" },
+        "contributes": {
+            "themes": [{ "label": "Dark", "uiTheme": "vs-dark", "path": "./themes/dark.json" }]
+        }
+    }
+    """
+
+    /// An extension that declares nothing at all — no `contributes` key.
+    private static let quietManifestJSON = """
+    {
+        "name": "quiet",
+        "publisher": "test",
+        "version": "1.0.0",
+        "engines": { "vscode": "^1.74.0" }
+    }
+    """
+
     private func makeTempDirectory() throws -> URL {
         try ExtensionFixtures.makeTemporaryDirectory("ExtensionsCoordinatorTests")
     }
@@ -197,6 +223,131 @@ struct ExtensionsCoordinatorTests {
             // empty-state panel names the path either way — it does not need
             // the folder to exist to tell a user where to put an extension.
             #expect(!FileManager.default.fileExists(atPath: missing.path))
+        }
+    }
+
+    // MARK: - Pruning against a scan that may be incomplete
+
+    @Test("one unreadable manifest anywhere in a search path prunes nothing")
+    func aManifestThatDidNotParseStopsTheWholePrune() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let extensionDirectory = root.appendingPathComponent("everything-1.0.0")
+            try write(Self.everythingManifestJSON, to: "package.json", in: extensionDirectory)
+            try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: extensionDirectory)
+            try write(Self.snippetJSON, to: "snippets/widget.json", in: extensionDirectory)
+            // The folder this launch cannot name. Its own themes are what is
+            // at stake: the file that names them is the file that would not
+            // parse, and no folder name recovers it.
+            try write(
+                "{ not valid json",
+                to: "package.json",
+                in: root.appendingPathComponent("themed-ext")
+            )
+
+            let previousProvider = CustomFileTypeMappings.contributedProvider
+            defer { CustomFileTypeMappings.contributedProvider = previousProvider }
+
+            let themeStorage = ExtensionTestThemeStorage()
+            let seed = ThemeStore(storage: themeStorage)
+            seed.add(try ExtensionFixtures.colorTheme(
+                id: "vscode.test.themed.Dark", attribution: "extension:test.themed", in: root))
+            themeStorage.activeThemeID = "vscode.test.themed.Dark"
+
+            try withCoordinator(searchPaths: [root], themeStorage: themeStorage) { coordinator in
+                try #require(coordinator.registry.failures.count == 1)
+                #expect(coordinator.registry.establishedIdentifiers == nil)
+
+                // Nothing pruned, and nothing deselected. Reconciling against
+                // the identifiers that *decoded* would have read "I could not
+                // read its manifest" as "it is gone" and deleted the user's
+                // themes, permanently, with the folder still on disk (I1).
+                let ids = themeStorage.customThemes.map(\.id)
+                #expect(ids == ["vscode.test.themed.Dark", "vscode.test.everything.Night"])
+                #expect(themeStorage.activeThemeID == "vscode.test.themed.Dark")
+            }
+        }
+    }
+
+    @Test("an extension this host cannot run keeps its themes, and a departed one still loses them")
+    func anIncompatibleExtensionKeepsItsThemesWhileTheDepartedOneLosesThem() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let extensionDirectory = root.appendingPathComponent("everything-1.0.0")
+            try write(Self.everythingManifestJSON, to: "package.json", in: extensionDirectory)
+            try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: extensionDirectory)
+            try write(Self.snippetJSON, to: "snippets/widget.json", in: extensionDirectory)
+            try write(
+                Self.incompatibleManifestJSON,
+                to: "package.json",
+                in: root.appendingPathComponent("oldhost-1.0.0")
+            )
+
+            let previousProvider = CustomFileTypeMappings.contributedProvider
+            defer { CustomFileTypeMappings.contributedProvider = previousProvider }
+
+            // What a previous launch left: a theme from the extension this
+            // host has since stopped satisfying, one from an extension really
+            // deleted while the app was closed, and the user's own.
+            let themeStorage = ExtensionTestThemeStorage()
+            let seed = ThemeStore(storage: themeStorage)
+            seed.add(try ExtensionFixtures.colorTheme(
+                id: "vscode.test.oldhost.Dark", attribution: "extension:test.oldhost", in: root))
+            seed.add(try ExtensionFixtures.colorTheme(
+                id: "vscode.test.gone.Old", attribution: "extension:test.gone", in: root))
+            seed.add(try ExtensionFixtures.colorTheme(id: "user.mine", attribution: nil, in: root))
+
+            try withCoordinator(searchPaths: [root], themeStorage: themeStorage) { coordinator in
+                try #require(coordinator.registry.failures.count == 1)
+
+                // Both halves in one list. The incompatible extension keeps
+                // its theme because the scan can name it (I2) — it is
+                // installed, just not applicable — and the genuinely departed
+                // one still loses its theme, which is what says the prune ran
+                // at all rather than being switched off by the failure.
+                let ids = themeStorage.customThemes.map(\.id)
+                #expect(ids == [
+                    "vscode.test.oldhost.Dark", "user.mine", "vscode.test.everything.Night"
+                ])
+            }
+        }
+    }
+
+    @Test("an extension that stops declaring contributes entirely loses the themes it shipped")
+    func anExtensionThatDropsContributesLosesTheThemesItShipped() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            // The update: same identifier, same folder, no `contributes` key
+            // at all where the previous version declared a theme.
+            try write(
+                Self.quietManifestJSON,
+                to: "package.json",
+                in: root.appendingPathComponent("quiet-1.0.0")
+            )
+
+            let themeStorage = ExtensionTestThemeStorage()
+            let seed = ThemeStore(storage: themeStorage)
+            seed.add(try ExtensionFixtures.colorTheme(
+                id: "vscode.test.quiet.Night", attribution: "extension:test.quiet", in: root))
+            themeStorage.activeThemeID = "vscode.test.quiet.Night"
+
+            try withCoordinator(searchPaths: [root], themeStorage: themeStorage) { coordinator in
+                try #require(coordinator.registry.extensions.count == 1)
+
+                // The composed case Ruling GV exists for, end to end: the
+                // registry hands the point `Contributions.empty` rather than
+                // skipping it, and the point reconciles against an empty
+                // declaration. `pruneOrphans` could never reach this theme —
+                // the extension is still installed — so an apply that was
+                // never called would orphan it for good.
+                #expect(themeStorage.customThemes.isEmpty)
+                // And the selection goes with it, rather than pointing at an
+                // id that no longer resolves.
+                #expect(themeStorage.activeThemeID == nil)
+            }
         }
     }
 }

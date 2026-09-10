@@ -199,7 +199,24 @@ public final class ThemeContributionPoint: ContributionPoint {
     /// while the app was closed would otherwise leave its themes in the list
     /// forever. Reconcile-on-launch is the only mechanism that can see a change
     /// made while the process was dead. Called once, after `loadAll()`.
-    public func pruneOrphans(installedIdentifiers: Set<String>) {
+    ///
+    /// - Parameter installedIdentifiers: every identifier the scan
+    ///   established, or `nil` when it could not establish them all — in
+    ///   which case nothing is pruned at all.
+    ///
+    /// **The Optional is the safety property, not a convenience** (I1/I2, and
+    /// the persisted-state invariant on `ContributionPoint`). "Nothing is
+    /// installed" and "I do not know what is installed" have to behave
+    /// oppositely here — the first is an instruction to delete every
+    /// contributed theme, the second is an absence of information — and
+    /// while both spelled `Set<String>()` a single unreadable `package.json`
+    /// anywhere in a search path deleted the themes of every extension
+    /// beside it, permanently, with all their folders still on disk.
+    public func pruneOrphans(installedIdentifiers: Set<String>?) {
+        // Not `?? []`: an incomplete scan is no evidence about anyone, so the
+        // themes stay exactly where they are until a launch that can name
+        // every directory it looked at.
+        guard let installedIdentifiers else { return }
         let installed = Set(installedIdentifiers.map { Self.attribution(for: $0) })
         for theme in themeStore.customThemes {
             // A theme with no attribution is the user's own import — never ours

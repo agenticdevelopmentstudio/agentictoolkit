@@ -46,6 +46,30 @@ public final class ExtensionRegistry {
     /// accumulate duplicates, and no entry outlives the directory it names.
     public private(set) var failures: [ExtensionLoadFailure] = []
 
+    /// Every identifier this scan established — the extensions that loaded,
+    /// plus the ones that failed *after* their manifest decoded — or `nil`
+    /// when some directory's identifier was never learned at all.
+    ///
+    /// `nil` is not "none". It is "I do not know", and the two must behave
+    /// oppositely at any caller that deletes on the strength of an absence
+    /// (`ThemeContributionPoint.pruneOrphans`, and the persisted-state
+    /// invariant on `ContributionPoint`). A directory whose `package.json`
+    /// could not be read or parsed has an identifier this process cannot
+    /// recover: the identifier lives *inside* the manifest, and the folder
+    /// name is not it — the marketplace installer writes
+    /// `publisher.name-version`, but a hand-installed extension, a dev
+    /// checkout or a clone is named whatever its author named it, so a path
+    /// heuristic would answer wrongest for exactly the extensions someone is
+    /// working on. One unnameable directory therefore makes the whole scan
+    /// incomplete, which is the honest answer and the safe one.
+    ///
+    /// Computed from the two stored arrays rather than kept as a third
+    /// beside them, so it cannot drift out of step with either.
+    public var establishedIdentifiers: Set<String>? {
+        guard failures.allSatisfy({ $0.identifier != nil }) else { return nil }
+        return Set(extensions.map(\.identifier)).union(failures.compactMap(\.identifier))
+    }
+
     private let searchPaths: [URL]
     private let hostVersion: SemanticVersion
     private var contributionPoints: [ContributionPoint] = []
@@ -131,6 +155,7 @@ public final class ExtensionRegistry {
         do {
             data = try Data(contentsOf: manifestURL)
         } catch {
+            // No identifier: the file that carries it could not be read.
             record(.manifestUnreadable(error.localizedDescription), at: directory)
             return
         }
@@ -139,19 +164,30 @@ public final class ExtensionRegistry {
         do {
             manifest = try JSONDecoder().decode(ExtensionManifest.self, from: data)
         } catch {
+            // No identifier: the file that carries it did not parse.
             record(.manifestMalformed(error.localizedDescription), at: directory)
             return
         }
 
+        // The manifest decoded, so every failure from here down knows whose
+        // extension it is — and must say so. An extension this host will not
+        // run is still *installed*, and a caller that reconciles persisted
+        // state against "what is installed" would otherwise delete a live
+        // extension's contributions on a host downgrade (I2).
         guard let range = VSCodeEngineRange(manifest.engines.vscode) else {
-            record(.engineRangeUnparsable(manifest.engines.vscode), at: directory)
+            record(
+                .engineRangeUnparsable(manifest.engines.vscode),
+                at: directory,
+                identifier: manifest.identifier
+            )
             return
         }
 
         guard range.accepts(hostVersion) else {
             record(
                 .engineIncompatible(required: manifest.engines.vscode, host: hostVersion.description),
-                at: directory
+                at: directory,
+                identifier: manifest.identifier
             )
             return
         }
@@ -159,7 +195,11 @@ public final class ExtensionRegistry {
         if let existing = claimedIdentifiers[manifest.identifier] {
             // swiftlint:disable:next line_length
             logger.warning("Skipping duplicate extension '\(manifest.identifier, privacy: .public)' at \(directory.path, privacy: .public); already loaded from \(existing.path, privacy: .public)")
-            record(.duplicateIdentifier(existing: existing.path), at: directory)
+            record(
+                .duplicateIdentifier(existing: existing.path),
+                at: directory,
+                identifier: manifest.identifier
+            )
             return
         }
         claimedIdentifiers[manifest.identifier] = directory
@@ -180,8 +220,14 @@ public final class ExtensionRegistry {
         applyContributions(manifest.contributes ?? .empty, from: manifest, at: directory)
     }
 
-    private func record(_ reason: ExtensionLoadError, at directory: URL) {
-        failures.append(ExtensionLoadFailure(directory: directory, reason: reason))
+    /// - Parameter identifier: whose extension this was, when the manifest
+    ///   had already decoded — and `nil` when it had not, which is the whole
+    ///   of what `ExtensionLoadFailure.identifier` means. Defaulted so the
+    ///   two pre-decode call sites read as the absence they are rather than
+    ///   spelling `nil` and looking like an oversight.
+    private func record(_ reason: ExtensionLoadError, at directory: URL, identifier: String? = nil) {
+        failures.append(
+            ExtensionLoadFailure(directory: directory, reason: reason, identifier: identifier))
         // swiftlint:disable:next line_length
         logger.warning("Failed to load extension at \(directory.path, privacy: .public): \(String(describing: reason), privacy: .public)")
     }
@@ -228,7 +274,12 @@ public final class ExtensionRegistry {
                     reason: .contributionPointFailed(
                         key: point.contributionKey,
                         message: String(describing: error)
-                    )
+                    ),
+                    // This extension loaded and is in `extensions`. A refused
+                    // contribution must not make the scan look incomplete —
+                    // `everyThemeFailed` is a common entry, and a nil here
+                    // would switch off `pruneOrphans` for everyone.
+                    identifier: manifest.identifier
                 ))
             }
         }
@@ -360,6 +411,20 @@ public struct LoadedExtension: Sendable, Equatable {
 public struct ExtensionLoadFailure: Sendable, Equatable {
     public let directory: URL
     public let reason: ExtensionLoadError
+    /// Who lived here — known whenever this failure happened *after* the
+    /// manifest decoded, and `nil` exactly when the scan never learned.
+    ///
+    /// `nil` is what makes a prune unsafe: it is the one state in which "not
+    /// among the installed identifiers" and "not installed" stop meaning the
+    /// same thing. `ExtensionRegistry.establishedIdentifiers` is where that
+    /// distinction is turned into an answer a caller can act on.
+    public let identifier: String?
+
+    public init(directory: URL, reason: ExtensionLoadError, identifier: String? = nil) {
+        self.directory = directory
+        self.reason = reason
+        self.identifier = identifier
+    }
 }
 
 /// Why a load — or one contribution within an otherwise successful load — did

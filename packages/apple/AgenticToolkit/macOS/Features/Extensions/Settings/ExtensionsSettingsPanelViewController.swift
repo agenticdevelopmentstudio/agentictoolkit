@@ -115,7 +115,13 @@ public final class ExtensionsSettingsPanelViewController: ComposableSettings.Set
         }
 
         if !registry.failures.isEmpty {
-            built.append(ExtensionLoadProblemsPanel(failures: registry.failures))
+            built.append(ExtensionLoadProblemsPanel(
+                failures: registry.failures,
+                // The same answer the theme prune was given, so the sentence
+                // in the panel and the behaviour it describes cannot drift
+                // apart.
+                scanIdentifiedEveryExtension: registry.establishedIdentifiers != nil
+            ))
         }
 
         setPanels(built)
@@ -579,10 +585,12 @@ final class ExtensionLoadProblemsPanel: ComposableSettings.SettingsPanelViewCont
 
     private let refused: [ExtensionLoadFailure]
     private let didNotLoad: [ExtensionLoadFailure]
+    private let scanIdentifiedEveryExtension: Bool
 
-    init(failures: [ExtensionLoadFailure]) {
+    init(failures: [ExtensionLoadFailure], scanIdentifiedEveryExtension: Bool) {
         self.refused = failures.filter { Self.isRefusedContribution($0) }
         self.didNotLoad = failures.filter { !Self.isRefusedContribution($0) }
+        self.scanIdentifiedEveryExtension = scanIdentifiedEveryExtension
         super.init(with: ComposableSettings.SettingsPanelDescriptor(
             title: Self.summaryTitle(for: failures),
             icon: NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
@@ -610,6 +618,18 @@ final class ExtensionLoadProblemsPanel: ComposableSettings.SettingsPanelViewCont
             )
         ])
     }
+
+    /// What a scan that could not name every directory costs the user,
+    /// said where the *cause* is already listed above it.
+    ///
+    /// A skipped prune is otherwise invisible: the themes of an extension the
+    /// user really did delete stay in the picker with nothing on screen to
+    /// say why. Deriving the flag from the same
+    /// `ExtensionRegistry.establishedIdentifiers` the prune reads keeps this
+    /// sentence and that behaviour from drifting apart.
+    static let incompleteScanNote =
+        "Because an extension could not be read, themes from extensions that are no longer "
+        + "installed have been left in place."
 
     static func isRefusedContribution(_ failure: ExtensionLoadFailure) -> Bool {
         if case .contributionPointFailed = failure.reason { return true }
@@ -639,8 +659,9 @@ final class ExtensionLoadProblemsPanel: ComposableSettings.SettingsPanelViewCont
     }
 
     /// The line for one extension that did not load. `ExtensionLoadFailure`
-    /// carries no identifier — for every case but a refused contribution there
-    /// is no manifest to take one from — so the folder name is all there is.
+    /// carries an identifier only when the manifest decoded, and the two
+    /// reasons a user meets most here are the two where it did not — so the
+    /// folder name is the one thing every row of this group can say.
     static func didNotLoadLine(for failure: ExtensionLoadFailure) -> String {
         "\(failure.directory.lastPathComponent): did not load — \(reason(for: failure.reason))"
     }
@@ -683,6 +704,10 @@ final class ExtensionLoadProblemsPanel: ComposableSettings.SettingsPanelViewCont
             for failure in didNotLoad {
                 group.addSettingSubview(
                     ComposableSettings.ExplanationView(withText: Self.didNotLoadLine(for: failure)))
+            }
+            if !scanIdentifiedEveryExtension {
+                group.addSettingSubview(
+                    ComposableSettings.ExplanationView(withText: Self.incompleteScanNote))
             }
             addGroup(group)
         }

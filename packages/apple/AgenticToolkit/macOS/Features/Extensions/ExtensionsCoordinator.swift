@@ -87,9 +87,12 @@ public final class ExtensionsCoordinator: AppFeature {
         // `withdraw`, so its themes would outlive it forever. Reconciling once
         // against what actually loaded is the only mechanism that can see a
         // change made while the process was dead.
-        themePoint.pruneOrphans(
-            installedIdentifiers: Set(registry.extensions.map(\.identifier))
-        )
+        //
+        // `establishedIdentifiers` is Optional and passed straight through: a
+        // scan that could not name every directory it looked at prunes
+        // nothing at all, rather than reading "its manifest would not parse"
+        // as "it is gone" and deleting the user's themes (I1/I2).
+        themePoint.pruneOrphans(installedIdentifiers: registry.establishedIdentifiers)
     }
 
     public func settingsPanel() -> ExtensionsSettingsPanelViewController {
