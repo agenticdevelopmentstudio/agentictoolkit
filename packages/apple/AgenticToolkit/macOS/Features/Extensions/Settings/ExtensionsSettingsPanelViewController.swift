@@ -132,7 +132,10 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
 
     let loaded: LoadedExtension
     private let coordinator: ExtensionsCoordinator
-    private let onUninstalled: () -> Void
+    /// Internal rather than private so a test can stand where the alert's
+    /// Uninstall button stands. Presenting the alert needs a window and a
+    /// modal loop; what is worth pinning is the rebuild it asks for.
+    let onUninstalled: () -> Void
 
     /// The enable/disable control. A plain `NSSwitch` rather than the
     /// vocabulary's `CheckboxView`, which is bound to a `UserSetting<Bool>`:

@@ -504,4 +504,42 @@ struct ExtensionsSettingsPanelTests {
         try #require(dropped.decodingFailures.count == 1)
         #expect(ExtensionDetailPanel.contributionSummaryLines(for: dropped).isEmpty)
     }
+
+    // MARK: - The sidebar selection
+
+    @Test("uninstalling a row leaves the reader where they were")
+    func uninstallingARowLeavesTheReaderWhereTheyWere() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            // Five, because the nit is about the *fourth* of five: with fewer
+            // rows than that, "the row that took its place" and "the top of the
+            // list" can be the same index and the assertion proves nothing.
+            for name in ["alpha", "bravo", "charlie", "delta", "echo"] {
+                try installExtension(named: name, in: root)
+            }
+
+            try withPanel(searchPaths: [root]) { coordinator, panel in
+                try #require(panel.extensionPanels.count == 5)
+                let fourth = panel.extensionPanels[3]
+                let identifier = fourth.extensionIdentifier
+
+                // The real removal, then the callback the alert's Uninstall
+                // button fires. The alert itself needs a window and a modal
+                // loop; the rebuild it asks for is what is under test.
+                try coordinator.registry.uninstall(identifier)
+                fourth.onUninstalled()
+
+                let remaining = panel.extensionPanels
+                try #require(remaining.count == 4)
+                #expect(!remaining.contains { $0.extensionIdentifier == identifier })
+                // Whatever slid into the removed row's place, not the top of
+                // the list: `rebuildPanels()` used to select 0 unconditionally,
+                // which reads as the panel throwing the reader out of the list
+                // as a reward for uninstalling something.
+                #expect(panel.currentPanelTitle == remaining[3].descriptor.title)
+                #expect(panel.currentPanelTitle != remaining[0].descriptor.title)
+            }
+        }
+    }
 }
