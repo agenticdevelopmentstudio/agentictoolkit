@@ -133,7 +133,7 @@ struct ExtensionLayoutWideningTests {
     }
 
     @Test("preferred axis follows the contributed view")
-    func preferredAxisFollowsTheContributedView() {
+    func preferredAxisFollowsTheContributedView() throws {
         let vertical = ExtensionsCoordinator.spec(
             Self.baseSpec, widenedFor: [contributedView(preferredAxisIsVertical: true)])
         // A bottom-strip view splits vertically; everything else splits across.
@@ -142,5 +142,26 @@ struct ExtensionLayoutWideningTests {
         let horizontal = ExtensionsCoordinator.spec(
             Self.baseSpec, widenedFor: [contributedView(preferredAxisIsVertical: false)])
         #expect(horizontal.allows.last?.preferredAxis == .horizontal)
+
+        // And end to end, because the flag is not spelled in a manifest: the
+        // container id is, and `panel` is the one that means the bottom strip.
+        #expect(try axis(ofViewTargeting: "panel") == .vertical)
+        #expect(try axis(ofViewTargeting: "explorer") == .horizontal)
+    }
+
+    /// The axis the widened spec ends up allowing for a view contributed into
+    /// `container`, taken through the real point rather than a hand-built
+    /// `ContributedView`.
+    private func axis(ofViewTargeting container: String) throws -> ComposableTabsAxis? {
+        let point = ViewsContributionPoint(registry: ComposableTabsViewRegistry())
+        let declaration = try manifest(
+            name: container,
+            views: #"{ "\#(container)": [{ "id": "test.tree", "name": "Tree" }] }"#
+        )
+        let contributions = try #require(declaration.contributes)
+        try point.apply(contributions, from: declaration, at: URL(fileURLWithPath: "/var/empty/none"))
+        let views = point.views(for: "test.\(container)")
+        try #require(views.count == 1)
+        return ExtensionsCoordinator.spec(Self.baseSpec, widenedFor: views).allows.last?.preferredAxis
     }
 }
