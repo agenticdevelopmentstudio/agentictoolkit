@@ -139,8 +139,22 @@ public final class ViewsContributionPoint: ContributionPoint {
 @MainActor
 public final class ExtensionViewPlaceholderViewController: NSViewController {
 
+    /// The widest the explanation is allowed to be: the ceiling its constraint
+    /// enforces, and the ceiling on the width it wraps at. One constant because
+    /// two literals fifteen lines apart are two numbers that can drift, and
+    /// nothing — not the compiler, not a test — would catch the drift.
+    private static let explanationWidth: CGFloat = 320
+
+    /// Inset from each side of the pane, matching the stack's own leading and
+    /// trailing constraints below.
+    private static let explanationInset: CGFloat = 16
+
     private let contributedView: ContributedView
     private let extensionDisplayName: String
+
+    /// Held because its wrap width is not knowable in `loadView` — see
+    /// `viewDidLayout`.
+    private var explanation: NSTextField?
 
     public init(view: ContributedView, extensionDisplayName: String) {
         self.contributedView = view
@@ -175,12 +189,8 @@ public final class ExtensionViewPlaceholderViewController: NSViewController {
         explanation.cell?.usesSingleLineMode = false
         explanation.lineBreakMode = .byWordWrapping
         explanation.maximumNumberOfLines = 0
-        // The width a multi-line `NSTextField` computes its intrinsic *height*
-        // against. The `widthAnchor` below bounds the field but does not tell
-        // it that, so without this AppKit can settle on a single-line
-        // intrinsic size and lay the sentence out clipped.
-        explanation.preferredMaxLayoutWidth = 320
         explanation.alignment = .center
+        self.explanation = explanation
         title.alignment = .center
         attribution.alignment = .center
 
@@ -194,11 +204,28 @@ public final class ExtensionViewPlaceholderViewController: NSViewController {
             stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             stack.leadingAnchor.constraint(
-                greaterThanOrEqualTo: container.leadingAnchor, constant: 16),
+                greaterThanOrEqualTo: container.leadingAnchor,
+                constant: Self.explanationInset),
             stack.trailingAnchor.constraint(
-                lessThanOrEqualTo: container.trailingAnchor, constant: -16),
-            explanation.widthAnchor.constraint(lessThanOrEqualToConstant: 320)
+                lessThanOrEqualTo: container.trailingAnchor,
+                constant: -Self.explanationInset),
+            explanation.widthAnchor.constraint(
+                lessThanOrEqualToConstant: Self.explanationWidth)
         ])
         view = container
+    }
+
+    /// The width a multi-line `NSTextField` computes its intrinsic *height*
+    /// against. Nothing else tells it: the `widthAnchor` above is a ceiling,
+    /// not a width, so in a pane narrower than
+    /// `explanationWidth + 2 * explanationInset` the label is narrower than the
+    /// ceiling and a static value would overestimate — which lays the sentence
+    /// out clipped in exactly the narrow panes an auxiliary extension view is
+    /// likeliest to be given. So it is set here, where the width is a
+    /// measurement rather than a guess, and re-set whenever the pane resizes.
+    public override func viewDidLayout() {
+        super.viewDidLayout()
+        explanation?.preferredMaxLayoutWidth =
+            min(Self.explanationWidth, view.bounds.width - 2 * Self.explanationInset)
     }
 }

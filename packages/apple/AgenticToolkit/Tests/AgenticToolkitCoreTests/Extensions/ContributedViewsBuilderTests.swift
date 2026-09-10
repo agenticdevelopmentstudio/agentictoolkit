@@ -140,9 +140,15 @@ struct ContributedViewsBuilderTests {
         // here would send a reader looking for an image that never existed.
         #expect((try notes(entry)).isEmpty)
 
-        let empty = try view(#"{ "id": "acme.paren", "name": "Paren", "icon": "$()" }"#)
+        let parens = #"{ "id": "acme.paren", "name": "Paren", "icon": "$()" }"#
+        let empty = try view(parens)
         #expect(empty.symbolName == nil)
         #expect(empty.iconPath == nil)
+        // The half that makes the two `nil`s mean something: `table[""]` is
+        // `nil` too, so without this the same pair passes for an empty name
+        // treated as a codicon — and the only visible difference would be an
+        // `unmappedIcon` note complaining about `$()`.
+        #expect((try notes(parens)).isEmpty)
     }
 
     @Test("a vendor-private icon name resolves to nothing, and says so")

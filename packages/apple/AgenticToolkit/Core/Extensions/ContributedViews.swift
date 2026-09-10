@@ -311,7 +311,15 @@ public enum ContributedViewsBuilder {
             let declaredLocation = locationsByContainerID[entry.target]
             let isKnownTarget =
                 declaredLocation != nil || builtInContainerIDs.contains(entry.target)
-            let isBottomStrip = (declaredLocation ?? entry.target) == bottomPanelLocation
+            // `isKnownTarget &&` is what keeps the axis and the note below from
+            // drifting apart: the `unknownContainer` note *states* the axis
+            // ("arranged along the horizontal axis") while this line *computes*
+            // it, and without the conjunction they are two independent
+            // expressions that happen to agree. Unreachable today — the only
+            // string that makes the comparison true is `panel`, which is always
+            // a known target — which is exactly why it needs saying.
+            let isBottomStrip =
+                isKnownTarget && (declaredLocation ?? entry.target) == bottomPanelLocation
             if !isKnownTarget {
                 notes.append(ContributedViewNote(
                     extensionIdentifier: identifier,

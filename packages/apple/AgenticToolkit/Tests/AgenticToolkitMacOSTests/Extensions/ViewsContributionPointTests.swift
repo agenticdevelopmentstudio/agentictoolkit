@@ -76,11 +76,15 @@ struct ViewsContributionPointTests {
         }
     }
 
-    private func labels(in view: NSView) -> [String] {
-        var found: [String] = []
-        if let label = view as? NSTextField { found.append(label.stringValue) }
-        for subview in view.subviews { found.append(contentsOf: labels(in: subview)) }
+    private func textFields(in view: NSView) -> [NSTextField] {
+        var found: [NSTextField] = []
+        if let label = view as? NSTextField { found.append(label) }
+        for subview in view.subviews { found.append(contentsOf: textFields(in: subview)) }
         return found
+    }
+
+    private func labels(in view: NSView) -> [String] {
+        textFields(in: view).map(\.stringValue)
     }
 
     // MARK: - 13 — Ruling FA, the table has to resolve on this platform
@@ -203,6 +207,47 @@ struct ViewsContributionPointTests {
         let text = labels(in: placeholder.view)
         #expect(text.contains("Pane Extension"))
         #expect(text.contains("Pane View"))
+    }
+
+    // MARK: - N3 — the wrap width is a measurement, not a constant
+
+    /// Drives a real layout pass at a deliberately narrow width and asserts the
+    /// width the label was *left with*, not the one it was handed: a narrow
+    /// pane has to produce something smaller than `explanationWidth`, and a
+    /// wide one has to stop at it.
+    ///
+    /// This is as close to on-screen as a headless bundle gets. It proves
+    /// `viewDidLayout` runs and computes what it should; it cannot prove the
+    /// sentence is legible, which needs the pane in a window.
+    @Test("the explanation wraps at the pane's width when the pane is narrower than the ceiling")
+    func explanationWrapWidthFollowsThePaneWidth() throws {
+        let view = ContributedView(
+            extensionIdentifier: "test.pane",
+            viewID: "test.pane",
+            registryID: "extension.test.pane.test.pane",
+            targetContainerID: "explorer",
+            name: "Pane View",
+            kind: .tree,
+            symbolName: nil,
+            iconPath: nil,
+            when: nil,
+            visibility: nil,
+            initialSize: nil,
+            preferredAxisIsVertical: false)
+        let controller = ExtensionViewPlaceholderViewController(
+            view: view, extensionDisplayName: "Pane Extension")
+        controller.loadViewIfNeeded()
+
+        let explanation = try #require(
+            textFields(in: controller.view).first { $0.stringValue.hasPrefix("This view's") })
+
+        controller.view.frame = NSRect(x: 0, y: 0, width: 200, height: 300)
+        controller.view.layoutSubtreeIfNeeded()
+        #expect(explanation.preferredMaxLayoutWidth == 168)
+
+        controller.view.frame = NSRect(x: 0, y: 0, width: 900, height: 300)
+        controller.view.layoutSubtreeIfNeeded()
+        #expect(explanation.preferredMaxLayoutWidth == 320)
     }
 
     // MARK: - 18 — applying twice is applying once

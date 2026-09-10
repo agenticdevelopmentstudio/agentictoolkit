@@ -165,6 +165,28 @@ struct ExtensionManifestTests {
         }
     }
 
+    /// `View.unreadableKeys` is what this decoder could not read, not something
+    /// a manifest declares, and it stays out of the JSON only because it has no
+    /// `CodingKeys` case — a fact a comment can ask a future reader to respect
+    /// but cannot enforce. Add `case unreadableKeys` to that enum and this
+    /// fails immediately, which is the point of it.
+    @Test("what the decoder could not read is decoder output, not manifest content")
+    func unreadableKeysAreNotEncoded() throws {
+        let view = try JSONDecoder().decode(
+            ExtensionManifest.View.self,
+            from: Data(#"{ "id": "a.b", "name": "B", "initialSize": "2" }"#.utf8))
+        try #require(view.unreadableKeys == ["initialSize"])
+
+        let json = try #require(String(data: try JSONEncoder().encode(view), encoding: .utf8))
+        #expect(!json.contains("unreadableKeys"))
+        // And the round trip still lands on manifest content: a re-decoded
+        // `View` has nothing unreadable, because nothing unreadable was written.
+        let roundTripped = try JSONDecoder().decode(
+            ExtensionManifest.View.self, from: Data(json.utf8))
+        #expect(roundTripped.unreadableKeys.isEmpty)
+        #expect(roundTripped.id == "a.b")
+    }
+
     @Test("a malformed theme leaves the other themes intact and records one decodingFailure")
     func malformedThemeIsIsolated() throws {
         let json = """

@@ -697,6 +697,16 @@ extension ExtensionManifest {
         /// unreadable", so the difference is carried here instead and
         /// `ContributedViewsBuilder` turns each entry into a `malformedField`
         /// note (Ruling GF).
+        ///
+        /// This is decoder output, not manifest content, which is why it has no
+        /// `CodingKeys` case: `Encodable` synthesis only encodes properties
+        /// that have one, so a `View` still encodes to manifest-shaped JSON.
+        /// Adding a case to "fix" the asymmetry would make the decoder look for
+        /// a key no manifest has — `unreadableKeysAreNotEncoded` fails the
+        /// moment someone does. Note also that `Equatable` synthesis is *not*
+        /// selective the way `Encodable` is: it covers this property too, so
+        /// `View` equality is no longer a statement about manifest content
+        /// alone.
         public let unreadableKeys: [String]
 
         private enum CodingKeys: String, CodingKey {
@@ -769,12 +779,14 @@ extension ExtensionManifest {
         /// itself instead of the container. Same shape as `View` above.
         ///
         /// No `unreadableKeys` here, though, and that asymmetry is deliberate.
-        /// Under Ruling FD nothing renders a container: its `icon` is carried
-        /// raw and its `when` is never evaluated, so a container decoration
-        /// that arrives unreadable compromises nothing a readable one would
-        /// have delivered. It is the same reason containers get no notes at
-        /// all. A view's dropped `when` is a different matter, because a view
-        /// becomes a registered, always-offered pane.
+        /// A container's decorations do have value — its `icon` is carried raw
+        /// for a future host — but under Ruling FD they reach no decision in
+        /// this one: nothing renders a container, and nothing reads
+        /// `containers(for:)` yet. When something does, container notes and
+        /// this field arrive together; adding it now would be a property with
+        /// no reader. It is the same reason containers get no notes at all. A
+        /// view's dropped `when` is a different matter, because a view becomes
+        /// a registered, always-offered pane.
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(String.self, forKey: .id)
