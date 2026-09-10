@@ -52,8 +52,11 @@ public final class ExtensionHost {
         /// refusal a caller gets can say which one happened.
         public enum TerminationReason: Sendable, Equatable {
 
-            /// The task awaiting `activate()` was cancelled. The extension's
-            /// own `activate()` may still be running.
+            /// The task awaiting `activate()` was cancelled **after the module
+            /// had been evaluated**. The extension's own `activate()` may still
+            /// be running. A cancellation that lands before that — while the
+            /// entry point is still being read off disk — abandons nothing and
+            /// leaves the host `.neverActivated`; see `moduleEvaluated`.
             case cancelled
 
             /// `activate()` failed after the module was evaluated: the
@@ -113,6 +116,19 @@ public final class ExtensionHost {
     ///    runtime that nothing can un-run; see `terminationReason`.
     /// 4. `.activating` — a call is inside `activate()`.
     /// 5. `.neverActivated` — nothing has happened yet.
+    ///
+    /// `.terminal` outranking `.activating` is deliberate too, and it is
+    /// visible to exactly one caller: `markTerminal(.failed)` runs inside
+    /// `performActivation`'s `catch`, while `activate()`'s
+    /// `defer { activationTask = nil }` runs several main-actor jobs later,
+    /// when the awaiting caller resumes. A *second* `activate()` arriving in
+    /// that window is refused with `activationAlreadyFailed` instead of
+    /// joining the still-live task and being handed the original
+    /// `activationThrew` message. Both answers are refusals, and this one is
+    /// the answer every caller arriving a microsecond later also gets, which
+    /// is worth more than the diagnostic: a state whose name changes with the
+    /// scheduler is the defect this enum exists to end. The caller who
+    /// actually made the failing call still receives the real error.
     public var activationState: ActivationState {
         if disposed { return .disposed }
         if activationSucceeded { return .activated }
@@ -173,6 +189,14 @@ public final class ExtensionHost {
     /// adaptor that owns a member is wired at construction time and the
     /// extension is activated later. The list is replayed onto the runtime as
     /// soon as one exists.
+    ///
+    /// A definition the shim refuses is taken back out again
+    /// (`applyOrWithdraw`). It has to be: the replay happens from inside
+    /// `activate()`, the refusal is not terminal — nothing ran — and a list
+    /// that kept the bad entry would fail every future `activate()` in exactly
+    /// the same way, leaving a host that reports `.neverActivated` and can
+    /// never activate. There is no API to withdraw a queued definition, so the
+    /// one that cannot work withdraws itself.
     private var vscodeMemberDefinitions: [VSCodeMemberDefinition] = []
 
     /// The in-flight `activate()`, so two concurrent calls are one activation.
@@ -184,16 +208,40 @@ public final class ExtensionHost {
     /// otherwise evaluate the module a second time.
     private var activationTask: Task<Void, Error>?
 
+    /// Whether this host has evaluated its extension's module.
+    ///
+    /// The invariant `terminationReason` describes, as a field rather than as
+    /// prose: it is written in exactly one place, immediately before
+    /// `evaluateModule`, and both routes into a terminal state read it rather
+    /// than each deciding for itself where the boundary is. The failure route
+    /// reads it as control flow — its `do` block starts on the line that sets
+    /// it, so a `catch` there can only be reached with this true — and
+    /// `endActivation` reads it as a value, because a cancellation lands
+    /// wherever the caller happens to cancel and has no such structure to sit
+    /// inside.
+    ///
+    /// Never cleared. A host that evaluated a module has evaluated it; a
+    /// retry is what this exists to refuse.
+    private var moduleEvaluated = false
+
     /// Why this host can never activate again, or `nil` while it still can.
     ///
     /// The property that makes a host terminal is not cancellation. It is that
-    /// the module has been **evaluated**: from that instant the extension's
-    /// code has run, its top level has registered whatever it registers and
-    /// started whatever timers it starts, and nothing can reach into JavaScript
-    /// and un-run it. Cancellation lands there, and so does every failure at or
-    /// after `evaluateModule` — a sync throw, a rejected promise, a throwing
-    /// `.then` getter, a top-level throw. They are one state, so they set one
-    /// field.
+    /// the module has been **evaluated** (`moduleEvaluated`): from that instant
+    /// the extension's code has run, its top level has registered whatever it
+    /// registers and started whatever timers it starts, and nothing can reach
+    /// into JavaScript and un-run it. Every failure at or after
+    /// `evaluateModule` lands there — a sync throw, a rejected promise, a
+    /// throwing `.then` getter, a top-level throw — and so does a cancellation
+    /// that arrives once the module is running. They are one state, so they set
+    /// one field.
+    ///
+    /// A cancellation that arrives *before* that instant sets nothing. Reading
+    /// the entry point off disk is a real suspension point, a bundled web
+    /// extension is routinely megabytes, and the caller who wraps `activate()`
+    /// in a timeout — the reason it is cancellation-responsive at all — is
+    /// asking to stop a slow read, not to spend the host. Nothing ran, so
+    /// nothing is abandoned, and the host stays retryable.
     ///
     /// A retry would therefore evaluate the module a second time into a
     /// *second* runtime: `context` overwritten while the abandoned instance
@@ -292,16 +340,22 @@ public final class ExtensionHost {
     /// is the first thing a Swift caller reaches for, and an `activate()` that
     /// ignored it would turn an ordinary timeout-and-give-up into a hang.
     ///
-    /// **An activation that does not succeed is terminal, and `dispose()` is
-    /// what follows it.** Cancellation ends the call, not the activation: the
-    /// extension's promise is still pending inside a runtime this host cannot
-    /// un-run. A *failure* — a throw from `activate()`, a rejected promise, a
-    /// throw from the module's top level — is the same situation arrived at by
-    /// a different route, because by then the module has been evaluated and its
-    /// top level has already run. Either way a later `activate()` refuses,
-    /// naming which of the two happened, rather than evaluating the module into
-    /// a second runtime beside the abandoned one. `activationState` reports it
-    /// as `.terminal`.
+    /// **An activation that runs the extension's code and does not succeed is
+    /// terminal, and `dispose()` is what follows it.** Cancellation ends the
+    /// call, not the activation: the extension's promise is still pending
+    /// inside a runtime this host cannot un-run. A *failure* — a throw from
+    /// `activate()`, a rejected promise, a throw from the module's top level —
+    /// is the same situation arrived at by a different route, because by then
+    /// the module has been evaluated and its top level has already run. Either
+    /// way a later `activate()` refuses, naming which of the two happened,
+    /// rather than evaluating the module into a second runtime beside the
+    /// abandoned one. `activationState` reports it as `.terminal`.
+    ///
+    /// What does *not* spend the host is an attempt that never reached the
+    /// extension's code: a cancellation that lands while the entry point is
+    /// still being read, an unloadable shim, a namespace an adaptor spelled
+    /// wrong. Nothing ran, so there is nothing to abandon, and the host stays
+    /// `.neverActivated` and can be activated again.
     ///
     /// Calling twice is a no-op, and two concurrent calls are one activation.
     /// VS Code activates an extension once, callers re-emit activation events
@@ -365,7 +419,12 @@ public final class ExtensionHost {
             // must not reach the *next* one: by the time this hop runs, the
             // owner's `defer` may have cleared the task it belongs to.
             guard let self, self.activationTask == task else { return }
-            self.markTerminal(.cancelled)
+            // Terminal only if there is something to abandon. A cancellation
+            // that lands while the entry point is still being read has no
+            // context and no runtime behind it, and spending the host for it
+            // would refuse both a retry *and* every later
+            // `defineVSCodeMember`, over a file that was merely slow.
+            if self.moduleEvaluated { self.markTerminal(.cancelled) }
             self.finishActivation(.failure(.activationCancelled(identifier: self.identifier)))
         }
 
@@ -409,21 +468,31 @@ public final class ExtensionHost {
         }
         self.runtime = runtime
 
-        // Past this line the extension's own code runs, and a failure is not a
-        // failure to *start*: it is a module that has been evaluated, whose top
-        // level has already registered whatever it registers and started
-        // whatever timers it starts. That is the same abandoned state a
-        // cancellation produces and it is reached far more often — a sync
-        // throw, a rejected promise, a throwing `.then` getter, a top-level
-        // throw — so it is marked the same way rather than left as the one
-        // route with no guard over it.
+        // The boundary, and `moduleEvaluated` is it. Past the line below the
+        // extension's own code runs, and a failure is not a failure to
+        // *start*: it is a module that has been evaluated, whose top level has
+        // already registered whatever it registers and started whatever timers
+        // it starts. That is the same abandoned state a cancellation produces
+        // and it is reached far more often — a sync throw, a rejected promise,
+        // a throwing `.then` getter, a top-level throw — so it is marked the
+        // same way rather than left as the one route with no guard over it.
         //
-        // Everything *before* this line is deliberately not terminal: no
-        // extension code has run yet, so a retry orphans nothing. A shim that
-        // will not load or a namespace an adaptor spelled wrong fails the same
-        // way on every attempt, and refusing the second attempt would only hide
-        // the reason behind a different error.
+        // The `catch` below and `endActivation`'s cancellation are the two
+        // writers of `terminationReason`, and they agree because they read one
+        // predicate: this `catch` cannot be reached with `moduleEvaluated`
+        // false, and `endActivation` tests it.
+        //
+        // Everything *before* the line below is deliberately not terminal: no
+        // extension code has run yet, so a retry orphans one `JSContext` and
+        // nothing inside it. Measured — evaluating the shim alone makes no
+        // call on the host block table, and neither does `defineMember`,
+        // valid or invalid — and that context is released on the next
+        // `self.context = context`. A shim that will not load or a namespace
+        // an adaptor spelled wrong fails the same way on every attempt, and
+        // refusing the second attempt would only hide the reason behind a
+        // different error.
         do {
+            moduleEvaluated = true
             let exports = try evaluateModule(runtime: runtime, source: source, entryPoint: entryPoint)
             try await callActivate(on: exports, runtime: runtime)
         } catch {
@@ -500,7 +569,10 @@ public final class ExtensionHost {
     ///   `ExtensionHostError.vscodeMemberNotDefinable` if the
     ///   namespace is not one the shim knows, which is a programming error in
     ///   the adaptor: immediately when the host is already running, and
-    ///   otherwise from the `activate()` that first installs a runtime.
+    ///   otherwise from the `activate()` that first installs a runtime. A
+    ///   definition refused that way is withdrawn rather than left queued, so
+    ///   the host is still activatable and the adaptor's other members are
+    ///   untouched; correcting the spelling means calling this again.
     public func defineVSCodeMember(
         namespacePath: String,
         name: String,
@@ -532,7 +604,30 @@ public final class ExtensionHost {
             origin: "\(fileID):\(line)")
         vscodeMemberDefinitions.append(definition)
         if let runtime {
-            try apply(definition, to: runtime)
+            try applyOrWithdraw(at: vscodeMemberDefinitions.count - 1, to: runtime)
+        }
+    }
+
+    /// Applies the queued definition at `index`, and takes it back off the
+    /// queue if the shim refuses it.
+    ///
+    /// One function for both call sites — this one and `installRuntime`'s
+    /// replay — because they are one rule: a definition the shim will not
+    /// accept is a definition no future activation should replay. The caller
+    /// still gets the full `vscodeMemberNotDefinable`, naming the namespace,
+    /// the member and the adaptor's `file:line`, so nothing is swallowed;
+    /// what is removed is only the entry that would raise it again, forever,
+    /// on a host that is otherwise perfectly able to activate.
+    ///
+    /// The runtime is passed rather than read from `self`, because the replay
+    /// runs inside `installRuntime`, before `performActivation` has adopted
+    /// the runtime it is building.
+    private func applyOrWithdraw(at index: Int, to runtime: JSValue) throws {
+        do {
+            try apply(vscodeMemberDefinitions[index], to: runtime)
+        } catch {
+            vscodeMemberDefinitions.remove(at: index)
+            throw error
         }
     }
 
@@ -787,8 +882,12 @@ public final class ExtensionHost {
         // Before the extension's first statement runs, so a member defined by
         // an adaptor is already there when the module body reaches for it —
         // extensions routinely destructure `vscode` at the top of the file.
-        for definition in vscodeMemberDefinitions {
-            try apply(definition, to: runtime)
+        //
+        // By index, because a refused definition withdraws itself and the
+        // throw leaves the loop immediately: nothing iterates past the
+        // mutation.
+        for index in vscodeMemberDefinitions.indices {
+            try applyOrWithdraw(at: index, to: runtime)
         }
 
         context.evaluateScript("delete globalThis.__extensionRuntime; delete globalThis.__host;")
@@ -1166,8 +1265,16 @@ public enum ExtensionHostError: Error, Sendable, Equatable {
     /// The task awaiting `activate()` was cancelled. Its own case rather than
     /// `CancellationError` because every failure here names the extension it
     /// belongs to, and because it says something `CancellationError` does not:
-    /// the extension's `activate()` may still be running in JavaScript, and
-    /// the host is still usable — `dispose()` is what stops it.
+    /// the extension's `activate()` may still be running in JavaScript.
+    ///
+    /// What the host can do next depends on where the cancellation landed, and
+    /// `activationState` is what answers it. A cancellation that reached a
+    /// module already evaluated leaves the host `.terminal(.cancelled)`, and
+    /// then `dispose()` is the only thing left — a later `activate()` and a
+    /// later `defineVSCodeMember` both refuse with this same error. A
+    /// cancellation that landed earlier, while the entry point was still being
+    /// read, ran nothing and abandoned nothing: the host stays
+    /// `.neverActivated` and can simply be activated again.
     case activationCancelled(identifier: String)
 
     /// An earlier `activate()` failed after the extension's module had already
@@ -1220,8 +1327,9 @@ extension ExtensionHostError: LocalizedError {
             return "'\(identifier)' threw from activate(): \(message)"
         case let .activationCancelled(identifier):
             return """
-                '\(identifier)' did not finish activating: the task awaiting it was cancelled. The \
-                extension's own activate() may still be running; tear the host down to stop it.
+                '\(identifier)' did not finish activating: the task awaiting it was cancelled. If its \
+                code had already started, the extension's own activate() may still be running, and \
+                tearing the host down is what stops it.
                 """
         case let .activationAlreadyFailed(identifier):
             return """

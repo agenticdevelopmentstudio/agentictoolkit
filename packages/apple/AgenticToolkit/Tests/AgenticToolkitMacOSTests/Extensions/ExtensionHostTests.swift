@@ -494,6 +494,14 @@ struct ExtensionHostTests {
     /// the activation completes either side of it - both orderings produce this
     /// state. `recordedTerminationReason` is asserted first because without it
     /// a run where the cancellation never landed would pass in silence.
+    ///
+    /// The reason both orderings agree lives in the other file:
+    /// `extension-runtime.js`'s `callActivate` reaches `done(true, '')`
+    /// *synchronously* for an `activate` that returns a non-thenable, so the
+    /// continuation is already taken and cleared before the hop can run and the
+    /// hop's `finishActivation` is a guaranteed no-op. A future `callActivate`
+    /// that deferred that callback would invalidate this test's premise while
+    /// leaving it green, which is why the dependency is written down here.
     @Test(.timeLimit(.minutes(1)))
     func aCancellationLandingAsActivationSucceedsLeavesTheHostActivated() async throws {
         let directory = try makeTempDirectory()
@@ -1490,16 +1498,20 @@ struct ExtensionHostTests {
         #expect(!host.isActivated)
     }
 
-    /// Cancelling an activation is terminal: the host refuses to activate
-    /// again, and `dispose()` is what follows.
+    /// Cancelling an activation *whose module has been evaluated* is terminal:
+    /// the host refuses to activate again, and `dispose()` is what follows.
     ///
     /// Cancellation ends the *call*, not the activation - the extension's
     /// promise is still pending inside a runtime nothing can un-run. A retry is
     /// the reflex response to a cancellation, and a host that allowed one would
     /// evaluate the module into a second runtime beside the abandoned one:
-    /// `context` overwritten under a still-running activation, `timerTasks`
-    /// holding the old instance's entries while their IDs are dispatched
-    /// against the new runtime, and `runningTimerCount` counting both.
+    /// `context` overwritten under a still-running activation, and
+    /// `runningTimerCount` counting both instances.
+    ///
+    /// The evaluation is what makes it terminal, not the cancellation, which is
+    /// why this test waits for the extension's own `console.log` before
+    /// cancelling. The other side of that boundary is
+    /// `aCancellationBeforeTheModuleIsEvaluatedLeavesTheHostRetryable`.
     ///
     /// Time-limited for LO-D's reason, and it is not hypothetical here:
     /// removing the guard makes the retry evaluate a module whose `activate`
@@ -1536,6 +1548,12 @@ struct ExtensionHostTests {
             try await activation.value
         }
 
+        // Named, not merely refused. The cancellation is what made this host
+        // terminal, and the assertion is what distinguishes this state from
+        // the pre-evaluation one the sibling test pins.
+        #expect(host.activationState == .terminal(.cancelled))
+        #expect(host.recordedTerminationReason == .cancelled)
+
         await #expect(throws: ExtensionHostError.activationCancelled(identifier: "test.alpha")) {
             try await host.activate()
         }
@@ -1544,6 +1562,71 @@ struct ExtensionHostTests {
         // the module never ran again, so the console never saw a second line.
         #expect(recorder.texts == ["waiting"])
         #expect(!host.isActivated)
+    }
+
+    /// The other side of the boundary: a cancellation that lands before the
+    /// module is evaluated leaves the host exactly as it was, and it activates
+    /// afterwards.
+    ///
+    /// Reading the entry point off disk is a real suspension point and it sits
+    /// *before* the first `JSContext` exists, so a caller who does what
+    /// `activate()`'s own documentation recommends - wrap it in a timeout -
+    /// over a bundled extension that is routinely megabytes, on a slow volume,
+    /// cancels a host in which nothing has run. Spending it there refuses the
+    /// retry *and*, since `defineVSCodeMember` reads the same terminal
+    /// predicate, refuses the caller even the chance to re-prepare the host
+    /// with its adaptor members. Both are asserted here, in that order.
+    ///
+    /// The cancellation is delivered before the wrapping task has begun, which
+    /// is the one timing that is not a race: the test body runs to
+    /// `cancel()` synchronously on the main actor, so `activate()` cannot have
+    /// started, and the only thing the activation can then be doing when the
+    /// cancellation handler's main-actor hop runs is the read - the hop is
+    /// enqueued before the read completes and the main actor is serial.
+    @Test(.timeLimit(.minutes(1)))
+    func aCancellationBeforeTheModuleIsEvaluatedLeavesTheHostRetryable() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                var vscode = require('vscode');
+                console.log('ran:' + vscode.window.showSomethingReal());
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        let activation = Task { @MainActor in try await host.activate() }
+        activation.cancel()
+
+        await #expect(throws: ExtensionHostError.activationCancelled(identifier: "test.alpha")) {
+            try await activation.value
+        }
+
+        // Nothing ran, so nothing was abandoned.
+        #expect(recorder.texts.isEmpty)
+        #expect(host.runningTimerCount == 0)
+        #expect(host.javaScriptContext == nil)
+        #expect(host.recordedTerminationReason == nil)
+        #expect(host.activationState == .neverActivated)
+
+        // So the host is still preparable...
+        let real: @convention(block) () -> String = { "ok" }
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "showSomethingReal", implementation: real)
+
+        // ...and still activatable, with the member the caller just defined.
+        try await host.activate()
+
+        #expect(host.isActivated)
+        #expect(host.activationState == .activated)
+        #expect(recorder.texts == ["ran:ok"])
     }
 
     /// Cancelling an activation stops the *waiting*, not the JavaScript: the
@@ -1715,6 +1798,59 @@ struct ExtensionHostTests {
             #expect(message.contains("ExtensionHostTests.swift:"), "message was: \(message)")
         }
         #expect(!host.isActivated)
+    }
+
+    /// And the refused definition is withdrawn, so the host that reports
+    /// `.neverActivated` can actually still activate.
+    ///
+    /// Definitions are queued and replayed into every context a later
+    /// `activate()` builds, and a misspelled namespace fails identically on
+    /// every replay. Left in the queue it is a permanent doom with no remedy —
+    /// there is no API to withdraw a queued definition, the host is not
+    /// terminal (nothing ran, so nothing was abandoned), and `.neverActivated`
+    /// means "everything still ahead of it" about a host with nothing ahead of
+    /// it. Withdrawing the one entry that cannot work makes the name true.
+    ///
+    /// The good definition is queued *first* deliberately: it proves the
+    /// withdrawal takes out the offending entry rather than the queue.
+    @Test
+    func aRefusedDefinitionIsWithdrawnSoTheHostStillActivates() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                var vscode = require('vscode');
+                console.log('ran:' + vscode.window.showSomethingReal());
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        let real: @convention(block) () -> String = { "ok" }
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "showSomethingReal", implementation: real)
+        let nothing: @convention(block) () -> Void = {}
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.notANamespace", name: "x", implementation: nothing)
+
+        await #expect(throws: ExtensionHostError.self) {
+            try await host.activate()
+        }
+        #expect(recorder.texts.isEmpty)
+        #expect(host.activationState == .neverActivated)
+
+        // The retry is not the same failure again: the entry that raised it is
+        // gone, and the one that works is not.
+        try await host.activate()
+
+        #expect(host.isActivated)
+        #expect(recorder.texts == ["ran:ok"])
     }
 
     /// A member defined on a disposed host is refused rather than accepted and
