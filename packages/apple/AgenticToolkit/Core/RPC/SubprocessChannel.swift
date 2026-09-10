@@ -16,19 +16,23 @@ public actor SubprocessChannel {
         public var environment: [String: String]
         public var environmentPolicy: EnvironmentPolicy
         public var framing: MessageFraming
+        /// Working directory for the child, or `nil` to inherit the parent's.
+        public var currentDirectoryURL: URL?
 
         public init(
             executableURL: URL,
             arguments: [String] = [],
             environment: [String: String] = [:],
             environmentPolicy: EnvironmentPolicy = .replace,
-            framing: MessageFraming = .newlineDelimited
+            framing: MessageFraming = .newlineDelimited,
+            currentDirectoryURL: URL? = nil
         ) {
             self.executableURL = executableURL
             self.arguments = arguments
             self.environment = environment
             self.environmentPolicy = environmentPolicy
             self.framing = framing
+            self.currentDirectoryURL = currentDirectoryURL
         }
     }
 
@@ -204,6 +208,7 @@ public actor SubprocessChannel {
         let process = Process()
         process.executableURL = configuration.executableURL
         process.arguments = configuration.arguments
+        process.currentDirectoryURL = configuration.currentDirectoryURL
         applyEnvironment(to: process)
 
         let standardInputPipe = Pipe()
