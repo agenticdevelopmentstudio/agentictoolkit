@@ -27,13 +27,24 @@ final class GitProcessBottleneckTests: XCTestCase {
         "macOS", "Markdown", "Permissions", "PermissionsUI", "Sync", "SyncGRDB"
     ]
 
-    /// The abstraction itself, and the one setting that feeds it. Everything in
-    /// `Core/Git/` is the door or a parser of what came through it, so the git
-    /// vocabulary belongs there; `UserSettings+Git.swift` holds the default
-    /// executable path the user may override.
-    static func isAllowed(_ relativePath: String) -> Bool {
-        relativePath.hasPrefix("Core/Git/")
-            || relativePath == "Core/SettingStorage/UserSettings+Git.swift"
+    /// Which file may contain which spelling.
+    ///
+    /// The allowance is per spelling, not per file, and that distinction is the
+    /// whole guard. Everything in `Core/Git/` is the door or a parser of what
+    /// came through it, so the git vocabulary belongs there wholesale, and
+    /// `UserSettings+Git.swift` holds the default executable path the user may
+    /// override. The settings panel is the third case and a narrower one: its
+    /// entire job is letting the user edit `gitExecutablePath`, so it cannot
+    /// avoid naming that setting — but it has no business naming an executable
+    /// or a git verb, and a file-level allowlist entry would have let it spawn
+    /// git undetected. It gets the one spelling it needs and nothing else.
+    static func isAllowed(_ relativePath: String, _ spelling: String) -> Bool {
+        if relativePath.hasPrefix("Core/Git/") { return true }
+        if relativePath == "Core/SettingStorage/UserSettings+Git.swift" { return true }
+        if relativePath == "macOS/Features/Git/Settings/GitSettingsPanelViewController.swift" {
+            return spelling == "gitExecutablePath"
+        }
+        return false
     }
 
     /// Spellings that mean a file is composing a git command line for itself.
@@ -76,7 +87,7 @@ final class GitProcessBottleneckTests: XCTestCase {
     static func offenders(
         under root: URL,
         relativeTo base: URL,
-        isAllowed: (String) -> Bool
+        isAllowed: (String, String) -> Bool
     ) throws -> [String] {
         guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else {
             return []
@@ -92,9 +103,9 @@ final class GitProcessBottleneckTests: XCTestCase {
         for case let file as URL in enumerator where file.pathExtension == "swift" {
             let path = file.resolvingSymlinksInPath().path
             let relative = path.hasPrefix(basePath + "/") ? String(path.dropFirst(basePath.count + 1)) : path
-            if isAllowed(relative) { continue }
             let source = try String(contentsOf: file, encoding: .utf8)
-            for spelling in forbiddenSpellings where source.contains(spelling) {
+            for spelling in forbiddenSpellings
+            where source.contains(spelling) && !isAllowed(relative, spelling) {
                 offenders.append("\(relative) contains \(spelling)")
             }
         }
@@ -142,7 +153,7 @@ final class GitProcessBottleneckTests: XCTestCase {
         try "let innocent = \"hello\"\n"
             .write(to: root.appendingPathComponent("Innocent.swift"), atomically: true, encoding: .utf8)
 
-        let offenders = try Self.offenders(under: root, relativeTo: root, isAllowed: { _ in false })
+        let offenders = try Self.offenders(under: root, relativeTo: root, isAllowed: { _, _ in false })
         for (index, spelling) in Self.forbiddenSpellings.enumerated() {
             XCTAssertTrue(
                 offenders.contains("Probe\(index).swift contains \(spelling)"),
@@ -182,7 +193,7 @@ final class GitProcessBottleneckTests: XCTestCase {
         try (#"let path = "/usr/bin/gi" + "t""# + "\n")
             .write(to: root.appendingPathComponent(concatenated), atomically: true, encoding: .utf8)
 
-        let offenders = try Self.offenders(under: root, relativeTo: root, isAllowed: { _ in false })
+        let offenders = try Self.offenders(under: root, relativeTo: root, isAllowed: { _, _ in false })
         for name in bypasses.keys {
             XCTAssertTrue(
                 offenders.contains { $0.hasPrefix(name) },
@@ -202,10 +213,27 @@ final class GitProcessBottleneckTests: XCTestCase {
     /// The allowlist has to be narrow enough to still catch a bypass planted in
     /// an allowed tier but an unrelated directory.
     func testTheAllowlistCoversTheAbstractionAndNothingElse() {
-        XCTAssertTrue(Self.isAllowed("Core/Git/GitClient.swift"))
-        XCTAssertTrue(Self.isAllowed("Core/SettingStorage/UserSettings+Git.swift"))
-        XCTAssertFalse(Self.isAllowed("Core/SettingStorage/UserSettings.swift"))
-        XCTAssertFalse(Self.isAllowed("macOS/Features/TerminalSession/TerminalSession.swift"))
-        XCTAssertFalse(Self.isAllowed("CoreMacOS/Git/SomethingNew.swift"))
+        XCTAssertTrue(Self.isAllowed("Core/Git/GitClient.swift", "/usr/bin/git"))
+        XCTAssertTrue(Self.isAllowed("Core/SettingStorage/UserSettings+Git.swift", "/usr/bin/git"))
+        XCTAssertFalse(Self.isAllowed("Core/SettingStorage/UserSettings.swift", "/usr/bin/git"))
+        XCTAssertFalse(Self.isAllowed("macOS/Features/TerminalSession/TerminalSession.swift", "/usr/bin/git"))
+        XCTAssertFalse(Self.isAllowed("CoreMacOS/Git/SomethingNew.swift", "/usr/bin/git"))
+    }
+
+    /// The settings panel's allowance is one spelling wide, and the half that
+    /// matters is what it still refuses. A panel that edits the executable path
+    /// must name the setting; a panel that *spawns* the executable is the exact
+    /// bypass this whole test exists to catch, and moving the allowance from
+    /// per-file to per-spelling is what keeps the second from riding in on the
+    /// first.
+    func testTheSettingsPanelMayNameTheSettingButNotSpawnGit() {
+        let panel = "macOS/Features/Git/Settings/GitSettingsPanelViewController.swift"
+        XCTAssertTrue(Self.isAllowed(panel, "gitExecutablePath"))
+        for spelling in Self.forbiddenSpellings where spelling != "gitExecutablePath" {
+            XCTAssertFalse(
+                Self.isAllowed(panel, spelling),
+                "The settings panel must not be allowed to name \(spelling)"
+            )
+        }
     }
 }

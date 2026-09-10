@@ -75,14 +75,28 @@ final class GitGlobalConfigTableViewTests: XCTestCase {
         XCTAssertEqual(received?.1, "")
     }
 
-    func testRenamingAnExistingKeyUnsetsTheOldKeyThenSetsTheNew() {
+    /// Renaming a live row fires `onRename` and *only* `onRename`.
+    ///
+    /// This deliberately replaced an earlier contract where a rename arrived as
+    /// a separate `onUnset` followed by `onSet`. That shape could not be made
+    /// safe: the two halves reached the panel as independent writes, so a set
+    /// that failed after its unset had already succeeded left the user's real
+    /// `~/.gitconfig` missing a setting with nothing left to restore it from.
+    /// `onRename` carries both keys *and* both values, which is what lets the
+    /// panel run the whole sequence as one operation and roll back.
+    ///
+    /// The assertion that `events` is exactly the rename — not merely that it
+    /// contains it — is the load-bearing half. A rename that *also* fired the
+    /// old pair would restore the very defect this replaced.
+    func testRenamingAnExistingKeyFiresOnRenameAndNothingElse() {
         let view = GitGlobalConfigTableView()
         view.setEntries([GitConfigEntry(key: "alias.st", value: "status")])
         var events: [String] = []
         view.onUnset = { events.append("unset:\($0)") }
         view.onSet = { events.append("set:\($0)=\($1)") }
+        view.onRename = { events.append("rename:\($0)=\($1)->\($2)=\($3)") }
         view.commitEdit(row: 0, key: "alias.s", value: "status")
-        XCTAssertEqual(events, ["unset:alias.st", "set:alias.s=status"])
+        XCTAssertEqual(events, ["rename:alias.st=status->alias.s=status"])
     }
 
     func testBlankingAnExistingKeyRevertsTheCell() {
