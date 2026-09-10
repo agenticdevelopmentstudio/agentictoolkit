@@ -44,8 +44,8 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
     /// were fired. A rename in `GitGlobalConfigTableView` fires `onRename`,
     /// which this panel enqueues as a *single* operation that unsets the old
     /// key, sets the new one, and -- if that set fails -- restores the old
-    /// key/value before re-throwing (see `makeGlobalConfigGroup`). Reloading
-    /// after each write independently would also race: an unset's own reload
+    /// key/value before re-throwing (see `performRename`). Reloading after
+    /// each write independently would also race: an unset's own reload
     /// could read global config *before* a later write has landed and
     /// redisplay the row as gone, only to have that stale read clobber the
     /// (later-arriving) correct one. Queuing every write and reloading
@@ -59,6 +59,22 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
     /// testable).
     var pendingWrites: [@Sendable () async throws -> Void] = []
     var isProcessingWrites = false
+
+    /// Number of times `reloadGlobalConfig` has actually run, incremented
+    /// synchronously at the top of that method, before its `await`. Not
+    /// `private`: pins the call at the end of `processNextWriteIfNeeded`'s
+    /// drain, so a test can assert it happened without racing the reload's
+    /// own async body (which does a real, read-only `git config --list`) --
+    /// the increment lands on the same synchronous tick the queue empties.
+    var reloadCount = 0
+
+    /// The most recent error message `processNextWriteIfNeeded`'s catch
+    /// block passed to `configTable.showError`, mirrored here (not `private`)
+    /// so a test can assert that call happened without reading the table's
+    /// own label. `nil` until the first write fails; never cleared back to
+    /// `nil` afterward (only `configTable`'s own label is cleared, by a
+    /// successful `reloadGlobalConfig`).
+    var lastWriteErrorMessage: String?
 
     public convenience init() {
         self.init(client: .shared)
@@ -217,37 +233,70 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
             guard !key.isEmpty else { return }
             self?.enqueueWrite { [weak self] in try await self?.client.unsetGlobalConfig(key: key) }
         }
-        // A rename is one queued operation, not two: unset the old key, set
-        // the new one, and -- if the set fails after the unset already
-        // succeeded -- put the old key/value back before re-throwing. Both
-        // steps run inside the same `enqueueWrite` call so a third edit can
-        // never land between the unset and the restore (F4's queue is what
-        // makes that guarantee; a second `enqueueWrite` for the restore would
-        // not). If the restore also fails, both errors are reported together
-        // (`GitConfigRestoreFailedError`) rather than the second masking the
-        // first -- losing a setting must be loud, never silent.
+        // A rename delegates to `performRename` rather than inlining its own
+        // unset/set/restore sequence here -- see that method's doc comment
+        // for why (the same control flow must be what a test drives, not a
+        // copy of it).
         configTable.onRename = { [weak self] oldKey, oldValue, newKey, newValue in
             guard !oldKey.isEmpty, !newKey.isEmpty else { return }
-            self?.enqueueWrite { [weak self] in
-                guard let client = self?.client else { return }
-                try await client.unsetGlobalConfig(key: oldKey)
-                do {
-                    try await client.setGlobalConfig(key: newKey, value: newValue)
-                } catch {
-                    do {
-                        try await client.setGlobalConfig(key: oldKey, value: oldValue)
-                    } catch let restoreError {
-                        throw GitConfigRestoreFailedError(setError: error, restoreError: restoreError)
-                    }
-                    throw GitConfigRenameFailedButRestoredError(setError: error)
-                }
-            }
+            self?.performRename(
+                oldKey: oldKey,
+                oldValue: oldValue,
+                newKey: newKey,
+                newValue: newValue,
+                unset: { [weak self] key in try await self?.client.unsetGlobalConfig(key: key) },
+                set: { [weak self] key, value in try await self?.client.setGlobalConfig(key: key, value: value) }
+            )
         }
         group.addSettingSubview(configTable)
         return group
     }
 
+    /// Renames a global-config key as one queued operation: unset `oldKey`,
+    /// set `newKey` to `newValue`, and -- if that set fails after the unset
+    /// already succeeded -- attempt to restore `oldKey` to `oldValue` before
+    /// re-throwing. Both failure outcomes are reported, never swallowed:
+    /// `GitConfigRenameFailedButRestoredError` if the restore succeeds,
+    /// `GitConfigRestoreFailedError` (carrying both underlying errors) if it
+    /// does not -- losing a setting must be loud, never silent.
+    ///
+    /// `unset`/`set` are the two git writes this performs, taken as
+    /// parameters instead of reaching `client` directly. `makeGlobalConfigGroup`
+    /// passes `client.unsetGlobalConfig`/`client.setGlobalConfig`; tests pass
+    /// throwing stand-ins. Either way this method -- not a hand-rolled copy
+    /// of its control flow -- is what runs: a dropped restore, a swapped
+    /// argument, or a wrong error type here fails every test that calls it,
+    /// the same way it would fail in production.
+    ///
+    /// All three steps run inside a single `enqueueWrite` call, so a third
+    /// edit can never land between the unset and the restore -- a second,
+    /// separate `enqueueWrite` for the restore would not guarantee that (see
+    /// `pendingWrites`' doc comment).
+    func performRename(
+        oldKey: String,
+        oldValue: String,
+        newKey: String,
+        newValue: String,
+        unset: @escaping @Sendable (_ key: String) async throws -> Void,
+        set: @escaping @Sendable (_ key: String, _ value: String) async throws -> Void
+    ) {
+        enqueueWrite {
+            try await unset(oldKey)
+            do {
+                try await set(newKey, newValue)
+            } catch {
+                do {
+                    try await set(oldKey, oldValue)
+                } catch let restoreError {
+                    throw GitConfigRestoreFailedError(setError: error, restoreError: restoreError)
+                }
+                throw GitConfigRenameFailedButRestoredError(setError: error)
+            }
+        }
+    }
+
     private func reloadGlobalConfig() {
+        reloadCount += 1
         // Cancel any in-flight reload before starting another: without a
         // handle, a rapid sequence of writes could leave two reads racing
         // each other into `setEntries`, and nothing ever cancelled the first
@@ -284,6 +333,7 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
             do {
                 try await operation()
             } catch {
+                self?.lastWriteErrorMessage = error.localizedDescription
                 self?.configTable.showError(error.localizedDescription)
             }
             guard let self else { return }
