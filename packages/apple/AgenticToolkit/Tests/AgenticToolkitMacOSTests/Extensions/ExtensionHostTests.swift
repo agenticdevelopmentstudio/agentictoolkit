@@ -381,6 +381,150 @@ struct ExtensionHostTests {
         }
     }
 
+    /// A file that will not *parse* ran nothing, so it does not spend the host.
+    ///
+    /// This is the boundary `moduleEvaluated` draws, arrived at by the single
+    /// most ordinary mistake an extension ships - a truncated download, a bad
+    /// minifier run, a file hand-edited during development. Compiling the
+    /// module and running it are two steps and only the second executes a
+    /// statement, so a syntax error throws out of `evaluateModule` *above* the
+    /// assignment. A host spent there would refuse the retry and - because
+    /// `defineVSCodeMember` reads the same terminal predicate - refuse the
+    /// caller even the chance to re-prepare it, over a file that never ran;
+    /// and it would say so with `activationAlreadyFailed`, whose text is "its
+    /// code has already run", which would be false.
+    ///
+    /// The corrected retry at the end is the clause that proves it. A host
+    /// that merely *reports* `.neverActivated` is not the same as one that can
+    /// still activate, and this file has shipped that exact difference before.
+    @Test(.timeLimit(.minutes(1)))
+    func aMalformedEntryPointRanNothingSoTheHostStaysRetryable() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                console.log('never ran' +;
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        do {
+            try await host.activate()
+            Issue.record("A file that will not parse must not activate.")
+            return
+        } catch let error as ExtensionHostError {
+            guard case let .entryPointThrew(identifier, message) = error else {
+                Issue.record("Expected entryPointThrew, got \(error)")
+                return
+            }
+            #expect(identifier == "test.alpha")
+            // The parse failure itself, which is the most useful thing this
+            // host produces for this mistake and the thing a spent host would
+            // trade away for "this host is spent".
+            #expect(message.contains("SyntaxError"), "message was: \(message)")
+        }
+
+        // Nothing ran, so nothing was abandoned.
+        #expect(recorder.texts.isEmpty)
+        #expect(host.runningTimerCount == 0)
+        #expect(!host.isActivated)
+        #expect(host.recordedTerminationReason == nil)
+        #expect(host.activationState == .neverActivated)
+
+        // So the host is still preparable...
+        let real: @convention(block) () -> String = { "ok" }
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "showSomethingReal", implementation: real)
+
+        // ...and a corrected file activates on that same host, with the member
+        // the caller just defined.
+        try ExtensionFixtures.write(
+            """
+            exports.activate = function () {
+                var vscode = require('vscode');
+                console.log('ran:' + vscode.window.showSomethingReal());
+            };
+            """,
+            to: "dist/web.js",
+            in: directory
+        )
+
+        try await host.activate()
+
+        #expect(host.isActivated)
+        #expect(host.activationState == .activated)
+        #expect(recorder.texts == ["ran:ok"])
+    }
+
+    /// And the boundary is the *run*, not the compile: a module that parses and
+    /// throws on its first statement is terminal.
+    ///
+    /// The pair is the point, and neither half is redundant. These two
+    /// extensions fail with the same error case, one line apart inside
+    /// `evaluateModule`, and the host has to answer differently: the one that
+    /// never ran keeps its retry, the one that ran spends the host. Asserting
+    /// only the first half would leave `moduleEvaluated` free to slide *down*
+    /// past the run call - which reads as an improvement and would quietly make
+    /// every post-evaluation failure retryable, evaluating a second module into
+    /// a second runtime beside a live one. That is the defect `.terminal`
+    /// exists to prevent.
+    @Test(.timeLimit(.minutes(1)))
+    func theTerminalBoundaryIsRunningTheModuleNotCompilingIt() async throws {
+        let willNotParseDirectory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: willNotParseDirectory) }
+        let ranAndThrewDirectory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: ranAndThrewDirectory) }
+
+        let willNotParse = try makeHost(
+            name: "alpha", source: "var broken = ;", in: willNotParseDirectory)
+        defer { willNotParse.dispose() }
+
+        // Its first statement is a host call, so "it ran" is observable rather
+        // than inferred - and the recorder stays empty.
+        let ranAndThrew = try makeHost(
+            name: "beta",
+            source: "console.log('ran'); throw new Error('boom');",
+            in: ranAndThrewDirectory
+        )
+        defer { ranAndThrew.dispose() }
+
+        let willNotParseConsole = ConsoleRecorder()
+        willNotParseConsole.attach(to: willNotParse)
+        let ranAndThrewConsole = ConsoleRecorder()
+        ranAndThrewConsole.attach(to: ranAndThrew)
+
+        await #expect(throws: ExtensionHostError.self) { try await willNotParse.activate() }
+        await #expect(throws: ExtensionHostError.self) { try await ranAndThrew.activate() }
+
+        // Compiled, never run: retryable, and `defineVSCodeMember` still works.
+        #expect(willNotParseConsole.texts.isEmpty)
+        #expect(willNotParse.recordedTerminationReason == nil)
+        #expect(willNotParse.activationState == .neverActivated)
+        let nothing: @convention(block) () -> Void = {}
+        try willNotParse.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "showSomethingReal", implementation: nothing)
+
+        // Run, then threw: spent, and both entry points refuse it.
+        #expect(ranAndThrewConsole.texts == ["ran"])
+        #expect(ranAndThrew.recordedTerminationReason == .failed)
+        #expect(ranAndThrew.activationState == .terminal(.failed))
+        await #expect(throws: ExtensionHostError.activationAlreadyFailed(identifier: "test.beta")) {
+            try await ranAndThrew.activate()
+        }
+        #expect(throws: ExtensionHostError.activationAlreadyFailed(identifier: "test.beta")) {
+            try ranAndThrew.defineVSCodeMember(
+                namespacePath: "vscode.window", name: "showSomethingReal", implementation: nothing)
+        }
+    }
+
     /// A failed activation is terminal, and the retry every caller reaches for
     /// is refused rather than run.
     ///
@@ -1583,6 +1727,24 @@ struct ExtensionHostTests {
     /// started, and the only thing the activation can then be doing when the
     /// cancellation handler's main-actor hop runs is the read - the hop is
     /// enqueued before the read completes and the main actor is serial.
+    ///
+    /// **What this test cannot assert, and which mutation covers it instead.**
+    /// A cancellation that landed before evaluation and a cancellation that
+    /// never landed at all are observationally identical, in every field the
+    /// host has. `endActivation`'s entire effect on this path is that it does
+    /// *not* call `markTerminal`, and that it calls `finishActivation`, which
+    /// is a guaranteed no-op here because `callActivate` has not run and so no
+    /// continuation is installed; the throw the caller sees comes from
+    /// `performActivation`'s own cancellation guard either way. That identity
+    /// is the fix working rather than a hole in the test, and adding a field to
+    /// make the two distinguishable would be adding host state to close a gap
+    /// in an assertion.
+    ///
+    /// So the coverage of `endActivation`'s `if self.moduleEvaluated` guard is
+    /// established by mutation, not by anything written below: make that guard
+    /// unconditional and this test dies on `recordedTerminationReason == nil`
+    /// and on `.neverActivated`. If you are reading this because the test looks
+    /// like it asserts nothing much, that is the sentence you came for.
     @Test(.timeLimit(.minutes(1)))
     func aCancellationBeforeTheModuleIsEvaluatedLeavesTheHostRetryable() async throws {
         let directory = try makeTempDirectory()
@@ -1839,8 +2001,25 @@ struct ExtensionHostTests {
         try host.defineVSCodeMember(
             namespacePath: "vscode.notANamespace", name: "x", implementation: nothing)
 
-        await #expect(throws: ExtensionHostError.self) {
+        do {
             try await host.activate()
+            Issue.record("A misspelled namespace must refuse the first activation.")
+            return
+        } catch let error as ExtensionHostError {
+            // The case and its values, not just the type: what the adaptor's
+            // author reads is the namespace they misspelled, the member they
+            // lost, and the line they wrote it on. A test that accepted any
+            // `ExtensionHostError` would stay green if the first activation
+            // started failing for some other reason entirely, as long as the
+            // retry still worked.
+            guard case let .vscodeMemberNotDefinable(identifier, namespacePath, name, message) = error else {
+                Issue.record("Expected vscodeMemberNotDefinable, got \(error)")
+                return
+            }
+            #expect(identifier == "test.alpha")
+            #expect(namespacePath == "vscode.notANamespace")
+            #expect(name == "x")
+            #expect(message.contains("ExtensionHostTests.swift:"), "message was: \(message)")
         }
         #expect(recorder.texts.isEmpty)
         #expect(host.activationState == .neverActivated)

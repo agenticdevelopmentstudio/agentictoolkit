@@ -211,14 +211,24 @@ public final class ExtensionHost {
     /// Whether this host has evaluated its extension's module.
     ///
     /// The invariant `terminationReason` describes, as a field rather than as
-    /// prose: it is written in exactly one place, immediately before
-    /// `evaluateModule`, and both routes into a terminal state read it rather
-    /// than each deciding for itself where the boundary is. The failure route
-    /// reads it as control flow — its `do` block starts on the line that sets
-    /// it, so a `catch` there can only be reached with this true — and
-    /// `endActivation` reads it as a value, because a cancellation lands
-    /// wherever the caller happens to cancel and has no such structure to sit
-    /// inside.
+    /// prose: it is written in exactly one place — inside `evaluateModule`,
+    /// on the line before the shim's `run` call — and every route into a
+    /// terminal state reads it rather than each deciding for itself where the
+    /// boundary is.
+    ///
+    /// That line is the boundary because it is the only line that runs the
+    /// extension's code. *Compiling* the module does not, and `evaluateModule`
+    /// throws three ways above the assignment with zero extension statements
+    /// executed (measured): no `JSContext`, a source that will not parse, and
+    /// a wrapper that did not compile to a function. So
+    /// `performActivation`'s `catch` tests this field rather than assuming
+    /// its `do` block implies it — it does not. It once did, and a host whose
+    /// extension file merely would not parse was told its code had already
+    /// run, refused a retry, and refused `defineVSCodeMember` besides.
+    ///
+    /// `endActivation` reads it from the other side and for the same reason:
+    /// a cancellation lands wherever the caller happens to cancel, with no
+    /// `do` block to sit inside at all.
     ///
     /// Never cleared. A host that evaluated a module has evaluated it; a
     /// retry is what this exists to refuse.
@@ -230,18 +240,23 @@ public final class ExtensionHost {
     /// the module has been **evaluated** (`moduleEvaluated`): from that instant
     /// the extension's code has run, its top level has registered whatever it
     /// registers and started whatever timers it starts, and nothing can reach
-    /// into JavaScript and un-run it. Every failure at or after
-    /// `evaluateModule` lands there — a sync throw, a rejected promise, a
-    /// throwing `.then` getter, a top-level throw — and so does a cancellation
-    /// that arrives once the module is running. They are one state, so they set
-    /// one field.
+    /// into JavaScript and un-run it. Every failure at or after the shim's
+    /// `run` call inside `evaluateModule` lands there — a sync throw, a
+    /// rejected promise, a throwing `.then` getter, a top-level throw — and so
+    /// does a cancellation that arrives once the module is running. They are
+    /// one state, so they set one field.
     ///
-    /// A cancellation that arrives *before* that instant sets nothing. Reading
-    /// the entry point off disk is a real suspension point, a bundled web
-    /// extension is routinely megabytes, and the caller who wraps `activate()`
-    /// in a timeout — the reason it is cancellation-responsive at all — is
-    /// asking to stop a slow read, not to spend the host. Nothing ran, so
-    /// nothing is abandoned, and the host stays retryable.
+    /// Nothing that arrives *before* that instant sets it, cancellation and
+    /// failure alike. Reading the entry point off disk is a real suspension
+    /// point, a bundled web extension is routinely megabytes, and the caller
+    /// who wraps `activate()` in a timeout — the reason it is
+    /// cancellation-responsive at all — is asking to stop a slow read, not to
+    /// spend the host. A module that will not *compile* is the same story one
+    /// step later: the compile throws with the author's own file and line
+    /// attached, which is the most valuable thing this host produces for that
+    /// mistake, and spending the host would replace it with "this host is
+    /// spent". Nothing ran, so nothing is abandoned, and the host stays
+    /// retryable.
     ///
     /// A retry would therefore evaluate the module a second time into a
     /// *second* runtime: `context` overwritten while the abandoned instance
@@ -354,8 +369,12 @@ public final class ExtensionHost {
     /// What does *not* spend the host is an attempt that never reached the
     /// extension's code: a cancellation that lands while the entry point is
     /// still being read, an unloadable shim, a namespace an adaptor spelled
-    /// wrong. Nothing ran, so there is nothing to abandon, and the host stays
-    /// `.neverActivated` and can be activated again.
+    /// wrong, a module that will not *compile*. Nothing ran, so there is
+    /// nothing to abandon, and the host stays `.neverActivated` and can be
+    /// activated again. The last of those is the ordinary one — a truncated
+    /// download, a bad minifier run, a file hand-edited during development —
+    /// and it is the case where a retry can genuinely differ, because the
+    /// file can be corrected under a host that is still willing to run it.
     ///
     /// Calling twice is a no-op, and two concurrent calls are one activation.
     /// VS Code activates an extension once, callers re-emit activation events
@@ -468,8 +487,9 @@ public final class ExtensionHost {
         }
         self.runtime = runtime
 
-        // The boundary, and `moduleEvaluated` is it. Past the line below the
-        // extension's own code runs, and a failure is not a failure to
+        // The boundary is `moduleEvaluated`, and it is *not* this line: it is
+        // the shim's `run` call inside `evaluateModule`, the one call that
+        // runs the extension's own code. Past it a failure is not a failure to
         // *start*: it is a module that has been evaluated, whose top level has
         // already registered whatever it registers and started whatever timers
         // it starts. That is the same abandoned state a cancellation produces
@@ -479,24 +499,26 @@ public final class ExtensionHost {
         //
         // The `catch` below and `endActivation`'s cancellation are the two
         // writers of `terminationReason`, and they agree because they read one
-        // predicate: this `catch` cannot be reached with `moduleEvaluated`
-        // false, and `endActivation` tests it.
+        // predicate. The `catch` tests it rather than inferring it from the
+        // `do` block: `evaluateModule` throws three ways with nothing
+        // executed, and the commonest of them is a syntax error in the
+        // extension's own file.
         //
-        // Everything *before* the line below is deliberately not terminal: no
+        // Everything before that boundary is deliberately not terminal: no
         // extension code has run yet, so a retry orphans one `JSContext` and
         // nothing inside it. Measured — evaluating the shim alone makes no
         // call on the host block table, and neither does `defineMember`,
-        // valid or invalid — and that context is released on the next
-        // `self.context = context`. A shim that will not load or a namespace
-        // an adaptor spelled wrong fails the same way on every attempt, and
-        // refusing the second attempt would only hide the reason behind a
-        // different error.
+        // valid or invalid, nor compiling the module — and that context is
+        // released on the next `self.context = context`. A shim that will not
+        // load or a namespace an adaptor spelled wrong fails the same way on
+        // every attempt, and refusing the second attempt would only hide the
+        // reason behind a different error; a file that will not parse is the
+        // case where the retry can actually differ, once the file is fixed.
         do {
-            moduleEvaluated = true
             let exports = try evaluateModule(runtime: runtime, source: source, entryPoint: entryPoint)
             try await callActivate(on: exports, runtime: runtime)
         } catch {
-            markTerminal(.failed)
+            if moduleEvaluated { markTerminal(.failed) }
             throw error
         }
         activationSucceeded = true
@@ -622,11 +644,31 @@ public final class ExtensionHost {
     /// The runtime is passed rather than read from `self`, because the replay
     /// runs inside `installRuntime`, before `performActivation` has adopted
     /// the runtime it is building.
+    ///
+    /// And it is logged, because withdrawing is the one event here that
+    /// changes what a *later*, apparently clean activation contains. The
+    /// adaptor's typo fails one `activate()` loudly and is then gone from the
+    /// queue; the next `activate()` succeeds with that member left as the
+    /// shim's not-implemented stub, and when the extension reaches for it the
+    /// host records it against the *extension*, in the ledger task 5.8
+    /// reports. That entry is a misattribution — the member is implemented,
+    /// and the app spelled its namespace wrong — so the log line carries the
+    /// same three facts the thrown error does, and the adaptor's bug stays
+    /// findable after the throw has been handled and scrolled past. Logged
+    /// here rather than at either call site, for the reason this function
+    /// exists at all: two copies of one rule drift.
     private func applyOrWithdraw(at index: Int, to runtime: JSValue) throws {
         do {
             try apply(vscodeMemberDefinitions[index], to: runtime)
         } catch {
-            vscodeMemberDefinitions.remove(at: index)
+            let withdrawn = vscodeMemberDefinitions.remove(at: index)
+            logger.error(
+                """
+                Extension '\(self.identifier, privacy: .public)' withdrew the definition of \
+                '\(withdrawn.name, privacy: .public)' on '\(withdrawn.namespacePath, privacy: .public)', \
+                declared at \(withdrawn.origin, privacy: .public): the shim refused it, so that member \
+                stays a not-implemented stub on every later activation
+                """)
             throw error
         }
     }
@@ -960,6 +1002,13 @@ public final class ExtensionHost {
         }
 
         pendingException = nil
+        // The boundary. Everything above compiles; the line below *runs*, and
+        // from the instant it does the extension's code cannot be un-run, so
+        // every failure from here on is terminal and a retry is refused — see
+        // `moduleEvaluated`. Nothing sits between the assignment and the call
+        // that can throw or suspend, so there is no window in which one is
+        // true without the other.
+        moduleEvaluated = true
         let exports = runtime.invokeMethod(
             "run",
             withArguments: [wrapper, entryPoint.path, entryPoint.deletingLastPathComponent().path]
