@@ -102,7 +102,21 @@ public final class NotesManager {
     /// (M1(b) in the review this fixes) and this is a `let`: the reference
     /// never changes after `init`, only what it points to does I/O.
     private nonisolated let storage: NoteStorage
-    private var saveTasks: [UUID: Task<Void, Never>] = [:]
+    /// Per-note debounced autosave.
+    ///
+    /// The dictionary of per-key `Task`s this used to be lived here, in
+    /// `TextDocumentSaveScheduler`, and (in a one-shot variant) in
+    /// `SemanticTokenHighlightProvider` — three copies of the same
+    /// cancel-and-reschedule-then-flush-once pattern, each independently wrong
+    /// in the same place. `KeyedDebouncer` is the extraction; the correction
+    /// it carries is that a note whose write *throws* stays pending and is
+    /// retried with backoff instead of being dropped with only a log line.
+    /// This copy dropped it the same way the editor's did.
+    private lazy var saveDebouncer = KeyedDebouncer<UUID>(
+        debounce: Self.saveDebounce
+    ) { [weak self] _, error in
+        self?.record(.save, error)
+    }
 
     /// The tail of the storage queue: the task every next storage call waits
     /// for before it starts. See `performStorage(_:)`.
@@ -259,46 +273,29 @@ public final class NotesManager {
     // MARK: - Debounced Save
 
     /// Schedules a save after `saveDebounce`. Subsequent calls for the same
-    /// note ID cancel the pending task and reschedule.
+    /// note ID replace the pending work and restart the debounce.
+    ///
+    /// The note is looked up again *inside* the work rather than captured, so
+    /// a save that runs late — or that is retried after a failure — persists
+    /// the note as it stands now, not as it stood when the keystroke landed.
     private func scheduleSave(_ note: Note) {
         let noteID = note.id
-        saveTasks[noteID]?.cancel()
-        saveTasks[noteID] = Task { [weak self] in
-            try? await Task.sleep(for: Self.saveDebounce)
-            guard !Task.isCancelled, let self else { return }
-            self.saveTasks.removeValue(forKey: noteID)
-            guard let current = self.notes.first(where: { $0.id == noteID }) else { return }
-            do {
-                try await self.performStorage { try $0.updateNote(current) }
-            } catch {
-                self.record(.save, error)
-            }
+        saveDebouncer.schedule(key: noteID) { [weak self] in
+            guard let self, let current = self.notes.first(where: { $0.id == noteID }) else { return }
+            try await self.performStorage { try $0.updateNote(current) }
         }
     }
 
-    /// Immediately persists any pending debounced saves. Cancels the scheduled
-    /// tasks and awaits their completion to avoid racing writes, then performs
-    /// a single synchronous write per affected note.
+    /// Immediately persists any pending debounced saves, and answers with the
+    /// note IDs whose write still failed.
     ///
-    /// Call before app termination.
-    public func flushPendingSaves() async {
-        let pending = saveTasks
-        saveTasks.removeAll()
-
-        // Cancel everyone first, then wait for each to observe cancellation
-        // before writing — this guarantees at most one write per note during
-        // flush, regardless of where the task was in its lifecycle.
-        for (_, task) in pending { task.cancel() }
-        for (_, task) in pending { await task.value }
-
-        for (noteID, _) in pending {
-            guard let note = notes.first(where: { $0.id == noteID }) else { continue }
-            do {
-                try await performStorage { try $0.updateNote(note) }
-            } catch {
-                record(.save, error)
-            }
-        }
+    /// Call before app termination. A failed write leaves its note pending
+    /// rather than dropping it, so a transient failure here is retried and a
+    /// permanent one is at least reportable — which the previous shape could
+    /// not do, having already cleared the note from its pending map.
+    @discardableResult
+    public func flushPendingSaves() async -> [UUID] {
+        await saveDebouncer.flushAll()
     }
 }
 

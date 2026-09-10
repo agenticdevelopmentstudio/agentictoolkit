@@ -3,59 +3,73 @@ import Foundation
 import LanguageServerProtocol
 import os
 
-/// Debounced autosave for `TextDocument`s. Modeled directly on
-/// `NotesManager`'s `scheduleSave`/`flushPendingSaves` (`macOS/Features/NotesWindow/NotesManager.swift`,
-/// lines 94-137): a dictionary of per-key `Task`s, cancel-and-reschedule on
-/// each touch, and a flush that cancels everyone, awaits each task, and only
-/// then performs at most one write per key.
+/// Debounced autosave for `TextDocument`s.
+///
+/// The per-key debounce, the cancel-and-reschedule, and the
+/// cancel-then-await-then-write-once flush all live in
+/// `KeyedDebouncer` (`Core/Concurrency/KeyedDebouncer.swift`) — this type is
+/// the `TextDocument`-shaped face of it. It used to be a hand-copy of
+/// `NotesManager`'s `scheduleSave`/`flushPendingSaves`, which is why the
+/// debouncer exists: three copies of that pattern each had to be corrected
+/// separately, and the correction below is the one they all needed.
+///
+/// **A failed write does not lose the edit.** The debouncer keeps an entry
+/// until its work completes without throwing, so a write that hits a full
+/// disk, a revoked network volume or a file that turned read-only leaves the
+/// document *still pending*, still dirty, and re-armed with backoff — and
+/// `flushPendingSaves()` at termination still finds it and tries again. The
+/// previous shape removed the document from its pending map before attempting
+/// the write and only logged on failure, so nothing re-armed, nothing
+/// re-inserted it, and the quit-time flush reported success over an empty map.
 ///
 /// Foundation-only, same import rules as `TextDocument` — the write itself is
-/// injected by the caller (Task 1.3), not hardcoded here, which is what makes
-/// this type testable without touching the filesystem.
+/// injected by the caller, not hardcoded here, which is what makes this type
+/// testable without touching the filesystem.
 @MainActor
 public final class TextDocumentSaveScheduler {
 
-    private let debounce: Duration
-    private let write: @MainActor (TextDocument) throws -> Void
+    /// Persists one document's current text.
+    ///
+    /// `async` deliberately: this runs from the main actor, and a synchronous
+    /// atomic write of a multi-megabyte file — or of any file on a network
+    /// volume or a sleeping external disk — beachballs the UI on every
+    /// autosave tick while the user is still typing. The caller is expected to
+    /// snapshot on the main actor and do the I/O off it; the scheduler only
+    /// decides *when*.
+    public typealias Write = @MainActor (TextDocument) async throws -> Void
 
-    /// The document to write once its debounce elapses, keyed by `uri`. Held
-    /// separately from `pendingTasks` so `flushPendingSaves()` can snapshot
-    /// and clear both before writing anything.
-    private var pendingDocuments: [DocumentUri: TextDocument] = [:]
-    private var pendingTasks: [DocumentUri: Task<Void, Never>] = [:]
+    private let write: Write
+    private let debouncer: KeyedDebouncer<DocumentUri>
 
-    public init(debounce: Duration = .seconds(1), write: @escaping @MainActor (TextDocument) throws -> Void) {
-        self.debounce = debounce
+    public init(debounce: Duration = .seconds(1), write: @escaping Write) {
         self.write = write
+        self.debouncer = KeyedDebouncer(debounce: debounce) { uri, error in
+            let reason = error.localizedDescription
+            TextDocumentSaveScheduler.logger.error(
+                "Auto-save failed for \(uri, privacy: .public): \(reason, privacy: .public) — still pending, will retry"
+            )
+        }
     }
 
-    /// Schedules `document` to be written after `debounce`. A pending task
-    /// for the same `uri` is cancelled and replaced — ten keystrokes inside
-    /// the debounce window produce exactly one write. A no-op on a document
-    /// that is already clean: nothing to save means no task to arm.
+    /// Schedules `document` to be written after the debounce. A pending save
+    /// for the same `uri` is replaced — ten keystrokes inside the debounce
+    /// window produce exactly one write. A no-op on a document that is already
+    /// clean: nothing to save means no work to arm.
+    ///
+    /// The closure holds `document` strongly, and the debouncer holds the
+    /// closure until the write succeeds. That retention *is* the guarantee
+    /// that a failed write has something left to retry.
     public func schedule(_ document: TextDocument) {
         guard document.isDirty else { return }
-
-        let uri = document.uri
-        pendingTasks[uri]?.cancel()
-        pendingDocuments[uri] = document
-
-        let debounce = self.debounce
-        pendingTasks[uri] = Task { [weak self] in
-            try? await Task.sleep(for: debounce)
-            guard !Task.isCancelled, let self else { return }
-            self.pendingTasks.removeValue(forKey: uri)
-            guard let pending = self.pendingDocuments.removeValue(forKey: uri) else { return }
-            self.performWrite(pending)
+        debouncer.schedule(key: document.uri) { [weak self] in
+            try await self?.performWrite(document)
         }
     }
 
     /// Drops a pending save for `uri` without writing — for a document being
     /// closed and discarded.
     public func cancel(uri: DocumentUri) {
-        pendingTasks[uri]?.cancel()
-        pendingTasks.removeValue(forKey: uri)
-        pendingDocuments.removeValue(forKey: uri)
+        debouncer.cancel(key: uri)
     }
 
     /// Immediately persists the pending debounced save for `uri` alone,
@@ -63,64 +77,48 @@ public final class TextDocumentSaveScheduler {
     ///
     /// This, not `flushPendingSaves()`, is what a file switch calls. The store
     /// and this scheduler are one instance for the whole app, so a
-    /// whole-scheduler flush on every click would perform a synchronous
-    /// main-actor write for every dirty document in every other window —
-    /// defeating their debounce and hitching the click that triggered it.
-    /// `flushPendingSaves()` stays for termination, the case it was written
-    /// for, where writing everything is exactly the point.
+    /// whole-scheduler flush on every click would write every dirty document
+    /// in every other window — defeating their debounce and hitching the click
+    /// that triggered it.
     ///
-    /// Same cancel-then-await-then-write ordering as `flushPendingSaves()`,
-    /// for the same reason: the pending task must be seen to have observed
-    /// its cancellation before this performs the write, or the two race and
-    /// the document is written twice.
+    /// Two concurrent flushes of the same `uri` — an eviction and a file
+    /// switch, say — do not produce two writes: the debouncer runs at most one
+    /// unit of work per key at a time and the second flush awaits the first.
     public func flushPendingSave(uri: DocumentUri) async {
-        let task = pendingTasks.removeValue(forKey: uri)
-        let document = pendingDocuments.removeValue(forKey: uri)
-
-        task?.cancel()
-        await task?.value
-
-        guard let document else { return }
-        performWrite(document)
+        await debouncer.flush(key: uri)
     }
 
-    /// Immediately persists every pending debounced save.
+    /// Immediately persists every pending debounced save, and answers with the
+    /// `uri`s whose write *still* failed.
     ///
-    /// Follows `NotesManager.flushPendingSaves()` exactly: snapshot the
-    /// pending map, clear it, cancel every task, `await` every task, and only
-    /// then perform the writes. That ordering — cancel everyone first, then
-    /// wait for each to observe cancellation before writing — is what
-    /// guarantees at most one write per document during a flush regardless of
-    /// where each task was in its lifecycle; collapsing it into a single pass
-    /// would race a task's own write against this one.
-    public func flushPendingSaves() async {
-        let documents = pendingDocuments
-        let tasks = pendingTasks
-        pendingDocuments.removeAll()
-        pendingTasks.removeAll()
-
-        for task in tasks.values { task.cancel() }
-        for task in tasks.values { await task.value }
-
-        for document in documents.values {
-            performWrite(document)
-        }
+    /// Call at termination. A non-empty answer is a genuine "this work did not
+    /// reach the disk" — the old shape could not report one, because a failed
+    /// write had already removed itself from the pending map.
+    @discardableResult
+    public func flushPendingSaves() async -> [DocumentUri] {
+        await debouncer.flushAll()
     }
 
-    /// The `uri`s with a save currently pending.
+    /// The `uri`s with a save currently pending — scheduled, in flight, or
+    /// awaiting a retry after a failed write.
     public var pendingURIs: [DocumentUri] {
-        Array(pendingDocuments.keys)
+        debouncer.pendingKeys
     }
 
-    private func performWrite(_ document: TextDocument) {
-        do {
-            try write(document)
-            document.markClean()
-        } catch {
-            let uri = document.uri
-            let reason = error.localizedDescription
-            logger.error("Auto-save failed for \(uri, privacy: .public): \(reason, privacy: .public)")
-        }
+    /// Writes `document` and, if nothing was typed in the meantime, marks it
+    /// clean.
+    ///
+    /// The version check is what the `async` write costs: the write suspends,
+    /// so the user can type into the same document between the bytes being
+    /// snapshotted and the write landing. Marking clean unconditionally there
+    /// would clear the dirty indicator over a buffer that is genuinely newer
+    /// than the file. The edit is not lost by declining — `TextDocument`'s
+    /// change handler has already scheduled the next save for it.
+    private func performWrite(_ document: TextDocument) async throws {
+        let versionAtWrite = document.version
+        try await write(document)
+        guard document.version == versionAtWrite else { return }
+        document.markClean()
     }
 }
 

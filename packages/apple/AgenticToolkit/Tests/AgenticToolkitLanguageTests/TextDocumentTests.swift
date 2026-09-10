@@ -290,4 +290,184 @@ struct TextDocumentTests {
         #expect(roundTrippedOffset == 1)
         #expect(document.position(forUTF16Offset: roundTrippedOffset) == midCRLFPosition)
     }
+
+    // MARK: - The edit-application contract
+    //
+    // `apply(_:)` has one ordering contract with two halves: the splices run
+    // back-to-front so an earlier offset stays valid, and the emitted events
+    // have to describe *that* sequence, because LSP requires each change to
+    // be applied to the document the previous change produced. The round-trip
+    // below is the real assertion — it re-derives the server's view by
+    // replaying the events onto a second document and compares it with the
+    // client buffer. Per-edit unit tests cannot catch an ordering bug.
+
+    /// Replays `events` onto a fresh document seeded with `original`, exactly
+    /// as a language server applies `didChange` — one change at a time, each
+    /// against the text the previous one produced.
+    private func serverView(
+        of original: String,
+        after events: [TextDocumentContentChangeEvent]
+    ) throws -> String {
+        let mirror = TextDocument(uri: "file:///mirror.txt", languageId: "plaintext", text: original)
+        for event in events {
+            let range = try #require(event.range, "an incremental change must carry a range")
+            mirror.apply([TextEdit(range: range, newText: event.text)])
+        }
+        return mirror.text
+    }
+
+    private func edit(
+        _ startLine: Int, _ startCharacter: Int,
+        _ endLine: Int, _ endCharacter: Int,
+        _ newText: String
+    ) -> TextEdit {
+        TextEdit(
+            range: LSPRange(
+                start: Position(line: startLine, character: startCharacter),
+                end: Position(line: endLine, character: endCharacter)
+            ),
+            newText: newText
+        )
+    }
+
+    @Test("a batch given in ascending order replays onto the server as the same text")
+    func ascendingBatchRoundTripsToTheServer() throws {
+        let original = "alpha beta gamma"
+        let document = TextDocument(uri: "file:///ascending.txt", languageId: "plaintext", text: original)
+
+        // Deliberately handed to `apply` low-offset-first, which is the order
+        // a formatter emits and the order that used to be echoed to the
+        // server while the splices ran the other way.
+        let events = document.apply([
+            edit(0, 0, 0, 5, "ALPHA"),
+            edit(0, 6, 0, 10, "BETA"),
+            edit(0, 11, 0, 16, "GAMMA")
+        ])
+
+        #expect(document.text == "ALPHA BETA GAMMA")
+        #expect(try serverView(of: original, after: events) == document.text)
+    }
+
+    @Test("co-located edits land in the caller's order, and the server agrees")
+    func coLocatedEditsKeepTheCallersOrder() throws {
+        let original = "foo\n"
+        let document = TextDocument(uri: "file:///colocated.txt", languageId: "plaintext", text: original)
+
+        // Three inserts at the identical offset — an opening paren, the
+        // argument, the closing paren, which is how servers emit a call
+        // completion. Nothing but the caller's own index distinguishes them,
+        // so a non-total comparator is free to reorder them and `sorted(by:)`
+        // does exactly that once the array is big enough. The array order is
+        // the order the caller means the text to read in, and the assertion
+        // below is that the buffer reads that way — not merely that it comes
+        // out the same twice.
+        let events = document.apply([
+            edit(0, 3, 0, 3, "("),
+            edit(0, 3, 0, 3, "bar"),
+            edit(0, 3, 0, 3, ")")
+        ])
+
+        #expect(document.text == "foo(bar)\n")
+        #expect(try serverView(of: original, after: events) == document.text)
+    }
+
+    @Test("a co-located insert and replacement round-trip to the server")
+    func coLocatedInsertAndReplacementRoundTrip() throws {
+        let original = "value = old\n"
+        let document = TextDocument(uri: "file:///colocated-mixed.txt", languageId: "plaintext", text: original)
+
+        let events = document.apply([
+            edit(0, 8, 0, 8, "// "),
+            edit(0, 8, 0, 11, "new")
+        ])
+
+        // The insert is declared first, so it reads first; the replacement it
+        // shares a start with still consumes the three units it was given
+        // rather than the text the insert put there.
+        #expect(document.text == "value = // new\n")
+        #expect(try serverView(of: original, after: events) == document.text)
+    }
+
+    @Test("a large scrambled batch replays onto the server as the same text")
+    func largeScrambledBatchRoundTrips() throws {
+        // Twenty-plus elements, because the reordering that a non-total
+        // comparator permits only shows up once `sorted(by:)` switches out of
+        // its small-array path.
+        let original = (0..<24).map { "line \($0) here" }.joined(separator: "\n")
+        let document = TextDocument(uri: "file:///scrambled.txt", languageId: "plaintext", text: original)
+
+        var edits: [TextEdit] = []
+        for line in 0..<24 {
+            // Two edits per line, one of them co-located with the other's
+            // start, handed over in an order that matches neither the splice
+            // order nor the emission order.
+            edits.append(edit(line, 0, line, 4, "LINE"))
+            edits.append(edit(line, 0, line, 0, "\(line % 3)"))
+        }
+        edits.reverse()
+
+        let events = document.apply(edits)
+
+        #expect(try serverView(of: original, after: events) == document.text)
+        #expect(events.count == edits.count)
+    }
+
+    @Test("an out-of-bounds edit reports the range it actually mutated")
+    func clampedEditReportsTheMutatedRange() throws {
+        let original = "short"
+        let document = TextDocument(uri: "file:///clamped.txt", languageId: "plaintext", text: original)
+
+        let events = document.apply([edit(0, 2, 9, 99, "!")])
+
+        #expect(document.text == "sh!")
+        #expect(try serverView(of: original, after: events) == document.text)
+    }
+
+    // MARK: - A character past a line's end stops at the terminator
+
+    @Test("a character past the end of a line resolves before the newline, not past it")
+    func characterPastLineEndStopsBeforeTheNewline() {
+        // "ab\ncd" — 'a' 0, 'b' 1, '\n' 2, 'c' 3, 'd' 4.
+        let document = TextDocument(uri: "file:///line-end.txt", languageId: "plaintext", text: "ab\ncd")
+
+        // LSP's own idiom for "to the end of this line".
+        #expect(document.utf16Offset(for: Position(line: 0, character: 999)) == 2)
+        #expect(document.utf16Offset(for: Position(line: 1, character: 999)) == 5)
+    }
+
+    @Test("a whole-line replacement does not eat the line's newline")
+    func wholeLineReplacementKeepsTheNewline() {
+        let document = TextDocument(uri: "file:///whole-line.txt", languageId: "plaintext", text: "ab\ncd")
+
+        document.apply([TextEdit(
+            range: LSPRange(
+                start: Position(line: 0, character: 0),
+                end: Position(line: 0, character: 999)
+            ),
+            newText: "XY"
+        )])
+
+        #expect(document.text == "XY\ncd", "the replacement must not swallow the line terminator")
+    }
+
+    @Test("a whole-line replacement keeps a CRLF terminator intact")
+    func wholeLineReplacementKeepsCRLF() {
+        let document = TextDocument(uri: "file:///whole-line-crlf.txt", languageId: "plaintext", text: "ab\r\ncd")
+
+        document.apply([TextEdit(
+            range: LSPRange(
+                start: Position(line: 0, character: 0),
+                end: Position(line: 0, character: 999)
+            ),
+            newText: "XY"
+        )])
+
+        #expect(document.text == "XY\r\ncd", "neither half of the CRLF may be consumed")
+    }
+
+    @Test("a character past the end of the last line clamps to the document end")
+    func characterPastTheLastLineClampsToTheEnd() {
+        let document = TextDocument(uri: "file:///last-line.txt", languageId: "plaintext", text: "ab\ncd")
+        #expect(document.utf16Offset(for: Position(line: 99, character: 99)) == 5)
+    }
 }

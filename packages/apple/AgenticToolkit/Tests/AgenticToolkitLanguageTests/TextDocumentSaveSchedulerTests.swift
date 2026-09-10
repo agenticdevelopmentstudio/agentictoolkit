@@ -102,6 +102,102 @@ struct TextDocumentSaveSchedulerTests {
         #expect(writer.writtenURIs == [succeedingDocument.uri])
     }
 
+    // MARK: - A failed write does not lose the edit
+    //
+    // The scheduler used to remove the document from its pending map *before*
+    // attempting the write and only log on failure. A full disk, a revoked
+    // network volume or a file gone read-only therefore dropped the edit on
+    // the floor: nothing re-armed, nothing re-inserted it, and the
+    // termination flush reported success over an empty map. These two tests
+    // fail against that shape.
+
+    @Test("a write that throws leaves the document pending, so the edit is not lost")
+    func failedWriteLeavesTheDocumentPending() async throws {
+        let writer = RecordingWriter()
+        let document = makeDirtyDocument(uri: "file:///disk-full.txt", text: "the user's work")
+        writer.urisThatThrow.insert(document.uri)
+
+        let scheduler = TextDocumentSaveScheduler(debounce: Self.testDebounce, write: writer.write)
+        scheduler.schedule(document)
+        try await Task.sleep(for: Self.settleDelay)
+
+        #expect(writer.writtenURIs.isEmpty)
+        #expect(document.isDirty, "a write that never landed must not mark the buffer clean")
+        #expect(
+            scheduler.pendingURIs == [document.uri],
+            "a failed write must leave something for the next flush to retry"
+        )
+        #expect(document.text == "the user's work")
+    }
+
+    @Test("the edit survives a failed write and reaches disk on a later successful flush")
+    func failedWriteIsRetriedByALaterFlush() async throws {
+        let writer = RecordingWriter()
+        let document = makeDirtyDocument(uri: "file:///comes-back.txt", text: "the user's work")
+        writer.urisThatThrow.insert(document.uri)
+
+        let scheduler = TextDocumentSaveScheduler(debounce: Self.testDebounce, write: writer.write)
+        scheduler.schedule(document)
+        try await Task.sleep(for: Self.settleDelay)
+        #expect(writer.writtenURIs.isEmpty)
+
+        // The volume comes back — a reconnected share, or the user freeing
+        // space — and the app is now quitting.
+        writer.urisThatThrow.remove(document.uri)
+        let stillUnsaved = await scheduler.flushPendingSaves()
+
+        #expect(writer.writtenURIs == [document.uri])
+        #expect(document.isDirty == false)
+        #expect(stillUnsaved.isEmpty)
+        #expect(scheduler.pendingURIs.isEmpty)
+    }
+
+    @Test("flushPendingSaves names the documents whose write still failed")
+    func flushReportsDocumentsThatStillFailed() async {
+        let writer = RecordingWriter()
+        let saved = makeDirtyDocument(uri: "file:///saved.txt")
+        let lost = makeDirtyDocument(uri: "file:///still-failing.txt")
+        writer.urisThatThrow.insert(lost.uri)
+
+        let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
+        scheduler.schedule(saved)
+        scheduler.schedule(lost)
+
+        let stillUnsaved = await scheduler.flushPendingSaves()
+
+        #expect(stillUnsaved == [lost.uri])
+        #expect(writer.writtenURIs == [saved.uri])
+    }
+
+    @Test("a write that suspends while the user types again does not mark the buffer clean")
+    func typingDuringASuspendedWriteKeepsTheDocumentDirty() async throws {
+        let document = makeDirtyDocument(uri: "file:///still-typing.txt", text: "one")
+        var released: (@MainActor () -> Void)?
+        let scheduler = TextDocumentSaveScheduler(debounce: Self.testDebounce) { _ in
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                released = { continuation.resume() }
+            }
+        }
+
+        scheduler.schedule(document)
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(released != nil, "the write should be suspended by now")
+
+        // The user types while the bytes are still on their way to the disk.
+        document.apply([TextEdit(
+            range: LSPRange(
+                start: Position(line: 0, character: 3),
+                end: Position(line: 0, character: 3)
+            ),
+            newText: " two"
+        )])
+        released?()
+        try await Task.sleep(for: .milliseconds(120))
+
+        #expect(document.isDirty, "the buffer is newer than the file that was just written")
+        #expect(document.text == "one two")
+    }
+
     @Test("cancel before the debounce elapses produces no write at all")
     func cancelBeforeDebounceProducesNoWrite() async throws {
         let writer = RecordingWriter()

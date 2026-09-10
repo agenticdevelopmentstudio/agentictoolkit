@@ -481,4 +481,177 @@ struct LSPEditorAnnotationTests {
         #expect(overlay.squiggles().allSatisfy { $0.severity == .warning })
         #expect(coordinator.hover.marks.first?.message == "never used")
     }
+
+    // MARK: - Marks are re-anchored across edits
+
+    /// Installs a coordinator with one published diagnostic already on it, and
+    /// hands back everything a re-anchoring assertion needs.
+    ///
+    /// The diagnostic goes through a real `DiagnosticStore` rather than being
+    /// poked into the views, because the coordinator's own copy of the marks
+    /// is what gets shifted and only the publish path fills it.
+    private func makeAnnotatedEditor(
+        text: String,
+        diagnostic: LSPRange
+    ) async throws -> (controller: TextViewController, coordinator: LSPEditorAnnotationCoordinator) {
+        let fixture = LSPEditorFixture(behavior: FakeEditorSessionBehavior(
+            capabilities: makeHoveringCapabilities()
+        ))
+        let session = try await fixture.startedSession()
+        let uri = "file:///Workspace/Sample.swift"
+        let controller = laidOutEditor(text: text)
+        let document = makeEditorDocument(uri: uri, text: text)
+        let store = DiagnosticStore()
+        store.observe(session)
+        let coordinator = LSPEditorAnnotationCoordinator(
+            document: document,
+            registry: fixture.registry,
+            store: store
+        )
+        coordinator.prepareCoordinator(controller: controller)
+
+        session.publish(PublishDiagnosticsParams(
+            uri: uri,
+            version: 1,
+            diagnostics: [Diagnostic(range: diagnostic, severity: .warning, message: "never used")]
+        ))
+        #expect(await poll { !coordinator.hover.marks.isEmpty })
+        return (controller, coordinator)
+    }
+
+    /// What it catches: marks that hold already-converted `NSRange`s and are
+    /// never shifted, so an insertion above them leaves every squiggle
+    /// underlining the wrong text until the server happens to publish again.
+    @Test("an insertion above a mark moves the mark down by the inserted length")
+    func insertionAboveAMarkShiftsIt() async throws {
+        // "let a = 1\n" is ten units, so line 1 starts at 10 and its "b" is
+        // at 14.
+        let (controller, coordinator) = try await makeAnnotatedEditor(
+            text: "let a = 1\nlet b = 2\nlet c = 3\n",
+            diagnostic: LSPRange(
+                start: Position(line: 1, character: 4),
+                end: Position(line: 1, character: 5)
+            )
+        )
+        #expect(coordinator.hover.marks.first?.range == NSRange(location: 14, length: 1))
+
+        controller.textView.replaceCharacters(in: NSRange(location: 0, length: 0), with: "// header\n")
+
+        #expect(
+            coordinator.hover.marks.first?.range == NSRange(location: 24, length: 1),
+            "a mark below an insertion has to move by the inserted length"
+        )
+    }
+
+    /// The other direction, which is the one that can address text that no
+    /// longer exists: deleting above a mark must pull it back up.
+    @Test("a deletion above a mark moves the mark up, and never off the end of the buffer")
+    func deletionAboveAMarkShiftsItBack() async throws {
+        let (controller, coordinator) = try await makeAnnotatedEditor(
+            text: "let a = 1\nlet b = 2\nlet c = 3\n",
+            diagnostic: LSPRange(
+                start: Position(line: 2, character: 4),
+                end: Position(line: 2, character: 5)
+            )
+        )
+        let before = try #require(coordinator.hover.marks.first?.range)
+        #expect(before == NSRange(location: 24, length: 1))
+
+        // Delete the whole first line.
+        controller.textView.replaceCharacters(in: NSRange(location: 0, length: 10), with: "")
+
+        let after = try #require(coordinator.hover.marks.first?.range)
+        #expect(after == NSRange(location: 14, length: 1))
+        #expect(
+            after.location + after.length <= (controller.textView.string as NSString).length,
+            "a mark must never address past the end of the buffer"
+        )
+    }
+
+    /// A mark entirely above the edit describes text nothing touched, so it
+    /// must be left exactly as it is — a blanket shift would be as wrong as no
+    /// shift at all.
+    @Test("an edit below a mark leaves the mark alone")
+    func editBelowAMarkLeavesItAlone() async throws {
+        let (controller, coordinator) = try await makeAnnotatedEditor(
+            text: "let a = 1\nlet b = 2\nlet c = 3\n",
+            diagnostic: LSPRange(
+                start: Position(line: 0, character: 4),
+                end: Position(line: 0, character: 5)
+            )
+        )
+        let before = try #require(coordinator.hover.marks.first?.range)
+
+        controller.textView.replaceCharacters(in: NSRange(location: 20, length: 0), with: "// tail\n")
+
+        #expect(coordinator.hover.marks.first?.range == before)
+    }
+
+    /// The text under the mark is gone, so the complaint about it is stale.
+    /// Keeping the mark would underline the replacement, which is a claim the
+    /// server never made.
+    @Test("an edit inside a mark drops it rather than underlining the replacement")
+    func editInsideAMarkDropsIt() async throws {
+        let (controller, coordinator) = try await makeAnnotatedEditor(
+            text: "let a = 1\nlet b = 2\nlet c = 3\n",
+            diagnostic: LSPRange(
+                start: Position(line: 1, character: 4),
+                end: Position(line: 1, character: 9)
+            )
+        )
+        #expect(coordinator.hover.marks.count == 1)
+
+        // Retype the middle of the marked span.
+        controller.textView.replaceCharacters(in: NSRange(location: 15, length: 2), with: "XYZ")
+
+        #expect(coordinator.hover.marks.isEmpty)
+    }
+
+    /// The overlay draws from its own copy, so a shift that only updated the
+    /// coordinator's array would move nothing on screen.
+    @Test("the re-anchored marks reach the overlay, not just the coordinator")
+    func reanchoredMarksReachTheOverlay() async throws {
+        let (controller, coordinator) = try await makeAnnotatedEditor(
+            text: "let a = 1\nlet b = 2\nlet c = 3\n",
+            diagnostic: LSPRange(
+                start: Position(line: 1, character: 4),
+                end: Position(line: 1, character: 5)
+            )
+        )
+        let overlay = try #require(
+            controller.textView.subviews.compactMap { $0 as? DiagnosticOverlayView }.first
+        )
+        #expect(overlay.marks.first?.range == NSRange(location: 14, length: 1))
+
+        controller.textView.replaceCharacters(in: NSRange(location: 0, length: 0), with: "// header\n")
+
+        #expect(overlay.marks.first?.range == NSRange(location: 24, length: 1))
+        _ = coordinator
+    }
+
+    /// A coordinator torn down with the editor must stop watching that
+    /// storage; an observer left registered against a live text storage is a
+    /// callback into a dead object graph.
+    @Test("destroy stops the coordinator re-anchoring against further edits")
+    func destroyStopsReanchoring() async throws {
+        let (controller, coordinator) = try await makeAnnotatedEditor(
+            text: "let a = 1\nlet b = 2\nlet c = 3\n",
+            diagnostic: LSPRange(
+                start: Position(line: 1, character: 4),
+                end: Position(line: 1, character: 5)
+            )
+        )
+
+        let overlay = try #require(
+            controller.textView.subviews.compactMap { $0 as? DiagnosticOverlayView }.first
+        )
+        coordinator.destroy()
+        controller.textView.replaceCharacters(in: NSRange(location: 0, length: 0), with: "// header\n")
+
+        // The overlay is off the view by now; what matters is that the edit
+        // did not reach a torn-down coordinator at all, which it would have
+        // done through an observer left registered on a still-live storage.
+        #expect(overlay.marks.first?.range == NSRange(location: 14, length: 1))
+        #expect(overlay.superview == nil)
+    }
 }

@@ -133,6 +133,22 @@ final class FileEditorState: ObservableObject {
     /// file can't land on top of a newer one.
     private var loadTask: Task<Void, Never>?
 
+    /// The un-awaited flush-and-close work this pane has started for a URI,
+    /// newest last in a per-URI chain.
+    ///
+    /// Eviction and `unload` both have to write a document's pending save
+    /// without blocking the caller, so both start a `Task` — and both used to
+    /// discard its handle. Nothing then serialised that flush against a
+    /// *reopen* of the same URI, which reads the file from disk: the read
+    /// could land before the flush wrote, building a fresh `TextDocument` from
+    /// pre-edit bytes and losing the edit the flush was still carrying. The
+    /// handle is kept so `load(from:)` can await it before reading, and so
+    /// `deinit` can await it before this pane's own final flush.
+    ///
+    /// Keyed by URI and chained rather than replaced: a second flush for the
+    /// same URI queues behind the first instead of racing it.
+    private var backgroundWork: [DocumentUri: (id: UUID, task: Task<Void, Never>)] = [:]
+
     /// One per open document, resolving that document's trigger characters.
     /// Kept so eviction can cancel a resolution for a slot that no longer
     /// exists, and so tests have something to await.
@@ -234,7 +250,13 @@ final class FileEditorState: ObservableObject {
         let scheduler = saveScheduler
         let store = documentStore
         let uris = openOrder
+        // Awaited first, so a flush-and-close this pane started for an evicted
+        // document cannot outlive the process behind an un-awaited handle.
+        let outstanding = backgroundWork.values.map(\.task)
         Task { @MainActor in
+            for work in outstanding {
+                await work.value
+            }
             for uri in uris {
                 await scheduler.flushPendingSave(uri: uri)
                 store.close(uri: uri)
@@ -350,13 +372,24 @@ final class FileEditorState: ObservableObject {
     /// requirements depend on that document never being touched again after
     /// its first open.
     func load(from url: URL) {
-        loadTask?.cancel()
+        // The cancel is *below* the guard, and the order is the whole point.
+        // `FileEditorView` calls `showSelection()` from both `.onAppear` and
+        // `.onChange(of: selectedNode)`, so a tab switch, a window relayout or
+        // a SwiftUI remount re-enters this with the URL already showing while
+        // the first read is still in flight. Cancelling first killed that read
+        // and then returned without starting a replacement — the cancelled
+        // task bailing out of its own `!Task.isCancelled` guard without
+        // clearing state — and the pane sat on `.loading` forever, with no
+        // error and no retry. A same-URL re-entry has to be a genuine no-op.
         guard url != currentURL else { return }
+        loadTask?.cancel()
         let outgoing = currentURL?.documentUri
         currentURL = url
 
         let uri = url.documentUri
         if slotsByURI[uri] != nil {
+            // A live slot means this URI was never evicted, so no release is
+            // in flight for it and there is nothing to order against.
             touch(uri)
             display = .text(uri: uri)
             // Nothing is opened on this path, so there is no open to order
@@ -371,6 +404,12 @@ final class FileEditorState: ObservableObject {
 
         let scheduler = saveScheduler
         loadTask = Task { [weak self] in
+            // This URI may have been evicted moments ago and still be flushing
+            // its last edit. Reading the file before that write lands returns
+            // pre-edit bytes, and the fresh document opened over them loses the
+            // edit — so the eviction's own flush is awaited before the read.
+            await self?.awaitBackgroundWork(for: uri)
+
             // Awaited, not fire-and-forget: the outgoing file's pending save
             // is on disk *before* the incoming document is opened. Doing this
             // as a detached `Task` and then loading synchronously — which is
@@ -529,19 +568,64 @@ final class FileEditorState: ObservableObject {
     private func release(uri: DocumentUri) {
         let scheduler = saveScheduler
         let store = documentStore
-        Task { @MainActor in
+        enqueueBackgroundWork(for: uri) {
             await scheduler.flushPendingSave(uri: uri)
             store.close(uri: uri)
         }
     }
 
-    /// Writes out `uri`'s pending save without blocking the caller. Used only
-    /// where nothing is being opened, so there is no ordering to preserve.
+    /// Writes out `uri`'s pending save without blocking the caller.
+    ///
+    /// Tracked on the same per-URI chain as `release`: this is fire-and-forget
+    /// from the caller's point of view, not from the pane's — a reopen of the
+    /// same URI still has to wait for it, and so does teardown.
     private func flushInBackground(_ uri: DocumentUri?) {
         guard let uri else { return }
         let scheduler = saveScheduler
-        Task { @MainActor in
+        enqueueBackgroundWork(for: uri) {
             await scheduler.flushPendingSave(uri: uri)
+        }
+    }
+
+    /// Queues `work` behind whatever background work is already outstanding
+    /// for `uri`, and keeps the handle so it can be awaited.
+    ///
+    /// Chained rather than replaced so two flushes of one URI cannot interleave
+    /// with each other or with the `store.close` that follows one of them.
+    private func enqueueBackgroundWork(
+        for uri: DocumentUri,
+        _ work: @escaping @MainActor () async -> Void
+    ) {
+        let previous = backgroundWork[uri]?.task
+        let id = UUID()
+        backgroundWork[uri] = (id, Task { @MainActor [weak self] in
+            await previous?.value
+            await work()
+            // Only this entry retires itself. A newer chain link registered
+            // while the work above was suspended owns the slot now.
+            if self?.backgroundWork[uri]?.id == id {
+                self?.backgroundWork[uri] = nil
+            }
+        })
+    }
+
+    /// Awaits any outstanding flush-and-close for `uri`.
+    private func awaitBackgroundWork(for uri: DocumentUri) async {
+        while let entry = backgroundWork[uri] {
+            await entry.task.value
+            // A finished link retires its own slot, so anything still parked
+            // here is a *newer* link that has to be awaited too. Seeing the
+            // same id back is impossible by that rule; break on it anyway
+            // rather than spin if it ever becomes possible.
+            if backgroundWork[uri]?.id == entry.id { break }
+        }
+    }
+
+    /// Test seam: awaits every outstanding flush-and-close this pane started,
+    /// so a test can assert against the disk rather than poll for it.
+    func awaitPendingBackgroundWork() async {
+        for uri in Array(backgroundWork.keys) {
+            await awaitBackgroundWork(for: uri)
         }
     }
 

@@ -31,6 +31,24 @@ public final class TextDocument {
     /// string on every call.
     private var lineStarts: [Int]
 
+    /// UTF-16 offset one past the last *content* code unit of every line —
+    /// the line's extent with its terminator excluded, `lineStarts.count`
+    /// entries, index-for-index with `lineStarts`. The final line, which has
+    /// no terminator, ends at `utf16Length`.
+    ///
+    /// Computed in the same single scan as `lineStarts`, which is the one
+    /// place a line's extent is known, so every conversion site inherits the
+    /// exclusion instead of each subtracting a terminator width it would have
+    /// to re-measure (`\n` is one unit, `\r\n` is two).
+    ///
+    /// LSP requires it: "If the character value is greater than the line
+    /// length it defaults back to the line length." Clamping to the line's
+    /// *extent* instead resolved a whole-line range such as (0,0)-(0,999) —
+    /// the standard shape for a format or quick-fix edit — to an offset past
+    /// the newline, so replacing that range deleted the terminator and joined
+    /// two lines together.
+    private var lineContentEnds: [Int]
+
     /// The UTF-16 length of `text`, cached alongside `lineStarts` from the
     /// same scan so offset/position lookups never call the (not guaranteed
     /// O(1)) `text.utf16.count` themselves.
@@ -65,6 +83,7 @@ public final class TextDocument {
         self.isDirty = false
         let index = TextDocument.computeLineIndex(text)
         self.lineStarts = index.starts
+        self.lineContentEnds = index.contentEnds
         self.utf16Length = index.length
     }
 
@@ -93,8 +112,10 @@ public final class TextDocument {
     }
 
     /// A `Position` past the end of the text (either an out-of-range line or
-    /// an out-of-range character within a valid line) clamps to the text's
-    /// length rather than trapping.
+    /// an out-of-range character within a valid line) clamps rather than
+    /// trapping: an out-of-range line clamps to the last line, and an
+    /// out-of-range character to the end of that line's *content* — before
+    /// its terminator, as LSP specifies.
     ///
     /// The resulting offset is rounded down to the nearest valid boundary
     /// before it is returned — see `roundedDownToValidBoundary(_:)`.
@@ -102,8 +123,11 @@ public final class TextDocument {
         let lastLine = lineStarts.count - 1
         let line = max(0, min(position.line, lastLine))
         let lineStart = lineStarts[line]
-        let lineEnd = line < lastLine ? lineStarts[line + 1] : utf16Length
-        let character = max(0, min(position.character, lineEnd - lineStart))
+        // The line's *content* end, not its extent: a `character` past the
+        // end of a line resolves to the end of that line's text, never past
+        // its terminator. See `lineContentEnds`.
+        let lineEnd = lineContentEnds[line]
+        let character = max(0, min(position.character, max(0, lineEnd - lineStart)))
         return roundedDownToValidBoundary(lineStart + character)
     }
 
@@ -133,26 +157,61 @@ public final class TextDocument {
         guard !edits.isEmpty else { return [] }
 
         let originalLength = utf16Length
-        let resolved: [(edit: TextEdit, start: Int, end: Int)] = edits.map { edit in
-            let start = min(utf16Offset(for: edit.range.start), originalLength)
-            let end = min(utf16Offset(for: edit.range.end), originalLength)
-            return (edit, min(start, end), max(start, end))
+        let resolved: [(edit: TextEdit, start: Int, end: Int, order: Int)] =
+            edits.enumerated().map { order, edit in
+                let start = min(utf16Offset(for: edit.range.start), originalLength)
+                let end = min(utf16Offset(for: edit.range.end), originalLength)
+                return (edit, min(start, end), max(start, end), order)
+            }
+
+        // **One order, used twice.** Descending start offset so an earlier
+        // edit's offset stays valid while a later one is spliced in, with the
+        // caller's own index as a tiebreak so the comparator is *total*:
+        // `sorted(by:)` gives no stability guarantee and introsort actively
+        // reorders equal elements once the array is large enough, so two
+        // edits sharing a start offset — an opening "(" and its argument
+        // text, which servers routinely emit as separate `TextEdit`s —
+        // otherwise landed in either order depending on element count and
+        // memory layout.
+        //
+        // The tiebreak is *descending* index, which is the direction that
+        // preserves the caller's declared order **in the resulting text**.
+        // Every splice happens at the same absolute offset, so each one lands
+        // in front of the one before it: running `["(", "foo"]` index-ascending
+        // produces "foo(", the exact inversion of what the caller asked for,
+        // while index-descending produces "(foo". For a co-located insert and
+        // replacement the difference is not cosmetic — index-ascending splices
+        // the insert first and the replacement then eats it.
+        let ordered = resolved.sorted { lhs, rhs in
+            lhs.start == rhs.start ? lhs.order > rhs.order : lhs.start > rhs.start
         }
 
-        for entry in resolved.sorted(by: { $0.start > $1.start }) {
-            replaceUTF16Range(start: entry.start, end: entry.end, with: entry.edit.newText)
-        }
-
-        // Built from the clamped offsets that were actually mutated, using
-        // `range(for:)` against the still-stale `lineStarts`/`utf16Length`
-        // (this batch's line index isn't rebuilt until just below) — the
-        // same pre-edit document those offsets were resolved against. This
-        // must happen before that rebuild: the caller's original
-        // `entry.edit.range` may not equal what was actually mutated once
+        // Built *before* the mutation loop and from `ordered`, not from the
+        // caller's original array.
+        //
+        // From `ordered`, because LSP requires each change to be applied to
+        // the document produced by the change before it: emitting the
+        // caller's order while mutating in descending order left a server
+        // applying a low-offset insert first, shifting every later offset,
+        // and replacing the wrong range from then on — client and server
+        // silently disagreeing about the text under every subsequent
+        // diagnostic, hover and completion. Descending order is what makes
+        // the sequence self-consistent: a change at a higher offset cannot
+        // move a lower one, so each event's range stays valid as the previous
+        // one is applied.
+        //
+        // Before the loop, because these ranges describe the pre-edit
+        // document — the same document the offsets were resolved against —
+        // and `range(for:)` reads `text` as well as the line index. Computing
+        // them afterwards read a `text` that the loop had already mutated
+        // while `lineStarts`/`utf16Length` still described the old one.
+        //
+        // The clamped offsets rather than `entry.edit.range`: what was
+        // actually mutated may differ from what the caller asked for once
         // offsets were clamped to the document's bounds, and reporting the
-        // wrong range desynchronizes a language server's mirror of the
-        // document.
-        let events = resolved.map { entry in
+        // range that was asked for rather than the one that was mutated
+        // desynchronizes the server's mirror just as surely.
+        let events = ordered.map { entry in
             TextDocumentContentChangeEvent(
                 range: range(for: NSRange(location: entry.start, length: entry.end - entry.start)),
                 rangeLength: entry.end - entry.start,
@@ -160,9 +219,14 @@ public final class TextDocument {
             )
         }
 
+        for entry in ordered {
+            replaceUTF16Range(start: entry.start, end: entry.end, with: entry.edit.newText)
+        }
+
         version += 1
         let index = TextDocument.computeLineIndex(text)
         lineStarts = index.starts
+        lineContentEnds = index.contentEnds
         utf16Length = index.length
 
         setDirty(true)
@@ -183,6 +247,7 @@ public final class TextDocument {
         version += 1
         let index = TextDocument.computeLineIndex(newText)
         lineStarts = index.starts
+        lineContentEnds = index.contentEnds
         utf16Length = index.length
         setDirty(false)
         notifyChangeHandlers(
@@ -309,16 +374,23 @@ public final class TextDocument {
     }
 
     /// Scans `text` once, in UTF-16 code units, recording the offset of the
-    /// first unit of every line and returning the total UTF-16 length as a
-    /// side effect of the same pass.
-    private static func computeLineIndex(_ text: String) -> (starts: [Int], length: Int) {
+    /// first unit of every line, the offset one past each line's last
+    /// *content* unit (its terminator excluded), and the total UTF-16 length —
+    /// all three as a side effect of the same pass.
+    ///
+    /// `starts` and `contentEnds` always have the same count: the terminator
+    /// that closes a line is what appends the next start, and the final line
+    /// (which has none) closes at the end of the text.
+    private static func computeLineIndex(_ text: String) -> (starts: [Int], contentEnds: [Int], length: Int) {
         var starts: [Int] = [0]
+        var contentEnds: [Int] = []
         let units = text.utf16
         var index = units.startIndex
         var offset = 0
         while index < units.endIndex {
             let unit = units[index]
             if unit == 0x0D { // \r — a following \n makes it one terminator
+                contentEnds.append(offset)
                 offset += 1
                 let next = units.index(after: index)
                 if next < units.endIndex, units[next] == 0x0A {
@@ -329,6 +401,7 @@ public final class TextDocument {
                 }
                 starts.append(offset)
             } else if unit == 0x0A { // \n
+                contentEnds.append(offset)
                 offset += 1
                 index = units.index(after: index)
                 starts.append(offset)
@@ -337,7 +410,8 @@ public final class TextDocument {
                 index = units.index(after: index)
             }
         }
-        return (starts, offset)
+        contentEnds.append(offset)
+        return (starts, contentEnds, offset)
     }
 }
 

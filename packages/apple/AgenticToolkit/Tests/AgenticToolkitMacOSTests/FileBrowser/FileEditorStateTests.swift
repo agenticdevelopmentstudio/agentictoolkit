@@ -346,6 +346,145 @@ struct FileEditorStateTests {
         #expect(store.document(for: uri) != nil)
         #expect(paneTwo.document(for: uri) != nil)
     }
+
+    // MARK: - An eviction's write must land before the same file is reopened
+
+    /// Writes the document to the file its URI names, after a delay long
+    /// enough that the write is genuinely still in flight when the next thing
+    /// happens.
+    ///
+    /// The other writers in this suite only record; this one has to touch the
+    /// disk, because the loss being tested for is a *reopen reading pre-edit
+    /// bytes* — which no amount of call recording can show.
+    @MainActor
+    private final class DelayedDiskWriter {
+        private(set) var writes: [DocumentUri] = []
+        let delay: Duration
+
+        init(delay: Duration = .milliseconds(300)) {
+            self.delay = delay
+        }
+
+        func write(_ document: TextDocument) async throws {
+            let uri = document.uri
+            let text = document.text
+            try? await Task.sleep(for: delay)
+            guard let url = URL(string: uri) else { throw CocoaError(.fileNoSuchFile) }
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            writes.append(uri)
+        }
+    }
+
+    /// What it catches: a reopen that reads the file while the eviction's own
+    /// save is still on its way to the disk. The fresh document is then built
+    /// over pre-edit bytes and the user's edit is gone — silently, with the
+    /// editor showing the stale text as though it were the truth.
+    @Test("an edit survives the file being evicted and immediately reopened")
+    func evictedDocumentIsReopenedWithItsEdit() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let writer = DelayedDiskWriter()
+        let store = TextDocumentStore()
+        let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
+
+        let firstURL = try makeFile(in: directory, named: "Edited.swift")
+        let firstURI = firstURL.documentUri
+        state.load(from: firstURL)
+        await state.awaitPendingLoad()
+        typeText("EDIT\n", into: try #require(state.storage(for: firstURI)))
+        #expect(scheduler.pendingURIs == [firstURI])
+
+        // Push it out of the cache. The last of these is what starts the
+        // eviction's flush, which is still suspended in `DelayedDiskWriter`
+        // when the reopen below begins.
+        for index in 0...FileEditorState.maximumCachedDocuments {
+            let url = try makeFile(in: directory, named: "Filler\(index).swift")
+            state.load(from: url)
+            await state.awaitPendingLoad()
+        }
+        #expect(state.openOrder.contains(firstURI) == false)
+
+        state.load(from: firstURL)
+        await state.awaitPendingLoad()
+
+        let reopened = try #require(state.document(for: firstURI))
+        #expect(reopened.text.hasPrefix("EDIT\n"), "the reopened document must carry the edit")
+        let onDisk = try String(contentsOf: firstURL, encoding: .utf8)
+        #expect(onDisk.hasPrefix("EDIT\n"))
+        #expect(writer.writes.contains(firstURI))
+        await state.awaitPendingBackgroundWork()
+    }
+
+    // MARK: - Re-entering `load` with the URL already showing
+
+    /// What it catches: `loadTask?.cancel()` above the same-URL guard.
+    /// `FileEditorView` calls `showSelection()` from both `.onAppear` and
+    /// `.onChange(of:)`, so a tab switch or a SwiftUI remount re-enters `load`
+    /// with the URL already selected while the first read is still in flight.
+    /// Cancelling first and then returning killed the only read there was, and
+    /// the pane sat on `.loading` forever with no error and no retry.
+    @Test("re-selecting the file mid-load is a no-op, not a permanent spinner")
+    func sameURLReentryDuringLoadIsANoOp() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = try makeFile(in: directory, named: "Remounted.swift")
+
+        let writer = RecordingWriter()
+        let store = TextDocumentStore()
+        let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
+
+        // No await between the two: the second call lands while the first
+        // read is still in flight, which is the whole scenario.
+        state.load(from: fileURL)
+        state.load(from: fileURL)
+        await state.awaitPendingLoad()
+
+        #expect(state.display == .text(uri: fileURL.documentUri))
+        #expect(state.document(for: fileURL.documentUri) != nil)
+    }
+
+    /// The same re-entry once the file is already showing: it must not reopen
+    /// the document, and must not rebuild the slot the undo stack lives in.
+    @Test("re-selecting the file after it has loaded keeps the same slot")
+    func sameURLReentryAfterLoadKeepsTheSlot() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = try makeFile(in: directory, named: "Stable.swift")
+
+        let writer = RecordingWriter()
+        let store = TextDocumentStore()
+        let scheduler = TextDocumentSaveScheduler(debounce: .seconds(60), write: writer.write)
+        let state = FileEditorState(
+            documentStore: store,
+            saveScheduler: scheduler,
+            languageServices: nil,
+            openFile: nil
+        )
+
+        state.load(from: fileURL)
+        await state.awaitPendingLoad()
+        let storage = try #require(state.storage(for: fileURL.documentUri))
+
+        state.load(from: fileURL)
+        await state.awaitPendingLoad()
+
+        #expect(state.display == .text(uri: fileURL.documentUri))
+        #expect(state.storage(for: fileURL.documentUri) === storage)
+        #expect(state.openOrder == [fileURL.documentUri])
+    }
 }
 
 /// The AppKit container that mounts one editor per cached document. What is
@@ -496,4 +635,5 @@ struct CachedEditorStackViewTests {
         #expect(hostA.superview == nil)
         #expect(stack.subviews.count == 1)
     }
+
 }

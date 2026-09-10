@@ -46,6 +46,25 @@ final class LSPEditorAnnotationCoordinator: TextViewCoordinator {
     private var overlay: DiagnosticOverlayView?
     private var subscription: AnyCancellable?
 
+    /// The marks currently on screen, in text-storage coordinates.
+    ///
+    /// Held here as well as pushed to the overlay and the hover card because
+    /// they have to be *re-anchored* between diagnostic publications: this is
+    /// the copy the shift is applied to, and the two views are refreshed from
+    /// it. Before, the two views were the only holders and nothing shifted
+    /// them at all.
+    private var marks: [DiagnosticMark] = []
+
+    /// The text storage this coordinator is watching for edits, and the
+    /// observer token that watches it.
+    ///
+    /// The storage is held here rather than read out of the notification so
+    /// nothing non-`Sendable` has to cross out of the observer closure — the
+    /// observer is registered with `object:`, so it only ever fires for this
+    /// one storage anyway.
+    private weak var observedStorage: NSTextStorage?
+    private var editObserver: (any NSObjectProtocol)?
+
     init(
         document: TextDocument,
         registry: LanguageServerRegistry,
@@ -67,10 +86,15 @@ final class LSPEditorAnnotationCoordinator: TextViewCoordinator {
 
     nonisolated func textViewDidChangeText(controller: TextViewController) {
         MainActor.assumeIsolated {
-            // Every stored range now describes text that has moved, so the
-            // squiggles are redrawn from the layout manager's new rects and the
-            // card — which was explaining a token that may no longer be there —
-            // goes away until the pointer asks again.
+            // Redraw only. The *re-anchoring* cannot happen here: this
+            // requirement is handed no range and no delta, and the marks need
+            // both. It is done from the storage's own edit notification (see
+            // `install(in:)`), which fires first — synchronously, from inside
+            // `processEditing()` — so by the time this runs the marks already
+            // describe the new text and the squiggles are redrawn from the
+            // layout manager's new rects. The card, which was explaining a
+            // token that may no longer be there, goes away until the pointer
+            // asks again.
             overlay?.textChanged()
             hover.invalidate()
         }
@@ -97,6 +121,12 @@ final class LSPEditorAnnotationCoordinator: TextViewCoordinator {
             overlay?.removeFromSuperview()
             overlay = nil
             subscription = nil
+            if let editObserver {
+                NotificationCenter.default.removeObserver(editObserver)
+            }
+            editObserver = nil
+            observedStorage = nil
+            marks = []
             controller = nil
         }
     }
@@ -128,6 +158,43 @@ final class LSPEditorAnnotationCoordinator: TextViewCoordinator {
 
         hover.textView = textView
 
+        // **Marks are re-anchored from the storage's own edit notification.**
+        // A squiggle on line 40 has to still be on line 40's text after three
+        // lines are inserted above it; the marks hold already-converted
+        // `NSRange`s, and nothing shifted them, so they drifted onto whatever
+        // text had moved under them and only corrected themselves when the
+        // debounced `publishDiagnostics` round-trip came back. A deletion big
+        // enough to shrink the buffer past a mark left the overlay drawing
+        // against offsets that addressed nothing.
+        //
+        // This notification, rather than `textViewDidChangeText(controller:)`,
+        // because it is the only edit signal that carries the range and the
+        // delta — `NSTextStorage` posts it from `processEditing()` with
+        // `editedRange` describing the *new* text and `changeInLength` the
+        // difference, which is exactly what a shift needs. Scoped to this
+        // editor's own storage by `object:`.
+        //
+        // `queue: nil`, so the block runs synchronously on the posting thread
+        // rather than being enqueued onto the main `OperationQueue`. Two
+        // reasons, and both are correctness rather than speed: the marks have
+        // to describe the new text before `textViewDidChangeText(controller:)`
+        // redraws the squiggles from them, and `editedRange`/`changeInLength`
+        // are properties of the storage that the *next* edit overwrites — read
+        // them a runloop turn late and a fast typist's second keystroke has
+        // already replaced the delta belonging to the first. Text storage is
+        // edited on the main thread by AppKit's own contract, which is the
+        // same assumption `TextDocumentStorage.replaceCharacters` makes.
+        if let storage = textView.textStorage {
+            observedStorage = storage
+            editObserver = NotificationCenter.default.addObserver(
+                forName: NSTextStorage.didProcessEditingNotification,
+                object: storage,
+                queue: nil
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.storageDidEdit() }
+            }
+        }
+
         // `publisher(for:)` emits once immediately, so a document opened after
         // its diagnostics arrived — which is every reopened file — is marked up
         // without waiting for the server to say anything again.
@@ -140,15 +207,13 @@ final class LSPEditorAnnotationCoordinator: TextViewCoordinator {
     }
 
     private func apply(_ diagnostics: [Diagnostic]) {
-        let marks = diagnostics.map { diagnostic in
+        publish(diagnostics.map { diagnostic in
             DiagnosticMark(
                 range: document.nsRange(for: diagnostic.range),
                 severity: diagnostic.severity,
                 message: diagnostic.message
             )
-        }
-        overlay?.marks = marks
-        hover.marks = marks
+        })
 
         // A card explaining a diagnostic that has just been replaced is
         // explaining something the server no longer says. A card showing the
@@ -157,5 +222,58 @@ final class LSPEditorAnnotationCoordinator: TextViewCoordinator {
         if hover.presented?.origin == .diagnostic {
             hover.invalidate()
         }
+    }
+
+    private func publish(_ newMarks: [DiagnosticMark]) {
+        marks = newMarks
+        overlay?.marks = newMarks
+        hover.marks = newMarks
+    }
+
+    /// Shifts every mark by one character edit, so a squiggle keeps sitting on
+    /// the text it was published against.
+    ///
+    /// Only character edits: the same notification fires for the attribute
+    /// runs the highlighter writes on every repaint, and those move nothing.
+    private func storageDidEdit() {
+        guard let storage = observedStorage else { return }
+        guard storage.editedMask.contains(.editedCharacters) else { return }
+        guard !marks.isEmpty else { return }
+
+        // `editedRange` describes the text as it is *now*; the range that was
+        // replaced was `changeInLength` shorter (or longer, for a deletion).
+        let delta = storage.changeInLength
+        let newRange = storage.editedRange
+        let replacedLength = max(0, newRange.length - delta)
+        reanchor(replacedStart: newRange.location, replacedLength: replacedLength, delta: delta)
+    }
+
+    /// Applies one edit's delta to the stored marks.
+    ///
+    /// Three cases, checked in this order because the first two overlap for a
+    /// zero-width insertion: a mark starting at or after the end of what was
+    /// replaced moves by the delta (an insertion at a mark's own start pushes
+    /// the mark right, which is what the user sees); a mark ending at or
+    /// before the start of what was replaced does not move; and a mark the
+    /// edit lands *inside* is dropped, because the text it was describing is
+    /// no longer the text it covers and drawing a squiggle over the
+    /// replacement would be a lie until the server answers again.
+    private func reanchor(replacedStart: Int, replacedLength: Int, delta: Int) {
+        let replacedEnd = replacedStart + replacedLength
+        let shifted: [DiagnosticMark] = marks.compactMap { mark in
+            if mark.range.location >= replacedEnd {
+                return DiagnosticMark(
+                    range: NSRange(location: max(0, mark.range.location + delta), length: mark.range.length),
+                    severity: mark.severity,
+                    message: mark.message
+                )
+            }
+            if mark.range.location + mark.range.length <= replacedStart {
+                return mark
+            }
+            return nil
+        }
+        guard shifted != marks else { return }
+        publish(shifted)
     }
 }

@@ -194,13 +194,32 @@ public final class TextDocumentStorage: NSTextStorage {
 
         backingStore.replaceCharacters(in: range, with: str)
         let changeInLength = (str as NSString).length - range.length
-        edited([.editedCharacters, .editedAttributes], range: range, changeInLength: changeInLength)
 
-        MainActor.assumeIsolated { guardState.isApplyingLocalEdit = true }
-        defer { MainActor.assumeIsolated { guardState.isApplyingLocalEdit = false } }
-        _ = MainActor.assumeIsolated {
-            currentDocument.apply([TextEdit(range: editedRange, newText: str)])
+        // **`document` is updated before `edited(...)`, not after.**
+        // `edited(_:range:changeInLength:)` runs `processEditing()`
+        // synchronously, which notifies layout managers and text-storage
+        // delegates — and those observers re-enter: the annotation
+        // coordinator, the hover controller and the highlight provider all
+        // convert an `NSRange` through `document.nsRange(for:)` from inside
+        // that notification. With the apply afterwards, `document.text` was
+        // still the pre-edit string while `backingStore` already held the
+        // post-edit one, so every such conversion was one edit behind — and
+        // near the end of the buffer clamped against the shorter old length.
+        // Applying first makes the two consistent before anything can look.
+        //
+        // The re-entrancy guard still brackets exactly the notification it
+        // exists to suppress: `apply` synchronously calls this storage's own
+        // change handler, and `applyExternalChanges` must ignore an edit this
+        // storage just made. It is deliberately *not* held across
+        // `edited(...)` — an observer running there is not applying a local
+        // edit, and suppressing it was never this flag's job.
+        MainActor.assumeIsolated {
+            guardState.isApplyingLocalEdit = true
+            defer { guardState.isApplyingLocalEdit = false }
+            _ = currentDocument.apply([TextEdit(range: editedRange, newText: str)])
         }
+
+        edited([.editedCharacters, .editedAttributes], range: range, changeInLength: changeInLength)
     }
 
     override public func setAttributes(_ attrs: [NSAttributedString.Key: Any]?, range: NSRange) {

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 import LanguageServerProtocol
@@ -116,5 +117,71 @@ struct TextDocumentStorageTests {
         #expect(storage.string == "hello there, friend")
         #expect(storage.length == (storage.string as NSString).length)
         #expect(storage.string.utf16.count == storage.length)
+    }
+
+    // MARK: - The document is current before anyone is notified
+
+    /// Captures what `document` looked like from inside the storage's own
+    /// edit notification.
+    ///
+    /// A class rather than captured `var`s because the notification block is
+    /// `@Sendable`; this is `@MainActor`, so it is implicitly `Sendable` and
+    /// its fields can be written from inside `MainActor.assumeIsolated`.
+    @MainActor
+    private final class EditObserver {
+        private(set) var text: String?
+        private(set) var wholeLine: NSRange?
+
+        func record(_ document: TextDocument) {
+            text = document.text
+            wholeLine = document.nsRange(for: LSPRange(
+                start: Position(line: 0, character: 0),
+                end: Position(line: 0, character: 9_999)
+            ))
+        }
+    }
+
+    /// What it catches: an `apply` that happens *after* `edited(...)`.
+    /// `edited(_:range:changeInLength:)` runs `processEditing()` synchronously
+    /// and notifies every layout manager and text-storage observer, and those
+    /// observers — the annotation coordinator, the hover controller, the
+    /// highlight provider — convert ranges through `document`. With the apply
+    /// afterwards they each saw the pre-edit text while the backing store
+    /// already held the post-edit one, so every conversion was one edit behind
+    /// and clamped against the shorter old length near the end of the buffer.
+    @Test("an observer notified during the edit sees the document already updated")
+    func observerDuringEditSeesTheUpdatedDocument() {
+        let (storage, document) = makeStorage(text: "hello world")
+        let observer = EditObserver()
+        let token = NotificationCenter.default.addObserver(
+            forName: NSTextStorage.didProcessEditingNotification,
+            object: storage,
+            queue: nil
+        ) { _ in
+            MainActor.assumeIsolated { observer.record(document) }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        storage.replaceCharacters(in: NSRange(location: 5, length: 0), with: ", dear")
+
+        #expect(observer.text == "hello, dear world")
+        #expect(
+            observer.wholeLine == NSRange(location: 0, length: 17),
+            "a conversion made during the notification must use the post-edit length"
+        )
+        #expect(storage.string == "hello, dear world")
+    }
+
+    /// The narrowed guard must still do its one job: `apply` fires the
+    /// document's change handler synchronously, and Direction 2 must not
+    /// rewrite the buffer the user is typing into.
+    @Test("typing still does not re-enter the external-change path")
+    func typingDoesNotReenterTheExternalPath() {
+        let (storage, _) = makeStorage(text: "hello world")
+        let before = storage.externalChangeApplicationCount
+
+        storage.replaceCharacters(in: NSRange(location: 5, length: 0), with: ", dear")
+
+        #expect(storage.externalChangeApplicationCount == before)
     }
 }
