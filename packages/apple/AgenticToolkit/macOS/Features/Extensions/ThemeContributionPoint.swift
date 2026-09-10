@@ -20,17 +20,10 @@ import AgenticToolkitCore
 @MainActor
 public final class ThemeContributionPoint: ContributionPoint {
 
-    /// One theme file that could not be imported, named so the settings panel
-    /// can show the author the path they have to fix.
-    ///
-    /// `path` is the string the manifest declared, not the resolved URL: the
-    /// declared spelling is what the author edits.
-    public typealias ImportFailure = (extensionIdentifier: String, path: String, message: String)
-
     private let themeStore: ThemeStore
 
     /// Themes that would not parse, across every extension applied so far.
-    public private(set) var importFailures: [ImportFailure] = []
+    public private(set) var importFailures: [ThemeImportFailure] = []
 
     public init(themeStore: ThemeStore) {
         self.themeStore = themeStore
@@ -72,24 +65,47 @@ public final class ThemeContributionPoint: ContributionPoint {
         let base = URL(fileURLWithPath: directory.path, isDirectory: true)
 
         var imported = 0
+        var written: Set<String> = []
         for theme in contributions.themes {
             // `relativeTo:` rather than stripping a "./" prefix and appending:
             // most manifests write "./themes/x.json" but not all do, and a
             // strip that assumes the prefix mangles the ones that do not.
             let url = URL(fileURLWithPath: theme.path, relativeTo: base)
+
+            // Two themes under one label share an id, so the second would
+            // quietly replace the first and both would count as imported —
+            // one file in the folder with nothing to show for it and no
+            // failure recorded. Keep the first and name the collision.
+            guard !written.contains(Self.themeID(extensionIdentifier: identifier, label: theme.label))
+            else {
+                importFailures.append(
+                    ThemeImportFailure(
+                        extensionIdentifier: identifier,
+                        path: theme.path,
+                        message: "another theme in this extension already uses the label "
+                            + "“\(theme.label)”."
+                    )
+                )
+                continue
+            }
+
             do {
                 let parsed = try VSCodeThemeImporter.parse(
                     contentsOf: url,
                     label: theme.label,
                     uiTheme: theme.uiTheme
                 )
-                store(parsed, label: theme.label, extensionIdentifier: identifier)
+                written.insert(store(parsed, label: theme.label, extensionIdentifier: identifier))
                 imported += 1
             } catch {
                 // One bad file must not cost the extension its other four
                 // themes; the panel reports this one and the rest install.
                 importFailures.append(
-                    (extensionIdentifier: identifier, path: theme.path, message: error.localizedDescription)
+                    ThemeImportFailure(
+                        extensionIdentifier: identifier,
+                        path: theme.path,
+                        message: error.localizedDescription
+                    )
                 )
             }
         }
@@ -97,8 +113,28 @@ public final class ThemeContributionPoint: ContributionPoint {
         // Nothing imported at all is a contribution with nothing to show for
         // it, so the registry's `contributionPointFailed` entry is the honest
         // report. A partial import is not.
+        //
+        // Throwing here also skips the reconciliation below, deliberately: a
+        // wholly failed import is evidence about nothing, so the themes the
+        // previous launch installed stay where they are rather than being taken
+        // away as a side effect of one broken file (Ruling GO). The user's
+        // recourse would be to reinstall the extension — the thing that just
+        // failed.
         if imported == 0 {
             throw ThemeContributionError.everyThemeFailed(count: contributions.themes.count)
+        }
+
+        // Reconcile this extension's whole set, not just the ids it declares
+        // now: an update that renames "Night" to "Midnight" writes the new id
+        // and leaves the old one looking exactly like a theme the extension
+        // still provides. `pruneOrphans` cannot see it — the extension is
+        // installed — so a successful apply is the only place it can go.
+        // Scoped to this extension's attribution: another extension's themes,
+        // and the user's own, are never this call's to delete.
+        let attribution = Self.attribution(for: identifier)
+        for theme in themeStore.customThemes
+        where theme.attribution == attribution && !written.contains(theme.id) {
+            themeStore.delete(id: theme.id)
         }
     }
 
@@ -132,15 +168,44 @@ public final class ThemeContributionPoint: ContributionPoint {
     }
 
     /// Writes one parsed theme under its deterministic id, replacing any copy
-    /// left by a previous launch. `delete` is a no-op when absent, so this is
-    /// idempotent — which is also what makes enable → disable → enable safe.
-    private func store(_ parsed: ColorTheme, label: String, extensionIdentifier: String) {
+    /// left by a previous launch, and returns that id.
+    ///
+    /// `update` rather than `delete`-then-`add`: `ThemeStore.delete` also
+    /// clears `activeThemeID`, so deleting the row a relaunch is about to put
+    /// back under the same id would silently deselect a theme the user chose.
+    /// Replacing in place keeps both the selection and the list order.
+    @discardableResult
+    private func store(_ parsed: ColorTheme, label: String, extensionIdentifier: String) -> String {
         var theme = parsed
         theme.id = Self.themeID(extensionIdentifier: extensionIdentifier, label: label)
         theme.isImported = true
         theme.attribution = Self.attribution(for: extensionIdentifier)
-        themeStore.delete(id: theme.id)
-        themeStore.add(theme)
+        if themeStore.customThemes.contains(where: { $0.id == theme.id }) {
+            themeStore.update(theme)
+        } else {
+            themeStore.add(theme)
+        }
+        return theme.id
+    }
+}
+
+/// One theme file that could not be imported, named so the settings panel can
+/// show the author the path they have to fix.
+///
+/// A struct rather than the labelled tuple this started as: the four sibling
+/// points all publish structs, and only a struct can conform, gain a field
+/// without breaking every destructuring site, or carry these doc comments.
+public struct ThemeImportFailure: Sendable, Equatable {
+    public let extensionIdentifier: String
+    /// The path exactly as the manifest declared it, not the resolved URL: the
+    /// declared spelling is what the author edits.
+    public let path: String
+    public let message: String
+
+    public init(extensionIdentifier: String, path: String, message: String) {
+        self.extensionIdentifier = extensionIdentifier
+        self.path = path
+        self.message = message
     }
 }
 
@@ -155,4 +220,12 @@ public enum ThemeContributionError: LocalizedError, Equatable {
             return "None of the \(count) declared theme\(count == 1 ? "" : "s") could be read."
         }
     }
+}
+
+/// `ExtensionRegistry` records a refused contribution as `String(describing:)`,
+/// which consults `CustomStringConvertible` and never `LocalizedError` — so
+/// without this the settings panel renders the compiler's spelling of the case
+/// ("everyThemeFailed(count: 2)") at the extension author it is written for.
+extension ThemeContributionError: CustomStringConvertible {
+    public var description: String { errorDescription ?? "the themes contribution failed." }
 }

@@ -4,11 +4,11 @@ import Foundation
 import AgenticToolkitCore
 @testable import AgenticToolkitMacOS
 
-/// `ExtensionsCoordinator.spec(_:widenedFor:)`.
+/// `ComposableTabLayoutSpec.widened(for:)`.
 ///
 /// The wiring site that calls it lives in the host app, where no toolkit test
-/// can reach — which is exactly why the function is pure and static, and why
-/// this suite can pin its behaviour without a window or a running app.
+/// can reach — which is exactly why the method is pure and value-returning, and
+/// why this suite can pin its behaviour without a window or a running app.
 @MainActor
 @Suite
 struct ExtensionLayoutWideningTests {
@@ -63,8 +63,7 @@ struct ExtensionLayoutWideningTests {
 
     @Test("a contributed view becomes an unbounded allowance")
     func aContributedViewBecomesAnUnboundedAllowance() {
-        let widened = ExtensionsCoordinator.spec(
-            Self.baseSpec, widenedFor: [contributedView()])
+        let widened = Self.baseSpec.widened(for: [contributedView()])
 
         #expect(widened.allows.count == 2)
         let added = widened.allows[1]
@@ -81,7 +80,7 @@ struct ExtensionLayoutWideningTests {
 
     @Test("no contributed views leaves the spec identical")
     func noContributedViewsLeavesTheSpecIdentical() {
-        let widened = ExtensionsCoordinator.spec(Self.baseSpec, widenedFor: [])
+        let widened = Self.baseSpec.widened(for: [])
 
         #expect(widened.allows.count == Self.baseSpec.allows.count)
         let viewIDs = widened.allows.map(\.viewID)
@@ -114,7 +113,7 @@ struct ExtensionLayoutWideningTests {
 
         let views = point.views(for: "test.pack")
         try #require(views.count == 1)
-        let widened = ExtensionsCoordinator.spec(Self.baseSpec, widenedFor: views)
+        let widened = Self.baseSpec.widened(for: views)
 
         // `validate(against:)` only checks that the ids a spec *names* are
         // registered, never the reverse — so a view registered by the point and
@@ -126,7 +125,7 @@ struct ExtensionLayoutWideningTests {
 
         // And the failure mode is real: an id the registry never saw is refused.
         let strayView = contributedView(registryID: "extension.test.pack.not.registered")
-        let stray = ExtensionsCoordinator.spec(Self.baseSpec, widenedFor: [strayView])
+        let stray = Self.baseSpec.widened(for: [strayView])
         #expect(throws: ComposableTabLayoutSpecError.self) {
             try stray.validate(against: registry)
         }
@@ -134,13 +133,13 @@ struct ExtensionLayoutWideningTests {
 
     @Test("preferred axis follows the contributed view")
     func preferredAxisFollowsTheContributedView() throws {
-        let vertical = ExtensionsCoordinator.spec(
-            Self.baseSpec, widenedFor: [contributedView(preferredAxisIsVertical: true)])
+        let vertical = Self.baseSpec.widened(
+            for: [contributedView(preferredAxisIsVertical: true)])
         // A bottom-strip view splits vertically; everything else splits across.
         #expect(vertical.allows.last?.preferredAxis == .vertical)
 
-        let horizontal = ExtensionsCoordinator.spec(
-            Self.baseSpec, widenedFor: [contributedView(preferredAxisIsVertical: false)])
+        let horizontal = Self.baseSpec.widened(
+            for: [contributedView(preferredAxisIsVertical: false)])
         #expect(horizontal.allows.last?.preferredAxis == .horizontal)
 
         // And end to end, because the flag is not spelled in a manifest: the
@@ -162,6 +161,6 @@ struct ExtensionLayoutWideningTests {
         try point.apply(contributions, from: declaration, at: URL(fileURLWithPath: "/var/empty/none"))
         let views = point.views(for: "test.\(container)")
         try #require(views.count == 1)
-        return ExtensionsCoordinator.spec(Self.baseSpec, widenedFor: views).allows.last?.preferredAxis
+        return Self.baseSpec.widened(for: views).allows.last?.preferredAxis
     }
 }

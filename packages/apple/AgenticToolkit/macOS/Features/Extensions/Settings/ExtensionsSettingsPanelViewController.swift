@@ -83,12 +83,27 @@ public final class ExtensionsSettingsPanelViewController: ComposableSettings.Set
         rebuildPanels()
     }
 
-    private func rebuildPanels() {
+    /// Rebuilds the sidebar and selects `index`, clamped to what is left.
+    ///
+    /// Every panel is a fresh object after a rebuild, so the split view's own
+    /// identity-based restore cannot recognise the survivors — the selection
+    /// has to be named positionally from here.
+    private func rebuildPanels(selecting index: Int = 0) {
         var built: [any ComposableSettingsPanel] = registry.extensions.map { loaded in
             ExtensionDetailPanel(
                 loaded: loaded,
                 coordinator: coordinator,
-                onUninstalled: { [weak self] in self?.rebuildPanels() }
+                onUninstalled: { [weak self] in
+                    guard let self else { return }
+                    // Uninstalling the fourth of five extensions should leave
+                    // the reader where they were rather than at the top of the
+                    // list: whatever takes the removed row's place is the
+                    // nearest thing to "still here".
+                    let removed = self.panels.firstIndex {
+                        ($0 as? ExtensionDetailPanel)?.extensionIdentifier == loaded.identifier
+                    }
+                    self.rebuildPanels(selecting: removed ?? 0)
+                }
             )
         }
 
@@ -104,7 +119,7 @@ public final class ExtensionsSettingsPanelViewController: ComposableSettings.Set
         }
 
         setPanels(built)
-        selectPanel(at: 0)
+        selectPanel(at: min(max(index, 0), built.count - 1))
     }
 }
 
@@ -418,7 +433,7 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
 
         for conflict in coordinator.languagePoint.conflicts
         where conflict.loser == extensionIdentifier || conflict.winner == extensionIdentifier {
-            lines.append(Self.line(for: conflict))
+            lines.append(Self.line(for: conflict, viewedFrom: extensionIdentifier))
         }
 
         for note in coordinator.configurationPoint.notes where note.extensionIdentifier == extensionIdentifier {
@@ -427,11 +442,27 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
             lines.append("Setting \(note.key): \(note.detail)")
         }
 
-        for note in coordinator.viewsPoint?.notes ?? [] where note.extensionIdentifier == extensionIdentifier {
-            lines.append("View \(note.viewID) \(note.detail)")
+        // View notes are deliberately *not* repeated here: they are rendered in
+        // the Views group, under the view each one is about, which is the more
+        // useful of the two places. Ruling FW asks for one line each.
+
+        // A lenient decode that dropped one malformed entry is a decision this
+        // app made on the author's behalf, and the manifest is the only source
+        // of those. Its failures are excluded from the Contributes summary —
+        // an entry that did not decode is not a contribution — so this is the
+        // one route they have to a screen.
+        for failure in loaded.manifest.contributes?.decodingFailures ?? [] {
+            lines.append("\(Self.entry(for: failure)) could not be read: \(failure.reason)")
         }
 
         return lines
+    }
+
+    /// `contributes.themes[1]`, or `contributes.menus.editor/context` for a
+    /// keyed container, whose failures carry no index.
+    static func entry(for failure: DecodingFailure) -> String {
+        guard let index = failure.index else { return failure.key }
+        return "\(failure.key)[\(index)]"
     }
 
     /// One sentence covering both facts a dropped matcher can carry at once.
@@ -443,29 +474,48 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
     /// whether one of the two is true or both are.
     static func line(for dropped: DroppedLanguageMatcher) -> String {
         var sentence = "Language \(dropped.languageID): "
-        if !dropped.keys.isEmpty {
-            sentence += "this app cannot match files by \(list(dropped.keys)), so "
-                + "\(dropped.keys.count == 1 ? "it was" : "they were") ignored"
+        // `keys` gains "extensions" when *individual declared values* were
+        // unusable, which is a different fact from a key this app cannot match
+        // by at all — and it is the clause below that says which values. Left
+        // in, the sentence claims the app cannot match files by extension,
+        // which is the one thing this point does, and then contradicts itself
+        // two clauses later.
+        let unsupported = dropped.keys.filter { $0 != "extensions" }
+        if !unsupported.isEmpty {
+            sentence += "this app cannot match files by \(list(unsupported)), so "
+                + "\(unsupported.count == 1 ? "it was" : "they were") ignored"
         }
         if dropped.declaredNoMatcher {
-            sentence += dropped.keys.isEmpty ? "" : ", and "
+            sentence += unsupported.isEmpty ? "" : ", and "
             sentence += "the entry declares no file extension, filename or pattern, "
                 + "so it matches no file here or in VS Code"
         }
         if !dropped.skippedExtensions.isEmpty {
-            sentence += dropped.keys.isEmpty && !dropped.declaredNoMatcher ? "" : ". "
+            sentence += unsupported.isEmpty && !dropped.declaredNoMatcher ? "" : ". "
+            // Quoted: a skipped value is often the empty string, and unquoted
+            // it renders as a hole in the sentence with no name in it.
             sentence += "The file \(dropped.skippedExtensions.count == 1 ? "extension" : "extensions") "
-                + "\(list(dropped.skippedExtensions)) could not be used"
+                + "\(list(dropped.skippedExtensions.map { "“\($0)”" })) could not be used"
         }
         return sentence + "."
     }
 
-    static func line(for conflict: LanguageContributionConflict) -> String {
+    /// The conflict, told from the panel it is shown on.
+    ///
+    /// Both sides are shown it, because a mapping that did not take effect is
+    /// news to whoever is reading — but the loser's sentence on the winner's
+    /// panel reads as somebody else's problem, so the winner is told what it
+    /// won instead.
+    static func line(for conflict: LanguageContributionConflict, viewedFrom identifier: String) -> String {
         guard conflict.winner != conflict.loser else {
             return "This extension claims \(conflict.fileExtension) more than once; "
                 + "\(conflict.losingLanguageID) does not apply to it."
         }
-        return "\(conflict.fileExtension) is mapped by \(conflict.winner); "
+        guard identifier == conflict.winner else {
+            return "\(conflict.fileExtension) is mapped by \(conflict.winner); "
+                + "\(conflict.loser)'s \(conflict.losingLanguageID) does not apply to it."
+        }
+        return "\(conflict.fileExtension) is mapped by this extension; "
             + "\(conflict.loser)'s \(conflict.losingLanguageID) does not apply to it."
     }
 

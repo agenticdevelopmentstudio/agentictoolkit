@@ -4,22 +4,13 @@ import Foundation
 import AgenticToolkitCore
 @testable import AgenticToolkitMacOS
 
-/// An in-memory `ThemeStorage`, as in `ThemeContributionPointTests` — the
-/// doubles that exist are in test targets this bundle cannot reach.
-@MainActor
-private final class CoordinatorThemeStorage: ThemeStorage {
-    var customThemes: [ColorTheme] = []
-    var activeThemeID: String?
-    var onExternalChange: (() -> Void)?
-}
-
 /// The feature that brings the extension subsystem up.
 ///
 /// The order inside `init` is the whole contract — points registered, then
-/// `install()`, then `loadAll()` — and `ExtensionRegistry` never replays past
-/// extensions against a point registered afterwards. So the way to test the
-/// order is not to inspect it but to load a real extension that contributes to
-/// every point and see whether each one has it.
+/// `install()`, then `loadAll()`, then the theme prune — and `ExtensionRegistry`
+/// never replays past extensions against a point registered afterwards. So the
+/// way to test the order is not to inspect it but to load a real extension that
+/// contributes to every point and see whether each one has it.
 ///
 /// Serialized: `setEnabled` and `install()` both write process-wide state
 /// (`UserSettings.shared`, `CustomFileTypeMappings.contributedProvider`).
@@ -28,35 +19,6 @@ private final class CoordinatorThemeStorage: ThemeStorage {
 struct ExtensionsCoordinatorTests {
 
     // MARK: - Fixtures
-
-    private static let themeJSON = """
-    {
-        "name": "File Name",
-        "type": "dark",
-        "colors": {
-            "editor.foreground": "#D8DEE9",
-            "editor.background": "#2E3440",
-            "editorCursor.foreground": "#FF00FF",
-            "editor.selectionBackground": "#4C566A",
-            "terminal.ansiBlack": "#000000",
-            "terminal.ansiRed": "#010000",
-            "terminal.ansiGreen": "#020000",
-            "terminal.ansiYellow": "#030000",
-            "terminal.ansiBlue": "#040000",
-            "terminal.ansiMagenta": "#050000",
-            "terminal.ansiCyan": "#060000",
-            "terminal.ansiWhite": "#070000",
-            "terminal.ansiBrightBlack": "#080000",
-            "terminal.ansiBrightRed": "#090000",
-            "terminal.ansiBrightGreen": "#0A0000",
-            "terminal.ansiBrightYellow": "#0B0000",
-            "terminal.ansiBrightBlue": "#0C0000",
-            "terminal.ansiBrightMagenta": "#0D0000",
-            "terminal.ansiBrightCyan": "#0E0000",
-            "terminal.ansiBrightWhite": "#0F0000"
-        }
-    }
-    """
 
     private static let snippetJSON =
         #"{ "Log": { "prefix": "log", "body": "print(${1:value})$0", "description": "Print" } }"#
@@ -86,23 +48,11 @@ struct ExtensionsCoordinatorTests {
     """
 
     private func makeTempDirectory() throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ExtensionsCoordinatorTests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
+        try ExtensionFixtures.makeTemporaryDirectory("ExtensionsCoordinatorTests")
     }
 
     private func write(_ contents: String, to relativePath: String, in directory: URL) throws {
-        // `isDirectory: true` before anything is resolved against it, for the
-        // same reason the contribution points do it: `relativeTo:` resolves
-        // against the base's *parent* unless the base is known to be a
-        // directory, and a fixture written one level up is a fixture the code
-        // under test cannot find.
-        let base = URL(fileURLWithPath: directory.path, isDirectory: true)
-        let url = URL(fileURLWithPath: relativePath, relativeTo: base)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try contents.write(to: url, atomically: true, encoding: .utf8)
+        try ExtensionFixtures.write(contents, to: relativePath, in: directory)
     }
 
     /// `AppFeature.init` registers itself with `AppFeatureRegistry.shared`, so
@@ -110,7 +60,7 @@ struct ExtensionsCoordinatorTests {
     /// the test in process-wide state.
     private func withCoordinator<Result>(
         searchPaths: [URL],
-        themeStorage: CoordinatorThemeStorage = CoordinatorThemeStorage(),
+        themeStorage: ExtensionTestThemeStorage = ExtensionTestThemeStorage(),
         viewRegistry: ComposableTabsViewRegistry? = nil,
         _ body: (ExtensionsCoordinator) throws -> Result
     ) rethrows -> Result {
@@ -123,13 +73,6 @@ struct ExtensionsCoordinatorTests {
         return try body(coordinator)
     }
 
-    private func withInMemorySettings<Result>(_ body: () throws -> Result) rethrows -> Result {
-        let previous = UserSettings.shared
-        UserSettings.shared = UserSettings(with: InMemorySettingsStorageProvider())
-        defer { UserSettings.shared = previous }
-        return try body()
-    }
-
     // MARK: - Tests
 
     @Test("init registers every contribution point before loading")
@@ -139,14 +82,14 @@ struct ExtensionsCoordinatorTests {
             defer { try? FileManager.default.removeItem(at: root) }
             let extensionDirectory = root.appendingPathComponent("everything-1.0.0")
             try write(Self.everythingManifestJSON, to: "package.json", in: extensionDirectory)
-            try write(Self.themeJSON, to: "themes/night.json", in: extensionDirectory)
+            try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: extensionDirectory)
             try write(Self.snippetJSON, to: "snippets/widget.json", in: extensionDirectory)
 
             // `install()` publishes into a process-wide static; put it back.
             let previousProvider = CustomFileTypeMappings.contributedProvider
             defer { CustomFileTypeMappings.contributedProvider = previousProvider }
 
-            let themeStorage = CoordinatorThemeStorage()
+            let themeStorage = ExtensionTestThemeStorage()
             let viewRegistry = ComposableTabsViewRegistry()
 
             try withCoordinator(
@@ -170,6 +113,52 @@ struct ExtensionsCoordinatorTests {
                 // the static provider is published. Miss it and every icon in
                 // the tree is unchanged, with no error anywhere.
                 #expect(CustomFileTypeMappings.mapping(for: "widget") != nil)
+            }
+        }
+    }
+
+    @Test("the theme prune runs after the load, not before it")
+    func theThemePruneRunsAfterTheLoadNotBeforeIt() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let extensionDirectory = root.appendingPathComponent("everything-1.0.0")
+            try write(Self.everythingManifestJSON, to: "package.json", in: extensionDirectory)
+            try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: extensionDirectory)
+            try write(Self.snippetJSON, to: "snippets/widget.json", in: extensionDirectory)
+
+            let previousProvider = CustomFileTypeMappings.contributedProvider
+            defer { CustomFileTypeMappings.contributedProvider = previousProvider }
+
+            // What a previous launch left behind: the theme this extension is
+            // about to write again, one from an extension since deleted, and
+            // the user's own. The user is looking at the first.
+            let themeStorage = ExtensionTestThemeStorage()
+            let seed = ThemeStore(storage: themeStorage)
+            seed.add(try ExtensionFixtures.colorTheme(
+                id: "vscode.test.everything.Night",
+                attribution: "extension:test.everything",
+                in: root
+            ))
+            seed.add(try ExtensionFixtures.colorTheme(
+                id: "vscode.test.gone.Old", attribution: "extension:test.gone", in: root))
+            seed.add(try ExtensionFixtures.colorTheme(
+                id: "user.mine", attribution: nil, in: root))
+            themeStorage.activeThemeID = "vscode.test.everything.Night"
+
+            try withCoordinator(searchPaths: [root], themeStorage: themeStorage) { coordinator in
+                try #require(coordinator.registry.extensions.count == 1)
+
+                // The deleted extension's theme is the only casualty.
+                let ids = themeStorage.customThemes.map(\.id)
+                #expect(ids == ["vscode.test.everything.Night", "user.mine"])
+
+                // And the ordering assertion. `pruneOrphans` before `loadAll()`
+                // would see *no* installed extensions, delete this theme —
+                // clearing `activeThemeID` on the way out — and then `apply`
+                // would put an identical row back, leaving a list that looks
+                // right and a selection that is gone.
+                #expect(themeStorage.activeThemeID == "vscode.test.everything.Night")
             }
         }
     }

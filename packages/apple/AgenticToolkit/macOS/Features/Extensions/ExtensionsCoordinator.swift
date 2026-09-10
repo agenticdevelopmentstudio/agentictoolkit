@@ -105,34 +105,6 @@ public final class ExtensionsCoordinator: AppFeature {
         guard let viewsPoint else { return [] }
         return registry.extensions.flatMap { viewsPoint.views(for: $0.identifier) }
     }
-
-    /// `spec` with one unbounded allowance added to its root for each
-    /// contributed view.
-    ///
-    /// `ComposableTabLayoutSpec.validate(against:)` only checks that the ids a
-    /// spec *names* are registered — never the reverse — so a view the views
-    /// point registers but no allowance names is registered and unplaceable.
-    /// Unbounded rather than `max: 1`: an extension view is auxiliary, and
-    /// capping it would stop a user opening the same view in two panes for no
-    /// reason the host can justify.
-    ///
-    /// Pure and static so it can be tested without a window, a registry or an
-    /// app: the wiring site that calls it lives in the host app, where no
-    /// toolkit test can reach.
-    public static func spec(
-        _ spec: ComposableTabLayoutSpec,
-        widenedFor views: [ContributedView]
-    ) -> ComposableTabLayoutSpec {
-        guard !views.isEmpty else { return spec }
-        var widened = spec
-        widened.allows += views.map { view in
-            .unbounded(
-                ComposableTabsViewID(view.registryID),
-                preferredAxis: view.preferredAxisIsVertical ? .vertical : .horizontal
-            )
-        }
-        return widened
-    }
 }
 
 extension ExtensionsCoordinator: Loggable {

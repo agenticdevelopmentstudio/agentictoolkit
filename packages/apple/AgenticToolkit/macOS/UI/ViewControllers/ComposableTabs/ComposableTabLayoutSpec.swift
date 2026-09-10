@@ -175,6 +175,32 @@ public struct ComposableTabLayoutSpec: Sendable {
         }
     }
 
+    // MARK: - Widening
+
+    /// This spec with one unbounded allowance added to its root for each
+    /// contributed view.
+    ///
+    /// `validate(against:)` only checks that the ids a spec *names* are
+    /// registered — never the reverse — so a view an extension registers but no
+    /// allowance names is registered and unplaceable. Unbounded rather than
+    /// `max: 1`: an extension view is auxiliary, and capping it would stop a
+    /// user opening the same view in two panes for no reason the host can
+    /// justify.
+    ///
+    /// A pure function on the spec, so the host app's wiring site — which no
+    /// toolkit test can reach — is not the only place this can be exercised.
+    public func widened(for views: [ContributedView]) -> Self {
+        guard !views.isEmpty else { return self }
+        var widened = self
+        widened.allows += views.map { view in
+            .unbounded(
+                ComposableTabsViewID(view.registryID),
+                preferredAxis: view.preferredAxisIsVertical ? .vertical : .horizontal
+            )
+        }
+        return widened
+    }
+
     // MARK: - Blueprint
 
     /// The `LayoutNode` a brand-new tab starts with.
