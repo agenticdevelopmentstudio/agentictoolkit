@@ -82,10 +82,12 @@ public final class TerminalSession: ObservableObject, Identifiable {
     private var gitBranchRequestID: UUID?
     private var processPollingTimer: Timer?
     private let workingDirectory: String?
+    private let gitClient: GitClient
 
-    public init(name: String, workingDirectory: String? = nil) {
+    public init(name: String, workingDirectory: String? = nil, gitClient: GitClient = .shared) {
         self.name = name
         self.workingDirectory = workingDirectory
+        self.gitClient = gitClient
         self.processHandler = TerminalSessionProcessHandler()
         self.processHandler.session = self
     }
@@ -192,51 +194,11 @@ public final class TerminalSession: ObservableObject, Identifiable {
     public func detectGitBranch(for directory: String) {
         let requestID = UUID()
         gitBranchRequestID = requestID
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["rev-parse", "--abbrev-ref", "HEAD"]
-            process.currentDirectoryURL = URL(fileURLWithPath: directory)
-
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = Pipe()
-
-            do {
-                try process.run()
-            } catch {
-                DispatchQueue.main.async { [weak self] in
-                    MainActor.assumeIsolated {
-                        guard self?.gitBranchRequestID == requestID else { return }
-                        self?.gitBranch = nil
-                    }
-                }
-                return
-            }
-
-            let timeoutItem = DispatchWorkItem {
-                if process.isRunning { process.terminate() }
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2, execute: timeoutItem)
-
-            process.waitUntilExit()
-            timeoutItem.cancel()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let branch = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let status = process.terminationStatus
-
-            DispatchQueue.main.async { [weak self] in
-                MainActor.assumeIsolated {
-                    guard self?.gitBranchRequestID == requestID else { return }
-                    if status == 0, let branch = branch, !branch.isEmpty {
-                        self?.gitBranch = branch
-                    } else {
-                        self?.gitBranch = nil
-                    }
-                }
-            }
+        let client = gitClient
+        Task { [weak self] in
+            let branch = try? await client.currentBranch(in: URL(fileURLWithPath: directory))
+            guard let self, self.gitBranchRequestID == requestID else { return }
+            self.gitBranch = branch ?? nil
         }
     }
 
