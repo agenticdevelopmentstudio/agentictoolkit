@@ -191,14 +191,34 @@ public final class TerminalSession: ObservableObject, Identifiable {
         }
     }
 
+    /// Detached HEAD renders as `HEAD`, not as nothing.
+    ///
+    /// `GitClient.currentBranch` returns `nil` there, which is the right answer
+    /// for an API whose question is "which branch?" — but this label's job is to
+    /// tell the user where they are standing, and a blank label reads as "not a
+    /// repository". The two cases stay distinguishable without a second call:
+    /// `currentBranch` *throws* when git could not answer, and returns `nil`
+    /// only when git answered `HEAD`.
     public func detectGitBranch(for directory: String) {
         let requestID = UUID()
         gitBranchRequestID = requestID
         let client = gitClient
         Task { [weak self] in
-            let branch = try? await client.currentBranch(in: URL(fileURLWithPath: directory))
+            let branch: String?
+            do {
+                branch = try await client.currentBranch(in: URL(fileURLWithPath: directory)) ?? "HEAD"
+            } catch is CancellationError {
+                // Defensive, and unreachable as written: the `Task` above is
+                // unstructured and its handle is discarded, so nothing holds a
+                // reference that could cancel it. It states the policy anyway,
+                // because the day someone keeps that handle, a cancelled
+                // detection must leave the label alone rather than blank it.
+                return
+            } catch {
+                branch = nil
+            }
             guard let self, self.gitBranchRequestID == requestID else { return }
-            self.gitBranch = branch ?? nil
+            self.gitBranch = branch
         }
     }
 

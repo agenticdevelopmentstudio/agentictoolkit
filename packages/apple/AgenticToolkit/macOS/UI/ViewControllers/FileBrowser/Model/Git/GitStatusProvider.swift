@@ -36,9 +36,13 @@ public final class GitStatusProvider: Sendable {
                     "Git status: \(fileCount, privacy: .public) files, \(dirCount, privacy: .public) directories"
                 )
             } catch is CancellationError {
-                // Do not treat cancellation as a status failure: leave whatever
-                // was last delivered in place rather than clobbering it with
-                // an empty result.
+                // Defensive, and unreachable as written: the `Task` above is
+                // unstructured and its handle is discarded, so nothing holds a
+                // reference that could cancel it. It states the policy anyway,
+                // because the day someone keeps that handle, cancellation must
+                // not read as a status failure — leave whatever was last
+                // delivered in place rather than clobbering it with an empty
+                // result.
                 return
             } catch {
                 let path = repoRoot.path
