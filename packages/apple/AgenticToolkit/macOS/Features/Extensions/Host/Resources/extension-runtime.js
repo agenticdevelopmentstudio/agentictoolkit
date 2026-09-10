@@ -48,10 +48,18 @@
     // `then` in `callActivate`, and `tail`'s slice, which feeds them their
     // arguments.
     //
+    // A fourth path joins them for a different reason. `fireTimer` dispatching
+    // a timer callback cannot produce a wrong verdict — activation has already
+    // been reported honestly by then — but it is the one dynamic call whose
+    // failure is *silence*: a poisoned `apply` dropped every `setTimeout` and
+    // `setInterval` callback with no callback, no error and no console line,
+    // forever. Degrading loudly is the contract; that one did not.
+    //
     // This is not a sandbox, and widening it would imply one. Everything else
     // here still resolves its methods dynamically, because everything else
     // degrades a console line or a formatted value rather than the answer to
-    // "did this extension activate?".
+    // "did this extension activate?" — measured, for each of the three that
+    // remain.
     var reflectApply = Reflect.apply;
     var arraySlice = Array.prototype.slice;
 
@@ -330,7 +338,7 @@
             delete timers[timerID];
         }
         try {
-            timer.callback.apply(undefined, timer.args);
+            reflectApply(timer.callback, undefined, timer.args);
         } catch (error) {
             host.console('error', 'Uncaught exception in a timer callback: ' + format(error, 0, []));
         }

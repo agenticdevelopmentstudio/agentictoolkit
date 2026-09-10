@@ -36,6 +36,38 @@ import AgenticToolkitCore
 @MainActor
 public final class ExtensionHost {
 
+    // MARK: - State
+
+    /// One host's position in its one-way trip from "nothing has happened" to
+    /// "torn down".
+    ///
+    /// The order the cases are *evaluated* in is the load-bearing part, and it
+    /// is documented on `activationState`, which is the only thing that builds
+    /// one of these.
+    public enum ActivationState: Sendable, Equatable {
+
+        /// Why a host can never activate again. Both reasons describe the same
+        /// physical situation — a module that has been evaluated into a runtime
+        /// this host cannot un-run — and they are distinguished only so the
+        /// refusal a caller gets can say which one happened.
+        public enum TerminationReason: Sendable, Equatable {
+
+            /// The task awaiting `activate()` was cancelled. The extension's
+            /// own `activate()` may still be running.
+            case cancelled
+
+            /// `activate()` failed after the module was evaluated: the
+            /// extension's code has run, and it did not finish activating.
+            case failed
+        }
+
+        case neverActivated
+        case activating
+        case activated
+        case terminal(TerminationReason)
+        case disposed
+    }
+
     // MARK: - Properties
 
     /// The extension this host runs, and the directory every path it declares
@@ -56,8 +88,52 @@ public final class ExtensionHost {
     /// otherwise have no way to observe that the extension's code ran at all.
     public var onConsoleMessage: ((ExtensionConsoleMessage) -> Void)?
 
-    public private(set) var isActivated = false
-    public private(set) var isDisposed = false
+    /// Where this host is, as one value.
+    ///
+    /// Four rounds of fixes to this file were each a correct answer to the
+    /// route that had just been demonstrated, and each left the *state* it led
+    /// to reachable by another route, because the state had no name — only a
+    /// scatter of booleans that each guard re-derived for itself. This is the
+    /// name. Every guard in this file reads it, and stages 5.3 onward read it
+    /// instead of re-deriving the precedence below from fields they cannot see.
+    ///
+    /// **The evaluation order is the contract**, and it is not the order the
+    /// fields happen to be declared in:
+    ///
+    /// 1. `.disposed` — teardown outranks everything; it is the one state that
+    ///    is genuinely final.
+    /// 2. `.activated` — **before** `.terminal`, deliberately. A cancellation
+    ///    can land while an activation is already succeeding, so
+    ///    `terminationReason` and a successful activation are simultaneously
+    ///    true (measured, at six different timings). A host that did activate
+    ///    must not be reported as cancelled, which is exactly why
+    ///    `terminationReason` is not exposed as a standalone `isCancelled`:
+    ///    it is only meaningful once teardown and success have been ruled out.
+    /// 3. `.terminal` — a cancelled or failed activation. Both abandoned a
+    ///    runtime that nothing can un-run; see `terminationReason`.
+    /// 4. `.activating` — a call is inside `activate()`.
+    /// 5. `.neverActivated` — nothing has happened yet.
+    public var activationState: ActivationState {
+        if disposed { return .disposed }
+        if activationSucceeded { return .activated }
+        if let terminationReason { return .terminal(terminationReason) }
+        if activationTask != nil { return .activating }
+        return .neverActivated
+    }
+
+    /// Whether the extension's `activate()` ran to completion.
+    ///
+    /// Stays true through `dispose()`: it records what happened, not what the
+    /// host can still do. `activationState` is the one that becomes
+    /// `.disposed`.
+    public var isActivated: Bool { activationSucceeded }
+
+    /// Whether `dispose()` has run. The same answer as
+    /// `activationState == .disposed`, spelled the way call sites ask it.
+    public var isDisposed: Bool { disposed }
+
+    private var activationSucceeded = false
+    private var disposed = false
 
     /// One VM for the whole process. `JSVirtualMachine` is not `Sendable`; this
     /// static is main-actor isolated with the rest of the type, which is the
@@ -108,26 +184,37 @@ public final class ExtensionHost {
     /// otherwise evaluate the module a second time.
     private var activationTask: Task<Void, Error>?
 
-    /// A cancelled activation was abandoned, not undone, so this host can
-    /// never activate again.
+    /// Why this host can never activate again, or `nil` while it still can.
     ///
-    /// Cancellation stops the *call*: it resumes the suspended `activate()`
-    /// with `activationCancelled` and leaves the extension's own `activate()`
-    /// promise pending inside a runtime that is still there, still holding the
-    /// context and whatever timers the module started. Nothing can reach into
-    /// JavaScript and un-run it. So a retry - and cancellation is the one
-    /// failure a caller retries by reflex - would evaluate the module a second
-    /// time into a *second* runtime: `context` would be overwritten while the
-    /// abandoned activation still ran in the old one, `timerTasks` would keep
-    /// the abandoned instance's entries while `fireTimer` dispatched their old
-    /// IDs against the new runtime, and `runningTimerCount` would count both
+    /// The property that makes a host terminal is not cancellation. It is that
+    /// the module has been **evaluated**: from that instant the extension's
+    /// code has run, its top level has registered whatever it registers and
+    /// started whatever timers it starts, and nothing can reach into JavaScript
+    /// and un-run it. Cancellation lands there, and so does every failure at or
+    /// after `evaluateModule` — a sync throw, a rejected promise, a throwing
+    /// `.then` getter, a top-level throw. They are one state, so they set one
+    /// field.
+    ///
+    /// A retry would therefore evaluate the module a second time into a
+    /// *second* runtime: `context` overwritten while the abandoned instance
+    /// still ran in the old one, and `runningTimerCount` counting both
     /// instances, so the teardown invariant would stop meaning one host-worth
-    /// of timers.
+    /// of timers. Measured, both of them.
     ///
-    /// `dispose()` is what follows a cancellation. It is the operation that
-    /// really does undo a runtime, and it is already safe to call on a host in
-    /// this state.
-    private var activationAbandoned = false
+    /// `dispose()` is what follows. It is the operation that really does undo a
+    /// runtime, and it is already safe to call on a host in this state.
+    private var terminationReason: ActivationState.TerminationReason?
+
+    /// The raw reason, before `activationState`'s precedence hides it.
+    ///
+    /// Internal, and it exists for exactly one test. `activationState` reports
+    /// `.activated` for a host that both activated *and* had a cancellation
+    /// land on it, which is correct and is the whole point of the ordering — but
+    /// it also makes that state indistinguishable from an ordinary activation
+    /// from outside. A test that cannot see this field cannot tell whether it
+    /// built the state it meant to build, and would pass just as happily
+    /// against a run where the cancellation never landed at all.
+    var recordedTerminationReason: ActivationState.TerminationReason? { terminationReason }
 
     /// Resumes the suspended `activate()`. Taken-and-nilled by
     /// `finishActivation`, so activation ends exactly once however it ends:
@@ -205,11 +292,16 @@ public final class ExtensionHost {
     /// is the first thing a Swift caller reaches for, and an `activate()` that
     /// ignored it would turn an ordinary timeout-and-give-up into a hang.
     ///
-    /// **Cancellation is terminal, and `dispose()` is what follows it.** It
-    /// ends the call, not the activation: the extension's promise is still
-    /// pending inside a runtime this host cannot un-run, so a later
-    /// `activate()` throws `activationCancelled` rather than evaluating the
-    /// module into a second runtime beside the abandoned one.
+    /// **An activation that does not succeed is terminal, and `dispose()` is
+    /// what follows it.** Cancellation ends the call, not the activation: the
+    /// extension's promise is still pending inside a runtime this host cannot
+    /// un-run. A *failure* — a throw from `activate()`, a rejected promise, a
+    /// throw from the module's top level — is the same situation arrived at by
+    /// a different route, because by then the module has been evaluated and its
+    /// top level has already run. Either way a later `activate()` refuses,
+    /// naming which of the two happened, rather than evaluating the module into
+    /// a second runtime beside the abandoned one. `activationState` reports it
+    /// as `.terminal`.
     ///
     /// Calling twice is a no-op, and two concurrent calls are one activation.
     /// VS Code activates an extension once, callers re-emit activation events
@@ -222,17 +314,24 @@ public final class ExtensionHost {
     /// - Throws: `ExtensionHostError.activationCancelled` if the calling task
     ///   is cancelled, in place of `CancellationError` — every error this host
     ///   raises names the extension, because a failure reaches the user
-    ///   through a list of extensions.
+    ///   through a list of extensions. The same error, and
+    ///   `ExtensionHostError.activationAlreadyFailed` after a failure, for a
+    ///   later call on a host that is already terminal.
     public func activate() async throws {
-        guard !isDisposed else {
+        // One read, and the precedence lives in `activationState` rather than
+        // in a ladder of guards each answering for a narrower machine than the
+        // one that exists. That ladder is what produced four rounds of the same
+        // defect: every widening of the state space left the older guards
+        // answering the older question.
+        switch activationState {
+        case .disposed:
             throw ExtensionHostError.hostDisposed(identifier: identifier)
-        }
-        guard !isActivated else { return }
-        // After `isActivated`, deliberately: a cancellation that lands as an
-        // activation is already succeeding must not refuse a host that did
-        // activate.
-        guard !activationAbandoned else {
-            throw ExtensionHostError.activationCancelled(identifier: identifier)
+        case .activated:
+            return
+        case let .terminal(reason):
+            throw Self.terminalRefusal(reason, identifier: identifier)
+        case .activating, .neverActivated:
+            break
         }
 
         if let activationTask {
@@ -266,7 +365,7 @@ public final class ExtensionHost {
             // must not reach the *next* one: by the time this hop runs, the
             // owner's `defer` may have cleared the task it belongs to.
             guard let self, self.activationTask == task else { return }
-            self.activationAbandoned = true
+            self.markTerminal(.cancelled)
             self.finishActivation(.failure(.activationCancelled(identifier: self.identifier)))
         }
 
@@ -310,9 +409,55 @@ public final class ExtensionHost {
         }
         self.runtime = runtime
 
-        let exports = try evaluateModule(runtime: runtime, source: source, entryPoint: entryPoint)
-        try await callActivate(on: exports, runtime: runtime)
-        isActivated = true
+        // Past this line the extension's own code runs, and a failure is not a
+        // failure to *start*: it is a module that has been evaluated, whose top
+        // level has already registered whatever it registers and started
+        // whatever timers it starts. That is the same abandoned state a
+        // cancellation produces and it is reached far more often — a sync
+        // throw, a rejected promise, a throwing `.then` getter, a top-level
+        // throw — so it is marked the same way rather than left as the one
+        // route with no guard over it.
+        //
+        // Everything *before* this line is deliberately not terminal: no
+        // extension code has run yet, so a retry orphans nothing. A shim that
+        // will not load or a namespace an adaptor spelled wrong fails the same
+        // way on every attempt, and refusing the second attempt would only hide
+        // the reason behind a different error.
+        do {
+            let exports = try evaluateModule(runtime: runtime, source: source, entryPoint: entryPoint)
+            try await callActivate(on: exports, runtime: runtime)
+        } catch {
+            markTerminal(.failed)
+            throw error
+        }
+        activationSucceeded = true
+    }
+
+    /// Records why this host became terminal, keeping the *first* reason.
+    ///
+    /// Both routes into the state arrive at once when a cancellation is what
+    /// caused the failure: `endActivation` names the cancellation and the throw
+    /// it produced then leaves `performActivation`. The throw is a consequence
+    /// of the cancellation, not a second reason for it, and the caller who
+    /// cancelled should be told what they did.
+    private func markTerminal(_ reason: ActivationState.TerminationReason) {
+        guard terminationReason == nil else { return }
+        terminationReason = reason
+    }
+
+    /// What a terminal host refuses with. One mapping, so `activate()` and
+    /// `defineVSCodeMember` cannot drift into refusing the same state with
+    /// different words.
+    private static func terminalRefusal(
+        _ reason: ActivationState.TerminationReason,
+        identifier: String
+    ) -> ExtensionHostError {
+        switch reason {
+        case .cancelled:
+            return .activationCancelled(identifier: identifier)
+        case .failed:
+            return .activationAlreadyFailed(identifier: identifier)
+        }
     }
 
     // MARK: - The 5.3-5.7 seam
@@ -348,7 +493,11 @@ public final class ExtensionHost {
     ///
     /// - Throws: `ExtensionHostError.hostDisposed` if the host has been torn
     ///   down — a definition appended then would go onto a list nothing will
-    ///   ever replay. `ExtensionHostError.vscodeMemberNotDefinable` if the
+    ///   ever replay — and `activationCancelled` or `activationAlreadyFailed`
+    ///   if the host is terminal, for the stronger version of the same reason:
+    ///   the list will never be replayed *and* the runtime it would be applied
+    ///   to belongs to an abandoned activation.
+    ///   `ExtensionHostError.vscodeMemberNotDefinable` if the
     ///   namespace is not one the shim knows, which is a programming error in
     ///   the adaptor: immediately when the host is already running, and
     ///   otherwise from the `activate()` that first installs a runtime.
@@ -359,8 +508,22 @@ public final class ExtensionHost {
         fileID: String = #fileID,
         line: Int = #line
     ) throws {
-        guard !isDisposed else {
+        // The same read `activate()` makes, for the same reason: this guard
+        // used to ask "is it disposed?", which stopped being the whole question
+        // the moment a host could be terminal without being torn down. On a
+        // terminal host the call did not merely queue a definition nothing
+        // would replay — it *installed* the implementation into the abandoned
+        // runtime, where the abandoned extension's still-running `setInterval`
+        // picked it up on the next tick and began calling a real adaptor. An
+        // extension the app has decided it is not running must not be handed a
+        // live implementation. Measured.
+        switch activationState {
+        case .disposed:
             throw ExtensionHostError.hostDisposed(identifier: identifier)
+        case let .terminal(reason):
+            throw Self.terminalRefusal(reason, identifier: identifier)
+        case .neverActivated, .activating, .activated:
+            break
         }
         let definition = VSCodeMemberDefinition(
             namespacePath: namespacePath,
@@ -424,7 +587,7 @@ public final class ExtensionHost {
     /// and releases the context, which is the largest thing the host owns.
     /// Teardown is an act, not a consequence of going out of scope.
     public func dispose() {
-        isDisposed = true
+        disposed = true
 
         for task in timerTasks.values {
             task.cancel()
@@ -457,8 +620,14 @@ public final class ExtensionHost {
     /// It catches every timer, repeating included: `scheduleTimer` builds its
     /// task with `[weak self]`, so the host holds the tasks and no task holds
     /// the host, and a host with a live `setInterval` deallocates like any
-    /// other. What it does not catch is *when* — see `dispose()`. The case it
-    /// exists for is real either way: a host whose `activate()` threw, dropped
+    /// other. What it does not catch is *when* — see `dispose()` — and it does
+    /// not catch the host dropped **while an activation is in flight** at all:
+    /// `activationTask` is an unstructured `Task` that strongly captures the
+    /// host, and the host holds `activationTask`, so a host abandoned on an
+    /// activation that never settles never deallocates and never reaches here.
+    /// That is precisely what `dispose()` being mandatory is for. Measured.
+    ///
+    /// The case it does catch is real: a host whose `activate()` threw, dropped
     /// by a caller that never learned it had timers to cancel, would otherwise
     /// leave a `setTimeout(fn, 3600000)` task asleep for the rest of the hour.
     ///
@@ -1001,6 +1170,14 @@ public enum ExtensionHostError: Error, Sendable, Equatable {
     /// the host is still usable — `dispose()` is what stops it.
     case activationCancelled(identifier: String)
 
+    /// An earlier `activate()` failed after the extension's module had already
+    /// been evaluated, so this host is spent. Its own case because the caller
+    /// who retries needs to be told something the original failure does not
+    /// say: retrying *this host* is not the way to try again. The module has
+    /// run; a second attempt would evaluate it into a second runtime beside the
+    /// first.
+    case activationAlreadyFailed(identifier: String)
+
     /// The runtime shim is missing from this framework's bundle. A build
     /// problem, not an extension problem.
     case runtimeUnavailable(identifier: String)
@@ -1045,6 +1222,11 @@ extension ExtensionHostError: LocalizedError {
             return """
                 '\(identifier)' did not finish activating: the task awaiting it was cancelled. The \
                 extension's own activate() may still be running; tear the host down to stop it.
+                """
+        case let .activationAlreadyFailed(identifier):
+            return """
+                '\(identifier)' already failed to activate, and a failed activation cannot be retried on \
+                the same host: its code has already run. Tear this host down and build a new one.
                 """
         case let .runtimeUnavailable(identifier):
             return "'\(identifier)' could not be started: the extension runtime is missing from this build."

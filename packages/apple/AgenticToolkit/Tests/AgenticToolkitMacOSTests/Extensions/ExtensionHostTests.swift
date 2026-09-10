@@ -24,6 +24,36 @@ private final class ConsoleRecorder {
     }
 }
 
+/// Watches a host from *inside* its own activation, and can cancel it there.
+///
+/// Two things are only observable from inside. `.activating` is over by the
+/// time `activate()` returns; and the state where an activation *succeeds* with
+/// a cancellation already recorded against it needs that cancellation delivered
+/// in the window between the two, which nothing outside the host can aim at.
+/// The extension's own `console` call is the one hook reliably inside it.
+///
+/// A reference type for `ConsoleRecorder`'s reason and one more: the task it
+/// cancels is assigned *after* the closure that cancels it.
+@MainActor
+private final class ActivationWatcher {
+
+    var task: Task<Void, Error>?
+
+    private(set) var texts: [String] = []
+    private(set) var statesSeen: [ExtensionHost.ActivationState] = []
+    private var cancelTrigger: String?
+
+    /// `weak host`, so the closure the host stores does not hold the host.
+    func attach(to host: ExtensionHost, cancellingOn trigger: String? = nil) {
+        cancelTrigger = trigger
+        host.onConsoleMessage = { [self, weak host] message in
+            texts.append(message.text)
+            if let host { statesSeen.append(host.activationState) }
+            if message.text == cancelTrigger { task?.cancel() }
+        }
+    }
+}
+
 /// The JavaScriptCore extension host.
 ///
 /// Every test builds a real extension directory on disk and runs real
@@ -341,6 +371,156 @@ struct ExtensionHostTests {
             #expect(message.contains("the extension exploded"))
         }
         #expect(!host.isActivated)
+
+        // And it is terminal, for the reason a cancellation is: the module was
+        // evaluated - it threw *while running* - so this host's JavaScript has
+        // already happened and cannot be made not to have happened.
+        #expect(host.activationState == .terminal(.failed))
+        await #expect(throws: ExtensionHostError.activationAlreadyFailed(identifier: "test.alpha")) {
+            try await host.activate()
+        }
+    }
+
+    /// A failed activation is terminal, and the retry every caller reaches for
+    /// is refused rather than run.
+    ///
+    /// This is MD-A's rule arriving at the state by the route that is actually
+    /// common. Cancellation is not what makes a host unrepeatable; *evaluating
+    /// the module* is, and every failing path gets there - a sync throw, a
+    /// rejected promise, a throwing `.then` getter, a top-level throw. Measured
+    /// before the guard existed: the module's top level and its `activate` both
+    /// ran a second time, a second `JSContext` was built beside the live first
+    /// one, and `runningTimerCount` reached 2 for a host with one live runtime,
+    /// so the teardown invariant stopped meaning one host-worth of timers.
+    /// Worse, timer IDs restart at 1 in a new runtime, so the retry's first
+    /// `setInterval` destroyed the abandoned instance's timer by ID collision -
+    /// the abandoned extension simply stopped, with nothing recorded anywhere.
+    ///
+    /// The console line and the timer count are the assertions that separate a
+    /// refusal from a second evaluation that also failed.
+    @Test(.timeLimit(.minutes(1)))
+    func aFailedActivationIsTerminalAndRefusesTheRetry() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            console.log('top level ran');
+            setInterval(function () { console.log('tick'); }, 3600000);
+            exports.activate = function () {
+                console.log('activate ran');
+                throw new Error('boom');
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        do {
+            try await host.activate()
+            Issue.record("A throw from activate() must fail the activation.")
+        } catch let error as ExtensionHostError {
+            guard case .activationThrew = error else {
+                Issue.record("Expected activationThrew, got \(error)")
+                return
+            }
+        }
+
+        #expect(!host.isActivated)
+        #expect(host.activationState == .terminal(.failed))
+        #expect(host.runningTimerCount == 1)
+
+        await #expect(throws: ExtensionHostError.activationAlreadyFailed(identifier: "test.alpha")) {
+            try await host.activate()
+        }
+
+        // The refusal is a refusal, not a second evaluation that then failed
+        // the same way: the module ran once.
+        #expect(recorder.texts == ["top level ran", "activate ran"])
+        #expect(host.runningTimerCount == 1)
+    }
+
+    /// The vocabulary itself, walked end to end, including the two states that
+    /// are only visible from inside an activation.
+    ///
+    /// `.disposed` outranking `.activated` is the half that is easy to get
+    /// backwards and impossible to notice: a host torn down after a successful
+    /// activation would go on describing itself as `.activated`, and every
+    /// guard that reads the state would let it through.
+    @Test(.timeLimit(.minutes(1)))
+    func activationStateNamesEveryStepFromFreshToDisposed() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: "exports.activate = function () { console.log('inside'); };",
+            in: directory
+        )
+
+        let watcher = ActivationWatcher()
+        watcher.attach(to: host)
+
+        #expect(host.activationState == .neverActivated)
+
+        try await host.activate()
+
+        #expect(watcher.statesSeen == [.activating], "a call inside activate() is .activating")
+        #expect(host.activationState == .activated)
+
+        host.dispose()
+
+        #expect(host.activationState == .disposed)
+        // `isActivated` records what happened, and teardown does not unhappen
+        // it - only `activationState` moves on.
+        #expect(host.isActivated)
+    }
+
+    /// A cancellation that lands while the activation is already succeeding
+    /// leaves the host **activated**, not terminal.
+    ///
+    /// This is the state that makes the ordering in `activationState`
+    /// load-bearing rather than arbitrary, and the reason the termination
+    /// reason is not exposed as a public `isCancelled`: it is true here, on a
+    /// host that genuinely activated. Reversing `.activated` and `.terminal`
+    /// turns a working extension into one that refuses every later call.
+    ///
+    /// The window is real but narrow, so the extension opens it itself: the
+    /// cancellation is issued from a `console` call inside `activate`, which
+    /// runs while the host is deep inside `performActivation` on the main
+    /// actor. The hop that records the cancellation is queued behind that, and
+    /// the activation completes either side of it - both orderings produce this
+    /// state. `recordedTerminationReason` is asserted first because without it
+    /// a run where the cancellation never landed would pass in silence.
+    @Test(.timeLimit(.minutes(1)))
+    func aCancellationLandingAsActivationSucceedsLeavesTheHostActivated() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: "exports.activate = function () { console.log('cancel me now'); };",
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let watcher = ActivationWatcher()
+        watcher.attach(to: host, cancellingOn: "cancel me now")
+        watcher.task = Task { @MainActor in try await host.activate() }
+
+        try await watcher.task?.value
+
+        #expect(
+            host.recordedTerminationReason == .cancelled,
+            "the cancellation never landed, so this test proved nothing")
+        #expect(host.activationState == .activated)
+        #expect(host.isActivated)
+
+        // And the host behaves as an activated one: a later call is the no-op
+        // it is for any activated host, not the refusal a terminal one gives.
+        try await host.activate()
+        #expect(watcher.texts == ["cancel me now"])
     }
 
     /// A throw from `activate()` is a different case from a throw while
@@ -1111,6 +1291,46 @@ struct ExtensionHostTests {
         #expect(recorder.texts == ["activate really ran", "timer saw extra"])
     }
 
+    /// The same poison aimed at `apply`, which is what actually *dispatches* a
+    /// timer callback.
+    ///
+    /// Hardening `tail` made the arguments survive a poisoned prototype; the
+    /// call that consumes them was still `timer.callback.apply(...)`. With
+    /// `Function.prototype.apply` replaced, every `setTimeout` and
+    /// `setInterval` callback was dropped - no callback, no error, no console
+    /// line, forever. It cannot make the host report a false activation, which
+    /// is why it is the mildest of these, but it is the only one whose failure
+    /// mode is *silence* rather than a degraded string, and silence is the one
+    /// thing this shim exists to refuse.
+    @Test(.timeLimit(.minutes(1)))
+    func aPoisonedFunctionPrototypeApplyCannotSilenceTimerCallbacks() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            Function.prototype.apply = function () {};
+            exports.activate = function () {
+                console.log('activate really ran');
+                setTimeout(function (marker) { console.log('timer saw ' + marker); }, 1, 'extra');
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        #expect(host.isActivated)
+
+        for _ in 0..<100 where recorder.texts.count < 2 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(recorder.texts == ["activate really ran", "timer saw extra"])
+    }
+
     /// The other half of M1, and the one 5.3 depends on: activation is not
     /// signalled until `activate()` has actually finished.
     ///
@@ -1513,6 +1733,81 @@ struct ExtensionHostTests {
 
         let nothing: @convention(block) () -> Void = {}
         #expect(throws: ExtensionHostError.hostDisposed(identifier: "test.alpha")) {
+            try host.defineVSCodeMember(
+                namespacePath: "vscode.window", name: "showSomethingReal", implementation: nothing)
+        }
+    }
+
+    /// A member defined on a *cancelled* host is refused too, and this one is
+    /// worse than the disposed case rather than milder.
+    ///
+    /// A disposed host drops the definition on the floor. A cancelled host
+    /// still has its runtime: without the guard the definition was queued
+    /// *and applied*, so the abandoned extension - the one the app has decided
+    /// it is not running - had a real adaptor implementation installed under it
+    /// and its still-running `setInterval` began calling it on the next tick.
+    /// Measured. The queued copy, meanwhile, can never be replayed, because the
+    /// host can never activate again.
+    @Test(.timeLimit(.minutes(1)))
+    func definingAMemberOnACancelledHostIsRefused() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                console.log('waiting');
+                setInterval(function () {}, 5);
+                return new Promise(function () {});
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        let activation = Task { @MainActor in try await host.activate() }
+        for _ in 0..<100 where recorder.texts.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await #expect(throws: ExtensionHostError.activationCancelled(identifier: "test.alpha")) {
+            activation.cancel()
+            try await activation.value
+        }
+
+        // The abandoned runtime is still there and still ticking - which is
+        // exactly what makes accepting a definition harmful.
+        #expect(host.runningTimerCount == 1)
+
+        let nothing: @convention(block) () -> Void = {}
+        #expect(throws: ExtensionHostError.activationCancelled(identifier: "test.alpha")) {
+            try host.defineVSCodeMember(
+                namespacePath: "vscode.window", name: "showSomethingReal", implementation: nothing)
+        }
+    }
+
+    /// And on a host whose activation *failed*, with the error that says which
+    /// of the two terminal states it is in.
+    @Test(.timeLimit(.minutes(1)))
+    func definingAMemberOnAFailedHostIsRefused() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: "exports.activate = function () { throw new Error('boom'); };",
+            in: directory
+        )
+        defer { host.dispose() }
+
+        await #expect(throws: ExtensionHostError.self) {
+            try await host.activate()
+        }
+        #expect(host.activationState == .terminal(.failed))
+
+        let nothing: @convention(block) () -> Void = {}
+        #expect(throws: ExtensionHostError.activationAlreadyFailed(identifier: "test.alpha")) {
             try host.defineVSCodeMember(
                 namespacePath: "vscode.window", name: "showSomethingReal", implementation: nothing)
         }
