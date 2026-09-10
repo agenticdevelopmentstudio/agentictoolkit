@@ -31,16 +31,37 @@ public struct NotImplementedAccess: Sendable, Equatable {
     /// only later, and a last-access stamp answers neither.
     public let firstAccess: Date
 
-    /// How many times, including the first. An extension that polls a missing
-    /// member in a timer produces a very different report from one that touched
-    /// it once at startup, and collapsing both to "seen" would hide that.
+    /// How many times the extension *used* it and was refused, including the
+    /// first. An extension that polls a missing member in a timer produces a
+    /// very different report from one that touched it once at startup, and
+    /// collapsing both to "seen" would hide that.
     public let count: Int
 
-    public init(extensionIdentifier: String, memberPath: String, firstAccess: Date, count: Int) {
+    /// How many times the extension merely *asked whether it existed* and was
+    /// told no — `'x' in vscode.commands`, `Object.keys(...)`,
+    /// `getOwnPropertyDescriptor(...)`.
+    ///
+    /// Separate from `count`, because the two say different things about the
+    /// same extension. A refused use is an extension that broke; a negative
+    /// probe is an extension that looked, found nothing, and quietly took its
+    /// fallback path — which is often the *more* interesting row in a report,
+    /// since nothing else in the system would ever notice it happened. A member
+    /// can carry both: a library commonly feature-detects once and then calls
+    /// anyway.
+    public let probeCount: Int
+
+    public init(
+        extensionIdentifier: String,
+        memberPath: String,
+        firstAccess: Date,
+        count: Int,
+        probeCount: Int = 0
+    ) {
         self.extensionIdentifier = extensionIdentifier
         self.memberPath = memberPath
         self.firstAccess = firstAccess
         self.count = count
+        self.probeCount = probeCount
     }
 }
 
@@ -91,23 +112,34 @@ public final class NotImplementedLedger {
     /// recorded. `firstAccess` is set once and never moved.
     @discardableResult
     public func record(memberPath: String, extensionIdentifier: String) -> NotImplementedAccess {
+        bump(memberPath: memberPath, extensionIdentifier: extensionIdentifier, wasProbe: false)
+    }
+
+    /// Records one *negative probe* — a feature-detection question that was
+    /// honestly answered "no".
+    ///
+    /// Shares a row with `record`, deliberately: `'x' in ns` followed by `ns.x`
+    /// is one library guarding one call, and two rows would read as two
+    /// different members.
+    @discardableResult
+    public func recordProbe(memberPath: String, extensionIdentifier: String) -> NotImplementedAccess {
+        bump(memberPath: memberPath, extensionIdentifier: extensionIdentifier, wasProbe: true)
+    }
+
+    private func bump(
+        memberPath: String,
+        extensionIdentifier: String,
+        wasProbe: Bool
+    ) -> NotImplementedAccess {
         let key = Key(extensionIdentifier: extensionIdentifier, memberPath: memberPath)
-        let updated: NotImplementedAccess
-        if let existing = entries[key] {
-            updated = NotImplementedAccess(
-                extensionIdentifier: existing.extensionIdentifier,
-                memberPath: existing.memberPath,
-                firstAccess: existing.firstAccess,
-                count: existing.count + 1
-            )
-        } else {
-            updated = NotImplementedAccess(
-                extensionIdentifier: extensionIdentifier,
-                memberPath: memberPath,
-                firstAccess: Date(),
-                count: 1
-            )
-        }
+        let existing = entries[key]
+        let updated = NotImplementedAccess(
+            extensionIdentifier: extensionIdentifier,
+            memberPath: memberPath,
+            firstAccess: existing?.firstAccess ?? Date(),
+            count: (existing?.count ?? 0) + (wasProbe ? 0 : 1),
+            probeCount: (existing?.probeCount ?? 0) + (wasProbe ? 1 : 0)
+        )
         entries[key] = updated
         return updated
     }

@@ -71,11 +71,48 @@ public final class ExtensionHost {
 
     private var context: JSContext?
 
+    /// The live `JSContext`, or `nil` once `dispose()` has released it.
+    ///
+    /// Internal, and it exists for one reason: `dispose()` dropping the context
+    /// is correct-but-unobservable from outside. Every behaviour a test can see
+    /// after teardown — no callbacks, no timers, refused re-activation — is
+    /// already guaranteed by `isDisposed` alone, so a `dispose()` that leaked
+    /// the whole JavaScript heap for the life of the host would pass every one
+    /// of them. A `weak` reference to this is the only way to state that the
+    /// context is actually gone, and the context is the largest thing this host
+    /// owns.
+    var javaScriptContext: JSContext? { context }
+
     /// `__extensionRuntime` from the shim, captured before its global is
     /// deleted. Holding it here rather than looking it up by name is what lets
     /// the globals go away: the extension's code cannot reach an object it has
     /// no name for, and this host still can.
     private var runtime: JSValue?
+
+    /// Real implementations installed over the shim's stubs, in the order they
+    /// were declared.
+    ///
+    /// Kept rather than applied and forgotten because a caller may define
+    /// members *before* `activate()` — that is the normal order, since the
+    /// adaptor that owns a member is wired at construction time and the
+    /// extension is activated later. The list is replayed onto the runtime as
+    /// soon as one exists.
+    private var vscodeMemberDefinitions: [VSCodeMemberDefinition] = []
+
+    /// The in-flight `activate()`, so two concurrent calls are one activation.
+    ///
+    /// `activate()` was synchronous-enough to guard with `isActivated` alone
+    /// when it did not await anything the extension controlled. It now awaits
+    /// `activate()`'s own promise, which an extension can keep pending for as
+    /// long as it likes, and a second caller arriving inside that window would
+    /// otherwise evaluate the module a second time.
+    private var activationTask: Task<Void, Error>?
+
+    /// Resumes the suspended `activate()`. Taken-and-nilled by
+    /// `finishActivation`, so activation ends exactly once however it ends:
+    /// the shim's callback, a JavaScript exception thrown before that callback
+    /// could fire, or `dispose()`.
+    private var activationContinuation: ((Result<Void, ExtensionHostError>) -> Void)?
 
     /// The clocks behind the shim's `setTimeout`/`setInterval`. `Task`, not
     /// `Timer` or a dispatch source, because cancellation is then the language
@@ -127,18 +164,53 @@ public final class ExtensionHost {
     /// Resolves the entry point, evaluates the extension's code in a fresh
     /// context, and calls its exported `activate` if it has one.
     ///
-    /// Calling twice is a no-op. VS Code activates an extension once, callers
-    /// re-emit activation events routinely, and re-evaluating the module would
-    /// leave two sets of registrations behind that one `dispose()` cannot undo
-    /// (`idempotency`).
+    /// **Returns only once `activate()` has finished.** VS Code declares
+    /// `activate(context): any | Thenable<any>`, and `export async function
+    /// activate()` is what most real extensions ship: a host that returned as
+    /// soon as the call did would report an extension activated before it had
+    /// registered anything, and the command a palette asks for a moment later
+    /// would not exist yet. A rejected promise fails activation with its reason,
+    /// for the same reason — JavaScriptCore routes an unhandled rejection
+    /// nowhere the exception handler can see it, so an async `activate` that
+    /// threw would otherwise be indistinguishable from one that succeeded.
+    ///
+    /// An extension whose `activate()` promise never settles suspends this call
+    /// for as long as it stays unsettled. That is deliberate, and the escape is
+    /// `dispose()`, which fails the activation — not a timeout, because there is
+    /// no honest number: a real extension may legitimately await a network
+    /// round trip during activation, and a host that gave up at *n* seconds
+    /// would be reporting a failure that did not happen.
+    ///
+    /// Calling twice is a no-op, and two concurrent calls are one activation.
+    /// VS Code activates an extension once, callers re-emit activation events
+    /// routinely, and re-evaluating the module would leave two sets of
+    /// registrations behind that one `dispose()` cannot undo (`idempotency`).
     public func activate() async throws {
         guard !isDisposed else {
             throw ExtensionHostError.hostDisposed(identifier: identifier)
         }
         guard !isActivated else { return }
 
+        if let activationTask {
+            try await activationTask.value
+            return
+        }
+
+        let task = Task { @MainActor in try await self.performActivation() }
+        activationTask = task
+        defer { activationTask = nil }
+        try await task.value
+    }
+
+    private func performActivation() async throws {
         let entryPoint = try resolveEntryPoint()
         let source = try await Self.readSource(at: entryPoint, identifier: identifier)
+
+        // Reading the source is the one suspension point before any JavaScript
+        // exists, so it is the one place a `dispose()` can land unnoticed.
+        guard !isDisposed else {
+            throw ExtensionHostError.hostDisposed(identifier: identifier)
+        }
 
         let context = try makeContext()
         self.context = context
@@ -149,8 +221,62 @@ public final class ExtensionHost {
         self.runtime = runtime
 
         let exports = try evaluateModule(runtime: runtime, source: source, entryPoint: entryPoint)
+        try await callActivate(on: exports, runtime: runtime)
         isActivated = true
-        try callActivate(on: exports, runtime: runtime)
+    }
+
+    // MARK: - The 5.3-5.7 seam
+
+    /// Installs a real implementation over one of the shim's throwing stubs.
+    ///
+    /// This is the seam stages 5.3 through 5.7 each register through, and the
+    /// reason none of them has to edit `extension-runtime.js`: the shim retains
+    /// every namespace's member table, and `defineMember` writes into the table
+    /// the namespace proxy already reads. A member defined here stops throwing,
+    /// stops being recorded as unimplemented, and leaves its siblings exactly as
+    /// they were.
+    ///
+    /// `implementation` is passed to JavaScriptCore as-is, so the useful shapes
+    /// are a `@convention(block)` closure, a `JSValue`, or any bridgeable value
+    /// — `vscode.env.appName` is a string, and most absent members are values
+    /// rather than functions.
+    ///
+    /// Callable before or after `activate()`. Before is the normal case, and
+    /// definitions made then are applied the moment the runtime exists.
+    ///
+    /// - Throws: `ExtensionHostError.vscodeMemberNotDefinable` if the namespace
+    ///   is not one the shim knows — which is a programming error in the
+    ///   adaptor, caught here rather than surfacing as a member that silently
+    ///   went on throwing.
+    public func defineVSCodeMember(namespacePath: String, name: String, implementation: Any) throws {
+        let definition = VSCodeMemberDefinition(
+            namespacePath: namespacePath, name: name, implementation: implementation)
+        vscodeMemberDefinitions.append(definition)
+        if let runtime {
+            try apply(definition, to: runtime)
+        }
+    }
+
+    private struct VSCodeMemberDefinition {
+        let namespacePath: String
+        let name: String
+        let implementation: Any
+    }
+
+    private func apply(_ definition: VSCodeMemberDefinition, to runtime: JSValue) throws {
+        pendingException = nil
+        runtime.invokeMethod(
+            "defineMember",
+            withArguments: [definition.namespacePath, definition.name, definition.implementation])
+        if let message = pendingException {
+            pendingException = nil
+            throw ExtensionHostError.vscodeMemberNotDefinable(
+                identifier: identifier,
+                namespacePath: definition.namespacePath,
+                name: definition.name,
+                message: message
+            )
+        }
     }
 
     /// Releases the context, cancels every timer the extension scheduled, and
@@ -165,6 +291,13 @@ public final class ExtensionHost {
     ///
     /// Safe to call more than once, and safe to call on a host that never
     /// activated.
+    ///
+    /// **Calling it is mandatory.** Dropping the last reference to a host does
+    /// most of this on its own — `deinit` is the net below — but it cannot do
+    /// the part that matters: a repeating timer's `Task` keeps the host alive
+    /// until the task ends, so a host with a live `setInterval` is never
+    /// deallocated and its `deinit` never runs. Teardown is an act, not a
+    /// consequence of going out of scope.
     public func dispose() {
         isDisposed = true
 
@@ -173,6 +306,12 @@ public final class ExtensionHost {
         }
         timerTasks.removeAll()
 
+        // A suspended `activate()` has to be released, and this is the only
+        // thing that releases it: an extension's `activate()` promise may never
+        // settle, and there is no timeout to fall back on. Teardown is the
+        // escape.
+        finishActivation(.failure(.hostDisposed(identifier: identifier)))
+
         // Blocks installed into the context capture this host weakly, so there
         // is no cycle to break — but the handler is cleared anyway, because a
         // context torn down mid-evaluation would otherwise still have a route
@@ -180,6 +319,26 @@ public final class ExtensionHost {
         context?.exceptionHandler = nil
         runtime = nil
         context = nil
+
+        // The observer outlives the host in the direction that matters: it is
+        // supplied by a UI that keeps a strong reference to whatever it closes
+        // over, and a disposed host holding it would keep that alive for as
+        // long as the host itself is held. There is also nothing left to report.
+        onConsoleMessage = nil
+    }
+
+    /// The net under `dispose()`, for the host that was dropped without one.
+    ///
+    /// It can only ever catch the *non-repeating* case — see `dispose()` — but
+    /// that case is real: a host whose `activate()` threw, dropped by a caller
+    /// that never learned it had timers to cancel, would otherwise leave a
+    /// `setTimeout(fn, 3600000)` task asleep for the rest of the hour.
+    ///
+    /// `isolated deinit` because everything it touches is main-actor state.
+    isolated deinit {
+        for task in timerTasks.values {
+            task.cancel()
+        }
     }
 
     // MARK: - Entry point
@@ -191,7 +350,7 @@ public final class ExtensionHost {
     /// has no Node: a Node extension refused with a generic "could not load"
     /// is the single most likely confusion this feature can produce, so it gets
     /// its own error that says which runtime it needed and which one exists.
-    func resolveEntryPoint() throws -> URL {
+    private func resolveEntryPoint() throws -> URL {
         let manifest = loadedExtension.manifest
 
         guard let browser = manifest.browser else {
@@ -298,6 +457,9 @@ public final class ExtensionHost {
         let record: @convention(block) (String) -> Void = { [weak self] memberPath in
             MainActor.assumeIsolated { self?.handleNotImplemented(memberPath: memberPath) }
         }
+        let probe: @convention(block) (String) -> Void = { [weak self] memberPath in
+            MainActor.assumeIsolated { self?.handleNegativeProbe(memberPath: memberPath) }
+        }
         let schedule: @convention(block) (Int32, Double, Bool) -> Void = { [weak self] timerID, delay, repeats in
             MainActor.assumeIsolated {
                 self?.scheduleTimer(timerID: timerID, delayMilliseconds: delay, repeats: repeats)
@@ -309,6 +471,7 @@ public final class ExtensionHost {
 
         table.setObject(console, forKeyedSubscript: "console" as NSString)
         table.setObject(record, forKeyedSubscript: "recordNotImplemented" as NSString)
+        table.setObject(probe, forKeyedSubscript: "recordNegativeProbe" as NSString)
         table.setObject(schedule, forKeyedSubscript: "scheduleTimer" as NSString)
         table.setObject(cancel, forKeyedSubscript: "cancelTimer" as NSString)
         context.setObject(table, forKeyedSubscript: "__host" as NSString)
@@ -323,6 +486,13 @@ public final class ExtensionHost {
 
         let runtime = context.objectForKeyedSubscript("__extensionRuntime")
         guard let runtime, !runtime.isUndefined, !runtime.isNull else { return nil }
+
+        // Before the extension's first statement runs, so a member defined by
+        // an adaptor is already there when the module body reaches for it —
+        // extensions routinely destructure `vscode` at the top of the file.
+        for definition in vscodeMemberDefinitions {
+            try apply(definition, to: runtime)
+        }
 
         context.evaluateScript("delete globalThis.__extensionRuntime; delete globalThis.__host;")
         return runtime
@@ -346,11 +516,57 @@ public final class ExtensionHost {
 
     // MARK: - Evaluation
 
+    /// The extension's source, wrapped in the CommonJS parameter list.
+    ///
+    /// The prefix carries no trailing newline, and that is load-bearing rather
+    /// than terse: Node's module wrapper is written the same way so that line
+    /// *n* of the author's file is line *n* of the compiled script. Only the
+    /// first line's columns shift, and a stack trace an author reads against
+    /// their own editor agrees with it everywhere else.
+    private static func moduleWrapperSource(_ source: String) -> String {
+        // The trailing newline before `})` matters for the opposite reason: a
+        // source whose last line is a `//` comment would otherwise swallow the
+        // closing brace.
+        "(function (exports, require, module, __filename, __dirname) { \(source)\n})"
+    }
+
+    /// Compiles the extension's module *as its own script*, named after the
+    /// entry point, and runs it through the shim's CommonJS wrapper.
+    ///
+    /// Compiling host-side rather than with `new Function` inside the shim is
+    /// what puts the author's own path and line numbers in their stack traces.
+    /// JavaScriptCore attributes dynamically compiled code to no script at all
+    /// — a `//# sourceURL=` directive reaches Web Inspector and never
+    /// `Error.stack`, whose frames come back with an empty location — so the
+    /// source URL has to be attached at compile time, which only the host can
+    /// do.
     private func evaluateModule(runtime: JSValue, source: String, entryPoint: URL) throws -> JSValue {
+        guard let context else {
+            throw ExtensionHostError.javaScriptEngineUnavailable(identifier: identifier)
+        }
+
+        pendingException = nil
+        let wrapper = context.evaluateScript(
+            Self.moduleWrapperSource(source), withSourceURL: entryPoint)
+        if let message = pendingException {
+            // A syntax error in the extension's own file lands here, already
+            // carrying the file name it came from.
+            pendingException = nil
+            logger.error(
+                "Extension '\(self.identifier, privacy: .public)' would not compile: \(message, privacy: .public)")
+            throw ExtensionHostError.entryPointThrew(identifier: identifier, message: message)
+        }
+        guard let wrapper, wrapper.isObject else {
+            throw ExtensionHostError.entryPointThrew(
+                identifier: identifier,
+                message: "The entry point did not compile to a module function."
+            )
+        }
+
         pendingException = nil
         let exports = runtime.invokeMethod(
             "run",
-            withArguments: [source, entryPoint.path, entryPoint.deletingLastPathComponent().path]
+            withArguments: [wrapper, entryPoint.path, entryPoint.deletingLastPathComponent().path]
         )
         if let message = pendingException {
             pendingException = nil
@@ -367,7 +583,15 @@ public final class ExtensionHost {
         return exports
     }
 
-    /// Calls `exports.activate(context)` when the extension exports one.
+    /// Calls `exports.activate(context)` and waits for it to *finish*.
+    ///
+    /// The waiting is the point. `activate` may return a thenable, and the
+    /// shim's `callActivate` reports the end of it — resolution or rejection —
+    /// through a completion block rather than a return value, because a
+    /// rejected promise is invisible from Swift: JavaScriptCore does not route
+    /// unhandled rejections to a context's `exceptionHandler`, so
+    /// `pendingException` stays nil and an async `activate` that threw would
+    /// look exactly like one that succeeded.
     ///
     /// An extension without `activate` is legal — a manifest can ship code that
     /// only contributes through side effects — so its absence is logged and is
@@ -375,24 +599,62 @@ public final class ExtensionHost {
     /// context is a recorded, throwing stub like every `vscode` member, so an
     /// extension that reaches for `context.subscriptions` today is told which
     /// member it wanted rather than failing later on an `undefined`.
-    private func callActivate(on exports: JSValue, runtime: JSValue) throws {
-        guard let activate = exports.objectForKeyedSubscript("activate"),
-              !activate.isUndefined, !activate.isNull else {
-            logger.info("Extension '\(self.identifier, privacy: .public)' exports no activate() function")
-            return
-        }
+    private func callActivate(on exports: JSValue, runtime: JSValue) async throws {
+        // Named `context`, the way the author typed it. The ledger is read by a
+        // person looking for the line they wrote, and
+        // `vscode.ExtensionContext.subscriptions` is a name that appears
+        // nowhere in their file.
+        let activationContext = runtime.invokeMethod("makeStubNamespace", withArguments: ["context"])
 
-        let activationContext = runtime.invokeMethod(
-            "makeStubNamespace", withArguments: ["vscode.ExtensionContext"])
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            activationContinuation = { result in continuation.resume(with: result) }
 
-        pendingException = nil
-        activate.call(withArguments: [activationContext as Any])
-        if let message = pendingException {
+            let done: @convention(block) (Bool, String) -> Void = { [weak self] succeeded, message in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if succeeded {
+                        self.finishActivation(.success(()))
+                    } else {
+                        Self.logger.error(
+                            """
+                            Extension '\(self.identifier, privacy: .public)' threw from activate(): \
+                            \(message, privacy: .public)
+                            """)
+                        self.finishActivation(
+                            .failure(.activationThrew(identifier: self.identifier, message: message)))
+                    }
+                }
+            }
+
             pendingException = nil
-            logger.error(
-                "Extension '\(self.identifier, privacy: .public)' threw from activate(): \(message, privacy: .public)")
-            throw ExtensionHostError.activationThrew(identifier: identifier, message: message)
+            let hadActivate = runtime.invokeMethod(
+                "callActivate", withArguments: [exports, activationContext as Any, done])
+
+            // Only reachable if the bridge itself failed — the shim catches
+            // everything the extension can throw. Without it a shim that never
+            // called `done` would hang activation instead of failing it.
+            if let message = pendingException {
+                pendingException = nil
+                finishActivation(
+                    .failure(.activationThrew(identifier: identifier, message: message)))
+                return
+            }
+
+            if hadActivate?.toBool() != true {
+                logger.info("Extension '\(self.identifier, privacy: .public)' exports no activate() function")
+            }
         }
+    }
+
+    /// Ends the suspended `activate()`, once and only once.
+    ///
+    /// Three callers race for it — the shim's completion block, the bridge's
+    /// own failure path, and `dispose()` — and a `CheckedContinuation` resumed
+    /// twice is a crash, not a warning.
+    private func finishActivation(_ result: Result<Void, ExtensionHostError>) {
+        guard let resume = activationContinuation else { return }
+        activationContinuation = nil
+        resume(result)
     }
 
     private static func describe(_ exception: JSValue?) -> String {
@@ -439,6 +701,29 @@ public final class ExtensionHost {
             """)
     }
 
+    /// An extension asked whether a member exists and was honestly told no.
+    ///
+    /// `'registerCommand' in vscode.commands`, `Object.keys(vscode.window)`,
+    /// `getOwnPropertyDescriptor(...)` — feature detection, which must answer
+    /// rather than throw, or every library that guards its own calls would
+    /// break. But the question is worth more to task 5.8's report than the
+    /// throwing accesses are: an extension that *looked* and quietly took its
+    /// fallback path is telling us what it wanted, and nothing else in this
+    /// host would ever notice.
+    private func handleNegativeProbe(memberPath: String) {
+        let access = notImplementedLedger.recordProbe(
+            memberPath: memberPath, extensionIdentifier: identifier)
+        // First probe only, for the same reason as `handleNotImplemented`: a
+        // library that feature-detects inside a loop would otherwise fill the
+        // log with one line that carries no new information.
+        guard access.probeCount == 1 else { return }
+        logger.notice(
+            """
+            Extension '\(self.identifier, privacy: .public)' checked for \
+            '\(memberPath, privacy: .public)' and was told it does not exist
+            """)
+    }
+
     // MARK: - Timers
 
     private func scheduleTimer(timerID: Int32, delayMilliseconds: Double, repeats: Bool) {
@@ -467,8 +752,24 @@ public final class ExtensionHost {
         }
     }
 
+    /// One timer task ended. Exactly as many of these as there were starts.
+    ///
+    /// The count going negative would mean a task finished twice, which cannot
+    /// happen through any route this file has — so it is stated rather than
+    /// clamped. A `max(0, …)` here would keep the invariant *looking* true
+    /// while the bug it was protecting against went on being a bug, and this
+    /// counter is the only evidence a teardown test has.
     private func timerTaskDidFinish() {
-        runningTimerTasks = max(0, runningTimerTasks - 1)
+        guard runningTimerTasks > 0 else {
+            assertionFailure("A timer task finished that was never counted as running.")
+            logger.fault(
+                """
+                Extension '\(self.identifier, privacy: .public)' finished a timer task that was \
+                never counted as running
+                """)
+            return
+        }
+        runningTimerTasks -= 1
     }
 
     private func cancelTimer(timerID: Int32) {
@@ -566,6 +867,11 @@ public enum ExtensionHostError: Error, Sendable, Equatable {
     case javaScriptEngineUnavailable(identifier: String)
 
     case hostDisposed(identifier: String)
+
+    /// `defineVSCodeMember` named a namespace the shim does not have. An
+    /// adaptor's bug, not an extension's — and one that would otherwise present
+    /// as a member that mysteriously went on throwing.
+    case vscodeMemberNotDefinable(identifier: String, namespacePath: String, name: String, message: String)
 }
 
 extension ExtensionHostError: LocalizedError {
@@ -599,6 +905,10 @@ extension ExtensionHostError: LocalizedError {
             return "'\(identifier)' could not be started: a JavaScript context could not be created."
         case let .hostDisposed(identifier):
             return "'\(identifier)' cannot be activated: its host has already been torn down."
+        case let .vscodeMemberNotDefinable(identifier, namespacePath, name, message):
+            return """
+                '\(identifier)' could not have '\(name)' installed on '\(namespacePath)': \(message)
+                """
         }
     }
 }

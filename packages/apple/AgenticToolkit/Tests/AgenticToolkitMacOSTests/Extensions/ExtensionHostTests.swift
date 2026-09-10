@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import JavaScriptCore
 @testable import AgenticToolkitCore
 @testable import AgenticToolkitMacOS
 
@@ -274,8 +275,25 @@ struct ExtensionHostTests {
         try FileManager.default.createDirectory(at: extensionDirectory, withIntermediateDirectories: true)
         try ExtensionFixtures.write("console.log('sibling ran');", to: "ext-evil/web.js", in: parent)
 
+        // Premise 1: the decoy exists and is readable, by a route the subject
+        // does not use.
         let decoy = parent.appendingPathComponent("ext-evil/web.js")
         #expect(FileManager.default.isReadableFile(atPath: decoy.path))
+
+        // Premise 2: the escape really does resolve to the decoy. This is not
+        // ceremony — `URL(fileURLWithPath:)` consults the file system, and a
+        // decoy that resolved somewhere else would leave the refusal proving
+        // nothing about sibling prefixes.
+        let escaped = URL(fileURLWithPath: "../ext-evil/web.js", relativeTo: extensionDirectory)
+            .resolvingSymlinksInPath().standardizedFileURL
+        let canonicalDecoy = decoy.resolvingSymlinksInPath().standardizedFileURL
+        #expect(escaped.path == canonicalDecoy.path)
+
+        // Premise 3: the two directory paths really are in the prefix relation
+        // this test exists to defeat. A fixture rename that broke it would
+        // otherwise turn this into a duplicate of the `../outside/` test.
+        #expect(canonicalDecoy.path.hasPrefix(
+            extensionDirectory.resolvingSymlinksInPath().standardizedFileURL.path))
 
         let loaded = LoadedExtension(
             manifest: try manifest(name: "sibling", browser: "../ext-evil/web.js"),
@@ -284,9 +302,18 @@ struct ExtensionHostTests {
         let host = ExtensionHost(loadedExtension: loaded)
         defer { host.dispose() }
 
-        await #expect(throws: ExtensionHostError.self) {
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        await #expect(throws: ExtensionHostError.entryPointEscapesExtensionDirectory(
+            identifier: "test.sibling",
+            declared: "../ext-evil/web.js",
+            resolved: canonicalDecoy.path
+        )) {
             try await host.activate()
         }
+        #expect(recorder.texts.isEmpty)
+        #expect(!host.isActivated)
     }
 
     // MARK: - Failure in the extension's own code
@@ -758,8 +785,11 @@ struct ExtensionHostTests {
 
         try await host.activate()
 
-        #expect(recorder.texts == ["vscode.ExtensionContext.subscriptions"])
-        #expect(ledger.accesses.map(\.memberPath) == ["vscode.ExtensionContext.subscriptions"])
+        // `context.subscriptions`, not `vscode.ExtensionContext.subscriptions`:
+        // the ledger is read by a person looking for the line they wrote, and
+        // the type's name appears nowhere in their file.
+        #expect(recorder.texts == ["context.subscriptions"])
+        #expect(ledger.accesses.map(\.memberPath) == ["context.subscriptions"])
     }
 
     /// The `vscode` object may not be mutated into working. An extension that
@@ -914,5 +944,619 @@ struct ExtensionHostTests {
             #expect(identifier == "test.absent")
             #expect(path.hasSuffix("dist/web.js"))
         }
+    }
+
+    // MARK: - Asynchronous activation
+
+    /// The failure this whole file exists to prevent.
+    ///
+    /// `export async function activate()` is what most real extensions ship,
+    /// and a throw from one produces a *rejected promise*. JavaScriptCore does
+    /// not route an unhandled rejection to a context's `exceptionHandler`, so
+    /// nothing on the Swift side sees it: without the shim's completion
+    /// callback the host reports a clean activation for an extension that
+    /// failed, which is exactly "activated fine, did nothing".
+    @Test
+    func aRejectingAsyncActivateFailsWithItsReason() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = async function () {
+                await new Promise(function (resolve) { setTimeout(resolve, 1); });
+                throw new Error('async activate exploded');
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        do {
+            try await host.activate()
+            Issue.record("A rejected activate() promise must fail activation.")
+        } catch let error as ExtensionHostError {
+            guard case let .activationThrew(identifier, message) = error else {
+                Issue.record("Expected activationThrew, got \(error)")
+                return
+            }
+            #expect(identifier == "test.alpha")
+            #expect(message.contains("async activate exploded"))
+        }
+        #expect(!host.isActivated)
+    }
+
+    /// A rejection that is not an `Error` still has to arrive as something.
+    /// `Promise.reject('nope')` is legal and libraries do it.
+    @Test
+    func aRejectionThatIsNotAnErrorIsStillReported() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: "exports.activate = function () { return Promise.reject('a bare string'); };",
+            in: directory
+        )
+        defer { host.dispose() }
+
+        await #expect(throws: ExtensionHostError.activationThrew(
+            identifier: "test.alpha",
+            message: "Non-Error thrown: a bare string"
+        )) {
+            try await host.activate()
+        }
+    }
+
+    /// The other half of M1, and the one 5.3 depends on: activation is not
+    /// signalled until `activate()` has actually finished.
+    ///
+    /// The extension registers its work *after* a timer, which is what an
+    /// async `activate` really does. A host that did not await the returned
+    /// promise would return here with `registered` still empty, and the command
+    /// a palette asked for a moment later would not exist.
+    @Test
+    func activationWaitsForASlowAsyncActivateToFinish() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = async function () {
+                console.log('activate started');
+                await new Promise(function (resolve) { setTimeout(resolve, 30); });
+                console.log('activate registered its command');
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == ["activate started", "activate registered its command"])
+        #expect(host.isActivated)
+    }
+
+    /// An `activate()` that resolves normally still activates — the positive
+    /// control for the two tests above, which would both pass against a host
+    /// that failed every async activation.
+    @Test
+    func aResolvingAsyncActivateActivates() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = async function () {
+                await Promise.resolve();
+                console.log('resolved cleanly');
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(host.isActivated)
+        #expect(recorder.texts == ["resolved cleanly"])
+    }
+
+    /// Teardown is the escape from an `activate()` that never settles. There is
+    /// no timeout, deliberately — a real extension may await a network round
+    /// trip, and a host that gave up at *n* seconds would report a failure that
+    /// did not happen.
+    @Test
+    func disposingReleasesAnActivateThatNeverSettles() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                console.log('hanging');
+                return new Promise(function () {});
+            };
+            """,
+            in: directory
+        )
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        let activation = Task { @MainActor in try await host.activate() }
+
+        // The dispose has to land after `activate()` has suspended, which is
+        // why it waits for the extension's own first line to arrive. Bounded,
+        // so a regression that never reached it fails rather than hangs.
+        for _ in 0..<100 where recorder.texts.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(recorder.texts == ["hanging"])
+
+        host.dispose()
+
+        await #expect(throws: ExtensionHostError.hostDisposed(identifier: "test.alpha")) {
+            try await activation.value
+        }
+        #expect(!host.isActivated)
+    }
+
+    // MARK: - The 5.3-5.7 seam
+
+    /// Replacing one stub with a real implementation, which is what stages 5.3
+    /// through 5.7 each do. Three things at once because they are one contract:
+    /// the defined member runs, it is *not* recorded as unimplemented, and its
+    /// siblings still throw and are still recorded.
+    @Test
+    func aDefinedMemberRunsIsNotRecordedAndLeavesItsSiblingsThrowing() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let ledger = NotImplementedLedger()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                console.log(vscode.commands.registerCommand('hello.world'));
+                try { vscode.commands.executeCommand('x'); } catch (error) { console.log(error.memberPath); }
+            };
+            """,
+            in: directory,
+            ledger: ledger
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        let register: @convention(block) (String) -> String = { "registered:\($0)" }
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.commands", name: "registerCommand", implementation: register)
+
+        try await host.activate()
+
+        #expect(recorder.texts == ["registered:hello.world", "vscode.commands.executeCommand"])
+        #expect(ledger.accesses.map(\.memberPath) == ["vscode.commands.executeCommand"])
+    }
+
+    /// A member defined *after* activation is live too — an adaptor wired late,
+    /// or one that grows a member while an extension is already running.
+    @Test
+    func aMemberDefinedAfterActivationIsLiveImmediately() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                // Captured now, called later — the closure holds the namespace
+                // from before the member existed.
+                globalThis.ask = function () {
+                    try { return vscode.window.showInformationMessage('hi'); } catch (error) { return error.name; }
+                };
+                console.log(globalThis.ask());
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        #expect(recorder.texts == ["NotImplementedError"])
+
+        let show: @convention(block) (String) -> String = { "shown:\($0)" }
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "showInformationMessage", implementation: show)
+
+        let context = try #require(host.javaScriptContext)
+        let answer = context.evaluateScript("globalThis.ask()")
+        #expect(answer?.toString() == "shown:hi")
+    }
+
+    /// A namespace the shim does not have is an adaptor's bug, and it is
+    /// refused rather than silently leaving the member throwing.
+    @Test
+    func definingAMemberOnAnUnknownNamespaceIsRefused() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(source: "exports.activate = function () {};", in: directory)
+        defer { host.dispose() }
+
+        let nothing: @convention(block) () -> Void = {}
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.notANamespace", name: "x", implementation: nothing)
+
+        do {
+            try await host.activate()
+            Issue.record("An unknown namespace must refuse the definition.")
+        } catch let error as ExtensionHostError {
+            guard case let .vscodeMemberNotDefinable(identifier, namespacePath, name, message) = error else {
+                Issue.record("Expected vscodeMemberNotDefinable, got \(error)")
+                return
+            }
+            #expect(identifier == "test.alpha")
+            #expect(namespacePath == "vscode.notANamespace")
+            #expect(name == "x")
+            // The refusal lists what *does* exist, so the author of the adaptor
+            // does not have to go read the shim to find the spelling.
+            #expect(message.contains("vscode.commands"))
+        }
+        #expect(!host.isActivated)
+    }
+
+    // MARK: - Coercion and formatting
+
+    /// Every way JavaScript turns an object into a string, applied to a
+    /// namespace stub. All four used to throw `TypeError: Cannot convert object
+    /// to primitive value` — an error that names nothing and points at nothing,
+    /// from code the author did not write.
+    @Test
+    func aNamespaceStubCoercesToSomethingThatSaysWhatItIs() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let ledger = NotImplementedLedger()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                console.log('concat: ' + vscode);
+                console.log(`template: ${vscode.commands}`);
+                console.log(String(vscode.window));
+                console.log(vscode.workspace.toString() + ' ' + vscode.languages.valueOf());
+                console.log(vscode);
+                console.log('%s', vscode.window);
+                console.log(vscode.hasOwnProperty('commands') + ',' + vscode.hasOwnProperty('nope'));
+                console.log(JSON.stringify(vscode));
+            };
+            """,
+            in: directory,
+            ledger: ledger
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == [
+            "concat: [VSCodeNamespace vscode]",
+            "template: [VSCodeNamespace vscode.commands]",
+            "[VSCodeNamespace vscode.window]",
+            "[VSCodeNamespace vscode.workspace] [VSCodeNamespace vscode.languages]",
+            // Inspecting a namespace shows what is *in* it, which is a
+            // different and more useful answer than stringifying it.
+            "{ commands: {}, workspace: {}, window: {}, languages: {}, lm: {} }",
+            "[VSCodeNamespace vscode.window]",
+            "true,false",
+            "{\"commands\":{},\"workspace\":{},\"window\":{},\"languages\":{},\"lm\":{}}"
+        ])
+        // None of that is a reach for an unimplemented member, and none of it
+        // may be recorded as one.
+        #expect(ledger.accesses.isEmpty)
+    }
+
+    /// Node's `util.format` specifiers. Extension authors write
+    /// `console.log('%s took %dms', name, elapsed)`, and a host that printed
+    /// the format string literally would make its own logging look broken.
+    @Test
+    func consoleHonoursNodeFormatSpecifiers() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                console.log('%s took %dms and %i%% of %j', 'load', 12.7, 42.9, { a: 1 });
+                console.log('100% sure');
+                console.log('a %s b');
+                console.log('%o and %f', [1, 2], '3.5kg');
+                console.warn('count', [1, 2, 3]);
+                console.log('%c styled', 'color: red', 'tail');
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == [
+            "load took 12.7ms and 42% of {\"a\":1}",
+            // A `%` with no specifier after it is not a specifier.
+            "100% sure",
+            // A specifier with no argument left is printed as written.
+            "a %s b",
+            "[ 1, 2 ] and 3.5",
+            // No format string, so the arguments are inspected and joined.
+            "count [ 1, 2, 3 ]",
+            // `%c` is a devtools CSS directive: it consumes its argument and
+            // prints nothing, as Node does.
+            " styled tail"
+        ])
+    }
+
+    // MARK: - Feature detection
+
+    /// `'x' in ns`, `Object.keys(ns)` and `getOwnPropertyDescriptor(ns, 'x')`
+    /// must answer honestly rather than throw — every library that guards its
+    /// own calls would break otherwise. But the question is worth recording:
+    /// an extension that *looked* and quietly took its fallback path is telling
+    /// us what it wanted, and nothing else in this host would ever notice.
+    @Test
+    func aNegativeProbeIsAnsweredHonestlyAndStillRecorded() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let ledger = NotImplementedLedger()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                console.log(('registerCommand' in vscode.commands) + ',' +
+                            (Object.getOwnPropertyDescriptor(vscode.window, 'activeTextEditor') === undefined));
+                // Probed twice, and the second is not a second row.
+                if ('registerCommand' in vscode.commands) { console.log('unreachable'); }
+                // A member that *is* there answers yes and is not recorded.
+                console.log('commands' in vscode);
+                console.log(Object.keys(vscode).join(','));
+            };
+            """,
+            in: directory,
+            ledger: ledger
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == ["false,true", "true", "commands,workspace,window,languages,lm"])
+
+        #expect(ledger.accesses.map(\.memberPath) == [
+            "vscode.commands.registerCommand", "vscode.window.activeTextEditor"
+        ])
+        let probed = try #require(ledger.accesses.first)
+        #expect(probed.memberPath == "vscode.commands.registerCommand")
+        #expect(probed.probeCount == 2)
+        // Looking is not using: nothing here was refused a call.
+        #expect(ledger.accesses.allSatisfy { $0.count == 0 })
+    }
+
+    /// A member reached both ways is one row carrying both numbers — a library
+    /// commonly feature-detects once and then calls anyway, and two rows would
+    /// read as two different members.
+    @Test
+    func probingAndThenUsingTheSameMemberIsOneRow() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let ledger = NotImplementedLedger()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                if (!('registerCommand' in vscode.commands)) {
+                    try { vscode.commands.registerCommand('x'); } catch (error) { console.log(error.memberPath); }
+                }
+            };
+            """,
+            in: directory,
+            ledger: ledger
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == ["vscode.commands.registerCommand"])
+        #expect(ledger.accesses.count == 1)
+        let access = try #require(ledger.accesses.first)
+        #expect(access.count == 1)
+        #expect(access.probeCount == 1)
+    }
+
+    // MARK: - Stack traces
+
+    /// The author of a throwing extension has to be able to find their own
+    /// line. JavaScriptCore attributes dynamically compiled code — `eval`,
+    /// `new Function` — to no script at all: a `//# sourceURL=` directive
+    /// reaches Web Inspector and never `Error.stack`, whose frames come back
+    /// with an empty location. So the module wrapper is compiled host-side with
+    /// the entry point as its source URL, and the wrapper's prefix carries no
+    /// newline so that line *n* of the author's file stays line *n*.
+    @Test
+    func aThrowNamesTheExtensionsOwnFileAndLine() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            var unused = 1;
+            var alsoUnused = 2;
+            throw new Error('top-level boom');
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        do {
+            try await host.activate()
+            Issue.record("A top-level throw must not activate.")
+        } catch let error as ExtensionHostError {
+            guard case let .entryPointThrew(_, message) = error else {
+                Issue.record("Expected entryPointThrew, got \(error)")
+                return
+            }
+            // Line 3 of the file above, named as the file the author wrote.
+            #expect(message.contains("web.js:3"), "stack was: \(message)")
+        }
+    }
+
+    /// The same, from inside `activate()`, which travels a different route —
+    /// the shim catches it and describes it rather than the context's exception
+    /// handler seeing it.
+    @Test
+    func aThrowFromActivateAlsoNamesTheFileAndLine() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            var unused = 1;
+            exports.activate = function () {
+                throw new Error('activate boom');
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        do {
+            try await host.activate()
+            Issue.record("A throw from activate() must surface.")
+        } catch let error as ExtensionHostError {
+            guard case let .activationThrew(_, message) = error else {
+                Issue.record("Expected activationThrew, got \(error)")
+                return
+            }
+            #expect(message.contains("web.js:3"), "stack was: \(message)")
+        }
+    }
+
+    // MARK: - Teardown, continued
+
+    /// `dispose()` releasing the context is correct-but-unobservable from
+    /// outside: every behaviour a test can see afterwards — no callbacks, no
+    /// timers, refused re-activation — is guaranteed by `isDisposed` alone, so
+    /// a `dispose()` that leaked the whole JavaScript heap would pass all of
+    /// them. A weak reference is the only way to state it, and the context is
+    /// the largest thing this host owns.
+    @Test
+    func teardownActuallyReleasesTheJavaScriptContext() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: "exports.activate = function () { console.log('ran'); };",
+            in: directory
+        )
+
+        try await host.activate()
+
+        weak var released: JSContext?
+        released = host.javaScriptContext
+        // The positive control: without it this test would pass against a host
+        // that never made a context at all.
+        #expect(released != nil)
+
+        host.dispose()
+
+        #expect(host.javaScriptContext == nil)
+        #expect(released == nil, "dispose() must release the JSContext, not merely stop using it")
+    }
+
+    // MARK: - The web-platform slice, continued
+
+    /// The `URL`/`URLSearchParams` surface an extension actually reaches for.
+    ///
+    /// The shim implements a lot of this, and the alternative to testing it was
+    /// to cut it back to what one test happened to touch. Coverage went up
+    /// instead: every line of it is on the path of ordinary extension code —
+    /// building a request URL, reading one apart, following a
+    /// protocol-relative asset reference — and cutting it would mean the next
+    /// extension to use it fails on a member that silently is not there.
+    @Test
+    func theShimSuppliesTheURLSurfaceExtensionsActuallyUse() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                // Protocol-relative: the host belongs to the authority, not to
+                // the path. Common in real extension code, and swallowing the
+                // host into the path produces a request to the wrong server.
+                var cdn = new URL('//cdn.example.com/lib/x.js', 'https://ext.example.com/a/b');
+                console.log(cdn.href + ' | ' + cdn.hostname + ' | ' + cdn.pathname);
+
+                // `searchParams` is a live view: a mutation writes back to href.
+                var api = new URL('https://a.example.com/p?x=1');
+                api.searchParams.set('y', 'a b!');
+                api.searchParams.append('x', '2');
+                console.log(api.href + ' | ' + api.search + ' | ' + api.searchParams.getAll('x').join(','));
+
+                var creds = new URL('https://user:pw@a.example.com:8443/p');
+                console.log(creds.origin + ' | ' + creds.username + ':' + creds.password + ' | ' + creds.href);
+
+                var params = new URLSearchParams('b=3&a=1&b=2');
+                params.sort();
+                var sorted = params.toString();
+                params.delete('b');
+                console.log(sorted + ' | ' + params.toString() + ' | ' + params.size);
+
+                console.log(String(new URL('./d/../e?q#h', 'https://a.example.com/base/c')));
+
+                try { new URL('/x', 'not-a-url'); } catch (error) { console.log(error.name); }
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == [
+            "https://cdn.example.com/lib/x.js | cdn.example.com | /lib/x.js",
+            // `!` is not escaped by form encoding; a space becomes `+`.
+            "https://a.example.com/p?x=1&y=a+b%21&x=2 | ?x=1&y=a+b%21&x=2 | 1,2",
+            "https://a.example.com:8443 | user:pw | https://user:pw@a.example.com:8443/p",
+            // A stable sort: `b=3` was before `b=2` and stays before it.
+            "a=1&b=3&b=2 | a=1 | 1",
+            "https://a.example.com/base/e?q#h",
+            "TypeError"
+        ])
     }
 }

@@ -137,10 +137,88 @@
         return prefix + formatEntries(parts, '{', '}');
     }
 
+    // Node's `util.format` specifiers, because extension authors write
+    // `console.log('%s took %dms', name, elapsed)` and a host that printed the
+    // format string literally would make its own logging look broken.
+    var SPECIFIER_PATTERN = /%([sdifjoOc%])/g;
+
+    // Node's rule for `%s` is "objects that have no user defined toString
+    // function are inspected", and the distinction earns its keep here: a
+    // namespace stub carries one, and `[VSCodeNamespace vscode.window]` says
+    // considerably more than the `{}` an inspection of an empty-looking proxy
+    // would. Built-in `toString`s do not count as user-defined, so `%s` of an
+    // array still inspects to `[ 1, 2 ]` rather than collapsing to `1,2`.
+    var BUILT_IN_TO_STRINGS = [
+        Object.prototype.toString,
+        Array.prototype.toString,
+        Error.prototype.toString,
+        Date.prototype.toString,
+        RegExp.prototype.toString,
+        Function.prototype.toString
+    ];
+
+    function hasUserDefinedToString(value) {
+        var candidate;
+        try {
+            candidate = value.toString;
+        } catch (error) {
+            // A throwing getter is not a `toString` worth calling.
+            return false;
+        }
+        return typeof candidate === 'function' && BUILT_IN_TO_STRINGS.indexOf(candidate) === -1;
+    }
+
+    function applySpecifier(specifier, value) {
+        switch (specifier) {
+        case 's':
+            if (typeof value === 'string') { return value; }
+            if (value === null || typeof value !== 'object') { return format(value, 0, []); }
+            return hasUserDefinedToString(value) ? String(value) : format(value, 0, []);
+        case 'd':
+            return typeof value === 'bigint' ? String(value) : String(Number(value));
+        case 'i':
+            return typeof value === 'bigint' ? String(value) : String(parseInt(value, 10));
+        case 'f':
+            return String(parseFloat(value));
+        case 'j':
+            try {
+                return JSON.stringify(value);
+            } catch (error) {
+                return '[Circular]';
+            }
+        case 'o':
+        case 'O':
+            return format(value, 0, []);
+        default:
+            // '%c' is a CSS directive for browser devtools. There is no styling
+            // here, so it consumes its argument and prints nothing, which is
+            // what Node does too.
+            return '';
+        }
+    }
+
     function formatArguments(args) {
         var parts = [];
-        for (var index = 0; index < args.length; index += 1) {
-            parts.push(format(args[index], 0, []));
+        var next = 0;
+        if (args.length > 0 && typeof args[0] === 'string' && args[0].indexOf('%') !== -1) {
+            next = 1;
+            parts.push(args[0].replace(SPECIFIER_PATTERN, function (match, specifier) {
+                if (specifier === '%') {
+                    return '%';
+                }
+                if (next >= args.length) {
+                    // Node leaves an unsatisfied specifier standing rather than
+                    // printing `undefined`, so the author can see they are one
+                    // argument short.
+                    return match;
+                }
+                var value = args[next];
+                next += 1;
+                return applySpecifier(specifier, value);
+            }));
+        }
+        for (; next < args.length; next += 1) {
+            parts.push(format(args[next], 0, []));
         }
         return parts.join(' ');
     }
@@ -245,19 +323,71 @@
     // handed back as a throwing function would be quiet in exactly the way
     // this mechanism exists to prevent.
     //
-    // Replacing a stub with a real implementation is a one-line change: put
-    // the value in the namespace's member table (see `vscodeMembers` below).
-    // The stub path is only ever reached for keys the table does not hold, so
-    // stages 5.3-5.7 each fill in a slice without touching this machinery.
+    // Replacing a stub with a real implementation is a one-line change:
+    // `__extensionRuntime.defineMember(namespacePath, name, value)` puts it in
+    // the namespace's member table. The stub path is only ever reached for keys
+    // the table does not hold, so stages 5.3-5.7 each fill in a slice without
+    // touching this machinery.
 
     // Keys the language, the debugger and bundled CommonJS interop shims probe
     // on any object they are handed. Throwing on these would fail an extension
     // before its first statement ran, and none of them is an extension asking
-    // for an API member — so they answer `undefined` quietly.
-    var PROBE_KEYS = [
-        'then', 'toJSON', 'toString', 'valueOf', 'constructor', 'inspect',
-        '__esModule', 'prototype', 'nodeType', 'hasOwnProperty'
+    // for an API member — so they are answered rather than recorded.
+    //
+    // Two thirds of this list is *derived* rather than guessed, which matters:
+    // an empirical list is one nobody can extend correctly, and the omissions
+    // in one are invisible until an extension trips on them.
+    //
+    //   1. Symbol keys are handled by the `typeof key === 'symbol'` branch in
+    //      the trap below, not by this list. That covers every well-known
+    //      symbol at once — `Symbol.toPrimitive`, `Symbol.iterator`,
+    //      `Symbol.toStringTag`, `Symbol.hasInstance`,
+    //      `Symbol.for('nodejs.util.inspect.custom')` — and it is sound rather
+    //      than lucky: the VS Code API has no symbol-keyed member, so a symbol
+    //      access can never be an author asking for one.
+    //   2. Everything on `Object.prototype`, read off `Object.prototype`. No
+    //      VS Code API member collides with any of these names.
+    //   3. A short interop tail that genuinely is empirical — but every entry
+    //      names who reaches for it, so the next person can judge an addition
+    //      instead of accreting one.
+    var INTEROP_PROBE_KEYS = [
+        'then',        // Promise adoption: `await vscode`, `Promise.resolve(ns)`
+        'toJSON',      // JSON.stringify
+        '__esModule',  // Babel / TypeScript / webpack / esbuild CommonJS-ESM interop
+        'default',     // the same interop shims, on the path where __esModule is absent
+        'inspect',     // Node's legacy util.inspect hook
+        'prototype',   // debuggers, and `instanceof`-shaped duck typing
+        'nodeType',    // DOM duck typing in libraries bundled into web extensions
+        '$$typeof'     // React element duck typing, ditto
     ];
+
+    var PROBE_KEYS = Object.getOwnPropertyNames(Object.prototype).concat(INTEROP_PROBE_KEYS);
+
+    // What those probes answer *with*.
+    //
+    // `undefined` is the wrong answer for the three coercion hooks, and wrong
+    // in the expensive direction: with no callable `toString` or `valueOf`,
+    // `'config: ' + vscode` and `` `${vscode.window}` `` throw
+    // `TypeError: Cannot convert object to primitive value`, which names
+    // neither the namespace nor the extension nor a member. A namespace that
+    // stringifies to something saying what it is beats both that throw and a
+    // bare `undefined`.
+    function probeValue(path, table, key) {
+        switch (key) {
+        case 'toString':
+        case 'toLocaleString':
+        case 'valueOf':
+        case 'inspect':
+            return function () { return '[VSCodeNamespace ' + path + ']'; };
+        case 'hasOwnProperty':
+        case 'propertyIsEnumerable':
+            return function (probed) { return Object.prototype.hasOwnProperty.call(table, probed); };
+        case 'isPrototypeOf':
+            return function () { return false; };
+        default:
+            return undefined;
+        }
+    }
 
     function notImplementedError(memberPath) {
         var error = new Error(
@@ -267,6 +397,21 @@
         error.name = 'NotImplementedError';
         error.memberPath = memberPath;
         return error;
+    }
+
+    // Feature detection — `'registerCommand' in vscode.commands`,
+    // `Object.getOwnPropertyDescriptor(...)` — is *supposed* to answer quietly:
+    // an honest "no" is the correct behaviour and throwing at it would break
+    // the extensions that ask politely. But a negative answer is still an
+    // extension saying which member it wanted, and task 5.8's report is more
+    // useful for knowing what an extension looked for and did not find than for
+    // knowing only what it tripped over. So the probe is recorded without being
+    // refused.
+    function recordNegativeProbe(path, key) {
+        if (typeof key === 'symbol' || PROBE_KEYS.indexOf(key) !== -1) {
+            return;
+        }
+        host.recordNegativeProbe(path + '.' + key);
     }
 
     // `members` is the table of members that *are* implemented at `path`.
@@ -285,14 +430,18 @@
                     return table[key];
                 }
                 if (PROBE_KEYS.indexOf(key) !== -1) {
-                    return undefined;
+                    return probeValue(path, table, key);
                 }
                 var memberPath = path + '.' + key;
                 host.recordNotImplemented(memberPath);
                 throw notImplementedError(memberPath);
             },
             has: function (target, key) {
-                return typeof key !== 'symbol' && key in table;
+                if (typeof key !== 'symbol' && key in table) {
+                    return true;
+                }
+                recordNegativeProbe(path, key);
+                return false;
             },
             set: function (target, key) {
                 throw new TypeError(
@@ -309,6 +458,7 @@
             },
             getOwnPropertyDescriptor: function (target, key) {
                 if (typeof key === 'symbol' || !(key in table)) {
+                    recordNegativeProbe(path, key);
                     return undefined;
                 }
                 return { value: table[key], enumerable: true, configurable: true, writable: false };
@@ -324,14 +474,40 @@
     // surface this host has made no plan for yet.
     var VSCODE_NAMESPACES = ['commands', 'workspace', 'window', 'languages', 'lm'];
 
+    // The seam stages 5.3-5.7 land on, and the reason the tables are *kept*
+    // rather than passed anonymously into `makeStubNamespace`. A table nothing
+    // holds a reference to cannot be added to afterwards, which would have made
+    // "replacing a stub is a local change" true only of a rewrite of this
+    // block.
     var vscodeMembers = Object.create(null);
+    var namespaceTables = Object.create(null);
+    namespaceTables.vscode = vscodeMembers;
+
     VSCODE_NAMESPACES.forEach(function (name) {
-        // Each namespace gets its own member table. Stage 5.3 implements
-        // `vscode.commands.registerCommand` by putting a function in this
-        // one — nothing else in this file changes.
-        vscodeMembers[name] = makeStubNamespace('vscode.' + name, Object.create(null));
+        var table = Object.create(null);
+        namespaceTables['vscode.' + name] = table;
+        vscodeMembers[name] = makeStubNamespace('vscode.' + name, table);
     });
     var vscode = makeStubNamespace('vscode', vscodeMembers);
+
+    // Installs one real implementation over one stub. Stage 5.3 registers
+    // `vscode.commands.registerCommand` by calling this with a Swift block; the
+    // stub path is only ever reached for keys the table does not hold, so its
+    // siblings go on throwing and nothing else in this file changes.
+    //
+    // Refuses an unknown namespace rather than creating one: a typo would
+    // otherwise install a member nothing can reach and report success, which is
+    // the quiet failure this whole file exists to avoid.
+    function defineMember(namespacePath, name, value) {
+        var table = namespaceTables[namespacePath];
+        if (!table) {
+            throw new Error(
+                "Cannot implement '" + name + "' on '" + namespacePath + "': no such namespace. " +
+                'Known namespaces: ' + Object.keys(namespaceTables).join(', ') + '.'
+            );
+        }
+        table[name] = value;
+    }
 
     // Deliberately not implemented in this task, and this stub is the record
     // of that decision rather than a comment promising one later. Giving
@@ -809,6 +985,20 @@
             parseAbsolute(this, match);
         } else if (base === undefined || base === null) {
             throw new TypeError("Invalid URL: '" + text + "'");
+        } else if (text.slice(0, 2) === '//') {
+            // A protocol-relative reference borrows the base's scheme and
+            // replaces everything after it. Left to the relative path resolver
+            // this parses *plausibly* — `//cdn.example.com/x` against
+            // `https://a.com/p/` folds the host into the path and `hostname`
+            // reads back `a.com` — which is the one silent mis-parse in a file
+            // whose whole policy is to fail loudly instead.
+            var borrowed = ABSOLUTE_PATTERN.exec(
+                (base instanceof URL ? base : new URL(String(base)))._protocol + text
+            );
+            if (!borrowed) {
+                throw new TypeError("Invalid URL: '" + text + "'");
+            }
+            parseAbsolute(this, borrowed);
         } else {
             parseRelative(this, text, base);
         }
@@ -892,14 +1082,79 @@
     // extension that used the other one would otherwise export nothing and
     // "activate" into silence.
     //
-    // `new Function` compiles the body in the global scope, so the extension
-    // sees exactly the five parameters named here and none of this file's
-    // internals.
-    function run(source, filename, dirname) {
+    // `wrapper` arrives already compiled, from the host, and that is the whole
+    // point of the split. This file used to build it with `new Function` and a
+    // trailing `//# sourceURL=` directive — but JavaScriptCore attributes
+    // dynamically compiled code to no script at all. Measured against the real
+    // engine: a throw from inside `new Function` (or `eval`) code produces
+    // stack frames of the form `boom@` with an empty location, and an error
+    // object with no `sourceURL` property, whether the directive is spelled
+    // `//#` or `//@` and wherever in the body it is placed. The directive is a
+    // Web Inspector affordance; it never reaches `Error.stack`.
+    //
+    // So the host compiles the wrapper as its own script through
+    // `evaluateScript(_:withSourceURL:)`, and the extension's own path and line
+    // numbers survive into every stack trace. The person this task serves most
+    // directly is an author reading the stack of their own throw.
+    //
+    // The wrapper's parameters are the CommonJS five and nothing else: it is
+    // compiled in the global scope, so the extension sees no internals of this
+    // file.
+    function run(wrapper, filename, dirname) {
         var module = { exports: {} };
-        var wrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', source);
         wrapper.call(module.exports, module.exports, require, module, filename, dirname);
         return module.exports;
+    }
+
+    function describeThrown(value) {
+        return value instanceof Error ? format(value, 0, []) : 'Non-Error thrown: ' + format(value, 0, []);
+    }
+
+    // Calls the extension's `activate` and reports how it *ended*, which is not
+    // the same question as whether the call returned.
+    //
+    // `activate(context): any | Thenable<any>` is what VS Code declares, and
+    // `export async function activate()` is the shape most real extensions
+    // ship. An async `activate` that throws produces a rejected promise, and
+    // JSC routes unhandled rejections nowhere — not to the context's exception
+    // handler, not anywhere the host can see. Reporting a clean activation for
+    // an extension that failed is the exact outcome this whole file exists to
+    // prevent, so the rejection is caught here, where it is visible, and handed
+    // back through `done`.
+    //
+    // `done` is called exactly once on every path, including the one where
+    // there is no `activate` to call: the host suspends until it arrives, so a
+    // path that skipped it would hang activation rather than fail it.
+    function callActivate(exports, activationContext, done) {
+        var activate;
+        try {
+            activate = exports && exports.activate;
+        } catch (error) {
+            done(false, describeThrown(error));
+            return false;
+        }
+        if (typeof activate !== 'function') {
+            done(true, '');
+            return false;
+        }
+        var result;
+        try {
+            result = activate.call(exports, activationContext);
+        } catch (error) {
+            done(false, describeThrown(error));
+            return true;
+        }
+        var then = result === null || result === undefined ? undefined : result.then;
+        if (typeof then !== 'function') {
+            done(true, '');
+            return true;
+        }
+        then.call(
+            result,
+            function () { done(true, ''); },
+            function (reason) { done(false, describeThrown(reason)); }
+        );
+        return true;
     }
 
     // ExtensionHost captures this object and then deletes both globals, so
@@ -907,6 +1162,10 @@
     global.__extensionRuntime = {
         run: run,
         fireTimer: fireTimer,
+        callActivate: callActivate,
+        // The seam. Stages 5.3-5.7 each install real members through this and
+        // change nothing else here.
+        defineMember: defineMember,
         // Used for the argument `activate(context)` receives: a recorded,
         // throwing stub like every other unimplemented surface, so an
         // extension that reaches for `context.subscriptions` today gets told
