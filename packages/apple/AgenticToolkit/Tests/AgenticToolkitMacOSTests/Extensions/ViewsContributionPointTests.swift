@@ -211,10 +211,15 @@ struct ViewsContributionPointTests {
 
     // MARK: - N3 — the wrap width is a measurement, not a constant
 
-    /// Drives a real layout pass at a deliberately narrow width and asserts the
-    /// width the label was *left with*, not the one it was handed: a narrow
-    /// pane has to produce something smaller than `explanationWidth`, and a
-    /// wide one has to stop at it.
+    /// Drives real layout passes at three deliberate widths and asserts the
+    /// width the label was *left with*, not the one it was handed. Each width
+    /// is the only one that can see one of the three operations: a narrow pane
+    /// has to produce something smaller than `explanationWidth` (the
+    /// measurement), a wide one has to stop at it (the ceiling), and a
+    /// collapsed one has to produce `0` rather than a negative (the floor).
+    ///
+    /// Zero is not hypothetical: these panes are registered `isCollapsible`,
+    /// and a collapsed `NSSplitViewItem` is laid out at zero width.
     ///
     /// This is as close to on-screen as a headless bundle gets. It proves
     /// `viewDidLayout` runs and computes what it should; it cannot prove the
@@ -248,6 +253,13 @@ struct ViewsContributionPointTests {
         controller.view.frame = NSRect(x: 0, y: 0, width: 900, height: 300)
         controller.view.layoutSubtreeIfNeeded()
         #expect(explanation.preferredMaxLayoutWidth == 320)
+
+        // A collapsed pane. `0` means "no maximum" to AppKit, which is a
+        // documented value; the `-32` this computes without its floor is not
+        // documented at all.
+        controller.view.frame = NSRect(x: 0, y: 0, width: 0, height: 300)
+        controller.view.layoutSubtreeIfNeeded()
+        #expect(explanation.preferredMaxLayoutWidth == 0)
     }
 
     // MARK: - 18 — applying twice is applying once

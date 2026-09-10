@@ -221,11 +221,28 @@ public final class ExtensionViewPlaceholderViewController: NSViewController {
     /// `explanationWidth + 2 * explanationInset` the label is narrower than the
     /// ceiling and a static value would overestimate — which lays the sentence
     /// out clipped in exactly the narrow panes an auxiliary extension view is
-    /// likeliest to be given. So it is set here, where the width is a
-    /// measurement rather than a guess, and re-set whenever the pane resizes.
+    /// likeliest to be given. So it is measured here rather than guessed, and
+    /// re-measured whenever the pane resizes.
+    ///
+    /// Each of the three operations catches something the others do not.
+    /// `bounds.width - 2 * inset` is the width available to the *stack*, which
+    /// is an upper bound on the label's width rather than the label's width —
+    /// they coincide only because the sentence is the widest thing in the stack
+    /// at every size that matters, and would stop coinciding if the stack ever
+    /// gained a wider sibling. `min` with the ceiling keeps a wide pane from
+    /// claiming more width than the `widthAnchor` will actually grant, which
+    /// would under-compute the height and clip the sentence at the *wide* end.
+    /// `max(0, …)` is for the collapsed pane: these panes register
+    /// `isCollapsible: true`, `ComposableTabs` collapses through
+    /// `NSSplitViewItem.isCollapsed`, and zoom collapses every item off the
+    /// zoomed path — all of which lay this view out at zero width, where the
+    /// subtraction alone yields `-2 * explanationInset`. AppKit documents `0`
+    /// as "no maximum" and says nothing whatever about negatives, so the floor
+    /// trades an undefined value for a defined one. "No maximum" is itself only
+    /// harmless because a collapsed pane draws nothing.
     public override func viewDidLayout() {
         super.viewDidLayout()
-        explanation?.preferredMaxLayoutWidth =
-            min(Self.explanationWidth, view.bounds.width - 2 * Self.explanationInset)
+        explanation?.preferredMaxLayoutWidth = max(
+            0, min(Self.explanationWidth, view.bounds.width - 2 * Self.explanationInset))
     }
 }
