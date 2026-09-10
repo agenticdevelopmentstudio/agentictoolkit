@@ -93,6 +93,50 @@ private final class WallClockBudgetRace<T: Sendable>: @unchecked Sendable {
     }
 }
 
+/// The largest budget that is still a bound, in seconds — one year.
+///
+/// Above this a budget stops meaning "finish by then" and starts meaning "no
+/// deadline", and the conversion to nanoseconds is where saying so matters:
+/// `UInt64(seconds * 1_000_000_000)` is a *trapping* conversion that fires on
+/// `.infinity`, on `.greatestFiniteMagnitude`, and on any finite value above
+/// roughly 1.8e10 seconds. The value reaching this function is not always the
+/// caller's own — `PluginTransport.run(spec:)` passes `AIRequestSpec.timeout`,
+/// a public unvalidated `var` a third-party plugin bundle sets — so "a plugin
+/// spelled *no timeout* the idiomatic way" must not be a way to kill the host
+/// process.
+///
+/// A year rather than the true conversion limit (~584 years of nanoseconds)
+/// because the point is plausibility, not arithmetic: no operation this
+/// function wraps is legitimately bounded at a decade, and a caller that meant
+/// "no deadline" is better served by getting exactly that than by a timer
+/// nothing will outlive.
+private let maximumWallClockBudgetSeconds: TimeInterval = 60 * 60 * 24 * 365
+
+/// The nanosecond sleep a budget asks for, or `nil` when the budget is not a
+/// bound at all and no timer should be started.
+///
+/// Three cases, and each is a decision rather than a fallout of the
+/// arithmetic:
+///
+/// - **NaN → no budget.** `max(0, .nan)` evaluates to `0` in Swift, because
+///   every comparison against NaN is false, so the obvious guard silently
+///   turned a NaN into an *immediate* expiry — a budget that raced the
+///   operation for a result. NaN is not a deadline in either direction, and
+///   inventing the harshest possible one from it is the least defensible
+///   reading.
+/// - **At or above the ceiling (`.infinity` included) → no budget.** Returning
+///   `nil` is what lets the caller skip creating the timer task entirely,
+///   rather than parking one on a sleep that would outlive the process.
+/// - **At or below zero (`-.infinity` included) → expire immediately.** Zero
+///   is a legitimate budget meaning exactly that, and a negative one is a
+///   deadline already past.
+private func wallClockBudgetNanoseconds(_ seconds: TimeInterval) -> UInt64? {
+    guard !seconds.isNaN else { return nil }
+    guard seconds < maximumWallClockBudgetSeconds else { return nil }
+    guard seconds > 0 else { return 0 }
+    return UInt64(seconds * 1_000_000_000)
+}
+
 /// Races `operation` against a wall-clock timer: on expiry
 /// `WallClockBudgetExceeded` is thrown immediately — the timed-out operation
 /// is cancelled but **not awaited**, so a budget genuinely bounds wall-clock
@@ -112,6 +156,15 @@ private final class WallClockBudgetRace<T: Sendable>: @unchecked Sendable {
 /// waiting out the operation or the full budget. The continuation is resumed
 /// exactly once across all three outcomes — operation wins, budget wins,
 /// caller cancels.
+///
+/// **A budget that is not a bound is honoured as such, not as a trap.** A
+/// `seconds` of `.infinity`, `.greatestFiniteMagnitude`, anything at or above
+/// `maximumWallClockBudgetSeconds`, or `NaN` starts no timer at all: the
+/// operation runs to completion or to the caller's cancellation, and nothing
+/// throws `WallClockBudgetExceeded`. That is a real loss of bounding, and it
+/// is the *caller's* to avoid by not asking for it — the alternative was
+/// `UInt64(_:)` trapping on the conversion, which killed the whole process
+/// over a number a third-party plugin bundle chose.
 ///
 /// This is generic over the return value (rather than pinned to `Void`) so an
 /// HTTP call and a subprocess run can both use it, and the timeout error is
@@ -137,12 +190,19 @@ public func withWallClockBudget<T: Sendable>(
             }
             race.track(operationTask)
 
-            let timeoutTask = Task<Void, Never> {
-                try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-                race.finish(throwing: WallClockBudgetExceeded(seconds: seconds))
+            // No timer at all for a budget that is not a bound — see
+            // `wallClockBudgetNanoseconds`. The operation racer and the
+            // cancellation handler both stand: "no deadline" must not quietly
+            // become "not cancellable either", which is why this skips only
+            // the timer and not the race.
+            if let nanoseconds = wallClockBudgetNanoseconds(seconds) {
+                let timeoutTask = Task<Void, Never> {
+                    try? await Task.sleep(nanoseconds: nanoseconds)
+                    guard !Task.isCancelled else { return }
+                    race.finish(throwing: WallClockBudgetExceeded(seconds: seconds))
+                }
+                race.track(timeoutTask)
             }
-            race.track(timeoutTask)
         }
     } onCancel: {
         race.cancel()

@@ -69,4 +69,77 @@ struct WallClockBudgetTests {
         #expect(elapsed >= 0, "expected CancellationError, got a different outcome (\(elapsed))")
         #expect(elapsed < 2, "cancellation took \(elapsed)s; it should be near-immediate")
     }
+
+    // MARK: - Budgets that are not bounds
+
+    /// A budget that cannot be expressed as a `UInt64` nanosecond count is not
+    /// a budget, and must not be a trap.
+    ///
+    /// `UInt64(seconds * 1_000_000_000)` is a *trapping* conversion: it fires
+    /// on `.infinity`, on `.greatestFiniteMagnitude`, and on any finite value
+    /// above roughly 1.8e10 seconds. `max(0, seconds)` guarded only the low
+    /// end. `AIRequestSpec.timeout` is a public unvalidated `var` that reaches
+    /// here through `PluginTransport.run(spec:)`, so a plugin spelling "no
+    /// timeout" the idiomatic way used to kill the host process.
+    ///
+    /// A regression here is process-fatal rather than a recorded failure: the
+    /// trap takes the whole test bundle down. Surviving the call is the
+    /// assertion; the `#expect` is the cheap part.
+    @Test(
+        "a budget too large to express is no budget at all, not a trap",
+        arguments: [TimeInterval.infinity, .greatestFiniteMagnitude, 1e18]
+    )
+    func unexpressibleBudgetIsNoBudget(_ seconds: TimeInterval) async throws {
+        let started = Date()
+        let value = try await withWallClockBudget(seconds) { 42 }
+        #expect(value == 42)
+        #expect(Date().timeIntervalSince(started) < 2)
+    }
+
+    /// `max(0, .nan)` evaluates to `0` in Swift, because every comparison
+    /// against NaN is false — so a NaN budget used to mean "expire
+    /// immediately", racing the operation for a result. NaN is not a deadline
+    /// in either direction; it is treated as no budget, deterministically.
+    @Test("a NaN budget does not become a zero-second one")
+    func nanBudgetIsNotAnImmediateExpiry() async throws {
+        let value = try await withWallClockBudget(.nan) { 42 }
+        #expect(value == 42)
+    }
+
+    /// Skipping the timeout racer must not skip the cancellation handler with
+    /// it: an unbounded budget still has to answer `cancel()` promptly, or
+    /// "no timeout" quietly becomes "not cancellable either".
+    @Test("an unbounded budget still propagates the caller's cancellation")
+    func unboundedBudgetStillCancels() async throws {
+        let started = Date()
+        let task = Task<TimeInterval, Never> {
+            do {
+                try await withWallClockBudget(.infinity) {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                }
+                return -1
+            } catch is CancellationError {
+                return Date().timeIntervalSince(started)
+            } catch {
+                return -2
+            }
+        }
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+        task.cancel()
+
+        let elapsed = await task.value
+        #expect(elapsed >= 0, "expected CancellationError, got a different outcome (\(elapsed))")
+        #expect(elapsed < 2, "cancellation took \(elapsed)s; it should be near-immediate")
+    }
+
+    /// A budget just under the ceiling is still a real budget: it is honoured
+    /// as a bound rather than folded into the "no budget" case.
+    @Test("a large but expressible budget still bounds the operation")
+    func largeExpressibleBudgetStillBounds() async throws {
+        let started = Date()
+        let value = try await withWallClockBudget(31_536_000) { 42 }
+        #expect(value == 42)
+        #expect(Date().timeIntervalSince(started) < 2)
+    }
 }
