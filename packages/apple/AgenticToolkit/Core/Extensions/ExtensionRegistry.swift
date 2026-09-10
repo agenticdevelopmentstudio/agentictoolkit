@@ -64,8 +64,13 @@ public final class ExtensionRegistry {
     /// incomplete, which is the honest answer and the safe one.
     ///
     /// Computed from the two stored arrays rather than kept as a third
-    /// beside them, so it cannot drift out of step with either.
+    /// beside them, so it cannot drift out of step with either — plus
+    /// `scanReadEverything`, which is the part the arrays cannot express: a
+    /// directory the scan never got far enough to name leaves no trace in
+    /// either of them, so "every failure is nameable" is not by itself
+    /// evidence that the scan was whole.
     public var establishedIdentifiers: Set<String>? {
+        guard scanReadEverything else { return nil }
         guard failures.allSatisfy({ $0.identifier != nil }) else { return nil }
         return Set(extensions.map(\.identifier)).union(failures.compactMap(\.identifier))
     }
@@ -73,6 +78,22 @@ public final class ExtensionRegistry {
     private let searchPaths: [URL]
     private let hostVersion: SemanticVersion
     private var contributionPoints: [ContributionPoint] = []
+
+    /// False until a scan has run to completion over every search path. Set
+    /// by `loadAll()` alone: `failures` can only speak for directories the
+    /// scan got far enough to *name*, and a search path it could not
+    /// enumerate — or a directory whose type it could not read — never
+    /// becomes a failure at all. Those directories go missing silently, and
+    /// without this flag `establishedIdentifiers` would answer for them
+    /// anyway.
+    ///
+    /// It starts `false`, which also covers a registry `loadAll()` has never
+    /// run on: two empty arrays are indistinguishable from a scan that found
+    /// nothing, and answering `[]` there is the instruction to delete
+    /// everything. No caller does that today; it costs nothing to be right
+    /// about it, and this task is entirely about not confusing "none" with
+    /// "I do not know".
+    private var scanReadEverything = false
 
     // MARK: - Initialization
 
@@ -112,6 +133,7 @@ public final class ExtensionRegistry {
 
         extensions = []
         failures = []
+        scanReadEverything = true
 
         let fileManager = FileManager.default
         var claimedIdentifiers: [String: URL] = [:]
@@ -121,12 +143,37 @@ public final class ExtensionRegistry {
                 at: searchPath,
                 includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles]
-            ) else { continue }
+            ) else {
+                // Two opposite answers arrive here as the same `throw`, and
+                // collapsing them is the whole hazard. A search path that is
+                // simply *absent* is the ordinary case — bringing the feature
+                // up deliberately does not create the folder — and calling
+                // that incomplete would switch pruning off forever for every
+                // user who has no extensions. A search path that exists and
+                // would not open is the other thing entirely: however many
+                // extensions live under it, this scan did not see them, and
+                // it must not let anyone reconcile against that silence.
+                if fileManager.fileExists(atPath: searchPath.path) {
+                    scanReadEverything = false
+                }
+                continue
+            }
 
             for directory in contents {
-                guard (try? directory.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else {
+                let isDirectory = (try? directory.resourceValues(
+                    forKeys: [.isDirectoryKey]))?.isDirectory
+                guard let isDirectory else {
+                    // The read itself gave no answer, so this entry's type is
+                    // unknown — it may well be an extension folder. `== true`
+                    // used to fold this into the ordinary-file case below and
+                    // drop it without trace.
+                    scanReadEverything = false
                     continue
                 }
+                // A read that succeeded and said "not a directory" is an
+                // ordinary file. That is knowledge, not absence of it, and it
+                // leaves the scan complete.
+                guard isDirectory else { continue }
                 load(from: directory, claimedIdentifiers: &claimedIdentifiers)
             }
         }
@@ -139,11 +186,24 @@ public final class ExtensionRegistry {
     ///
     /// A directory with no `package.json` is not itself a failure — a
     /// search path can hold ordinary non-extension directories (`.DS_Store`
-    /// siblings, a README, a partially-downloaded extension folder) and
-    /// none of those are worth surfacing as a load error. `manifestMissing`
-    /// stays a case on `ExtensionLoadError` for a future single-extension
-    /// lookup (e.g. an install flow resolving one specific directory), just
-    /// not for bulk discovery.
+    /// siblings, a README) and none of those are worth surfacing as a load
+    /// error. `manifestMissing` stays a case on `ExtensionLoadError` for a
+    /// future single-extension lookup (e.g. an install flow resolving one
+    /// specific directory), just not for bulk discovery.
+    ///
+    /// **A folder caught mid-install or mid-update is a real exception to
+    /// that, not another harmless example.** Its `package.json` has not
+    /// landed yet, so it is silently skipped, the scan still calls itself
+    /// complete, and `pruneOrphans` deletes that extension's themes as
+    /// departed — along with `activeThemeID` if one of them was selected.
+    /// The themes return on the next launch, because `apply` re-imports
+    /// every declared theme; **the user's chosen theme does not**, and
+    /// nothing tells them why it reset. This is accepted deliberately: the
+    /// alternative — treating any directory without a manifest as
+    /// unnameable — makes the scan permanently incomplete on any search path
+    /// holding one stray folder, which disables pruning for everyone, always.
+    /// A rare, transient, self-mostly-healing loss beats a certain,
+    /// permanent one.
     private func load(from directory: URL, claimedIdentifiers: inout [String: URL]) {
         let manifestURL = directory.appendingPathComponent("package.json")
 

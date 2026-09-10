@@ -24,7 +24,10 @@ import Foundation
 /// **A point that writes to persisted, user-owned state must distinguish
 /// "the extension declares nothing" from "I could not read what it
 /// declares"** (Ruling GX). The first is an instruction; the second is an
-/// absence of information, and acting on it deletes the user's data. A point
+/// absence of information, and acting on it deletes the user's data — while
+/// failing to act on the first, reading a real "nothing" as though it were an
+/// absence of information, orphans that data instead. Both directions cost the
+/// user; only the conflation is common to them. A point
 /// whose state is in-memory and rebuilt from the manifests each launch is
 /// exempt, because a wrong answer there costs a session rather than data.
 ///

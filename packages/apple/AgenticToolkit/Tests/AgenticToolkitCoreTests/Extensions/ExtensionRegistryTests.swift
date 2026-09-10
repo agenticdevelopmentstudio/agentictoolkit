@@ -678,4 +678,91 @@ struct ExtensionRegistryTests {
             #expect(registry.establishedIdentifiers == ["acme.good"])
         }
     }
+
+    // MARK: - Which directories the scan never got far enough to name
+
+    @Test("a search path that exists and cannot be listed prunes nothing")
+    func anUnreadableSearchPathMakesTheWholeScanUnnameable() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            let locked = root.appendingPathComponent("locked")
+            try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+            // An extension really is in there. That is what makes this test
+            // self-checking: if the chmod below failed to bite, this loads and
+            // the answer stops being nil.
+            try writeManifest(manifestJSON(name: "hidden"), named: "hidden-ext", in: locked)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o000], ofItemAtPath: locked.path)
+            defer {
+                // Runs *before* the removeItem above — defers unwind
+                // last-in-first-out — because a 000 directory cannot be
+                // emptied, so the cleanup would silently leave the fixture
+                // behind in the shared temp root.
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            }
+
+            let registry = ExtensionRegistry(searchPaths: [locked], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            // Nothing loaded and nothing failed: this exit is above the line
+            // that records failures, so the two arrays say "an empty search
+            // path" just as loudly as a genuinely empty one would.
+            #expect(registry.extensions.isEmpty)
+            #expect(registry.failures.isEmpty)
+            // Which is why the answer cannot be computed from them alone. An
+            // empty set here is the instruction to delete every contributed
+            // theme in the store, for extensions this scan never even saw.
+            #expect(registry.establishedIdentifiers == nil)
+        }
+    }
+
+    @Test("a search path that does not exist still prunes normally")
+    func anAbsentSearchPathLeavesTheScanComplete() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            let missing = root.appendingPathComponent("no-such-folder")
+
+            // The ordinary case, and the one that must not be marked
+            // incomplete: bringing the feature up deliberately does not create
+            // the extensions folder, so almost every user has one of these.
+            // Answering nil here would switch pruning off permanently for all
+            // of them — a worse bug than the one the flag exists to fix.
+            let empty = ExtensionRegistry(searchPaths: [missing], hostVersion: Self.hostVersion)
+            empty.loadAll()
+            #expect(empty.establishedIdentifiers == [])
+
+            // And an absent path alongside a real one must not poison the real
+            // one's answer either.
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+            let registry = ExtensionRegistry(
+                searchPaths: [missing, root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+            #expect(registry.establishedIdentifiers == ["acme.good"])
+        }
+    }
+
+    @Test("a registry that has never scanned knows nothing rather than nothing being installed")
+    func anUnscannedRegistryAnswersUnknown() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            // Two empty arrays, and an extension sitting on disk that nobody
+            // has looked for yet. No caller reaches this today, which is the
+            // only reason it is not a live bug — the arrays alone would answer
+            // "nothing is installed" with total confidence.
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            #expect(registry.establishedIdentifiers == nil)
+
+            registry.loadAll()
+            #expect(registry.establishedIdentifiers == ["acme.good"])
+        }
+    }
 }
