@@ -45,8 +45,13 @@ public final class GitStatusProvider: Sendable {
                 // result.
                 return
             } catch {
+                // Never `error.localizedDescription`: for `GitClientError`,
+                // that interpolates git's own `standardError`, and the
+                // branch's logging rule is that OSLog records what was
+                // called, never what git said. `logDescription` carries only
+                // the case name and structured fields (verb, exit status).
                 let path = repoRoot.path
-                let reason = error.localizedDescription
+                let reason = (error as? GitClientError)?.logDescription ?? String(describing: type(of: error))
                 Self.logger.error("Git status failed for \(path, privacy: .public): \(reason, privacy: .public)")
                 status = .empty
             }

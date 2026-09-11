@@ -254,3 +254,39 @@ struct GitClientTests {
                 "the developer's real ~/.gitconfig must be untouched")
     }
 }
+
+/// Covers `GitClientError.logDescription`, the seam `GitStatusProvider` logs
+/// through instead of `errorDescription`/`localizedDescription`. There is no
+/// way to assert an OSLog line directly, so this is the testable shape of
+/// the fix for review A's BLOCKER B1: git's own stderr must never reach the
+/// unified log.
+@Suite("GitClientError.logDescription")
+struct GitClientErrorLogDescriptionTests {
+    @Test("commandFailed's logDescription carries the verb and exit status, never standardError")
+    func commandFailedNeverLeaksStandardError() {
+        let error = GitClientError.commandFailed(
+            verb: "status",
+            exitStatus: 128,
+            standardError: "fatal: detected dubious ownership in repository at '/Users/secret/repo'"
+        )
+        #expect(!error.logDescription.contains("secret"))
+        #expect(error.logDescription.contains("status"))
+        #expect(error.logDescription.contains("128"))
+    }
+
+    @Test("timedOut's logDescription carries the verb")
+    func timedOutCarriesVerb() {
+        let error = GitClientError.timedOut(verb: "worktree")
+        #expect(error.logDescription.contains("worktree"))
+    }
+
+    @Test("launchFailed's logDescription carries the verb, never the launch reason")
+    func launchFailedNeverLeaksReason() {
+        let error = GitClientError.launchFailed(verb: "status", reason: "secret-path-in-the-reason")
+        #expect(!error.logDescription.contains("secret"))
+        #expect(error.logDescription.contains("status"))
+    }
+
+    @Test("executableNotFound's logDescription never leaks the configured path")
+    func executableNotFoundNeverLeaksPath() {
+        let error = GitClientError.executableNotFound(path: "/Users/secret/bin/git")

@@ -43,4 +43,23 @@ public enum GitClientError: Error, LocalizedError, Equatable {
             return "No git executable at \(path). Change it in Settings > Git."
         }
     }
+
+    /// A description safe to hand to `OSLog`: the case name plus whatever
+    /// structured fields exist (verb, exit status), and **never**
+    /// `standardError` — that is git's own output, and the branch's logging
+    /// rule is that OSLog records what was called, never what git said.
+    /// `errorDescription` is unsafe for logging for exactly this reason: it
+    /// interpolates `standardError` for `.commandFailed`.
+    public var logDescription: String {
+        switch self {
+        case let .commandFailed(verb, exitStatus, _):
+            return "commandFailed(verb: \(verb), exitStatus: \(exitStatus))"
+        case let .timedOut(verb):
+            return "timedOut(verb: \(verb))"
+        case let .launchFailed(verb, _):
+            return "launchFailed(verb: \(verb))"
+        case .executableNotFound:
+            return "executableNotFound"
+        }
+    }
 }
