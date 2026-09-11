@@ -121,6 +121,23 @@ public struct ActivationEventMatcher: Sendable, Equatable {
     /// note on `matches(_:)`.
     private static let implicitCommandActivationFloor = SemanticVersion(major: 1, minor: 74, patch: 0)
 
+    /// Builds a matcher from a manifest's `activationEvents` and declared
+    /// commands.
+    ///
+    /// Parses every `activationEvents` entry once, up front, sorting them
+    /// into `events` (recognised) and `unrecognizedEvents` (not); does the
+    /// same triage for `workspaceContains:` globs into `unsupportedPatterns`,
+    /// so a caller never has to re-derive "did this glob parse" for itself.
+    /// It also computes `implicitlyActivatingCommands`: from VS Code 1.74, a
+    /// command already declared in `contributes.commands` activates its
+    /// extension without a matching `onCommand:` entry.
+    ///
+    /// The version test is the extension's own declared engine, not the
+    /// host's: an extension that still targets an older VS Code cannot rely
+    /// on behaviour its stated minimum predates. A manifest whose
+    /// `engines.vscode` does not parse gets no implicit activation — an
+    /// engine string this host cannot evaluate is not evidence the extension
+    /// supports the newer inference.
     public init(manifest: ExtensionManifest) {
         var parsed: [ActivationEvent] = []
         var unrecognized: [String] = []
@@ -142,14 +159,6 @@ public struct ActivationEventMatcher: Sendable, Equatable {
         }
         unsupportedPatterns = unsupported
 
-        // The version test is the extension's own declared engine, not the
-        // host's: VS Code 1.74 made an `onCommand:` entry unnecessary for a
-        // command already declared in `contributes.commands`, but an
-        // extension that still targets an older VS Code cannot rely on
-        // behaviour its stated minimum predates. A manifest whose
-        // `engines.vscode` does not parse gets no implicit activation — an
-        // engine string this host cannot evaluate is not evidence the
-        // extension supports the newer inference.
         if let range = VSCodeEngineRange(manifest.engines.vscode),
            range.minimumVersion >= Self.implicitCommandActivationFloor {
             let commandIDs = manifest.contributes?.commands.map(\.command) ?? []
@@ -301,65 +310,186 @@ internal struct GlobPattern {
         return tokens
     }
 
+    /// A `(tokenIndex, pathIndex)` pair identifies one state in the
+    /// backtracking search — see `matchTokens` below for why that pair alone
+    /// is enough to memoize on.
+    private struct MemoKey: Hashable {
+        let tokenIndex: Int
+        let pathIndex: Int
+    }
+
     /// Whether `path` matches this pattern, anchored at both ends — the
     /// whole relative path, not a substring of it.
     func matches(_ path: String) -> Bool {
-        Self.matchTokens(tokens, 0, Array(path), 0)
+        var memo: [MemoKey: Bool] = [:]
+        return Self.matchTokens(tokens, 0, Array(path), 0, &memo)
     }
 
+    /// Whether `path[pathIndex...]` matches `tokens[tokenIndex...]`.
+    ///
+    /// Memoized on `(tokenIndex, pathIndex)`: for a fixed `tokens` array and
+    /// `path`, that pair alone determines the answer — two calls with the
+    /// same indices explore exactly the same remaining search space and must
+    /// return the same result. Without the cache, a pattern like
+    /// `a**a**a**a**a**a**a**b` matched against a long run of `a` characters
+    /// re-derives the same failing `(tokenIndex, pathIndex)` state through
+    /// every combination of how much each `**` consumed — the search time
+    /// roughly doubles per added `**` segment. Caching collapses that to one
+    /// evaluation per state: `O(tokens.count * path.count)` states, each
+    /// doing at most `O(path.count)` work, rather than exponential
+    /// re-exploration. Every recursive call below either advances
+    /// `tokenIndex` or (for `.anyDirectories`, which can repeat the same
+    /// token) strictly advances `pathIndex`, so the state space has no
+    /// cycles and it is safe to cache each result only once its full value
+    /// is known.
+    ///
+    /// `.alternation` is the one case that does not recurse into this same
+    /// `tokens` array — see `matchBranch`.
     private static func matchTokens(
-        _ tokens: [Token], _ tokenIndex: Int, _ path: [Character], _ pathIndex: Int
+        _ tokens: [Token], _ tokenIndex: Int, _ path: [Character], _ pathIndex: Int,
+        _ memo: inout [MemoKey: Bool]
     ) -> Bool {
         guard tokenIndex < tokens.count else { return pathIndex == path.count }
 
+        let key = MemoKey(tokenIndex: tokenIndex, pathIndex: pathIndex)
+        if let cached = memo[key] { return cached }
+
+        let result: Bool
         switch tokens[tokenIndex] {
         case .literal(let expected):
-            guard pathIndex < path.count, path[pathIndex] == expected else { return false }
-            return matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1)
+            if pathIndex < path.count, path[pathIndex] == expected {
+                result = matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1, &memo)
+            } else {
+                result = false
+            }
 
         case .question:
-            guard pathIndex < path.count, path[pathIndex] != "/" else { return false }
-            return matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1)
+            if pathIndex < path.count, path[pathIndex] != "/" {
+                result = matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1, &memo)
+            } else {
+                result = false
+            }
 
         case .star:
-            if matchTokens(tokens, tokenIndex + 1, path, pathIndex) { return true }
+            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, &memo)
             var cursor = pathIndex
-            while cursor < path.count, path[cursor] != "/" {
+            while !matched, cursor < path.count, path[cursor] != "/" {
                 cursor += 1
-                if matchTokens(tokens, tokenIndex + 1, path, cursor) { return true }
+                matched = matchTokens(tokens, tokenIndex + 1, path, cursor, &memo)
             }
-            return false
+            result = matched
 
         case .doubleStar:
-            if matchTokens(tokens, tokenIndex + 1, path, pathIndex) { return true }
+            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, &memo)
             var cursor = pathIndex
-            while cursor < path.count {
+            while !matched, cursor < path.count {
                 cursor += 1
-                if matchTokens(tokens, tokenIndex + 1, path, cursor) { return true }
+                matched = matchTokens(tokens, tokenIndex + 1, path, cursor, &memo)
             }
-            return false
+            result = matched
 
         case .anyDirectories:
             // Zero directories first — the case a plain `doubleStar` +
             // literal `/` could never express.
-            if matchTokens(tokens, tokenIndex + 1, path, pathIndex) { return true }
+            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, &memo)
             var cursor = pathIndex
-            while cursor < path.count {
+            while !matched, cursor < path.count {
                 if path[cursor] == "/" {
                     // Consumed one segment ending at this slash; recurse on
                     // the *same* token so further segments can follow.
-                    if matchTokens(tokens, tokenIndex, path, cursor + 1) { return true }
+                    matched = matchTokens(tokens, tokenIndex, path, cursor + 1, &memo)
+                }
+                cursor += 1
+            }
+            result = matched
+
+        case .alternation(let branches):
+            result = branches.contains { branch in
+                matchBranch(branch, 0, tokens, tokenIndex + 1, path, pathIndex, &memo)
+            }
+        }
+
+        memo[key] = result
+        return result
+    }
+
+    /// Matches one branch of a `{a,b,c}` alternation, starting at
+    /// `branchIndex` within `branch`, against `path` starting at `pathIndex`.
+    ///
+    /// Exists so `.alternation` never has to splice a branch's tokens onto
+    /// what follows it into a new array just to keep recursing — that would
+    /// have made `(tokenIndex, pathIndex)` ambiguous as a memo key, since the
+    /// same pair would mean different things in different spliced arrays.
+    /// Instead, `branch` is walked on its own, unmemoized coordinate space
+    /// (branches are small and `{...}` cannot nest — a nested `{` is
+    /// rejected at parse time — so there is no equivalent blowup to guard
+    /// here), and once it is exhausted this calls straight back into the
+    /// memoized `matchTokens(outerTokens, outerTokenIndex, ...)` to resume
+    /// matching whatever follows the `{...}` group in the fixed outer array.
+    private static func matchBranch(
+        _ branch: [Token], _ branchIndex: Int,
+        _ outerTokens: [Token], _ outerTokenIndex: Int,
+        _ path: [Character], _ pathIndex: Int,
+        _ memo: inout [MemoKey: Bool]
+    ) -> Bool {
+        guard branchIndex < branch.count else {
+            return matchTokens(outerTokens, outerTokenIndex, path, pathIndex, &memo)
+        }
+
+        switch branch[branchIndex] {
+        case .literal(let expected):
+            guard pathIndex < path.count, path[pathIndex] == expected else { return false }
+            return matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex + 1, &memo)
+
+        case .question:
+            guard pathIndex < path.count, path[pathIndex] != "/" else { return false }
+            return matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex + 1, &memo)
+
+        case .star:
+            if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex, &memo) {
+                return true
+            }
+            var cursor = pathIndex
+            while cursor < path.count, path[cursor] != "/" {
+                cursor += 1
+                if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, cursor, &memo) {
+                    return true
+                }
+            }
+            return false
+
+        case .doubleStar:
+            if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex, &memo) {
+                return true
+            }
+            var cursor = pathIndex
+            while cursor < path.count {
+                cursor += 1
+                if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, cursor, &memo) {
+                    return true
+                }
+            }
+            return false
+
+        case .anyDirectories:
+            if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex, &memo) {
+                return true
+            }
+            var cursor = pathIndex
+            while cursor < path.count {
+                if path[cursor] == "/" {
+                    if matchBranch(branch, branchIndex, outerTokens, outerTokenIndex, path, cursor + 1, &memo) {
+                        return true
+                    }
                 }
                 cursor += 1
             }
             return false
 
-        case .alternation(let branches):
-            let remainder = Array(tokens[(tokenIndex + 1)...])
-            for branch in branches where matchTokens(branch + remainder, 0, path, pathIndex) {
-                return true
-            }
-            return false
+        case .alternation:
+            // Unreachable: `branch` came from `tokenize`, which rejects a
+            // nested `{` inside a `{...}` group before this ever runs.
+            preconditionFailure("a { ... } branch cannot itself contain a nested alternation")
         }
     }
 }
