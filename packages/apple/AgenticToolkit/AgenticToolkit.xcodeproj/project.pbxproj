@@ -910,6 +910,7 @@
 		F8169BA3C60886BC4F455238 /* TerminalSessionLayoutState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F801935FF47FB37D7B8EB930 /* TerminalSessionLayoutState.swift */; };
 		F8B98EF1B775D5033F45725E /* FileTreeNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5892B23358CC8088DB3A07AA /* FileTreeNode.swift */; };
 		F946E90504AC0420E9FD1352 /* TerminalCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF39A5EE490267175AD2F89 /* TerminalCommands.swift */; };
+		F963FBEF37B1FAD6EDEAD089 /* NSWindow+TestHostVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 337093F9A13BC44F1849D5B1 /* NSWindow+TestHostVisibility.swift */; };
 		F9AD368E7963C24C2AAF238D /* MCPServerRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FCEFB5144AC969192DD72F4 /* MCPServerRegistryTests.swift */; };
 		F9D8F92D9AA0F61AFF270E42 /* NotesCoordinatorMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE8F713165AC8E94FACD702 /* NotesCoordinatorMenuTests.swift */; };
 		F9DA532AB46B8C411B5E25BE /* LogLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9880737F7060E9B047C7A98 /* LogLine.swift */; };
@@ -1925,6 +1926,7 @@
 		318E853592964F2E3951830F /* ThemeEditorSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeEditorSplitViewController.swift; sourceTree = "<group>"; };
 		31E7501A87831CAE04B1416A /* ExplanationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplanationView.swift; sourceTree = "<group>"; };
 		31F04A00FAA3D63C0CA839A4 /* SystemWindowContextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowContextStore.swift; sourceTree = "<group>"; };
+		337093F9A13BC44F1849D5B1 /* NSWindow+TestHostVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSWindow+TestHostVisibility.swift"; sourceTree = "<group>"; };
 		339250B6C2715F71635C6744 /* SessionWatcherListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWatcherListViewModel.swift; sourceTree = "<group>"; };
 		33ED62A78F2D392CAEC3AF9A /* WindowExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowExplorerView.swift; sourceTree = "<group>"; };
 		33F852968686967ACD65E1B5 /* KeychainSecureSettingsStorageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecureSettingsStorageProvider.swift; sourceTree = "<group>"; };
@@ -4318,6 +4320,7 @@
 		BE65EDF851CDC01778FF098B /* Windows */ = {
 			isa = PBXGroup;
 			children = (
+				337093F9A13BC44F1849D5B1 /* NSWindow+TestHostVisibility.swift */,
 				69D0314BEF2FB056EE285DB7 /* SingleWindowController.swift */,
 				86A0358BA20B02FF69A28CFF /* WindowController.swift */,
 				F92FB7BCCF9327A97360842B /* WindowSpec.swift */,
@@ -6258,6 +6261,7 @@
 				24B34FACDE15F9F3180FB988 /* MultiTabbedViewControllerDelegate.swift in Sources */,
 				65440185D4A0757885DF2F10 /* NSColor+Hex.swift in Sources */,
 				B93F66A6AD3191463E8DD9F3 /* NSStackView+FullWidth.swift in Sources */,
+				F963FBEF37B1FAD6EDEAD089 /* NSWindow+TestHostVisibility.swift in Sources */,
 				FDC42BA0A99E8CAFB9221A1B /* NewItemProvider.swift in Sources */,
 				162FDEA636FB93C2E3448502 /* NotImplementedLedger.swift in Sources */,
 				8AC2E3DB605DFFD13DB20E99 /* Note.swift in Sources */,

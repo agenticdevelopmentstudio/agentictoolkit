@@ -49,13 +49,7 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
     /// of which the `makeKeyAndOrderFront` inside `super.showWindow` still
     /// provides. Settable so a host that genuinely wants the old behavior
     /// back — including a future test *of* front-ordering — can say so.
-    public static var forcesWindowFront = !isRunningInTests
-
-    /// Whether this process is an XCTest host. XCTest links its own framework
-    /// into the runner, so the class exists in a test run and nowhere else.
-    private static var isRunningInTests: Bool {
-        NSClassFromString("XCTestCase") != nil
-    }
+    public static var forcesWindowFront = !NSWindow.isRunningInTests
 
     public var windowID: String = ""
 
@@ -204,7 +198,9 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
             // off the display. So leave the geometry alone and sink it behind
             // the desktop picture instead: still a real, laid-out, visible
             // window to AppKit, invisible to whoever is using the machine.
-            window.level = NSWindow.Level(Int(CGWindowLevelForKey(.desktopWindow)))
+            // The suite's own bare `NSWindow`s take the same treatment, which
+            // is why it is `sinkBehindDesktop()` and not two lines here.
+            window.sinkBehindDesktop()
             window.orderBack(nil)
         }
         WindowManager.shared.frames.saveVisibility(true, for: windowID)
