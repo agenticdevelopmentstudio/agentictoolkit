@@ -1,5 +1,6 @@
 import AgenticToolkitCore
 import AppKit
+import os
 
 /// One per project window. Owns the project's checkouts and their branch
 /// controllers, decides which tabs the window shows, and answers the window
@@ -85,19 +86,37 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
         }
     }
 
-    /// The repository's own checkout first. When git cannot be asked (no
-    /// executable, not a repository) the project directory is the one checkout.
+    /// The repository's own checkout first. When git answers with no
+    /// worktrees at all (no executable, not a repository) the project
+    /// directory is the one checkout. A transient failure is different from
+    /// that: it keeps whatever the last successful read produced rather than
+    /// collapsing to the single-project fallback, so a `BranchController`
+    /// this controller already handed out (and a pane that may still be
+    /// showing it) does not get silently dropped and re-created on the very
+    /// next reconcile because one `git worktree list` call hiccupped.
     private func readCheckouts() async -> [ProjectCheckout] {
-        let worktrees = (try? await gitClient.worktrees(in: workspace.directoryURL)) ?? []
-        let found = ProjectCheckout.checkouts(from: worktrees)
-        if found.isEmpty {
-            return [ProjectCheckout(directory: workspace.directoryURL, branch: nil, isMain: true)]
+        do {
+            let worktrees = try await gitClient.worktrees(in: workspace.directoryURL)
+            let found = ProjectCheckout.checkouts(from: worktrees)
+            guard !found.isEmpty else {
+                return [ProjectCheckout(directory: workspace.directoryURL, branch: nil, isMain: true)]
+            }
+            // `sorted(by:)` is documented as not guaranteed stable, so a
+            // comparator that only orders main-before-non-main would not
+            // reliably keep the non-main checkouts in git's own order.
+            // Partition instead: git's order survives within each half.
+            return found.filter(\.isMain) + found.filter { !$0.isMain }
+        } catch {
+            // What failed and where, never the git output itself (which may
+            // land in `GitClientError.commandFailed`'s `standardError`).
+            let directory = self.workspace.directoryURL.path
+            Self.logger.error(
+                "readCheckouts: worktrees(in:) failed for \(directory, privacy: .public); keeping last checkouts"
+            )
+            return checkouts.isEmpty
+                ? [ProjectCheckout(directory: workspace.directoryURL, branch: nil, isMain: true)]
+                : checkouts
         }
-        // `sorted(by:)` is documented as not guaranteed stable, so a
-        // comparator that only orders main-before-non-main would not
-        // reliably keep the non-main checkouts in git's own order. Partition
-        // instead: git's order survives within each half.
-        return found.filter(\.isMain) + found.filter { !$0.isMain }
     }
 
     /// Keeps one `BranchController` per current checkout, reusing an existing
@@ -138,4 +157,8 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
         }
         return .viewController(branch.makeTabPane(edge: edge, tabID: record.id))
     }
+}
+
+extension ProjectController: Loggable {
+    public static nonisolated let logger = makeLogger()
 }
