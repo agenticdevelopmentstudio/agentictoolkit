@@ -579,7 +579,7 @@ final class NotesSplitViewControllerTests: XCTestCase {
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.contentViewController = split
-        window.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFrontQuietly()
         window.contentView?.layoutSubtreeIfNeeded()
 
         split.findInNote()

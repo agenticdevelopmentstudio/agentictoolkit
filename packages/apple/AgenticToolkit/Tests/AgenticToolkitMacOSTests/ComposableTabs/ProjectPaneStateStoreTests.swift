@@ -302,7 +302,7 @@ final class ProjectPaneStateStoreTests: XCTestCase {
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.contentViewController = root
-        window.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFrontQuietly()
         window.contentView?.layoutSubtreeIfNeeded()
         windows.append(window)
     }
@@ -418,7 +418,7 @@ final class ProjectPaneStateStoreTests: XCTestCase {
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.contentViewController = tabs
-        window.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFrontQuietly()
         window.contentView?.layoutSubtreeIfNeeded()
         windows.append(window)
 

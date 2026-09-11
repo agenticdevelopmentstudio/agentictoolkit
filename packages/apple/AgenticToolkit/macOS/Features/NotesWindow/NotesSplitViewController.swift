@@ -205,6 +205,19 @@ public final class NotesSplitViewController: ThemedSplitViewController {
     private func presentStorageFailureIfPossible() {
         guard let failure = notesManager.storageFailure, let window = view.window else { return }
         notesManager.clearStorageFailure()
+        storageFailurePresenter(failure, window)
+    }
+
+    /// How a claimed failure reaches the user. The default is the sheet
+    /// described above; a test replaces it to assert what the alert *said*
+    /// rather than only that the failure was claimed.
+    ///
+    /// This is the same seam `NotesFolderListViewController` already keeps for
+    /// its own destructive alerts — a sheet opened with `completionHandler:
+    /// nil` is never answered, and a test host that opens one leaves the
+    /// application sheet-blocked for the rest of the run: every subsequent
+    /// `performClick(_:)` in the process beeps instead of clicking.
+    public var storageFailurePresenter: (NotesStorageFailure, NSWindow) -> Void = { failure, window in
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = failure.operation.title

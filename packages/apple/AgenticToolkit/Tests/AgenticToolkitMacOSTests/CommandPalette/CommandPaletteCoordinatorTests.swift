@@ -148,7 +148,7 @@ struct CommandPaletteWindowDismissalTests {
     func resigningKeyDuringTheCloseDoesNotReenter() throws {
         let controller = makeController()
         let window = try #require(controller.window)
-        window.orderFront(nil)
+        window.orderFrontQuietly()
 
         let probe = PaletteCloseProbe()
         probe.controller = controller
@@ -188,9 +188,9 @@ struct CommandPaletteWindowDismissalTests {
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
-        window.orderFront(nil)
+        window.orderFrontQuietly()
         controller.close()
-        window.orderFront(nil)
+        window.orderFrontQuietly()
         controller.close()
 
         #expect(probe.closes == 2)

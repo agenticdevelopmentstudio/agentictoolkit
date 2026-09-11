@@ -111,12 +111,31 @@ final class NotesStorageFailureTests: XCTestCase {
 
     // MARK: - Reaching a user
 
-    private func makeSplit(_ manager: NotesManager) -> NotesSplitViewController {
+    /// What the pane's alert would have said, in order. A test host must never
+    /// let the real sheet open: `beginSheetModal(for:completionHandler: nil)`
+    /// puts a sheet on screen that nothing ever answers, and an application
+    /// with an unanswered sheet beeps at every later `performClick(_:)` in the
+    /// process instead of clicking.
+    private final class PresentedAlerts {
+        private(set) var shown: [(failure: NotesStorageFailure, window: NSWindow)] = []
+        func record(_ failure: NotesStorageFailure, _ window: NSWindow) {
+            shown.append((failure, window))
+        }
+    }
+
+    /// Builds the pane with its alert routed to `alerts` rather than to a real
+    /// sheet, so what reaches the user is something the test can read.
+    private func makeSplit(
+        _ manager: NotesManager, recordingInto alerts: PresentedAlerts? = nil
+    ) -> NotesSplitViewController {
         let name = "notes-failure-tests-\(UUID().uuidString)"
         addTeardownBlock {
             UserDefaults.standard.removeObject(forKey: "NSSplitView Subview Frames \(name)")
         }
-        return NotesSplitViewController(notesManager: manager, autosaveName: name)
+        let split = NotesSplitViewController(notesManager: manager, autosaveName: name)
+        let recorder = alerts ?? PresentedAlerts()
+        split.storageFailurePresenter = { failure, window in recorder.record(failure, window) }
+        return split
     }
 
     private func window(hosting controller: NSViewController) -> NSWindow {
@@ -124,6 +143,9 @@ final class NotesStorageFailureTests: XCTestCase {
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 500),
             styleMask: [.titled], backing: .buffered, defer: true)
         window.contentViewController = controller
+        // Nothing here orders this window in, but anything that attaches a
+        // sheet to it would — so it is born below the desktop picture.
+        window.sinkBehindDesktop()
         addTeardownBlock { @MainActor in window.close() }
         return window
     }
@@ -151,17 +173,25 @@ final class NotesStorageFailureTests: XCTestCase {
     /// whichever host put the alert on screen.
     func testAPaneAsksForAPendingFailureWhenItAppears() async {
         let manager = NotesManager(storage: ThrowingNoteStorage(failing: [.fetch]))
-        let split = makeSplit(manager)
+        let alerts = PresentedAlerts()
+        let split = makeSplit(manager, recordingInto: alerts)
         split.loadViewIfNeeded()
         await manager.loadNotes()
         XCTAssertNotNil(manager.storageFailure)
 
-        _ = window(hosting: split)
+        let hostWindow = window(hosting: split)
         split.viewDidAppear()
 
         XCTAssertNil(
             manager.storageFailure,
             "the first pane that can show a pending failure claims it")
+        // Claiming it is only half the contract: claiming without showing is
+        // exactly the silent drop these tests exist to catch.
+        XCTAssertEqual(alerts.shown.count, 1)
+        XCTAssertEqual(alerts.shown.first?.failure.operation, .load)
+        XCTAssertEqual(alerts.shown.first?.failure.message, "the database is locked")
+        XCTAssertTrue(alerts.shown.first?.window === hostWindow,
+                      "the sheet belongs to the pane's own window")
     }
 
     /// The path that already worked, kept honest: a failure arriving at a pane
@@ -171,14 +201,18 @@ final class NotesStorageFailureTests: XCTestCase {
         let existing = note()
         let manager = NotesManager(
             storage: ThrowingNoteStorage(failing: [.delete], stored: [existing]))
-        let split = makeSplit(manager)
+        let alerts = PresentedAlerts()
+        let split = makeSplit(manager, recordingInto: alerts)
         split.loadViewIfNeeded()
         _ = window(hosting: split)
         split.viewDidAppear()
         await manager.loadNotes()
+        XCTAssertTrue(alerts.shown.isEmpty, "nothing has failed yet")
 
         await manager.deleteNote(id: existing.id)
 
         XCTAssertNil(manager.storageFailure)
+        XCTAssertEqual(alerts.shown.count, 1)
+        XCTAssertEqual(alerts.shown.first?.failure.operation, .delete)
     }
 }
