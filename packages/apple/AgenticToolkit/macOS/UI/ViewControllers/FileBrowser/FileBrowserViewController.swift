@@ -260,11 +260,11 @@ public final class FileBrowserViewController: NSViewController {
 
     /// Removes the root the footer's `−` targets, if it is a removable one.
     @objc public func removeSelectedDirectory() {
-        guard let root = selection.selectedRoot else { NSSound.beep(); return }
+        guard let root = selection.selectedRoot else { RefusalFeedback.announce(); return }
         if directories.remove(root) {
             selection.selectedRoot = nil
         } else {
-            NSSound.beep()
+            RefusalFeedback.announce()
         }
     }
 

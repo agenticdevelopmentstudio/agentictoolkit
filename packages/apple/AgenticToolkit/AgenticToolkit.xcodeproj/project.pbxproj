@@ -340,6 +340,7 @@
 		4D3E95FD69B51DEB256162DE /* AgenticDeveloperToolkitUI-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 12692636CB83EBEA82DE2F7C /* AgenticDeveloperToolkitUI-macOS.framework */; };
 		4DE437922146CD838B2D98EC /* ProjectBrowserViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62899E2D8A1715C1FCECE465 /* ProjectBrowserViewController.swift */; };
 		4E215FE43F0BE99D1C4AE6E6 /* GitFileStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F390DE34061E16AA1ED5060D /* GitFileStatus.swift */; };
+		4E9D73F89B84255A420D7568 /* RefusalFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D288C64E539B1D7D8FE1F41 /* RefusalFeedback.swift */; };
 		4EB892BE77ECEAE7EAD6F7C0 /* ModelCatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21A2733A4CD84EDD73E5D3B /* ModelCatalogStore.swift */; };
 		50131C005F2C2DCED1A2F8A4 /* FileBrowserViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA88DA3490B30D9417464679 /* FileBrowserViewController.swift */; };
 		5056A4E1B4F63A242BF5F6B3 /* HeuristicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05F23507703845E8715E1F99 /* HeuristicTests.swift */; };
@@ -881,6 +882,7 @@
 		EEB3DFD90EBCCAB8E6C80E8A /* ScriptableTerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30AD3EAE92B62896687121A9 /* ScriptableTerminalSession.swift */; };
 		EEF997E6E95D4F75736DCC4F /* LocalModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C768913C2E67B08FB03FB83 /* LocalModelCatalog.swift */; };
 		EF67FBEF3A727EF3A8F1DC47 /* ExtensionRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1582FFA3C37E29B8B3A8FCD0 /* ExtensionRegistryTests.swift */; };
+		EFA49C92E289060D0EAA3199 /* RefusalRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB78EA6E1D01F6B14B041951 /* RefusalRecorder.swift */; };
 		F00153AB50EE5ADB0B591D8B /* WindowPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71116A9F950E75D198E453E1 /* WindowPosition.swift */; };
 		F0073F9C41A4ECAF86AC72E9 /* AgenticToolkitMarkdown-macOS.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9BE5AA37E98B6801FE1D1948 /* AgenticToolkitMarkdown-macOS.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F0226D5E7FF105FF52499BA1 /* PeriodicTriggerSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FFD6F006E798B5A1BA44C22 /* PeriodicTriggerSource.swift */; };
@@ -1822,6 +1824,7 @@
 		0C86FC37F48D2DC557B60669 /* AIPluginManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPluginManagerTests.swift; sourceTree = "<group>"; };
 		0CBD6D7113FA1954DBC255E4 /* SpacingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpacingTests.swift; sourceTree = "<group>"; };
 		0CE882F7D14667CDC3988D8B /* CommandRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRegistryTests.swift; sourceTree = "<group>"; };
+		0D288C64E539B1D7D8FE1F41 /* RefusalFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefusalFeedback.swift; sourceTree = "<group>"; };
 		0DD01D2095CEDD122A37FA91 /* FileEditorTriggerCharacterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEditorTriggerCharacterTests.swift; sourceTree = "<group>"; };
 		0DECC3D1E97AF33714DCB5D3 /* SingleConfigurationChatConfigProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleConfigurationChatConfigProvider.swift; sourceTree = "<group>"; };
 		0DF57595093D7A815C86BA53 /* ClaudeCLI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCLI.swift; sourceTree = "<group>"; };
@@ -2435,6 +2438,7 @@
 		DA214EADFAE1BADD1EFC41DF /* ScriptableProjectWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptableProjectWindow.swift; sourceTree = "<group>"; };
 		DA8EBD7DE07EAE6D4F575B42 /* MarkdownNoteStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownNoteStorage.swift; sourceTree = "<group>"; };
 		DB253B518D12219E03CC47A3 /* ADHSyncCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ADHSyncCatalogTests.swift; sourceTree = "<group>"; };
+		DB78EA6E1D01F6B14B041951 /* RefusalRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefusalRecorder.swift; sourceTree = "<group>"; };
 		DBEB58A49782766E3929EC3C /* SettingsPanelSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelSplitViewController.swift; sourceTree = "<group>"; };
 		DBF568C4E57FFEE3670544C8 /* FileTypesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypesSettingsView.swift; sourceTree = "<group>"; };
 		DCA7037E8B1F1B555E281A65 /* CommandPaletteViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteViewController.swift; sourceTree = "<group>"; };
@@ -3252,6 +3256,7 @@
 				E2DDEF39272F2731EDDDFB00 /* Popover */,
 				FE539DABB2B8624FA09B5FF9 /* Theme */,
 				9B98611E780BAA553707EB5B /* ViewControllers */,
+				0D288C64E539B1D7D8FE1F41 /* RefusalFeedback.swift */,
 				143BB28B18F37E34CE02E2CB /* StringRenderedWidth.swift */,
 			);
 			path = UI;
@@ -3884,6 +3889,7 @@
 				68F983574EBDA8EAE4D3FC62 /* WindowDiscovery */,
 				BB4368290C759EB450171D51 /* MarkdownNoteStorageTests.swift */,
 				891D2F21BE29CCE600FB6473 /* NoteEditorViewControllerTests.swift */,
+				DB78EA6E1D01F6B14B041951 /* RefusalRecorder.swift */,
 			);
 			name = AgenticToolkitMacOSTests;
 			path = Tests/AgenticToolkitMacOSTests;
@@ -6323,6 +6329,7 @@
 				5E3FAB824D0D5BA3CADF0197 /* RangeViewModel.swift in Sources */,
 				2DE3C49225FD1D17E521B235 /* RealScreenProvider.swift in Sources */,
 				AF06F0FBA7449AB6A5A9A17E /* ReconcileView.swift in Sources */,
+				4E9D73F89B84255A420D7568 /* RefusalFeedback.swift in Sources */,
 				750147665D21A4AA50DE2086 /* ReopenOnLaunchPolicy.swift in Sources */,
 				8C0C8D40CCFBA9A9C395B931 /* RunningAppsProvider.swift in Sources */,
 				824106A9FAA5BBA72233BDB3 /* ScreenChange.swift in Sources */,
@@ -6770,6 +6777,7 @@
 				7EF0A5CDFEDF2B8CF61E833C /* ProjectWindowSearchTests.swift in Sources */,
 				1C5E9D7F9395D9E22D5CAF58 /* ProjectWindowTestSupport.swift in Sources */,
 				4B556CFC5B14E9A9811F54F9 /* ProviderPickerTests.swift in Sources */,
+				EFA49C92E289060D0EAA3199 /* RefusalRecorder.swift in Sources */,
 				D05B43C7B4AD560380776DD2 /* ReopenOnLaunchPolicyTests.swift in Sources */,
 				63DB102B342074B1FF9223B2 /* ScreenManagerTests.swift in Sources */,
 				29C34DE7636859C833F72C67 /* ScreenMatcherTests.swift in Sources */,

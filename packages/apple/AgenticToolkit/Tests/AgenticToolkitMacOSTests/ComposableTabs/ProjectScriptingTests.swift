@@ -276,6 +276,7 @@ final class ProjectScriptingTests: XCTestCase {
     /// regardless, which is a script being told a pane is gone while looking
     /// straight at it.
     func testClosePaneReportsFalseWhenTheTreeRefusesTheClose() throws {
+        let refusals = recordingRefusals()
         let controller = makeController(for: makeProject())
         ProjectWindowManager.shared.adoptForScripting(controller)
         defer { ProjectWindowManager.shared.forgetForScripting(controller) }
@@ -288,6 +289,8 @@ final class ProjectScriptingTests: XCTestCase {
         XCTAssertEqual(controller.allPanes().count, 1)
         XCTAssertEqual(command.scriptErrorNumber, 0,
                        "a veto is a legitimate answer; the error channel is for \"no such pane\"")
+        XCTAssertEqual(refusals.count, 1,
+                       "the veto reached the same announcement a clicked close button would")
     }
 
     func testClosePaneReportsTrueWhenThePaneIsActuallyGone() throws {

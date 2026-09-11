@@ -279,7 +279,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
 
     private func move(_ direction: ComposableTabsViewController.Direction) {
         guard let split = enclosingSplitOnScreen, split.move(self, direction) else {
-            NSSound.beep()
+            RefusalFeedback.announce()
             return
         }
     }
@@ -309,7 +309,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     private func presentAddSheet() {
         let choices = addChoices()
         guard !choices.isEmpty else {
-            NSSound.beep()
+            RefusalFeedback.announce()
             return
         }
         let picker = ComposableTabsAddPaneViewController(choices: choices) { [weak self] viewID, direction in
@@ -330,7 +330,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     /// and the pane's content is the only thing that knows whether it would.
     private func confirmAndRemove() {
         guard let split = enclosingSplitOnScreen, split.canRemoveLeaf(self) else {
-            NSSound.beep()
+            RefusalFeedback.announce()
             return
         }
         guard let warning = (contentViewController as? PaneContentRemovalConfirmation)?

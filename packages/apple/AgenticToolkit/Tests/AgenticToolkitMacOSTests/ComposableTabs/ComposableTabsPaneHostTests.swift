@@ -125,6 +125,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
     /// The host is free to refuse. A tab reduced to one pane has nothing to
     /// give the space to, and `remove` already says so.
     func testCloseIsRefusedForTheLastPaneInATab() throws {
+        let refusals = recordingRefusals()
         let onlyID = UUID()
         let root = try makeTree(.leaf(id: onlyID, contentType: alpha))
         let only = try leaf(onlyID, in: root)
@@ -132,6 +133,8 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         root.paneDidRequestClose(only)
 
         XCTAssertEqual(root.allLeaves().map(\.nodeID), [onlyID])
+        XCTAssertEqual(refusals.count, 1,
+                       "and the refusal is said out loud, or the button reads as dead")
     }
 
     // MARK: - Which edges are offered
@@ -598,6 +601,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
     /// allowed made every refused click cost the pane its zoom. A refused close
     /// has to leave the pane exactly as it found it.
     func testARefusedCloseKeepsTheZoomItWouldOtherwiseThrowAway() throws {
+        let refusals = recordingRefusals()
         let root = try boundedSideBySide()
         let left = try leaf(leftID, in: root)
         root.paneDidRequestZoom(left)
@@ -605,6 +609,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
 
         root.paneDidRequestClose(left)
 
+        XCTAssertEqual(refusals.count, 1, "the close was refused, and said so")
         XCTAssertEqual(root.allLeaves().map(\.nodeID), [leftID, rightID],
                        "the spec's floor still refuses the close")
         XCTAssertTrue(root.zoomedLeaf === left, "and the refusal changed nothing else")
@@ -1119,6 +1124,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
     /// close the spec permits was silently refused on a tab nobody had
     /// displayed.
     func testTheRemovalVetoOnANeverDisplayedTabIsAskedAboutTheTabNotTheSubtree() throws {
+        let refusals = recordingRefusals()
         let root = try boundedNested()
         let top = try leaf(topID, in: root)
         let bottom = try leaf(bottomID, in: root)
@@ -1137,10 +1143,12 @@ final class ComposableTabsPaneHostTests: XCTestCase {
         bottom.host?.paneDidRequestClose(bottom)
         XCTAssertEqual(root.allLeaves().map(\.nodeID), [leftID, topID, bottomID],
                        "a refused close leaves the tree exactly as it was")
+        XCTAssertEqual(refusals.count, 1, "and says so rather than doing nothing quietly")
 
         top.host?.paneDidRequestClose(top)
         XCTAssertEqual(root.allLeaves().map(\.nodeID), [leftID, bottomID],
                        "and the veto is what `remove(_:)` gates on, so a wrong answer keeps the pane")
+        XCTAssertEqual(refusals.count, 1, "a close that goes through announces nothing")
     }
 
     /// A collapse detaches the inner split from the tab. `layoutChildren`'s

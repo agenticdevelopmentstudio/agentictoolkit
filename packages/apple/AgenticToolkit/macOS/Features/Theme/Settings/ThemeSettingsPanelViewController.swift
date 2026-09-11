@@ -200,7 +200,7 @@ public final class ThemeSettingsPanelViewController: ComposableSettings.Settings
     }
 
     private func removeSelectedTheme() {
-        guard let theme = selectedTheme, theme.isDeletable else { NSSound.beep(); return }
+        guard let theme = selectedTheme, theme.isDeletable else { RefusalFeedback.announce(); return }
         // Land on the previous row (or the first) after the delete.
         let ids = store.allThemes.map(\.id)
         let previousID = ids.firstIndex(of: theme.id).flatMap { $0 > 0 ? ids[$0 - 1] : nil }
@@ -209,7 +209,7 @@ public final class ThemeSettingsPanelViewController: ComposableSettings.Settings
     }
 
     @objc private func duplicateSelected() {
-        guard let theme = selectedTheme else { NSSound.beep(); return }
+        guard let theme = selectedTheme else { RefusalFeedback.announce(); return }
         rebuildPanels(selecting: store.duplicate(theme).id)
     }
 
@@ -234,7 +234,7 @@ public final class ThemeSettingsPanelViewController: ComposableSettings.Settings
     }
 
     @objc private func exportJSONAction() {
-        guard let theme = selectedTheme else { NSSound.beep(); return }
+        guard let theme = selectedTheme else { RefusalFeedback.announce(); return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "\(Self.sanitizedFilename(theme.name)).json"

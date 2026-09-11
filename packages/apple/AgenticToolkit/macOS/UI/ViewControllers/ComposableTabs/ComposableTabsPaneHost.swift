@@ -50,7 +50,7 @@ extension ComposableTabsViewController: PaneHost {
         // reads as a dead button rather than a protected pane.
         guard layoutChildren.contains(where: { $0.viewController === leaf }),
               (rootSplit() ?? self).canRemoveLeaf(leaf) else {
-            NSSound.beep()
+            RefusalFeedback.announce()
             return
         }
         // The pane is about to stop existing; a zoom pointing at it would leave

@@ -257,7 +257,7 @@ open class AIPanelViewController: ComposableSettings.SettingsPanelSplitViewContr
     private func removeSelected() {
         guard let id = viewModel.selectedId,
               let config = viewModel.configurations.first(where: { $0.id == id }) else {
-            NSSound.beep()
+            RefusalFeedback.announce()
             return
         }
         let alert = NSAlert()
