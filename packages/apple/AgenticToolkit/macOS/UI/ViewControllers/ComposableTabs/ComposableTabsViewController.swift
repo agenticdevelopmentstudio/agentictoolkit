@@ -152,6 +152,12 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// the project's tab list.
     public var onLayoutDidChange: ((LayoutNode) -> Void)?
 
+    /// How this tree divides its space when panes come and go. Defaults to
+    /// today's behaviour, so no existing host's layout moves.
+    public var arranger: PaneArranger = InheritedSlotArranger() {
+        didSet { stampOwnershipOnChildren() }
+    }
+
     /// The array is the general shape, but a split here is binary or solo and
     /// `captureThicknessFractions()` now depends on that: it skips a split whole
     /// when one of its items is a rail, which is only lossless because a binary
@@ -188,10 +194,43 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// holding it — `host` for a pane, `layoutParent` for a nested split.
     /// Nested splits stamp their own children the same way, from their own
     /// `init` and their own `didSet`, so one pass per level covers the tree.
+    ///
+    /// A nested split also inherits `arranger` here: an arranger governs a
+    /// whole tree, not one node, so a split that appeared after the root's was
+    /// installed — or picked up a new one — has to pass it on the same way.
     private func stampOwnershipOnChildren() {
         for child in layoutChildren {
             (child as? ComposableTabsPaneViewController)?.host = self
-            (child as? ComposableTabsViewController)?.layoutParent = self
+            if let split = child as? ComposableTabsViewController {
+                split.layoutParent = self
+                split.arranger = arranger
+            }
+        }
+    }
+
+    /// Reassigns thickness fractions from the installed arranger.
+    ///
+    /// Applied onto the live children rather than through `rebuild(from:)`:
+    /// the tree shape is already correct by the time this runs, and rebuilding
+    /// would tear down and re-adopt every pane to change two numbers.
+    public func applyArrangement() {
+        guard !(arranger is InheritedSlotArranger) else { return }
+        let arranged = arranger.arrange(snapshotNode(), along: axis)
+        applyFractions(from: arranged)
+        if isViewLoaded {
+            hasAppliedPreferredThicknesses = false
+            view.needsLayout = true
+        }
+    }
+
+    /// Matches the arranged tree back onto the live one by node id. A node the
+    /// arranger did not describe keeps whatever fraction it had.
+    private func applyFractions(from node: LayoutNode) {
+        guard case .split(_, let first, let second) = node.kind else { return }
+        for (child, arranged) in zip(layoutChildren, [first, second]) {
+            guard child.nodeID == arranged.id else { continue }
+            child.thicknessFraction = arranged.thicknessFraction.map { CGFloat($0) }
+            (child as? ComposableTabsViewController)?.applyFractions(from: arranged)
         }
     }
 
@@ -625,6 +664,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         }
 
         // Propagate to root, which persists the full tree.
+        rootSplit()?.applyArrangement()
         rootSplit()?.persistTreeToDocument()
     }
 
@@ -695,6 +735,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         if hadFocus, let root, let leaf = root.firstLeaf() {
             root.view.window?.makeFirstResponder(leaf.view)
         }
+        root?.applyArrangement()
         root?.persistTreeToDocument()
     }
 
