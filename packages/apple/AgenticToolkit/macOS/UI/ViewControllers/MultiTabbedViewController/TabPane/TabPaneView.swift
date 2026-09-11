@@ -2,15 +2,17 @@ import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
 import AppKit
 
-/// The card drawn in the edge bar: one row, the same on all four edges.
+/// The card drawn in the edge bar: a stacked block, the same on all four edges.
 ///
-/// The card is flush against the side of the bar that faces the workspace and
-/// open on that side — the fill runs into it, and the border stops there — so
-/// the card reads as attached to the workspace rather than as a chip floating
-/// beside it. The selected card paints what the workspace paints, and is
-/// outlined in the workspace's own outline colour, so the two are one object
-/// with a tab sticking out of it. The unselected ones sit a plane lower, on
-/// `surface`, with dimmer text: present, but not the one in front.
+/// Every card paints what the workspace paints, in the workspace's own outline
+/// colour, and its background overhangs the bar by `workspaceOverlap` — far
+/// enough to cover the line the workspace draws down that side. So there is no
+/// seam where the two meet: a single unbroken 1pt line runs up one side of a
+/// card, around its two outer corners, down the other side, across the bare
+/// workspace edge to the next card, and on around the workspace itself.
+///
+/// Which card is in front is therefore carried by its text, not by its fill:
+/// the active card's labels sit a role brighter than the rest.
 ///
 /// `TabBarView` supplies the other half of the attachment: it pads the outer
 /// side of the bar and leaves the workspace side at zero.
@@ -21,11 +23,18 @@ final class TabPaneView: NSView {
     /// horizontal one does.
     static let minWidth: CGFloat = 240
     static let maxWidth: CGFloat = 340
-    static let rowHeight: CGFloat = 34
-    static let cornerRadius: CGFloat = 8
+    /// Deep enough for the header and the four lines under it with room left
+    /// over: the card is a block you read, not a strip you squint at.
+    static let minHeight: CGFloat = 136
+    static let cornerRadius: CGFloat = 10
+
+    /// How far the card's background reaches past the bar and over the
+    /// workspace's own outline. One point is that outline's whole width, which
+    /// is the point: the line ceases to exist across the card's mouth.
+    static let workspaceOverlap: CGFloat = 1
 
     /// The card's own padding, inside the border.
-    private static let padding = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+    private static let padding = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
 
     let agentLabel = ThemedLabel(role: .primaryText, textRole: .body)
     let sessionLabel = ThemedLabel(role: .primaryText, textRole: .body)
@@ -83,21 +92,21 @@ final class TabPaneView: NSView {
 
     /// The size the card wants for its current content. The same measurement
     /// on every edge, because the arrangement is the same on every edge: a
-    /// width held between `minWidth` and `maxWidth`, and a height that grows
-    /// past `rowHeight` when the content needs it to (a larger text scale).
+    /// width held between `minWidth` and `maxWidth`, and a height that starts
+    /// at `minHeight` and grows past it when the content needs it to.
     ///
-    /// It measures the row, not the card. `TabPaneViewController` makes this
+    /// It measures the stack, not the card. `TabPaneViewController` makes this
     /// view its own `view`, so AppKit installs the priority-501
     /// `preferredContentSize` constraints onto the card itself — and the
     /// labels resist compression at only `.defaultLow`. Asking the card for
     /// its `fittingSize` after a first measurement therefore returns that
     /// first answer back, and a card whose text grows on a later `reload()`
-    /// would never widen. The row carries none of those constraints.
+    /// would never widen. The stack carries none of those constraints.
     var contentSize: NSSize {
         let fitting = content.fittingSize
         return NSSize(
             width: min(Self.maxWidth, max(Self.minWidth, fitting.width)),
-            height: max(Self.rowHeight, fitting.height)
+            height: max(Self.minHeight, fitting.height)
         )
     }
 
@@ -120,10 +129,6 @@ final class TabPaneView: NSView {
         directoryLabel.lineBreakMode = .byTruncatingHead
         summaryLabel.lineBreakMode = .byTruncatingTail
         summaryLabel.isHidden = true
-        // The lowest priorities in the row, so a narrow bar squeezes the
-        // summary before it touches the agent name, branch, or path.
-        summaryLabel.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        summaryLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
         statusStack.orientation = .horizontal
         statusStack.spacing = 2
@@ -141,58 +146,99 @@ final class TabPaneView: NSView {
         addSubview(background)
         observeTheme { view, _ in view.applyHighlight() }
 
-        for view in rowContents() { content.addArrangedSubview(view) }
-        content.orientation = .horizontal
-        content.alignment = .centerY
-        content.spacing = 8
+        let header = makeHeader()
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 6
         content.edgeInsets = Self.padding
         content.translatesAutoresizingMaskIntoConstraints = false
+        for view in [header, sessionLabel, directoryLabel, branchLabel, summaryLabel, makeSpacer()] {
+            content.addArrangedSubview(view)
+        }
         addSubview(content)
 
+        let overhang = overhangInsets()
         NSLayoutConstraint.activate([
-            background.topAnchor.constraint(equalTo: topAnchor),
-            background.leadingAnchor.constraint(equalTo: leadingAnchor),
-            background.trailingAnchor.constraint(equalTo: trailingAnchor),
-            background.bottomAnchor.constraint(equalTo: bottomAnchor),
+            background.topAnchor.constraint(equalTo: topAnchor, constant: -overhang.top),
+            background.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -overhang.left),
+            background.trailingAnchor.constraint(equalTo: trailingAnchor, constant: overhang.right),
+            background.bottomAnchor.constraint(equalTo: bottomAnchor, constant: overhang.bottom),
             content.topAnchor.constraint(equalTo: topAnchor),
             content.leadingAnchor.constraint(equalTo: leadingAnchor),
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor)
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // `.leading` alignment pins one edge only, so without this the
+            // header is as wide as its own text and the close button lands
+            // beside the agent name instead of in the card's far corner. The
+            // inset arithmetic has to restate `edgeInsets` exactly — the
+            // stack's own alignment constraints are required priority, and a
+            // different number here is unsatisfiable rather than merely wrong.
+            header.widthAnchor.constraint(
+                equalTo: content.widthAnchor,
+                constant: -(Self.padding.left + Self.padding.right)
+            )
         ])
         // No self-pin on either axis: the cross axis is the hosting bar's
         // job at required priority (`TabBarView.rebuildButtons()`), and the
         // length axis is AppKit's own priority-501
         // `NSViewController.preferredContentSize` constraint, driven by
-        // `contentSize` below. A required pin here would restate one of
+        // `contentSize` above. A required pin here would restate one of
         // those two numbers at required priority and risk an unsatisfiable
         // conflict with whichever one wins.
         applyHighlight()
     }
 
-    /// The row, outermost item first. The close button goes on the end of the
-    /// card nearest the outside of the window — the leading end on a left bar,
-    /// the trailing end everywhere else — so it is never the thing standing
+    /// The card's top line: the agent, its status symbols, and the close
+    /// button.
+    ///
+    /// The close button goes on the end nearest the outside of the window —
+    /// the leading end on a left bar, the trailing end everywhere else — so it
+    /// sits in the card's outside top corner and is never the thing standing
     /// between the card's text and the workspace it belongs to.
-    private func rowContents() -> [NSView] {
-        let body = [agentLabel, statusStack, sessionLabel, directoryLabel, branchLabel, summaryLabel] as [NSView]
-        return edge == .left ? [closeButton] + body : body + [closeButton]
+    private func makeHeader() -> NSStackView {
+        let gap = NSView()
+        gap.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        gap.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let body = [agentLabel, statusStack, gap] as [NSView]
+        let header = NSStackView(views: edge == .left ? [closeButton] + body : body + [closeButton])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 6
+        return header
     }
 
-    /// Selection is the card changing plane, not a highlight over it: the
-    /// selected card paints the workspace's own backdrop and outline, so it
-    /// reads as the near end of the workspace. The rest sit on `surface` with
-    /// dimmer text.
+    /// Takes whatever height is left over in a card taller than its text, so
+    /// the lines sit at the top of the card rather than spreading down it.
+    private func makeSpacer() -> NSView {
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        return spacer
+    }
+
+    /// How far the background reaches past each side of the card. Only the
+    /// side facing the workspace overhangs; the other three end where the card
+    /// ends.
+    private func overhangInsets() -> NSEdgeInsets {
+        let over = Self.workspaceOverlap
+        switch edge {
+        case .top: return NSEdgeInsets(top: 0, left: 0, bottom: over, right: 0)
+        case .bottom: return NSEdgeInsets(top: over, left: 0, bottom: 0, right: 0)
+        case .left: return NSEdgeInsets(top: 0, left: 0, bottom: 0, right: over)
+        case .right: return NSEdgeInsets(top: 0, left: over, bottom: 0, right: 0)
+        }
+    }
+
+    /// Every card paints the workspace's own backdrop and outline, so the two
+    /// are one surface under one line. Which card is in front is the text: the
+    /// active card's labels sit a role brighter than the rest.
     private func applyHighlight() {
         let palette = resolvedThemeScope.palette
-        background.fillColor = isHighlighted
-            ? NSColor(palette.projectPaneBackdrop)
-            : palette.nsColor(.surface)
-        background.borderColor = isHighlighted
-            ? NSColor(palette.projectPaneOutline)
-            : palette.nsColor(.border)
+        background.fillColor = NSColor(palette.projectPaneBackdrop)
+        background.borderColor = NSColor(palette.projectPaneOutline)
         agentLabel.role = isHighlighted ? .primaryText : .secondaryText
         sessionLabel.role = isHighlighted ? .primaryText : .secondaryText
-        directoryLabel.role = isHighlighted ? .tertiaryText : .placeholderText
+        directoryLabel.role = isHighlighted ? .secondaryText : .placeholderText
         branchLabel.role = isHighlighted ? .secondaryText : .tertiaryText
         summaryLabel.role = isHighlighted ? .secondaryText : .tertiaryText
         closeButton.contentTintColor = palette.nsColor(isHighlighted ? .secondaryText : .placeholderText)
@@ -276,8 +322,10 @@ private final class TabCardBackgroundView: NSView {
 
     /// `bounds` pulled in by half a point on the three stroked sides, so a
     /// 1pt line lands inside the card instead of straddling its edge. The open
-    /// side keeps its half point: nothing is drawn there, and the fill has to
-    /// reach all the way to the workspace.
+    /// side keeps its half point: nothing is drawn there, and both the fill
+    /// and the two side strokes have to run all the way out through the
+    /// overhang and over the workspace's own outline, which is what leaves no
+    /// seam between them.
     private func strokeBounds() -> NSRect {
         let half: CGFloat = 0.5
         var rect = bounds.insetBy(dx: half, dy: half)

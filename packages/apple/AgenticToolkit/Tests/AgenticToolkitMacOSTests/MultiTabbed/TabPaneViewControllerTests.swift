@@ -79,9 +79,9 @@ final class TabPaneViewControllerTests: XCTestCase {
             XCTAssertEqual(size, sizes[0])
         }
         // The floors the measurement is built on: never narrower than
-        // `minWidth`, never shorter than `rowHeight`.
+        // `minWidth`, never shorter than `minHeight`.
         XCTAssertGreaterThanOrEqual(sizes[0].width, TabPaneView.minWidth)
-        XCTAssertGreaterThanOrEqual(sizes[0].height, TabPaneView.rowHeight)
+        XCTAssertGreaterThanOrEqual(sizes[0].height, TabPaneView.minHeight)
     }
 
     /// Discriminates `max(Self.minWidth, fittingSize.width)`: content that
@@ -99,10 +99,10 @@ final class TabPaneViewControllerTests: XCTestCase {
     }
 
     /// Review C MAJOR-1: `TabPaneView.contentSize`'s `.top`/`.bottom` arm
-    /// returned the literal `Self.rowHeight` with no `max` against
-    /// `fittingSize.height`, so a pane whose content needed more than the row
-    /// height got clipped (and fought a required constraint pin) instead of
-    /// the bar growing to fit. This drives a real
+    /// returned a literal height with no `max` against `fittingSize.height`,
+    /// so a pane whose content needed more than that got clipped (and fought a
+    /// required constraint pin) instead of the bar growing to fit. This drives
+    /// a real
     /// `ThemeManager` with an enlarged `textScale`, the same knob the
     /// review's own "concrete failure" traces to (`ThemeTypography.sizeScale`,
     /// composed into the live palette `ThemedLabel` actually paints with via
@@ -118,7 +118,7 @@ final class TabPaneViewControllerTests: XCTestCase {
         let source = StubSource()
         let top = makePane(edge: .top, source: source)
 
-        XCTAssertGreaterThan(top.preferredContentSize.height, TabPaneView.rowHeight)
+        XCTAssertGreaterThan(top.preferredContentSize.height, TabPaneView.minHeight)
         XCTAssertEqual(top.preferredContentSize.height, top.paneView.fittingSize.height, accuracy: 0.5)
     }
 
