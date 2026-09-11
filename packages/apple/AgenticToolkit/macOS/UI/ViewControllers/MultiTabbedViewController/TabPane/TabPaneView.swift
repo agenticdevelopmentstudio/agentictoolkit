@@ -123,7 +123,7 @@ final class TabPaneView: NSView {
             summaryLabel.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
             summaryLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
             content = NSStackView(
-                views: [agentLabel, statusStack, sessionLabel, branchLabel, summaryLabel, directoryLabel, closeButton]
+                views: [agentLabel, statusStack, sessionLabel, directoryLabel, branchLabel, summaryLabel, closeButton]
             )
             content.orientation = .horizontal
             content.alignment = .centerY

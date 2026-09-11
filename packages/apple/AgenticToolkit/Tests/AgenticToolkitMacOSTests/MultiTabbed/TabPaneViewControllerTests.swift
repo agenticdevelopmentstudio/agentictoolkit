@@ -98,7 +98,12 @@ final class TabPaneViewControllerTests: XCTestCase {
     /// exercise because their stub path sits outside the home directory.
     func testWorkingDirectoryUnderHomeIsAbbreviatedWithATilde() {
         let source = StubSource()
-        source.directory = URL(fileURLWithPath: NSHomeDirectory() + "/Projects/worktrees/tabs")
+        // Same API `TabPaneViewController.abbreviate` reads, not
+        // `NSHomeDirectory()` — the two are not guaranteed to agree, so a
+        // mismatch here could go green against a production path this test
+        // never actually exercises.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        source.directory = URL(fileURLWithPath: home + "/Projects/worktrees/tabs")
         let pane = makePane(edge: .left, source: source)
         XCTAssertEqual(pane.paneView.directoryLabel.stringValue, "~/Projects/worktrees/tabs")
     }

@@ -326,4 +326,77 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         container.layoutSubtreeIfNeeded()
         XCTAssertEqual(hostedView.frame.width, 300, accuracy: 0.5)
     }
+
+    // MARK: - Task 11 fix round 2: the cross-axis relationship the +17/+1 constants promise
+
+    /// Pins `TabBarView.updateThickness()`'s `+ 17` constant by measuring the
+    /// relationship it exists to guarantee, not by reading back a hardcoded
+    /// thickness number: a hosted item's content view, once laid out, must
+    /// receive *exactly* its own `preferredContentSize.width` on the bar's
+    /// cross axis (17 = the host's 8+8pt leading/trailing pins in
+    /// `rebuildButtons()` plus the 1pt `edgeDivider`, both of which sit
+    /// between the bar's outer edge and the content view). Too little and
+    /// the constant under-allocates (content gets clipped); too much and it
+    /// over-allocates (content floats in slack) — either would fail this.
+    ///
+    /// The frame is zeroed before layout for the same reason as
+    /// `testHostedBareViewGetsANonZeroLengthOnALeftRightBar`: an axis with
+    /// its constraint removed goes ambiguous, not zero, and an unzeroed
+    /// frame would read back whatever size the view already carried.
+    func testHostedItemReceivesExactlyItsPreferredWidthOnALeftRightBar() throws {
+        let host = NSViewController()
+        host.view = NSView()
+        let bar = TabBarView(edge: .left)
+        bar.hostController = host
+
+        let content = NSViewController()
+        content.view = NSView()
+        content.preferredContentSize = NSSize(width: 200, height: 64)
+        bar.setItems([.init(id: UUID(), item: .viewController(content))], selectedID: nil)
+
+        let hostedView = try XCTUnwrap(content.view.superview)
+        hostedView.frame = .zero
+        content.view.frame = .zero
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        container.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bar.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(content.view.frame.width, 200, accuracy: 0.5)
+    }
+
+    /// The same relationship on the swapped axis, pinning `+ 1`: a
+    /// top/bottom bar's hosted content view must receive exactly its
+    /// `preferredContentSize.height` (there is no left/right-style
+    /// cross-axis inset on this axis, so the only consumer between the bar's
+    /// edge and the content view is the 1pt `edgeDivider`).
+    func testHostedItemReceivesExactlyItsPreferredHeightOnATopBottomBar() throws {
+        let host = NSViewController()
+        host.view = NSView()
+        let bar = TabBarView(edge: .top)
+        bar.hostController = host
+
+        let content = NSViewController()
+        content.view = NSView()
+        content.preferredContentSize = NSSize(width: 120, height: 40)
+        bar.setItems([.init(id: UUID(), item: .viewController(content))], selectedID: nil)
+
+        let hostedView = try XCTUnwrap(content.view.superview)
+        hostedView.frame = .zero
+        content.view.frame = .zero
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 100))
+        container.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bar.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(content.view.frame.height, 40, accuracy: 0.5)
+    }
 }
