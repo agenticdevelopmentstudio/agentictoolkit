@@ -36,7 +36,11 @@ public final class ProjectWorkspace {
     public let languageServices: ProjectLanguageServices?
 
     private var nextPaneNumber = 1
-    private var cachedDirectories: FileBrowserDirectories?
+    private var fileBrowserDirectoriesByPrimary: [URL: FileBrowserDirectories] = [:]
+
+    /// Set by the project controller so panes get the status provider of the
+    /// branch that owns their directory instead of building their own.
+    public var gitStatusProviderResolver: ((URL) -> GitStatusProvider?)?
 
     public init(
         repo: GitRepo,
@@ -88,12 +92,26 @@ public final class ProjectWorkspace {
 
     // MARK: - Tabs
 
+    /// What the database holds for this project's tabs, or `nil` when nothing
+    /// was ever saved (a project being opened for the first time, or a load
+    /// that failed).
+    public struct StoredTabs {
+        public let tabs: [TabRecord]
+        public let activeTabID: UUID?
+        public let enabledEdges: [Edge]
+    }
+
+    /// The persisted tabs, or `nil` when there is nothing stored to read
+    /// through: a fresh project, or one whose load failed.
+    public func storedTabs() -> StoredTabs? {
+        guard let loaded = try? database.loadTabs(repoID: repo.id), !loaded.tabs.isEmpty else { return nil }
+        return StoredTabs(tabs: loaded.tabs, activeTabID: loaded.activeTabID, enabledEdges: loaded.enabledEdges)
+    }
+
     /// The tabs the window controller should display: the stored set, or one
     /// default tab for a project being opened for the first time.
     public func initialTabs() -> (tabs: [TabRecord], activeTabID: UUID, enabledEdges: [Edge]) {
-        let stored: (tabs: [TabRecord], activeTabID: UUID?, enabledEdges: [Edge]) =
-            (try? database.loadTabs(repoID: repo.id)) ?? (tabs: [], activeTabID: nil, enabledEdges: [.top])
-        guard !stored.tabs.isEmpty else {
+        guard let stored = storedTabs() else {
             let tab = TabRecord(title: "Tab 1", root: layout.blueprint())
             return ([tab], tab.id, [.top])
         }
@@ -238,29 +256,34 @@ public final class ProjectWorkspace {
         }
     }
 
-    /// The roots every file browser pane of this project shows — one object,
-    /// not one per pane.
+    /// The roots every file browser pane working in `primary` shows — one
+    /// object per directory, not one per pane, so every pane in a tab shares
+    /// and observes the same additional-roots list.
     ///
     /// Each pane used to build its own from a snapshot taken when it was
     /// created, and each wrote the *whole* list back on any change: a directory
     /// added in one pane was silently dropped the next time another pane saved
     /// (`dry` — one representation of the project's roots). Which root a pane's
     /// footer is aimed at stays per-pane, on `FileBrowserSelection`.
-    public var fileBrowserDirectories: FileBrowserDirectories {
-        // A project that moved has a different primary root, so the cached list
-        // is rebuilt rather than left pointing at the old folder.
-        if let cached = cachedDirectories, cached.primary == directoryURL.standardizedFileURL {
+    public func fileBrowserDirectories(primary: URL) -> FileBrowserDirectories {
+        let key = primary.standardizedFileURL
+        if let cached = fileBrowserDirectoriesByPrimary[key] {
             return cached
         }
         let directories = FileBrowserDirectories(
-            primary: directoryURL,
+            primary: key,
             additional: projectDirectories()
         )
         directories.onChange = { [weak self] urls in
             self?.persistProjectDirectories(urls)
         }
-        cachedDirectories = directories
+        fileBrowserDirectoriesByPrimary[key] = directories
         return directories
+    }
+
+    /// The roots for panes working in the project's own directory.
+    public var fileBrowserDirectories: FileBrowserDirectories {
+        fileBrowserDirectories(primary: directoryURL)
     }
 
     /// Persists the extra directories. Called whenever the browser's `+`/`−`
@@ -271,6 +294,15 @@ public final class ProjectWorkspace {
         } catch {
             Self.logger.error("Failed to save project directories: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    // MARK: - Git status
+
+    /// The status provider for panes working in `directory`, or `nil` when the
+    /// project controller has not resolved one (a directory outside any known
+    /// worktree, or a project with no resolver wired yet).
+    public func gitStatusProvider(forDirectory directory: URL) -> GitStatusProvider? {
+        gitStatusProviderResolver?(directory.standardizedFileURL)
     }
 }
 
