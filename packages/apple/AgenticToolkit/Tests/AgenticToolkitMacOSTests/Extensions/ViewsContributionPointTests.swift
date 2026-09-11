@@ -196,10 +196,15 @@ struct ViewsContributionPointTests {
             to: point)
 
         defer { removeWorkspaceDirectories() }
+        // A pane's working directory is its own — a worktree's, not always the
+        // project's — so the registry takes it separately. This suite has one
+        // checkout, which makes the project's directory the right answer here.
+        let workspace = makeWorkspace()
         let controller = registry.makeContentViewController(
             for: "extension.test.pane.test.pane",
             nodeID: UUID(),
-            project: makeWorkspace(),
+            project: workspace,
+            workingDirectory: workspace.directoryURL,
             paneNumber: 1)
 
         let placeholder = try #require(controller as? ExtensionViewPlaceholderViewController)

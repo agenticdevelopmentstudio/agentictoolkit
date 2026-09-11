@@ -48,7 +48,12 @@ extension SubprocessChannel {
                     // a thrown error for this one-shot caller.
                     guard case .exited = error else { throw error }
                 }
-                let status = await channel.waitUntilExit()
+                // `waitUntilExit()` refuses to invent a status: an unlaunched
+                // channel and a cancelled wait both throw rather than reading
+                // as a clean exit. Either one belongs to the caller of a
+                // one-shot run, so it propagates through the `catch` below,
+                // which terminates the child first.
+                let status = try await channel.waitUntilExit()
                 let standardError = await channel.standardErrorText()
                 return RunResult(
                     standardOutput: output,
