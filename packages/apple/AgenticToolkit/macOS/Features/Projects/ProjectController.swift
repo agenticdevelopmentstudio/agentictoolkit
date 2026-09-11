@@ -29,17 +29,23 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// always the one left standing.
     private var inFlightReconcile: Task<Void, Never>?
 
-    /// Set synchronously, before any `await`, at the top of `shutdown()`.
-    /// `reconcile(notify:)` checks it again after its own git call returns,
-    /// so a reconcile already in flight when the window closes — the open
-    /// scan taking its ~100ms while `observeClose` drops this controller —
-    /// bails before persisting tabs or notifying, instead of writing a dead
-    /// window's checkouts into the database and asking it to reload. One flag
-    /// covers both `open()` and `refreshCheckouts()`, since both funnel
-    /// through `serializedReconcile(notify:)`; a stored, cancelled `Task`
-    /// handle was the alternative, rejected because it would be a second
-    /// lifecycle to keep in step with this one.
-    private var isClosed = false
+    /// Set by `markClosed()`, which the window's close handler calls
+    /// **synchronously**, in the same main-actor turn that drops this
+    /// controller. That timing is the whole point: `shutdown()` sets the flag
+    /// too, but it is `async`, so reaching it costs a main-actor hop — and a
+    /// reconcile continuation already enqueued ahead of that hop would resume
+    /// with the flag still down, pass the guard, and write a dead window's
+    /// checkouts into the database.
+    ///
+    /// `reconcile(notify:)` checks it again after its own git call returns, so
+    /// a reconcile already in flight when the window closes — the open scan
+    /// taking its ~100ms while `observeClose` drops this controller — bails
+    /// before persisting tabs or notifying. One flag covers both `open()` and
+    /// `refreshCheckouts()`, since both funnel through
+    /// `serializedReconcile(notify:)`;
+    /// a stored, cancelled `Task` handle was the alternative, rejected because
+    /// it would be a second lifecycle to keep in step with this one.
+    private(set) var isClosed = false
 
     public init(workspace: ProjectWorkspace, gitClient: GitClient, commandRegistry: CommandRegistry?) {
         self.workspace = workspace
@@ -74,8 +80,18 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
         await task.value
     }
 
-    public func shutdown() async {
+    /// Closes this controller to further work, synchronously. Separate from
+    /// `shutdown()` because `shutdown()` is `async`: a caller reaching it
+    /// through `Task { await … }` gets the flag set one main-actor hop later
+    /// than its own turn, which is exactly long enough for a reconcile
+    /// continuation enqueued ahead of that hop to resume, find the flag down,
+    /// and persist for a window that is already gone.
+    public func markClosed() {
         isClosed = true
+    }
+
+    public func shutdown() async {
+        markClosed()
         await workspace.languageServices?.shutdown()
     }
 

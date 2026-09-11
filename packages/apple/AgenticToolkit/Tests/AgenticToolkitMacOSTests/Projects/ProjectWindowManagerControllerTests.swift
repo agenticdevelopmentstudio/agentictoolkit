@@ -427,6 +427,35 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         )
     }
 
+    /// The close has to reach the controller's closed flag in its **own**
+    /// main-actor turn. `shutdown()` sets the same flag, but it is `async` and
+    /// the close handler reaches it through `Task { await … }`, so the flag
+    /// went down one hop late — and the job that hop lets through is precisely
+    /// the one that matters: a reconcile continuation resuming from
+    /// `readCheckouts()`'s `await`, which then writes `checkouts`, registers
+    /// commands for a dead window and persists its tabs. Asserting right here,
+    /// with no `await` between the close and the check, is what distinguishes
+    /// "synchronously" from "very soon".
+    func testClosingMarksTheControllerClosedInTheSameTurn() async throws {
+        let database = try ProjectDatabase(path: repoRoot.appendingPathComponent(".test-project.db").path)
+        let repo = GitRepo(path: repoRoot.path, name: "fixture")
+        try database.insert(repo)
+        let coordinator = try ProjectsCoordinator(database: database, scanner: nil, commandRegistry: CommandRegistry())
+        let manager = ProjectWindowManager()
+        manager.attach(to: coordinator)
+        manager.gitClient = GitClient(configuration: .default)
+
+        manager.openProject(repo)
+        let controller = try XCTUnwrap(manager.projectController(for: repo.id))
+        XCTAssertFalse(controller.isClosed, "an open project's controller is not closed")
+
+        manager.closeProject(repoID: repo.id)
+        XCTAssertTrue(
+            controller.isClosed,
+            "the close handler must close the controller synchronously, not in a task it schedules"
+        )
+    }
+
     /// Task 23: `ProjectWindowManager`'s scripting surface must route through
     /// `projectController(for:)` to a real `BranchController.currentBranch`
     /// lookup, not the `{ _ in nil }` placeholder Task 20 left behind. This

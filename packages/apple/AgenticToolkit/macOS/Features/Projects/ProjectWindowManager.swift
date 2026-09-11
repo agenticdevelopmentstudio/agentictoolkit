@@ -270,7 +270,8 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         // Ruling Q: `projectController` is captured strongly, so it outlives
         // its removal from `projectControllers` if the window closes mid-scan
         // — `ProjectController`'s own closed flag (set synchronously by
-        // `shutdown()`) stops that from persisting a dead window's tabs, but
+        // `markClosed()`, in the close handler's own turn) stops that from
+        // persisting a dead window's tabs, but
         // this call site is outside `ProjectController` entirely, so it needs
         // its own guard: only reload when this controller is still the one
         // registered for `repo.id`, so a resurrected or replaced controller
@@ -450,7 +451,16 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
                 // would shut the same services down twice. The inline path
                 // stays for a window `adoptForScripting(_:)` registered,
                 // which has no project controller of its own.
+                //
+                // `markClosed()` first, and synchronously: `shutdown()` sets
+                // the same flag, but only once the task below is scheduled,
+                // and a reconcile continuation already enqueued ahead of that
+                // task would resume in between with the flag still down —
+                // writing a closed window's checkouts, registering its
+                // commands and persisting its tabs. The flag has to be down
+                // before this turn ends, not merely soon.
                 let projectController = self.projectControllers.removeValue(forKey: repoID)
+                projectController?.markClosed()
                 if let observer = self.keyObservers.removeValue(forKey: repoID) {
                     NotificationCenter.default.removeObserver(observer)
                 }
