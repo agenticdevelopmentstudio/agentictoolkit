@@ -2,13 +2,30 @@ import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
 import AppKit
 
-/// The card drawn in the edge bar. Two arrangements: a stacked card for the
-/// left and right edges, a single row for the top and bottom edges.
+/// The card drawn in the edge bar: one row, the same on all four edges.
+///
+/// The card is flush against the side of the bar that faces the workspace and
+/// open on that side — the fill runs into it, and the border stops there — so
+/// the card reads as attached to the workspace rather than as a chip floating
+/// beside it. The selected card paints what the workspace paints, and is
+/// outlined in the workspace's own outline colour, so the two are one object
+/// with a tab sticking out of it. The unselected ones sit a plane lower, on
+/// `surface`, with dimmer text: present, but not the one in front.
+///
+/// `TabBarView` supplies the other half of the attachment: it pads the outer
+/// side of the bar and leaves the workspace side at zero.
 @MainActor
 final class TabPaneView: NSView {
-    static let sideWidth: CGFloat = 220
-    static let rowHeight: CGFloat = 28
-    static let rowMaxWidth: CGFloat = 320
+    /// A card is never narrower than this and never wider than `maxWidth`,
+    /// whichever edge it is on — a vertical bar gets the same card a
+    /// horizontal one does.
+    static let minWidth: CGFloat = 240
+    static let maxWidth: CGFloat = 340
+    static let rowHeight: CGFloat = 34
+    static let cornerRadius: CGFloat = 8
+
+    /// The card's own padding, inside the border.
+    private static let padding = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
 
     let agentLabel = ThemedLabel(role: .primaryText, textRole: .body)
     let sessionLabel = ThemedLabel(role: .primaryText, textRole: .body)
@@ -23,11 +40,13 @@ final class TabPaneView: NSView {
     var isHighlighted = false { didSet { applyHighlight() } }
 
     private let edge: Edge
-    private let background = NSView()
+    private let background: TabCardBackgroundView
+    private let content = NSStackView()
     private var statusViews: [NSImageView] = []
 
     init(edge: Edge, tabID: UUID) {
         self.edge = edge
+        self.background = TabCardBackgroundView(edge: edge, cornerRadius: Self.cornerRadius)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         accessibilityID("tab-pane.\(tabID.uuidString)")
@@ -62,18 +81,24 @@ final class TabPaneView: NSView {
         }
     }
 
-    /// The size the pane wants for its current content in its arrangement.
+    /// The size the card wants for its current content. The same measurement
+    /// on every edge, because the arrangement is the same on every edge: a
+    /// width held between `minWidth` and `maxWidth`, and a height that grows
+    /// past `rowHeight` when the content needs it to (a larger text scale).
+    ///
+    /// It measures the row, not the card. `TabPaneViewController` makes this
+    /// view its own `view`, so AppKit installs the priority-501
+    /// `preferredContentSize` constraints onto the card itself — and the
+    /// labels resist compression at only `.defaultLow`. Asking the card for
+    /// its `fittingSize` after a first measurement therefore returns that
+    /// first answer back, and a card whose text grows on a later `reload()`
+    /// would never widen. The row carries none of those constraints.
     var contentSize: NSSize {
-        layoutSubtreeIfNeeded()
-        switch edge {
-        case .left, .right:
-            return NSSize(width: Self.sideWidth, height: max(Self.rowHeight, fittingSize.height))
-        case .top, .bottom:
-            return NSSize(
-                width: min(Self.rowMaxWidth, fittingSize.width),
-                height: max(Self.rowHeight, fittingSize.height)
-            )
-        }
+        let fitting = content.fittingSize
+        return NSSize(
+            width: min(Self.maxWidth, max(Self.minWidth, fitting.width)),
+            height: max(Self.rowHeight, fitting.height)
+        )
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -93,7 +118,12 @@ final class TabPaneView: NSView {
             label.isSelectable = false
         }
         directoryLabel.lineBreakMode = .byTruncatingHead
+        summaryLabel.lineBreakMode = .byTruncatingTail
         summaryLabel.isHidden = true
+        // The lowest priorities in the row, so a narrow bar squeezes the
+        // summary before it touches the agent name, branch, or path.
+        summaryLabel.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        summaryLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
         statusStack.orientation = .horizontal
         statusStack.spacing = 2
@@ -107,37 +137,15 @@ final class TabPaneView: NSView {
         closeButton.widthAnchor.constraint(equalToConstant: 14).isActive = true
         closeButton.heightAnchor.constraint(equalToConstant: 14).isActive = true
 
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 6
         background.translatesAutoresizingMaskIntoConstraints = false
         addSubview(background)
         observeTheme { view, _ in view.applyHighlight() }
 
-        let content: NSStackView
-        switch edge {
-        case .left, .right:
-            let header = NSStackView(views: [agentLabel, statusStack, NSView(), closeButton])
-            header.orientation = .horizontal
-            header.spacing = 4
-            header.alignment = .centerY
-            content = NSStackView(views: [header, sessionLabel, directoryLabel, branchLabel, summaryLabel])
-            content.orientation = .vertical
-            content.alignment = .leading
-            content.spacing = 2
-        case .top, .bottom:
-            summaryLabel.lineBreakMode = .byTruncatingTail
-            // The lowest priorities in the row, so a narrow bar squeezes the
-            // summary before it touches the agent name, branch, or path.
-            summaryLabel.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-            summaryLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-            content = NSStackView(
-                views: [agentLabel, statusStack, sessionLabel, directoryLabel, branchLabel, summaryLabel, closeButton]
-            )
-            content.orientation = .horizontal
-            content.alignment = .centerY
-            content.spacing = 6
-        }
-        content.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+        for view in rowContents() { content.addArrangedSubview(view) }
+        content.orientation = .horizontal
+        content.alignment = .centerY
+        content.spacing = 8
+        content.edgeInsets = Self.padding
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
@@ -161,18 +169,130 @@ final class TabPaneView: NSView {
         applyHighlight()
     }
 
-    /// Selection is a fill and a role swap, exactly as `TabButton` does it.
+    /// The row, outermost item first. The close button goes on the end of the
+    /// card nearest the outside of the window — the leading end on a left bar,
+    /// the trailing end everywhere else — so it is never the thing standing
+    /// between the card's text and the workspace it belongs to.
+    private func rowContents() -> [NSView] {
+        let body = [agentLabel, statusStack, sessionLabel, directoryLabel, branchLabel, summaryLabel] as [NSView]
+        return edge == .left ? [closeButton] + body : body + [closeButton]
+    }
+
+    /// Selection is the card changing plane, not a highlight over it: the
+    /// selected card paints the workspace's own backdrop and outline, so it
+    /// reads as the near end of the workspace. The rest sit on `surface` with
+    /// dimmer text.
     private func applyHighlight() {
         let palette = resolvedThemeScope.palette
-        background.layer?.backgroundColor = isHighlighted
-            ? palette.nsColor(.selection).cgColor
-            : palette.nsColor(.surface).cgColor
-        agentLabel.role = isHighlighted ? .selectionText : .primaryText
-        sessionLabel.role = isHighlighted ? .selectionText : .primaryText
-        closeButton.contentTintColor = palette.nsColor(isHighlighted ? .selectionText : .tertiaryText)
+        background.fillColor = isHighlighted
+            ? NSColor(palette.projectPaneBackdrop)
+            : palette.nsColor(.surface)
+        background.borderColor = isHighlighted
+            ? NSColor(palette.projectPaneOutline)
+            : palette.nsColor(.border)
+        agentLabel.role = isHighlighted ? .primaryText : .secondaryText
+        sessionLabel.role = isHighlighted ? .primaryText : .secondaryText
+        directoryLabel.role = isHighlighted ? .tertiaryText : .placeholderText
+        branchLabel.role = isHighlighted ? .secondaryText : .tertiaryText
+        summaryLabel.role = isHighlighted ? .secondaryText : .tertiaryText
+        closeButton.contentTintColor = palette.nsColor(isHighlighted ? .secondaryText : .placeholderText)
     }
 
     @objc private func closePressed() {
         onClose?()
+    }
+}
+
+// MARK: - The card's shape
+
+/// The card's fill and border, drawn as one path that leaves out the side
+/// facing the workspace: three sides, rounded at the two corners between them,
+/// open where the card meets what it belongs to.
+///
+/// A layer's `cornerRadius`/`maskedCorners` cannot do this — a layer border
+/// follows all four sides — and the open side is the whole point: a line there
+/// would box the card off from the workspace it is supposed to be part of.
+@MainActor
+private final class TabCardBackgroundView: NSView {
+    var fillColor: NSColor = .clear { didSet { needsDisplay = true } }
+    var borderColor: NSColor = .clear { didSet { needsDisplay = true } }
+
+    private let edge: Edge
+    private let cornerRadius: CGFloat
+
+    init(edge: Edge, cornerRadius: CGFloat) {
+        self.edge = edge
+        self.cornerRadius = cornerRadius
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let path = cardPath() else { return }
+        fillColor.setFill()
+        // An open path fills as if it were closed, so the fill reaches the
+        // workspace side that the stroke below deliberately misses.
+        path.fill()
+        borderColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    /// Traced from one end of the open side, round the two outer corners, to
+    /// the other end — never across the open side itself.
+    private func cardPath() -> NSBezierPath? {
+        let rect = strokeBounds()
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        let radius = min(cornerRadius, min(rect.width, rect.height) / 2)
+        let corners = corners(of: rect)
+        let path = NSBezierPath()
+        path.move(to: corners[0])
+        path.appendArc(from: corners[1], to: corners[2], radius: radius)
+        path.appendArc(from: corners[2], to: corners[3], radius: radius)
+        path.line(to: corners[3])
+        return path
+    }
+
+    /// The four points the path runs through, starting and ending on the open
+    /// side: `[open, outer, outer, open]`.
+    private func corners(of rect: NSRect) -> [NSPoint] {
+        switch edge {
+        case .top:
+            return [NSPoint(x: rect.minX, y: rect.minY), NSPoint(x: rect.minX, y: rect.maxY),
+                    NSPoint(x: rect.maxX, y: rect.maxY), NSPoint(x: rect.maxX, y: rect.minY)]
+        case .bottom:
+            return [NSPoint(x: rect.minX, y: rect.maxY), NSPoint(x: rect.minX, y: rect.minY),
+                    NSPoint(x: rect.maxX, y: rect.minY), NSPoint(x: rect.maxX, y: rect.maxY)]
+        case .left:
+            return [NSPoint(x: rect.maxX, y: rect.minY), NSPoint(x: rect.minX, y: rect.minY),
+                    NSPoint(x: rect.minX, y: rect.maxY), NSPoint(x: rect.maxX, y: rect.maxY)]
+        case .right:
+            return [NSPoint(x: rect.minX, y: rect.minY), NSPoint(x: rect.maxX, y: rect.minY),
+                    NSPoint(x: rect.maxX, y: rect.maxY), NSPoint(x: rect.minX, y: rect.maxY)]
+        }
+    }
+
+    /// `bounds` pulled in by half a point on the three stroked sides, so a
+    /// 1pt line lands inside the card instead of straddling its edge. The open
+    /// side keeps its half point: nothing is drawn there, and the fill has to
+    /// reach all the way to the workspace.
+    private func strokeBounds() -> NSRect {
+        let half: CGFloat = 0.5
+        var rect = bounds.insetBy(dx: half, dy: half)
+        switch edge {
+        case .top:
+            rect.origin.y -= half
+            rect.size.height += half
+        case .bottom:
+            rect.size.height += half
+        case .left:
+            rect.size.width += half
+        case .right:
+            rect.origin.x -= half
+            rect.size.width += half
+        }
+        return rect
     }
 }

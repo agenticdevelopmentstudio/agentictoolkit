@@ -9,13 +9,23 @@ import AgenticToolkitCoreMacOS
 @MainActor
 final class TabBarView: NSView {
 
-    /// The bar's narrow dimension — height for top/bottom, width for left/right.
+    /// The bar's narrow dimension — height for top/bottom, width for
+    /// left/right — when nothing hosted in it asks for more.
     static func preferredThickness(for edge: Edge) -> CGFloat {
         switch edge {
         case .top, .bottom: return 28
         case .left, .right: return 140
         }
     }
+
+    /// The gap between an item and the *outer* side of the bar — the window
+    /// side. The workspace side gets none: an item is flush against it, which
+    /// is what lets a tab read as attached to the workspace rather than as a
+    /// chip floating in a bar of its own.
+    static let outerPadding: CGFloat = 6
+
+    /// The gap at each end of the bar, along the direction it lays items out.
+    private static let endPadding: CGFloat = 8
 
     let edge: Edge
 
@@ -43,7 +53,6 @@ final class TabBarView: NSView {
     // MARK: - Subviews
 
     private let stack = NSStackView()
-    private let edgeDivider = NSView()
     private var buttons: [UUID: TabButton] = [:]
 
     /// The controller `rebuildButtons()` parents hosted view controllers to
@@ -66,61 +75,59 @@ final class TabBarView: NSView {
     private func setUp() {
         translatesAutoresizingMaskIntoConstraints = false
 
+        // Padding on the outer side only, so items meet the workspace side of
+        // the bar — see `outerPadding`. The cross-axis alignment is set to
+        // that same workspace side rather than to the centre, so the
+        // alignment constraints NSStackView installs agree with the explicit
+        // cross-axis pins in `rebuildButtons()` instead of fighting them.
+        let outer = Self.outerPadding
+        let ends = Self.endPadding
         switch edge {
-        case .top, .bottom:
+        case .top:
             stack.orientation = .horizontal
-            stack.alignment = .centerY
-            stack.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
-        case .left, .right:
+            stack.alignment = .bottom
+            stack.edgeInsets = NSEdgeInsets(top: outer, left: ends, bottom: 0, right: ends)
+        case .bottom:
+            stack.orientation = .horizontal
+            stack.alignment = .top
+            stack.edgeInsets = NSEdgeInsets(top: 0, left: ends, bottom: outer, right: ends)
+        case .left:
+            stack.orientation = .vertical
+            stack.alignment = .trailing
+            stack.edgeInsets = NSEdgeInsets(top: ends, left: outer, bottom: ends, right: 0)
+        case .right:
             stack.orientation = .vertical
             stack.alignment = .leading
-            stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+            stack.edgeInsets = NSEdgeInsets(top: ends, left: 0, bottom: ends, right: outer)
         }
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        edgeDivider.wantsLayer = true
-        edgeDivider.translatesAutoresizingMaskIntoConstraints = false
-
         wantsLayer = true
         observeTheme { bar, palette in
-            bar.layer?.backgroundColor = palette.nsColor(.surface).cgColor
-            bar.edgeDivider.layer?.backgroundColor = palette.nsColor(.divider).cgColor
+            // The backdrop a tab sits on, a plane below the `.surface` an
+            // inactive tab paints — otherwise a tab is the same colour as its
+            // bar and only its border has any shape. There is no divider
+            // along the workspace side: the workspace draws its own outline,
+            // and the tabs break through it, which is what makes them read as
+            // part of it.
+            bar.layer?.backgroundColor = palette.nsColor(.windowBackground).cgColor
         }
 
         addSubview(stack)
-        addSubview(edgeDivider)
 
         let thickness = Self.preferredThickness(for: edge)
 
         switch edge {
-        case .top:
+        case .top, .bottom:
             NSLayoutConstraint.activate([
                 makeThicknessConstraint(thickness),
                 stack.topAnchor.constraint(equalTo: topAnchor),
-                stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-                stack.bottomAnchor.constraint(equalTo: edgeDivider.topAnchor),
-
-                edgeDivider.leadingAnchor.constraint(equalTo: leadingAnchor),
-                edgeDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
-                edgeDivider.bottomAnchor.constraint(equalTo: bottomAnchor),
-                edgeDivider.heightAnchor.constraint(equalToConstant: 1)
-            ])
-        case .bottom:
-            NSLayoutConstraint.activate([
-                makeThicknessConstraint(thickness),
-                edgeDivider.leadingAnchor.constraint(equalTo: leadingAnchor),
-                edgeDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
-                edgeDivider.topAnchor.constraint(equalTo: topAnchor),
-                edgeDivider.heightAnchor.constraint(equalToConstant: 1),
-
-                stack.topAnchor.constraint(equalTo: edgeDivider.bottomAnchor),
                 stack.leadingAnchor.constraint(equalTo: leadingAnchor),
                 stack.trailingAnchor.constraint(equalTo: trailingAnchor),
                 stack.bottomAnchor.constraint(equalTo: bottomAnchor)
             ])
-        case .left:
+        case .left, .right:
             NSLayoutConstraint.activate([
                 makeThicknessConstraint(thickness),
                 stack.topAnchor.constraint(equalTo: topAnchor),
@@ -128,26 +135,6 @@ final class TabBarView: NSView {
                 // stays empty instead of stretching the buttons.
                 stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
                 stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: edgeDivider.leadingAnchor),
-
-                edgeDivider.topAnchor.constraint(equalTo: topAnchor),
-                edgeDivider.bottomAnchor.constraint(equalTo: bottomAnchor),
-                edgeDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
-                edgeDivider.widthAnchor.constraint(equalToConstant: 1)
-            ])
-        case .right:
-            NSLayoutConstraint.activate([
-                makeThicknessConstraint(thickness),
-                edgeDivider.topAnchor.constraint(equalTo: topAnchor),
-                edgeDivider.bottomAnchor.constraint(equalTo: bottomAnchor),
-                edgeDivider.leadingAnchor.constraint(equalTo: leadingAnchor),
-                edgeDivider.widthAnchor.constraint(equalToConstant: 1),
-
-                stack.topAnchor.constraint(equalTo: topAnchor),
-                // Pack buttons from the top; the leftover column height
-                // stays empty instead of stretching the buttons.
-                stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
-                stack.leadingAnchor.constraint(equalTo: edgeDivider.trailingAnchor),
                 stack.trailingAnchor.constraint(equalTo: trailingAnchor)
             ])
         }
@@ -247,8 +234,7 @@ final class TabBarView: NSView {
                 // Vertical bars: each button fills the bar's interior width
                 // so labels and close buttons line up flush.
                 if stack.orientation == .vertical {
-                    view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8).isActive = true
-                    view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -8).isActive = true
+                    pinCrossAxis(view)
                 }
             case let .viewController(controller):
                 if controller.parent !== hostController { hostController?.addChild(controller) }
@@ -271,17 +257,36 @@ final class TabBarView: NSView {
                 // `preferredContentSize` asked for while the bar is as wide
                 // as the widest item. These pins are required priority and
                 // so win over that 501 constraint, which is the point.
-                switch edge {
-                case .top, .bottom:
-                    host.topAnchor.constraint(equalTo: stack.topAnchor).isActive = true
-                    host.bottomAnchor.constraint(equalTo: stack.bottomAnchor).isActive = true
-                case .left, .right:
-                    host.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8).isActive = true
-                    host.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -8).isActive = true
-                }
+                pinCrossAxis(host)
             }
         }
         updateThickness()
+    }
+
+    /// Stretches one arranged item across the bar's thickness, from the outer
+    /// side to the workspace side.
+    ///
+    /// The constants restate `stack.edgeInsets` on this axis rather than
+    /// pinning to the stack's raw bounds: NSStackView's own alignment
+    /// constraints are required priority and already honour the insets, so a
+    /// pin that disagreed with them by even a point would make the layout
+    /// unsatisfiable.
+    private func pinCrossAxis(_ view: NSView) {
+        let outer = Self.outerPadding
+        switch edge {
+        case .top:
+            view.topAnchor.constraint(equalTo: stack.topAnchor, constant: outer).isActive = true
+            view.bottomAnchor.constraint(equalTo: stack.bottomAnchor).isActive = true
+        case .bottom:
+            view.topAnchor.constraint(equalTo: stack.topAnchor).isActive = true
+            view.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: -outer).isActive = true
+        case .left:
+            view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: outer).isActive = true
+            view.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        case .right:
+            view.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+            view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -outer).isActive = true
+        }
     }
 
     /// The bar is as thick as its thickest hosted item needs, never thinner
@@ -298,20 +303,18 @@ final class TabBarView: NSView {
     /// hatch away while adding nothing.
     func updateThickness() {
         let sizes = hostedControllers.values.map(\.preferredContentSize)
-        let constant: CGFloat
+        // `outerPadding` is the one thing standing between an item and the
+        // bar's own edge on this axis — the workspace side is flush — so the
+        // bar is exactly that much thicker than its thickest item.
+        let thickest: CGFloat
         switch edge {
-        case .top, .bottom:
-            // + 1 covers the 1pt `edgeDivider`, which eats into the stack's
-            // height before a hosted item's cross-axis pins (0/0 top/bottom
-            // insets on this axis) ever see it.
-            constant = max(Self.preferredThickness(for: edge), (sizes.map(\.height).max() ?? 0) + 1)
-        case .left, .right:
-            // + 16 covers the hosted item's 8+8pt leading/trailing cross-axis
-            // pins (`rebuildButtons()`); + 1 on top of that covers the 1pt
-            // `edgeDivider`, which also eats into the stack's available width.
-            constant = max(Self.preferredThickness(for: edge), (sizes.map(\.width).max() ?? 0) + 17)
+        case .top, .bottom: thickest = sizes.map(\.height).max() ?? 0
+        case .left, .right: thickest = sizes.map(\.width).max() ?? 0
         }
-        thicknessConstraint?.constant = constant
+        thicknessConstraint?.constant = max(
+            Self.preferredThickness(for: edge),
+            thickest + Self.outerPadding
+        )
     }
 }
 

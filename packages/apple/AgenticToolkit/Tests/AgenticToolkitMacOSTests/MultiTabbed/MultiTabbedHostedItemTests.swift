@@ -69,11 +69,12 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         controller.addTab(.init(item: .viewController(HostedItem()), viewController: makeContent()), on: .left)
         controller.view.layoutSubtreeIfNeeded()
         let bar = try XCTUnwrap(controller.tabBars[.left])
-        // Exact rather than a floor: pins the `+ 16` cross-axis padding, the
-        // `+ 1` for the bar's `edgeDivider`, and the floor at the button
-        // default (140), none of which a `>=` against 200 would catch a
-        // regression in.
-        XCTAssertEqual(bar.thicknessConstraint?.constant, 217)
+        // Exact rather than a floor: pins the item's own 200 plus the bar's
+        // single `outerPadding` (6) — the card is flush against the workspace
+        // side, so there is padding on the outer side only — and the floor at
+        // the button default (140), neither of which a `>=` against 200 would
+        // catch a regression in.
+        XCTAssertEqual(bar.thicknessConstraint?.constant, 206)
     }
 
     func testTheBarGrowsToTheHostedItemsPreferredSizeOnATopBar() throws {
@@ -81,11 +82,10 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         controller.addTab(.init(item: .viewController(HostedItem()), viewController: makeContent()), on: .top)
         controller.view.layoutSubtreeIfNeeded()
         let bar = try XCTUnwrap(controller.tabBars[.top])
-        // The left/right thickness test exercises `.width` + 16 + 1; this
-        // pins the separate `.top`/`.bottom` branch, `.height` + 1 (there is
-        // no left/right-style cross-axis inset on this axis, only the
-        // divider).
-        XCTAssertEqual(bar.thicknessConstraint?.constant, 65)
+        // The left/right thickness test exercises `.width` + 6; this pins the
+        // separate `.top`/`.bottom` branch, `.height` + 6, where the floor is
+        // the much smaller top/bottom default (28) rather than 140.
+        XCTAssertEqual(bar.thicknessConstraint?.constant, 70)
     }
 
     func testRemovingATabRemovesItsHostedItemFromTheParent() {
@@ -131,7 +131,7 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         controller.preferredContentSizeDidChange(for: item)
 
         let bar = try XCTUnwrap(controller.tabBars[.left])
-        XCTAssertEqual(bar.thicknessConstraint?.constant, 417)
+        XCTAssertEqual(bar.thicknessConstraint?.constant, 406)
     }
 
     func testHostedItemsOnCloseRemovesTheTab() {

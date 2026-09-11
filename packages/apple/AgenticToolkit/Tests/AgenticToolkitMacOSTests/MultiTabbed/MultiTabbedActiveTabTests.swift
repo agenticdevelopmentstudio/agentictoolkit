@@ -22,10 +22,10 @@ final class MultiTabbedActiveTabTests: XCTestCase {
         }
     }
 
-    private func makeTab(_ title: String) -> MultiTabbedViewController.Tab {
+    private func makeTab(_ title: String, group: UUID? = nil) -> MultiTabbedViewController.Tab {
         let content = NSViewController()
         content.view = NSView()
-        return .init(title: title, viewController: content)
+        return .init(groupID: group, title: title, viewController: content)
     }
 
     /// The controller is loaded so the bars and the centre exist; nothing here
@@ -100,5 +100,42 @@ final class MultiTabbedActiveTabTests: XCTestCase {
         XCTAssertEqual(controller.activeTabID, bottom.id)
         XCTAssertEqual(delegate.reports.last?.id, bottom.id)
         XCTAssertEqual(delegate.reports.last?.edge, .bottom)
+    }
+
+    /// One thing the user thinks of as "a tab" has a member on each enabled
+    /// edge, so selecting any member has to leave every sibling looking
+    /// selected too. Exactly one of them is the *active* tab — the one whose
+    /// content the centre shows — but that is not what the bars display.
+    func testSelectingATabSelectsItsSiblingsOnTheOtherEdges() {
+        let (controller, _) = makeController()
+        controller.setEdgeEnabled(.bottom, true)
+        let group = UUID()
+        let top = makeTab("One", group: group)
+        let bottom = makeTab("One", group: group)
+        controller.addTab(top, on: .top)
+        controller.addTab(bottom, on: .bottom)
+
+        controller.selectTab(id: bottom.id, on: .bottom)
+
+        XCTAssertEqual(controller.activeTabID, bottom.id)
+        XCTAssertEqual(controller.tabBars[.top]?.selectedID, top.id)
+        XCTAssertEqual(controller.tabBars[.bottom]?.selectedID, bottom.id)
+    }
+
+    /// A tab given no group is its own group of one — what every host had
+    /// before groups existed. An edge with no member of the active group
+    /// shows nothing selected rather than borrowing a neighbour's tab.
+    func testATabWithNoGroupSelectsNothingOnTheOtherEdges() {
+        let (controller, _) = makeController()
+        controller.setEdgeEnabled(.bottom, true)
+        let top = makeTab("One")
+        let bottom = makeTab("Two")
+        controller.addTab(top, on: .top)
+        controller.addTab(bottom, on: .bottom)
+
+        controller.selectTab(id: top.id, on: .top)
+
+        XCTAssertEqual(controller.tabBars[.top]?.selectedID, top.id)
+        XCTAssertNil(controller.tabBars[.bottom]?.selectedID)
     }
 }

@@ -26,20 +26,38 @@ open class MultiTabbedViewController: NSViewController {
 
     public struct Tab {
         public let id: UUID
+
+        /// Ties this tab to its siblings on the other edges: one thing the
+        /// user thinks of as "a tab" can have a member on each edge, and
+        /// selecting any member selects all of them. Defaults to `id`, which
+        /// makes a tab its own group of one — the behaviour every host had
+        /// before groups existed.
+        public let groupID: UUID
         public var item: TabItem
         public var viewController: NSViewController
 
         @MainActor
         public var title: String { item.title }
 
-        public init(id: UUID = UUID(), item: TabItem, viewController: NSViewController) {
+        public init(
+            id: UUID = UUID(),
+            groupID: UUID? = nil,
+            item: TabItem,
+            viewController: NSViewController
+        ) {
             self.id = id
+            self.groupID = groupID ?? id
             self.item = item
             self.viewController = viewController
         }
 
-        public init(id: UUID = UUID(), title: String, viewController: NSViewController) {
-            self.init(id: id, item: .title(title), viewController: viewController)
+        public init(
+            id: UUID = UUID(),
+            groupID: UUID? = nil,
+            title: String,
+            viewController: NSViewController
+        ) {
+            self.init(id: id, groupID: groupID, item: .title(title), viewController: viewController)
         }
     }
 
@@ -101,6 +119,15 @@ open class MultiTabbedViewController: NSViewController {
         didSet { centerContainer.colorOverride = centerBackgroundColor }
     }
 
+    /// The line drawn around the centre content, so the plane it sits on has a
+    /// visible boundary and the tabs standing against that boundary read as
+    /// part of the same object rather than as chrome beside it.
+    ///
+    /// `nil` falls back to the palette's `.outline`.
+    public var centerOutlineColor: NSColor? {
+        didSet { applyCenterOutline(centerContainer.resolvedThemeScope.palette) }
+    }
+
     /// The four constraints pinning the mounted content, kept so an inset
     /// change is a constant update rather than a teardown.
     private var centerContentConstraints: [NSLayoutConstraint] = []
@@ -125,6 +152,9 @@ open class MultiTabbedViewController: NSViewController {
         let root = ThemedBackgroundView(role: .windowBackground)
 
         centerContainer.translatesAutoresizingMaskIntoConstraints = false
+        centerContainer.observeTheme { [weak self] _, palette in
+            self?.applyCenterOutline(palette)
+        }
         root.addSubview(centerContainer)
         for edge in Edge.allCases {
             guard let bar = tabBars[edge] else { continue }
@@ -364,7 +394,7 @@ open class MultiTabbedViewController: NSViewController {
     private func setActiveTab(_ id: UUID?) {
         guard activeTabID != id else { return }
         activeTabID = id
-        for bar in tabBars.values { bar.setSelected(id) }
+        for (edge, bar) in tabBars { bar.setSelected(selectedID(on: edge)) }
         refreshCenterContent()
         // The single funnel every activation goes through — a click,
         // `selectTab`, `activateFallbackTab`, `insertTab`, `removeTab`'s
@@ -429,12 +459,30 @@ open class MultiTabbedViewController: NSViewController {
         centerContentConstraints[3].constant = -contentInsets.bottom
     }
 
+    /// Draws the centre's boundary straight onto its layer. `ThemedBackgroundView`
+    /// paints only a fill, and this is the one view in the toolkit that needs a
+    /// line as well — a border property on the shared view would be carried by
+    /// every other user of it for this one caller's sake.
+    private func applyCenterOutline(_ palette: SemanticPalette) {
+        centerContainer.layer?.borderWidth = 1
+        centerContainer.layer?.borderColor = (centerOutlineColor ?? palette.nsColor(.outline)).cgColor
+    }
+
     // MARK: - Sync
 
     private func syncTabBar(for edge: Edge) {
         guard let state = edgeStates[edge], let bar = tabBars[edge] else { return }
         let items = state.tabs.map { TabBarView.ItemModel(id: $0.id, item: $0.item) }
-        bar.setItems(items, selectedID: activeTabID)
+        bar.setItems(items, selectedID: selectedID(on: edge))
+    }
+
+    /// Which tab one edge's bar should show as selected: its own member of the
+    /// active tab's group. Exactly one tab is active across the controller —
+    /// it is the one whose content the centre shows — but every sibling of it
+    /// stands for the same thing, so every sibling looks selected.
+    private func selectedID(on edge: Edge) -> UUID? {
+        guard let group = activeTab?.groupID else { return nil }
+        return edgeStates[edge]?.tabs.first(where: { $0.groupID == group })?.id
     }
 
     private func edge(forTabID id: UUID) -> Edge? {

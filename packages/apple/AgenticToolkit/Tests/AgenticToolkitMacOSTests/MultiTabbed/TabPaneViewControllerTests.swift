@@ -67,30 +67,42 @@ final class TabPaneViewControllerTests: XCTestCase {
         XCTAssertEqual(pane.paneView.agentLabel.stringValue, "Claude")
     }
 
-    /// Discriminates the `switch edge` in `TabPaneView.contentSize`: it reads
-    /// back the `sideWidth` literal exactly (width is never content-driven on
-    /// a left/right pane) and the `rowHeight` literal as a **floor** rather
-    /// than an exact value — `rowHeight` is `max`'d against the pane's own
-    /// `fittingSize.height` on `.top`/`.bottom` (review C MAJOR-1), so normal
-    /// content that fits inside 28pt still measures exactly 28, but nothing
-    /// here proves the pane would grow past it; see
-    /// `testTopPaneHeightGrowsToFitOversizedContent` for that case, and
-    /// `testLeftPaneHeightGrowsToFitStackedContent` /
-    /// `testTopPaneWidthIsCappedAtRowMaxWidth` for the other measured arms.
-    func testEdgeSwitchRoutesTheHardcodedDimensionsAsAFloor() {
+    /// The user's requirement that a tab look the same on all four edges,
+    /// asserted where it is decided: `TabPaneView.contentSize` no longer
+    /// switches on the edge, so the same content measures identically
+    /// wherever it is hosted. A per-edge arrangement coming back — a taller
+    /// stacked card on the vertical bars, say — fails here first.
+    func testEveryEdgeMeasuresTheSameCard() {
         let source = StubSource()
-        let left = makePane(edge: .left, source: source)
-        let top = makePane(edge: .top, source: source)
-        XCTAssertEqual(left.preferredContentSize.width, 220)
-        XCTAssertGreaterThanOrEqual(top.preferredContentSize.height, 28)
+        let sizes = Edge.allCases.map { makePane(edge: $0, source: source).preferredContentSize }
+        for size in sizes {
+            XCTAssertEqual(size, sizes[0])
+        }
+        // The floors the measurement is built on: never narrower than
+        // `minWidth`, never shorter than `rowHeight`.
+        XCTAssertGreaterThanOrEqual(sizes[0].width, TabPaneView.minWidth)
+        XCTAssertGreaterThanOrEqual(sizes[0].height, TabPaneView.rowHeight)
+    }
+
+    /// Discriminates `max(Self.minWidth, fittingSize.width)`: content that
+    /// fits well inside the card still reports exactly `minWidth`, so a
+    /// narrow tab never shrinks to its text.
+    func testShortContentStillMeasuresTheMinimumWidth() {
+        let source = StubSource()
+        source.agent = "C"
+        source.model = nil
+        source.session = "s"
+        source.directory = URL(fileURLWithPath: "/a")
+        source.branch = "b"
+        let pane = makePane(edge: .top, source: source)
+        XCTAssertEqual(pane.preferredContentSize.width, TabPaneView.minWidth)
     }
 
     /// Review C MAJOR-1: `TabPaneView.contentSize`'s `.top`/`.bottom` arm
     /// returned the literal `Self.rowHeight` with no `max` against
-    /// `fittingSize.height`, so a pane whose content needed more than 28pt
-    /// got clipped (and fought a required constraint pin) instead of the bar
-    /// growing to fit — unlike `.left`/`.right`, which already took
-    /// `max(Self.rowHeight, fittingSize.height)`. This drives a real
+    /// `fittingSize.height`, so a pane whose content needed more than the row
+    /// height got clipped (and fought a required constraint pin) instead of
+    /// the bar growing to fit. This drives a real
     /// `ThemeManager` with an enlarged `textScale`, the same knob the
     /// review's own "concrete failure" traces to (`ThemeTypography.sizeScale`,
     /// composed into the live palette `ThemedLabel` actually paints with via
@@ -106,24 +118,15 @@ final class TabPaneViewControllerTests: XCTestCase {
         let source = StubSource()
         let top = makePane(edge: .top, source: source)
 
-        XCTAssertGreaterThan(top.preferredContentSize.height, 28)
+        XCTAssertGreaterThan(top.preferredContentSize.height, TabPaneView.rowHeight)
         XCTAssertEqual(top.preferredContentSize.height, top.paneView.fittingSize.height, accuracy: 0.5)
     }
 
     /// Discriminates `TabPaneView.contentSize`'s
-    /// `max(Self.rowHeight, fittingSize.height)` — a stacked left/right pane
-    /// with real content measures taller than the 28pt floor.
-    func testLeftPaneHeightGrowsToFitStackedContent() {
-        let source = StubSource()
-        let left = makePane(edge: .left, source: source)
-        XCTAssertGreaterThan(left.preferredContentSize.height, 28)
-    }
-
-    /// Discriminates `TabPaneView.contentSize`'s
-    /// `min(Self.rowMaxWidth, fittingSize.width)` — long enough content that
-    /// `fittingSize.width` genuinely exceeds 320 still reports exactly 320,
-    /// which only holds while the `min` is there.
-    func testTopPaneWidthIsCappedAtRowMaxWidth() {
+    /// `min(Self.maxWidth, fittingSize.width)` — long enough content that
+    /// `fittingSize.width` genuinely exceeds `maxWidth` still reports exactly
+    /// `maxWidth`, which only holds while the `min` is there.
+    func testPaneWidthIsCappedAtMaxWidth() {
         let source = StubSource()
         source.agent = String(repeating: "Agent Name ", count: 20)
         source.model = String(repeating: "Model Name ", count: 20)
@@ -131,7 +134,7 @@ final class TabPaneViewControllerTests: XCTestCase {
         source.branch = String(repeating: "branch-name-", count: 20)
         source.summary = String(repeating: "summary text ", count: 20)
         let top = makePane(edge: .top, source: source)
-        XCTAssertEqual(top.preferredContentSize.width, 320)
+        XCTAssertEqual(top.preferredContentSize.width, TabPaneView.maxWidth)
     }
 
     /// Discriminates the `~`-substitution branch of
@@ -151,28 +154,32 @@ final class TabPaneViewControllerTests: XCTestCase {
 
     /// Discriminates `TabPaneViewController.reload()`'s final
     /// `preferredContentSize = paneView.contentSize` line on a *second*
-    /// call: branch stays visible across both reloads (so no row drops out
-    /// to offset the new one) and only the summary row is newly added,
-    /// so a second pass that skips recomputing `preferredContentSize`
-    /// leaves it at the first call's (shorter) height.
+    /// call: the first pass is deliberately short enough to measure the
+    /// `minWidth` floor and the second long enough to reach `maxWidth`, so a
+    /// second pass that skips recomputing `preferredContentSize` leaves it at
+    /// the first call's narrower width.
     func testReloadTwiceFollowsChangedDataSourceValues() {
         let source = StubSource()
+        source.agent = "C"
+        source.model = nil
+        source.session = "s"
+        source.directory = URL(fileURLWithPath: "/a")
+        source.branch = "b"
         let pane = makePane(edge: .left, source: source)
-        let firstSize = pane.preferredContentSize
+        XCTAssertEqual(pane.preferredContentSize.width, TabPaneView.minWidth)
 
         source.agent = "Codex"
-        source.model = nil
-        source.session = "renamed-session"
-        source.branch = "renamed-branch"
-        source.summary = "now has a summary"
+        source.session = String(repeating: "renamed-session-", count: 20)
+        source.branch = String(repeating: "renamed-branch-", count: 20)
+        source.summary = String(repeating: "now has a summary ", count: 20)
         pane.reload()
 
         XCTAssertEqual(pane.paneView.agentLabel.stringValue, "Codex")
-        XCTAssertEqual(pane.paneView.sessionLabel.stringValue, "renamed-session")
-        XCTAssertEqual(pane.paneView.branchLabel.stringValue, "renamed-branch")
-        XCTAssertEqual(pane.paneView.summaryLabel.stringValue, "now has a summary")
+        XCTAssertTrue(pane.paneView.sessionLabel.stringValue.hasPrefix("renamed-session-"))
+        XCTAssertTrue(pane.paneView.branchLabel.stringValue.hasPrefix("renamed-branch-"))
+        XCTAssertTrue(pane.paneView.summaryLabel.stringValue.hasPrefix("now has a summary "))
         XCTAssertFalse(pane.paneView.summaryLabel.isHidden)
-        XCTAssertGreaterThan(pane.preferredContentSize.height, firstSize.height)
+        XCTAssertEqual(pane.preferredContentSize.width, TabPaneView.maxWidth)
     }
 
     /// Discriminates `TabPaneViewController.reload()`'s
@@ -221,6 +228,34 @@ final class TabPaneViewControllerTests: XCTestCase {
         XCTAssertEqual(pane.paneView.directoryLabel.accessibilityIdentifier(), "tab-pane.directory.\(id)")
         XCTAssertEqual(pane.paneView.summaryLabel.accessibilityIdentifier(), "tab-pane.summary.\(id)")
         XCTAssertEqual(pane.paneView.closeButton.accessibilityIdentifier(), "tab-pane.close.\(id)")
+    }
+
+    /// The close button belongs on the end of the card facing away from the
+    /// workspace, so it never sits between the card's text and the pane it
+    /// belongs to. On a left bar that is the leading end; everywhere else the
+    /// trailing one.
+    func testCloseButtonSitsOnTheEndFacingAwayFromTheWorkspace() {
+        let source = StubSource()
+        for edge in Edge.allCases {
+            let pane = makePane(edge: edge, source: source)
+            let row = pane.paneView.closeButton.superview as? NSStackView
+            let expected = edge == .left ? row?.arrangedSubviews.first : row?.arrangedSubviews.last
+            XCTAssertTrue(expected === pane.paneView.closeButton, "wrong end on \(edge)")
+        }
+    }
+
+    /// A selected tab is not highlighted — it is promoted. Its text goes to
+    /// the primary role rather than to `.selectionText`, because the card is
+    /// painting the workspace's own plane underneath it, not a selection fill.
+    func testSelectionPromotesTheTextInsteadOfHighlightingIt() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+
+        XCTAssertEqual(pane.paneView.agentLabel.role, .secondaryText)
+
+        pane.isHighlighted = true
+        XCTAssertEqual(pane.paneView.agentLabel.role, .primaryText)
+        XCTAssertEqual(pane.paneView.sessionLabel.role, .primaryText)
     }
 
     func testClosePressedFiresOnClose() {

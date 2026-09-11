@@ -247,6 +247,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         tabbed.contentInsets = PaneSpacing.contentInsets
         backdropObserver = ThemePaletteObserver(host: tabbed.view) { [weak self] palette in
             self?.tabbed.centerBackgroundColor = NSColor(palette.projectPaneBackdrop)
+            self?.tabbed.centerOutlineColor = NSColor(palette.projectPaneOutline)
         }
         spacingObservers = PaneSpacing.edgeSettings.values.map { setting in
             UserSettingObserver(setting) { [weak self] _ in
@@ -458,7 +459,8 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 root: split.snapshotNode(),
                 workingDirectory: storedWorkingDirectory(group.workingDirectory)
             )
-            let tab = MultiTabbedViewController.Tab(id: id, item: tabItem(for: record, on: edge), viewController: split)
+            let tab = MultiTabbedViewController.Tab(
+                id: id, groupID: group.id, item: tabItem(for: record, on: edge), viewController: split)
             tabbed.insertTab(tab, at: index, on: edge)
             tabGroups[index].members[edge] = id
             created = true
@@ -483,7 +485,9 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 root: split.snapshotNode(),
                 workingDirectory: storedWorkingDirectory(group.workingDirectory)
             )
-            tabbed.addTab(.init(id: id, item: tabItem(for: record, on: edge), viewController: split), on: edge)
+            tabbed.addTab(
+                .init(id: id, groupID: group.id, item: tabItem(for: record, on: edge), viewController: split),
+                on: edge)
             group.members[edge] = id
         }
         tabGroups.append(group)
@@ -1004,7 +1008,10 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 focusedLeafByTabID[record.id] = focusedNodeID
             }
             let tab = MultiTabbedViewController.Tab(
-                id: record.id, item: tabItem(for: record, on: record.edge), viewController: split)
+                id: record.id,
+                groupID: record.groupID,
+                item: tabItem(for: record, on: record.edge),
+                viewController: split)
             tabbed.addTab(tab, on: record.edge)
             if let index = groupIndexByID[record.groupID] {
                 tabGroups[index].members[record.edge] = record.id
