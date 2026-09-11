@@ -25,7 +25,18 @@ final class TabBarView: NSView {
     static let outerPadding: CGFloat = 6
 
     /// The gap at each end of the bar, along the direction it lays items out.
-    private static let endPadding: CGFloat = 8
+    static let endPadding: CGFloat = 8
+
+    /// Where the first item begins, measured along the bar from its start —
+    /// the top of a left or right bar, the leading edge of a top or bottom
+    /// one.
+    ///
+    /// `endPadding` unless a host says otherwise. A host whose workspace has
+    /// chrome of its own can line the first tab up with it, and the bar stays
+    /// ignorant of what it is lining up with.
+    var startInset: CGFloat = TabBarView.endPadding {
+        didSet { applyEdgeInsets() }
+    }
 
     let edge: Edge
 
@@ -80,26 +91,21 @@ final class TabBarView: NSView {
         // that same workspace side rather than to the centre, so the
         // alignment constraints NSStackView installs agree with the explicit
         // cross-axis pins in `rebuildButtons()` instead of fighting them.
-        let outer = Self.outerPadding
-        let ends = Self.endPadding
         switch edge {
         case .top:
             stack.orientation = .horizontal
             stack.alignment = .bottom
-            stack.edgeInsets = NSEdgeInsets(top: outer, left: ends, bottom: 0, right: ends)
         case .bottom:
             stack.orientation = .horizontal
             stack.alignment = .top
-            stack.edgeInsets = NSEdgeInsets(top: 0, left: ends, bottom: outer, right: ends)
         case .left:
             stack.orientation = .vertical
             stack.alignment = .trailing
-            stack.edgeInsets = NSEdgeInsets(top: ends, left: outer, bottom: ends, right: 0)
         case .right:
             stack.orientation = .vertical
             stack.alignment = .leading
-            stack.edgeInsets = NSEdgeInsets(top: ends, left: 0, bottom: ends, right: outer)
         }
+        applyEdgeInsets()
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -261,6 +267,25 @@ final class TabBarView: NSView {
             }
         }
         updateThickness()
+    }
+
+    /// The stack's padding: `outerPadding` on the window side and none on the
+    /// workspace side, `startInset` where the items begin and `endPadding`
+    /// where they run out.
+    private func applyEdgeInsets() {
+        let outer = Self.outerPadding
+        let start = startInset
+        let end = Self.endPadding
+        switch edge {
+        case .top:
+            stack.edgeInsets = NSEdgeInsets(top: outer, left: start, bottom: 0, right: end)
+        case .bottom:
+            stack.edgeInsets = NSEdgeInsets(top: 0, left: start, bottom: outer, right: end)
+        case .left:
+            stack.edgeInsets = NSEdgeInsets(top: start, left: outer, bottom: end, right: 0)
+        case .right:
+            stack.edgeInsets = NSEdgeInsets(top: start, left: 0, bottom: end, right: outer)
+        }
     }
 
     /// Stretches one arranged item across the bar's thickness, from the outer

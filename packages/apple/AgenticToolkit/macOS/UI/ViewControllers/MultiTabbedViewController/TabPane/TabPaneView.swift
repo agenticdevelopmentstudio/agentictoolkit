@@ -26,7 +26,6 @@ final class TabPaneView: NSView {
     /// Deep enough for the header and the four lines under it with room left
     /// over: the card is a block you read, not a strip you squint at.
     static let minHeight: CGFloat = 136
-    static let cornerRadius: CGFloat = 10
 
     /// How far the card's background reaches past the bar and over the
     /// workspace's own outline. One point is that outline's whole width, which
@@ -55,7 +54,7 @@ final class TabPaneView: NSView {
 
     init(edge: Edge, tabID: UUID) {
         self.edge = edge
-        self.background = TabCardBackgroundView(edge: edge, cornerRadius: Self.cornerRadius)
+        self.background = TabCardBackgroundView(edge: edge)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         accessibilityID("tab-pane.\(tabID.uuidString)")
@@ -252,23 +251,21 @@ final class TabPaneView: NSView {
 // MARK: - The card's shape
 
 /// The card's fill and border, drawn as one path that leaves out the side
-/// facing the workspace: three sides, rounded at the two corners between them,
-/// open where the card meets what it belongs to.
+/// facing the workspace: three square-cornered sides, open where the card
+/// meets what it belongs to.
 ///
-/// A layer's `cornerRadius`/`maskedCorners` cannot do this — a layer border
-/// follows all four sides — and the open side is the whole point: a line there
-/// would box the card off from the workspace it is supposed to be part of.
+/// A layer border cannot do this — it follows all four sides — and the open
+/// side is the whole point: a line there would box the card off from the
+/// workspace it is supposed to be part of.
 @MainActor
 private final class TabCardBackgroundView: NSView {
     var fillColor: NSColor = .clear { didSet { needsDisplay = true } }
     var borderColor: NSColor = .clear { didSet { needsDisplay = true } }
 
     private let edge: Edge
-    private let cornerRadius: CGFloat
 
-    init(edge: Edge, cornerRadius: CGFloat) {
+    init(edge: Edge) {
         self.edge = edge
-        self.cornerRadius = cornerRadius
         super.init(frame: .zero)
     }
 
@@ -286,18 +283,15 @@ private final class TabCardBackgroundView: NSView {
         path.stroke()
     }
 
-    /// Traced from one end of the open side, round the two outer corners, to
+    /// Traced from one end of the open side, through the two outer corners, to
     /// the other end — never across the open side itself.
     private func cardPath() -> NSBezierPath? {
         let rect = strokeBounds()
         guard rect.width > 0, rect.height > 0 else { return nil }
-        let radius = min(cornerRadius, min(rect.width, rect.height) / 2)
-        let corners = corners(of: rect)
         let path = NSBezierPath()
+        let corners = corners(of: rect)
         path.move(to: corners[0])
-        path.appendArc(from: corners[1], to: corners[2], radius: radius)
-        path.appendArc(from: corners[2], to: corners[3], radius: radius)
-        path.line(to: corners[3])
+        for corner in corners.dropFirst() { path.line(to: corner) }
         return path
     }
 

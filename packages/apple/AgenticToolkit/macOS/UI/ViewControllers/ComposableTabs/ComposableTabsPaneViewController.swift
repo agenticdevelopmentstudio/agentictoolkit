@@ -169,6 +169,14 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     /// content is held off its edge by that much or the border lands under it.
     private static let borderInset: CGFloat = 2
 
+    /// How far below a pane's own top edge its title bar ends: the border
+    /// inset the chrome is held off by, plus the title bar itself.
+    ///
+    /// A tab bar standing beside the workspace lines its first tab up with
+    /// this, so the tab reads as belonging to the pane rather than floating
+    /// above it.
+    public static var titleBarBottom: CGFloat { borderInset + PaneTitleBarView.height }
+
     /// Called by the enclosing split when this pane leaves the tree for good.
     /// The pane's content may be holding shells or file-system watchers, and
     /// "released at some point after the last reference drops" is not good

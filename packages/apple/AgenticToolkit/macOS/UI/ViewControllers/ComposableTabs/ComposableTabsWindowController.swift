@@ -244,14 +244,15 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         self.minSize = NSSize(width: 400, height: 300)
 
         tabbed.delegate = self
-        tabbed.contentInsets = PaneSpacing.contentInsets
+        Self.applyPaneSpacing(PaneSpacing.contentInsets, to: tabbed)
         backdropObserver = ThemePaletteObserver(host: tabbed.view) { [weak self] palette in
             self?.tabbed.centerBackgroundColor = NSColor(palette.projectPaneBackdrop)
             self?.tabbed.centerOutlineColor = NSColor(palette.projectPaneOutline)
         }
         spacingObservers = PaneSpacing.edgeSettings.values.map { setting in
             UserSettingObserver(setting) { [weak self] _ in
-                self?.tabbed.contentInsets = PaneSpacing.contentInsets
+                guard let tabbed = self?.tabbed else { return }
+                Self.applyPaneSpacing(PaneSpacing.contentInsets, to: tabbed)
             }
         }
         self.tabItemDataSource = tabItemDataSource
@@ -272,6 +273,22 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             .store(in: &cancellables)
 
         refreshActivePaneChrome()
+    }
+
+    /// Hands the window's spacing to the tabs: the room around the panes, and
+    /// where a side bar's first tab begins.
+    ///
+    /// Both come from the same insets, so they are applied together — a top
+    /// spacing that moved the panes down without moving the tabs with them
+    /// would break the alignment the tab is there to show.
+    /// `MultiTabbedViewController` is generic and knows nothing about pane
+    /// chrome, so the arithmetic belongs here, where the spacing and the
+    /// pane's own title bar are both in view.
+    static func applyPaneSpacing(_ insets: NSEdgeInsets, to tabbed: MultiTabbedViewController) {
+        tabbed.contentInsets = insets
+        let firstTabTop = insets.top + ComposableTabsPaneViewController.titleBarBottom
+        tabbed.setTabStartInset(firstTabTop, for: .left)
+        tabbed.setTabStartInset(firstTabTop, for: .right)
     }
 
     isolated deinit {

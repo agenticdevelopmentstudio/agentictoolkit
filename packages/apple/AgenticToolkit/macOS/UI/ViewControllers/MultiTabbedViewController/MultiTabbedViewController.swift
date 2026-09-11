@@ -109,6 +109,20 @@ open class MultiTabbedViewController: NSViewController {
         didSet { applyContentInsets() }
     }
 
+    /// Where a bar's first tab begins, measured along the bar from its start —
+    /// the top of a left or right bar, the leading edge of a top or bottom one.
+    ///
+    /// A host sets it when the first tab has to line up with something inside
+    /// the content it frames; this controller never asks what that something
+    /// is, because the content is the only thing that could know.
+    public func setTabStartInset(_ inset: CGFloat, for edge: Edge) {
+        tabBars[edge]?.startInset = inset
+    }
+
+    public func tabStartInset(for edge: Edge) -> CGFloat {
+        tabBars[edge]?.startInset ?? 0
+    }
+
     /// The plane the centre content sits on — what shows through
     /// `contentInsets`, and through any gap the content leaves inside itself.
     ///
