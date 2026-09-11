@@ -65,6 +65,7 @@ struct FileEditorTriggerCharacterTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: services,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -99,6 +100,7 @@ struct FileEditorTriggerCharacterTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -147,6 +149,7 @@ struct FileEditorTriggerCharacterTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: services,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -218,6 +221,7 @@ struct FileEditorTriggerCharacterTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: services,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -334,6 +338,7 @@ struct FileEditorTriggerCharacterTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: services,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 

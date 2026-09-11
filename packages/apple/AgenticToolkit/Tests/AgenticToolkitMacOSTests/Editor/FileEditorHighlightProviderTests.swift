@@ -51,6 +51,7 @@ struct FileEditorHighlightProviderTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: services,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
         state.load(from: fileURL)

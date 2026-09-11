@@ -95,6 +95,11 @@ final class FileEditorState: ObservableObject {
     /// view that owns the selection; this type knows nothing about a file tree.
     private let openFile: (@MainActor (URL) -> Void)?
 
+    /// This pane's resolved display options — line numbers, minimap,
+    /// invisibles. Re-published here so a change reaches the mounted
+    /// `SourceEditor` without reopening the file.
+    private let options: EditorOptionsOverride
+
     /// How the current file is being shown.
     @Published private(set) var display: Display = .empty
 
@@ -162,12 +167,16 @@ final class FileEditorState: ObservableObject {
         documentStore: TextDocumentStore,
         saveScheduler: TextDocumentSaveScheduler,
         languageServices: ProjectLanguageServices?,
+        options: EditorOptionsOverride,
         openFile: (@MainActor (URL) -> Void)?
     ) {
         self.documentStore = documentStore
         self.saveScheduler = saveScheduler
         self.languageServices = languageServices
+        self.options = options
         self.openFile = openFile
+
+        options.onChange = { [weak self] in self?.objectWillChange.send() }
 
         // A session can appear *after* a slot is open: the registry creates one
         // when a language server is added or enabled in settings, and this pane
@@ -335,10 +344,9 @@ final class FileEditorState: ObservableObject {
                 font: palette.font(.code),
                 wrapLines: false
             ),
-            peripherals: SourceEditorConfiguration.Peripherals(
-                showGutter: true,
-                showMinimap: true,
-                codeSuggestionTriggerCharacters: completionTriggerCharacters[uri] ?? []
+            peripherals: EditorPeripherals.make(
+                from: options,
+                triggerCharacters: completionTriggerCharacters[uri] ?? []
             )
         )
     }
