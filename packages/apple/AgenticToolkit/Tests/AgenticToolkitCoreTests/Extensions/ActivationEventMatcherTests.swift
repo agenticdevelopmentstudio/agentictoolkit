@@ -244,4 +244,24 @@ struct ActivationEventMatcherTests {
 
         #expect(!matcher.matches(.workspaceScanned(relativePaths: [])))
     }
+
+    /// A pathological pattern shaped to blow up an unmemoized backtracking
+    /// matcher: each `a**` segment can consume any amount of the run of `a`
+    /// characters, so without memoization the search re-derives the same
+    /// failing state through every combination of how much each `**`
+    /// consumed, roughly doubling the work per added segment. Unlike the
+    /// brief's own `**/{package.json,bower.json}`-style examples, this
+    /// pattern ends in a literal (`b`) the path never supplies, so matching
+    /// must exhaust the search space rather than short-circuit on an
+    /// unconditioned trailing `**`. A regression here should show up as this
+    /// test timing out or hanging, not as a wrong answer.
+    @Test("a pattern with many ** segments against a long non-matching path resolves correctly and fast")
+    func manyDoubleStarSegmentsDoNotBlowUp() throws {
+        let pattern = "a**a**a**a**a**a**a**b"
+        let path = String(repeating: "a", count: 25)
+        let manifest = try Self.manifest(activationEvents: ["workspaceContains:\(pattern)"])
+        let matcher = ActivationEventMatcher(manifest: manifest)
+
+        #expect(!matcher.matches(.workspaceScanned(relativePaths: [path])))
+    }
 }
