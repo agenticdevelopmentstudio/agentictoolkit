@@ -68,6 +68,9 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
     ///     browser legitimately has none; required in position — with no
     ///     default value — because a default would let a new call site lose
     ///     completion and go-to-definition and never say so.
+    ///   - gitStatusProvider: A status provider to hand to the tree for
+    ///     whichever root it belongs to; `nil` (the default) keeps today's
+    ///     behaviour of one freshly built provider per root.
     public init(
         directories: FileBrowserDirectories,
         excludedURL: URL,
@@ -77,7 +80,8 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
         restoration: FileBrowserRestorationState = FileBrowserRestorationState(),
         documentStore: TextDocumentStore,
         saveScheduler: TextDocumentSaveScheduler,
-        languageServices: ProjectLanguageServices?
+        languageServices: ProjectLanguageServices?,
+        gitStatusProvider: GitStatusProvider? = nil
     ) {
         let selection = FileBrowserSelection()
         self.selection = selection
@@ -88,7 +92,8 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
             ignorePatterns: ignorePatterns,
             selection: selection,
             restoration: restoration,
-            documentStore: documentStore
+            documentStore: documentStore,
+            gitStatusProvider: gitStatusProvider
         )
         self.viewerViewController = FileViewerViewController(
             selection: selection,
@@ -130,7 +135,8 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
         restoration: FileBrowserRestorationState = FileBrowserRestorationState(),
         documentStore: TextDocumentStore,
         saveScheduler: TextDocumentSaveScheduler,
-        languageServices: ProjectLanguageServices?
+        languageServices: ProjectLanguageServices?,
+        gitStatusProvider: GitStatusProvider? = nil
     ) {
         self.init(
             directories: FileBrowserDirectories(primary: rootURL),
@@ -141,7 +147,8 @@ public final class FileBrowserSplitViewController: ThemedSplitViewController {
             restoration: restoration,
             documentStore: documentStore,
             saveScheduler: saveScheduler,
-            languageServices: languageServices
+            languageServices: languageServices,
+            gitStatusProvider: gitStatusProvider
         )
     }
 

@@ -21,7 +21,7 @@ public final class FileTreeManager: ObservableObject {
     public let ideDetector: IDEDetector
 
     private let coordinator: DirectoryWatchCoordinator
-    private let gitStatusProvider: GitStatusProvider
+    let gitStatusProvider: GitStatusProvider
     private var pendingGitRefresh: DispatchWorkItem?
     private var pendingIDEDetection: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
@@ -30,12 +30,13 @@ public final class FileTreeManager: ObservableObject {
         repoRootURL: URL,
         packageURL: URL,
         config: FileTreeConfig,
-        ignorePatterns: [String] = []
+        ignorePatterns: [String] = [],
+        gitStatusProvider: GitStatusProvider? = nil
     ) {
         self.repoRootURL = repoRootURL
         self.packageURL = packageURL
         self.ideDetector = IDEDetector(rootURL: repoRootURL)
-        self.gitStatusProvider = GitStatusProvider(repoRoot: repoRootURL)
+        self.gitStatusProvider = gitStatusProvider ?? GitStatusProvider(repoRoot: repoRootURL)
         self.coordinator = DirectoryWatchCoordinator(
             rootURL: repoRootURL,
             config: config,

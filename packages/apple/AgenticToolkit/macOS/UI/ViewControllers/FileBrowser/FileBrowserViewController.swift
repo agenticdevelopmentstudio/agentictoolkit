@@ -41,6 +41,11 @@ public final class FileBrowserViewController: NSViewController {
     /// can show a dirty indicator on a node with unsaved changes.
     private let documentStore: TextDocumentStore
 
+    /// A status provider handed in from outside — for the root it belongs to,
+    /// used instead of a freshly built one. `nil` for every browser that has
+    /// no reason to share one, which is today's behaviour: a provider per root.
+    private let injectedGitStatusProvider: GitStatusProvider?
+
     /// One manager per root, keyed by the root it scans, so rebuilding the list
     /// after an add or a remove reuses every manager that survived — a scanned
     /// tree is not rescanned because a *different* directory appeared.
@@ -75,6 +80,9 @@ public final class FileBrowserViewController: NSViewController {
     ///     own, so a browser used alone needs to know nothing about it.
     ///   - documentStore: The app-wide open-document registry, threaded down
     ///     to the tree for its dirty indicator. Injected — never built here.
+    ///   - gitStatusProvider: A status provider to hand to the manager for
+    ///     whichever root it belongs to; `nil` (the default) keeps today's
+    ///     behaviour of one freshly built provider per root.
     public init(
         directories: FileBrowserDirectories,
         excludedURL: URL,
@@ -82,7 +90,8 @@ public final class FileBrowserViewController: NSViewController {
         ignorePatterns: [String] = [],
         selection: FileBrowserSelection = FileBrowserSelection(),
         restoration: FileBrowserRestorationState = FileBrowserRestorationState(),
-        documentStore: TextDocumentStore
+        documentStore: TextDocumentStore,
+        gitStatusProvider: GitStatusProvider? = nil
     ) {
         self.directories = directories
         self.excludedURL = excludedURL
@@ -91,6 +100,7 @@ public final class FileBrowserViewController: NSViewController {
         self.selection = selection
         self.restoration = restoration
         self.documentStore = documentStore
+        self.injectedGitStatusProvider = gitStatusProvider
         super.init(nibName: nil, bundle: nil)
 
         rebuildManagers()
@@ -108,7 +118,8 @@ public final class FileBrowserViewController: NSViewController {
         ignorePatterns: [String] = [],
         selection: FileBrowserSelection = FileBrowserSelection(),
         restoration: FileBrowserRestorationState = FileBrowserRestorationState(),
-        documentStore: TextDocumentStore
+        documentStore: TextDocumentStore,
+        gitStatusProvider: GitStatusProvider? = nil
     ) {
         self.init(
             directories: FileBrowserDirectories(primary: rootURL),
@@ -117,7 +128,8 @@ public final class FileBrowserViewController: NSViewController {
             ignorePatterns: ignorePatterns,
             selection: selection,
             restoration: restoration,
-            documentStore: documentStore
+            documentStore: documentStore,
+            gitStatusProvider: gitStatusProvider
         )
     }
 
@@ -310,11 +322,15 @@ public final class FileBrowserViewController: NSViewController {
     }
 
     private func makeManager(for root: URL) -> FileTreeManager {
-        FileTreeManager(
+        let provider = injectedGitStatusProvider.flatMap { candidate in
+            candidate.repoRoot.standardizedFileURL == root.standardizedFileURL ? candidate : nil
+        }
+        return FileTreeManager(
             repoRootURL: root,
             packageURL: excludedURL,
             config: config,
-            ignorePatterns: ignorePatterns
+            ignorePatterns: ignorePatterns,
+            gitStatusProvider: provider
         )
     }
 
