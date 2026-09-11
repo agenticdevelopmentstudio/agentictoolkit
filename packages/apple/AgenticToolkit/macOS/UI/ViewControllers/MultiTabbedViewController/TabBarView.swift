@@ -301,9 +301,15 @@ final class TabBarView: NSView {
         let constant: CGFloat
         switch edge {
         case .top, .bottom:
-            constant = max(Self.preferredThickness(for: edge), (sizes.map(\.height).max() ?? 0) + 4)
+            // + 1 covers the 1pt `edgeDivider`, which eats into the stack's
+            // height before a hosted item's cross-axis pins (0/0 top/bottom
+            // insets on this axis) ever see it.
+            constant = max(Self.preferredThickness(for: edge), (sizes.map(\.height).max() ?? 0) + 1)
         case .left, .right:
-            constant = max(Self.preferredThickness(for: edge), (sizes.map(\.width).max() ?? 0) + 16)
+            // + 16 covers the hosted item's 8+8pt leading/trailing cross-axis
+            // pins (`rebuildButtons()`); + 1 on top of that covers the 1pt
+            // `edgeDivider`, which also eats into the stack's available width.
+            constant = max(Self.preferredThickness(for: edge), (sizes.map(\.width).max() ?? 0) + 17)
         }
         thicknessConstraint?.constant = constant
     }

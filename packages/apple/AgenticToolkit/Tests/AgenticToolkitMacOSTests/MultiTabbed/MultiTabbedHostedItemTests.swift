@@ -69,10 +69,11 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         controller.addTab(.init(item: .viewController(HostedItem()), viewController: makeContent()), on: .left)
         controller.view.layoutSubtreeIfNeeded()
         let bar = try XCTUnwrap(controller.tabBars[.left])
-        // Exact rather than a floor: pins both the `+ 16` padding and the
-        // floor at the button default (140), neither of which a `>=` against
-        // 200 would catch a regression in.
-        XCTAssertEqual(bar.thicknessConstraint?.constant, 216)
+        // Exact rather than a floor: pins the `+ 16` cross-axis padding, the
+        // `+ 1` for the bar's `edgeDivider`, and the floor at the button
+        // default (140), none of which a `>=` against 200 would catch a
+        // regression in.
+        XCTAssertEqual(bar.thicknessConstraint?.constant, 217)
     }
 
     func testTheBarGrowsToTheHostedItemsPreferredSizeOnATopBar() throws {
@@ -80,9 +81,11 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         controller.addTab(.init(item: .viewController(HostedItem()), viewController: makeContent()), on: .top)
         controller.view.layoutSubtreeIfNeeded()
         let bar = try XCTUnwrap(controller.tabBars[.top])
-        // The left/right thickness test exercises only `.width` + 16; this
-        // pins the separate `.top`/`.bottom` branch, `.height` + 4.
-        XCTAssertEqual(bar.thicknessConstraint?.constant, 68)
+        // The left/right thickness test exercises `.width` + 16 + 1; this
+        // pins the separate `.top`/`.bottom` branch, `.height` + 1 (there is
+        // no left/right-style cross-axis inset on this axis, only the
+        // divider).
+        XCTAssertEqual(bar.thicknessConstraint?.constant, 65)
     }
 
     func testRemovingATabRemovesItsHostedItemFromTheParent() {
@@ -128,7 +131,7 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         controller.preferredContentSizeDidChange(for: item)
 
         let bar = try XCTUnwrap(controller.tabBars[.left])
-        XCTAssertEqual(bar.thicknessConstraint?.constant, 416)
+        XCTAssertEqual(bar.thicknessConstraint?.constant, 417)
     }
 
     func testHostedItemsOnCloseRemovesTheTab() {

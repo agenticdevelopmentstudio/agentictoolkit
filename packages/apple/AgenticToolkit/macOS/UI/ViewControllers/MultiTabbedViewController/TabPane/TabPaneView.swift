@@ -46,7 +46,7 @@ final class TabPaneView: NSView {
     // MARK: Content
 
     func setStatusSymbols(_ symbols: [TabPaneStatusSymbol]) {
-        for view in statusViews { view.removeFromSuperview() }
+        for view in statusViews { statusStack.removeView(view) }
         statusViews = symbols.map { symbol in
             let symbolImage = NSImage(
                 systemSymbolName: symbol.symbolName,
@@ -105,21 +105,25 @@ final class TabPaneView: NSView {
         addSubview(background)
         observeTheme { view, _ in view.applyHighlight() }
 
-        let header = NSStackView(views: [agentLabel, statusStack, NSView(), closeButton])
-        header.orientation = .horizontal
-        header.spacing = 4
-        header.alignment = .centerY
-
         let content: NSStackView
         switch edge {
         case .left, .right:
+            let header = NSStackView(views: [agentLabel, statusStack, NSView(), closeButton])
+            header.orientation = .horizontal
+            header.spacing = 4
+            header.alignment = .centerY
             content = NSStackView(views: [header, sessionLabel, directoryLabel, branchLabel, summaryLabel])
             content.orientation = .vertical
             content.alignment = .leading
             content.spacing = 2
         case .top, .bottom:
+            summaryLabel.lineBreakMode = .byTruncatingTail
+            // The lowest priorities in the row, so a narrow bar squeezes the
+            // summary before it touches the agent name, branch, or path.
+            summaryLabel.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+            summaryLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
             content = NSStackView(
-                views: [agentLabel, statusStack, sessionLabel, branchLabel, directoryLabel, closeButton]
+                views: [agentLabel, statusStack, sessionLabel, branchLabel, summaryLabel, directoryLabel, closeButton]
             )
             content.orientation = .horizontal
             content.alignment = .centerY
@@ -139,12 +143,13 @@ final class TabPaneView: NSView {
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
             content.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
-        if edge == .left || edge == .right {
-            widthAnchor.constraint(equalToConstant: Self.sideWidth).isActive = true
-        } else {
-            heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
-            widthAnchor.constraint(lessThanOrEqualToConstant: Self.rowMaxWidth).isActive = true
-        }
+        // No self-pin on either axis: the cross axis is the hosting bar's
+        // job at required priority (`TabBarView.rebuildButtons()`), and the
+        // length axis is AppKit's own priority-501
+        // `NSViewController.preferredContentSize` constraint, driven by
+        // `contentSize` below. A required pin here would restate one of
+        // those two numbers at required priority and risk an unsatisfiable
+        // conflict with whichever one wins.
         applyHighlight()
     }
 
