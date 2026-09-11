@@ -39,7 +39,7 @@ extension ProjectDatabase {
                 title: columnText(stmt, 1) ?? "",
                 root: try buildTree(id: rootID, rows: allRows),
                 focusedNodeID: columnText(stmt, 3).flatMap { UUID(uuidString: $0) },
-                workingDirectory: columnText(stmt, 6).map { URL(fileURLWithPath: $0) }
+                workingDirectory: columnText(stmt, 6).flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ))
         }
 

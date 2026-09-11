@@ -32,10 +32,29 @@ final class ProjectDatabaseWorkingDirectoryTests: XCTestCase {
         return repo
     }
 
+    /// The path carries a space and a non-ASCII character on purpose: both
+    /// survive a naive URL-to-string encoding that a percent-escaped or
+    /// UTF-8-mangling round trip would not, so this asserts the actual
+    /// TEXT-column encoding rather than reasoning about it from a plain path.
     func testWorkingDirectoryRoundTrips() throws {
         let database = try makeDatabase()
         let repo = try registerRepo(in: database)
-        let worktree = tempRoot.appendingPathComponent("wt-feature")
+        let worktree = tempRoot.appendingPathComponent("wt-feature café")
+        let leaf = LayoutNode.leaf(contentType: ComposableTabsViewID("test.editor"), paneLabel: nil)
+        let record = TabRecord(edge: .left, title: "feature", root: leaf, workingDirectory: worktree)
+        try database.saveTabs([record], activeTabID: record.id, enabledEdges: [.left], repoID: repo.id)
+
+        let loaded = try database.loadTabs(repoID: repo.id)
+        XCTAssertEqual(loaded.tabs.first?.workingDirectory?.path, worktree.path)
+    }
+
+    /// A worktree path stored with a trailing slash has to come back with the
+    /// same trailing slash — `URL(fileURLWithPath:)` normalizes directory
+    /// paths in a way that could silently drop it.
+    func testWorkingDirectoryWithATrailingSlashRoundTrips() throws {
+        let database = try makeDatabase()
+        let repo = try registerRepo(in: database)
+        let worktree = tempRoot.appendingPathComponent("wt-trailing", isDirectory: true)
         let leaf = LayoutNode.leaf(contentType: ComposableTabsViewID("test.editor"), paneLabel: nil)
         let record = TabRecord(edge: .left, title: "feature", root: leaf, workingDirectory: worktree)
         try database.saveTabs([record], activeTabID: record.id, enabledEdges: [.left], repoID: repo.id)
@@ -58,6 +77,15 @@ final class ProjectDatabaseWorkingDirectoryTests: XCTestCase {
     func testSchemaIsAtVersionFour() throws {
         let database = try makeDatabase()
         XCTAssertGreaterThanOrEqual(try database.schemaVersion(), 4)
+    }
+
+    /// Ties `currentSchemaVersion` to what a fresh database actually ends up
+    /// at, so the constant cannot drift out of step with the migration chain
+    /// again without a test noticing — today it is bumped by hand alongside
+    /// the migration and referenced nowhere else.
+    func testFreshDatabaseReportsCurrentSchemaVersion() throws {
+        let database = try makeDatabase()
+        XCTAssertEqual(try database.schemaVersion(), ProjectDatabase.currentSchemaVersion)
     }
 
     /// A migration that only works on a freshly-created database is the
