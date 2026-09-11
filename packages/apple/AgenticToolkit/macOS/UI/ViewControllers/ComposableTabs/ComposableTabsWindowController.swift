@@ -145,12 +145,16 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     private var tabGroups: [TabGroup] = []
 
     /// Set for the duration of `reloadTabs()`'s removal loop. `removeTab`
-    /// fires `didSelectTab` for whichever member it activates next, and that
-    /// callback calls `persistAllTabs()` — which, mid-loop, would write the
-    /// shrinking tab set the loop hasn't finished removing, overwriting the
-    /// stored tabs `installInitialTabs()` is about to read back. Guarded here,
-    /// not at the callback, because the callback's other duties (restoring
-    /// focus, refreshing chrome) are still correct mid-reload.
+    /// fires `didSelectTab` for whichever member it activates next, and none
+    /// of that callback's duties are meaningful mid-loop: `persistAllTabs()`
+    /// would write the shrinking tab set the loop hasn't finished removing,
+    /// overwriting the stored tabs `installInitialTabs()` is about to read
+    /// back; `restoreFocusedLeafForActiveTab()` would schedule a first
+    /// responder on a split controller the loop discards two statements
+    /// later; and `refreshActivePaneChrome()` would recompute against tabs
+    /// that are half gone. So the callback is suppressed wholesale, and
+    /// `persistAllTabs()` checks the flag again for the paths that reach it
+    /// by other routes.
     private var isReloadingTabs = false
 
     /// Live mapping from a tab's UUID to the tab's root `ComposableTabsViewController`.
@@ -423,7 +427,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 edge: edge,
                 title: group.title,
                 root: split.snapshotNode(),
-                workingDirectory: group.workingDirectory
+                workingDirectory: storedWorkingDirectory(group.workingDirectory)
             )
             let tab = MultiTabbedViewController.Tab(id: id, item: tabItem(for: record, on: edge), viewController: split)
             tabbed.insertTab(tab, at: index, on: edge)
@@ -448,7 +452,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 edge: edge,
                 title: title,
                 root: split.snapshotNode(),
-                workingDirectory: group.workingDirectory
+                workingDirectory: storedWorkingDirectory(group.workingDirectory)
             )
             tabbed.addTab(.init(id: id, item: tabItem(for: record, on: edge), viewController: split), on: edge)
             group.members[edge] = id
@@ -543,10 +547,26 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     private func liveGroupTitle(for group: TabGroup) -> String {
         for edge in Edge.allCases {
             guard let id = group.members[edge],
-                  let tab = tabbed.tabs(on: edge).first(where: { $0.id == id }) else { continue }
+                  let tab = tabbed.tabs(on: edge).first(where: { $0.id == id }),
+                  // A hosted item whose view controller has no `title` reports
+                  // `""`, which is not a name a script should read as the
+                  // tab's. Treat it the same as no installed member.
+                  !tab.title.isEmpty else { continue }
             return tab.title
         }
         return group.title
+    }
+
+    /// Storage's convention for a tab's working directory: `nil` means the
+    /// project's own directory (see `TabRecord.workingDirectory`). Records
+    /// built for a freshly created tab must follow it too, or a data source
+    /// sees the same tab two different ways depending on whether it was just
+    /// created or restored from storage. Resolved, not standardized, for the
+    /// reason `ProjectCheckout.init` resolves.
+    private func storedWorkingDirectory(_ directory: URL) -> URL? {
+        directory.resolvingSymlinksInPath() == project.directoryURL.resolvingSymlinksInPath()
+            ? nil
+            : directory
     }
 
     /// This window's tabs, as scripting values. `branch` resolves a working
@@ -928,18 +948,26 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// tabs from this, since `init` already installed the initial set
     /// itself.
     public func reloadTabs() {
-        isReloadingTabs = true
-        for edge in Edge.allCases {
-            for tab in tabbed.tabs(on: edge) {
-                tabbed.removeTab(id: tab.id)
-            }
-        }
-        isReloadingTabs = false
+        removeAllTabs()
         tabGroups.removeAll()
         splitControllersByTabID.removeAll()
         focusedLeafByTabID.removeAll()
         installInitialTabs()
         refreshActivePaneChrome()
+    }
+
+    /// The removal half of `reloadTabs()`, extracted so `isReloadingTabs`
+    /// is raised and lowered by one `defer` around the loop alone. The flag
+    /// must be down again before `installInitialTabs()` runs, or the top-up
+    /// persist inside it would be suppressed too.
+    private func removeAllTabs() {
+        isReloadingTabs = true
+        defer { isReloadingTabs = false }
+        for edge in Edge.allCases {
+            for tab in tabbed.tabs(on: edge) {
+                tabbed.removeTab(id: tab.id)
+            }
+        }
     }
 
     private func wireLayoutCallback(on split: ComposableTabsViewController, tabID: UUID) {
@@ -997,16 +1025,23 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         for edge in Edge.allCases {
             for tab in tabbed.tabs(on: edge) {
                 guard let split = splitControllersByTabID[tab.id] else { continue }
-                let groupID = tabGroups.first(where: { $0.members[edge] == tab.id })?.id
+                let group = tabGroups.first(where: { $0.members[edge] == tab.id })
                 records.append(TabRecord(
                     id: tab.id,
-                    groupID: groupID,
+                    groupID: group?.id,
                     edge: edge,
-                    title: tab.title,
+                    // The group's own title, not `tab.title`. A hosted item's
+                    // title is whatever its view controller reports — nil
+                    // becomes `""`, and a source that derives its title from
+                    // the record accretes (`main` → `hosted-main` →
+                    // `hosted-hosted-main`) across reload/persist cycles.
+                    // Either way the stored title would be overwritten
+                    // permanently, and the next launch installs tabs before a
+                    // data source exists, so the fallback would render it.
+                    title: group?.title ?? tab.title,
                     root: split.snapshotNode(),
                     focusedNodeID: focusedLeafByTabID[tab.id],
-                    workingDirectory: split.workingDirectory.standardizedFileURL
-                        == project.directoryURL.standardizedFileURL ? nil : split.workingDirectory
+                    workingDirectory: storedWorkingDirectory(split.workingDirectory)
                 ))
             }
         }
@@ -1145,6 +1180,7 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
         didSelectTab id: UUID,
         on edge: Edge
     ) {
+        guard !isReloadingTabs else { return }
         restoreFocusedLeafForActiveTab()
         persistAllTabs()
         refreshActivePaneChrome()
