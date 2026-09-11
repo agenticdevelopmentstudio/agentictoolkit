@@ -27,16 +27,22 @@ public final class FileBrowserDirectories: ObservableObject {
     /// Every root, primary first.
     public var all: [URL] { [primary] + additional }
 
+    /// Every root is normalized with `resolvingSymlinksInPath()` rather than
+    /// `standardizedFileURL`, matching the rule `ProjectCheckout.swift:12`
+    /// documents: the same folder reaches this object as a checkout directory
+    /// that git already resolved and as a path the user picked that nothing
+    /// did, and a lexical comparison would call those two different roots —
+    /// two managers, two git status providers, one folder (`dry`).
     public init(primary: URL, additional: [URL] = []) {
-        self.primary = primary.standardizedFileURL
+        self.primary = primary.resolvingSymlinksInPath()
         // A stored list can name the primary (the user added the folder before
         // it became the document's own), or the same folder twice. Repairing on
         // the way in keeps every later `all` free of duplicate roots.
         var seen: Set<URL> = [self.primary]
         self.additional = additional.compactMap { url in
-            let standardized = url.standardizedFileURL
-            guard seen.insert(standardized).inserted else { return nil }
-            return standardized
+            let resolved = url.resolvingSymlinksInPath()
+            guard seen.insert(resolved).inserted else { return nil }
+            return resolved
         }
     }
 
@@ -45,9 +51,9 @@ public final class FileBrowserDirectories: ObservableObject {
     /// small: no silent no-op that looks like success).
     @discardableResult
     public func add(_ url: URL) -> Bool {
-        let standardized = url.standardizedFileURL
-        guard !all.contains(standardized) else { return false }
-        additional.append(standardized)
+        let resolved = url.resolvingSymlinksInPath()
+        guard !all.contains(resolved) else { return false }
+        additional.append(resolved)
         onChange?(additional)
         return true
     }
@@ -56,22 +62,22 @@ public final class FileBrowserDirectories: ObservableObject {
     /// removable, so passing it does nothing.
     @discardableResult
     public func remove(_ url: URL) -> Bool {
-        let standardized = url.standardizedFileURL
-        guard let index = additional.firstIndex(of: standardized) else { return false }
+        let resolved = url.resolvingSymlinksInPath()
+        guard let index = additional.firstIndex(of: resolved) else { return false }
         additional.remove(at: index)
         onChange?(additional)
         return true
     }
 
     public func isRemovable(_ url: URL) -> Bool {
-        additional.contains(url.standardizedFileURL)
+        additional.contains(url.resolvingSymlinksInPath())
     }
 
     /// The root `url` lives under, or `nil` if it lives under none of them.
     /// Longest match wins, so a directory added *inside* another one still
     /// claims its own files.
     public func root(containing url: URL) -> URL? {
-        let path = url.standardizedFileURL.path
+        let path = url.resolvingSymlinksInPath().path
         return all
             .filter { path == $0.path || path.hasPrefix($0.path + "/") }
             .max { $0.path.count < $1.path.count }

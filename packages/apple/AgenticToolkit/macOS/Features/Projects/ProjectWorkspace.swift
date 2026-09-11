@@ -266,7 +266,12 @@ public final class ProjectWorkspace {
     /// (`dry` — one representation of the project's roots). Which root a pane's
     /// footer is aimed at stays per-pane, on `FileBrowserSelection`.
     public func fileBrowserDirectories(primary: URL) -> FileBrowserDirectories {
-        let key = primary.standardizedFileURL
+        // Resolved, like every other directory identity on this path: the same
+        // folder arrives here both as a checkout directory git already
+        // resolved and as the unresolved path the project was opened with, and
+        // a lexical key would hand those two callers two different objects —
+        // which is exactly the per-pane duplication this cache exists to end.
+        let key = primary.resolvingSymlinksInPath()
         if let cached = fileBrowserDirectoriesByPrimary[key] {
             return cached
         }
@@ -302,7 +307,7 @@ public final class ProjectWorkspace {
     /// project controller has not resolved one (a directory outside any known
     /// worktree, or a project with no resolver wired yet).
     public func gitStatusProvider(forDirectory directory: URL) -> GitStatusProvider? {
-        gitStatusProviderResolver?(directory.standardizedFileURL)
+        gitStatusProviderResolver?(directory.resolvingSymlinksInPath())
     }
 }
 

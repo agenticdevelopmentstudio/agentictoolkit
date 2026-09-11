@@ -324,8 +324,14 @@ public final class FileBrowserViewController: NSViewController {
     }
 
     private func makeManager(for root: URL) -> FileTreeManager {
+        // `resolvingSymlinksInPath()`, not `standardizedFileURL`, for the
+        // reason `ProjectCheckout.swift:12` documents: the injected provider's
+        // `repoRoot` is a resolved checkout directory, and this root is
+        // whatever the window was opened with. A lexical comparison misses
+        // whenever a symlink stands between them, and the miss is silent — the
+        // pane quietly builds a second, uninstrumented provider of its own.
         let provider = injectedGitStatusProvider.flatMap { candidate in
-            candidate.repoRoot.standardizedFileURL == root.standardizedFileURL ? candidate : nil
+            candidate.repoRoot.resolvingSymlinksInPath() == root.resolvingSymlinksInPath() ? candidate : nil
         }
         return FileTreeManager(
             repoRootURL: root,

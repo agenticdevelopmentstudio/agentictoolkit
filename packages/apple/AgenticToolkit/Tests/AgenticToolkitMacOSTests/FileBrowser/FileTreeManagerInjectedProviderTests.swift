@@ -74,4 +74,39 @@ final class FileTreeManagerInjectedProviderTests: XCTestCase {
             "a non-matching root builds its own provider"
         )
     }
+
+    /// The two sides of that match reach the same directory by different
+    /// routes. `BranchController` builds its provider on `checkout.directory`,
+    /// which `ProjectCheckout` resolves symlinks on; the root tab's browser is
+    /// rooted at the path the user picked, which nothing resolves. On a Mac
+    /// where the project lives under a symlinked parent — `/tmp`, a symlinked
+    /// `~/Development`, or any `$TMPDIR` fixture — a purely lexical comparison
+    /// misses, the injected provider is silently discarded, and the pane's git
+    /// status comes from a second, uninstrumented `GitClient`.
+    func testAnInjectedProviderIsAdoptedWhenTheRootReachesItThroughASymlink() throws {
+        let manager = FileManager.default
+        let target = manager.temporaryDirectory.appendingPathComponent("ftm-target-\(UUID().uuidString)")
+        let link = manager.temporaryDirectory.appendingPathComponent("ftm-link-\(UUID().uuidString)")
+        try manager.createDirectory(at: target, withIntermediateDirectories: true)
+        try manager.createSymbolicLink(at: link, withDestinationURL: target)
+        defer {
+            try? manager.removeItem(at: link)
+            try? manager.removeItem(at: target)
+        }
+
+        let provider = GitStatusProvider(repoRoot: link.resolvingSymlinksInPath())
+        let browser = FileBrowserViewController(
+            directories: FileBrowserDirectories(primary: link),
+            excludedURL: link.appendingPathComponent(".build"),
+            documentStore: TextDocumentStore(),
+            gitStatusProvider: provider
+        )
+
+        let root = try XCTUnwrap(browser.directories.all.first)
+        let treeManager = try XCTUnwrap(browser.managersByRoot[root])
+        XCTAssertTrue(
+            treeManager.gitStatusProvider === provider,
+            "a root reaching the provider's repo through a symlink is the same repo"
+        )
+    }
 }

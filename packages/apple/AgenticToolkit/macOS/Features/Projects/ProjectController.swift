@@ -195,7 +195,11 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
         tabItemFor record: TabRecord,
         on edge: Edge
     ) -> TabItem {
-        let directory = record.workingDirectory ?? workspace.directoryURL
+        // The root tab stores no working directory, so it falls back to the
+        // path the project was opened with — the one path in this system that
+        // nothing has resolved. Normalizing it here means every tab's pane
+        // reaches its branch controller, and its provider, the same way.
+        let directory = (record.workingDirectory ?? workspace.directoryURL).resolvingSymlinksInPath()
         guard let branch = branchController(forDirectory: directory) else {
             return .title(record.title)
         }
