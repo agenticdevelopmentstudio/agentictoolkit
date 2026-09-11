@@ -48,8 +48,10 @@ public final class FileBrowserViewController: NSViewController {
 
     /// One manager per root, keyed by the root it scans, so rebuilding the list
     /// after an add or a remove reuses every manager that survived — a scanned
-    /// tree is not rescanned because a *different* directory appeared.
-    private var managersByRoot: [URL: FileTreeManager] = [:]
+    /// tree is not rescanned because a *different* directory appeared. Internal
+    /// read so a test can see which manager serves which root; write stays
+    /// private — nothing outside this class may mutate it.
+    private(set) var managersByRoot: [URL: FileTreeManager] = [:]
     private let roots = FileBrowserRootsModel()
 
     private lazy var tree = FileTreeOutlineViewController(
