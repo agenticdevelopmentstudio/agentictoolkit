@@ -165,6 +165,7 @@
 		1688F5A31F8C2F4FE1DE175F /* MarkdownReExports.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF729C4B81A698492FAE06C /* MarkdownReExports.swift */; };
 		16BFC33B6B2D54930312F61C /* ExtensionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8CE30BD70C9561F5ED16DD /* ExtensionSettings.swift */; };
 		16C4C0E0EA485890B97F4DEF /* InMemorySettingsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65E84C2ED0A1658E6689EA0B /* InMemorySettingsStoreTests.swift */; };
+		16DA4040869C3964057ED939 /* ProjectTabReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 441052E15EEBEC4403209207 /* ProjectTabReconciler.swift */; };
 		177F45379D83B6F56C2B5ACC /* TextDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90BFF487FD6A18049057E50 /* TextDocument.swift */; };
 		17C65568E7218AE88D6F5368 /* MatchStrategy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EEFD96B23DBED0737E91903 /* MatchStrategy.swift */; };
 		17CC6967F3E21C7F64C148B7 /* LanguageServerRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A555A3D1B9A0FC23DB677272 /* LanguageServerRegistry.swift */; };
@@ -592,6 +593,7 @@
 		94DE8A75AB403AFD6B253541 /* SystemWindowControlError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AA9EC2686794F2DDE4DABB9 /* SystemWindowControlError.swift */; };
 		95657C1C5367A92F48264057 /* LanguageServerProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = B34D83F0409157F2341DFEC8 /* LanguageServerProtocol */; };
 		956673336C906CF1234B52E9 /* SystemWindowContextsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CB4DD7F9E79CBD2FF2D70E /* SystemWindowContextsModel.swift */; };
+		959B7EF3B0A0AE2A602DB396 /* ProjectTabReconcilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E393284AD4F968CB29C9A27C /* ProjectTabReconcilerTests.swift */; };
 		95EDBFDADFA6BA4D21D4899A /* SystemWindowFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0943720365027F131F29F4 /* SystemWindowFingerprint.swift */; };
 		9608E169F7BF2D69DF3141FD /* ButtonViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7107EEE6C4A62A28A42C7FEE /* ButtonViewModel.swift */; };
 		96541B499E4F6C8328CEC8C7 /* MultiTabbedViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AEFF464DC5C557DEB876AC /* MultiTabbedViewController.swift */; };
@@ -1993,6 +1995,7 @@
 		426B8225A1D8E3C1C86F547B /* TextEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditView.swift; sourceTree = "<group>"; };
 		42C23A1B3C60DB4DF13266CE /* SessionWatcherSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWatcherSession.swift; sourceTree = "<group>"; };
 		4344896C3D142D30AC54BB97 /* TTYResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTYResolver.swift; sourceTree = "<group>"; };
+		441052E15EEBEC4403209207 /* ProjectTabReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTabReconciler.swift; sourceTree = "<group>"; };
 		4425888F9715CC2C33E23445 /* PanelHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelHostView.swift; sourceTree = "<group>"; };
 		449C339E5C58DC7C8A39A14D /* AppearanceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceManager.swift; sourceTree = "<group>"; };
 		44D0FA7E378C628556F6CD86 /* SettingsNavigationHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationHistory.swift; sourceTree = "<group>"; };
@@ -2466,6 +2469,7 @@
 		E2C71C9CB4C83289BC8FB988 /* ScriptingRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptingRouter.swift; sourceTree = "<group>"; };
 		E2E872F8042F0C5864570DA2 /* LanguageContributionPointTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageContributionPointTests.swift; sourceTree = "<group>"; };
 		E38F419ED8F070B50F6D70AE /* ProjectWindowManager+Scripting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProjectWindowManager+Scripting.swift"; sourceTree = "<group>"; };
+		E393284AD4F968CB29C9A27C /* ProjectTabReconcilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTabReconcilerTests.swift; sourceTree = "<group>"; };
 		E44C16FF5550600D6EF44C65 /* Loggable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Loggable.swift; sourceTree = "<group>"; };
 		E489812BE4A44DD1779834D3 /* AIProviderConfigKeysTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfigKeysTests.swift; sourceTree = "<group>"; };
 		E63C0C56825BFBAFD19C516C /* LLMChatViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMChatViewController.swift; sourceTree = "<group>"; };
@@ -3209,6 +3213,7 @@
 				754077B055C5961C7199C040 /* ProjectDatabaseWorkingDirectoryTests.swift */,
 				2AEFD15057D9E0337954491D /* ProjectFilterTests.swift */,
 				FC74E3CD9ADAEEFAA40964A9 /* ProjectReconcilerTests.swift */,
+				E393284AD4F968CB29C9A27C /* ProjectTabReconcilerTests.swift */,
 				9D57AD5D38D8C72ADF74A428 /* ProjectTreeTests.swift */,
 				F67E456C9D40ADA6FDECEC30 /* ProjectWindowRestoreTests.swift */,
 			);
@@ -4569,6 +4574,7 @@
 				EEB56C08E03EB52BF42DB82A /* ProjectReconciler.swift */,
 				C66667DCA02B801B5D59DD3D /* ProjectScanProgressWindow.swift */,
 				6667710358B319E8F16BAB02 /* ProjectsCoordinator.swift */,
+				441052E15EEBEC4403209207 /* ProjectTabReconciler.swift */,
 				6955FB0BB19459F31EC1BB25 /* ProjectTree.swift */,
 				677FA8E599601D661129D938 /* ProjectWindowManager.swift */,
 				ECDE8A61C9B5FD8D1CC15D6B /* ProjectWorkspace.swift */,
@@ -6325,6 +6331,7 @@
 				D0FA87A8D9A08A28556C2183 /* ProjectPaneStateStore.swift in Sources */,
 				39BB3DB32C5BE56ECAE5F37F /* ProjectReconciler.swift in Sources */,
 				1C2646340730B42803418548 /* ProjectScanProgressWindow.swift in Sources */,
+				16DA4040869C3964057ED939 /* ProjectTabReconciler.swift in Sources */,
 				E10D5A649092BC472D06968A /* ProjectTree.swift in Sources */,
 				241031A8B81F9C80224445BB /* ProjectWindowManager+Scripting.swift in Sources */,
 				71DD82E6767538A86D2C7186 /* ProjectWindowManager.swift in Sources */,
@@ -6784,6 +6791,7 @@
 				AC156590B81AA8354A67A79A /* ProjectPaneStateStoreTests.swift in Sources */,
 				219BAC26897C034850C48212 /* ProjectReconcilerTests.swift in Sources */,
 				AC752DC035B25CFA00001C5C /* ProjectScriptingTests.swift in Sources */,
+				959B7EF3B0A0AE2A602DB396 /* ProjectTabReconcilerTests.swift in Sources */,
 				F5D3294BDAD1EC4BAEC5A2D2 /* ProjectTreeTests.swift in Sources */,
 				329018C1665E96A3DBEED01F /* ProjectWindowRestoreTests.swift in Sources */,
 				7EF0A5CDFEDF2B8CF61E833C /* ProjectWindowSearchTests.swift in Sources */,
