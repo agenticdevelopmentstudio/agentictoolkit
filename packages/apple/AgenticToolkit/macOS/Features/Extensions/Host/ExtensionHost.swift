@@ -465,9 +465,17 @@ public final class ExtensionHost {
     private func performActivation() async throws {
         let entryPoint = try resolveEntryPoint()
         let source = try await Self.readSource(at: entryPoint, identifier: identifier)
+        // Read here rather than where it is used, which is the difference
+        // between adding a suspension point the guards below already cover and
+        // opening a second one underneath them — between `self.context =
+        // context` and the module evaluation, where a `dispose()` would leave
+        // this activation installing a shim into a context the host has already
+        // let go of.
+        let runtimeSource = try await Self.runtimeSource(identifier: identifier)
 
-        // Reading the source is the one suspension point before any JavaScript
-        // exists, so it is the one place a `dispose()` can land unnoticed.
+        // Reading the sources is the only suspension point before any
+        // JavaScript exists, so it is the one place a `dispose()` can land
+        // unnoticed.
         guard !isDisposed else {
             throw ExtensionHostError.hostDisposed(identifier: identifier)
         }
@@ -482,7 +490,7 @@ public final class ExtensionHost {
         let context = try makeContext()
         self.context = context
 
-        guard let runtime = try installRuntime(into: context) else {
+        guard let runtime = try installRuntime(runtimeSource: runtimeSource, into: context) else {
             throw ExtensionHostError.runtimeUnavailable(identifier: identifier)
         }
         self.runtime = runtime
@@ -847,7 +855,7 @@ public final class ExtensionHost {
             // `JSValue.call`, on whatever thread made that call — and this host
             // only ever makes them from the main actor.
             MainActor.assumeIsolated {
-                self?.pendingException = Self.describe(exception)
+                self?.pendingException = self?.describe(exception)
             }
         }
         return context
@@ -861,7 +869,7 @@ public final class ExtensionHost {
     /// direct line to the app": `__host` carries blocks that schedule timers
     /// and write to the log, and an extension that found it could use them
     /// without going through any of the shim's checks.
-    private func installRuntime(into context: JSContext) throws -> JSValue? {
+    private func installRuntime(runtimeSource: String, into context: JSContext) throws -> JSValue? {
         guard let table = JSValue(newObjectIn: context) else {
             throw ExtensionHostError.javaScriptEngineUnavailable(identifier: identifier)
         }
@@ -880,8 +888,16 @@ public final class ExtensionHost {
                 self?.scheduleTimer(timerID: timerID, delayMilliseconds: delay, repeats: repeats)
             }
         }
-        let cancel: @convention(block) (Int32) -> Void = { [weak self] timerID in
-            MainActor.assumeIsolated { self?.cancelTimer(timerID: timerID) }
+        // `Double`, not `Int32`, and that is the entire Swift half of the
+        // truncation fix: a `@convention(block) (Int32) -> Void` makes
+        // JavaScriptCore apply ToInt32 to whatever it is handed, so
+        // `clearTimeout(4294967297)` arrived here as `1` and cancelled a live
+        // timer that had nothing to do with it — with no error on either side,
+        // because the JS table had no such key to report on. A `Double` carries
+        // the value the extension actually wrote, which is the only way this
+        // side can refuse it at all.
+        let cancel: @convention(block) (Double) -> Void = { [weak self] timerID in
+            MainActor.assumeIsolated { self?.cancelTimer(rawTimerID: timerID) }
         }
 
         table.setObject(console, forKeyedSubscript: "console" as NSString)
@@ -892,8 +908,7 @@ public final class ExtensionHost {
         context.setObject(table, forKeyedSubscript: "__host" as NSString)
 
         pendingException = nil
-        let source = try Self.runtimeSource(identifier: identifier)
-        context.evaluateScript(source, withSourceURL: Self.runtimeSourceURL)
+        context.evaluateScript(runtimeSource, withSourceURL: Self.runtimeSourceURL)
         if let message = pendingException {
             pendingException = nil
             throw ExtensionHostError.runtimeShimFailed(identifier: identifier, message: message)
@@ -919,18 +934,36 @@ public final class ExtensionHost {
 
     private static let runtimeSourceURL = URL(fileURLWithPath: "/agentic-extension-runtime.js")
 
-    private static func runtimeSource(identifier: String) throws -> String {
+    /// The bundled shim, read once per process and off the main thread.
+    ///
+    /// `readSource(at:identifier:)` above wraps its read in `Task.detached` for
+    /// the project's no-lengthy-work-on-the-main-thread rule, and this is the
+    /// same read of a file in the same size class; doing it inline here
+    /// contradicted the rule its own neighbour documents, and it did so at the
+    /// worst moment — inside the first activation, on the main actor.
+    /// Memoized exactly as before: the answer cannot change within a process.
+    ///
+    /// Its caller reads it up with the entry point rather than at the point of
+    /// use, so the suspension it adds sits *above* `performActivation`'s
+    /// `isDisposed` and `Task.isCancelled` guards instead of opening a new
+    /// window below them. See `performActivation`.
+    private static func runtimeSource(identifier: String) async throws -> String {
         if let cachedRuntimeSource { return cachedRuntimeSource }
         let bundle = Bundle(for: ExtensionHostBundleToken.self)
-        guard let url = bundle.url(forResource: "extension-runtime", withExtension: "js"),
-              let source = try? String(contentsOf: url, encoding: .utf8) else {
+        guard let url = bundle.url(forResource: "extension-runtime", withExtension: "js") else {
             // The shim ships inside this framework. Missing means a broken
             // build, not a broken extension — and it must not be reported as
             // the extension's fault.
             throw ExtensionHostError.runtimeUnavailable(identifier: identifier)
         }
-        cachedRuntimeSource = source
-        return source
+        let read = await Task.detached(priority: .userInitiated) {
+            try? String(contentsOf: url, encoding: .utf8)
+        }.value
+        guard let read else {
+            throw ExtensionHostError.runtimeUnavailable(identifier: identifier)
+        }
+        cachedRuntimeSource = read
+        return read
     }
 
     // MARK: - Evaluation
@@ -1032,6 +1065,32 @@ public final class ExtensionHost {
         // nowhere in their file.
         let activationContext = runtime.invokeMethod("makeStubNamespace", withArguments: ["context"])
 
+        // The one window the state machine did not cover, and the last one:
+        // between `performActivation`'s guards and the continuation installed
+        // below, `evaluateModule` runs the extension's top level — and a host
+        // observer called from inside it can `dispose()` the host, exactly as
+        // a cancellation can land there. Both routes end an activation through
+        // `finishActivation`, which is a no-op while there is no continuation
+        // to resume, so an activation that installed one anyway suspended on a
+        // host that had already been told to stop, with nothing left to wake
+        // it. Read through `activationState` rather than an ad-hoc
+        // `isDisposed`, so both routes are refused by the same precedence rule
+        // as every other transition and neither has to be enumerated here.
+        //
+        // Throwing rather than resuming: `performActivation`'s `catch` is
+        // below, `moduleEvaluated` is already true, and `markTerminal` keeps
+        // the first reason — so a cancellation that came through
+        // `endActivation` is still reported as `.cancelled` and is not
+        // relabelled `.failed` on its way out.
+        switch activationState {
+        case .disposed:
+            throw ExtensionHostError.hostDisposed(identifier: identifier)
+        case let .terminal(reason):
+            throw Self.terminalRefusal(reason, identifier: identifier)
+        case .activating, .activated, .neverActivated:
+            break
+        }
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             activationContinuation = { result in continuation.resume(with: result) }
 
@@ -1092,8 +1151,33 @@ public final class ExtensionHost {
         resume(result)
     }
 
-    private static func describe(_ exception: JSValue?) -> String {
+    /// Whether `describe` is already running, one level up.
+    ///
+    /// The thing being described is a value the extension threw, and describing
+    /// it means *calling into JavaScript*: `toString()` and the `stack` getter
+    /// are both extension-controlled. JavaScriptCore reports an exception
+    /// raised by either of them the only way it has — by calling the context's
+    /// exception handler — and that handler is what called `describe` in the
+    /// first place. A value that keeps throwing while being described therefore
+    /// recurses: `throw (hostile = new Proxy({}, { get() { throw hostile } }))`
+    /// nests a native frame per cycle and the process dies on a stack overflow
+    /// rather than reporting an extension error.
+    ///
+    /// One owned bit, checked at entry — the same shape as the reentrancy flag
+    /// in `TextDocumentStorage`. A nested call describes nothing and touches no
+    /// JavaScript, so the recursion is two deep and bounded by construction
+    /// however the outer description is later grown.
+    private var describingException = false
+
+    private func describe(_ exception: JSValue?) -> String {
         guard let exception else { return "unknown JavaScript exception" }
+        // The nested call is the one raised *by* describing, so it has no
+        // description of its own to give: returning a literal is the whole
+        // point, and it is the one answer that cannot throw again.
+        guard !describingException else { return "a JavaScript exception raised while describing another" }
+        describingException = true
+        defer { describingException = false }
+
         let message = exception.toString() ?? "unknown JavaScript exception"
         guard let stack = exception.objectForKeyedSubscript("stack"),
               !stack.isUndefined, !stack.isNull,
@@ -1161,11 +1245,29 @@ public final class ExtensionHost {
 
     // MARK: - Timers
 
+    /// The largest delay this host will sleep for, in milliseconds — the
+    /// signed 32-bit ceiling `setTimeout` has on every platform an extension
+    /// author has used, about 24.8 days.
+    ///
+    /// A ceiling is required here, not merely tidy. `Duration.seconds(Double)`
+    /// scales its argument into fixed-width attoseconds, so it **traps** on any
+    /// value it cannot represent — and the value reaching it is an ordinary
+    /// `setTimeout` argument: `setTimeout(fn, Number.MAX_VALUE)` is one JS call
+    /// in one extension, and it took the whole process down. `max(0, …)` alone
+    /// guarded only the end that could not overflow. The shim clamps too, but
+    /// the shim is extension-reachable and this is not, and one bad
+    /// `setTimeout` must not be able to kill every other extension and the app
+    /// with it — which is the isolation property this host exists to provide.
+    private static let maximumTimerDelayMilliseconds: Double = 2_147_483_647
+
     private func scheduleTimer(timerID: Int32, delayMilliseconds: Double, repeats: Bool) {
         guard !isDisposed else { return }
         timerTasks[timerID]?.cancel()
 
-        let seconds = max(0, delayMilliseconds) / 1000
+        // `max` first, and it is what handles NaN: a NaN comparison is false,
+        // so `max(0, .nan)` is 0 rather than NaN. `min` then takes the ceiling,
+        // including for `.infinity`.
+        let seconds = min(max(0, delayMilliseconds), Self.maximumTimerDelayMilliseconds) / 1000
         runningTimerTasks += 1
         timerTasks[timerID] = Task { @MainActor [weak self] in
             defer { self?.timerTaskDidFinish() }
@@ -1205,6 +1307,19 @@ public final class ExtensionHost {
             return
         }
         runningTimerTasks -= 1
+    }
+
+    /// Cancels by the id the extension wrote, or by nothing at all.
+    ///
+    /// An id outside `Int32`, or one with a fraction, is not an id this host
+    /// ever issued — the shim numbers from 1 and stops at the same ceiling —
+    /// so there is nothing to cancel and, crucially, nothing to *round* onto.
+    private func cancelTimer(rawTimerID: Double) {
+        guard rawTimerID.isFinite,
+              rawTimerID == rawTimerID.rounded(.towardZero),
+              rawTimerID >= Double(Int32.min),
+              rawTimerID <= Double(Int32.max) else { return }
+        cancelTimer(timerID: Int32(rawTimerID))
     }
 
     private func cancelTimer(timerID: Int32) {

@@ -231,6 +231,31 @@
         }
     }
 
+    // What one hostile argument degrades to.
+    //
+    // Describing a value means reading it, and every read can run the
+    // extension's own code: a getter, a `Proxy` trap, a `toString`. `format`
+    // reads arbitrary keys and arbitrary property values off whatever it is
+    // handed, so any of them can throw - and `console.log` is the one call an
+    // extension author assumes cannot fail. An exception escaping here lands in
+    // the author's frame as a control-flow surprise *and* costs the host's
+    // console observer the line entirely, which is the half nobody can debug.
+    //
+    // Per argument rather than around the whole call, deliberately: a log line
+    // with one bad value in it still carries every other value the author
+    // wanted to see. `format`'s cycle bookkeeping is unaffected - its `seen`
+    // stack is popped in a `finally`, so a throw from any depth unwinds it
+    // before arriving here.
+    var UNFORMATTABLE = '[unformattable value]';
+
+    function formatSafely(value) {
+        try {
+            return format(value, 0, []);
+        } catch (error) {
+            return UNFORMATTABLE;
+        }
+    }
+
     function formatArguments(args) {
         var parts = [];
         var next = 0;
@@ -248,11 +273,19 @@
                 }
                 var value = args[next];
                 next += 1;
-                return applySpecifier(specifier, value);
+                // `applySpecifier` is a throw site in its own right and not
+                // only through `format`: `%s` calls `String(value)`, `%d` and
+                // `%i` call `Number`/`parseInt`, and each of those runs a
+                // user-supplied `toString` or `valueOf`.
+                try {
+                    return applySpecifier(specifier, value);
+                } catch (error) {
+                    return UNFORMATTABLE;
+                }
             }));
         }
         for (; next < args.length; next += 1) {
-            parts.push(format(args[next], 0, []));
+            parts.push(formatSafely(args[next]));
         }
         return parts.join(' ');
     }
@@ -286,6 +319,13 @@
     var nextTimerID = 1;
     var timers = Object.create(null);
 
+    // The largest id this runtime can hand out and the largest delay it will
+    // honour are the same number, and not by coincidence: both cross to the
+    // host as a 32-bit integer, and `setTimeout`'s delay is a signed 32-bit
+    // millisecond count on every platform an extension author has ever used.
+    // Roughly 24.8 days.
+    var TIMER_MAX_INT32 = 2147483647;
+
     function schedule(callback, delay, args, repeats, apiName) {
         if (typeof callback !== 'function') {
             throw new TypeError(apiName + ' requires a function as its first argument.');
@@ -294,6 +334,15 @@
         if (!isFinite(delayMilliseconds) || delayMilliseconds < 0) {
             delayMilliseconds = 0;
         }
+        // Clamped rather than wrapped. A browser takes the delay modulo 2^32,
+        // so `setTimeout(fn, 1e25)` fires almost immediately there; clamping
+        // makes a nonsense delay behave like the "never, practically" the
+        // author was reaching for instead of like "now". Either way the number
+        // stops here: Swift's mirror of this clamp is the guard that matters,
+        // because this line is extension-reachable and that one is not.
+        if (delayMilliseconds > TIMER_MAX_INT32) {
+            delayMilliseconds = TIMER_MAX_INT32;
+        }
         var timerID = nextTimerID;
         nextTimerID += 1;
         timers[timerID] = { callback: callback, args: args, repeats: repeats };
@@ -301,9 +350,20 @@
         return timerID;
     }
 
+    // `clearTimeout(4294967297)` used to cancel timer 1.
+    //
+    // The id crosses to the host as a number and is range-checked on both
+    // sides, but only this side knows which ids were ever *issued*. An id this
+    // table does not hold cannot cancel anything, and forwarding it is strictly
+    // worse than ignoring it: the JS `delete` finds no key, so the shim stays
+    // silent, while the host is handed a value that may land on a live timer.
+    // The platform ignores an unknown id silently, and so does this.
     function cancel(timerID) {
         var key = Number(timerID);
-        if (!isFinite(key)) {
+        if (!isFinite(key) || Math.floor(key) !== key || key < 1 || key > TIMER_MAX_INT32) {
+            return;
+        }
+        if (!Object.prototype.hasOwnProperty.call(timers, key)) {
             return;
         }
         delete timers[key];
@@ -340,7 +400,7 @@
         try {
             reflectApply(timer.callback, undefined, timer.args);
         } catch (error) {
-            host.console('error', 'Uncaught exception in a timer callback: ' + format(error, 0, []));
+            host.console('error', 'Uncaught exception in a timer callback: ' + formatSafely(error));
         }
     }
 
@@ -683,12 +743,50 @@
         throw new TypeError('TextDecoder.decode expects an ArrayBuffer or a typed array.');
     }
 
+    // Every UTF-8 validity rule lives in these three functions, and all of them
+    // are decided from the *lead* and the *second* byte - which is the only
+    // arrangement that gets both halves of the answer right.
+    //
+    // The verdict half: an overlong sequence spells an ASCII character in two,
+    // three or four bytes. `[0xE0,0x80,0xAF]` decoded to `/` here and
+    // `[0xC0,0x80]` to NUL, so an extension that decoded untrusted bytes and
+    // then checked the result for a path separator or a terminator was handed
+    // one its own validation never saw. That is the classic overlong filter
+    // bypass, and it is why the minimums below are not a tidiness exercise.
+    //
+    // The *count* half, which is why this rejects on the second byte rather
+    // than checking a minimum after the code point is assembled: WHATWG treats
+    // an out-of-range second byte as an error and then re-reads that byte as a
+    // fresh lead, so `[0xE0,0x80,0xAF]` is three replacement characters, not
+    // one. A decoder that assembled first could never produce three however
+    // correct its verdict was, and a host whose replacement count disagrees
+    // with every other decoder silently changes the length of a string an
+    // extension is about to index into. Each row of the test was measured
+    // against Node rather than reasoned about.
     function sequenceLength(leadByte) {
         if (leadByte < 0x80) { return 1; }
-        if ((leadByte & 0xE0) === 0xC0) { return 2; }
-        if ((leadByte & 0xF0) === 0xE0) { return 3; }
-        if ((leadByte & 0xF8) === 0xF0) { return 4; }
+        // 0xC0 and 0xC1 can only ever begin an overlong two-byte sequence, and
+        // 0xF5-0xFF can only ever begin one above U+10FFFF. Neither is a lead.
+        if (leadByte >= 0xC2 && leadByte <= 0xDF) { return 2; }
+        if (leadByte >= 0xE0 && leadByte <= 0xEF) { return 3; }
+        if (leadByte >= 0xF0 && leadByte <= 0xF4) { return 4; }
         return 0;
+    }
+
+    // 0xE0 and 0xF0 carry no payload bits of their own worth having, so their
+    // second byte is what rules out the overlong three- and four-byte forms.
+    // 0xED's ceiling excludes the surrogate range; 0xF4's excludes everything
+    // above U+10FFFF.
+    function secondByteLowerBound(leadByte) {
+        if (leadByte === 0xE0) { return 0xA0; }
+        if (leadByte === 0xF0) { return 0x90; }
+        return 0x80;
+    }
+
+    function secondByteUpperBound(leadByte) {
+        if (leadByte === 0xED) { return 0x9F; }
+        if (leadByte === 0xF4) { return 0x8F; }
+        return 0xBF;
     }
 
     function leadBits(leadByte, length) {
@@ -698,10 +796,9 @@
         return leadByte & 0x07;
     }
 
+    // Encoding only. Every validity question was already answered above, so a
+    // code point that reaches here is one this decoder is certain of.
     function appendCodePoint(text, codePoint) {
-        if (codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
-            return text + REPLACEMENT;
-        }
         if (codePoint > 0xFFFF) {
             var offset = codePoint - 0x10000;
             return text + String.fromCharCode(0xD800 + (offset >> 10), 0xDC00 + (offset & 0x3FF));
@@ -714,25 +811,48 @@
         var text = '';
         var index = 0;
         while (index < bytes.length) {
-            var length = sequenceLength(bytes[index]);
-            if (length === 0 || index + length > bytes.length) {
+            var lead = bytes[index];
+            var length = sequenceLength(lead);
+            if (length === 0) {
                 text += REPLACEMENT;
                 index += 1;
                 continue;
             }
-            var codePoint = leadBits(bytes[index], length);
-            var valid = true;
+            if (length === 1) {
+                text += String.fromCharCode(lead);
+                index += 1;
+                continue;
+            }
+
+            var available = bytes.length - index - 1;
+            var codePoint = leadBits(lead, length);
+            var consumed = 0;
+            var rejected = false;
             for (var offset = 1; offset < length; offset += 1) {
+                if (offset > available) { break; }
                 var continuation = bytes[index + offset];
-                if ((continuation & 0xC0) !== 0x80) {
-                    valid = false;
+                var lower = offset === 1 ? secondByteLowerBound(lead) : 0x80;
+                var upper = offset === 1 ? secondByteUpperBound(lead) : 0xBF;
+                if (continuation < lower || continuation > upper) {
+                    rejected = true;
                     break;
                 }
                 codePoint = (codePoint << 6) | (continuation & 0x3F);
+                consumed += 1;
             }
-            if (!valid) {
+
+            if (rejected) {
+                // One error for the bytes consumed so far, and the byte that
+                // broke the sequence goes back to be read as a lead of its own.
                 text += REPLACEMENT;
-                index += 1;
+                index += 1 + consumed;
+                continue;
+            }
+            if (consumed < length - 1) {
+                // The input ended mid-sequence: one error for the whole pending
+                // sequence, and there is nothing left to re-read.
+                text += REPLACEMENT;
+                index = bytes.length;
                 continue;
             }
             index += length;

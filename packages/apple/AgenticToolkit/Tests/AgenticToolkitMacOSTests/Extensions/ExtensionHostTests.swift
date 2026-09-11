@@ -2518,4 +2518,328 @@ struct ExtensionHostTests {
             "https://a.com/p#x%20y"
         ])
     }
+
+    // MARK: - Hostile values from the extension
+
+    /// `dispose()` landing while the module's top level is still running must
+    /// end the activation it is tearing down.
+    ///
+    /// The window is real and an observer is the ordinary way into it: a host
+    /// observer - `onConsoleMessage` is the one every caller sets - is called
+    /// synchronously from inside `evaluateModule`'s `run`, which is inside
+    /// `performActivation`'s only `isDisposed` guard and *before* `callActivate`
+    /// installs the continuation that `dispose()` resumes. `dispose()`'s
+    /// `finishActivation` therefore finds nothing to resume, and the activation
+    /// walks on and suspends on a torn-down host with nothing left to wake it.
+    ///
+    /// The extension's `activate()` returns a promise that never settles on
+    /// purpose: that is the one shape with no other escape, so a hang here is a
+    /// hang forever rather than a slow pass.
+    @Test(.timeLimit(.minutes(1)))
+    func disposingFromInsideTheModulesTopLevelEndsTheActivation() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            console.log('top level');
+            exports.activate = function () {
+                return new Promise(function () {});
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        // `weak`, so the closure the host stores does not hold the host, and
+        // `dispose()` clears the observer, so this fires exactly once.
+        host.onConsoleMessage = { [weak host] _ in host?.dispose() }
+
+        do {
+            try await host.activate()
+            Issue.record("An activation disposed from inside the module must not succeed.")
+            return
+        } catch let error as ExtensionHostError {
+            guard case .hostDisposed = error else {
+                Issue.record("Expected hostDisposed, got \(error)")
+                return
+            }
+        }
+
+        #expect(host.activationState == .disposed)
+        #expect(host.isActivated == false)
+    }
+
+    /// `clearTimeout` must ignore an id this runtime never issued rather than
+    /// truncate it onto one it did.
+    ///
+    /// The host's cancel block used to take an `Int32`, so JavaScriptCore
+    /// applied ToInt32 on the way across: `clearTimeout(4294967297)` arrived in
+    /// Swift as `1` and cancelled whichever live timer held that id, and
+    /// `clearTimeout(1.5)` did the same. The JS table saw neither key, so the
+    /// shim reported nothing and the cancelled timer simply never fired.
+    ///
+    /// The shim numbers from 1 per context, so the timer below holds id 1 -
+    /// which is exactly the id both hostile values truncate onto.
+    @Test(.timeLimit(.minutes(1)))
+    func clearTimeoutIgnoresAnIdItCouldOnlyReachByTruncation() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                setTimeout(function () { console.log('kept'); }, 60);
+                clearTimeout(4294967297);
+                clearTimeout(1.5);
+                clearTimeout(-4294967295);
+                clearInterval(8589934593);
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        try await Task.sleep(for: .milliseconds(400))
+
+        #expect(recorder.texts == ["kept"])
+    }
+
+    /// `TextDecoder` must reject overlong sequences, surrogates and anything
+    /// above U+10FFFF, and it must produce the same *number* of replacement
+    /// characters every other decoder does.
+    ///
+    /// The count is not cosmetic. WHATWG rejects on the second byte and then
+    /// re-reads that byte as a fresh lead, so `E0 80 AF` is three errors, not
+    /// one - and a decoder that assembles the code point first and checks a
+    /// minimum afterwards cannot produce three however correct its verdict is.
+    /// Every row here was measured against Node's `TextDecoder` rather than
+    /// reasoned about.
+    ///
+    /// The security half is the first three rows: an extension that decodes
+    /// untrusted bytes and then checks the result for `/` or NUL was handed a
+    /// real `/` and a real NUL by a decoder that accepted their overlong
+    /// spellings, which is the classic filter bypass.
+    @Test(.timeLimit(.minutes(1)))
+    func textDecoderRejectsOverlongSurrogateAndOutOfRangeSequences() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                function units(bytes) {
+                    var text = new TextDecoder().decode(new Uint8Array(bytes));
+                    var out = [];
+                    for (var index = 0; index < text.length; index += 1) {
+                        out.push(text.charCodeAt(index).toString(16));
+                    }
+                    return out.join(',');
+                }
+                console.log(units([0xE0, 0x80, 0xAF]));
+                console.log(units([0xC0, 0x80]));
+                console.log(units([0xC1, 0xBF]));
+                console.log(units([0xF0, 0x80, 0x80, 0x80]));
+                console.log(units([0xED, 0xA0, 0x80]));
+                console.log(units([0xF4, 0x90, 0x80, 0x80]));
+                console.log(units([0xE2, 0x82, 0xAC]));
+                console.log(units([0xF0, 0x9F, 0x98, 0x80]));
+                console.log(units([0xE0, 0xA0]));
+                console.log(units([0xE0, 0xA0, 0x80]));
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == [
+            // Overlong '/', NUL and DEL: the three the bypass is built from.
+            "fffd,fffd,fffd",
+            "fffd,fffd",
+            "fffd,fffd",
+            "fffd,fffd,fffd,fffd",
+            // A surrogate half, and a code point above U+10FFFF.
+            "fffd,fffd,fffd",
+            "fffd,fffd,fffd,fffd",
+            // The valid rows, which must be untouched.
+            "20ac",
+            "d83d,de00",
+            // Truncated: one error for the whole pending sequence, and one
+            // shortest-form code point when the last byte does arrive.
+            "fffd",
+            "800"
+        ])
+    }
+
+    /// `console.log` must not throw, whatever it is handed.
+    ///
+    /// Logging is the one call an extension author assumes cannot fail, and the
+    /// formatter reads arbitrary keys and property values off the value it is
+    /// given: a throwing getter, a `Proxy` whose `ownKeys` trap throws, a
+    /// `toString` that throws under `%s`. Each of those used to come back out of
+    /// `console.log` into the author's own frame - and the host's console
+    /// observer never saw the line at all.
+    ///
+    /// The `'survived'` lines are the assertion that matters: they only appear
+    /// if the `console.log` above them returned.
+    @Test(.timeLimit(.minutes(1)))
+    func aHostileValueDegradesOneArgumentRatherThanThrowingOutOfConsoleLog() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                var getter = { get boom() { throw new Error('getter'); } };
+                try {
+                    console.log('value:', getter);
+                    console.log('survived');
+                } catch (error) {
+                    console.log('console.log threw: ' + error.message);
+                }
+
+                var trapped = new Proxy({}, {
+                    ownKeys: function () { throw new Error('ownKeys'); }
+                });
+                try {
+                    console.log(trapped);
+                    console.log('survived proxy');
+                } catch (error) {
+                    console.log('console.log threw: ' + error.message);
+                }
+
+                try {
+                    console.log('%s', { toString: function () { throw new Error('toString'); } });
+                    console.log('survived specifier');
+                } catch (error) {
+                    console.log('console.log threw: ' + error.message);
+                }
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == [
+            "value: [unformattable value]",
+            "survived",
+            "[unformattable value]",
+            "survived proxy",
+            "[unformattable value]",
+            "survived specifier"
+        ])
+    }
+
+    /// A delay no clock can honour must produce a timer that never fires, not a
+    /// dead process.
+    ///
+    /// `Duration.seconds(Double)` traps on a value it cannot represent, and the
+    /// value handed to it was `max(0, delayMilliseconds) / 1000` — guarded at
+    /// the end that could not overflow and nowhere else. `setTimeout(fn,
+    /// Number.MAX_VALUE)` is the idiomatic JS spelling of "effectively never",
+    /// needs no malice, and killed the whole app: every other extension and the
+    /// host with it, which is the exact inversion of what this host is for.
+    ///
+    /// The `'alive'` line is the assertion. A trap does not fail this test, it
+    /// takes the test bundle down — so the observable claim has to be that the
+    /// host went on scheduling and firing ordinary timers afterwards.
+    ///
+    /// `Infinity` is deliberately *not* in the clamped group, and measuring it
+    /// is what settled the shape of the fix. A non-finite delay is normalised
+    /// to zero before it ever reaches the ceiling, so it fires as soon as it
+    /// can — which is what every browser and Node do with it too, because the
+    /// IDL conversion takes it to `0`. It reads as the opposite of "never", so
+    /// it is pinned here rather than left for the next reader to rediscover.
+    @Test(.timeLimit(.minutes(1)))
+    func anImpossibleTimerDelayIsClampedRatherThanTrapped() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function () {
+                setTimeout(function () { console.log('must not fire'); }, Number.MAX_VALUE);
+                setInterval(function () { console.log('must not fire'); }, 1e25);
+                // One past the ceiling, so the boundary itself is pinned.
+                setTimeout(function () { console.log('must not fire'); }, 2147483648);
+                setTimeout(function () { console.log('infinity is not a delay'); }, Infinity);
+                setTimeout(function () { console.log('alive'); }, 40);
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        #expect(host.runningTimerCount == 5)
+
+        try await Task.sleep(for: .milliseconds(400))
+
+        #expect(recorder.texts == ["infinity is not a delay", "alive"])
+        // The three clamped timers are still asleep, which is what a 24.8-day
+        // delay should look like — and is how this differs from a browser,
+        // which wraps the delay modulo 2^32 and so fires almost immediately.
+        #expect(host.runningTimerCount == 3)
+    }
+
+    /// Describing a thrown value must not re-enter the handler that asked for
+    /// the description.
+    ///
+    /// `describe` runs from the context's `exceptionHandler` and calls straight
+    /// back into JavaScript — `toString()`, then the `stack` getter — both of
+    /// which the extension controls. A value that throws *itself* when read
+    /// makes each description raise the exception that triggers the next one,
+    /// nesting a native frame per cycle until the process dies on a stack
+    /// overflow instead of reporting an extension error.
+    ///
+    /// The self-referential `throw` is what makes it unbounded: a trap that
+    /// threw a fresh `Error` would be described successfully on the second
+    /// pass and stop there.
+    @Test(.timeLimit(.minutes(1)))
+    func aThrownValueThatThrowsWhileBeingDescribedIsNotFatal() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            var hostile = new Proxy({}, { get: function () { throw hostile; } });
+            throw hostile;
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        do {
+            try await host.activate()
+            Issue.record("A module whose top level throws must not activate.")
+            return
+        } catch let error as ExtensionHostError {
+            guard case .entryPointThrew = error else {
+                Issue.record("Expected entryPointThrew, got \(error)")
+                return
+            }
+        }
+
+        // The module ran before it threw, so the host is spent — the ordinary
+        // contract, reached through the one route that used to kill the
+        // process instead.
+        #expect(host.activationState == .terminal(.failed))
+    }
 }
