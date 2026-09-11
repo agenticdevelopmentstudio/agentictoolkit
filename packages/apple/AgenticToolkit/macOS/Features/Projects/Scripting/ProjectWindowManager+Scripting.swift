@@ -29,13 +29,15 @@ extension ProjectWindowManager {
 
     // MARK: - Tabs
 
+    /// `branch: { _ in nil }` is a placeholder: a later task (branch lookup)
+    /// supplies a real resolver here.
     public var scriptableProjectTabs: [ScriptableProjectTab] {
-        self.openWindowControllers.flatMap(\.scriptingTabs)
+        self.openWindowControllers.flatMap { $0.scriptingTabs(branch: { _ in nil }) }
     }
 
     public func scriptableProjectTab(uniqueID: String) -> ScriptableProjectTab? {
         self.openWindowControllers.lazy
-            .flatMap(\.scriptingTabs)
+            .flatMap { $0.scriptingTabs(branch: { _ in nil }) }
             .first { $0.uniqueID == uniqueID }
     }
 

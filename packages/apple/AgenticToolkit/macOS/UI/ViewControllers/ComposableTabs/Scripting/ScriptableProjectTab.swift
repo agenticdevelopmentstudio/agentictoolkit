@@ -18,12 +18,23 @@ public final class ScriptableProjectTab: NSObject {
     private let title: String
     private let edges: [String]
     private let project: String
+    private let workingDirectory: String
+    private let branch: String
 
-    public init(id: UUID, title: String, edges: [String], project: String) {
+    public init(
+        id: UUID,
+        title: String,
+        edges: [String],
+        project: String,
+        workingDirectory: String,
+        branch: String
+    ) {
         self.id = id
         self.title = title
         self.edges = edges
         self.project = project
+        self.workingDirectory = workingDirectory
+        self.branch = branch
         super.init()
     }
 
@@ -41,6 +52,10 @@ public final class ScriptableProjectTab: NSObject {
     @objc var tabEdges: [String] { self.edges }
 
     @objc var tabProject: String { self.project }
+
+    @objc var tabWorkingDirectory: String { self.workingDirectory }
+
+    @objc var tabBranch: String { self.branch }
 
     public override nonisolated var objectSpecifier: NSScriptObjectSpecifier? {
         applicationElementSpecifier(key: "projectTabs") { self.uniqueID }

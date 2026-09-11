@@ -68,6 +68,11 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     public let project: ProjectWorkspace
     private let tabbed: MultiTabbedViewController
 
+    /// Supplies what each tab shows in the edge bar. The project controller
+    /// (a later task) sets this; a window with none falls back to a plain
+    /// title button — see `tabItem(for:on:)`.
+    public weak var tabItemDataSource: ComposableTabsTabItemDataSource?
+
     /// The window's content: the tabs, with the footer under them. Held so the
     /// footer can be reached without walking `window?.contentViewController`,
     /// which is nil until the window loads.
@@ -138,6 +143,15 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
 
     /// Project-level tabs, in creation order.
     private var tabGroups: [TabGroup] = []
+
+    /// Set for the duration of `reloadTabs()`'s removal loop. `removeTab`
+    /// fires `didSelectTab` for whichever member it activates next, and that
+    /// callback calls `persistAllTabs()` — which, mid-loop, would write the
+    /// shrinking tab set the loop hasn't finished removing, overwriting the
+    /// stored tabs `installInitialTabs()` is about to read back. Guarded here,
+    /// not at the callback, because the callback's other duties (restoring
+    /// focus, refreshing chrome) are still correct mid-reload.
+    private var isReloadingTabs = false
 
     /// Live mapping from a tab's UUID to the tab's root `ComposableTabsViewController`.
     /// Used by the layout-change callback to rebuild a tab's `TabRecord`
@@ -403,7 +417,16 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         for (index, group) in tabGroups.enumerated() where group.members[edge] == nil {
             let id = UUID()
             let split = makeSplitController(for: id, workingDirectory: group.workingDirectory)
-            tabbed.insertTab(.init(id: id, title: group.title, viewController: split), at: index, on: edge)
+            let record = TabRecord(
+                id: id,
+                groupID: group.id,
+                edge: edge,
+                title: group.title,
+                root: split.snapshotNode(),
+                workingDirectory: group.workingDirectory
+            )
+            let tab = MultiTabbedViewController.Tab(id: id, item: tabItem(for: record, on: edge), viewController: split)
+            tabbed.insertTab(tab, at: index, on: edge)
             tabGroups[index].members[edge] = id
             created = true
         }
@@ -419,7 +442,15 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         for edge in Edge.allCases where tabbed.isEdgeEnabled(edge) {
             let id = UUID()
             let split = makeSplitController(for: id, workingDirectory: project.directoryURL)
-            tabbed.addTab(.init(id: id, title: title, viewController: split), on: edge)
+            let record = TabRecord(
+                id: id,
+                groupID: group.id,
+                edge: edge,
+                title: title,
+                root: split.snapshotNode(),
+                workingDirectory: group.workingDirectory
+            )
+            tabbed.addTab(.init(id: id, item: tabItem(for: record, on: edge), viewController: split), on: edge)
             group.members[edge] = id
         }
         tabGroups.append(group)
@@ -439,6 +470,13 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         // recompute racing those posts can name either pane. Guarded and
         // idempotent, so keeping it costs one comparison.
         refreshActivePaneChrome()
+    }
+
+    /// What `record` should show in the edge bar. Falls back to a plain title
+    /// button when no data source is set — the window controller still works,
+    /// on its own, exactly as it always has.
+    private func tabItem(for record: TabRecord, on edge: Edge) -> TabItem {
+        tabItemDataSource?.composableTabsWindowController(self, tabItemFor: record, on: edge) ?? .title(record.title)
     }
 
     private func makeSplitController(
@@ -488,7 +526,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         tabGroups.map { group in
             ScriptingTab(
                 id: group.id,
-                title: group.title,
+                title: liveGroupTitle(for: group),
                 members: Edge.allCases.compactMap { edge in
                     guard tabbed.isEdgeEnabled(edge), let id = group.members[edge] else { return nil }
                     return (edge: edge, tabID: id)
@@ -496,14 +534,35 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         }
     }
 
-    /// This window's tabs, as scripting values.
-    public var scriptingTabs: [ScriptableProjectTab] {
-        scriptingTabGroups.map {
-            ScriptableProjectTab(
-                id: $0.id,
-                title: $0.title,
-                edges: $0.edges.map(\.rawValue),
-                project: project.displayName)
+    /// A group's title the way a reader sees it, not the stored default it
+    /// was created with: a data source can host a richer item whose own
+    /// title changes independently (e.g. a pane's `title` following its
+    /// session). Falls back to the stored `group.title` when the group has
+    /// no installed member — which cannot happen for a real tab, but keeps
+    /// this total rather than force-unwrapping a lookup.
+    private func liveGroupTitle(for group: TabGroup) -> String {
+        for edge in Edge.allCases {
+            guard let id = group.members[edge],
+                  let tab = tabbed.tabs(on: edge).first(where: { $0.id == id }) else { continue }
+            return tab.title
+        }
+        return group.title
+    }
+
+    /// This window's tabs, as scripting values. `branch` resolves a working
+    /// directory to a branch name; Task 23 supplies a real lookup, so today
+    /// every caller passes `{ _ in nil }`.
+    public func scriptingTabs(branch: (URL) -> String?) -> [ScriptableProjectTab] {
+        scriptingTabGroups.map { group in
+            let directory = tabGroups.first { $0.id == group.id }?.workingDirectory ?? project.directoryURL
+            return ScriptableProjectTab(
+                id: group.id,
+                title: group.title,
+                edges: group.edges.map(\.rawValue),
+                project: project.displayName,
+                workingDirectory: directory.path,
+                branch: branch(directory) ?? ""
+            )
         }
     }
 
@@ -821,7 +880,9 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             if let focusedNodeID = record.focusedNodeID {
                 focusedLeafByTabID[record.id] = focusedNodeID
             }
-            tabbed.addTab(.init(id: record.id, title: record.title, viewController: split), on: record.edge)
+            let tab = MultiTabbedViewController.Tab(
+                id: record.id, item: tabItem(for: record, on: record.edge), viewController: split)
+            tabbed.addTab(tab, on: record.edge)
             if let index = groupIndexByID[record.groupID] {
                 tabGroups[index].members[record.edge] = record.id
             } else {
@@ -859,6 +920,26 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             // leaves the window with nothing selected and no visible pane.
             tabbed.selectTab(id: fallback.id, on: fallback.edge)
         }
+    }
+
+    /// Tears down every tab and re-installs from the workspace's stored
+    /// tabs. The project controller calls this after it changes what is
+    /// stored — a data source assigned after `init(project:)` only sees
+    /// tabs from this, since `init` already installed the initial set
+    /// itself.
+    public func reloadTabs() {
+        isReloadingTabs = true
+        for edge in Edge.allCases {
+            for tab in tabbed.tabs(on: edge) {
+                tabbed.removeTab(id: tab.id)
+            }
+        }
+        isReloadingTabs = false
+        tabGroups.removeAll()
+        splitControllersByTabID.removeAll()
+        focusedLeafByTabID.removeAll()
+        installInitialTabs()
+        refreshActivePaneChrome()
     }
 
     private func wireLayoutCallback(on split: ComposableTabsViewController, tabID: UUID) {
@@ -904,7 +985,14 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// and writes the full set back to the project. Called whenever the
     /// user touches the layout (split, close, tab add/remove/reorder/
     /// select, edge toggle).
+    ///
+    /// A no-op while `reloadTabs()` is tearing tabs down: `removeTab`'s
+    /// `didSelectTab` callback fires for whatever it activates next, and
+    /// mid-loop that callback would write the shrinking tab set — pruning
+    /// tabs `installInitialTabs()` is about to read straight back out of
+    /// storage.
     private func persistAllTabs() {
+        guard !isReloadingTabs else { return }
         var records: [TabRecord] = []
         for edge in Edge.allCases {
             for tab in tabbed.tabs(on: edge) {

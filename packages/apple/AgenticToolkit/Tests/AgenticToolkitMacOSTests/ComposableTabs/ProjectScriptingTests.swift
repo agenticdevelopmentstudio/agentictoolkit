@@ -330,10 +330,10 @@ final class ProjectScriptingTests: XCTestCase {
         let (controller, first, second) = makeTwoTabController()
 
         XCTAssertEqual(
-            controller.scriptingTabs.map(\.uniqueID),
+            controller.scriptingTabs(branch: { _ in nil }).map(\.uniqueID),
             [first.uuidString, second.uuidString])
 
-        let tab = try XCTUnwrap(controller.scriptingTabs.first)
+        let tab = try XCTUnwrap(controller.scriptingTabs(branch: { _ in nil }).first)
         XCTAssertEqual(tab.name, "Tab 1")
         XCTAssertEqual(tab.tabEdges, ["top"])
         XCTAssertEqual(tab.tabProject, "api-server")
@@ -346,8 +346,8 @@ final class ProjectScriptingTests: XCTestCase {
         let controller = makeController(for: makeProject())
         controller.setEdgeEnabled(.right, true)
 
-        XCTAssertEqual(controller.scriptingTabs.count, 1)
-        let tab = try XCTUnwrap(controller.scriptingTabs.first)
+        XCTAssertEqual(controller.scriptingTabs(branch: { _ in nil }).count, 1)
+        let tab = try XCTUnwrap(controller.scriptingTabs(branch: { _ in nil }).first)
         XCTAssertEqual(tab.tabEdges, ["top", "right"])
     }
 
@@ -363,7 +363,7 @@ final class ProjectScriptingTests: XCTestCase {
 
         controller.setEdgeEnabled(.right, false)
         XCTAssertEqual(controller.allPanes().count, 1)
-        XCTAssertEqual(controller.scriptingTabs.count, 1)
+        XCTAssertEqual(controller.scriptingTabs(branch: { _ in nil }).count, 1)
     }
 
     // MARK: - The window
@@ -574,7 +574,7 @@ final class ProjectScriptingTests: XCTestCase {
         ProjectWindowManager.shared.adoptForScripting(controller)
         defer { ProjectWindowManager.shared.forgetForScripting(controller) }
 
-        let tab = try XCTUnwrap(controller.scriptingTabs.first)
+        let tab = try XCTUnwrap(controller.scriptingTabs(branch: { _ in nil }).first)
         XCTAssertEqual(
             ProjectWindowManager.shared.scriptableProjectTab(uniqueID: tab.uniqueID)?.uniqueID,
             tab.uniqueID)
