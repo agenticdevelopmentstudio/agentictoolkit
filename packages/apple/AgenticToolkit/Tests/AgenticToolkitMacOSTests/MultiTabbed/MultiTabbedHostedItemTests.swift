@@ -195,4 +195,132 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         XCTAssertNil(first.view.superview)
         XCTAssertTrue(second.parent === host)
     }
+
+    // MARK: - Fix round 2: previously-uncovered guards
+
+    /// A cross-edge move inserts the item on the new edge before removing it
+    /// from the old one (there is no edge-to-edge `moveTab`), so the old
+    /// bar's next reconciliation pass sees an id that vanished from its own
+    /// `items` while the controller itself is still alive and now owned by
+    /// the other bar. This pins the guard in `rebuildButtons()` that keeps
+    /// that pass from tearing the controller down anyway.
+    func testCrossBarOwnershipTransferLeavesTheForeignControllerAlone() throws {
+        let host = NSViewController()
+        host.view = NSView()
+        let barA = TabBarView(edge: .left)
+        barA.hostController = host
+        let barB = TabBarView(edge: .right)
+        barB.hostController = host
+        let id = UUID()
+        let item = HostedItem()
+
+        // Host on barA first, exactly like a real tab before a move.
+        barA.setItems([.init(id: id, item: .viewController(item))], selectedID: nil)
+        XCTAssertTrue(item.parent === host)
+        let originalHostView = try XCTUnwrap(item.view.superview)
+
+        // barB takes it over. `TabItemHostView.init`'s `addSubview(content)`
+        // silently detaches `item.view` from barA's wrapper here — the same
+        // mechanism a real cross-edge move relies on.
+        barB.setItems([.init(id: id, item: .viewController(item))], selectedID: nil)
+        let newHostView = try XCTUnwrap(item.view.superview)
+        XCTAssertFalse(newHostView === originalHostView)
+
+        // barA's own reconciliation now runs with `id` gone from its items.
+        // The controller it once owned belongs to barB now; barA must leave
+        // it alone rather than tearing it down.
+        barA.setItems([], selectedID: nil)
+
+        XCTAssertTrue(item.parent === host, "barA tore down a controller it no longer owns")
+        XCTAssertTrue(item.view.superview === newHostView, "barA ripped the view out of barB's wrapper")
+    }
+
+    /// A hosted item's content view is a bare `NSView` with no intrinsic
+    /// size and no internal constraints, so without an explicit length-axis
+    /// pin it collapses to 0 along the stack's main axis — the axis
+    /// `thicknessConstraint` never touches. Left/right bars run vertically,
+    /// so the length axis is height.
+    ///
+    /// A hosted item gets a concrete extent along the stack's main axis from
+    /// `preferredContentSize`, and keeps following it when it changes.
+    ///
+    /// Nothing in `TabBarView` pins that axis, and nothing should: a hosted
+    /// item is always an `NSViewController`, and AppKit installs
+    /// `NSViewController.preferredContentSize.height` on its view at
+    /// priority 501. This test exists because that is a borrowed guarantee
+    /// rather than one this file enforces — it would quietly stop holding if
+    /// the payload ever became a bare view, or if the content view had
+    /// `translatesAutoresizingMaskIntoConstraints` left on. Left/right bars
+    /// run vertically, so the length axis here is height.
+    ///
+    /// The frames are zeroed before layout on purpose. Removing a constraint
+    /// from this axis does not make it measure zero — it makes it
+    /// *ambiguous*, and an ambiguous axis is answered by whatever the views
+    /// already carry, so an assertion on an un-zeroed frame reads back the
+    /// size the view arrived with and passes either way.
+    func testHostedBareViewGetsANonZeroLengthOnALeftRightBar() throws {
+        let host = NSViewController()
+        host.view = NSView()
+        let bar = TabBarView(edge: .left)
+        bar.hostController = host
+
+        let content = NSViewController()
+        content.view = NSView()
+        content.preferredContentSize = NSSize(width: 120, height: 90)
+        bar.setItems([.init(id: UUID(), item: .viewController(content))], selectedID: nil)
+
+        let hostedView = try XCTUnwrap(content.view.superview)
+        hostedView.frame = .zero
+        content.view.frame = .zero
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 400))
+        container.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bar.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(hostedView.frame.height, 90, accuracy: 0.5)
+
+        // The second half of the contract: the length tracks a later change,
+        // with no `updateThickness()` call in between. Nothing in this file
+        // re-pins it, so if this ever regresses the cause is the borrowed
+        // guarantee above going away, not a stale constant here.
+        content.preferredContentSize = NSSize(width: 120, height: 150)
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(hostedView.frame.height, 150, accuracy: 0.5)
+    }
+
+    /// The same contract on the swapped axis: top/bottom bars run
+    /// horizontally, so the length axis is width.
+    func testHostedBareViewGetsANonZeroLengthOnATopBottomBar() throws {
+        let host = NSViewController()
+        host.view = NSView()
+        let bar = TabBarView(edge: .top)
+        bar.hostController = host
+
+        let content = NSViewController()
+        content.view = NSView()
+        content.preferredContentSize = NSSize(width: 250, height: 40)
+        bar.setItems([.init(id: UUID(), item: .viewController(content))], selectedID: nil)
+
+        let hostedView = try XCTUnwrap(content.view.superview)
+        hostedView.frame = .zero
+        content.view.frame = .zero
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 60))
+        container.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bar.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(hostedView.frame.width, 250, accuracy: 0.5)
+
+        content.preferredContentSize = NSSize(width: 300, height: 40)
+        container.layoutSubtreeIfNeeded()
+        XCTAssertEqual(hostedView.frame.width, 300, accuracy: 0.5)
+    }
 }

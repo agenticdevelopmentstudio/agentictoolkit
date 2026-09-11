@@ -262,13 +262,15 @@ final class TabBarView: NSView {
                 hostViews[item.id] = host
                 view = host
                 stack.addArrangedSubview(view)
-                // A hosted item's content view reports no intrinsic size, so
-                // without explicit pins it collapses on whichever axis
-                // `updateThickness()` doesn't cover — the length axis on
-                // every bar (only the bar's own thickness is ever sized from
-                // `preferredContentSize`), and additionally the thickness
-                // axis itself on a horizontal bar, which has no counterpart
-                // to the leading/trailing fill below.
+                // A hosted item's content view reports no intrinsic size. Its
+                // length along the stack's main axis is already handled —
+                // AppKit constrains a view controller's view from
+                // `preferredContentSize` (see `updateThickness()`) — but the
+                // cross axis is not: the item has to be told to fill the
+                // bar's interior, or it sits at whatever width that same
+                // `preferredContentSize` asked for while the bar is as wide
+                // as the widest item. These pins are required priority and
+                // so win over that 501 constraint, which is the point.
                 switch edge {
                 case .top, .bottom:
                     host.topAnchor.constraint(equalTo: stack.topAnchor).isActive = true
@@ -283,11 +285,17 @@ final class TabBarView: NSView {
     }
 
     /// The bar is as thick as its thickest hosted item needs, never thinner
-    /// than the button default. Also gives every hosted item a concrete
-    /// extent along the bar's length axis, driven by the same
-    /// `preferredContentSize` — the axis `thicknessConstraint` never
-    /// touches, and the only place a size change (`preferredContentSizeDidChange`)
-    /// has to reach after the item's view already exists.
+    /// than the button default.
+    ///
+    /// Only the thickness axis is this method's business. The length axis —
+    /// the stack's main axis — needs nothing from here: a hosted item is
+    /// always an `NSViewController`, and AppKit installs
+    /// `NSViewController.preferredContentSize.width`/`.height` constraints
+    /// on that controller's view at priority 501, updating them whenever
+    /// `preferredContentSize` changes. Pinning the length here as well would
+    /// restate those at required priority, which is strictly worse: 501 is
+    /// deliberately overridable, and a required duplicate takes that escape
+    /// hatch away while adding nothing.
     func updateThickness() {
         let sizes = hostedControllers.values.map(\.preferredContentSize)
         let constant: CGFloat
@@ -298,16 +306,6 @@ final class TabBarView: NSView {
             constant = max(Self.preferredThickness(for: edge), (sizes.map(\.width).max() ?? 0) + 16)
         }
         thicknessConstraint?.constant = constant
-
-        for (id, controller) in hostedControllers {
-            guard let host = hostViews[id] else { continue }
-            switch edge {
-            case .top, .bottom:
-                host.setLength(max(controller.preferredContentSize.width, 0), axis: .horizontal)
-            case .left, .right:
-                host.setLength(max(controller.preferredContentSize.height, 0), axis: .vertical)
-            }
-        }
     }
 }
 
@@ -320,7 +318,6 @@ final class TabBarView: NSView {
 private final class TabItemHostView: NSView {
     let id: UUID
     var onSelect: ((UUID) -> Void)?
-    private var lengthConstraint: NSLayoutConstraint?
 
     init(id: UUID, content: NSView) {
         self.id = id
@@ -343,21 +340,6 @@ private final class TabItemHostView: NSView {
         onSelect?(id)
     }
 
-    /// Gives the host a concrete extent along the bar's length axis — the
-    /// stack's main axis, which a bare hosted content view reports no
-    /// intrinsic size for and would otherwise collapse to zero on. Replaces
-    /// any previous length constraint rather than layering a new one on top,
-    /// so a later `preferredContentSize` change (routed back here through
-    /// `TabBarView.updateThickness()`) updates the same constraint instead
-    /// of accumulating conflicting ones.
-    func setLength(_ constant: CGFloat, axis: NSLayoutConstraint.Orientation) {
-        lengthConstraint?.isActive = false
-        let constraint = axis == .horizontal
-            ? widthAnchor.constraint(equalToConstant: constant)
-            : heightAnchor.constraint(equalToConstant: constant)
-        constraint.isActive = true
-        lengthConstraint = constraint
-    }
 }
 
 // MARK: - TabButton
