@@ -168,6 +168,21 @@ public actor SubprocessChannel {
 
     private var hasLaunched = false
 
+    /// Set by `terminate()` **before** it checks `hasLaunched`, and checked
+    /// again at the end of `launch()`. Closes the window in which
+    /// `withWallClockBudget` cancels (but never awaits — see its own doc
+    /// comment) the task racing to reach `process.run()`: a `terminate()`
+    /// that arrives while that task is still cooperatively cancelling sees
+    /// `hasLaunched == false` and would otherwise return having done
+    /// nothing, letting the task go on to spawn a real child that nothing
+    /// then terminates. `launch()` is a non-`async` actor method, so it runs
+    /// to completion without yielding the actor once started — a
+    /// `terminate()` can therefore only run wholly before it (setting this
+    /// flag in time) or wholly after it (finding `hasLaunched` already
+    /// true), never during. That is what makes checking this flag once, at
+    /// the end of `launch()`, sufficient.
+    private var terminationRequested = false
+
     /// The one in-flight termination, so a second concurrent `terminate()`
     /// awaits it instead of returning before the work it names is done.
     private var terminationTask: Task<Void, Never>?
@@ -275,6 +290,22 @@ public actor SubprocessChannel {
 
         startMessagePump(process: process, reader: standardOutputReader)
         startStandardErrorDrain(reader: standardErrorReader)
+
+        // A `terminate()` may already have run and found `hasLaunched ==
+        // false` (see `terminationRequested`'s doc comment): catch that
+        // request now, rather than leaving this child to run unterminated
+        // because the caller that asked for it has already moved on.
+        if terminationRequested {
+            let task = Task { await self.performTermination() }
+            terminationTask = task
+        }
+    }
+
+    /// Whether the child is currently running. `false` before `launch()`,
+    /// after the child has exited on its own, and once `terminate()` (or the
+    /// `terminationRequested` catch-up in `launch()`) has killed it.
+    public var isRunning: Bool {
+        process?.isRunning ?? false
     }
 
     /// Framed messages from the child's stdout. Finishes on EOF; throws on a
@@ -476,6 +507,10 @@ public actor SubprocessChannel {
     /// not something `terminate()` can do; until then, callers that need
     /// grandchildren reaped must arrange it in the command they launch.
     public func terminate() async {
+        // Set before the `hasLaunched` guard — see `terminationRequested`'s
+        // doc comment for why this ordering is what closes the missed-child
+        // window (review A M1 / parked Task 1 F9).
+        terminationRequested = true
         guard hasLaunched else { return }
 
         // Idempotent means *every* caller gets the finished article, not just

@@ -290,3 +290,65 @@ struct GitClientErrorLogDescriptionTests {
     @Test("executableNotFound's logDescription never leaks the configured path")
     func executableNotFoundNeverLeaksPath() {
         let error = GitClientError.executableNotFound(path: "/Users/secret/bin/git")
+        #expect(!error.logDescription.contains("secret"))
+    }
+}
+
+/// Covers review A's M1 (parked Task 1 F9, reproducing): `withWallClockBudget`
+/// cancels its loser but never awaits it (`WallClockBudget.swift`'s own doc
+/// comment), so a `terminate()` that arrives before `launch()` has reached
+/// `process.run()` used to find `hasLaunched == false` and return having done
+/// nothing — the cancelled task then went on to spawn a real child that
+/// nothing terminated.
+///
+/// This drives the two actor calls **in the order the race produces**
+/// (`terminate()` first, `launch()` second) rather than actually racing
+/// `withWallClockBudget` against a real `launch()`: `launch()` is a
+/// non-`async` actor method, so once either call reaches the actor it runs
+/// to completion before the other can start (see `terminationRequested`'s
+/// doc comment on `SubprocessChannel`), which makes "terminate() reaches the
+/// actor first" the entire content of the race regardless of how close the
+/// wall-clock timing is. Racing the real budget instead proved flaky: a
+/// 1 ms budget does not reliably lose to `/bin/sleep 30`'s own
+/// `process.run()`, which is just a fork/exec and can complete in well under
+/// 1 ms. `GitClientTests.timesOut` keeps the 1 ms wall-clock race, but that
+/// one only needs the *whole `status` command* — spawn plus produce output —
+/// to outlast 1 ms, which is reliable.
+@Suite("SubprocessChannel terminate()/launch() race")
+struct SubprocessChannelTerminationRaceTests {
+    @Test("a terminate() that arrives before launch() still ends the child")
+    func terminateBeforeLaunchStillEndsTheChild() async throws {
+        let channel = SubprocessChannel(configuration: .init(
+            executableURL: URL(fileURLWithPath: "/bin/sleep"),
+            arguments: ["30"]
+        ))
+
+        // `hasLaunched` is still false here, so before the fix this returned
+        // having done nothing.
+        await channel.terminate()
+
+        // Before the fix, nothing had recorded the request above, so this
+        // spawned a real `sleep 30` with nothing left to stop it. After the
+        // fix, `launch()` finds `terminationRequested` already set and kicks
+        // off the catch-up termination itself.
+        try await channel.launch()
+
+        // Bounded poll rather than a fixed sleep: the catch-up termination
+        // runs on its own `Task`, not ours. 5s is generous against
+        // `terminationGraceSeconds` (2s) plus the pump drain grace (0.5s);
+        // before the fix this times out with `isRunning == true` — the real
+        // child runs for the full 30s with nothing to stop it.
+        _ = try? await withWallClockBudget(5) {
+            while await channel.isRunning {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+        #expect(await channel.isRunning == false, "the child must not be left running")
+
+        // Cleanup net, independent of the assertion above: if the poll's
+        // budget lapsed first, this still ends the child rather than leaving
+        // a real `sleep 30` running for the rest of its 30s regardless of
+        // whether the assertion just failed.
+        await channel.terminate()
+    }
+}
