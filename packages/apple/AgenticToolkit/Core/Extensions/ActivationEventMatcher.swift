@@ -246,13 +246,30 @@ internal struct GlobPattern {
         /// nothing. This token instead matches zero or more path segments,
         /// each ending in `/`.
         case anyDirectories
-        /// `{a,b,c}` — each branch already tokenized, so the same
-        /// backtracking matcher recurses into it. Nested `{` is rejected at
-        /// parse time.
-        case alternation([[Token]])
+        /// `{a,b,c}` — each alternative's own token list is tokenized once,
+        /// up front, and stored in `branches` under a stable id; this case
+        /// holds only the ids for its own alternatives, not the token lists
+        /// themselves. Nested `{` is rejected at parse time.
+        case alternation([BranchID])
     }
 
+    /// Identifies one `{...}` branch's own token list within `branches`.
+    /// Assigned once at tokenize time and never reused for another branch —
+    /// see `matchBranch` for why that makes it a sufficient memoization key
+    /// on its own, without also carrying which `.alternation` token or which
+    /// outer array it belongs to.
+    private typealias BranchID = Int
+
     private let tokens: [Token]
+
+    /// Every `{...}` branch's own token list, flattened out of the pattern's
+    /// tree and indexed by `BranchID`. `tokenize` rejects a nested `{`, so a
+    /// branch can only ever hold `literal`/`star`/`doubleStar`/`question`/
+    /// `anyDirectories` tokens — never another `.alternation` — which is
+    /// exactly what lets `matchBranch` treat every branch as belonging to
+    /// exactly one `.alternation` token, at exactly one fixed index in
+    /// `tokens`.
+    private let branches: [[Token]]
 
     /// `nil` when `pattern` uses syntax this matcher does not support: a
     /// `[...]` character class, a leading `!` negation, or a nested `{`
@@ -261,11 +278,18 @@ internal struct GlobPattern {
     /// its author never intended it to.
     init?(_ pattern: String) {
         guard !pattern.contains("["), !pattern.hasPrefix("!") else { return nil }
-        guard let tokens = Self.tokenize(Array(pattern)) else { return nil }
+        var branches: [[Token]] = []
+        guard let tokens = Self.tokenize(Array(pattern), &branches) else { return nil }
         self.tokens = tokens
+        self.branches = branches
     }
 
-    private static func tokenize(_ characters: [Character]) -> [Token]? {
+    /// Tokenizes `characters`, appending each `{...}` branch it discovers
+    /// (its own already-tokenized contents) to the shared `branches` table
+    /// and recording only that branch's index in the `.alternation` token —
+    /// so every branch, anywhere in the pattern, ends up with a single
+    /// stable id it keeps for the lifetime of this `GlobPattern`.
+    private static func tokenize(_ characters: [Character], _ branches: inout [[Token]]) -> [Token]? {
         var tokens: [Token] = []
         var index = 0
         while index < characters.count {
@@ -294,12 +318,13 @@ internal struct GlobPattern {
                 guard !inner.contains("{") else { return nil }
 
                 let alternatives = inner.split(separator: ",", omittingEmptySubsequences: false)
-                var branches: [[Token]] = []
+                var branchIDs: [BranchID] = []
                 for alternative in alternatives {
-                    guard let branchTokens = tokenize(Array(alternative)) else { return nil }
+                    guard let branchTokens = tokenize(Array(alternative), &branches) else { return nil }
+                    branchIDs.append(branches.count)
                     branches.append(branchTokens)
                 }
-                tokens.append(.alternation(branches))
+                tokens.append(.alternation(branchIDs))
                 index = closeIndex + 1
 
             case let character:
@@ -310,7 +335,7 @@ internal struct GlobPattern {
         return tokens
     }
 
-    /// A `(tokenIndex, pathIndex)` pair identifies one state in the
+    /// A `(tokenIndex, pathIndex)` pair identifies one state in `tokens`'s
     /// backtracking search — see `matchTokens` below for why that pair alone
     /// is enough to memoize on.
     private struct MemoKey: Hashable {
@@ -318,11 +343,20 @@ internal struct GlobPattern {
         let pathIndex: Int
     }
 
+    /// A `(branch, branchIndex, pathIndex)` triple identifies one state in a
+    /// `{...}` branch's own backtracking search — see `matchBranch`.
+    private struct BranchMemoKey: Hashable {
+        let branch: BranchID
+        let branchIndex: Int
+        let pathIndex: Int
+    }
+
     /// Whether `path` matches this pattern, anchored at both ends — the
     /// whole relative path, not a substring of it.
     func matches(_ path: String) -> Bool {
         var memo: [MemoKey: Bool] = [:]
-        return Self.matchTokens(tokens, 0, Array(path), 0, &memo)
+        var branchMemo: [BranchMemoKey: Bool] = [:]
+        return Self.matchTokens(tokens, 0, Array(path), 0, branches, &memo, &branchMemo)
     }
 
     /// Whether `path[pathIndex...]` matches `tokens[tokenIndex...]`.
@@ -344,10 +378,15 @@ internal struct GlobPattern {
     /// is known.
     ///
     /// `.alternation` is the one case that does not recurse into this same
-    /// `tokens` array — see `matchBranch`.
+    /// `tokens` array — see `matchBranch`. The same blowup this cache guards
+    /// against is just as reachable through a single, comma-less `{...}`
+    /// group wrapping a wildcard-heavy pattern (e.g.
+    /// `{a**a**a**a**a**a**a**b}` parses to one `.alternation` with one
+    /// branch holding that same adversarial token list), so `matchBranch`
+    /// keeps an equivalent cache of its own rather than leaning on this one.
     private static func matchTokens(
         _ tokens: [Token], _ tokenIndex: Int, _ path: [Character], _ pathIndex: Int,
-        _ memo: inout [MemoKey: Bool]
+        _ branches: [[Token]], _ memo: inout [MemoKey: Bool], _ branchMemo: inout [BranchMemoKey: Bool]
     ) -> Bool {
         guard tokenIndex < tokens.count else { return pathIndex == path.count }
 
@@ -358,54 +397,57 @@ internal struct GlobPattern {
         switch tokens[tokenIndex] {
         case .literal(let expected):
             if pathIndex < path.count, path[pathIndex] == expected {
-                result = matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1, &memo)
+                result = matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1, branches, &memo, &branchMemo)
             } else {
                 result = false
             }
 
         case .question:
             if pathIndex < path.count, path[pathIndex] != "/" {
-                result = matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1, &memo)
+                result = matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1, branches, &memo, &branchMemo)
             } else {
                 result = false
             }
 
         case .star:
-            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, &memo)
+            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, branches, &memo, &branchMemo)
             var cursor = pathIndex
             while !matched, cursor < path.count, path[cursor] != "/" {
                 cursor += 1
-                matched = matchTokens(tokens, tokenIndex + 1, path, cursor, &memo)
+                matched = matchTokens(tokens, tokenIndex + 1, path, cursor, branches, &memo, &branchMemo)
             }
             result = matched
 
         case .doubleStar:
-            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, &memo)
+            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, branches, &memo, &branchMemo)
             var cursor = pathIndex
             while !matched, cursor < path.count {
                 cursor += 1
-                matched = matchTokens(tokens, tokenIndex + 1, path, cursor, &memo)
+                matched = matchTokens(tokens, tokenIndex + 1, path, cursor, branches, &memo, &branchMemo)
             }
             result = matched
 
         case .anyDirectories:
             // Zero directories first — the case a plain `doubleStar` +
             // literal `/` could never express.
-            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, &memo)
+            var matched = matchTokens(tokens, tokenIndex + 1, path, pathIndex, branches, &memo, &branchMemo)
             var cursor = pathIndex
             while !matched, cursor < path.count {
                 if path[cursor] == "/" {
                     // Consumed one segment ending at this slash; recurse on
                     // the *same* token so further segments can follow.
-                    matched = matchTokens(tokens, tokenIndex, path, cursor + 1, &memo)
+                    matched = matchTokens(tokens, tokenIndex, path, cursor + 1, branches, &memo, &branchMemo)
                 }
                 cursor += 1
             }
             result = matched
 
-        case .alternation(let branches):
-            result = branches.contains { branch in
-                matchBranch(branch, 0, tokens, tokenIndex + 1, path, pathIndex, &memo)
+        case .alternation(let branchIDs):
+            result = branchIDs.contains { branchID in
+                matchBranch(
+                    branchID, branches[branchID], 0, tokens, tokenIndex + 1, path, pathIndex,
+                    branches, &memo, &branchMemo
+                )
             }
         }
 
@@ -413,83 +455,120 @@ internal struct GlobPattern {
         return result
     }
 
-    /// Matches one branch of a `{a,b,c}` alternation, starting at
-    /// `branchIndex` within `branch`, against `path` starting at `pathIndex`.
+    /// Matches branch `branchID` (its token list, `branch`, is always
+    /// `branches[branchID]` — passed in directly so callers don't re-look it
+    /// up), starting at `branchIndex`, against `path` starting at
+    /// `pathIndex`; `outerTokenIndex` in `outerTokens` is where to resume
+    /// once the branch is exhausted.
     ///
-    /// Exists so `.alternation` never has to splice a branch's tokens onto
-    /// what follows it into a new array just to keep recursing — that would
-    /// have made `(tokenIndex, pathIndex)` ambiguous as a memo key, since the
-    /// same pair would mean different things in different spliced arrays.
-    /// Instead, `branch` is walked on its own, unmemoized coordinate space
-    /// (branches are small and `{...}` cannot nest — a nested `{` is
-    /// rejected at parse time — so there is no equivalent blowup to guard
-    /// here), and once it is exhausted this calls straight back into the
-    /// memoized `matchTokens(outerTokens, outerTokenIndex, ...)` to resume
-    /// matching whatever follows the `{...}` group in the fixed outer array.
+    /// Memoized on `(branchID, branchIndex, pathIndex)` — a smaller version
+    /// of the same problem `matchTokens` solves, and needed for the same
+    /// reason: `.star`/`.doubleStar`/`.anyDirectories` inside a branch can
+    /// backtrack exponentially too. `{a**a**a**a**a**a**a**b}` is exactly
+    /// `matchTokens`'s adversarial pattern wrapped in one comma-less group —
+    /// before this cache existed, `matchBranch` reached that same blowup
+    /// with no bound at all, since its only contact with any cache was the
+    /// one terminal delegation below.
+    ///
+    /// `branchID` alone is enough to identify which branch a state belongs
+    /// to — the key does not also need `outerTokens`/`outerTokenIndex` —
+    /// because `tokenize` rejects a nested `{`, so every branch belongs to
+    /// exactly one `.alternation` token, which sits at exactly one index in
+    /// exactly one array (always `self.tokens`, since `.alternation` can
+    /// only ever appear there, never inside a branch). `outerTokenIndex` is
+    /// therefore a constant function of `branchID`, not a separate degree of
+    /// freedom the key would need to distinguish. For the same reason,
+    /// `branch` can never itself contain `.alternation`, so there is no case
+    /// for it below.
     private static func matchBranch(
-        _ branch: [Token], _ branchIndex: Int,
+        _ branchID: BranchID, _ branch: [Token], _ branchIndex: Int,
         _ outerTokens: [Token], _ outerTokenIndex: Int,
         _ path: [Character], _ pathIndex: Int,
-        _ memo: inout [MemoKey: Bool]
+        _ branches: [[Token]], _ memo: inout [MemoKey: Bool], _ branchMemo: inout [BranchMemoKey: Bool]
     ) -> Bool {
         guard branchIndex < branch.count else {
-            return matchTokens(outerTokens, outerTokenIndex, path, pathIndex, &memo)
+            return matchTokens(outerTokens, outerTokenIndex, path, pathIndex, branches, &memo, &branchMemo)
         }
 
+        let key = BranchMemoKey(branch: branchID, branchIndex: branchIndex, pathIndex: pathIndex)
+        if let cached = branchMemo[key] { return cached }
+
+        let result: Bool
         switch branch[branchIndex] {
         case .literal(let expected):
-            guard pathIndex < path.count, path[pathIndex] == expected else { return false }
-            return matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex + 1, &memo)
+            if pathIndex < path.count, path[pathIndex] == expected {
+                result = matchBranch(
+                    branchID, branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex + 1,
+                    branches, &memo, &branchMemo
+                )
+            } else {
+                result = false
+            }
 
         case .question:
-            guard pathIndex < path.count, path[pathIndex] != "/" else { return false }
-            return matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex + 1, &memo)
+            if pathIndex < path.count, path[pathIndex] != "/" {
+                result = matchBranch(
+                    branchID, branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex + 1,
+                    branches, &memo, &branchMemo
+                )
+            } else {
+                result = false
+            }
 
         case .star:
-            if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex, &memo) {
-                return true
-            }
+            var matched = matchBranch(
+                branchID, branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex,
+                branches, &memo, &branchMemo
+            )
             var cursor = pathIndex
-            while cursor < path.count, path[cursor] != "/" {
+            while !matched, cursor < path.count, path[cursor] != "/" {
                 cursor += 1
-                if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, cursor, &memo) {
-                    return true
-                }
+                matched = matchBranch(
+                    branchID, branch, branchIndex + 1, outerTokens, outerTokenIndex, path, cursor,
+                    branches, &memo, &branchMemo
+                )
             }
-            return false
+            result = matched
 
         case .doubleStar:
-            if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex, &memo) {
-                return true
-            }
+            var matched = matchBranch(
+                branchID, branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex,
+                branches, &memo, &branchMemo
+            )
             var cursor = pathIndex
-            while cursor < path.count {
+            while !matched, cursor < path.count {
                 cursor += 1
-                if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, cursor, &memo) {
-                    return true
-                }
+                matched = matchBranch(
+                    branchID, branch, branchIndex + 1, outerTokens, outerTokenIndex, path, cursor,
+                    branches, &memo, &branchMemo
+                )
             }
-            return false
+            result = matched
 
         case .anyDirectories:
-            if matchBranch(branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex, &memo) {
-                return true
-            }
+            var matched = matchBranch(
+                branchID, branch, branchIndex + 1, outerTokens, outerTokenIndex, path, pathIndex,
+                branches, &memo, &branchMemo
+            )
             var cursor = pathIndex
-            while cursor < path.count {
+            while !matched, cursor < path.count {
                 if path[cursor] == "/" {
-                    if matchBranch(branch, branchIndex, outerTokens, outerTokenIndex, path, cursor + 1, &memo) {
-                        return true
-                    }
+                    matched = matchBranch(
+                        branchID, branch, branchIndex, outerTokens, outerTokenIndex, path, cursor + 1,
+                        branches, &memo, &branchMemo
+                    )
                 }
                 cursor += 1
             }
-            return false
+            result = matched
 
         case .alternation:
             // Unreachable: `branch` came from `tokenize`, which rejects a
             // nested `{` inside a `{...}` group before this ever runs.
             preconditionFailure("a { ... } branch cannot itself contain a nested alternation")
         }
+
+        branchMemo[key] = result
+        return result
     }
 }
