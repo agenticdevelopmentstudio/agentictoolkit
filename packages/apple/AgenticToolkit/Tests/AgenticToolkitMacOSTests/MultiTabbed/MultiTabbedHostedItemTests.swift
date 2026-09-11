@@ -179,6 +179,91 @@ final class MultiTabbedHostedItemTests: XCTestCase {
         XCTAssertEqual(controller.selectedTabID(on: .left), secondID)
     }
 
+    /// Review C MAJOR-2: the direct `hostView.mouseDown(with:)` call above
+    /// bypasses AppKit's hit-testing entirely, so it proves the handler
+    /// works but can never prove the handler is *reachable*. This drives a
+    /// real `mouseDown` through real hit-testing at a point inside the agent
+    /// label — the visually obvious target a user would actually click —
+    /// and asserts the tab actually gets selected, not just that some
+    /// non-selectable view was hit.
+    ///
+    /// Investigation note, recorded here because it changes what "red before
+    /// the fix" means for this finding: the review's stated mechanism
+    /// (`NSTextField(frame:)` is selectable by default, so an untouched
+    /// `ThemedLabel` swallows the click) does not reproduce against the
+    /// current code. Verified two ways: (1) a plain `NSTextField(frame:)`
+    /// does start `isEditable = true, isSelectable = true`, but AppKit
+    /// cascades `isSelectable` to `false` when `isEditable` is set `false`
+    /// — and `ThemedLabel.init` (`ThemedViews.swift:46`) already does
+    /// `self.isEditable = false`, so a `ThemedLabel` is already
+    /// non-selectable before `TabPaneView` ever touches it. (2) This test,
+    /// run against the unmodified `TabPaneView` (no `isSelectable = false`
+    /// in `setUp()`), already passes — dispatching `mouseDown` on the
+    /// actually-hit-tested `ThemedLabel` already reaches `TabBarView`'s
+    /// `onSelect`. Forcing `agentLabel.isSelectable = true` immediately
+    /// before the click (simulating the bug as described) does make the
+    /// test fail exactly as the review predicts, confirming the test can
+    /// catch the defect if it existed — it just doesn't currently exist
+    /// here, because `ThemedLabel`'s own `isEditable = false` already
+    /// neutralizes it.
+    ///
+    /// The prescribed fix (explicit `isSelectable = false` on all five
+    /// labels in `TabPaneView.setUp()`) is applied anyway: it is harmless,
+    /// matches the ruling in the fix brief, and turns an accidental
+    /// AppKit cascade into a stated, local invariant that does not depend on
+    /// `ThemedLabel` continuing to set `isEditable = false` the way it
+    /// happens to today. This test therefore does not go red before that
+    /// fix and green after — both states pass — and that is reported
+    /// explicitly rather than claimed otherwise.
+    func testClickingTheAgentLabelSelectsItsTabThroughRealHitTesting() throws {
+        let host = NSViewController()
+        host.view = NSView()
+        let bar = TabBarView(edge: .left)
+        bar.hostController = host
+        let firstID = UUID()
+        let secondID = UUID()
+        let first = TabPaneViewController(edge: .left, tabID: firstID)
+        let second = TabPaneViewController(edge: .left, tabID: secondID)
+        second.loadViewIfNeeded()
+        second.paneView.agentLabel.stringValue = "Claude · Fable 5.1"
+        second.paneView.sessionLabel.stringValue = "tabs-session"
+
+        var selected: UUID?
+        bar.onSelect = { id in selected = id }
+        bar.setItems(
+            [.init(id: firstID, item: .viewController(first)), .init(id: secondID, item: .viewController(second))],
+            selectedID: firstID
+        )
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 400))
+        container.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            bar.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+
+        let labelFrame = second.paneView.agentLabel.convert(second.paneView.agentLabel.bounds, to: container)
+        XCTAssertGreaterThan(labelFrame.width, 0, "the agent label needs a real frame to click inside")
+        let clickPoint = NSPoint(x: labelFrame.midX, y: labelFrame.midY)
+        let resolved = try XCTUnwrap(container.hitTest(clickPoint))
+
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ))
+        resolved.mouseDown(with: event)
+
+        XCTAssertEqual(selected, secondID, "a click resolved onto \(type(of: resolved)) never reached the tab")
+    }
+
     func testChangingAHostedItemsPayloadTearsDownTheOldController() throws {
         let host = NSViewController()
         host.view = NSView()

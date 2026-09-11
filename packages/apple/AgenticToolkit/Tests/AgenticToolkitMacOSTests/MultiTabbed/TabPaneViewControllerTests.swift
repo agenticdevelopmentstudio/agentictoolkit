@@ -1,4 +1,5 @@
 import AgenticToolkitCore
+import AgenticDeveloperToolkitUI
 import AppKit
 import XCTest
 @testable import AgenticToolkitMacOS
@@ -21,6 +22,15 @@ final class TabPaneViewControllerTests: XCTestCase {
         func tabPaneWorkingDirectory(_ pane: TabPaneViewController) -> URL { directory }
         func tabPaneBranch(_ pane: TabPaneViewController) -> String? { branch }
         func tabPaneSummary(_ pane: TabPaneViewController) -> String? { summary }
+    }
+
+    /// A `ThemeStorage` with nothing behind it, so a test can spin up a real
+    /// `ThemeManager` (and therefore a real, larger `SemanticPalette`) without
+    /// touching `UserSettings`/`UserDefaults`.
+    private final class StubThemeStorage: ThemeStorage {
+        var customThemes: [ColorTheme] = []
+        var activeThemeID: String?
+        var onExternalChange: (() -> Void)?
     }
 
     private final class StubDelegate: TabPaneDelegate {
@@ -58,15 +68,46 @@ final class TabPaneViewControllerTests: XCTestCase {
     }
 
     /// Discriminates the `switch edge` in `TabPaneView.contentSize`: it reads
-    /// back the two hardcoded literals (`sideWidth`, `rowHeight`) and nothing
-    /// about layout or content — see `testLeftPaneHeightGrowsToFitStackedContent`
-    /// and `testTopPaneWidthIsCappedAtRowMaxWidth` for the measured ones.
-    func testEdgeSwitchRoutesTheHardcodedDimensions() {
+    /// back the `sideWidth` literal exactly (width is never content-driven on
+    /// a left/right pane) and the `rowHeight` literal as a **floor** rather
+    /// than an exact value — `rowHeight` is `max`'d against the pane's own
+    /// `fittingSize.height` on `.top`/`.bottom` (review C MAJOR-1), so normal
+    /// content that fits inside 28pt still measures exactly 28, but nothing
+    /// here proves the pane would grow past it; see
+    /// `testTopPaneHeightGrowsToFitOversizedContent` for that case, and
+    /// `testLeftPaneHeightGrowsToFitStackedContent` /
+    /// `testTopPaneWidthIsCappedAtRowMaxWidth` for the other measured arms.
+    func testEdgeSwitchRoutesTheHardcodedDimensionsAsAFloor() {
         let source = StubSource()
         let left = makePane(edge: .left, source: source)
         let top = makePane(edge: .top, source: source)
         XCTAssertEqual(left.preferredContentSize.width, 220)
-        XCTAssertEqual(top.preferredContentSize.height, 28)
+        XCTAssertGreaterThanOrEqual(top.preferredContentSize.height, 28)
+    }
+
+    /// Review C MAJOR-1: `TabPaneView.contentSize`'s `.top`/`.bottom` arm
+    /// returned the literal `Self.rowHeight` with no `max` against
+    /// `fittingSize.height`, so a pane whose content needed more than 28pt
+    /// got clipped (and fought a required constraint pin) instead of the bar
+    /// growing to fit — unlike `.left`/`.right`, which already took
+    /// `max(Self.rowHeight, fittingSize.height)`. This drives a real
+    /// `ThemeManager` with an enlarged `textScale`, the same knob the
+    /// review's own "concrete failure" traces to (`ThemeTypography.sizeScale`,
+    /// composed into the live palette `ThemedLabel` actually paints with via
+    /// `SemanticPalette.scaled(by:)`), so the row's single line of text
+    /// genuinely no longer fits in 28pt. `ThemeManager.shared` is weak, so
+    /// the locally-owned `manager` reverts it to `nil` — the test-default
+    /// fallback every other test in this file already relies on — the
+    /// moment this function returns; no explicit teardown is needed.
+    func testTopPaneHeightGrowsToFitOversizedContent() {
+        let manager = ThemeManager(storage: StubThemeStorage(), appearanceDriver: nil)
+        manager.textScale = 3
+
+        let source = StubSource()
+        let top = makePane(edge: .top, source: source)
+
+        XCTAssertGreaterThan(top.preferredContentSize.height, 28)
+        XCTAssertEqual(top.preferredContentSize.height, top.paneView.fittingSize.height, accuracy: 0.5)
     }
 
     /// Discriminates `TabPaneView.contentSize`'s

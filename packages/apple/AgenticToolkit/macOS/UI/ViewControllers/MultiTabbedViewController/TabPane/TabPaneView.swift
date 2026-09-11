@@ -69,7 +69,10 @@ final class TabPaneView: NSView {
         case .left, .right:
             return NSSize(width: Self.sideWidth, height: max(Self.rowHeight, fittingSize.height))
         case .top, .bottom:
-            return NSSize(width: min(Self.rowMaxWidth, fittingSize.width), height: Self.rowHeight)
+            return NSSize(
+                width: min(Self.rowMaxWidth, fittingSize.width),
+                height: max(Self.rowHeight, fittingSize.height)
+            )
         }
     }
 
@@ -83,6 +86,11 @@ final class TabPaneView: NSView {
         for label in [agentLabel, sessionLabel, directoryLabel, branchLabel, summaryLabel] {
             label.lineBreakMode = .byTruncatingMiddle
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            // A selectable field takes its own `mouseDown` to begin a text
+            // selection, which never reaches `TabItemHostView.mouseDown(with:)` —
+            // these labels cover nearly the whole card, so that would eat
+            // almost every click meant to select the tab.
+            label.isSelectable = false
         }
         directoryLabel.lineBreakMode = .byTruncatingHead
         summaryLabel.isHidden = true
