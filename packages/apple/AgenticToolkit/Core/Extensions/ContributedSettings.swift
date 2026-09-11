@@ -101,7 +101,7 @@ public struct ContributedSettingsSection: Sendable, Equatable {
 /// one: a property this host cannot render must not cost the extension its
 /// other properties, and what was compromised is shown to a person rather than
 /// swallowed.
-public struct ContributedSettingNote: Sendable, Equatable {
+public struct ContributedSettingNote: ExtensionContributionNote, Equatable {
     public enum Kind: String, Sendable, Equatable {
         /// Nothing to classify on, so the value is edited as JSON text.
         case unrenderableType

@@ -1,6 +1,6 @@
+import AgenticToolkitCore
 import Foundation
 import os
-import AgenticToolkitCore
 import OSLog
 
 /// Discovers, loads, and manages LLM plugin bundles.
@@ -103,10 +103,14 @@ public final class AIPluginManager {
             paths.append(builtInPath)
         }
 
-        paths.append(URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".agenticplugins"))
+        // The two locations, and the order, are the host's: `InstalledContentLocation`
+        // derives where user-installed content lives, and this init says that for
+        // plugins the bundle's own copy wins, then the hand-filled dotfolder, then
+        // what an installer wrote.
+        paths.append(InstalledContentLocation.homeDotDirectory(named: "agenticplugins"))
 
-        if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let userPlugins = appSupport.appendingPathComponent(appName).appendingPathComponent("Plugins")
+        if let userPlugins = InstalledContentLocation.applicationSupport(
+            appName: appName, subdirectory: "Plugins") {
             paths.append(userPlugins)
         }
 

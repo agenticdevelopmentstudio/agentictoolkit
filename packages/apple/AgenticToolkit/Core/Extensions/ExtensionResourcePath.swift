@@ -124,3 +124,79 @@ public enum ExtensionResourcePath {
         return Array(candidateComponents.prefix(baseComponents.count)) == baseComponents
     }
 }
+
+/// Where user-installed add-ons live: the two directories this project's hosts
+/// look in for content a user drops beside the app rather than inside it.
+///
+/// Both conventions were written out twice before this type existed — once in
+/// `AIPluginManager.init(appName:additionalSearchPaths:)` for `.aiplugin`
+/// bundles, once in the app leaf for VS Code extensions — and the copies had
+/// already drifted in how they name the home directory (`NSHomeDirectory()`
+/// against an overridable one). A change to either convention — a sandbox
+/// container, a Time Machine exclusion, a security-scoped bookmark — now has
+/// one place to happen instead of one place to happen and one to be forgotten
+/// (`dry`).
+///
+/// **Locations, not a list.** Each host composes its own search *order*,
+/// because the orders differ and the difference means something: the plugin
+/// manager looks inside the app bundle first, so a shipped plugin wins over a
+/// hand-installed one of the same identifier, while the extension host looks
+/// in Application Support first, where an installer writes. One ordered list
+/// here would have had to pick one of those silently, and changing which
+/// directory wins is a behaviour change wearing a refactor's clothes.
+///
+/// Not beside `AppStorageLocation`, despite that type owning the app's *own*
+/// `~/.<token>` directory, for two reasons. It lives in `apple-database`,
+/// which `apple-pluginkit` does not depend on, so sharing from there would add
+/// a framework to the embed set for no behaviour. And it is not the same
+/// convention: these folders are named after the kind of content
+/// (`.agenticplugins`, `.agenticextensions`), not after the app.
+///
+/// In this file rather than one of its own to keep the `apple-core` tier's
+/// file set as it is; the type is independent of everything else here beyond
+/// both being about where extension content is found.
+///
+/// Nothing here touches the file system: these are derivations, and every
+/// caller already skips a search path it cannot read. Creating an empty folder
+/// for a feature the user has not used is a side effect nobody asked for.
+public enum InstalledContentLocation {
+
+    /// `~/Library/Application Support/<appName>/<subdirectory>`, or `nil` when
+    /// the user domain has no Application Support directory to name.
+    ///
+    /// `appName` is the display name, spaces and all — that is what names an
+    /// Application Support subdirectory by macOS convention. It must not be
+    /// empty: an empty component collapses the path onto the *shared*
+    /// `Application Support/<subdirectory>` and silently widens the search to
+    /// every app's content of that kind. Callers derive it through something
+    /// that cannot answer `""` — `AppStorageLocation.displayName` for this
+    /// project's apps.
+    public static func applicationSupport(appName: String, subdirectory: String) -> URL? {
+        guard let base = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return base
+            .appendingPathComponent(appName, isDirectory: true)
+            .appendingPathComponent(subdirectory, isDirectory: true)
+    }
+
+    /// `<home>/.<name>` — the dotfolder a developer can fill by hand, with no
+    /// installer and no code signature in the way.
+    ///
+    /// - Parameters:
+    ///   - name: The folder name *without* its leading dot, e.g.
+    ///     `"agenticplugins"`. Dotless at the call site is what keeps "these
+    ///     are hidden folders" a property of this function rather than of each
+    ///     caller's string literal.
+    ///   - home: The home directory to resolve against, defaulting to the
+    ///     process's own. A host that lets a test point the home somewhere
+    ///     temporary passes that instead, so a test run reads its own fixture
+    ///     rather than whatever the developer has installed.
+    public static func homeDotDirectory(
+        named name: String,
+        in home: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    ) -> URL {
+        home.appendingPathComponent(".\(name)", isDirectory: true)
+    }
+}

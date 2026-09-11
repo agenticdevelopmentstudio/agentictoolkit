@@ -95,6 +95,26 @@ public final class ExtensionRegistry {
     /// "I do not know".
     private var scanReadEverything = false
 
+    /// Called after any change to what the registered points hold — the end of
+    /// `loadAll()`, an enable or disable that actually moved, and an uninstall.
+    ///
+    /// A contribution point receives its own `apply`/`withdraw` and so already
+    /// knows; this is for a host that has to reconcile something *outside* the
+    /// points with what they now hold. The document layout is the case that
+    /// forced it: a contributed view is registered by `ViewsContributionPoint`,
+    /// but nothing can place it until the installed `ComposableTabLayoutSpec`
+    /// also names it, and that spec belongs to the host.
+    ///
+    /// One callback rather than a `@Published` set, because this tier is
+    /// Foundation-only and the thing that changed is not expressible here: the
+    /// registry knows contributions moved, not which of five kinds. Callers
+    /// re-read whatever they care about.
+    ///
+    /// Fired after the state it describes is already in place, so a callback
+    /// that reads `extensions` or asks a point what it holds sees the new
+    /// answer, never the old one.
+    public var contributionsDidChange: (() -> Void)?
+
     // MARK: - Initialization
 
     public init(searchPaths: [URL], hostVersion: SemanticVersion) {
@@ -185,6 +205,8 @@ public final class ExtensionRegistry {
                 load(from: directory, claimedIdentifiers: &claimedIdentifiers)
             }
         }
+
+        contributionsDidChange?()
     }
 
     /// Loads a single extension directory, recording a `LoadedExtension` on
@@ -470,6 +492,12 @@ public final class ExtensionRegistry {
             // longer exists. Re-enabling re-derives it.
             removeContributionFailures(at: loaded.directory)
         }
+
+        // Only here, past the `guard`s: a call that changed no state and one
+        // for an identifier this registry never loaded both leave every point
+        // holding exactly what it held, and a host that rebuilt its layout on
+        // the strength of that would be doing it on every settings save.
+        contributionsDidChange?()
     }
 
     // MARK: - Uninstall
@@ -515,6 +543,8 @@ public final class ExtensionRegistry {
         var disabled = UserSettings.disabledExtensionIdentifiers.value
         disabled = disabled.filter { $0.lowercased() != folded }
         UserSettings.disabledExtensionIdentifiers.value = disabled
+
+        contributionsDidChange?()
     }
 }
 

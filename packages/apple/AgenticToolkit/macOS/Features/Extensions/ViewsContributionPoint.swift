@@ -23,20 +23,22 @@ import Foundation
 @MainActor
 public final class ViewsContributionPoint: ContributionPoint {
 
-    private struct Registration {
-        let identifier: String
+    /// What one extension contributed, as this point needs to remember it.
+    private struct Contributed {
         let containers: [ContributedViewContainer]
         let views: [ContributedView]
     }
 
-    /// An array, not a dictionary: application order is the only order these
-    /// have, and a dictionary has none to report.
-    private var registrations: [Registration] = []
+    /// The payload-per-extension and notes bookkeeping every point of this
+    /// shape needs, kept once in `apple-core` rather than written out again
+    /// here — including the withdraw-before-record that makes re-applying
+    /// idempotent.
+    private var registrations = ContributionRegistrations<Contributed, ContributedViewNote>()
 
     /// Every compromise made across every applied extension, in application
     /// order. The Extensions UI filters these by identifier at display time,
     /// which is why there is no pre-filtered accessor here.
-    public private(set) var notes: [ContributedViewNote] = []
+    public var notes: [ContributedViewNote] { registrations.notes }
 
     /// Injected, never reached for globally: the registry is deliberately an
     /// instance, because a demo project and a real project need different view
@@ -96,30 +98,27 @@ public final class ViewsContributionPoint: ContributionPoint {
             }
         }
 
-        registrations.append(Registration(
-            identifier: manifest.identifier,
-            containers: built.containers,
-            views: built.views
-        ))
-        notes.append(contentsOf: built.notes)
+        registrations.record(
+            Contributed(containers: built.containers, views: built.views),
+            notes: built.notes,
+            for: manifest.identifier)
     }
 
+    /// Withdrawal here is more than forgetting: the panes were handed to a
+    /// registry a window reads, so they come back out of it first.
     public func withdraw(extensionIdentifier: String) {
-        for registration in registrations where registration.identifier == extensionIdentifier {
-            for view in registration.views {
-                registry.unregister(ComposableTabsViewID(view.registryID))
-            }
+        for view in registrations.payload(for: extensionIdentifier)?.views ?? [] {
+            registry.unregister(ComposableTabsViewID(view.registryID))
         }
-        registrations.removeAll { $0.identifier == extensionIdentifier }
-        notes.removeAll { $0.extensionIdentifier == extensionIdentifier }
+        registrations.remove(extensionIdentifier)
     }
 
     public func containers(for extensionIdentifier: String) -> [ContributedViewContainer] {
-        registrations.first { $0.identifier == extensionIdentifier }?.containers ?? []
+        registrations.payload(for: extensionIdentifier)?.containers ?? []
     }
 
     public func views(for extensionIdentifier: String) -> [ContributedView] {
-        registrations.first { $0.identifier == extensionIdentifier }?.views ?? []
+        registrations.payload(for: extensionIdentifier)?.views ?? []
     }
 }
 

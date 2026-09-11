@@ -97,7 +97,7 @@ public struct ContributedView: Sendable, Equatable {
 /// `kind` a caller can group on, and a `detail` sentence written for a person.
 /// The Extensions UI filters these by identifier at display time, which is why
 /// nothing here offers a pre-filtered accessor.
-public struct ContributedViewNote: Sendable, Equatable {
+public struct ContributedViewNote: ExtensionContributionNote, Equatable {
     public enum Kind: String, Sendable, Equatable {
         /// A `when` clause was declared. It is stored and never evaluated.
         case whenNotEvaluated

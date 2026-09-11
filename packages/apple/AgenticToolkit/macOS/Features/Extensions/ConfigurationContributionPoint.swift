@@ -17,8 +17,8 @@ import Foundation
 @MainActor
 public final class ConfigurationContributionPoint: ContributionPoint {
 
-    private struct Registration {
-        let identifier: String
+    /// What one extension contributed, as this point needs to remember it.
+    private struct Contributed {
         /// `displayName ?? name`, kept for the panel's title. Reading it back
         /// off the manifest at `panel(for:)` time would mean holding the
         /// manifest, and the manifest is the one thing here that is allowed to
@@ -27,13 +27,15 @@ public final class ConfigurationContributionPoint: ContributionPoint {
         let declaration: ContributedSettingsDeclaration
     }
 
-    /// An array, not a dictionary: `contributingExtensions` is specified in
-    /// registration order, and a dictionary has no order to report.
-    private var registrations: [Registration] = []
+    /// The payload-per-extension and notes bookkeeping every point of this
+    /// shape needs, kept once in `apple-core` rather than written out again
+    /// here — including the withdraw-before-record that makes re-applying
+    /// idempotent.
+    private var registrations = ContributionRegistrations<Contributed, ContributedSettingNote>()
 
     /// Every compromise made while classifying, across every applied
     /// extension, in application order.
-    public private(set) var notes: [ContributedSettingNote] = []
+    public var notes: [ContributedSettingNote] { registrations.notes }
 
     public init() {}
 
@@ -80,12 +82,12 @@ public final class ConfigurationContributionPoint: ContributionPoint {
         case .declared, .unreadable: break
         }
 
-        registrations.append(Registration(
-            identifier: manifest.identifier,
-            title: manifest.displayName ?? manifest.name,
-            declaration: built.declaration
-        ))
-        notes.append(contentsOf: built.notes)
+        registrations.record(
+            Contributed(
+                title: manifest.displayName ?? manifest.name,
+                declaration: built.declaration),
+            notes: built.notes,
+            for: manifest.identifier)
     }
 
     /// Unregisters an extension's sections and its notes.
@@ -95,13 +97,12 @@ public final class ConfigurationContributionPoint: ContributionPoint {
     /// not asked for the values they typed to be forgotten — and VS Code does
     /// not forget them either. The rows go; what they held stays.
     public func withdraw(extensionIdentifier: String) {
-        registrations.removeAll { $0.identifier == extensionIdentifier }
-        notes.removeAll { $0.extensionIdentifier == extensionIdentifier }
+        registrations.remove(extensionIdentifier)
     }
 
     /// Identifiers with at least one section, in registration order.
     public var contributingExtensions: [String] {
-        registrations.filter { !$0.declaration.sections.isEmpty }.map(\.identifier)
+        registrations.identifiers(where: { !$0.declaration.sections.isEmpty })
     }
 
     public func sections(for extensionIdentifier: String) -> [ContributedSettingsSection] {
@@ -112,7 +113,7 @@ public final class ConfigurationContributionPoint: ContributionPoint {
     /// difference between saying nothing and saying something that rendered as
     /// nothing, which `sections(for:)` flattens into the same empty array.
     public func declaration(for extensionIdentifier: String) -> ContributedSettingsDeclaration {
-        registrations.first { $0.identifier == extensionIdentifier }?.declaration ?? .undeclared
+        registrations.payload(for: extensionIdentifier)?.declaration ?? .undeclared
     }
 
     /// A panel over the registered sections, or `nil` when this extension
@@ -121,7 +122,7 @@ public final class ConfigurationContributionPoint: ContributionPoint {
     public func panel(
         for extensionIdentifier: String
     ) -> ComposableSettings.SettingsPanelViewController? {
-        guard let registration = registrations.first(where: { $0.identifier == extensionIdentifier }),
+        guard let registration = registrations.payload(for: extensionIdentifier),
               !registration.declaration.sections.isEmpty else {
             return nil
         }

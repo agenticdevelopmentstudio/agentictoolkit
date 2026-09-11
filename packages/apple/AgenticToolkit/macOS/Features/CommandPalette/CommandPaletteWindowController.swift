@@ -26,6 +26,16 @@ public final class CommandPaletteWindowController: NSWindowController {
     /// it covers the work it is about to act on.
     private static let topInsetFraction: CGFloat = 0.2
 
+    /// True for as long as one dismissal is unwinding.
+    ///
+    /// Closing the key panel makes AppKit resign key *before* the window is
+    /// ordered out, which lands in `windowDidResignKey` — the dismissal path —
+    /// in the middle of the dismissal already running. This bit is what tells
+    /// the two apart, because it is this controller's own answer to "am I
+    /// already closing?" rather than an inference from window state AppKit has
+    /// not finished updating.
+    private var isDismissing = false
+
     // MARK: - Lifecycle
 
     public init(model: CommandPaletteModel) {
@@ -121,6 +131,24 @@ public final class CommandPaletteWindowController: NSWindowController {
         logger.debug("Command palette shown")
     }
 
+    // MARK: - Dismiss
+
+    /// The single dismissal, entered once however it was asked for.
+    ///
+    /// All four ways out of the palette come through here, and the close this
+    /// starts can re-enter it (see `isDismissing`). Re-entering returns without
+    /// closing again, so `windowWillClose` — and with it `reset()` — runs once
+    /// per dismissal instead of twice.
+    ///
+    /// The flag is cleared on the way out rather than left set, so the *next*
+    /// dismissal of a re-shown palette is a first entry again.
+    public override func close() {
+        guard !isDismissing else { return }
+        isDismissing = true
+        defer { isDismissing = false }
+        super.close()
+    }
+
     /// Horizontally centred, near the top, on the screen the pointer is on.
     ///
     /// The pointer rather than the key window because the palette is opened by a
@@ -156,13 +184,19 @@ extension CommandPaletteWindowController: NSWindowDelegate {
     /// through `close()` and end in `windowWillClose` below — one dismissal
     /// path, not four (`dry`).
     ///
-    /// The guard is what keeps that one path from running twice: closing a key
-    /// window resigns key on the way out, so an unguarded `close()` here
-    /// re-enters and `windowWillClose` — hence `reset()` — fires twice per
-    /// dismissal. Bounded at depth two, but a reset that runs twice is one
-    /// that can be observed running at the wrong time.
+    /// Two guards, for two different things. `isDismissing` is the one that
+    /// keeps the single path from running twice: closing a key window resigns
+    /// key on the way out, so this is re-entered mid-close, and without it
+    /// `windowWillClose` — hence `reset()` — fires twice per dismissal. It is
+    /// an owned bit rather than a reading of window state precisely because
+    /// the window's state is what AppKit has not finished changing yet.
+    ///
+    /// Visibility is the second, and answers a different question: a palette
+    /// that is already closed has no dismissal to perform, so a resignation
+    /// arriving for one is ignored rather than reopening the close path on a
+    /// window that is gone.
     public func windowDidResignKey(_ notification: Notification) {
-        guard window?.isVisible == true else { return }
+        guard !isDismissing, window?.isVisible == true else { return }
         close()
     }
 

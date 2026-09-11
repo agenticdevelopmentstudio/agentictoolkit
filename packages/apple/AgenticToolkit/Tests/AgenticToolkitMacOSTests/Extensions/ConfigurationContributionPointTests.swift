@@ -495,4 +495,30 @@ struct ConfigurationContributionPointTests {
         }
         #expect(point.contributingExtensions.isEmpty)
     }
+
+    // MARK: - F63 — the bookkeeping both points now share
+
+    /// The twin of `ViewsContributionPointTests.applyIsIdempotent`, which this
+    /// point had no equivalent of while the two kept separate copies of the
+    /// same registration bookkeeping. Both now run on
+    /// `ContributionRegistrations`, and this is what says so from the outside.
+    @Test("applying the same manifest twice leaves one registration and one set of notes")
+    func applyIsIdempotent() throws {
+        let point = ConfigurationContributionPoint()
+        // No `default`, so classifying it records a note — which is the half
+        // of the state a second application is likeliest to duplicate.
+        let sample = try manifest(name: "twice", configuration: """
+        { "title": "Twice", "properties": { "t.name": { "type": "string" } } }
+        """)
+
+        try apply(sample, to: point)
+        let firstNotes = point.notes
+        let firstSections = point.sections(for: sample.identifier)
+        try apply(sample, to: point)
+
+        #expect(!firstNotes.isEmpty)
+        #expect(point.notes == firstNotes)
+        #expect(point.sections(for: sample.identifier) == firstSections)
+        #expect(point.contributingExtensions == [sample.identifier])
+    }
 }

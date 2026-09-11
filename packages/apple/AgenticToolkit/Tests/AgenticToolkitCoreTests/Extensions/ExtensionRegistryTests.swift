@@ -1005,4 +1005,71 @@ struct ExtensionRegistryTests {
         }
     }
 
+    // MARK: - F10 — the host is told when contributions move
+
+    @Test("every change to live contributions fires the callback, and nothing else does")
+    func contributionChangesAreAnnounced() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            let point = RecordingContributionPoint()
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(point)
+
+            // What the host sees at each notification, not just how many there
+            // were: a callback that fires *before* the state it describes is a
+            // host rebuilding from the old answer, which is the defect F10 is
+            // about wearing a different hat.
+            var observed: [[String]] = []
+            registry.contributionsDidChange = { observed.append(point.appliedIdentifiers) }
+
+            registry.loadAll()
+            #expect(observed == [["acme.good"]])
+
+            // A toggle that changes nothing changes nothing.
+            registry.setEnabled(true, for: "acme.good")
+            #expect(observed.count == 1)
+
+            // An identifier this registry never loaded moves no contribution
+            // either, however the setting records it.
+            registry.setEnabled(false, for: "acme.absent")
+            #expect(observed.count == 1)
+
+            registry.setEnabled(false, for: "acme.good")
+            registry.setEnabled(true, for: "acme.good")
+            #expect(observed == [["acme.good"], [], ["acme.good"]])
+
+            try registry.uninstall("acme.good")
+            #expect(observed == [["acme.good"], [], ["acme.good"], []])
+            // And an uninstall of something already gone is still a no-op.
+            try registry.uninstall("acme.good")
+            #expect(observed.count == 4)
+        }
+    }
+
+    @Test("a reload announces itself once, after every withdrawal it made")
+    func reloadAnnouncesItselfOnceAtTheEnd() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            let point = RecordingContributionPoint()
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(point)
+            registry.loadAll()
+
+            var observed: [[String]] = []
+            registry.contributionsDidChange = { observed.append(point.appliedIdentifiers) }
+
+            // `loadAll()` withdraws everything it applied before re-applying.
+            // One notification at the end, never one per withdrawal: a host
+            // that rebuilt mid-reload would rebuild from a state that never
+            // existed for the user.
+            registry.loadAll()
+            #expect(observed == [["acme.good"]])
+        }
+    }
 }

@@ -51,8 +51,11 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
     /// would then keep a closed project's workspace — and the language servers
     /// hanging off it — alive past its window.
     ///
-    /// Derived from `controllers` at every mutation rather than maintained
-    /// alongside it, so the two cannot drift. `closeProject` is not one of
+    /// Derived from `openOrder` and `controllers` at every mutation rather
+    /// than maintained alongside them, so the three cannot drift — and in
+    /// `openOrder`'s order, because a subscriber that renders one section per
+    /// open project must not have them rearrange themselves on the next
+    /// unrelated open or close. `closeProject` is not one of
     /// those sites: it only asks the window to close, and the removal happens
     /// in the `willCloseNotification` observer below, which is also the path a
     /// user clicking the red button takes.
@@ -98,13 +101,29 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
             .first
     }
 
+    /// Every open project's workspace, in the order their projects were
+    /// opened — the same order as `openWindowControllers` below, and read out
+    /// of the same two sources.
     public var openWorkspaces: [ProjectWorkspace] {
-        controllers.values.map(\.project)
+        openOrder.compactMap { controllers[$0]?.project }
     }
 
     /// Every open project window, in the order their projects were opened.
     public var openWindowControllers: [ComposableTabsWindowController] {
         openOrder.compactMap { controllers[$0] }
+    }
+
+    /// Republishes `openWorkspaceIDs` from the one ordering this type keeps.
+    ///
+    /// Every site that adds to or removes from `controllers` calls this, so
+    /// the published ids, `openWorkspaces` and `openWindowControllers` are
+    /// three views of the same pair — `openOrder` for the order, `controllers`
+    /// for membership — and cannot disagree about either. Filtering through
+    /// `controllers` rather than publishing `openOrder` itself keeps the
+    /// membership answer in the dictionary alone: an id that outlives its
+    /// controller is not open.
+    private func refreshOpenWorkspaceIDs() {
+        openWorkspaceIDs = openOrder.filter { controllers[$0] != nil }
     }
 
     /// Registers a window this manager did not open, so scripting can see it.
@@ -128,7 +147,7 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         guard controllers[id] == nil else { return }
         controllers[id] = controller
         openOrder.append(id)
-        openWorkspaceIDs = Array(controllers.keys)
+        refreshOpenWorkspaceIDs()
         adoptedForScripting.insert(id)
         observeClose(of: controller, repoID: id, recordsOpenState: false)
     }
@@ -149,7 +168,7 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         guard controllers[id] === controller, adoptedForScripting.contains(id) else { return }
         controllers.removeValue(forKey: id)
         openOrder.removeAll { $0 == id }
-        openWorkspaceIDs = Array(controllers.keys)
+        refreshOpenWorkspaceIDs()
         adoptedForScripting.remove(id)
         if let observer = closeObservers.removeValue(forKey: id) {
             NotificationCenter.default.removeObserver(observer)
@@ -187,7 +206,7 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         let controller = ComposableTabsWindowController(project: workspace)
         controllers[repo.id] = controller
         openOrder.append(repo.id)
-        openWorkspaceIDs = Array(controllers.keys)
+        refreshOpenWorkspaceIDs()
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         observeClose(of: controller, repoID: repo.id, recordsOpenState: true)
@@ -342,7 +361,7 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
                 self.controllers.removeValue(forKey: repoID)
                 self.openOrder.removeAll { $0 == repoID }
                 self.adoptedForScripting.remove(repoID)
-                self.openWorkspaceIDs = Array(self.controllers.keys)
+                self.refreshOpenWorkspaceIDs()
                 if let services {
                     self.closeTeardowns.add { await services.shutdown() }
                 }

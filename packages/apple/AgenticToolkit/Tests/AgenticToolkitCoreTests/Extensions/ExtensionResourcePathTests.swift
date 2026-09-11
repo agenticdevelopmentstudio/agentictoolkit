@@ -188,3 +188,60 @@ struct ExtensionResourcePathTests {
         }
     }
 }
+
+/// Where user-installed add-ons are looked for — the pair
+/// `AIPluginManager` and the app's extension host now both derive from, having
+/// each hand-rolled it before.
+///
+/// Every case here is about *composition*, not the file system: nothing below
+/// creates or reads a directory, because neither does the code under test.
+@Suite("InstalledContentLocation")
+struct InstalledContentLocationTests {
+
+    @Test("The Application Support path is the app's folder, then the kind of content")
+    func applicationSupportComposesBothComponents() throws {
+        let url = try #require(InstalledContentLocation.applicationSupport(
+            appName: "Coffee Grinder", subdirectory: "Extensions"))
+
+        // The display name goes in with its space intact: that is how macOS
+        // names an Application Support subdirectory.
+        #expect(url.pathComponents.suffix(3) == ["Application Support", "Coffee Grinder", "Extensions"])
+        #expect(url.deletingLastPathComponent().lastPathComponent == "Coffee Grinder")
+    }
+
+    @Test("The two hosts' Application Support paths differ only in the kind of content")
+    func bothHostsShareTheApplicationSupportShape() throws {
+        let plugins = try #require(InstalledContentLocation.applicationSupport(
+            appName: "Coffee Grinder", subdirectory: "Plugins"))
+        let extensions = try #require(InstalledContentLocation.applicationSupport(
+            appName: "Coffee Grinder", subdirectory: "Extensions"))
+
+        #expect(plugins.deletingLastPathComponent() == extensions.deletingLastPathComponent())
+    }
+
+    @Test("The dotfolder is hidden by this function, not by the caller's spelling")
+    func homeDotDirectoryAddsTheDot() {
+        let home = URL(fileURLWithPath: "/var/empty/fixture-home", isDirectory: true)
+
+        #expect(
+            InstalledContentLocation.homeDotDirectory(named: "agenticextensions", in: home).path
+                == "/var/empty/fixture-home/.agenticextensions")
+        #expect(
+            InstalledContentLocation.homeDotDirectory(named: "agenticplugins", in: home).path
+                == "/var/empty/fixture-home/.agenticplugins")
+    }
+
+    @Test("An injected home is used instead of the process's own")
+    func theInjectedHomeWins() {
+        let home = URL(fileURLWithPath: "/var/empty/fixture-home", isDirectory: true)
+        let injected = InstalledContentLocation.homeDotDirectory(named: "agenticextensions", in: home)
+        let processHome = InstalledContentLocation.homeDotDirectory(named: "agenticextensions")
+
+        // The default is the process's own home — what a host that has no test
+        // override to offer gets — and an injected one must not silently fall
+        // back to it, or a test run would read the developer's installed
+        // extensions.
+        #expect(injected != processHome)
+        #expect(processHome.deletingLastPathComponent().path == NSHomeDirectory())
+    }
+}

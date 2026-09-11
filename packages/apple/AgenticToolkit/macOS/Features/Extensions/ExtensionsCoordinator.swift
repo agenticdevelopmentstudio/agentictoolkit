@@ -108,6 +108,82 @@ public final class ExtensionsCoordinator: AppFeature {
         guard let viewsPoint else { return [] }
         return registry.extensions.flatMap { viewsPoint.views(for: $0.identifier) }
     }
+
+    // MARK: - Document layout
+
+    /// The layout the widened one is always derived from — never the installed
+    /// layout, which is a *result* of this and would compound.
+    private var baseDocumentLayout: ComposableTabsLayout?
+
+    /// The view ids the currently installed layout was widened for, so a change
+    /// that moves no view — a disable of an extension contributing only themes,
+    /// a `loadAll()` that found the same set — reinstalls nothing.
+    private var installedContributedViewIDs: [String] = []
+
+    /// Keeps the installed document layout in step with the views extensions
+    /// contribute, for as long as this coordinator lives.
+    ///
+    /// Registering a view does not make it reachable:
+    /// `ComposableTabLayoutSpec.validate(against:)` only checks that the ids a
+    /// spec *names* are registered, never the reverse, so a contributed view no
+    /// allowance mentions is registered and unplaceable. Widening once at
+    /// launch covered only the extensions enabled at launch — enabling one
+    /// afterwards registered its view into a layout with no room for it, and
+    /// the user saw nothing until the app was restarted.
+    ///
+    /// `base` is the layout the host installed *before* any extension was
+    /// widened in, and every rebuild starts from it again.
+    /// `ComposableTabLayoutSpec.widened(for:)` **appends**, so re-widening the
+    /// installed layout would add a second allowance for every view on every
+    /// change; worse, a disable leaves the withdrawn view's allowance naming an
+    /// id no longer in the registry, and the next widening throws
+    /// `.unregisteredView` — from then on the catch below keeps the broken
+    /// layout installed forever. Deriving from `base` makes every rebuild total
+    /// rather than incremental, which is what lets a withdrawal shrink the spec
+    /// at all.
+    ///
+    /// Passing `nil` (a headless host, or a wiring site with no layout yet)
+    /// subscribes to nothing: there is no spec to widen and no base to hold.
+    public func maintainDocumentLayout(basedOn base: ComposableTabsLayout?) {
+        guard let base else { return }
+        baseDocumentLayout = base
+        // A second call with a different base has to rebuild even if the same
+        // views are contributed, so the recorded set cannot short-circuit it.
+        installedContributedViewIDs = []
+        // `[weak self]`: the registry is this coordinator's own property, so a
+        // strong capture is a cycle that outlives `unregister()`.
+        registry.contributionsDidChange = { [weak self] in
+            self?.refreshDocumentLayout()
+        }
+        refreshDocumentLayout()
+    }
+
+    /// Rebuilds the installed layout from the base one and what is contributed
+    /// now. A throw leaves whatever is installed in place — a bad extension
+    /// must not cost the user their file browser — and deliberately does not
+    /// record the view set, so the next change retries rather than treating the
+    /// failed widening as the installed state.
+    private func refreshDocumentLayout() {
+        guard let baseDocumentLayout else { return }
+        let views = contributedViews
+        let viewIDs = views.map(\.registryID)
+        guard viewIDs != installedContributedViewIDs else { return }
+        do {
+            let widened = try ComposableTabsLayout(
+                registry: baseDocumentLayout.registry,
+                spec: baseDocumentLayout.spec.widened(for: views)
+            )
+            ComposableTabsLayout.install(widened)
+            installedContributedViewIDs = viewIDs
+        } catch {
+            logger.error(
+                """
+                Extension views left unplaceable — the widened layout did not \
+                validate: \(error.localizedDescription, privacy: .public)
+                """
+            )
+        }
+    }
 }
 
 extension ExtensionsCoordinator: Loggable {

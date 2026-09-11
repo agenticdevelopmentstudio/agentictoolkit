@@ -66,3 +66,63 @@ final class ProjectWindowRestoreTests: XCTestCase {
         XCTAssertEqual(plan.forget.map(\.name), ["gone"])
     }
 }
+
+/// What the manager reports as "the projects with a window open", and in what
+/// order.
+///
+/// `openOrder` exists in `ProjectWindowManager` precisely so that the answer is
+/// the order the projects were opened in — its own comment says "a script that
+/// lists `panes` twice must get the same order twice". `openWorkspaceIDs` and
+/// `openWorkspaces` are the two accessors that were reading `controllers`
+/// directly instead, and a `Dictionary`'s key order is seeded per process and
+/// reshuffles on insert and remove.
+///
+/// Ten projects rather than two: with two, a dictionary that happened to
+/// enumerate them in insertion order would let the bug through half the time.
+/// At ten the chance of that is one in 10!, which is the difference between a
+/// test that pins the behaviour and one that samples it.
+@MainActor
+final class ProjectWindowOpenOrderTests: XCTestCase {
+
+    private static let projectCount = 10
+
+    private func makeControllers() -> [ComposableTabsWindowController] {
+        (0..<Self.projectCount).map { index in
+            ComposableTabsWindowController(
+                project: ProjectWindowTestSupport.makeProject(
+                    label: "ProjectWindowOpenOrderTests", named: "project-\(index)"))
+        }
+    }
+
+    func testOpenWorkspaceIDsFollowTheOrderTheProjectsWereRegisteredIn() {
+        let manager = ProjectWindowManager()
+        let controllers = makeControllers()
+        for controller in controllers { manager.adoptForScripting(controller) }
+        defer { for controller in controllers { manager.forgetForScripting(controller) } }
+
+        let expected = controllers.map(\.project.id)
+        XCTAssertEqual(manager.openWorkspaceIDs, expected)
+        XCTAssertEqual(manager.openWorkspaces.map(\.id), expected)
+        // The three accessors are three views of one list, and
+        // `openWindowControllers` is the one that was already right.
+        XCTAssertEqual(manager.openWindowControllers.map(\.project.id), expected)
+    }
+
+    /// Removing one from the middle must not disturb the rest: a `Dictionary`
+    /// rehashes on remove, which is the second half of what made the published
+    /// order jump around while a user opened and closed windows.
+    func testRemovingOneProjectLeavesTheOthersInOrder() throws {
+        let manager = ProjectWindowManager()
+        let controllers = makeControllers()
+        for controller in controllers { manager.adoptForScripting(controller) }
+        defer { for controller in controllers { manager.forgetForScripting(controller) } }
+
+        let removed = try XCTUnwrap(controllers.dropFirst(4).first)
+        manager.forgetForScripting(removed)
+
+        let expected = controllers.filter { $0 !== removed }.map(\.project.id)
+        XCTAssertEqual(manager.openWorkspaceIDs, expected)
+        XCTAssertEqual(manager.openWorkspaces.map(\.id), expected)
+        XCTAssertEqual(manager.openWindowControllers.map(\.project.id), expected)
+    }
+}

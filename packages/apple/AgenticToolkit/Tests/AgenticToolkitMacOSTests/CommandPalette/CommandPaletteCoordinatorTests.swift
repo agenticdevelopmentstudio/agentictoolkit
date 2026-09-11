@@ -111,3 +111,88 @@ struct CommandPaletteCoordinatorTests {
         #expect(contribution?.isEnabled() == true)
     }
 }
+
+/// Counts what a dismissal did, from inside the notification that announces it.
+///
+/// A reference type, and `@MainActor`, so the `@Sendable` notification block can
+/// hold it: AppKit posts `willCloseNotification` synchronously on the main
+/// thread, which is what makes the `assumeIsolated` below true rather than
+/// hopeful.
+@MainActor
+private final class PaletteCloseProbe {
+    var closes = 0
+    var hasResignedKeyOnce = false
+    /// The controller under test, reached through the probe rather than
+    /// captured directly: an `NSWindowController` subclass is not `Sendable`
+    /// (its superclass is not), while this actor-isolated class is.
+    var controller: CommandPaletteWindowController?
+}
+
+/// One dismissal, one close.
+///
+/// `CommandPaletteWindowController` funnels all four ways out of the palette —
+/// Escape, running a command, clicking another window, switching apps — through
+/// `close()`, and `windowWillClose` is where the palette is cleared. AppKit
+/// resigns key *during* a close of the key window, so the dismissal path can be
+/// re-entered before the window is ordered out; these tests reproduce that
+/// ordering directly rather than waiting for a window server to produce it.
+@Suite("CommandPaletteWindowController dismissal")
+@MainActor
+struct CommandPaletteWindowDismissalTests {
+
+    private func makeController() -> CommandPaletteWindowController {
+        CommandPaletteWindowController(model: CommandPaletteModel(registry: CommandRegistry()))
+    }
+
+    @Test("Resigning key mid-close does not close the palette a second time")
+    func resigningKeyDuringTheCloseDoesNotReenter() throws {
+        let controller = makeController()
+        let window = try #require(controller.window)
+        window.orderFront(nil)
+
+        let probe = PaletteCloseProbe()
+        probe.controller = controller
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: nil
+        ) { _ in
+            MainActor.assumeIsolated {
+                probe.closes += 1
+                guard !probe.hasResignedKeyOnce else { return }
+                probe.hasResignedKeyOnce = true
+                // What AppKit does to a key window that is closing: the
+                // resignation arrives while the window is still visible, so
+                // anything deciding reentrancy by visibility cannot see that
+                // this is the same dismissal.
+                probe.controller?.windowDidResignKey(
+                    Notification(name: NSWindow.didResignKeyNotification, object: window))
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        controller.close()
+
+        #expect(probe.hasResignedKeyOnce)
+        #expect(probe.closes == 1)
+    }
+
+    @Test("The guard is per dismissal, not for the life of the palette")
+    func aLaterDismissalStillCloses() throws {
+        let controller = makeController()
+        let window = try #require(controller.window)
+
+        let probe = PaletteCloseProbe()
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: nil
+        ) { _ in
+            MainActor.assumeIsolated { probe.closes += 1 }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        window.orderFront(nil)
+        controller.close()
+        window.orderFront(nil)
+        controller.close()
+
+        #expect(probe.closes == 2)
+    }
+}

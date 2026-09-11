@@ -350,4 +350,102 @@ struct ExtensionsCoordinatorTests {
             }
         }
     }
+
+    // MARK: - Document layout
+
+    /// The registry id `ViewsContributionPoint` gives the one view
+    /// `everythingManifestJSON` contributes.
+    private static let contributedViewID =
+        ComposableTabsViewID("extension.test.everything.test.tree")
+
+    /// How many allowances in the installed layout's root name that view.
+    /// A count rather than a `contains`, because the hazard on the other side
+    /// of this fix is a *duplicate* allowance: `widened(for:)` appends, so a
+    /// widening that re-reads the installed layout instead of the base one
+    /// grows the spec by one entry every time contributions change.
+    private func installedAllowancesForContributedView() -> Int {
+        (ComposableTabsLayout.current?.spec.allows ?? [])
+            .filter { $0.viewID == Self.contributedViewID }
+            .count
+    }
+
+    /// Builds the everything extension, installs `base` as the app layout, and
+    /// runs `body` with a coordinator already maintaining that layout — the
+    /// wiring site's shape, minus the host app no toolkit test can reach.
+    private func withMaintainedLayout(
+        _ body: (ExtensionsCoordinator) throws -> Void
+    ) throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let extensionDirectory = root.appendingPathComponent("everything-1.0.0")
+            try write(Self.everythingManifestJSON, to: "package.json", in: extensionDirectory)
+            try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: extensionDirectory)
+            try write(Self.snippetJSON, to: "snippets/widget.json", in: extensionDirectory)
+
+            let previousProvider = CustomFileTypeMappings.contributedProvider
+            defer { CustomFileTypeMappings.contributedProvider = previousProvider }
+            let previousLayout = ComposableTabsLayout.current
+            defer { ComposableTabsLayout.install(previousLayout) }
+
+            let viewRegistry = ComposableTabsViewRegistry()
+            let base = try ComposableTabsLayout(registry: viewRegistry, spec: .placeholders)
+            ComposableTabsLayout.install(base)
+
+            try withCoordinator(searchPaths: [root], viewRegistry: viewRegistry) { coordinator in
+                coordinator.maintainDocumentLayout(basedOn: base)
+                try body(coordinator)
+            }
+        }
+    }
+
+    @Test("enabling an extension after launch makes its view placeable")
+    func enablingAnExtensionAfterLaunchWidensTheLayout() throws {
+        try withMaintainedLayout { coordinator in
+            // At launch the extension is enabled, so the one-shot widening the
+            // wiring site used to do is enough for this much.
+            try #require(installedAllowancesForContributedView() == 1)
+
+            coordinator.registry.setEnabled(false, for: "test.everything")
+            #expect(installedAllowancesForContributedView() == 0)
+
+            // The defect: the view is registered again, but nothing re-widened
+            // the layout, so no allowance names it and the user sees nothing
+            // until the app is restarted.
+            coordinator.registry.setEnabled(true, for: "test.everything")
+            #expect(installedAllowancesForContributedView() == 1)
+        }
+    }
+
+    @Test("a disable/enable cycle does not accumulate duplicate allowances")
+    func aDisableEnableCycleDoesNotAccumulateAllowances() throws {
+        try withMaintainedLayout { coordinator in
+            let baseAllowances = try #require(ComposableTabsLayout.current?.spec.allows.count) - 1
+
+            for _ in 0..<3 {
+                coordinator.registry.setEnabled(false, for: "test.everything")
+                coordinator.registry.setEnabled(true, for: "test.everything")
+            }
+
+            #expect(installedAllowancesForContributedView() == 1)
+            #expect(ComposableTabsLayout.current?.spec.allows.count == baseAllowances + 1)
+        }
+    }
+
+    @Test("uninstalling an extension takes its allowance back out of the layout")
+    func uninstallingAnExtensionNarrowsTheLayout() throws {
+        try withMaintainedLayout { coordinator in
+            try #require(installedAllowancesForContributedView() == 1)
+
+            try coordinator.registry.uninstall("test.everything")
+
+            // A stale allowance here is worse than a missing one: the id is no
+            // longer registered, so the *next* widening fails validation and
+            // every later contribution is stranded behind it.
+            #expect(installedAllowancesForContributedView() == 0)
+            #expect(ComposableTabsLayout.current?.spec.allows.contains {
+                !(ComposableTabsLayout.current?.registry.isRegistered($0.viewID) ?? false)
+            } == false)
+        }
+    }
 }
