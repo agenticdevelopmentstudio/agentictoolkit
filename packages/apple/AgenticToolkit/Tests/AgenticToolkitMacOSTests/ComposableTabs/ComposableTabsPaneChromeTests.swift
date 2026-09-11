@@ -68,7 +68,8 @@ final class ComposableTabsPaneChromeTests: XCTestCase {
             nodeID: UUID(),
             paneNumber: project.allocatePaneNumber(),
             viewID: viewID,
-            project: project
+            project: project,
+            workingDirectory: project.directoryURL
         )
         pane.loadViewIfNeeded()
         return pane
@@ -115,7 +116,8 @@ final class ComposableTabsPaneChromeTests: XCTestCase {
     func testASoleTerminalIsNotNumbered() throws {
         try installLayout()
         let root = ComposableTabsViewController.make(
-            from: .leaf(contentType: plain), project: project, isRoot: true)
+            from: .leaf(contentType: plain), project: project,
+            workingDirectory: project.directoryURL, isRoot: true)
         _ = root.view
         root.reassignPaneIdentifiers()
 
@@ -131,7 +133,8 @@ final class ComposableTabsPaneChromeTests: XCTestCase {
                            first: .leaf(contentType: titled),
                            second: .leaf(contentType: plain))
         )
-        let root = ComposableTabsViewController.make(from: node, project: project, isRoot: true)
+        let root = ComposableTabsViewController.make(
+            from: node, project: project, workingDirectory: project.directoryURL, isRoot: true)
         _ = root.view
         root.reassignPaneIdentifiers()
 
@@ -159,7 +162,8 @@ final class ComposableTabsPaneChromeTests: XCTestCase {
             nodeID: UUID(),
             paneNumber: project.allocatePaneNumber(),
             viewID: teardown,
-            project: project
+            project: project,
+            workingDirectory: project.directoryURL
         )
         pane.loadViewIfNeeded()
         pane.paneWillBeRemoved()

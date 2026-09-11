@@ -34,6 +34,9 @@ public struct ComposableTabsViewContext {
     public let descriptor: ComposableTabsViewDescriptor
     public let nodeID: UUID
     public let project: ProjectWorkspace
+    /// The directory this pane's content should be rooted in — the tab's
+    /// working directory, shared by every pane in the same split tree.
+    public let workingDirectory: URL
     /// 1-based, allocated per project, and what the placeholder shows.
     public let paneNumber: Int
 }
@@ -181,6 +184,7 @@ public final class ComposableTabsViewRegistry {
         for viewID: ComposableTabsViewID,
         nodeID: UUID,
         project: ProjectWorkspace,
+        workingDirectory: URL,
         paneNumber: Int
     ) -> NSViewController {
         guard let entry = entries[viewID] else {
@@ -193,6 +197,7 @@ public final class ComposableTabsViewRegistry {
             descriptor: entry.descriptor,
             nodeID: nodeID,
             project: project,
+            workingDirectory: workingDirectory,
             paneNumber: paneNumber
         ))
     }

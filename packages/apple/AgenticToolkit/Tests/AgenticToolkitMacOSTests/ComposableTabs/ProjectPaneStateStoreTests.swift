@@ -146,7 +146,8 @@ final class ProjectPaneStateStoreTests: XCTestCase {
     /// a relaunch is, minus the process boundary.
     private func makeTree() throws -> ComposableTabsViewController {
         try installLayout()
-        let root = ComposableTabsViewController.make(from: node, project: project, isRoot: true)
+        let root = ComposableTabsViewController.make(
+            from: node, project: project, workingDirectory: project.directoryURL, isRoot: true)
         root.loadViewIfNeeded()
         for leaf in root.allLeaves() { leaf.loadViewIfNeeded() }
         return root
@@ -354,7 +355,8 @@ final class ProjectPaneStateStoreTests: XCTestCase {
         first.paneDidRequestMinimize(try leaf(leftID, in: first), to: .leading)
 
         try installLayout()
-        let nested = ComposableTabsViewController.make(from: node, project: project, isRoot: false)
+        let nested = ComposableTabsViewController.make(
+            from: node, project: project, workingDirectory: project.directoryURL, isRoot: false)
         nested.loadViewIfNeeded()
         for pane in nested.allLeaves() { pane.loadViewIfNeeded() }
 

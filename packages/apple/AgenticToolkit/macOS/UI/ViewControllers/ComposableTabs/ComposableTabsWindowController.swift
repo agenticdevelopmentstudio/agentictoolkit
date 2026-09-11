@@ -60,6 +60,9 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         let id: UUID
         var title: String
         var members: [Edge: UUID]
+        /// Shared by every member tab in the group — see
+        /// `ComposableTabsViewController.workingDirectory`.
+        let workingDirectory: URL
     }
 
     public let project: ProjectWorkspace
@@ -399,7 +402,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         var created = false
         for (index, group) in tabGroups.enumerated() where group.members[edge] == nil {
             let id = UUID()
-            let split = makeSplitController(for: id)
+            let split = makeSplitController(for: id, workingDirectory: group.workingDirectory)
             tabbed.insertTab(.init(id: id, title: group.title, viewController: split), at: index, on: edge)
             tabGroups[index].members[edge] = id
             created = true
@@ -411,10 +414,11 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// sharing a title, and activates the first member.
     private func addTabGroup() {
         let title = "Tab \(tabGroups.count + 1)"
-        var group = TabGroup(id: UUID(), title: title, members: [:])
+        var group = TabGroup(
+            id: UUID(), title: title, members: [:], workingDirectory: project.directoryURL)
         for edge in Edge.allCases where tabbed.isEdgeEnabled(edge) {
             let id = UUID()
-            let split = makeSplitController(for: id)
+            let split = makeSplitController(for: id, workingDirectory: project.directoryURL)
             tabbed.addTab(.init(id: id, title: title, viewController: split), on: edge)
             group.members[edge] = id
         }
@@ -437,10 +441,13 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         refreshActivePaneChrome()
     }
 
-    private func makeSplitController(for tabID: UUID) -> ComposableTabsViewController {
+    private func makeSplitController(
+        for tabID: UUID, workingDirectory: URL
+    ) -> ComposableTabsViewController {
         let split = ComposableTabsViewController.make(
             from: project.layout.blueprint(),
             project: project,
+            workingDirectory: workingDirectory,
             isRoot: true
         )
         wireLayoutCallback(on: split, tabID: tabID)
@@ -802,9 +809,11 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         // order, per-edge member order is record order.
         var groupIndexByID: [UUID: Int] = [:]
         for record in initial.tabs {
+            let directory = record.workingDirectory ?? project.directoryURL
             let split = ComposableTabsViewController.make(
                 from: record.root,
                 project: project,
+                workingDirectory: directory,
                 isRoot: true
             )
             wireLayoutCallback(on: split, tabID: record.id)
@@ -820,7 +829,8 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 tabGroups.append(TabGroup(
                     id: record.groupID,
                     title: record.title,
-                    members: [record.edge: record.id]
+                    members: [record.edge: record.id],
+                    workingDirectory: directory
                 ))
             }
         }
@@ -906,7 +916,9 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                     edge: edge,
                     title: tab.title,
                     root: split.snapshotNode(),
-                    focusedNodeID: focusedLeafByTabID[tab.id]
+                    focusedNodeID: focusedLeafByTabID[tab.id],
+                    workingDirectory: split.workingDirectory.standardizedFileURL
+                        == project.directoryURL.standardizedFileURL ? nil : split.workingDirectory
                 ))
             }
         }

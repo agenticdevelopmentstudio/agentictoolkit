@@ -114,6 +114,7 @@ final class ProjectPaneContentTests: XCTestCase {
             first: makeLeaf(sidebar),
             second: makeLeaf(.placeholder),
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
         _ = root.view
@@ -137,6 +138,7 @@ final class ProjectPaneContentTests: XCTestCase {
             first: makeLeaf(notes),        // 320
             second: makeLeaf(terminal),    // 400
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: false
         )
         let root = ComposableTabsViewController(
@@ -145,6 +147,7 @@ final class ProjectPaneContentTests: XCTestCase {
             first: makeLeaf(sidebar),
             second: inner,
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
         _ = root.view
@@ -163,6 +166,7 @@ final class ProjectPaneContentTests: XCTestCase {
             first: makeLeaf(notes),        // 320
             second: makeLeaf(terminal),    // 400
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: false
         )
         let root = ComposableTabsViewController(
@@ -171,6 +175,7 @@ final class ProjectPaneContentTests: XCTestCase {
             first: makeLeaf(.placeholder),
             second: inner,
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
         _ = root.view
@@ -190,6 +195,7 @@ final class ProjectPaneContentTests: XCTestCase {
             first: makeLeaf(sidebar),
             second: makeLeaf(notes),
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
         _ = root.view
@@ -224,6 +230,7 @@ final class ProjectPaneContentTests: XCTestCase {
             first: doomed,
             second: survivor,
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
         _ = root.view
@@ -246,6 +253,7 @@ final class ProjectPaneContentTests: XCTestCase {
             axis: .horizontal,
             children: [only],
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
         _ = root.view
@@ -317,7 +325,8 @@ final class ProjectPaneContentTests: XCTestCase {
             nodeID: UUID(),
             paneNumber: project.allocatePaneNumber(),
             viewID: viewID,
-            project: project
+            project: project,
+            workingDirectory: project.directoryURL
         )
     }
 }

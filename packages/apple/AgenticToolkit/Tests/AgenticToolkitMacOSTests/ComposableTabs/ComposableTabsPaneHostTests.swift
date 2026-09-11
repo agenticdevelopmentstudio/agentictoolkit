@@ -69,7 +69,8 @@ final class ComposableTabsPaneHostTests: XCTestCase {
     private func makeTree(_ node: LayoutNode, preferredFraction: CGFloat? = nil)
         throws -> ComposableTabsViewController {
         try installLayout(preferredFraction: preferredFraction)
-        let root = ComposableTabsViewController.make(from: node, project: project, isRoot: true)
+        let root = ComposableTabsViewController.make(
+            from: node, project: project, workingDirectory: project.directoryURL, isRoot: true)
         root.loadViewIfNeeded()
         for leaf in root.allLeaves() { leaf.loadViewIfNeeded() }
         return root
@@ -503,7 +504,8 @@ final class ComposableTabsPaneHostTests: XCTestCase {
     /// What a relaunch does: a fresh tree built from the snapshot that would
     /// have been persisted, with nothing but the stored fractions to go on.
     private func rebuild(_ node: LayoutNode) throws -> ComposableTabsViewController {
-        let rebuilt = ComposableTabsViewController.make(from: node, project: project, isRoot: true)
+        let rebuilt = ComposableTabsViewController.make(
+            from: node, project: project, workingDirectory: project.directoryURL, isRoot: true)
         rebuilt.loadViewIfNeeded()
         for leaf in rebuilt.allLeaves() { leaf.loadViewIfNeeded() }
         layOut(rebuilt)
@@ -630,6 +632,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
                 second: .leaf(id: rightID, contentType: beta)
             ),
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true)
         root.loadViewIfNeeded()
         for pane in root.allLeaves() { pane.loadViewIfNeeded() }
@@ -778,7 +781,8 @@ final class ComposableTabsPaneHostTests: XCTestCase {
     /// scripted request finds when it names a pane on a background tab.
     private func unloadedTree(_ node: LayoutNode) throws -> ComposableTabsViewController {
         try installLayout()
-        let root = ComposableTabsViewController.make(from: node, project: project, isRoot: true)
+        let root = ComposableTabsViewController.make(
+            from: node, project: project, workingDirectory: project.directoryURL, isRoot: true)
         XCTAssertFalse(root.isViewLoaded, "the fixture stops being the fixture once anything loads")
         return root
     }
@@ -844,7 +848,7 @@ final class ComposableTabsPaneHostTests: XCTestCase {
     private func boundedNested() throws -> ComposableTabsViewController {
         try installBoundedLayout()
         let root = ComposableTabsViewController.make(
-            from: nestedNode(innerID: UUID()), project: project, isRoot: true)
+            from: nestedNode(innerID: UUID()), project: project, workingDirectory: project.directoryURL, isRoot: true)
         XCTAssertFalse(root.isViewLoaded, "the fixture stops being the fixture once anything loads")
         return root
     }

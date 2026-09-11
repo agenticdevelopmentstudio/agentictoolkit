@@ -110,6 +110,12 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     private weak var project: ProjectWorkspace?
     let isRoot: Bool
 
+    /// The directory every pane in this split — and every split nested inside
+    /// it — works in. Set once, from the tab's own working directory: a split
+    /// or a rebuild always passes its parent's value along rather than
+    /// re-deriving one, so every pane in a tab agrees.
+    public let workingDirectory: URL
+
     /// See `ComposableTabsChild.thicknessFraction`.
     public var thicknessFraction: CGFloat?
 
@@ -159,6 +165,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         axis: ComposableTabsAxis,
         children: [any ComposableTabsChild],
         project: ProjectWorkspace?,
+        workingDirectory: URL,
         isRoot: Bool
     ) {
         assert(children.count <= 2, "a split is binary or solo; nest instead of appending")
@@ -166,6 +173,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         self.axis = axis
         self.layoutChildren = children
         self.project = project
+        self.workingDirectory = workingDirectory
         self.isRoot = isRoot
         super.init(nibName: nil, bundle: nil)
         // Not redundant with `layoutChildren`'s `didSet`, and deleting it costs
@@ -193,6 +201,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         first: any ComposableTabsChild,
         second: any ComposableTabsChild,
         project: ProjectWorkspace?,
+        workingDirectory: URL,
         isRoot: Bool
     ) {
         self.init(
@@ -200,6 +209,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
             axis: axis,
             children: [first, second],
             project: project,
+            workingDirectory: workingDirectory,
             isRoot: isRoot
         )
     }
@@ -495,7 +505,8 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
             nodeID: UUID(),
             paneNumber: project.allocatePaneNumber(),
             viewID: viewID,
-            project: project
+            project: project,
+            workingDirectory: workingDirectory
         )
 
         let firstChildVC: ComposableTabsPaneViewController
@@ -520,6 +531,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
             first: firstChildVC,
             second: secondChildVC,
             project: project,
+            workingDirectory: workingDirectory,
             isRoot: false
         )
         // The inner split takes over the slot the pane held, so it inherits its
@@ -768,6 +780,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
                 first: rebuildChild(first, reusing: leaves, project: project),
                 second: rebuildChild(second, reusing: leaves, project: project),
                 project: project,
+                workingDirectory: workingDirectory,
                 isRoot: false
             )
         case .leaf(let viewID, _):
@@ -775,7 +788,8 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
                 nodeID: node.id,
                 paneNumber: project.allocatePaneNumber(),
                 viewID: viewID,
-                project: project
+                project: project,
+                workingDirectory: workingDirectory
             )
         }
         child.thicknessFraction = node.thicknessFraction.map { CGFloat($0) }
@@ -1011,17 +1025,19 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     public static func make(
         from node: LayoutNode,
         project: ProjectWorkspace,
+        workingDirectory: URL,
         isRoot: Bool
     ) -> ComposableTabsViewController {
         switch node.kind {
         case .split:
-            return buildSplit(node, project: project, isRoot: isRoot)
+            return buildSplit(node, project: project, workingDirectory: workingDirectory, isRoot: isRoot)
         case .leaf:
             return ComposableTabsViewController(
                 nodeID: UUID(),
                 axis: .horizontal,
-                children: [buildChild(node, project: project)],
+                children: [buildChild(node, project: project, workingDirectory: workingDirectory)],
                 project: project,
+                workingDirectory: workingDirectory,
                 isRoot: isRoot
             )
         }
@@ -1030,6 +1046,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     private static func buildSplit(
         _ node: LayoutNode,
         project: ProjectWorkspace,
+        workingDirectory: URL,
         isRoot: Bool
     ) -> ComposableTabsViewController {
         guard case .split(let axis, let first, let second) = node.kind else {
@@ -1039,27 +1056,30 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         return ComposableTabsViewController(
             nodeID: node.id,
             axis: axis,
-            first: buildChild(first, project: project),
-            second: buildChild(second, project: project),
+            first: buildChild(first, project: project, workingDirectory: workingDirectory),
+            second: buildChild(second, project: project, workingDirectory: workingDirectory),
             project: project,
+            workingDirectory: workingDirectory,
             isRoot: isRoot
         )
     }
 
     private static func buildChild(
         _ node: LayoutNode,
-        project: ProjectWorkspace
+        project: ProjectWorkspace,
+        workingDirectory: URL
     ) -> any ComposableTabsChild {
         let child: any ComposableTabsChild
         switch node.kind {
         case .split:
-            child = buildSplit(node, project: project, isRoot: false)
+            child = buildSplit(node, project: project, workingDirectory: workingDirectory, isRoot: false)
         case .leaf(let viewID, _):
             child = ComposableTabsPaneViewController(
                 nodeID: node.id,
                 paneNumber: project.allocatePaneNumber(),
                 viewID: viewID,
-                project: project
+                project: project,
+                workingDirectory: workingDirectory
             )
         }
         // The saved size travels with the child, so the first layout pass can

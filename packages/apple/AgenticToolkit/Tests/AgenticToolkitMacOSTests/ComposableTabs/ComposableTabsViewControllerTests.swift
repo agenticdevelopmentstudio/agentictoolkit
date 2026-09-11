@@ -38,7 +38,8 @@ final class ComposableTabsViewControllerTests: XCTestCase {
             nodeID: id,
             paneNumber: project.allocatePaneNumber(),
             viewID: .placeholder,
-            project: project
+            project: project,
+            workingDirectory: project.directoryURL
         )
     }
 
@@ -54,6 +55,7 @@ final class ComposableTabsViewControllerTests: XCTestCase {
             first: first,
             second: second,
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
         _ = root.view
@@ -82,6 +84,7 @@ final class ComposableTabsViewControllerTests: XCTestCase {
             first: leafB,
             second: leafC,
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: false
         )
         let root = makeLoadedRoot(first: leafA, second: inner)
@@ -109,6 +112,7 @@ final class ComposableTabsViewControllerTests: XCTestCase {
             first: leafB,
             second: leafC,
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: false
         )
         let root = makeLoadedRoot(first: inner, second: leafA)
@@ -142,6 +146,7 @@ final class ComposableTabsViewControllerTests: XCTestCase {
         let root = ComposableTabsViewController.make(
             from: LayoutNode.leaf(id: idA, contentType: .placeholder),
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
 
@@ -160,6 +165,7 @@ final class ComposableTabsViewControllerTests: XCTestCase {
         let restored = ComposableTabsViewController.make(
             from: root.snapshotNode(),
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: true
         )
 
@@ -204,6 +210,7 @@ final class ComposableTabsViewControllerTests: XCTestCase {
             first: leafB,
             second: leafC,
             project: project,
+            workingDirectory: project.directoryURL,
             isRoot: false
         )
         let root = makeLoadedRoot(first: leafA, second: inner)

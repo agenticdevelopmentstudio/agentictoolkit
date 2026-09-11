@@ -22,6 +22,9 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     public let nodeID: UUID
     public let paneNumber: Int
     public let viewID: ComposableTabsViewID
+    /// The directory this pane's content is rooted in — shared by every pane
+    /// in the same split tree. See `ComposableTabsViewController.workingDirectory`.
+    public let workingDirectory: URL
     /// See `ComposableTabsChild.thicknessFraction`.
     public var thicknessFraction: CGFloat?
     private weak var project: ProjectWorkspace?
@@ -38,12 +41,14 @@ public final class ComposableTabsPaneViewController: PaneViewController {
         nodeID: UUID,
         paneNumber: Int,
         viewID: ComposableTabsViewID,
-        project: ProjectWorkspace
+        project: ProjectWorkspace,
+        workingDirectory: URL
     ) {
         self.nodeID = nodeID
         self.paneNumber = paneNumber
         self.viewID = viewID
         self.project = project
+        self.workingDirectory = workingDirectory
         // The parameters, not `self` — stored properties are set, but `self` is
         // not usable until `super.init` returns.
         super.init(stateStore: ProjectPaneStateStore(project: project, nodeID: nodeID))
@@ -67,6 +72,7 @@ public final class ComposableTabsPaneViewController: PaneViewController {
             for: viewID,
             nodeID: nodeID,
             project: project,
+            workingDirectory: workingDirectory,
             paneNumber: paneNumber
         )
     }
