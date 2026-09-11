@@ -1142,8 +1142,12 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
 
     private func exitStatus() async -> Int32? {
         guard let channel else { return nil }
+        // `try?` on both levels, and they mean different things: the outer one
+        // swallows the budget expiry, the inner one a wait that was never
+        // launched or was cancelled. All three are "no status to report",
+        // which is exactly what `nil` says here.
         return try? await withWallClockBudget(configuration.exitStatusBudgetSeconds) {
-            await channel.waitUntilExit()
+            try? await channel.waitUntilExit()
         }
     }
 

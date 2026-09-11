@@ -127,6 +127,38 @@ struct SubprocessTransportTests {
         await transport.disconnect()
     }
 
+    /// The same rule, one line ending later. A server on a CRLF runtime — a
+    /// Windows-default interpreter, or anything behind a translating wrapper —
+    /// writes its blank line as `\r\n`, and an indenting server can write one
+    /// as spaces. Testing only for a bare LF let both through, which is the
+    /// regression the filter above was added to prevent.
+    @Test("a CRLF or whitespace-only stdout line is dropped too")
+    func crlfAndWhitespaceOnlyLinesAreNotForwarded() async throws {
+        let transport = makeTransport(
+            executable: "/bin/sh",
+            arguments: ["-c", #"printf '{"id":1}\n\r\n   \n\t\n{"id":2}\n'"#]
+        )
+        try await transport.connect()
+        let stream = await transport.receive()
+
+        let frames = try await collectFrames(from: stream, count: 2)
+        #expect(frames == [newlineTerminated(#"{"id":1}"#), newlineTerminated(#"{"id":2}"#)])
+
+        await transport.disconnect()
+    }
+
+    @Test("isBlankLine classifies exactly the whitespace-only frames as blank")
+    func isBlankLineClassification() {
+        #expect(SubprocessTransport.isBlankLine(Data([0x0A])))
+        #expect(SubprocessTransport.isBlankLine(Data([0x0D, 0x0A])))
+        #expect(SubprocessTransport.isBlankLine(Data("   \t\r\n".utf8)))
+        #expect(SubprocessTransport.isBlankLine(Data()))
+        #expect(!SubprocessTransport.isBlankLine(Data("{}\n".utf8)))
+        // A frame whose only non-whitespace byte is non-ASCII is still a
+        // message: the predicate must not reach for "looks like text".
+        #expect(!SubprocessTransport.isBlankLine(Data([0xC2, 0xA0, 0x0A])))
+    }
+
     /// `disconnect()` is the only owner of the child: `MCPClient` no longer
     /// keeps a `Process` of its own beside the transport, so if this leaks the
     /// server survives for the life of the app.

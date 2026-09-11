@@ -131,13 +131,19 @@ public actor SubprocessTransport: Transport {
         forwardingTask = Task.detached {
             do {
                 for try await frame in frames {
-                    // A frame that is empty once its delimiter is disregarded
-                    // is a blank stdout line. `StdioTransport` dropped those;
-                    // yielding one as `"\n"` would make the SDK log an
-                    // "Unexpected message" warning for every blank line a
-                    // server prints. The delimiter is *not* stripped from real
-                    // frames — only used to recognise this case.
-                    guard frame.contains(where: { $0 != 0x0A }) else { continue }
+                    // A frame that is nothing but ASCII whitespace is a blank
+                    // stdout line. `StdioTransport` dropped those; yielding
+                    // one would make the SDK log an "Unexpected message"
+                    // warning for every blank line a server prints. Nothing
+                    // is stripped from real frames — the bytes are only
+                    // inspected to recognise this case.
+                    //
+                    // The test is every-byte-is-whitespace rather than
+                    // "is it a bare LF", because a blank line is not always
+                    // one byte: a server on a CRLF runtime writes `\r\n`, and
+                    // an indenting server can emit a line of spaces or tabs.
+                    // All of those are blank lines, and none of them is JSON.
+                    guard !Self.isBlankLine(frame) else { continue }
                     continuation.yield(frame)
                 }
                 continuation.finish()
@@ -146,6 +152,17 @@ public actor SubprocessTransport: Transport {
             }
         }
         logger.debug("Transport connected successfully")
+    }
+
+    /// Whether `frame` is a blank line: empty, or made up entirely of ASCII
+    /// whitespace — LF, CR, space, tab. Anything else is a message, even if
+    /// it turns out not to parse.
+    ///
+    /// Deliberately not `Character.isWhitespace` over a decoded string: this
+    /// runs on every frame, the bytes may not be valid UTF-8, and the set of
+    /// things a server means by "blank line" is exactly these four.
+    static func isBlankLine(_ frame: Data) -> Bool {
+        frame.allSatisfy { $0 == 0x0A || $0 == 0x0D || $0 == 0x20 || $0 == 0x09 }
     }
 
     /// Stops the child and finishes the message stream.

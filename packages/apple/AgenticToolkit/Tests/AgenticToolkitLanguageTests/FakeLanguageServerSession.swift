@@ -87,6 +87,16 @@ struct FakeSessionBehavior: Sendable {
     /// inspect.
     var holdsStart: Bool
 
+    /// When true, `stop()` parks — **before** it writes any state — until
+    /// `releaseHeldStop()`.
+    ///
+    /// This is what makes "shutdown waited for it" expressible. A teardown
+    /// that runs to completion on its own is indistinguishable from one
+    /// nobody waited for; a teardown that is still parked when `shutdown()`
+    /// returns is a leak, and holding the stop is how a test gets to see the
+    /// difference.
+    var holdsStop: Bool
+
     /// Errors for successive `didOpen` calls; a `nil` entry (or running off the
     /// end) succeeds. `[.notRunning, nil]` is "the first open is dropped, the
     /// next one lands".
@@ -100,13 +110,15 @@ struct FakeSessionBehavior: Sendable {
         startError: LanguageServerSessionError? = nil,
         didOpenErrors: [LanguageServerSessionError?] = [],
         didChangeErrors: [LanguageServerSessionError?] = [],
-        holdsStart: Bool = false
+        holdsStart: Bool = false,
+        holdsStop: Bool = false
     ) {
         self.capabilities = capabilities
         self.startError = startError
         self.didOpenErrors = didOpenErrors
         self.didChangeErrors = didChangeErrors
         self.holdsStart = holdsStart
+        self.holdsStop = holdsStop
     }
 
     /// A server that declared the given sync capability and nothing else.
@@ -158,6 +170,13 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
 
     /// Parked `start()` calls, when `behavior.holdsStart` is set.
     private var heldStarts: [CheckedContinuation<Void, Never>] = []
+
+    /// Parked `stop()` calls, when `behavior.holdsStop` is set, and whether
+    /// the release has already been given. The flag is what makes the release
+    /// order-independent: a test that releases before the stop has arrived
+    /// would otherwise park it forever.
+    private var heldStops: [CheckedContinuation<Void, Never>] = []
+    private var stopWasReleased = false
     private let log: SessionLog
     private let behavior: FakeSessionBehavior
     private var didOpenCount = 0
@@ -214,6 +233,17 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
         setState(.running)
     }
 
+    /// Resumes every `stop()` parked by `behavior.holdsStop`, and lets any
+    /// later one through without parking.
+    func releaseHeldStop() {
+        stopWasReleased = true
+        let held = heldStops
+        heldStops = []
+        for continuation in held {
+            continuation.resume()
+        }
+    }
+
     /// Resumes every `start()` parked by `behavior.holdsStart`.
     func releaseHeldStart() {
         let held = heldStarts
@@ -224,6 +254,11 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     }
 
     func stop() async {
+        if behavior.holdsStop && !stopWasReleased {
+            await withCheckedContinuation { continuation in
+                heldStops.append(continuation)
+            }
+        }
         setState(.stopped)
         record(.stop)
         // Finished here for the same reason the real session finishes it in

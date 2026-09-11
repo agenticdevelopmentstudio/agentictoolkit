@@ -793,4 +793,129 @@ struct LanguageServerRegistryTests {
         #expect(sessionEmissions == emissionsAfterCreation, "the failure must not move `sessions`")
         #expect(registry.sessionStates[configuration.id]?.failure != nil)
     }
+
+    // MARK: - 9. Teardown that outlives the call that started it
+
+    /// A retired session is stopped from work that `reconcile` cannot wait for
+    /// — it is synchronous, and a settings change must not block on a
+    /// subprocess exiting. The handle still has to survive, because the quit
+    /// path is the one caller that *must* wait.
+    ///
+    /// What it catches: the original `Task { await stopAll(retired) }`, whose
+    /// handle was dropped on the floor. `shutdown()` enumerated `sessions`,
+    /// did not find the retired session there — `reconcile` had already taken
+    /// it out — and returned while its `sourcekit-lsp` was still inside its
+    /// grace period, to be killed with the app.
+    ///
+    /// The two releases are the assertion. Releasing the *live* session's stop
+    /// lets `stopAll` finish; a `shutdown()` that only waits for what is in
+    /// `sessions` completes right there. It must not, and the second release
+    /// is what proves the retired one was what held it.
+    @Test("shutdown waits for a session that reconcile retired earlier")
+    func shutdownWaitsForARetiredSessionsTeardown() async {
+        let store = makeStore()
+        let log = SessionLog()
+        let registry = makeRegistry(
+            store: store,
+            log: log,
+            behavior: FakeSessionBehavior(holdsStop: true)
+        )
+
+        var configuration = makeConfiguration(command: "/nonexistent/first-server")
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+        guard let retired = fake(registry, configuration.id) else {
+            Issue.record("no session was created")
+            return
+        }
+
+        // A changed command is a changed descriptor, which is what retires the
+        // first session and builds a second under the same configuration id.
+        configuration.command = "/nonexistent/second-server"
+        store.set([configuration], for: UserSettings.languageServerConfigurations)
+        guard let replacement = fake(registry, configuration.id) else {
+            Issue.record("no replacement session was created")
+            return
+        }
+        #expect(!identical(retired, replacement), "the session was reused, not replaced")
+
+        let finished = Journal()
+        let shutdown = Task { @MainActor in
+            await registry.shutdown()
+            finished.record("shutdown")
+        }
+
+        // The live session lets go; the retired one has not.
+        await replacement.releaseHeldStop()
+        let stoppedTheLiveOne = await poll(seconds: 1) { log.stopped.count >= 1 }
+        #expect(stoppedTheLiveOne, "the live session was never stopped")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(
+            finished.entries.isEmpty,
+            "shutdown returned while a retired session was still shutting down"
+        )
+
+        await retired.releaseHeldStop()
+        await shutdown.value
+        #expect(finished.entries == ["shutdown"])
+        #expect(log.stopped.count == 2, "both sessions must have been stopped")
+    }
+
+    /// Somewhere to record that an `await` returned, readable from the main
+    /// actor without a second suspension point.
+    @MainActor
+    private final class Journal {
+        private(set) var entries: [String] = []
+        func record(_ name: String) { entries.append(name) }
+    }
+
+    /// The rule the Language Servers panel depends on, asserted at *every*
+    /// emission rather than at rest: **`sessionStates`'s keys are a subset of
+    /// `configurations`'s ids.** `@Published` fires from `willSet`, so a
+    /// `combineLatest` subscriber sees each intermediate pairing, and the
+    /// panel's row builder iterates the states and looks each name up in the
+    /// configurations — a state with no configuration renders a blank name.
+    ///
+    /// What it catches: `configurations = effective` in either outer position.
+    /// Published first — where it used to be — a removal pairs the shrunken
+    /// configuration list with a state that has not gone yet. Published last,
+    /// which is the obvious fix, an addition pairs the old configuration list
+    /// with a state that has already arrived. Only between the retire loop and
+    /// the create loop is it safe in both directions, and this test does both
+    /// directions.
+    @Test("sessionStates never holds an id that configurations has not published")
+    func statesAreAlwaysASubsetOfConfigurations() {
+        let store = makeStore()
+        let registry = makeRegistry(
+            store: store,
+            log: SessionLog(),
+            // Parked at `.idle`, so the only writes to `sessionStates` in this
+            // test are reconcile's own. A session running to `.running` would
+            // emit from its observation task, off the reconcile that is under
+            // test.
+            behavior: FakeSessionBehavior(holdsStart: true)
+        )
+
+        var violations: [String] = []
+        let token = registry.$configurations
+            .combineLatest(registry.$sessionStates)
+            .sink { configurations, states in
+                let published = Set(configurations.map(\.id))
+                let orphans = Set(states.keys).subtracting(published)
+                if !orphans.isEmpty {
+                    violations.append("\(orphans.count) state(s) with no configuration")
+                }
+            }
+        defer { token.cancel() }
+
+        let swiftServer = makeConfiguration(languageIds: ["swift"], command: "/nonexistent/swift")
+        let pythonServer = makeConfiguration(languageIds: ["python"], command: "/nonexistent/python")
+
+        // Addition, then a second addition beside it, then a removal.
+        store.set([swiftServer], for: UserSettings.languageServerConfigurations)
+        store.set([swiftServer, pythonServer], for: UserSettings.languageServerConfigurations)
+        store.set([pythonServer], for: UserSettings.languageServerConfigurations)
+
+        #expect(registry.sessions.count == 1)
+        #expect(violations.isEmpty, "\(violations)")
+    }
 }

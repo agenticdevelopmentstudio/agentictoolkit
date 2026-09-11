@@ -171,13 +171,27 @@ public enum PluginTransport {
             try Task.checkCancellation()
             for event in decoder.finish() { continuation.yield(event) }
 
-            let status = await channel.waitUntilExit()
+            // `try`: this throws rather than reporting a status nobody
+            // observed. A wall-clock budget expiry cancels this task, and a
+            // cancelled wait means the child may still be running — reading
+            // that as "exited 0" would take the success path on a run that
+            // never finished. The throw lands in the `catch` below, which is
+            // what actually reaps the child.
+            let status = try await channel.waitUntilExit()
             // Releases the descriptors and, for a child whose stderr a
             // backgrounded grandchild still holds open, ends the drain — so
             // the capture below is complete rather than a bounded snapshot.
             await channel.terminate()
             guard status == 0 else {
-                let errorBody = Data(await channel.standardErrorText().utf8)
+                // The child's stderr **bytes**, not `standardErrorText()`'s
+                // string. That string is for humans: it carries diagnostic
+                // prefixes ("[stderr truncated to …]", "[stderr capture
+                // incomplete …]") and falls back to Latin-1 for non-UTF-8
+                // input, and re-encoding it as UTF-8 rewrites every byte at
+                // or above 0x80. A plugin parsing its own error format would
+                // be handed our bookkeeping as its first line and a
+                // transcoded body after it.
+                let errorBody = await channel.standardErrorData()
                 let message = plugin.describeError(status: Int(status), body: errorBody)
                     ?? "Command exited with status \(status)"
                 throw TransportError.commandFailed(status: status, message: message)
@@ -198,15 +212,23 @@ public enum PluginTransport {
             // That is the trade, and it is the right way round. The
             // alternative is abandoning a half-killed child: a plugin's
             // subprocess left running with its descriptors held, which for a
-            // menu-bar app that stays resident for days accumulates. Paying a
-            // bounded wait once, on the way out of a run that already failed,
-            // buys the guarantee that no `.command` plugin ever leaks a
-            // process.
+            // menu-bar app that stays resident for days accumulates.
             //
-            // The success path does not pay it. There, `waitUntilExit()` has
-            // already returned, so the child is gone before `terminate()` is
-            // reached and the grace period is never entered — the call
-            // degenerates to closing descriptors.
+            // **This line only reaps what actually reaches it**, and that is
+            // a fact about the code above, not about `terminate()`. It is
+            // reached because `waitUntilExit()` is cancellable: a budget
+            // expiry cancels this task, that wait throws `CancellationError`
+            // instead of parking on the child for ever, and the throw arrives
+            // here. Before that was true the racer stayed parked at the wait
+            // and this `catch` never ran — the child outlived the app's
+            // interest in it. Any future wait added above this point must be
+            // cancellable for the same reason; an uncancellable one silently
+            // reinstates the leak.
+            //
+            // The success path does not pay the grace period. There,
+            // `waitUntilExit()` has already returned, so the child is gone
+            // before `terminate()` is reached and the grace period is never
+            // entered — the call degenerates to closing descriptors.
             await channel.terminate()
             throw error
         }

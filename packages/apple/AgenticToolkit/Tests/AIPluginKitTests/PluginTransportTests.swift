@@ -143,6 +143,78 @@ struct PluginTransportTests {
         }
     }
 
+    /// Somewhere for a plugin to leave the exact bytes it was handed.
+    /// Lock-guarded: `describeError` is called from the transport's task and
+    /// read from the test's.
+    private final class BodyBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored = Data()
+        func set(_ data: Data) {
+            lock.lock()
+            defer { lock.unlock() }
+            stored = data
+        }
+        var data: Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+    }
+
+    /// `AIPlugin` requires `init()`, so the box is the plugin's own and the
+    /// test reads it back off the instance it handed over.
+    private final class BodyRecordingPlugin: AIPlugin {
+        let box = BodyBox()
+        func buildRequest(_ context: AIChatContext) throws -> AIRequestSpec {
+            fatalError("unused: specs are built directly in the tests")
+        }
+        func makeDecoder() -> any AIStreamDecoder { LineDecoder() }
+        func describeError(status: Int, body: Data) -> String? {
+            box.set(body)
+            return "status \(status)"
+        }
+    }
+
+    /// `describeError(status:body:)` takes `Data` for the same reason the HTTP
+    /// path hands it the response body verbatim: a plugin's error format is
+    /// the *server's*, and it may be JSON, a protobuf, or anything else that
+    /// does not survive a trip through `String`.
+    ///
+    /// What it catches: sourcing that body from a *text* accessor. The
+    /// command path used to call `standardErrorText()` and re-encode the
+    /// result, which turned every byte that is not valid UTF-8 into U+FFFD —
+    /// three bytes where there was one — and prefixed the channel's own
+    /// diagnostic line onto stderr the plugin was asked to parse. A plugin
+    /// looking for a length, a checksum, or a leading brace was handed
+    /// something the child never wrote.
+    ///
+    /// The `\377` is the whole point: it is a byte no UTF-8 decoder can
+    /// represent, so a round trip through `String` is visible in the
+    /// assertion rather than merely suspected.
+    @Test("describeError is handed the child's stderr bytes, unmodified")
+    func describeErrorReceivesRawStandardErrorBytes() async throws {
+        let plugin = BodyRecordingPlugin()
+        let spec = AIRequestSpec.command(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf 'boom\\377\\n' >&2; exit 3"],
+            timeout: 10
+        )
+
+        do {
+            _ = try await collectText(spec, plugin: plugin)
+            Issue.record("a child exiting non-zero must fail the stream")
+        } catch is PluginTransport.TransportError {
+            // The failure is the path under test; its shape is pinned by
+            // `nonZeroExitCarriesStatusAndStandardError` above.
+        }
+
+        let expected = Data([0x62, 0x6F, 0x6F, 0x6D, 0xFF, 0x0A])  // "boom\377\n"
+        #expect(
+            plugin.box.data == expected,
+            "stderr reached describeError altered: \(Array(plugin.box.data)) != \(Array(expected))"
+        )
+    }
+
     /// `.command`'s environment **replaces** the parent's rather than merging
     /// over it, which is the opposite of what the MCP side wants and the
     /// reason `SubprocessChannel.EnvironmentPolicy` is a parameter at all. A

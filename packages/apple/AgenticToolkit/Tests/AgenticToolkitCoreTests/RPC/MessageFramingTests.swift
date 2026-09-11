@@ -239,4 +239,97 @@ struct MessageFramingTests {
             try decoder.finish()
         }
     }
+
+    // MARK: - A rejected frame's bytes never become protocol (F11)
+
+    @Test("an over-cap Content-Length body is discarded, so a header inside it never frames anything")
+    func contentLengthOverCapBodyIsDiscardedNotReframed() throws {
+        var decoder = MessageFramingDecoder(framing: .contentLength)
+        let bodyLength = MessageFramingDecoder.maximumFrameBytes + 1
+
+        // The header is consumed unconditionally, so from here on the body is
+        // peer-controlled bytes sitting in the decoder's buffer.
+        #expect(throws: MessageFramingError.frameSizeExceeded(limit: MessageFramingDecoder.maximumFrameBytes)) {
+            try decoder.consume(Data("Content-Length: \(bodyLength)\r\n\r\n".utf8))
+        }
+
+        // The body *is* a well-formed frame. If it is scanned as protocol
+        // rather than skipped, the decoder resynchronises on the boundary the
+        // peer chose and hands "EVIL!" back as a message.
+        let smuggled = Data("Content-Length: 5\r\n\r\nEVIL!".utf8)
+        var frames: [Data] = []
+        frames += try decoder.consume(smuggled)
+
+        // The rest of the declared body, in realistic chunks.
+        var remaining = bodyLength - smuggled.count
+        let filler = Data(repeating: 0x2E, count: 64 * 1024)
+        while remaining > 0 {
+            let take = min(remaining, filler.count)
+            frames += try decoder.consume(filler.prefix(take))
+            remaining -= take
+        }
+        #expect(frames.isEmpty, "the rejected body was reframed into \(frames.count) message(s)")
+
+        // The next genuine frame, which must be the first thing returned.
+        frames += try decoder.consume(Data("Content-Length: 2\r\n\r\nok".utf8))
+        #expect(frames == [Data("ok".utf8)])
+    }
+
+    @Test("the chunk that carries a deferred cap violation is kept, not dropped with the throw")
+    func contentLengthDeferredViolationDoesNotDropItsChunk() throws {
+        var decoder = MessageFramingDecoder(framing: .contentLength)
+        let bodyLength = MessageFramingDecoder.maximumFrameBytes + 1
+
+        // One chunk: a good frame, then the header of an over-cap one. The
+        // good frame comes back now and the violation is deferred.
+        let first = Data("Content-Length: 4\r\n\r\ngood".utf8)
+            + Data("Content-Length: \(bodyLength)\r\n\r\n".utf8)
+        #expect(try decoder.consume(first) == [Data("good".utf8)])
+
+        // The deferred violation surfaces on this call — and the 100 body
+        // bytes handed over with it must still be counted against the
+        // discard. Dropping them makes the skip finish 100 bytes early and
+        // eat the front of the next frame.
+        let bodyPrefix = Data(repeating: 0x2E, count: 100)
+        #expect(throws: MessageFramingError.frameSizeExceeded(limit: MessageFramingDecoder.maximumFrameBytes)) {
+            try decoder.consume(bodyPrefix)
+        }
+
+        var frames: [Data] = []
+        var remaining = bodyLength - bodyPrefix.count
+        let filler = Data(repeating: 0x2E, count: 64 * 1024)
+        while remaining > 0 {
+            let take = min(remaining, filler.count)
+            frames += try decoder.consume(filler.prefix(take))
+            remaining -= take
+        }
+        #expect(frames.isEmpty)
+        frames += try decoder.consume(Data("Content-Length: 5\r\n\r\nafter".utf8))
+        #expect(frames == [Data("after".utf8)], "the discard ran off the end of the rejected frame")
+    }
+
+    @Test("an over-cap newline line is skipped up to its delimiter, and the next line decodes")
+    func newlineOverCapLineIsSkippedToItsDelimiter() throws {
+        var decoder = MessageFramingDecoder(framing: .newlineDelimited)
+        let oversized = Data(repeating: 0x41, count: MessageFramingDecoder.maximumFrameBytes + 1)
+        #expect(throws: MessageFramingError.frameSizeExceeded(limit: MessageFramingDecoder.maximumFrameBytes)) {
+            try decoder.consume(oversized)
+        }
+
+        // "TAIL\n" completes the rejected line, so it goes with it; "next\n"
+        // is the first line that is really a line.
+        let frames = try decoder.consume(Data("TAIL\nnext\n".utf8))
+        #expect(frames == [Data("next\n".utf8)])
+    }
+
+    @Test("finish() during a skip returns nothing rather than half of a rejected frame")
+    func finishDuringASkipYieldsNothing() throws {
+        var decoder = MessageFramingDecoder(framing: .newlineDelimited)
+        let oversized = Data(repeating: 0x41, count: MessageFramingDecoder.maximumFrameBytes + 1)
+        #expect(throws: MessageFramingError.frameSizeExceeded(limit: MessageFramingDecoder.maximumFrameBytes)) {
+            try decoder.consume(oversized)
+        }
+        _ = try decoder.consume(Data("still the same line".utf8))
+        #expect(try decoder.finish() == [])
+    }
 }

@@ -120,18 +120,47 @@ public struct MessageFramingDecoder {
     /// the good frames to the same throw that reports the bad one.
     private var pendingCapViolation: MessageFramingError?
 
+    /// Content-Length framing only: how many bytes of an over-cap body are
+    /// still to be thrown away before the next header is looked for.
+    ///
+    /// **This is what keeps a rejected frame from becoming protocol.** The
+    /// header of an over-cap frame is consumed and its declared length is
+    /// known, so the body's extent is known too; without recording it, those
+    /// peer-controlled bytes stay in the buffer and the next header scan runs
+    /// *over the body*, letting a body that contains a `Content-Length:` line
+    /// resynchronise the stream onto boundaries the peer chose. Reporting the
+    /// violation is not enough on its own: the decoder is a value the caller
+    /// still holds, and `consume(_:)` after a throw must be safe by
+    /// construction rather than by the caller's good manners.
+    private var pendingDiscardLength = 0
+
+    /// Newline framing only: the same idea where there is no declared length.
+    /// An over-cap line's extent is "until the next `0x0A`", so this drops
+    /// bytes until one arrives, and the oversized line is never delivered as
+    /// a frame. It also bounds the buffer, which the previous behaviour —
+    /// keep accumulating and re-throw — did not.
+    private var isDiscardingToDelimiter = false
+
     public init(framing: MessageFraming) {
         self.framing = framing
     }
 
     /// Appends `chunk` to the internal buffer and returns every frame the
     /// buffer now completes, in order. Never returns a partial frame.
+    ///
+    /// **The chunk is taken before a deferred violation is thrown**, and the
+    /// order matters. Throwing first would silently drop a whole chunk of the
+    /// stream, and the byte accounting that skips a rejected frame's body
+    /// (`pendingDiscardLength`) would then come up short by exactly that many
+    /// bytes — the discard would run off the end of the bad frame and eat the
+    /// front of the next good one, which is the desync this decoder is meant
+    /// to make impossible.
     public mutating func consume(_ chunk: Data) throws -> [Data] {
+        buffer.append(chunk)
         if let violation = pendingCapViolation {
             pendingCapViolation = nil
             throw violation
         }
-        buffer.append(chunk)
         switch framing {
         case .newlineDelimited:
             return try consumeNewlineDelimited()
@@ -152,6 +181,19 @@ public struct MessageFramingDecoder {
             pendingCapViolation = nil
             throw violation
         }
+        // Whatever is still buffered while a rejected frame is being skipped
+        // belongs to that frame, not to a final one. Dropping it here is what
+        // keeps `finish()` from handing back half of an over-cap line as a
+        // frame, or reporting its unarrived body as a truncated message.
+        if isDiscardingToDelimiter || pendingDiscardLength > 0 {
+            isDiscardingToDelimiter = false
+            pendingDiscardLength = 0
+            buffer.removeAll()
+            scanCursor = 0
+            pendingBodyLength = nil
+            return []
+        }
+
         switch framing {
         case .newlineDelimited:
             guard !buffer.isEmpty else { return [] }
@@ -187,6 +229,20 @@ public struct MessageFramingDecoder {
         var frames: [Data] = []
         var consumedThrough = 0
 
+        if isDiscardingToDelimiter {
+            guard let newlineIndex = buffer.firstIndex(of: 0x0A) else {
+                // Every byte held is part of the rejected line. Drop them
+                // rather than accumulate: none of them will ever be a frame.
+                buffer.removeAll()
+                scanCursor = 0
+                return frames
+            }
+            let resumeFrom = buffer.index(after: newlineIndex)
+            buffer.removeSubrange(buffer.startIndex..<resumeFrom)
+            scanCursor = 0
+            isDiscardingToDelimiter = false
+        }
+
         while true {
             let searchStart = buffer.index(buffer.startIndex, offsetBy: max(scanCursor, consumedThrough))
             guard let newlineIndex = buffer[searchStart...].firstIndex(of: 0x0A) else {
@@ -212,8 +268,16 @@ public struct MessageFramingDecoder {
         // frames to the same throw that reports the overflow — return them
         // now and report the violation the next time this decoder is asked
         // for more (see `pendingCapViolation`).
+        //
+        // The rejected line is *dropped*, not kept: it is over the cap and so
+        // will never be handed back as a frame, and holding it would let the
+        // buffer grow without bound while a peer that never sends a delimiter
+        // keeps writing. Everything up to the next `0x0A` belongs to it.
         if buffer.count > Self.maximumFrameBytes {
             let violation = MessageFramingError.frameSizeExceeded(limit: Self.maximumFrameBytes)
+            isDiscardingToDelimiter = true
+            buffer.removeAll()
+            scanCursor = 0
             if frames.isEmpty {
                 throw violation
             }
@@ -228,6 +292,20 @@ public struct MessageFramingDecoder {
         var frames: [Data] = []
 
         while true {
+            if pendingDiscardLength > 0 {
+                // Bytes belonging to a frame already rejected for exceeding
+                // the cap. They are dropped before anything else looks at the
+                // buffer, so no header scan ever runs over a rejected body.
+                let dropped = min(pendingDiscardLength, buffer.count)
+                let cut = buffer.index(buffer.startIndex, offsetBy: dropped)
+                buffer.removeSubrange(buffer.startIndex..<cut)
+                pendingDiscardLength -= dropped
+                if pendingDiscardLength > 0 {
+                    // The rest of the rejected body has not arrived yet.
+                    return frames
+                }
+            }
+
             if pendingBodyLength == nil {
                 guard let headerRange = buffer.firstRange(of: Self.headerTerminator) else {
                     if buffer.count > Self.maximumFrameBytes {
@@ -248,6 +326,13 @@ public struct MessageFramingDecoder {
 
                 if bodyLength > Self.maximumFrameBytes {
                     let violation = MessageFramingError.frameSizeExceeded(limit: Self.maximumFrameBytes)
+                    // The header has just been consumed, so the body's extent
+                    // is known exactly: record it as bytes to throw away.
+                    // Without this the body would stay in the buffer and the
+                    // next header scan would run over peer-controlled bytes —
+                    // a `Content-Length:` line *inside* the rejected body
+                    // would then set the stream's next frame boundary.
+                    pendingDiscardLength = bodyLength
                     if frames.isEmpty {
                         throw violation
                     }

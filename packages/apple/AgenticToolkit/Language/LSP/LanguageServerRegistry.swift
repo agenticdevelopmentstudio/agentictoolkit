@@ -87,6 +87,11 @@ public final class LanguageServerRegistry: ObservableObject {
     /// lockstep with it.
     private var stateObservations: [UUID: Task<Void, Never>] = [:]
 
+    /// Sessions `reconcile` retired, still stopping. They have already left
+    /// `sessions`, so `shutdown()` cannot find them there; this is the handle
+    /// that lets it wait for them anyway. See `PendingTeardowns`.
+    private let retiredTeardowns = PendingTeardowns()
+
     private var cancellables: Set<AnyCancellable> = []
 
     public init(
@@ -283,6 +288,13 @@ public final class LanguageServerRegistry: ObservableObject {
         stateObservations = [:]
         sessionStates = [:]
         await Self.stopAll(running)
+        // The sessions this registry retired earlier are not in `sessions`
+        // any more — `reconcile` took them out when it replaced them — so
+        // `stopAll(running)` above cannot see them. They are still shutting
+        // down, and a quit that does not wait for them leaves their children
+        // to be killed with the app. Awaited *after* `stopAll` so both sets
+        // of grace periods overlap rather than queue.
+        await retiredTeardowns.drain()
     }
 
     /// How many sessions are having their state read right now.
@@ -298,7 +310,6 @@ public final class LanguageServerRegistry: ObservableObject {
         secrets: LanguageServerSecrets
     ) {
         let effective = Self.effectiveConfigurations(builtIn: builtInConfigurations, user: userConfigurations)
-        configurations = effective
 
         let enabled = effective.filter(\.isEnabled)
         let desired: [UUID: SessionDescriptor] = enabled.reduce(into: [:]) { result, configuration in
@@ -326,8 +337,28 @@ public final class LanguageServerRegistry: ObservableObject {
             stateObservations.removeValue(forKey: id)?.cancel()
         }
         if !retired.isEmpty {
-            Task { await Self.stopAll(retired) }
+            // Not a bare `Task {}`: the handle has to survive this call so
+            // `shutdown()` can wait for it. These sessions are no longer in
+            // `sessions`, so nothing else knows they exist.
+            retiredTeardowns.add { await Self.stopAll(retired) }
         }
+
+        // Published here — after the retire loop above removed the states of
+        // everything leaving, and before the create loop below seeds the
+        // states of everything arriving.
+        //
+        // **The invariant is `sessionStates`'s keys ⊆ `configurations`'s ids**,
+        // at every emission, and the position of this line is the whole of
+        // what enforces it. `@Published` fires from `willSet`, so a
+        // `combineLatest` subscriber — the Language Servers panel is one —
+        // runs on the *intermediate* pairing, and the panel iterates states
+        // and looks each name up in configurations. Publishing first, as this
+        // used to, pairs a new configuration with a state that is not there
+        // yet; publishing last would pair a removed configuration with a
+        // state that has not gone yet. Only the middle is safe in both
+        // directions, and both directions happen: this method both adds and
+        // removes servers.
+        configurations = effective
 
         for (id, descriptor) in desired where sessions[id] == nil {
             let session = sessionFactory(descriptor.configuration, descriptor.secrets, descriptor.rootURL)

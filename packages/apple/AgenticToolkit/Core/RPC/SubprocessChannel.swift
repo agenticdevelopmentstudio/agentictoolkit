@@ -58,6 +58,11 @@ public actor SubprocessChannel {
         /// well-defined way to hand out the same `AsyncThrowingStream`
         /// twice and have both sides see every frame.
         case alreadyConsumed
+        /// The child's stdin has been closed — by `closeInput()`, or
+        /// pre-emptively by `terminate()` — so there is nowhere for a write
+        /// to go. Distinct from `notLaunched`: a child did run, and may still
+        /// be running and producing output.
+        case inputClosed
         case launchFailed(String)
         /// Not thrown by `SubprocessChannel` itself — `waitUntilExit()`
         /// returns the raw status and `standardErrorText()` the raw text, and
@@ -75,6 +80,8 @@ public actor SubprocessChannel {
                 return "The subprocess channel has already been launched."
             case .alreadyConsumed:
                 return "messages() has already been called; only one reader is supported."
+            case .inputClosed:
+                return "The subprocess channel's standard input has been closed."
             case .launchFailed(let reason):
                 return "Failed to launch the subprocess: \(reason)"
             case .exited(let status, let standardError):
@@ -138,7 +145,21 @@ public actor SubprocessChannel {
     /// storage if it is to stop them.
     private nonisolated let readerBox = DescriptorReaderBox()
 
+    /// The `DispatchIO` writer over the child's stdin, held where `deinit` and
+    /// `performTermination()` can reach it without actor isolation — the same
+    /// reasoning as `readerBox`, and for the same descriptor-ownership reason.
+    ///
+    /// It is what makes `sendRaw` a *suspending* write rather than a blocking
+    /// one; see `DescriptorWriter`.
+    private nonisolated let writerBox = DescriptorWriterBox()
+
     private var process: Process?
+
+    /// Retained only so the `Pipe` — and therefore the read end the child
+    /// inherited — outlives `launch()`. **No I/O goes through it**: the write
+    /// end is owned by `writerBox`'s `DescriptorWriter` from the moment
+    /// `launch()` hands it over, and is closed exactly once, by that writer's
+    /// `DispatchIO` cleanup handler.
     private var standardInputPipe: Pipe?
 
     private var hasLaunched = false
@@ -169,6 +190,10 @@ public actor SubprocessChannel {
         // they own. Safe from `deinit` because `readerBox` is a `nonisolated
         // let` guarded by its own lock, not actor-isolated state.
         readerBox.stopAll()
+        // Same argument for the write side: a channel dropped without
+        // `terminate()` must still give the child's stdin write end back, and
+        // must fail — rather than strand — a write still in flight.
+        writerBox.stop()
     }
 
     /// Spawns the process and starts the read pump. Throws `.alreadyLaunched`
@@ -234,6 +259,10 @@ public actor SubprocessChannel {
             label: "com.agentictoolkit.subprocess-channel.stderr"
         )
         readerBox.set(standardOutput: standardOutputReader, standardError: standardErrorReader)
+        writerBox.set(DescriptorWriter(
+            handle: standardInputPipe.fileHandleForWriting,
+            label: "com.agentictoolkit.subprocess-channel.stdin"
+        ))
 
         self.process = process
         self.standardInputPipe = standardInputPipe
@@ -256,8 +285,8 @@ public actor SubprocessChannel {
 
     /// Frames `message` and writes it to the child's stdin. Equivalent to
     /// `sendRaw(configuration.framing.frame(message))`.
-    public func send(_ message: Data) throws {
-        try sendRaw(configuration.framing.frame(message))
+    public func send(_ message: Data) async throws {
+        try await sendRaw(configuration.framing.frame(message))
     }
 
     /// Writes `bytes` to the child's stdin **unframed**, byte for byte.
@@ -268,14 +297,36 @@ public actor SubprocessChannel {
     /// A write after the child has exited throws rather than raising
     /// SIGPIPE — `launch()` disables the signal for this descriptor
     /// specifically (see `F_SETNOSIGPIPE` there).
-    public func sendRaw(_ bytes: Data) throws {
-        guard let standardInputPipe else { throw ChannelError.notLaunched }
-        try standardInputPipe.fileHandleForWriting.write(contentsOf: bytes)
+    ///
+    /// **This suspends; it does not block.** A `FileHandle.write(contentsOf:)`
+    /// here would be a blocking `write(2)` made while holding this actor, and
+    /// once a child stops draining its stdin — busy, wedged, stopped in a
+    /// debugger — the 64 KB pipe buffer fills and that call never returns.
+    /// Every other actor-isolated method queues behind it, `terminate()`
+    /// included, so the one call that could rescue the situation would be the
+    /// one call that can no longer run. That is exactly the hazard
+    /// `waitUntilExit()`'s doc comment below rejects `Process.waitUntilExit()`
+    /// for; the write side is held to the same rule, over the same
+    /// `DispatchIO` machinery the read side already uses.
+    ///
+    /// **Order is still call order.** The submission is synchronous — it
+    /// happens while this actor is held, before the first suspension — and
+    /// only the *completion* is awaited. Two concurrent `send`s therefore
+    /// reach the descriptor in the order they were called, which a JSON-RPC
+    /// peer's stdin depends on as much as its stdout does.
+    public func sendRaw(_ bytes: Data) async throws {
+        guard let writer = writerBox.get() else { throw ChannelError.notLaunched }
+        let pending = writer.submit(bytes)
+        try await pending.value()
     }
 
     /// Closes stdin so the child sees EOF and can finish.
+    ///
+    /// Orderly: bytes already submitted by `sendRaw` are flushed before the
+    /// descriptor goes away. `terminate()` uses the pre-emptive close instead —
+    /// see `DescriptorWriter.stop()`.
     public func closeInput() {
-        try? standardInputPipe?.fileHandleForWriting.close()
+        writerBox.close()
     }
 
     /// Everything the child wrote to stderr, decoded as UTF-8 where possible.
@@ -304,15 +355,7 @@ public actor SubprocessChannel {
     /// and "the front was trimmed" and "the end hasn't arrived yet" are
     /// different facts for a caller trying to explain a failure.
     public func standardErrorText() async -> String {
-        if let standardErrorTask {
-            let drained: Bool? = try? await withWallClockBudget(
-                Self.standardErrorDrainGraceSeconds
-            ) {
-                await standardErrorTask.value
-                return true
-            }
-            if drained == nil { isStandardErrorIncomplete = true }
-        }
+        await awaitStandardErrorDrain()
         let text = String(bytes: standardErrorBuffer, encoding: .utf8)
             ?? String(bytes: standardErrorBuffer, encoding: .isoLatin1)
             ?? ""
@@ -325,6 +368,42 @@ public actor SubprocessChannel {
             prefix += "[stderr capture incomplete: the drain did not finish within \(grace)s]\n"
         }
         return prefix + text
+    }
+
+    /// Exactly the bytes the child wrote to stderr — no decoding, no
+    /// re-encoding, and **no diagnostic prefix**.
+    ///
+    /// This is the form to hand to anything that *parses* stderr, and
+    /// `standardErrorText()` is the form to show a human or write to a log.
+    /// The difference is not cosmetic. That method prepends a truncation or
+    /// drain-timeout marker, which a plugin scanning the first line of stderr
+    /// for an error code would parse instead of the child's own first line;
+    /// and it falls back to Latin-1 for a capture that is not valid UTF-8, so
+    /// re-encoding the result changes every byte at or above `0x80`. A caller
+    /// that needs those two facts should ask for them as facts, not read them
+    /// out of prose glued to the front of the payload.
+    ///
+    /// Subject to the same bounded drain wait, the same 1 MB tail cap, and the
+    /// same "call `terminate()` first for a complete answer" advice as
+    /// `standardErrorText()`.
+    public func standardErrorData() async -> Data {
+        await awaitStandardErrorDrain()
+        return standardErrorBuffer
+    }
+
+    /// Waits out `standardErrorDrainGraceSeconds` for the drain task, and
+    /// records the lapse if the budget expires first. Shared by the two
+    /// accessors above so "the capture is incomplete" is decided once, in one
+    /// place, whichever of them the caller reaches for.
+    private func awaitStandardErrorDrain() async {
+        guard let standardErrorTask else { return }
+        let drained: Bool? = try? await withWallClockBudget(
+            Self.standardErrorDrainGraceSeconds
+        ) {
+            await standardErrorTask.value
+            return true
+        }
+        if drained == nil { isStandardErrorIncomplete = true }
     }
 
     /// Terminates the child if still running and finishes the message
@@ -430,7 +509,14 @@ public actor SubprocessChannel {
         // safe, and a child blocked reading it needs the EOF to notice it has
         // been asked to leave. The stdout/stderr read ends are handled below,
         // once the child is confirmed dead or forcibly killed.
-        try? standardInputPipe?.fileHandleForWriting.close()
+        //
+        // `stop()`, not `close()`: the case this method exists for includes a
+        // child that has stopped draining its stdin, and an orderly close
+        // waits for the queued writes such a child will never take. `.stop`
+        // cancels the write in flight — its `sendRaw` caller sees a thrown
+        // `ECANCELED` rather than parking for ever — and closes the descriptor
+        // now, which is the EOF a child blocked on `read(2)` needs.
+        writerBox.stop()
 
         if let process, process.isRunning {
             // Record that what follows is a teardown, and record it here
@@ -532,8 +618,26 @@ public actor SubprocessChannel {
     /// long-lived MCP server, and it would make `terminate()` on that same
     /// channel unreachable (every other actor call, `terminate()` included,
     /// queues behind the blocked one).
-    public nonisolated func waitUntilExit() async -> Int32 {
-        await exitWaiterBox.get()?.wait() ?? 0
+    ///
+    /// **Throws rather than inventing a status.** There are two ways not to
+    /// have one, and both used to be reported as `0` — success:
+    ///
+    /// - the channel was never launched, so no child ever ran
+    ///   (`ChannelError.notLaunched`, the same answer `sendRaw` gives); and
+    /// - the caller's task was cancelled while waiting, so the child may still
+    ///   be running (`CancellationError`).
+    ///
+    /// A caller that reads the result as an exit code — `guard status == 0`
+    /// is the shape at every call site — would otherwise treat "no child" and
+    /// "gave up waiting" as a clean run and go on to consume output that was
+    /// never produced.
+    ///
+    /// Cancelling the wait cancels *only the wait*: the child is untouched and
+    /// another caller's `waitUntilExit()` still resolves normally.
+    public nonisolated func waitUntilExit() async throws -> Int32 {
+        guard let waiter = exitWaiterBox.get() else { throw ChannelError.notLaunched }
+        guard let status = await waiter.wait() else { throw CancellationError() }
+        return status
     }
 
     // MARK: - Environment
@@ -731,7 +835,12 @@ public actor SubprocessChannel {
     /// `@unchecked Sendable` because the lock, not the compiler, is what makes
     /// the finish-exactly-once guarantee hold across the dispatch queue, the
     /// consuming task and `terminate()`.
-    private final class DescriptorReader: @unchecked Sendable {
+    /// Internal rather than private so the teardown/EOF interaction can be
+    /// tested directly. `markTornDown()` versus a real end of file is a race
+    /// between the `DispatchIO` queue and `terminate()` when driven through a
+    /// live child, and a racy test of an ordering rule proves nothing; over a
+    /// bare `Pipe` the ordering is the test's to choose.
+    final class DescriptorReader: @unchecked Sendable {
         /// Chunks in arrival order; finishes on EOF or on `stop()`, and
         /// throws if the read itself fails.
         let chunks: AsyncThrowingStream<Data, Error>
@@ -780,9 +889,23 @@ public actor SubprocessChannel {
         /// deliberately separate from `stop()`: the kill comes first and the
         /// descriptors are released last, so between those two points a
         /// genuine-looking EOF is still ours.
+        ///
+        /// **A teardown cannot be retroactive**, and this is the same
+        /// invariant `stop()` states from the other side. An EOF that has
+        /// already arrived, or a descriptor some terminal path has already
+        /// closed, happened *before* this call and therefore cannot have been
+        /// caused by it. A child that closes stdout and keeps running — `sh
+        /// -c 'printf …; exec 1>&-; sleep 60'` is the shape — reaches EOF for
+        /// its own reasons while `process.isRunning` is still true, so a
+        /// `terminate()` arriving afterwards would otherwise unmake a genuine
+        /// end of output: `.newlineDelimited` would drop the trailing
+        /// unterminated frame, and `.contentLength` would swallow the
+        /// `truncatedMessage` that reports a half-received body. So this
+        /// records a teardown only for a descriptor that is still live and
+        /// has not yet reached EOF.
         func markTornDown() {
             lock.lock()
-            wasTornDown = true
+            if !sawEndOfFile && !hasClosedDescriptor { wasTornDown = true }
             lock.unlock()
         }
 
@@ -934,17 +1057,6 @@ public actor SubprocessChannel {
             dispatchChannel.close(flags: .stop)
         }
 
-        /// Owns the read end and closes it exactly once, from the
-        /// `DispatchIO` cleanup handler. A separate object rather than a bare
-        /// `FileHandle` capture so what the `@Sendable` cleanup closure holds
-        /// is itself `Sendable`, and so the descriptor has one owner: the
-        /// channel that reads it.
-        private final class HandleCloser: @unchecked Sendable {
-            private let handle: FileHandle
-            init(_ handle: FileHandle) { self.handle = handle }
-            func close() { try? handle.close() }
-        }
-
         private static func makeData(from dispatchData: DispatchData) -> Data {
             var result = Data()
             result.reserveCapacity(dispatchData.count)
@@ -952,6 +1064,204 @@ public actor SubprocessChannel {
                 result.append(buffer)
             }
             return result
+        }
+    }
+
+    /// Owns one end of a pipe and closes it exactly once, from the
+    /// `DispatchIO` cleanup handler. A separate object rather than a bare
+    /// `FileHandle` capture so what the `@Sendable` cleanup closure holds is
+    /// itself `Sendable`, and so the descriptor has exactly one owner: the
+    /// `DispatchIO` channel that reads or writes it.
+    ///
+    /// Shared by `DescriptorReader` and `DescriptorWriter` — the ownership
+    /// rule is the same in both directions, and stating it once is what keeps
+    /// the two sides from drifting into two different close policies.
+    private final class HandleCloser: @unchecked Sendable {
+        private let handle: FileHandle
+        init(_ handle: FileHandle) { self.handle = handle }
+        func close() { try? handle.close() }
+    }
+
+    /// One awaited write submitted to a `DescriptorWriter`.
+    ///
+    /// Exists to split *submission* from *completion*. `sendRaw` must put its
+    /// bytes into the writer's queue while it still holds the actor —
+    /// otherwise two concurrent `send`s could hop off the actor and reach the
+    /// descriptor in either order, which desynchronises a JSON-RPC session
+    /// permanently — but must not block the actor waiting for the child to
+    /// drain them. So submission is synchronous and returns this; awaiting it
+    /// is what suspends.
+    ///
+    /// The completion may land before, during or after the caller starts
+    /// awaiting, so the result is recorded under a lock and replayed to a
+    /// continuation that arrives late. `@unchecked Sendable` because that
+    /// lock, not the compiler, is what makes resume-exactly-once hold across
+    /// the writer's dispatch queue and the awaiting task.
+    final class PendingWrite: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<Void, Error>?
+        private var continuation: CheckedContinuation<Void, Error>?
+
+        /// Suspends until the descriptor has taken every byte, or the write
+        /// failed or was cancelled.
+        func value() async throws {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                if let result {
+                    lock.unlock()
+                    continuation.resume(with: result)
+                    return
+                }
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+
+        /// Records the outcome and wakes the awaiting caller if there is one.
+        /// Idempotent: `DispatchIO`'s write handler can be invoked more than
+        /// once for a single write (once per progress report, once with
+        /// `done`), and only the first terminal report is the answer.
+        func complete(_ outcome: Result<Void, Error>) {
+            lock.lock()
+            guard result == nil else {
+                lock.unlock()
+                return
+            }
+            result = outcome
+            let waiting = continuation
+            continuation = nil
+            lock.unlock()
+            waiting?.resume(with: outcome)
+        }
+    }
+
+    /// The write side of the child's stdin, over `DispatchIO` for exactly the
+    /// reason the read side uses it: a `write(2)` on a pipe the child has
+    /// stopped draining blocks for ever once the 64 KB buffer fills, and this
+    /// actor cannot afford to be the thing that is blocked — `terminate()`
+    /// queues behind it.
+    ///
+    /// The queue is **serial** and `DispatchIO` preserves submission order, so
+    /// bytes reach the child in the order `submit` was called. `@unchecked
+    /// Sendable` because the lock, not the compiler, is what makes the
+    /// close-exactly-once guarantee hold across the dispatch queue, `deinit`
+    /// and `performTermination()`.
+    private final class DescriptorWriter: @unchecked Sendable {
+        private let closer: HandleCloser
+        private let dispatchChannel: DispatchIO
+        private let queue: DispatchQueue
+        private let lock = NSLock()
+        private var isClosed = false
+
+        init(handle: FileHandle, label: String) {
+            let closer = HandleCloser(handle)
+            self.closer = closer
+            let queue = DispatchQueue(label: label)
+            self.queue = queue
+            // Same ownership rule as `DescriptorReader`: the `DispatchIO`
+            // channel owns the descriptor from here and its cleanup handler
+            // is the single place it is closed.
+            dispatchChannel = DispatchIO(
+                type: .stream,
+                fileDescriptor: handle.fileDescriptor,
+                queue: queue,
+                cleanupHandler: { _ in closer.close() }
+            )
+        }
+
+        /// Queues `bytes` for the child. **Synchronous** — it returns as soon
+        /// as the write is submitted, which is what lets the caller submit
+        /// while holding the actor and await afterwards.
+        func submit(_ bytes: Data) -> PendingWrite {
+            let pending = PendingWrite()
+            lock.lock()
+            let closed = isClosed
+            lock.unlock()
+            guard !closed else {
+                pending.complete(.failure(ChannelError.inputClosed))
+                return pending
+            }
+            guard !bytes.isEmpty else {
+                pending.complete(.success(()))
+                return pending
+            }
+            let dispatchData = bytes.withUnsafeBytes { DispatchData(bytes: $0) }
+            dispatchChannel.write(offset: 0, data: dispatchData, queue: queue) { done, _, error in
+                guard done else { return }
+                if error != 0 {
+                    pending.complete(.failure(
+                        NSError(domain: NSPOSIXErrorDomain, code: Int(error), userInfo: nil)
+                    ))
+                } else {
+                    pending.complete(.success(()))
+                }
+            }
+            return pending
+        }
+
+        /// Orderly close: bytes already submitted are handed to the child
+        /// before the descriptor goes away, so it sees them and *then* EOF.
+        /// This is what `closeInput()` wants. Idempotent.
+        func close() {
+            lock.lock()
+            let shouldClose = !isClosed
+            isClosed = true
+            lock.unlock()
+            guard shouldClose else { return }
+            dispatchChannel.close()
+        }
+
+        /// Pre-emptive close: any write still in flight is cancelled — its
+        /// handler is invoked with `ECANCELED`, so its `sendRaw` caller throws
+        /// rather than parking for ever — and the descriptor is released now.
+        ///
+        /// This is what teardown wants, and the distinction from `close()` is
+        /// load-bearing. The case `terminate()` exists for includes a child
+        /// that has stopped reading its stdin; an orderly close there waits on
+        /// bytes nobody will ever take, and the wait is unbounded.
+        /// Idempotent.
+        func stop() {
+            lock.lock()
+            let shouldClose = !isClosed
+            isClosed = true
+            lock.unlock()
+            guard shouldClose else { return }
+            dispatchChannel.close(flags: .stop)
+        }
+    }
+
+    /// A lock-protected box so `deinit` and `performTermination()` — neither
+    /// of which can touch actor-isolated storage — can reach the writer
+    /// `launch()` created. The read side's `DescriptorReaderBox` below is the
+    /// same idea for the same reason.
+    private final class DescriptorWriterBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var writer: DescriptorWriter?
+
+        func set(_ writer: DescriptorWriter) {
+            lock.lock()
+            self.writer = writer
+            lock.unlock()
+        }
+
+        func get() -> DescriptorWriter? {
+            lock.lock()
+            defer { lock.unlock() }
+            return writer
+        }
+
+        func close() {
+            lock.lock()
+            let writer = self.writer
+            lock.unlock()
+            writer?.close()
+        }
+
+        func stop() {
+            lock.lock()
+            let writer = self.writer
+            lock.unlock()
+            writer?.stop()
         }
     }
 
@@ -995,7 +1305,15 @@ public actor SubprocessChannel {
     private final class ExitWaiter: @unchecked Sendable {
         private let lock = NSLock()
         private var status: Int32?
-        private var waiters: [CheckedContinuation<Int32, Never>] = []
+        /// Keyed by token rather than a flat array so cancelling one waiter
+        /// can remove exactly that waiter and leave every other one parked.
+        private var waiters: [UInt64: CheckedContinuation<Int32?, Never>] = [:]
+        /// Tokens cancelled before their continuation was registered.
+        /// `withTaskCancellationHandler` fires `onCancel` immediately when the
+        /// task is *already* cancelled on entry, which can beat `register`;
+        /// without this the continuation would park for the life of the child.
+        private var cancelledTokens: Set<UInt64> = []
+        private var nextToken: UInt64 = 0
 
         /// Installs the handler. Call this *before* `process.run()` so there
         /// is no window in which an immediately-exiting child can finish
@@ -1024,24 +1342,46 @@ public actor SubprocessChannel {
             self.status = status
             let pending = waiters
             waiters.removeAll()
+            cancelledTokens.removeAll()
             lock.unlock()
-            for waiter in pending {
+            for waiter in pending.values {
                 waiter.resume(returning: status)
             }
         }
 
-        func wait() async -> Int32 {
+        /// Waits for the child to exit. `nil` means **this wait** was
+        /// cancelled, not that the child exited: the child is untouched, and
+        /// every other waiter stays parked until it really does exit.
+        ///
+        /// Cancellable because the callers that wrap it in a deadline —
+        /// `withWallClockBudget` in `terminate()` and in `PluginTransport` —
+        /// cancel the loser of the race. Without a cancellation path that
+        /// loser stays parked on this continuation for the whole life of the
+        /// child, which is unbounded for a long-lived server.
+        func wait() async -> Int32? {
             if let status = peekStatus() {
                 return status
             }
+            let token = makeToken()
             // The lock usage below is split into plain (non-`async`)
             // methods deliberately: `NSLock.lock()`/`unlock()` are
             // unavailable directly inside an `async` function body under
             // strict concurrency, even when no suspension point sits
             // between them.
-            return await withCheckedContinuation { continuation in
-                register(continuation)
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Int32?, Never>) in
+                    register(token, continuation)
+                }
+            } onCancel: {
+                cancelWaiter(token)
             }
+        }
+
+        private func makeToken() -> UInt64 {
+            lock.lock()
+            defer { lock.unlock() }
+            nextToken += 1
+            return nextToken
         }
 
         private func peekStatus() -> Int32? {
@@ -1050,15 +1390,37 @@ public actor SubprocessChannel {
             return status
         }
 
-        private func register(_ continuation: CheckedContinuation<Int32, Never>) {
+        private func register(_ token: UInt64, _ continuation: CheckedContinuation<Int32?, Never>) {
             lock.lock()
+            let wasCancelled = cancelledTokens.remove(token) != nil
             if let status {
+                // A real status outranks a cancellation that raced it: the
+                // child has exited, so there is a true answer to give.
                 lock.unlock()
                 continuation.resume(returning: status)
-            } else {
-                waiters.append(continuation)
-                lock.unlock()
+                return
             }
+            if wasCancelled {
+                lock.unlock()
+                continuation.resume(returning: nil)
+                return
+            }
+            waiters[token] = continuation
+            lock.unlock()
+        }
+
+        private func cancelWaiter(_ token: UInt64) {
+            lock.lock()
+            if let continuation = waiters.removeValue(forKey: token) {
+                lock.unlock()
+                continuation.resume(returning: nil)
+                return
+            }
+            // No continuation yet and no status: `onCancel` beat `register`,
+            // so leave a note for it. If a status is already recorded there
+            // is nothing to cancel — `register` will hand it back.
+            if status == nil { cancelledTokens.insert(token) }
+            lock.unlock()
         }
     }
 

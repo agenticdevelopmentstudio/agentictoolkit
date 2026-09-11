@@ -25,6 +25,13 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
 
     private var controllers: [UUID: ComposableTabsWindowController] = [:]
 
+    /// Language-service shutdowns started by a window close, still running.
+    /// The controller is out of `controllers` by then, so
+    /// `shutdownAllLanguageServices()` cannot find it there; this is the
+    /// handle that lets the quit path wait for it anyway. See
+    /// `PendingTeardowns`.
+    private let closeTeardowns = PendingTeardowns()
+
     /// The order projects were opened in.
     ///
     /// `controllers` is a `Dictionary`, whose value order is seeded per
@@ -208,12 +215,20 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
     /// with windows still open, where no `willClose` shutdown has run yet.
     public func shutdownAllLanguageServices() async {
         let services = controllers.values.compactMap(\.project.languageServices)
-        guard !services.isEmpty else { return }
         await withTaskGroup(of: Void.self) { group in
             for service in services {
                 group.addTask { await service.shutdown() }
             }
         }
+        // A project whose window closed moments ago is not in `controllers`
+        // any more, and its shutdown may still be inside
+        // `SubprocessChannel.terminate()`'s ~2.5 s budget. Close a window and
+        // press Cmd-Q and the loop above finds nothing to wait for; without
+        // this the process exits and takes the detached teardown with it,
+        // leaving an orphaned language server behind. The early `guard` that
+        // used to stand above the loop is gone for the same reason: "no open
+        // windows" is not "nothing to wait for".
+        await closeTeardowns.drain()
     }
 
     // MARK: - Restore
@@ -320,16 +335,16 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
                 // Captured strongly and *before* the controller is dropped:
                 // dropping it releases the workspace and with it the services,
                 // and a shutdown needs the object to still exist when the task
-                // it schedules runs. Best-effort — nothing waits for it here,
-                // because a window close must not block the main thread on a
-                // subprocess exiting.
+                // it schedules runs. Nothing waits for it *here* — a window
+                // close must not block the main thread on a subprocess
+                // exiting — but the quit path does, through `closeTeardowns`.
                 let services = self.controllers[repoID]?.project.languageServices
                 self.controllers.removeValue(forKey: repoID)
                 self.openOrder.removeAll { $0 == repoID }
                 self.adoptedForScripting.remove(repoID)
                 self.openWorkspaceIDs = Array(self.controllers.keys)
                 if let services {
-                    Task { await services.shutdown() }
+                    self.closeTeardowns.add { await services.shutdown() }
                 }
                 if let observer = self.closeObservers.removeValue(forKey: repoID) {
                     NotificationCenter.default.removeObserver(observer)
