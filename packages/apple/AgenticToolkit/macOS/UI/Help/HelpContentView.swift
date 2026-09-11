@@ -84,7 +84,11 @@ public final class HelpContentView: NSView {
     }
 
     private func applyTheme(_ palette: SemanticPalette) {
-        self.layer?.backgroundColor = palette.surfaceColor.cgColor
+        // The same ground as the window, the drawer around it and the
+        // `PanelView` of topics below — for the reason `PanelView` gives: the
+        // cards are what should stand out, and a heading-shaped band of a
+        // second near-identical grey above them only reads as a misprint.
+        self.layer?.backgroundColor = palette.windowBackgroundColor.cgColor
         self.titleLabel.font = palette.font(.heading)
         self.titleLabel.textColor = palette.primaryTextColor
     }

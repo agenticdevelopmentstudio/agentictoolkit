@@ -1,9 +1,11 @@
 import AppKit
 import AgenticToolkitCoreMacOS
+import AgenticDeveloperToolkitUI
 
 private extension NSToolbarItem.Identifier {
     static let settingsNavigation = NSToolbarItem.Identifier("ComposableSettings.navigation")
     static let settingsPanelTitle = NSToolbarItem.Identifier("ComposableSettings.panelTitle")
+    static let settingsHelp = NSToolbarItem.Identifier("ComposableSettings.help")
 }
 
 extension ComposableSettings {
@@ -107,6 +109,13 @@ extension ComposableSettings {
             return label
         }()
 
+        /// The `?`. Built here rather than left in the detail pane because help
+        /// is disclosed on the *window* — the drawer slides out beside it — so
+        /// its control belongs in the titlebar with the window's other chrome,
+        /// at the far right where AppKit centres it in the band for free.
+        private var helpButton: NSButton?
+        private var helpButtonThemeObserver: ThemePaletteObserver?
+
         private func installToolbar(on window: NSWindow) {
             let toolbar = NSToolbar(identifier: "ComposableSettings.Toolbar")
             toolbar.delegate = self
@@ -128,6 +137,13 @@ extension ComposableSettings {
             viewController?.onNavigationChange = { [weak self] in
                 self?.updateToolbarState()
             }
+            // The detail pane's floating `?` stands down now that the titlebar
+            // carries one: two buttons reporting one drawer is one too many.
+            // A settings split shown in a sheet has no toolbar and keeps its own.
+            viewController?.showsInlineHelpButton = false
+            viewController?.onHelpVisibilityChange = { [weak self] in
+                self?.updateHelpButton()
+            }
             updateToolbarState()
         }
 
@@ -138,6 +154,25 @@ extension ComposableSettings {
             navigationControl.setEnabled(split.canGoBack, forSegment: 0)
             navigationControl.setEnabled(split.canGoForward, forSegment: 1)
             panelTitleLabel.stringValue = split.currentPanelTitle ?? ""
+            updateHelpButton()
+        }
+
+        /// Makes the `?` report the drawer as well as toggle it — filled while
+        /// open, outlined while shut — which matters because the drawer is
+        /// remembered across launches and may already be open on the first draw.
+        private func updateHelpButton() {
+            guard let button = helpButton else { return }
+            WindowToolbarBuilder.applyDisclosureAppearance(
+                to: button,
+                disclosed: viewController?.isHelpVisible ?? false,
+                outlineSymbol: "questionmark.circle",
+                filledSymbol: "questionmark.circle.fill",
+                showTooltip: "Show Help",
+                hideTooltip: "Hide Help")
+        }
+
+        @objc private func helpClicked(_ sender: NSButton) {
+            viewController?.toggleHelp()
         }
 
         @objc private func navigationClicked(_ sender: NSSegmentedControl) {
@@ -151,8 +186,12 @@ extension ComposableSettings {
             }
         }
 
+        // The flexible space is what right-justifies the `?`: everything before
+        // it packs against the panel title, everything after against the
+        // trailing edge.
         private static let itemIdentifiers: [NSToolbarItem.Identifier] = [
-            .sidebarTrackingSeparator, .settingsNavigation, .settingsPanelTitle
+            .sidebarTrackingSeparator, .settingsNavigation, .settingsPanelTitle,
+            .flexibleSpace, .settingsHelp
         ]
 
         public func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -188,6 +227,27 @@ extension ComposableSettings {
                 item.paletteLabel = item.label
                 item.view = panelTitleLabel
                 item.visibilityPriority = .high
+                return item
+
+            case .settingsHelp:
+                let (item, button) = WindowToolbarBuilder.iconButtonItem(
+                    identifier: itemIdentifier,
+                    symbol: "questionmark.circle",
+                    label: "Help",
+                    target: self,
+                    action: #selector(helpClicked(_:)))
+                item.visibilityPriority = .high
+                helpButton = button
+                // The presenter anchors a popover on this view when the host is
+                // one that shows help as a popover rather than a drawer; for the
+                // drawer it is harmless, and it keeps the two interchangeable.
+                viewController?.helpPresenter?.helpAnchorView = button
+                // Read on demand, not once: the tint is the palette's, and a
+                // theme change has to reach a button AppKit owns the drawing of.
+                helpButtonThemeObserver = ThemePaletteObserver(host: button) { [weak self] _ in
+                    self?.updateHelpButton()
+                }
+                updateHelpButton()
                 return item
 
             default:

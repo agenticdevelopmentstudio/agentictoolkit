@@ -31,12 +31,48 @@ extension ComposableSettings {
         public weak var helpPresenter: (any SettingsHelpPresenting)? {
             didSet {
                 self.helpPresenter?.onVisibilityChange = { [weak self] in
-                    self?.updateHelpButton()
+                    self?.helpVisibilityDidChange()
                 }
                 self.helpPresenter?.helpAnchorView = self.helpButton
                 self.helpPresenter?.setHelp(self.help)
                 self.updateHelpButton()
             }
+        }
+
+        /// Whether this view supplies the `?` itself.
+        ///
+        /// A window whose toolbar carries a help button of its own sets this
+        /// `false`: help is a property of the window, so its control belongs in
+        /// the titlebar with the window's other controls, and two buttons
+        /// reporting one drawer is one too many. A settings split shown in a
+        /// *sheet* has no toolbar to put it in and leaves this `true` — which
+        /// is also what keeps `HelpPopoverController` an anchor to hang off.
+        public var showsHelpButton: Bool = true {
+            didSet { self.updateHelpButton() }
+        }
+
+        /// Fired after help is disclosed or dismissed, so chrome outside this
+        /// view — a toolbar button — can report the same state the inline
+        /// button does.
+        ///
+        /// It exists because `onVisibilityChange` has exactly one slot and this
+        /// view claims it above. Anything else that needs the news has to be
+        /// told by whoever took the slot, rather than quietly overwriting it.
+        public var onHelpVisibilityChange: (() -> Void)?
+
+        /// Shows or hides help. The action of this view's own button, and the
+        /// way chrome outside it — a toolbar `?` — asks for the same thing:
+        /// routed through here rather than reaching `helpPresenter` directly,
+        /// so there stays one owner of the presenter.
+        @objc public func toggleHelp() {
+            self.helpPresenter?.toggleHelp()
+        }
+
+        public var isHelpVisible: Bool { self.helpPresenter?.isHelpVisible ?? false }
+
+        private func helpVisibilityDidChange() {
+            self.updateHelpButton()
+            self.onHelpVisibilityChange?()
         }
 
         public init() {
@@ -106,10 +142,6 @@ extension ComposableSettings {
             self.helpButton.setAccessibilityLabel("Help")
         }
 
-        @objc private func toggleHelp() {
-            self.helpPresenter?.toggleHelp()
-        }
-
         private func updateHelpButton() {
             let disclosed = self.helpPresenter?.isHelpVisible ?? false
             let palette = self.resolvedThemeScope.palette
@@ -117,8 +149,9 @@ extension ComposableSettings {
             // has prose. It used to come and go with `help != nil`, which put a
             // control in the corner of some panels and not others and made the
             // drawer look like a property of the panel rather than of the window.
-            // A nested split still has no button at all — it has no presenter.
-            self.helpButton.isHidden = self.helpPresenter == nil
+            // A nested split still has no button at all — it has no presenter —
+            // and neither does a split whose window puts the `?` in its toolbar.
+            self.helpButton.isHidden = !self.showsHelpButton || self.helpPresenter == nil
             // Filled while open, outlined while closed — the button reports the
             // drawer's state as well as toggling it, which matters because the
             // drawer is remembered across launches.

@@ -115,6 +115,33 @@ extension ComposableSettings {
             didSet { panelHost.helpPresenter = helpPresenter }
         }
 
+        /// Whether the detail pane draws the `?` itself. A window that carries
+        /// help in its toolbar — where a window-level control belongs — turns
+        /// it off and drives help through `toggleHelp()` instead. A split shown
+        /// in a sheet has no toolbar and leaves it on.
+        public var showsInlineHelpButton: Bool = true {
+            didSet { panelHost.showsHelpButton = showsInlineHelpButton }
+        }
+
+        /// Fired when help is disclosed or dismissed, so a toolbar button can
+        /// report the same state the inline one does. Separate from
+        /// `onNavigationChange` because a drawer moves without the selection
+        /// moving — including on its own, when a remembered preference is
+        /// re-applied or the reader drags it shut.
+        public var onHelpVisibilityChange: (() -> Void)? {
+            didSet {
+                panelHost.onHelpVisibilityChange = { [weak self] in
+                    self?.onHelpVisibilityChange?()
+                }
+            }
+        }
+
+        /// Shows or hides help. For chrome outside this split; the detail
+        /// pane's own button goes straight to the presenter.
+        public func toggleHelp() { panelHost.toggleHelp() }
+
+        public var isHelpVisible: Bool { panelHost.isHelpVisible }
+
         // Repaints the window chrome and detail pane on every theme change.
         private var themeObserver: ThemePaletteObserver?
 
