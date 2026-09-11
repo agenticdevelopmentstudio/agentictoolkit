@@ -236,6 +236,7 @@
 		29C34DE7636859C833F72C67 /* ScreenMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D21F8F899C4B44436BA0F07 /* ScreenMatcherTests.swift */; };
 		2A117FB9C3DBB2CBA2788559 /* ThemeManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E863C52ADF710584F4BEBF85 /* ThemeManagerTests.swift */; };
 		2A8E26DBD3C2A0128277B690 /* AIChatCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51B874C7A633BB5E097D470C /* AIChatCoordinator.swift */; };
+		2A932EAF5D82AF4C1184378F /* EditorSettingsPanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9060636F5AE8DED3C3E1405E /* EditorSettingsPanelViewControllerTests.swift */; };
 		2A99CB9161EDC01A4C864261 /* GitSettingsPanelViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA8A88A7D6D88BB1D472FE3 /* GitSettingsPanelViewControllerTests.swift */; };
 		2BAD24393705B85E2730F046 /* GitWorktree.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A58EFB1DD8D72086650FA4 /* GitWorktree.swift */; };
 		2C13DE619892F06B0F5C60BA /* HostMCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 780DC98D6CEA2306564CC337 /* HostMCPServer.swift */; };
@@ -362,6 +363,7 @@
 		4E7D9942F2AC2A499FA7D964 /* GitCommandLogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59766E284750A6D72C57352 /* GitCommandLogTests.swift */; };
 		4E9D73F89B84255A420D7568 /* RefusalFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D288C64E539B1D7D8FE1F41 /* RefusalFeedback.swift */; };
 		4EB892BE77ECEAE7EAD6F7C0 /* ModelCatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21A2733A4CD84EDD73E5D3B /* ModelCatalogStore.swift */; };
+		4FA737CC8BB96AE6B5B0BBB9 /* UserSettings+Editor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91AC0BD64023575F1ACB323 /* UserSettings+Editor.swift */; };
 		50131C005F2C2DCED1A2F8A4 /* FileBrowserViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA88DA3490B30D9417464679 /* FileBrowserViewController.swift */; };
 		5056A4E1B4F63A242BF5F6B3 /* HeuristicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05F23507703845E8715E1F99 /* HeuristicTests.swift */; };
 		50632186AE2D9719BBB8F950 /* SpacingControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98B13923596E2430488F463B /* SpacingControl.swift */; };
@@ -975,6 +977,7 @@
 		F8169BA3C60886BC4F455238 /* TerminalSessionLayoutState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F801935FF47FB37D7B8EB930 /* TerminalSessionLayoutState.swift */; };
 		F8849890FE60B55C85BEE97B /* GitStatusProviderRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B5A562CCDA5EF229D01B99F /* GitStatusProviderRefreshTests.swift */; };
 		F8B98EF1B775D5033F45725E /* FileTreeNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5892B23358CC8088DB3A07AA /* FileTreeNode.swift */; };
+		F93CCD29ADB58E31C9C14E60 /* EditorSettingsPanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF360D598CCA38046B23D3EE /* EditorSettingsPanelViewController.swift */; };
 		F946E90504AC0420E9FD1352 /* TerminalCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF39A5EE490267175AD2F89 /* TerminalCommands.swift */; };
 		F963FBEF37B1FAD6EDEAD089 /* NSWindow+TestHostVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 337093F9A13BC44F1849D5B1 /* NSWindow+TestHostVisibility.swift */; };
 		F9AD368E7963C24C2AAF238D /* MCPServerRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FCEFB5144AC969192DD72F4 /* MCPServerRegistryTests.swift */; };
@@ -2319,6 +2322,7 @@
 		8F32D28A8E0199C82E8216B0 /* WindowManagerRecentsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManagerRecentsTests.swift; sourceTree = "<group>"; };
 		8F3E1250C6037CC4B42743C2 /* TabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarView.swift; sourceTree = "<group>"; };
 		8F6CE4270FD855B12EA44D5C /* MarkdownTaxonomyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTaxonomyTests.swift; sourceTree = "<group>"; };
+		9060636F5AE8DED3C3E1405E /* EditorSettingsPanelViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSettingsPanelViewControllerTests.swift; sourceTree = "<group>"; };
 		90627AC37DA4BFBF6C32C07D /* NoteStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteStorage.swift; sourceTree = "<group>"; };
 		90AF74F7C15F06925B32E9D7 /* TextDocumentStorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentStorageTests.swift; sourceTree = "<group>"; };
 		913A7036E54EC7335780A40D /* CardFoldMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardFoldMemory.swift; sourceTree = "<group>"; };
@@ -2521,6 +2525,7 @@
 		CE7CD1AA3878CBD31E245D04 /* LocalModelServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelServer.swift; sourceTree = "<group>"; };
 		CED6D92BE5D6C405930E5386 /* SyncID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncID.swift; sourceTree = "<group>"; };
 		CF257F89CFF00A2F21772F08 /* FileTreeManagerInjectedProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeManagerInjectedProviderTests.swift; sourceTree = "<group>"; };
+		CF360D598CCA38046B23D3EE /* EditorSettingsPanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSettingsPanelViewController.swift; sourceTree = "<group>"; };
 		CF68F1ED9C55006410E976B6 /* ComposableTabsMoveMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsMoveMenu.swift; sourceTree = "<group>"; };
 		CFDA74414E7A1ACA14DDFC1C /* ReconcileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconcileView.swift; sourceTree = "<group>"; };
 		D0904313AC1BEE6662DBB5BC /* ProviderPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPickerTests.swift; sourceTree = "<group>"; };
@@ -2594,6 +2599,7 @@
 		E85918F0FFDF71217F36A5FA /* HelpPresenting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpPresenting.swift; sourceTree = "<group>"; };
 		E863C52ADF710584F4BEBF85 /* ThemeManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeManagerTests.swift; sourceTree = "<group>"; };
 		E90F59F2C0C58348C6AEE149 /* LanguageServerSessionRaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageServerSessionRaceTests.swift; sourceTree = "<group>"; };
+		E91AC0BD64023575F1ACB323 /* UserSettings+Editor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserSettings+Editor.swift"; sourceTree = "<group>"; };
 		E94E4226C9F21C5C1E6E0DE3 /* ContextsSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextsSettingsTab.swift; sourceTree = "<group>"; };
 		E9A1E913777AA53295489FAA /* SettingsPanelListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelListViewController.swift; sourceTree = "<group>"; };
 		E9B65139F53D350B09C3FC48 /* ComposableTabsTabItemDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsTabItemDataSource.swift; sourceTree = "<group>"; };
@@ -3984,6 +3990,7 @@
 				922457ED5DA5D1D965AB21F5 /* StoredSettingsStorageProvider.swift */,
 				B3D112853E30CE786A73B192 /* UserSetting.swift */,
 				B2DBBC96379BEBF4C59726ED /* UserSettings.swift */,
+				E91AC0BD64023575F1ACB323 /* UserSettings+Editor.swift */,
 				5F4D23CA2D27465EB54A982E /* UserSettings+Git.swift */,
 				4AFA9E122D9EDB9BAEFEE7B1 /* UserSettings+Theme.swift */,
 			);
@@ -4157,6 +4164,7 @@
 		8CC52C8838E3FC23EAA9881F /* Editor */ = {
 			isa = PBXGroup;
 			children = (
+				9060636F5AE8DED3C3E1405E /* EditorSettingsPanelViewControllerTests.swift */,
 				709AC1D916C7F34F31438D09 /* FileEditorHighlightProviderTests.swift */,
 				0DD01D2095CEDD122A37FA91 /* FileEditorTriggerCharacterTests.swift */,
 				D566499EB2CFCAF2E14B55B8 /* LanguageServerStatusModelTests.swift */,
@@ -5063,6 +5071,7 @@
 		F991DEFD93FCD5B9461CF2FC /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				CF360D598CCA38046B23D3EE /* EditorSettingsPanelViewController.swift */,
 				FBA357B9B5CC2D304EBB343D /* LanguageServersPanelViewController.swift */,
 			);
 			path = Settings;
@@ -6449,6 +6458,7 @@
 				E29EB62074BC387FCB3772DD /* DismissibleHintView.swift in Sources */,
 				331EE8F2A046A8848422BAF1 /* DividerView.swift in Sources */,
 				386E5C4E6DA127E9F38558BF /* Edge.swift in Sources */,
+				F93CCD29ADB58E31C9C14E60 /* EditorSettingsPanelViewController.swift in Sources */,
 				AB23FAC1C0384772CC1F3C6D /* ExplanationView.swift in Sources */,
 				837DF5E29CA1F61211DCCD89 /* ExtensionHost.swift in Sources */,
 				1F8C1D3FE8481FEB3D86F25D /* ExtensionsCoordinator.swift in Sources */,
@@ -6839,6 +6849,7 @@
 				ADCCDA20AA7C3D31156B1E46 /* ToolResult.swift in Sources */,
 				636967AFCFC51E5665554384 /* UserDefaultsSettingsStorageProvider.swift in Sources */,
 				EA7FB6C3355B06B56E0E7C10 /* UserSetting.swift in Sources */,
+				4FA737CC8BB96AE6B5B0BBB9 /* UserSettings+Editor.swift in Sources */,
 				A725CC154E9C140A3BA29BAC /* UserSettings+Git.swift in Sources */,
 				52345BC704CF6C8759097A7E /* UserSettings+Theme.swift in Sources */,
 				81C1CEF0731A9F4884B69CB2 /* UserSettings.swift in Sources */,
@@ -7002,6 +7013,7 @@
 				63F9D3A48B1135A10DE549B8 /* DebugLaunchSwitchTests.swift in Sources */,
 				83661684BCBC4B07761FF8E7 /* DirectoryWatchCoordinatorTests.swift in Sources */,
 				246E0BFA8CA1639D7CC339FA /* DisclosureCardTests.swift in Sources */,
+				2A932EAF5D82AF4C1184378F /* EditorSettingsPanelViewControllerTests.swift in Sources */,
 				8BD464A2F290BADB87655702 /* ExtensionHostTests.swift in Sources */,
 				C456D866CC1CFD83397547CC /* ExtensionLayoutWideningTests.swift in Sources */,
 				6E56A75DE4AE7CA1D02874E5 /* ExtensionTestSupport.swift in Sources */,
