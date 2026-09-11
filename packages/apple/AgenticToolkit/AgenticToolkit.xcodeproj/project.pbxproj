@@ -959,6 +959,7 @@
 		F6ACD67DDD451ABA93AE6062 /* SyncProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28FF7E8AD8D44B8CC367E0E4 /* SyncProtocols.swift */; };
 		F6E48919E0295C5D264F471A /* QuickNoteWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA87B6E341A750FF0117D814 /* QuickNoteWindowController.swift */; };
 		F6F2511A8F3871D3EF729E6C /* LocalInferenceGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9F802CE87AAB4F3411BE1A5 /* LocalInferenceGuard.swift */; };
+		F7B88FFA10A2AA015336A050 /* TabCardStackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2863B495031BCB53966A224C /* TabCardStackTests.swift */; };
 		F7DE43710415ABA99C80B275 /* SettingsPanelSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBEB58A49782766E3929EC3C /* SettingsPanelSplitViewController.swift */; };
 		F8169BA3C60886BC4F455238 /* TerminalSessionLayoutState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F801935FF47FB37D7B8EB930 /* TerminalSessionLayoutState.swift */; };
 		F8849890FE60B55C85BEE97B /* GitStatusProviderRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B5A562CCDA5EF229D01B99F /* GitStatusProviderRefreshTests.swift */; };
@@ -1968,6 +1969,7 @@
 		27ECB0B3683D7B48A177ACC2 /* SettingsStoreWindowStateStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreWindowStateStorage.swift; sourceTree = "<group>"; };
 		2811A57B61C48C21BD8A4995 /* AgenticToolkitSyncGRDB.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AgenticToolkitSyncGRDB.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		282A18DC936C06444C296EAC /* FileTreeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeConfig.swift; sourceTree = "<group>"; };
+		2863B495031BCB53966A224C /* TabCardStackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCardStackTests.swift; sourceTree = "<group>"; };
 		2884DE314C62C3F463384589 /* GitWorktreeParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitWorktreeParserTests.swift; sourceTree = "<group>"; };
 		28E4DA0475CA3E52B78F13FF /* ModelPickerItemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerItemTests.swift; sourceTree = "<group>"; };
 		28FF7E8AD8D44B8CC367E0E4 /* SyncProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncProtocols.swift; sourceTree = "<group>"; };
@@ -3654,6 +3656,7 @@
 				F06A26884C3D24D8045E627D /* MultiTabbedActiveTabTests.swift */,
 				E3049C1C30EAC6D3BEFCBFF9 /* MultiTabbedHostedItemTests.swift */,
 				467191B455A10940C4090212 /* TabBarStartInsetTests.swift */,
+				2863B495031BCB53966A224C /* TabCardStackTests.swift */,
 				944BB6AD2BBDC051ACB3D867 /* TabPaneViewControllerTests.swift */,
 			);
 			path = MultiTabbed;
@@ -7061,6 +7064,7 @@
 				F0619763C8A2EC2168010B87 /* SystemWindowMatcherTests.swift in Sources */,
 				6CB386464D1A769B4DC084E5 /* SystemWindowShortcutNamesTests.swift in Sources */,
 				4E535AB7A7F5E3AD74367036 /* TabBarStartInsetTests.swift in Sources */,
+				F7B88FFA10A2AA015336A050 /* TabCardStackTests.swift in Sources */,
 				89BD930B805681630C39038F /* TabPaneViewControllerTests.swift in Sources */,
 				E78B0E62A73A6142EE421553 /* TerminalSessionGitBranchTests.swift in Sources */,
 				444EFB4D09F8D7A761C43743 /* TerminalTextInjectorTests.swift in Sources */,

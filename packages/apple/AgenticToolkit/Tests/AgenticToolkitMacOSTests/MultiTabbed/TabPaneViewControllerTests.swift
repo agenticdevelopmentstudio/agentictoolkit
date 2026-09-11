@@ -312,6 +312,59 @@ final class TabPaneViewControllerTests: XCTestCase {
         XCTAssertGreaterThan(front.height, behind.height)
     }
 
+    /// The deck: on a vertical bar each card further from the one in front
+    /// stands another step back from the workspace, until the steps stop
+    /// adding up at `maxStackDepth`.
+    func testEachCardBehindStandsAStepFurtherBackOnAVerticalBar() {
+        let source = StubSource()
+        for edge in Edge.allCases where edge.isVertical {
+            let pane = makePane(edge: edge, source: source)
+            for depth in 1...TabPaneView.maxStackDepth {
+                pane.stackDepth = depth
+                XCTAssertEqual(
+                    pane.paneView.workspaceOverhang,
+                    -CGFloat(depth) * TabPaneView.inactiveInset,
+                    "depth \(depth) on \(edge)")
+            }
+            pane.stackDepth = TabPaneView.maxStackDepth + 4
+            XCTAssertEqual(
+                pane.paneView.workspaceOverhang,
+                -CGFloat(TabPaneView.maxStackDepth) * TabPaneView.inactiveInset,
+                "past the cap on \(edge)")
+        }
+    }
+
+    /// A horizontal bar lays its cards out along their long side, so there is
+    /// no column to fan: every card behind stands the same single step back.
+    func testEveryCardBehindStandsTheSameStepBackOnAHorizontalBar() {
+        let source = StubSource()
+        for edge in Edge.allCases where !edge.isVertical {
+            let pane = makePane(edge: edge, source: source)
+            for depth in 1...(TabPaneView.maxStackDepth + 1) {
+                pane.stackDepth = depth
+                XCTAssertEqual(
+                    pane.paneView.workspaceOverhang, -TabPaneView.inactiveInset, "depth \(depth) on \(edge)")
+            }
+        }
+    }
+
+    /// Selection and depth arrive from the bar as two separate statements, and
+    /// the card draws from one number: a card that is not selected is never
+    /// drawn as the card in front, whichever order the two arrive in.
+    func testADeselectedCardIsNeverTheCardInFrontWhateverDepthItWasTold() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+
+        pane.stackDepth = 0
+        XCTAssertEqual(pane.paneView.workspaceOverhang, -TabPaneView.inactiveInset)
+
+        pane.isHighlighted = true
+        XCTAssertEqual(pane.paneView.workspaceOverhang, TabPaneView.workspaceOverlap)
+
+        pane.isHighlighted = false
+        XCTAssertEqual(pane.paneView.workspaceOverhang, -TabPaneView.inactiveInset)
+    }
+
     /// The words are readable whichever card they are on — an inactive tab
     /// recedes by its plane, never by fading its own text out of legibility.
     func testAnInactiveCardsTextStaysAtReadableRoles() {

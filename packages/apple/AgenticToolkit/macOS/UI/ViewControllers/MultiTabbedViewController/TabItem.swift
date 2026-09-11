@@ -28,3 +28,18 @@ public protocol TabBarHostedItem: AnyObject {
     var isHighlighted: Bool { get set }
     var onClose: (() -> Void)? { get set }
 }
+
+/// A hosted item that draws itself as one card in a stack of them, and so needs
+/// to know more than whether it is selected: how far it stands from whichever
+/// item is.
+///
+/// Separate from `TabBarHostedItem` rather than folded into it because most
+/// items have no use for the number — a plain title has no depth to draw — and
+/// an item that ignored it would have to say so in code. The bar asks for this
+/// with a cast, exactly as it asks for `TabBarHostedItem`.
+@MainActor
+public protocol TabBarStackedItem: TabBarHostedItem {
+    /// Counted in items: 0 for the selected item itself, 1 for either
+    /// neighbour, and on outward.
+    var stackDepth: Int { get set }
+}

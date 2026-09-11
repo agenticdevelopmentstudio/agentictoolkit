@@ -27,6 +27,16 @@ final class TabBarView: NSView {
     /// The gap at each end of the bar, along the direction it lays items out.
     static let endPadding: CGFloat = 8
 
+    /// The gap between two items along the bar.
+    static let itemSpacing: CGFloat = 4
+
+    /// How far two cards on a vertical bar overlap along the column — a
+    /// negative gap, so each card is partly behind its neighbour and the column
+    /// reads as a deck being turned rather than a list. A horizontal bar keeps
+    /// `itemSpacing`: its cards are laid out along their long side, where the
+    /// window runs out before a stack has any depth to show.
+    static let cardOverlap: CGFloat = 16
+
     /// Where the first item begins, measured along the bar from its start —
     /// the top of a left or right bar, the leading edge of a top or bottom
     /// one.
@@ -106,7 +116,7 @@ final class TabBarView: NSView {
             stack.alignment = .leading
         }
         applyEdgeInsets()
-        stack.spacing = 4
+        stack.spacing = edge.isVertical ? -Self.cardOverlap : Self.itemSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         wantsLayer = true
@@ -172,6 +182,34 @@ final class TabBarView: NSView {
         }
         for (itemID, controller) in hostedControllers {
             (controller as? TabBarHostedItem)?.isHighlighted = (itemID == id)
+        }
+        applyStackOrder()
+    }
+
+    /// Tells every hosted item how far it stands from the selected one, and on
+    /// a bar whose cards overlap, puts them in front-to-back order.
+    private func applyStackOrder() {
+        let selected = items.firstIndex { $0.id == selectedID }
+        // Nothing selected: no card is in front, so all of them stand the same
+        // single step back.
+        let depths = items.indices.map { index in selected.map { abs(index - $0) } ?? 1 }
+        for (index, item) in items.enumerated() {
+            (hostedControllers[item.id] as? TabBarStackedItem)?.stackDepth = depths[index]
+        }
+
+        guard edge.isVertical else { return }
+        // Raising them deepest-first leaves the card in front last in
+        // `subviews`, which is both the last drawn and the first hit-tested —
+        // so on the strip where two cards overlap, the click lands on the one
+        // the user can see. Ties are ordered by position for the sake of
+        // repeatability; two cards at the same depth sit either side of the
+        // selected one and never overlap each other.
+        let backToFront = items.indices.sorted {
+            depths[$0] == depths[$1] ? $0 > $1 : depths[$0] > depths[$1]
+        }
+        for index in backToFront {
+            guard let view = hostViews[items[index].id] else { continue }
+            stack.addSubview(view, positioned: .above, relativeTo: nil)
         }
     }
 
@@ -266,6 +304,7 @@ final class TabBarView: NSView {
                 pinCrossAxis(host)
             }
         }
+        applyStackOrder()
         updateThickness()
     }
 

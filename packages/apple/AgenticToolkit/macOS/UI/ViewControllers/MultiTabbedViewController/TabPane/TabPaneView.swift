@@ -11,9 +11,12 @@ import AppKit
 /// side, around its two outer corners, down the other side, and on around the
 /// workspace itself.
 ///
-/// A card behind stops at its own edge instead, leaving the workspace's line
-/// whole where it passes: the outline belongs to the workspace and to whatever
-/// is joined to it, and a waiting card is not that.
+/// A card behind stops short of its own edge instead, leaving the workspace's
+/// line whole where it passes: the outline belongs to the workspace and to
+/// whatever is joined to it, and a waiting card is not that. How far short is
+/// `stackDepth`'s doing — on a vertical bar, where the cards overlap down a
+/// column, each one further from the card in front stands another step back, so
+/// the column reads as a deck turned to the tab you are in.
 ///
 /// `TabBarView` supplies the other half of the attachment: it pads the outer
 /// side of the bar and leaves the workspace side at zero.
@@ -38,7 +41,17 @@ final class TabPaneView: NSView {
     /// paint that shrinks, never the card: the text stays where it was and only
     /// the block around it pulls in, so the card in front reads as the one
     /// standing nearer.
+    ///
+    /// It is also one step back from the workspace, and on a vertical bar those
+    /// steps accumulate — see `recession`.
     static let inactiveInset: CGFloat = 4
+
+    /// How many steps back a card is drawn at before they stop adding up.
+    ///
+    /// Three, because four would put the paint's edge past where the card's own
+    /// text begins (`padding`), and a stack that has receded further than its
+    /// words is no longer a stack of anything readable.
+    static let maxStackDepth = 3
 
     /// The card's own padding, inside the border.
     private static let padding = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
@@ -53,7 +66,11 @@ final class TabPaneView: NSView {
 
     var onClose: (() -> Void)?
     var contextMenuProvider: ((NSEvent) -> NSMenu?)?
-    var isHighlighted = false { didSet { applyHighlight() } }
+
+    /// Which card in the deck this is: 0 for the one in front — the selected
+    /// tab — 1 for a card immediately behind it, and on back. A card is behind
+    /// until something says otherwise.
+    var stackDepth = 1 { didSet { applyDepth() } }
 
     private let edge: Edge
     private let background: TabCardBackgroundView
@@ -127,8 +144,8 @@ final class TabPaneView: NSView {
 
     /// How far the painted block stands past the card's own edge on the side
     /// facing the workspace: a point out over the workspace's outline while
-    /// this is the card in front, and back inside the card by
-    /// `inactiveInset` while it is not.
+    /// this is the card in front, and back inside the card by `recession`
+    /// while it is not.
     var workspaceOverhang: CGFloat { (cardSides?.workspace.constant ?? 0) * outwardSign }
 
     /// Where the painted block has landed inside the card, once laid out.
@@ -168,7 +185,7 @@ final class TabPaneView: NSView {
 
         background.translatesAutoresizingMaskIntoConstraints = false
         addSubview(background)
-        observeTheme { view, _ in view.applyHighlight() }
+        observeTheme { view, _ in view.applyDepth() }
 
         let header = makeHeader()
         content.orientation = .vertical
@@ -206,7 +223,7 @@ final class TabPaneView: NSView {
         // `contentSize` above. A required pin here would restate one of
         // those two numbers at required priority and risk an unsatisfiable
         // conflict with whichever one wins.
-        applyHighlight()
+        applyDepth()
     }
 
     /// The card's top line: the agent, its status symbols, and the close
@@ -247,37 +264,55 @@ final class TabPaneView: NSView {
         }
     }
 
-    /// The active card and an inactive one are two different objects, not one
+    /// Whether this is the card the workspace is showing.
+    private var isFrontCard: Bool { stackDepth == 0 }
+
+    /// How far back from the workspace this card's paint stands.
+    ///
+    /// On a vertical bar the steps accumulate: each card further from the one
+    /// in front pulls back another `inactiveInset`, up to `maxStackDepth`, so a
+    /// column of cards fans away from the workspace like a deck being turned
+    /// rather than sitting in one flat row behind it. A horizontal bar has no
+    /// such column — its cards are laid out along their long side — so every
+    /// card behind takes the same single step.
+    private var recession: CGFloat {
+        guard stackDepth > 0 else { return 0 }
+        let steps = edge.isVertical ? min(stackDepth, Self.maxStackDepth) : 1
+        return CGFloat(steps) * Self.inactiveInset
+    }
+
+    /// The card in front and a card behind are two different objects, not one
     /// object at two brightnesses.
     ///
-    /// The active card paints the workspace's own backdrop and outline and
+    /// The card in front paints the workspace's own backdrop and outline and
     /// reaches over the workspace's line, so it and the workspace are one
     /// surface under one line, and its agent name is the theme's accent — the
     /// one thing on the bar in a colour, so the eye finds it without reading
-    /// anything. An inactive card paints the plane the bar itself is on, is
-    /// drawn in the border tone, and pulls in `inactiveInset` on every side —
-    /// so it stands back from the workspace's line rather than over it, leaving
-    /// that line whole, and is plainly the smaller of the two shapes. It reads
-    /// as a waiting outline rather than a dimmed copy of the active one: its
-    /// own text stays at the roles a body of text is meant to be read at, so
-    /// only the card around it recedes, never the words.
-    private func applyHighlight() {
+    /// anything. A card behind paints the plane the bar itself is on, is drawn
+    /// in the border tone, and pulls in `inactiveInset` on every side and
+    /// `recession` on the side facing the workspace — so it stands back from
+    /// the workspace's line rather than over it, leaving that line whole, and
+    /// is plainly the smaller of the two shapes. It reads as a waiting outline
+    /// rather than a dimmed copy of the card in front: its own text stays at
+    /// the roles a body of text is meant to be read at, so only the card around
+    /// it recedes, never the words.
+    private func applyDepth() {
         let palette = resolvedThemeScope.palette
-        cardSides?.inset(by: isHighlighted ? 0 : Self.inactiveInset)
-        if isHighlighted { cardSides?.workspace.constant = outwardSign * Self.workspaceOverlap }
-        background.reachesOverWorkspace = isHighlighted
-        background.fillColor = isHighlighted
+        cardSides?.inset(by: isFrontCard ? 0 : Self.inactiveInset)
+        cardSides?.workspace.constant = outwardSign * (isFrontCard ? Self.workspaceOverlap : -recession)
+        background.reachesOverWorkspace = isFrontCard
+        background.fillColor = isFrontCard
             ? NSColor(palette.projectPaneBackdrop)
             : palette.nsColor(.windowBackground)
-        background.borderColor = isHighlighted
+        background.borderColor = isFrontCard
             ? NSColor(palette.projectPaneOutline)
             : palette.nsColor(.border)
-        agentLabel.role = isHighlighted ? .accent : .primaryText
-        sessionLabel.role = isHighlighted ? .primaryText : .secondaryText
-        directoryLabel.role = isHighlighted ? .secondaryText : .tertiaryText
-        branchLabel.role = isHighlighted ? .secondaryText : .tertiaryText
-        summaryLabel.role = isHighlighted ? .secondaryText : .tertiaryText
-        closeButton.contentTintColor = palette.nsColor(isHighlighted ? .secondaryText : .tertiaryText)
+        agentLabel.role = isFrontCard ? .accent : .primaryText
+        sessionLabel.role = isFrontCard ? .primaryText : .secondaryText
+        directoryLabel.role = isFrontCard ? .secondaryText : .tertiaryText
+        branchLabel.role = isFrontCard ? .secondaryText : .tertiaryText
+        summaryLabel.role = isFrontCard ? .secondaryText : .tertiaryText
+        closeButton.contentTintColor = palette.nsColor(isFrontCard ? .secondaryText : .tertiaryText)
     }
 
     @objc private func closePressed() {

@@ -5,14 +5,19 @@ import AppKit
 /// working directory, branch and summary. Vended by a branch controller,
 /// hosted by `MultiTabbedViewController` through `TabItem.viewController`.
 @MainActor
-public final class TabPaneViewController: NSViewController, TabBarHostedItem {
+public final class TabPaneViewController: NSViewController, TabBarStackedItem {
     public let edge: Edge
     public let tabID: UUID
     public weak var dataSource: TabPaneDataSource?
     public weak var delegate: TabPaneDelegate?
 
     public var isHighlighted: Bool = false {
-        didSet { paneView.isHighlighted = isHighlighted }
+        didSet { applyDepth() }
+    }
+
+    /// How far the bar says this card stands from the selected one.
+    public var stackDepth: Int = 0 {
+        didSet { applyDepth() }
     }
     public var onClose: (() -> Void)? {
         didSet { paneView.onClose = onClose }
@@ -35,8 +40,17 @@ public final class TabPaneViewController: NSViewController, TabBarHostedItem {
             guard let self else { return nil }
             return self.delegate?.tabPane(self, contextMenuFor: event)
         }
-        paneView.isHighlighted = isHighlighted
+        applyDepth()
         paneView.onClose = onClose
+    }
+
+    /// The bar states selection and depth separately; the card draws from one
+    /// number, and this is where the two are reconciled. The `max` is what
+    /// keeps them from contradicting each other: a card that is not the
+    /// selected one is never the card in front, whatever depth it was last
+    /// told — including the initial zero, before any bar has said anything.
+    private func applyDepth() {
+        paneView.stackDepth = isHighlighted ? 0 : max(1, stackDepth)
     }
 
     /// Re-reads the data source and resizes. Call after anything it reports changes.
