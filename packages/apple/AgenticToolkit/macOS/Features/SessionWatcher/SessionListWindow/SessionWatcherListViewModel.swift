@@ -322,7 +322,11 @@ extension SessionWatcher {
         public func openPermissionSettings() {
             guard let permission = lastRequiredPermission else { return }
             Task { @MainActor in
-                await PermissionPresenter.present(permission, using: SystemPermissionChecker())
+                // `.denied` because that is what the banner offering this
+                // button is reporting: the action failed for want of exactly
+                // this permission.
+                await PermissionPresenter.present(
+                    permission, shownAs: .denied, using: SystemPermissionChecker())
             }
         }
 

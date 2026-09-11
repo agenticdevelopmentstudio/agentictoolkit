@@ -33,7 +33,7 @@ extension ComposableSettings {
                 self.helpPresenter?.onVisibilityChange = { [weak self] in
                     self?.helpVisibilityDidChange()
                 }
-                self.helpPresenter?.helpAnchorView = self.helpButton
+                self.claimHelpAnchorIfShown()
                 self.helpPresenter?.setHelp(self.help)
                 self.updateHelpButton()
             }
@@ -48,7 +48,23 @@ extension ComposableSettings {
         /// *sheet* has no toolbar to put it in and leaves this `true` — which
         /// is also what keeps `HelpPopoverController` an anchor to hang off.
         public var showsHelpButton: Bool = true {
-            didSet { self.updateHelpButton() }
+            didSet {
+                self.claimHelpAnchorIfShown()
+                self.updateHelpButton()
+            }
+        }
+
+        /// Points the presenter's anchor at this view's `?`, but only while this
+        /// view is the one showing it.
+        ///
+        /// A window that carries help in its toolbar sets `showsHelpButton`
+        /// false and anchors on the toolbar button instead. Claiming the anchor
+        /// unconditionally meant any later reassignment of `helpPresenter`
+        /// silently took it back — and handed a popover presenter a hidden,
+        /// zero-size view to hang off.
+        private func claimHelpAnchorIfShown() {
+            guard self.showsHelpButton else { return }
+            self.helpPresenter?.helpAnchorView = self.helpButton
         }
 
         /// Fired after help is disclosed or dismissed, so chrome outside this

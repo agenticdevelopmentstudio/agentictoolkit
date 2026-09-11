@@ -13,7 +13,10 @@ private struct StubChecker: PermissionChecking {
 @Suite("Permission row view")
 struct PermissionRowViewTests {
     private func row(_ status: PermissionStatus) -> PermissionRowView {
-        PermissionRowView(permission: .accessibility, checker: StubChecker(result: status), onAction: { _ in })
+        PermissionRowView(
+            permission: .accessibility,
+            checker: StubChecker(result: status),
+            onAction: { _, _ in })
     }
 
     @Test("row shows Granted when the checker reports granted")
@@ -51,5 +54,28 @@ struct PermissionRowViewTests {
             await row.refresh()
             #expect(row.actionTitle == "Open Settings")
         }
+    }
+
+    @Test("the action reports the status the button was showing")
+    func actionCarriesTheDisplayedStatus() async {
+        for status in [PermissionStatus.granted, .denied, .undetermined] {
+            var reported: PermissionStatus?
+            let row = PermissionRowView(
+                permission: .accessibility,
+                checker: StubChecker(result: status),
+                onAction: { _, shown in reported = shown })
+            await row.refresh()
+            row.performActionForTesting()
+            #expect(reported == status)
+        }
+    }
+
+    @Test("a refresh cancelled mid-read leaves the row as it was")
+    func cancelledRefreshDoesNotLand() async {
+        let row = row(.granted)
+        let task = Task { @MainActor in await row.refresh() }
+        task.cancel()
+        await task.value
+        #expect(row.statusText == "Checking…")
     }
 }

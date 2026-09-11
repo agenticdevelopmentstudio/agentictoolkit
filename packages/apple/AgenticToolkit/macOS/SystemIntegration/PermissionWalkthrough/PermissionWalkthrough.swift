@@ -18,6 +18,10 @@ import AgenticToolkitPermissionsUI
 /// grant or never asked. The panel refreshes itself as grants change (on app
 /// reactivation), so there's no polling timer; the user clicks Done when
 /// finished.
+///
+/// It asks *once*. Done retires it whatever the user granted, and what is still
+/// missing lives in Settings ▸ Permissions, which shows the same panel without
+/// blocking anything.
 @MainActor
 public final class PermissionWalkthrough: AppFeature {
 
@@ -42,7 +46,20 @@ public final class PermissionWalkthrough: AppFeature {
     private let checker: any PermissionChecking
     /// Held rather than captured, so the run-loop block below needs to capture
     /// nothing but `self` — which, being main-actor isolated, is `Sendable`.
-    private var completion: (() -> Void)?
+    ///
+    /// A list rather than one closure: a second `runIfNeeded` arriving while the
+    /// first alert is still up must not overwrite the first caller's
+    /// continuation, which would leave it waiting for a callback that no longer
+    /// exists.
+    private var completions: [() -> Void] = []
+
+    /// True from the moment a presentation is scheduled until the alert closes.
+    ///
+    /// `RunLoop.perform(inModes: [.common])` includes the modal and
+    /// event-tracking modes, so a block enqueued while the alert is up *runs*
+    /// rather than waiting for the modal session to end — which without this
+    /// would stack a second "Grant Permissions" alert inside the first.
+    private var isPresenting = false
 
     public override init() {
         // Include Automation so first-launch onboarding covers the permission the
@@ -63,7 +80,9 @@ public final class PermissionWalkthrough: AppFeature {
             return
         }
 
-        self.completion = completion
+        self.completions.append(completion)
+        guard !self.isPresenting else { return }
+        self.isPresenting = true
 
         Task { @MainActor in
             // Nothing missing: the walkthrough has served its purpose without
@@ -71,6 +90,7 @@ public final class PermissionWalkthrough: AppFeature {
             // an interruption that teaches the reader nothing.
             guard await self.allGranted() == false else {
                 Self.markComplete()
+                self.isPresenting = false
                 self.finish()
                 return
             }
@@ -94,23 +114,33 @@ public final class PermissionWalkthrough: AppFeature {
         RunLoop.main.perform(inModes: [.common]) {
             MainActor.assumeIsolated {
                 self.present(self.permissions)
-                // Done means "stop asking forever" only when there is nothing
-                // left to ask for. Clicking it early dismisses this launch's
-                // alert and the walkthrough returns next launch, rather than
-                // silently suppressing itself.
-                Task { @MainActor in
-                    if await self.allGranted() {
-                        Self.markComplete()
-                    }
-                    self.finish()
-                }
+                // Done retires the walkthrough, whatever the user granted —
+                // including nothing. Gating it on every permission reading
+                // `.granted` looked stricter and was in fact unsatisfiable: an
+                // Automation grant cannot be proven while its target app is not
+                // running, because `AEDeterminePermissionToAutomateTarget`
+                // answers `procNotFound` and the checker can only report that
+                // as `undetermined`. A menubar app launching at login will
+                // usually find iTerm2 closed, so the flag was never written and
+                // this app-modal alert came back at every launch with nothing
+                // the user could do to stop it. Onboarding asks once; Settings ▸
+                // Permissions is where the state lives afterwards, and "Reset
+                // Permission Walkthrough" there brings this back.
+                Self.markComplete()
+                self.isPresenting = false
+                self.finish()
             }
         }
     }
 
+    /// Drains the queue before calling, so a completion that itself calls
+    /// `runIfNeeded` again can't see its own entry still pending.
     private func finish() {
-        completion?()
-        completion = nil
+        let pending = completions
+        completions = []
+        for completion in pending {
+            completion()
+        }
     }
 
     private func allGranted() async -> Bool {
@@ -123,8 +153,9 @@ public final class PermissionWalkthrough: AppFeature {
     // MARK: - The alert
 
     private static let explanation =
-        "These permissions let the app monitor and activate your Claude Code sessions."
-        + " Grant them in System Settings — this list updates automatically."
+        "These permissions let the app find and activate terminal windows, open new"
+        + " ones, and post notifications. Grant them in System Settings — this list"
+        + " updates automatically."
 
     /// The width the permission cards are laid out at. An alert sizes itself
     /// around its accessory view, and a view laid out by constraints has no
@@ -142,6 +173,12 @@ public final class PermissionWalkthrough: AppFeature {
         // other alert on the system puts it. Nothing here positions it — that
         // is the point of using an alert rather than building a window.
         alert.addButton(withTitle: "Done").accessibilityID("permission-walkthrough.done")
+        // An alert is app-modal, not system-modal, and this runs at launch —
+        // before a menubar app has a window of its own to have been activated
+        // by. Without this the modal session can begin behind whatever app is
+        // frontmost, and the user meets an app that has stopped answering its
+        // status item with nothing on screen to say why.
+        NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
 

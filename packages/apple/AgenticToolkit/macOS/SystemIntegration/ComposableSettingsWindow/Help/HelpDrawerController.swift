@@ -40,7 +40,13 @@ extension ComposableSettings {
         /// Unused: a drawer comes out of the window's edge, not out of a button.
         /// `HelpPresenting` still requires it, because the popover presenter
         /// does need somewhere to hang its help from.
-        public var helpAnchorView: NSView?
+        ///
+        /// `weak`, as it is on `HelpPopoverController`. This controller lives as
+        /// long as its window, and a toolbar hands it a fresh button on every
+        /// rebuild — strongly held, each of those buttons and the view subtree,
+        /// target chain and theme observer behind it would be kept alive
+        /// forever, with only the last one visible.
+        public weak var helpAnchorView: NSView?
 
         /// The drawer is open because the reader asked for it to be open, and
         /// for no other reason.

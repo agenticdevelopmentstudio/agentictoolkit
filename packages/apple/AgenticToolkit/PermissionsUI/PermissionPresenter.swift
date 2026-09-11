@@ -7,12 +7,22 @@ import AgenticToolkitPermissions
 /// when the permission is already granted and the user wants it back.
 @MainActor
 public enum PermissionPresenter {
-    public static func present(_ permission: Permission, using checker: any PermissionChecking) async {
+    /// - Parameter shownAs: the status the caller's control was offering to act
+    ///   on. Passed in rather than re-read here: a re-read can disagree with
+    ///   what the user actually pressed — they revoked the permission in System
+    ///   Settings while the panel was open — and then a button labelled
+    ///   "Revoke" fires a live consent prompt instead. It also spares the
+    ///   Automation row a second synchronous Apple Event round trip per click.
+    public static func present(
+        _ permission: Permission,
+        shownAs status: PermissionStatus,
+        using checker: any PermissionChecking
+    ) async {
         // Already granted: there is nothing left to ask for, and no API to hand
         // a grant back — only the user can, in System Settings. So the one
         // useful thing to do is take them to the very pane the grant flow would
         // have ended at, which is what the row's "Revoke" title promises.
-        if await checker.status(permission) == .granted {
+        if status == .granted {
             NSWorkspace.shared.open(permission.settingsPaneURL)
             return
         }

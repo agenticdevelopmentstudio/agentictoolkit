@@ -8,7 +8,15 @@ public final class PermissionRowView: NSView {
 
     public let permission: Permission
     private let checker: any PermissionChecking
-    private let onAction: (Permission) -> Void
+    private let onAction: (Permission, PermissionStatus) -> Void
+
+    /// The status the button is currently offering to act on.
+    ///
+    /// Handed to the action rather than re-read when it fires: the two can
+    /// disagree — the user revokes the permission in System Settings while the
+    /// panel is open — and re-reading turns a button labelled "Revoke" into a
+    /// live consent prompt. What the user pressed is what should happen.
+    private var displayedStatus: PermissionStatus = .undetermined
 
     private let titleLabel: NSTextField
     private let statusDot = NSView()
@@ -18,7 +26,7 @@ public final class PermissionRowView: NSView {
     public init(
         permission: Permission,
         checker: any PermissionChecking,
-        onAction: @escaping (Permission) -> Void
+        onAction: @escaping (Permission, PermissionStatus) -> Void
     ) {
         self.permission = permission
         self.checker = checker
@@ -39,9 +47,19 @@ public final class PermissionRowView: NSView {
     /// Test seam: current action-button title.
     var actionTitle: String { actionButton.title }
 
+    /// Test seam: fires the action the way the button does, so what the action
+    /// is handed can be checked without an event.
+    func performActionForTesting() { actionTapped() }
+
     /// Re-reads the grant state and updates the status dot + label.
     public func refresh() async {
-        apply(status: await checker.status(permission))
+        let status = await checker.status(permission)
+        // A status read is a cross-process round trip — the Automation one is a
+        // synchronous Apple Event with a timeout — and several refreshes can be
+        // in flight at once. A cancelled one must not land: it is holding a
+        // snapshot older than whatever replaced it.
+        guard !Task.isCancelled else { return }
+        apply(status: status)
     }
 
     private func apply(status: PermissionStatus) {
@@ -60,6 +78,7 @@ public final class PermissionRowView: NSView {
             color = .secondaryLabelColor
             text = "Unknown"
         }
+        displayedStatus = status
         statusDot.layer?.backgroundColor = color.cgColor
         statusLabel.stringValue = text
         statusLabel.textColor = color
@@ -81,7 +100,10 @@ public final class PermissionRowView: NSView {
     /// reflow the card's description and rows in differing states still line
     /// their buttons up. Measured rather than spelled as a constant: these are
     /// words, and a number that fits them in English fits nothing else.
-    private static func widestActionWidth() -> CGFloat {
+    /// A `let`, so the two text measurements happen once for the process rather
+    /// than once per row — the answer depends only on the titles and the system
+    /// font, and is the same for every row on screen.
+    private static let widestActionWidth: CGFloat = {
         let probe = NSButton(title: "", target: nil, action: nil)
         probe.bezelStyle = .rounded
         probe.controlSize = .small
@@ -89,7 +111,7 @@ public final class PermissionRowView: NSView {
             probe.title = title
             return max(widest, probe.fittingSize.width)
         }
-    }
+    }()
 
     private func buildLayout() {
         translatesAutoresizingMaskIntoConstraints = false
@@ -133,16 +155,13 @@ public final class PermissionRowView: NSView {
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.translatesAutoresizingMaskIntoConstraints = false
-        // Hug the title, so the button stays button-sized however wide the row
-        // gets. Without this it and the wrapping description both stretch to
-        // fill, and the card in a wide window grows a button several inches
-        // long. The width floor below keeps that hug from re-flowing the
-        // description every time the title changes.
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        // Namespaced by permission: the panel shows one row per pending
-        // permission, so an unqualified "open-settings" would name several
-        // buttons at once and a test could not say which it clicked.
-        button.setAccessibilityIdentifier("permission.\(permission.identifierToken).open-settings")
+        // Namespaced by permission: the panel shows one row per permission, so
+        // an unqualified name would match several buttons at once and a test
+        // could not say which it clicked. Named for the slot rather than for
+        // one of its titles — the same button reads "Revoke" on a granted row,
+        // and an identifier that said "open-settings" there would promise a
+        // behaviour the element no longer has.
+        button.setAccessibilityIdentifier("permission.\(permission.identifierToken).action")
         // The row itself carries no identifier. A plain `NSView` is not an
         // accessibility element, so an identifier set on one is never
         // published — `XCUIElement` cannot see it, and nothing here calls
@@ -181,11 +200,18 @@ public final class PermissionRowView: NSView {
 
             button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             button.centerYAnchor.constraint(equalTo: centerYAnchor),
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.widestActionWidth())
+            // An exact width, not a floor plus content hugging. Both were
+            // needed to stop the button stretching across a wide card, but as
+            // two required rules they only agree in whichever title happens to
+            // be the wider one — satisfiable today only because AppKit treats a
+            // button's hugging as a preference rather than a ceiling. One
+            // constraint sized to the longer title says the same thing without
+            // resting on that.
+            button.widthAnchor.constraint(equalToConstant: Self.widestActionWidth)
         ])
     }
 
     @objc private func actionTapped() {
-        onAction(permission)
+        onAction(permission, displayedStatus)
     }
 }

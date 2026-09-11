@@ -15,6 +15,17 @@ public final class PermissionsPanelView: NSView {
     private var rows: [PermissionRowView] = []
     private var isObserving = false
 
+    /// The refresh in flight, so the next one can cancel it.
+    ///
+    /// Three things ask for a refresh — appearing, the app reactivating, and an
+    /// action finishing — and each row's status read is a cross-process round
+    /// trip they suspend on. Unserialised, whichever *resumed* last won: the
+    /// user granted a permission, came back, and the pre-grant snapshot landed
+    /// after the post-grant one, leaving the row reading "Not Granted" until
+    /// the next activation. The newest read wins now, which is the one that was
+    /// asked for last.
+    private var refreshTask: Task<Void, Never>?
+
     public init(permissions: [Permission], checker: any PermissionChecking = SystemPermissionChecker()) {
         self.permissions = permissions
         self.checker = checker
@@ -28,6 +39,7 @@ public final class PermissionsPanelView: NSView {
     }
 
     deinit {
+        refreshTask?.cancel()
         // Selector-based observers are auto-zeroed on dealloc since macOS 10.11,
         // but remove explicitly so a view deallocated while still in a window
         // doesn't leave a dangling registration.
@@ -37,7 +49,18 @@ public final class PermissionsPanelView: NSView {
     /// Re-reads the grant state of every row.
     public func refresh() async {
         for row in rows {
+            guard !Task.isCancelled else { return }
             await row.refresh()
+        }
+    }
+
+    /// Starts a refresh, cancelling any still running. Every internal trigger
+    /// goes through here; `refresh()` stays public for a host that wants to
+    /// await one.
+    private func scheduleRefresh() {
+        refreshTask?.cancel()
+        refreshTask = Task { @MainActor [weak self] in
+            await self?.refresh()
         }
     }
 
@@ -51,8 +74,8 @@ public final class PermissionsPanelView: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         for permission in permissions {
-            let row = PermissionRowView(permission: permission, checker: checker) { [weak self] permission in
-                self?.handleAction(permission)
+            let row = PermissionRowView(permission: permission, checker: checker) { [weak self] permission, status in
+                self?.handleAction(permission, shownAs: status)
             }
             rows.append(row)
             stack.addArrangedSubview(row)
@@ -71,10 +94,13 @@ public final class PermissionsPanelView: NSView {
         ])
     }
 
-    private func handleAction(_ permission: Permission) {
+    private func handleAction(_ permission: Permission, shownAs status: PermissionStatus) {
         Task { @MainActor in
-            await PermissionPresenter.present(permission, using: checker)
-            await refresh()
+            await PermissionPresenter.present(permission, shownAs: status, using: checker)
+            // Scheduled, not awaited: returning from System Settings has
+            // already fired a refresh through the activation notification, and
+            // this one — being later — is the one that should land.
+            scheduleRefresh()
         }
     }
 
@@ -82,7 +108,7 @@ public final class PermissionsPanelView: NSView {
         super.viewDidMoveToWindow()
         if window != nil {
             startObservingActivation()
-            Task { @MainActor in await refresh() }
+            scheduleRefresh()
         }
     }
 
@@ -101,6 +127,6 @@ public final class PermissionsPanelView: NSView {
     }
 
     @objc private func appDidBecomeActive() {
-        Task { @MainActor in await refresh() }
+        scheduleRefresh()
     }
 }

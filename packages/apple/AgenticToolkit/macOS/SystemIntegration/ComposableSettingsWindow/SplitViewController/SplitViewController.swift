@@ -128,13 +128,13 @@ extension ComposableSettings {
         /// `onNavigationChange` because a drawer moves without the selection
         /// moving — including on its own, when a remembered preference is
         /// re-applied or the reader drags it shut.
-        public var onHelpVisibilityChange: (() -> Void)? {
-            didSet {
-                panelHost.onHelpVisibilityChange = { [weak self] in
-                    self?.onHelpVisibilityChange?()
-                }
-            }
-        }
+        /// Wired to the panel host once, in `init`, rather than from this
+        /// property's `didSet`. Installing it on assignment meant setting the
+        /// property to `nil` to unsubscribe *installed* a forwarder instead of
+        /// removing one, and a consumer that never assigned it got no
+        /// forwarding at all — silently, with a help button whose pressed state
+        /// simply never moved.
+        public var onHelpVisibilityChange: (() -> Void)?
 
         /// Shows or hides help. For chrome outside this split; the detail
         /// pane's own button goes straight to the presenter.
@@ -167,6 +167,13 @@ extension ComposableSettings {
         public init(listViewController: PanelListViewController = PanelListViewController()) {
             self.listViewController = listViewController
             super.init(nibName: nil, bundle: nil)
+            // Wired once, here: a trampoline that reads `onHelpVisibilityChange`
+            // at call time, so assigning or clearing that property is all a host
+            // has to do — and a host that only reads `isHelpVisible` still gets
+            // told when it changes.
+            panelHost.onHelpVisibilityChange = { [weak self] in
+                self?.onHelpVisibilityChange?()
+            }
         }
 
         @available(*, unavailable)

@@ -237,6 +237,13 @@ extension ComposableSettings {
                     target: self,
                     action: #selector(helpClicked(_:)))
                 item.visibilityPriority = .high
+                // Only an item on its way *into* the toolbar becomes the live
+                // one. AppKit calls this again to build a sample for the
+                // customization palette and on every toolbar rebuild, and
+                // adopting one of those would point `helpButton`, the help
+                // anchor and the theme observer at a button that is not on
+                // screen — leaving the visible `?` unthemed and unreported.
+                guard flag else { return item }
                 helpButton = button
                 // The presenter anchors a popover on this view when the host is
                 // one that shows help as a popover rather than a drawer; for the
@@ -244,10 +251,11 @@ extension ComposableSettings {
                 viewController?.helpPresenter?.helpAnchorView = button
                 // Read on demand, not once: the tint is the palette's, and a
                 // theme change has to reach a button AppKit owns the drawing of.
+                // The observer applies its closure as it is built, so the
+                // button's first appearance is set here too.
                 helpButtonThemeObserver = ThemePaletteObserver(host: button) { [weak self] _ in
                     self?.updateHelpButton()
                 }
-                updateHelpButton()
                 return item
 
             default:
