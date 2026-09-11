@@ -196,6 +196,102 @@ struct CommandRegistryTests {
         ])
         #expect(registry.allCommands.first?.title == "Alpha again")
     }
+
+    // MARK: - execute(id:arguments:) and unregister (task 5.3)
+
+    @Test("execute(id:arguments:) delivers the arguments and returns the command's result")
+    func executeWithArgumentsDeliversAndReturns() throws {
+        let registry = CommandRegistry()
+        var received: [Any] = []
+        registry.register(AppCommand(id: "test.action.args", title: "Args", run: { arguments in
+            received = arguments
+            return "computed"
+        }))
+
+        let result = try registry.execute(id: "test.action.args", arguments: [1, "two"])
+
+        #expect(received.count == 2)
+        #expect(received.first as? Int == 1)
+        #expect(received.last as? String == "two")
+        #expect(result as? String == "computed")
+    }
+
+    @Test("execute(id:) calls through to execute(id:arguments:) with an empty argument list")
+    func executeWithNoArgumentsPassesAnEmptyList() throws {
+        let registry = CommandRegistry()
+        var received: [Any]?
+        registry.register(AppCommand(id: "test.action.empty", title: "Empty", run: { arguments in
+            received = arguments
+            return "ignored"
+        }))
+
+        try registry.execute(id: "test.action.empty")
+        #expect(received?.isEmpty == true)
+    }
+
+    @Test("execute(id:arguments:) of an unknown id throws unknownCommand")
+    func executeWithArgumentsOfUnknownIDThrows() {
+        let registry = CommandRegistry()
+        #expect(throws: CommandRegistryError.unknownCommand(id: "test.action.missing")) {
+            try registry.execute(id: "test.action.missing", arguments: [])
+        }
+    }
+
+    @Test("execute(id:arguments:) of a disabled command throws commandDisabled and does not run it")
+    func executeWithArgumentsOfDisabledCommandThrows() {
+        let registry = CommandRegistry()
+        var ran = false
+        registry.register(AppCommand(
+            id: "test.action.disabledArgs",
+            title: "Disabled",
+            isEnabled: { false },
+            run: { _ in
+                ran = true
+                return nil
+            }
+        ))
+
+        #expect(throws: CommandRegistryError.commandDisabled(id: "test.action.disabledArgs")) {
+            try registry.execute(id: "test.action.disabledArgs", arguments: [1])
+        }
+        #expect(!ran)
+    }
+
+    @Test("unregister removes the command and its position in allCommands")
+    func unregisterRemovesTheCommand() {
+        let registry = CommandRegistry()
+        registry.register(command(id: "test.action.alpha"))
+        registry.register(command(id: "test.action.bravo"))
+        registry.register(command(id: "test.action.charlie"))
+
+        registry.unregister(id: "test.action.bravo")
+
+        #expect(registry.command(id: "test.action.bravo") == nil)
+        #expect(registry.allCommands.map(\.id) == ["test.action.alpha", "test.action.charlie"])
+    }
+
+    @Test("unregister of an unknown id is a silent no-op")
+    func unregisterOfUnknownIDIsANoOp() {
+        let registry = CommandRegistry()
+        registry.register(command(id: "test.action.alpha"))
+
+        registry.unregister(id: "test.action.missing")
+
+        #expect(registry.allCommands.map(\.id) == ["test.action.alpha"])
+    }
+
+    @Test("A command re-registered after being unregistered gets a fresh position at the end")
+    func reregisteringAfterUnregisterAppendsAtTheEnd() {
+        let registry = CommandRegistry()
+        registry.register(command(id: "test.action.alpha"))
+        registry.register(command(id: "test.action.bravo"))
+
+        registry.unregister(id: "test.action.alpha")
+        registry.register(command(id: "test.action.alpha", title: "Alpha again"))
+
+        #expect(registry.allCommands.map(\.id) == ["test.action.bravo", "test.action.alpha"])
+        #expect(registry.command(id: "test.action.alpha")?.title == "Alpha again")
+    }
 }
 
 /// Pins the additive command-ID `MenuContribution` initializer (task 4.1): it

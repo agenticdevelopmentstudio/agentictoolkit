@@ -32,15 +32,56 @@ public struct AppCommand {
     /// always-enabled, matching `MenuContribution.isEnabled`.
     public let isEnabled: () -> Bool
 
-    /// What the command does.
-    public let run: () -> Void
+    /// What the command does, given whatever arguments the caller passed and
+    /// answering with whatever the command wants to hand back.
+    ///
+    /// `([Any]) -> Any?`, not `() -> Void`: a menu item or a keyboard shortcut
+    /// never has arguments and never wants a return value, but
+    /// `vscode.commands.executeCommand(id, ...args)` both delivers them and
+    /// resolves with whatever comes back, and a `() -> Void` stored here would
+    /// discard both silently — the exact quiet failure `CommandRegistryError`
+    /// exists to prevent one layer up. Every existing caller still writes
+    /// `run: { ... }` with no arguments and no return; see the initializer
+    /// below for how that stays true.
+    public let run: ([Any]) -> Any?
 
+    /// The menu-item / keyboard-shortcut / palette-row shape: a command that
+    /// takes nothing and answers nothing. Kept byte-for-byte — same
+    /// parameters, same defaults — so every existing call site compiles
+    /// unchanged; `run` is wrapped as `{ _ in run(); return nil }`, discarding
+    /// the arguments a caller of this initializer never had a way to supply
+    /// in the first place and answering `nil`, which is the correct "nothing
+    /// to resolve with" for a command nothing ever awaits.
     public init(
         id: String,
         title: String,
         category: String = "",
         isEnabled: @escaping () -> Bool = { true },
         run: @escaping () -> Void
+    ) {
+        self.id = id
+        self.title = title
+        self.category = category
+        self.isEnabled = isEnabled
+        self.run = { _ in
+            run()
+            return nil
+        }
+    }
+
+    /// The `vscode.commands.executeCommand` shape: a command that receives
+    /// whatever arguments the caller passed and can answer with a value the
+    /// caller resolves its `Thenable` with. Additive beside the initializer
+    /// above rather than a replacement for it — every existing call site
+    /// wants `() -> Void` and gains nothing from typing `_ in` and `return
+    /// nil` at every one of them for a distinction only `MainThreadCommands`
+    /// needs.
+    public init(
+        id: String,
+        title: String,
+        category: String = "",
+        isEnabled: @escaping () -> Bool = { true },
+        run: @escaping ([Any]) -> Any?
     ) {
         self.id = id
         self.title = title
@@ -174,7 +215,7 @@ public final class CommandRegistry {
         commandsByID[id]?.isEnabled() ?? false
     }
 
-    /// Run the command registered under `id`.
+    /// Run the command registered under `id`, with no arguments.
     ///
     /// - Throws: `CommandRegistryError.unknownCommand` when nothing is
     ///   registered under `id`, and `CommandRegistryError.commandDisabled` when
@@ -182,19 +223,51 @@ public final class CommandRegistry {
     ///   configuration-level mistakes that must be seen, not swallowed
     ///   (`fail-fast`).
     ///
-    /// There is no `arguments:` parameter, deliberately: `AppCommand.run` takes
-    /// none, so an `arguments` parameter would have nowhere to deliver them and
-    /// would silently discard whatever a caller passed. Stage 5's
-    /// `executeCommand` shim adds an overload beside this one, additively, once
-    /// the argument type is decided by a caller that actually has arguments.
+    /// A thin call-through to `execute(id:arguments:)` rather than a second
+    /// copy of the two guards above: every menu item and keyboard shortcut in
+    /// the app calls this exact signature, and duplicating the checks here
+    /// would be a second place for them to drift apart.
     public func execute(id: String) throws {
+        _ = try execute(id: id, arguments: [])
+    }
+
+    /// Run the command registered under `id`, delivering `arguments` and
+    /// answering with whatever it returns.
+    ///
+    /// This is the `vscode.commands.executeCommand(id, ...args)` shape
+    /// `execute(id:)`'s own doc comment used to promise: `MainThreadCommands`
+    /// is the caller that actually has arguments to deliver and a `Thenable`
+    /// to resolve with. `@discardableResult` because the app's own menu items
+    /// and shortcuts — which route through `execute(id:)` above — never want
+    /// the value back, and only an extension's `executeCommand` does.
+    ///
+    /// - Throws: the same two cases as `execute(id:)`, for the same reason.
+    @discardableResult
+    public func execute(id: String, arguments: [Any]) throws -> Any? {
         guard let command = commandsByID[id] else {
             throw CommandRegistryError.unknownCommand(id: id)
         }
         guard command.isEnabled() else {
             throw CommandRegistryError.commandDisabled(id: id)
         }
-        command.run()
+        return command.run(arguments)
+    }
+
+    /// Removes `id` and its entry in `registrationOrder`, so a torn-down
+    /// extension's commands stop appearing in the palette rather than sitting
+    /// there pointing at whatever the id used to mean.
+    ///
+    /// Additive beside `register`'s replace-and-warn behaviour, not a
+    /// replacement for it: replacing a live id in place is still what a
+    /// reloaded extension or a reloaded app feature needs, and nothing about
+    /// wanting to remove an id outright changes that argument. Silent on an
+    /// unknown id — `MainThreadCommands.dispose()` calls this for every id it
+    /// ever owned, including one a duplicate registration already displaced,
+    /// and that is not a mistake worth `fail-fast`ing over the way an
+    /// unregistered `execute` is: nothing was supposed to run and nothing did.
+    public func unregister(id: String) {
+        guard commandsByID.removeValue(forKey: id) != nil else { return }
+        registrationOrder.removeAll { $0 == id }
     }
 }
 
