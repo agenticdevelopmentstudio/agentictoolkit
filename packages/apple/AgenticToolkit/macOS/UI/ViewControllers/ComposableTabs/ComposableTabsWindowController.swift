@@ -171,6 +171,19 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     private var pendingFocusPersist: DispatchWorkItem?
     private static let focusPersistDelay: DispatchTimeInterval = .milliseconds(250)
 
+    /// Latched by `windowWillClose(_:)`. A window on its way out still lays
+    /// out — the split views settle, their debounced thickness persist fires,
+    /// and the responder chain comes apart — and each of those reaches
+    /// `persistAllTabs()`, which would write the dying window's tab set over
+    /// whatever the project has written since. Nothing of value is lost by
+    /// refusing: every real change was already persisted when it happened.
+    ///
+    /// Deliberately one-way, and deliberately not `isReloadingTabs`: that flag
+    /// is raised and lowered around one loop precisely so the top-up persist in
+    /// `installInitialTabs()` still runs. This one never comes down, because
+    /// the window never comes back.
+    private var isClosing = false
+
     private var titlebarAccessory: NSTitlebarAccessoryViewController?
     private var arrangeButton: NSButton?
     private var cancellables = Set<AnyCancellable>()
@@ -192,7 +205,15 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// a rebuilt toolbar simply leaves this `nil` until the next refresh.
     private weak var helpButton: NSButton?
 
-    public init(project: ProjectWorkspace) {
+    /// - Parameter tabItemDataSource: Assigned **before** the initial tabs are
+    ///   installed, which is the only moment it can matter: `installInitialTabs()`
+    ///   runs inside this initializer, and a data source set afterwards arrives
+    ///   too late to be asked for a single tab item — every tab falls back to
+    ///   `.title(record.title)` and the whole tree has to be thrown away and
+    ///   rebuilt to correct it. Defaulted, because a window with no project
+    ///   controller behind it (every layout test, the demo app) genuinely has
+    ///   none.
+    public init(project: ProjectWorkspace, tabItemDataSource: ComposableTabsTabItemDataSource? = nil) {
         self.project = project
         // Locals first: a stored property cannot be read back before
         // `super.init`, and the host needs the tab controller to wrap.
@@ -225,6 +246,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 self?.tabbed.contentInsets = PaneSpacing.contentInsets
             }
         }
+        self.tabItemDataSource = tabItemDataSource
         installInitialTabs()
 
         // The pane the user is working in is tracked once for the whole app;
@@ -764,6 +786,52 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusPersistDelay, execute: work)
     }
 
+    /// Drops a debounced focus-persist that has not fired yet.
+    ///
+    /// There are two writers of a project's tab rows — this window and the
+    /// project controller's reconcile — and `saveTabs` is a full
+    /// delete-then-insert, so the later write simply wins. The 250 ms delay on
+    /// this one is long enough to land *after* reconcile has written, and what
+    /// it would write is the window's live tab set: on a first open, the single
+    /// placeholder tab, which then replaces the freshly reconciled worktree
+    /// tabs outright.
+    ///
+    /// So reconcile calls this immediately before it writes. Only the pending
+    /// item is cancelled — not persisting in general — because the write that
+    /// follows is *also* ours, and `reloadTabs()` runs in the same main-actor
+    /// turn as it, leaving no window for a new one to be armed in. The focus
+    /// record the cancelled item was carrying is re-derived from the rebuilt
+    /// tabs; it is a first-responder position, not user data.
+    public func cancelPendingTabPersist() {
+        pendingFocusPersist?.cancel()
+        pendingFocusPersist = nil
+    }
+
+    /// A closing window stops writing the project's tab rows.
+    ///
+    /// All three halves are needed. The pending focus-persist is dropped; the
+    /// observer that arms it goes too, because a close tears the responder
+    /// chain apart and every step of that posts `didUpdateNotification`, which
+    /// would arm a fresh one straight after the cancel; and `isClosing` catches
+    /// the writer neither of those covers — the splits' own debounced thickness
+    /// persist, armed by the layout a close provokes and reaching
+    /// `persistAllTabs()` through `onLayoutDidChange`.
+    ///
+    /// It usually went unnoticed because `ProjectWindowManager` drops its last
+    /// reference to the controller in the same turn, leaving the work items'
+    /// `weak self` nil by the time they run. "Usually deallocated first" is not
+    /// a life cycle, and anything that holds the controller a moment longer —
+    /// a script, a test — got the write.
+    public override func windowWillClose(_ notification: Notification) {
+        super.windowWillClose(notification)
+        isClosing = true
+        cancelPendingTabPersist()
+        if let firstResponderObserver {
+            NotificationCenter.default.removeObserver(firstResponderObserver)
+            self.firstResponderObserver = nil
+        }
+    }
+
     private func restoreFocusedLeafForActiveTab() {
         guard let activeTabID = tabbed.activeTabID,
               let activeSplit = splitControllersByTabID[activeTabID],
@@ -955,11 +1023,13 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         }
     }
 
-    /// Tears down every tab and re-installs from the workspace's stored
-    /// tabs. The project controller calls this after it changes what is
-    /// stored — a data source assigned after `init(project:)` only sees
-    /// tabs from this, since `init` already installed the initial set
-    /// itself.
+    /// Tears down every tab and re-installs from the workspace's stored tabs.
+    ///
+    /// The project controller calls this when — and only when — a reconcile
+    /// actually wrote different tabs. It is not a cheap refresh: every pane in
+    /// the window is discarded and rebuilt, which for the app's default
+    /// blueprint means killing a shell per tab and spawning a new one, so
+    /// calling it on a reconcile that changed nothing is pure loss.
     public func reloadTabs() {
         removeAllTabs()
         tabGroups.removeAll()
@@ -969,6 +1039,25 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         refreshActivePaneChrome()
     }
 
+    /// Re-asks the data source what each tab's bar item should be, and swaps
+    /// in the answer. The panes are untouched.
+    ///
+    /// This is the cheap counterpart to `reloadTabs()`, and it exists because
+    /// the two things a tab is made of become available at different times.
+    /// A window installs its tabs from storage the moment it opens; the data
+    /// source's answer for a tab depends on a checkout scan that runs git and
+    /// therefore has not finished yet, so every item falls back to
+    /// `.title(record.title)`. When the scan then agrees with what was stored
+    /// — the common case on a reopen — nothing was written, `reloadTabs()` is
+    /// rightly not called, and the placeholder titles would otherwise stand
+    /// for the life of the window. Rebuilding the panes to correct a tab
+    /// button would be an absurd price; this only rebuilds the buttons.
+    public func refreshTabItems() {
+        for (edge, record) in currentTabRecords() {
+            tabbed.setTabItem(id: record.id, item: tabItem(for: record, on: edge))
+        }
+    }
+
     /// The removal half of `reloadTabs()`, extracted so `isReloadingTabs`
     /// is raised and lowered by one `defer` around the loop alone. The flag
     /// must be down again before `installInitialTabs()` runs, or the top-up
@@ -976,10 +1065,28 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     private func removeAllTabs() {
         isReloadingTabs = true
         defer { isReloadingTabs = false }
+        for split in splitControllersByTabID.values {
+            tearDown(split: split)
+        }
         for edge in Edge.allCases {
             for tab in tabbed.tabs(on: edge) {
                 tabbed.removeTab(id: tab.id)
             }
+        }
+    }
+
+    /// Tells every pane under `split` that it is being discarded.
+    ///
+    /// `MultiTabbedViewController.removeTab(id:)` drops a whole split tree
+    /// without going through `ComposableTabsViewController.remove(_:)`, which
+    /// is the framework's only other call site for `paneWillBeRemoved()`. A
+    /// pane's content may own a shell or an FSEvents stream, and "released
+    /// whenever the last reference happens to drop" is not a life cycle for a
+    /// child process — so the two paths that discard a tree whole,
+    /// `removeAllTabs()` and `didRequestCloseTab`, go through here.
+    private func tearDown(split: ComposableTabsViewController) {
+        for leaf in split.allLeaves() {
+            leaf.paneWillBeRemoved()
         }
     }
 
@@ -1031,15 +1138,32 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// `didSelectTab` callback fires for whatever it activates next, and
     /// mid-loop that callback would write the shrinking tab set — pruning
     /// tabs `installInitialTabs()` is about to read straight back out of
-    /// storage.
+    /// storage. A no-op once the window is closing, for the reasons on
+    /// `isClosing`.
     private func persistAllTabs() {
-        guard !isReloadingTabs else { return }
-        var records: [TabRecord] = []
+        guard !isReloadingTabs, !isClosing else { return }
+        project.persistTabs(
+            currentTabRecords().map(\.record),
+            activeTabID: tabbed.activeTabID,
+            enabledEdges: Edge.allCases.filter { tabbed.isEdgeEnabled($0) }
+        )
+    }
+
+    /// What this window's tabs are, right now, as the records storage holds —
+    /// paired with the edge each one is drawn on, which the record itself also
+    /// carries but which a caller asking per-edge questions would otherwise
+    /// have to dig back out.
+    ///
+    /// Shared by the two callers that need a record for a live tab: the
+    /// persist above, and `refreshTabItems()`, which hands each one back to
+    /// the data source (`dry` — one answer to "what is this tab").
+    private func currentTabRecords() -> [(edge: Edge, record: TabRecord)] {
+        var records: [(edge: Edge, record: TabRecord)] = []
         for edge in Edge.allCases {
             for tab in tabbed.tabs(on: edge) {
                 guard let split = splitControllersByTabID[tab.id] else { continue }
                 let group = tabGroups.first(where: { $0.members[edge] == tab.id })
-                records.append(TabRecord(
+                records.append((edge: edge, record: TabRecord(
                     id: tab.id,
                     groupID: group?.id,
                     edge: edge,
@@ -1055,14 +1179,10 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                     root: split.snapshotNode(),
                     focusedNodeID: focusedLeafByTabID[tab.id],
                     workingDirectory: storedWorkingDirectory(split.workingDirectory)
-                ))
+                )))
             }
         }
-        project.persistTabs(
-            records,
-            activeTabID: tabbed.activeTabID,
-            enabledEdges: Edge.allCases.filter { tabbed.isEdgeEnabled($0) }
-        )
+        return records
     }
 
     // MARK: - Help drawer
@@ -1228,6 +1348,9 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
         // group disappears.
         let ordered = [id] + group.members.values.filter { $0 != id }
         for memberID in ordered {
+            if let split = splitControllersByTabID[memberID] {
+                tearDown(split: split)
+            }
             controller.removeTab(id: memberID)
             splitControllersByTabID.removeValue(forKey: memberID)
             focusedLeafByTabID.removeValue(forKey: memberID)

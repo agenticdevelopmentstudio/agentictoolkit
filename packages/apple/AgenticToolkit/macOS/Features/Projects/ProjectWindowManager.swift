@@ -245,9 +245,40 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
             commandRegistry: commandRegistry
         )
         projectControllers[repo.id] = projectController
-        let controller = ComposableTabsWindowController(project: workspace)
-        controller.tabItemDataSource = projectController
-        projectController.onTabsDidChange = { [weak controller] in controller?.reloadTabs() }
+        // The data source is passed to the initializer, not assigned after it:
+        // the window installs its stored tabs while initializing, and a tab
+        // whose item is built before the data source arrives falls back to a
+        // plain title, leaving a pane-less tab until something else reloads.
+        let controller = ComposableTabsWindowController(
+            project: workspace,
+            tabItemDataSource: projectController
+        )
+        // Ruling Q: `projectController` is captured weakly here and the window
+        // reloads only while this controller is still the one registered for
+        // `repo.id`, so a controller that was closed and replaced — or one
+        // whose window is already gone — can never drive a window that is no
+        // longer its own.
+        projectController.onTabsDidChange = { [weak self, weak controller, weak projectController] in
+            guard let self, let projectController,
+                  self.projectControllers[repo.id] === projectController else { return }
+            controller?.reloadTabs()
+        }
+        // The window's debounced focus-persist writes the same rows a reconcile
+        // is about to write. Cancelling it here, in the same turn as the write,
+        // is what stops a pending item from landing afterwards with the tab set
+        // the reconcile just replaced.
+        projectController.onWillChangeTabs = { [weak controller] in
+            controller?.cancelPendingTabPersist()
+        }
+        // The other half of the reconcile's two outcomes. Nothing was written,
+        // so the panes stand; but the window built its tab buttons before this
+        // controller had any checkouts to answer with, and now it has them.
+        // Guarded the same way as `onTabsDidChange`, for the same reason.
+        projectController.onTabItemsNeedRefresh = { [weak self, weak controller, weak projectController] in
+            guard let self, let projectController,
+                  self.projectControllers[repo.id] === projectController else { return }
+            controller?.refreshTabItems()
+        }
         controllers[repo.id] = controller
         openOrder.append(repo.id)
         refreshOpenWorkspaceIDs()
@@ -255,7 +286,7 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         // `makeKeyAndOrderFront(nil)` runs before `observeBecameKey` is
         // installed below, so whether this window's own *initial* key
         // notification is seen by that observer is left to AppKit timing.
-        // That is deliberately not guarded against: `reconcile(notify:)`
+        // That is deliberately not guarded against: `reconcile()`
         // early-returns on `plan.isUnchanged` before ever calling
         // `onTabsDidChange?()`, so a redundant refresh this ordering might
         // let through costs one `git worktree list` and no rebuild — not
@@ -265,22 +296,14 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         observeClose(of: controller, repoID: repo.id, recordsOpenState: true)
         observeBecameKey(of: controller, repoID: repo.id)
         // The window is on screen with whatever tabs were stored; the checkout
-        // scan runs git, so it is a task, and the window reloads when it lands.
-        //
-        // Ruling Q: `projectController` is captured strongly, so it outlives
-        // its removal from `projectControllers` if the window closes mid-scan
-        // — `ProjectController`'s own closed flag (set synchronously by
-        // `markClosed()`, in the close handler's own turn) stops that from
-        // persisting a dead window's tabs, but
-        // this call site is outside `ProjectController` entirely, so it needs
-        // its own guard: only reload when this controller is still the one
-        // registered for `repo.id`, so a resurrected or replaced controller
-        // can never drive a window that is no longer its own.
-        Task { [weak self, weak controller] in
-            await projectController.open()
-            guard let self, self.projectControllers[repo.id] === projectController else { return }
-            controller?.reloadTabs()
-        }
+        // scan runs git, so it is a task. There is no reload here: the scan
+        // reloads the window through `onTabsDidChange` if — and only if — it
+        // actually wrote a different set of tabs. Reloading unconditionally
+        // once the scan returned was the bug: the common case is a project
+        // whose checkouts have not changed since last time, and it threw away
+        // the pane tree the window had just built, and every shell and
+        // file-system watcher living in it, to build an identical one.
+        Task { await projectController.open() }
         setWindowOpen(true, repoID: repo.id)
     }
 

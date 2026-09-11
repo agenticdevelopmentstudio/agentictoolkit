@@ -4,6 +4,14 @@ import AppKit
 import XCTest
 @testable import AgenticToolkitMacOS
 
+/// A pane content view that can take the window's focus. The window arms its
+/// debounced tab persist from first-responder changes *inside a pane*, so a
+/// test that needs that writer running needs a view AppKit will actually hand
+/// the responder to.
+private final class FocusableTestView: NSView {
+    override var acceptsFirstResponder: Bool { true }
+}
+
 /// `ProjectWindowManager` builds one `ProjectController` per project window,
 /// hands it to the window as its `tabItemDataSource`, and tears it down when
 /// the window closes.
@@ -33,7 +41,7 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         let registry = ComposableTabsViewRegistry()
         registry.register(alpha, descriptor: .init(displayName: "Alpha", minimumThickness: 150)) { _ in
             let content = NSViewController()
-            content.view = NSView()
+            content.view = FocusableTestView()
             return content
         }
         // swiftlint:disable:next force_try
@@ -77,10 +85,9 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         // MAJOR 1 (review fix round 1): stored tab titles only prove the
         // database was written, not that the window itself shows anything
         // but a plain title button. `ComposableTabsWindowController.init`
-        // installs tabs before `tabItemDataSource` is even set, so the
-        // `reloadTabs()` call after `open()` lands (`ProjectWindowManager`
-        // line ~236) is what turns "main" into a hosted pane — delete it and
-        // every other assertion in this test still passes.
+        // installs tabs, so the `tabItemDataSource:` argument the manager
+        // passes to it is what turns "main" into a hosted pane — drop that
+        // argument and every other assertion in this test still passes.
         let reloadDeadline = Date().addingTimeInterval(5)
         func isHostedPane(_ item: TabItem) -> Bool {
             if case .viewController = item { return true }
@@ -152,9 +159,9 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         XCTAssertEqual(controller.checkouts.map(\.displayName), ["main", "feature"])
 
         // MAJOR 1 (review fix round 1): checkouts changing is not the same
-        // claim as the window's tab items changing. `onTabsDidChange` (set at
-        // `ProjectWindowManager` line ~224) is the only thing that calls
-        // `reloadTabs()` on this path — delete that assignment and
+        // claim as the window's tab items changing. `onTabsDidChange` is now
+        // the only thing anywhere that calls
+        // `reloadTabs()` — delete that assignment and
         // `checkouts` above still updates, but the window keeps showing only
         // "main" forever.
         let windowController = try XCTUnwrap(manager.windowController(for: repo.id))
@@ -385,30 +392,22 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         // the in-flight open() task to land.
         try await Task.sleep(for: .milliseconds(900))
 
-        // Checking the *database* here would not actually prove anything:
-        // `ComposableTabsWindowController` separately schedules a
-        // focus-tracking persist (`scheduleFocusPersist()`, driven by
-        // `NSWindow.didUpdateNotification` -> `refreshFocusedLeaf()`)
-        // whenever the window's first responder changes, entirely unrelated
-        // to the git-reconcile path and not something the `isClosed` guard
-        // is meant to cover. Closing the window fires more first-responder
-        // updates, which keep re-debouncing that persist — verified directly,
-        // by disabling `isClosed`'s check in `reconcile(notify:)`, that this
-        // still lands "Tab 1" (the placeholder) in the database within the
-        // wait window above: the debounced focus persist overwrites
-        // reconcile's own write, so a stored-tabs assertion cannot tell a
-        // guarded close from an unguarded one. (It fires here only because
-        // this test keeps `windowController` alive after close — production
-        // drops the last strong reference to it in `observeClose`, so the
-        // scheduled work's `weak self` resolves to nil before it runs.)
-        //
-        // `controller.checkouts` is not touched by that unrelated mechanism,
-        // and it is exactly what `reconcile(notify:)` guards on `!isClosed`
-        // — checked again after the `await` a close can land inside of —
-        // before assigning it, and everything downstream (`branchControllers`
-        // and the persisted tabs) flows from that same assignment. A window
-        // closed mid-scan must never see it happen, no matter how long the
-        // slow git call takes to return.
+        // The database, which is the claim that matters: a window closed
+        // mid-scan must leave the project's rows exactly as it found them.
+        // This assertion was impossible to write while the window's debounced
+        // focus-persist could fire on its own schedule — it wrote the live
+        // (placeholder) tab set and so landed "Tab 1" here no matter what the
+        // reconcile did. The close now drops that pending item, so nothing
+        // writes these rows behind the guard.
+        XCTAssertNil(
+            controller.workspace.storedTabs(),
+            "a window closed mid-scan must not leave tab rows behind"
+        )
+        // `controller.checkouts` is the same guard seen one step earlier:
+        // `reconcile()` re-checks `!isClosed` after the `await` a close can
+        // land inside of, before assigning it, and everything downstream
+        // (`branchControllers` and the persisted tabs) flows from that same
+        // assignment.
         XCTAssertTrue(
             controller.checkouts.isEmpty,
             "a window closed mid-scan must never have its checkouts updated by the in-flight reconcile"
@@ -425,6 +424,124 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
             },
             "a window closed mid-scan must never be reloaded with the checkout's hosted pane"
         )
+    }
+
+    /// BLOCKER 2 (final review B): the window and the project controller are
+    /// both writers of the project's tab rows, and `saveTabs` is a full
+    /// delete-then-insert, so whichever lands last wins outright.
+    ///
+    /// On a first open the window has nothing stored to install, so its live
+    /// tab set is a single placeholder. The 250 ms focus-persist armed the
+    /// moment focus lands in a pane then fires *after* reconcile has written
+    /// one tab per worktree and replaces every one of them with that
+    /// placeholder — and it does not self-heal, because the next reconcile
+    /// keeps the placeholder (its directory resolves to the project) and adds
+    /// the checkouts back beside it.
+    ///
+    /// The fake git answers `worktree list` at once with two checkouts and
+    /// then sleeps in `rev-parse`, which is what used to hold the post-open
+    /// reload well past the debounce and leave the placeholder standing as the
+    /// final state of the database.
+    func testAFirstOpenKeepsTheReconciledTabsAgainstTheWindowsDebouncedWrite() async throws {
+        let database = try ProjectDatabase(path: repoRoot.appendingPathComponent(".test-project.db").path)
+        let repo = GitRepo(path: repoRoot.path, name: "fixture")
+        try database.insert(repo)
+        let coordinator = try ProjectsCoordinator(database: database, scanner: nil, commandRegistry: CommandRegistry())
+        let manager = ProjectWindowManager()
+        manager.attach(to: coordinator)
+
+        let worktreeRoot = repoRoot.deletingLastPathComponent()
+            .appendingPathComponent(repoRoot.lastPathComponent + "-wt")
+        try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: worktreeRoot) }
+
+        let scriptDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("two-writer-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scriptDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scriptDir) }
+        let fakeGitURL = try makeTwoCheckoutFakeGitExecutable(scriptDir: scriptDir, worktreeRoot: worktreeRoot)
+        manager.gitClient = GitClient(configuration: GitClientConfiguration(executableURL: fakeGitURL, timeout: 10))
+
+        manager.openProject(repo)
+        let controller = try XCTUnwrap(manager.projectController(for: repo.id))
+        let windowController = try XCTUnwrap(manager.windowController(for: repo.id))
+        // Still in the turn that opened the window, so this is provably armed
+        // before the reconcile's own write — the ordering the bug needs.
+        try armFocusPersist(on: windowController)
+
+        // Past the 250 ms debounce and past the checkout scan, but nowhere
+        // near the sleeping `rev-parse` calls behind it.
+        try await Task.sleep(for: .milliseconds(900))
+
+        let stored = try XCTUnwrap(
+            controller.workspace.storedTabs(),
+            "the reconcile must have written this project's tabs"
+        )
+        XCTAssertEqual(
+            Set(stored.tabs.map(\.title)), ["main", "feature"],
+            "the window's debounced write must not replace the reconciled tabs with its placeholder"
+        )
+
+        manager.closeProject(repoID: repo.id)
+    }
+
+    /// MAJOR 6 (final review B): opening a project built its whole pane tree
+    /// twice — once inside `init`, before the data source was assigned, so
+    /// every tab fell back to a plain title, and again from a `reloadTabs()`
+    /// that ran whether or not the scan had changed anything. With every tab
+    /// carrying a terminal, the second build is a set of shells killed and a
+    /// set spawned for nothing.
+    ///
+    /// A reopen is where it shows: the checkouts are already stored, so the
+    /// reconcile writes nothing and there is nothing to reload. The panes the
+    /// window built for itself must simply still be there.
+    func testReopeningAnUnchangedProjectKeepsThePanesItsWindowBuilt() async throws {
+        let database = try ProjectDatabase(path: repoRoot.appendingPathComponent(".test-project.db").path)
+        let repo = GitRepo(path: repoRoot.path, name: "fixture")
+        try database.insert(repo)
+        let coordinator = try ProjectsCoordinator(database: database, scanner: nil, commandRegistry: CommandRegistry())
+        let manager = ProjectWindowManager()
+        manager.attach(to: coordinator)
+        manager.gitClient = GitClient(configuration: .default)
+
+        manager.openProject(repo)
+        let firstController = try XCTUnwrap(manager.projectController(for: repo.id))
+        let firstDeadline = Date().addingTimeInterval(5)
+        while firstController.workspace.storedTabs() == nil, Date() < firstDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let storedBefore = try XCTUnwrap(firstController.workspace.storedTabs()).tabs.map(\.id)
+        manager.closeProject(repoID: repo.id)
+
+        manager.openProject(repo)
+        let windowController = try XCTUnwrap(manager.windowController(for: repo.id))
+        // Read in the opening turn: these are the panes `init` built, before
+        // any reconcile could have landed.
+        let panesAtOpen = windowController.allPanes().map(ObjectIdentifier.init)
+        XCTAssertFalse(panesAtOpen.isEmpty, "the stored tab must have been installed by init")
+
+        // Past the reconcile, and past the window's own 250 ms debounce.
+        try await Task.sleep(for: .milliseconds(800))
+
+        XCTAssertEqual(
+            windowController.allPanes().map(ObjectIdentifier.init), panesAtOpen,
+            "a reopen that changed nothing must not throw the window's panes away and rebuild them"
+        )
+        // The tab *buttons* are the one thing the scan does have to correct:
+        // at init the project controller had not scanned yet, so it could only
+        // answer `.title`. It must correct them without touching the panes
+        // asserted above — which is exactly what the assertion pair says.
+        XCTAssertTrue(
+            windowController.tabItems(on: .top).allSatisfy { item in
+                if case .viewController = item { return true }
+                return false
+            },
+            "the checkout scan must hand the tabs their real items once it has them"
+        )
+        let reopened = try XCTUnwrap(manager.projectController(for: repo.id))
+        XCTAssertEqual(try XCTUnwrap(reopened.workspace.storedTabs()).tabs.map(\.id), storedBefore)
+
+        manager.closeProject(repoID: repo.id)
     }
 
     /// The close has to reach the controller's closed flag in its **own**
@@ -583,6 +700,68 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         main()
         """
         let scriptURL = logDir.appendingPathComponent("fake-git.py")
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        return scriptURL
+    }
+
+    /// Puts the window's focus inside its first pane and tells the window the
+    /// responder changed, which is exactly what arms the debounced tab
+    /// persist. Asserts the responder actually moved: a view that refuses it
+    /// would leave the writer this exercises switched off, and the test would
+    /// pass by testing nothing.
+    private func armFocusPersist(on windowController: ComposableTabsWindowController) throws {
+        let window = try XCTUnwrap(windowController.window)
+        let pane = try XCTUnwrap(windowController.allPanes().first)
+        // The pane's content is built with its view, and the responder has to
+        // land on a real view inside the leaf.
+        _ = pane.view
+        let content = try XCTUnwrap(pane.contentViewController)
+        XCTAssertTrue(window.makeFirstResponder(content.view), "the pane's content must accept first responder")
+        NotificationCenter.default.post(name: NSWindow.didUpdateNotification, object: window)
+    }
+
+    /// Writes an executable fake `git` answering `worktree list --porcelain`
+    /// immediately with two checkouts — `repoRoot` on `main` and
+    /// `worktreeRoot` on `feature` — and taking a full second over each
+    /// `rev-parse`. The delay is the point: it holds the branch refresh that
+    /// follows a reconcile well past the window's 250 ms focus-persist
+    /// debounce, so the two writers are ordered the way the bug needs them.
+    private func makeTwoCheckoutFakeGitExecutable(scriptDir: URL, worktreeRoot: URL) throws -> URL {
+        let script = """
+        #!/usr/bin/env python3
+        import sys
+        import time
+
+        REPO_ROOT = \(pythonLiteral(repoRoot.path))
+        WORKTREE_ROOT = \(pythonLiteral(worktreeRoot.path))
+
+
+        def main():
+            args = sys.argv[1:]
+            verb = args[0] if args else ""
+            if verb == "worktree":
+                sys.stdout.write(
+                    "worktree " + REPO_ROOT + "\\n"
+                    "HEAD 0000000000000000000000000000000000000001\\n"
+                    "branch refs/heads/main\\n"
+                    "\\n"
+                    "worktree " + WORKTREE_ROOT + "\\n"
+                    "HEAD 0000000000000000000000000000000000000002\\n"
+                    "branch refs/heads/feature\\n"
+                )
+                sys.exit(0)
+            elif verb == "rev-parse":
+                time.sleep(1.0)
+                sys.stdout.write("main\\n")
+                sys.exit(0)
+            else:
+                sys.exit(1)
+
+
+        main()
+        """
+        let scriptURL = scriptDir.appendingPathComponent("fake-git.py")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
         return scriptURL

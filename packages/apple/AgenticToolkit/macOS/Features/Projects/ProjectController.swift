@@ -11,7 +11,25 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     public let workspace: ProjectWorkspace
     public private(set) var checkouts: [ProjectCheckout] = []
     public private(set) var branchControllers: [ProjectCheckout: BranchController] = [:]
+    /// Fired when — and only when — a reconcile actually wrote new tabs. The
+    /// window rebuilds from storage in response, so firing it on a reconcile
+    /// that changed nothing would throw away a live pane tree, and every shell
+    /// and file-system watcher in it, for no reason at all.
     public var onTabsDidChange: (() -> Void)?
+
+    /// Fired immediately before a reconcile writes, in the same main-actor
+    /// turn. The window's debounced focus-persist is the other writer of these
+    /// rows and would otherwise land after this write with a stale tab set; the
+    /// window cancels it from here. See `cancelPendingTabPersist()`.
+    public var onWillChangeTabs: (() -> Void)?
+
+    /// Fired when a reconcile left the stored tabs alone but this controller's
+    /// checkouts — and so the answers it gives as a tab-item data source —
+    /// changed. The window opened before the first scan finished, so its tab
+    /// buttons are the stored titles; this is what tells it they can now be
+    /// the real thing. Mutually exclusive with `onTabsDidChange`: one fires on
+    /// the path that writes, the other on the path that does not.
+    public var onTabItemsNeedRefresh: (() -> Void)?
 
     private let gitClient: GitClient
     private let commandRegistry: CommandRegistry?
@@ -37,12 +55,11 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// with the flag still down, pass the guard, and write a dead window's
     /// checkouts into the database.
     ///
-    /// `reconcile(notify:)` checks it again after its own git call returns, so
+    /// `reconcile()` checks it again after its own git call returns, so
     /// a reconcile already in flight when the window closes — the open scan
     /// taking its ~100ms while `observeClose` drops this controller — bails
     /// before persisting tabs or notifying. One flag covers both `open()` and
-    /// `refreshCheckouts()`, since both funnel through
-    /// `serializedReconcile(notify:)`;
+    /// `refreshCheckouts()`, since both funnel through `serializedReconcile()`;
     /// a stored, cancelled `Task` handle was the alternative, rejected because
     /// it would be a second lifecycle to keep in step with this one.
     private(set) var isClosed = false
@@ -56,21 +73,21 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     // MARK: Lifecycle
 
     public func open() async {
-        await serializedReconcile(notify: false)
+        await serializedReconcile()
     }
 
     public func refreshCheckouts() async {
-        await serializedReconcile(notify: true)
+        await serializedReconcile()
     }
 
     /// Waits for whatever reconcile is already in flight, then runs this
     /// caller's own — see `inFlightReconcile`.
-    private func serializedReconcile(notify: Bool) async {
+    private func serializedReconcile() async {
         let previous = inFlightReconcile
         let task = Task {
             _ = await previous?.value
             guard !self.isClosed else { return }
-            await self.reconcile(notify: notify)
+            await self.reconcile()
             guard !self.isClosed else { return }
             for controller in self.branchControllers.values {
                 await controller.refresh()
@@ -119,7 +136,13 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// brings the stored tabs in line with what is on disk. Persists only when
     /// something changed or nothing was stored, so an unchanged reopen leaves
     /// the database and the window alone.
-    private func reconcile(notify: Bool) async {
+    ///
+    /// The two callbacks bracket that write and fire only on the path that
+    /// actually takes it: everything downstream — the window throwing its pane
+    /// tree away and rebuilding it, the window cancelling its own pending
+    /// write — is wasted or harmful work when the stored tabs already say what
+    /// this reconcile was going to write.
+    private func reconcile() async {
         let freshCheckouts = await readCheckouts()
         // Checked again here, not only at the top of `serializedReconcile`'s
         // task: `readCheckouts()` is the `await` a window close can land
@@ -127,6 +150,7 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
         // to `branchControllers`, and (below) to the database. A close that
         // lands mid-scan must stop here, before any of that runs.
         guard !isClosed else { return }
+        let previousCheckouts = checkouts
         checkouts = freshCheckouts
         syncBranchControllers()
 
@@ -136,7 +160,16 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
             checkouts: checkouts,
             projectDirectory: workspace.directoryURL
         )
-        guard stored == nil || !plan.isUnchanged else { return }
+        guard stored == nil || !plan.isUnchanged else {
+            // The stored tabs already say what this reconcile would have
+            // written, so nothing is persisted and the window keeps its panes.
+            // Its tab *buttons* are another matter: the window installed them
+            // before this scan finished, when this controller had no checkouts
+            // and could only answer `.title`. Now that it can answer properly,
+            // the buttons — and only the buttons — are rebuilt.
+            if previousCheckouts != checkouts { onTabItemsNeedRefresh?() }
+            return
+        }
 
         let enabledEdges = stored?.enabledEdges ?? [.top]
         var tabs = plan.keep
@@ -148,10 +181,9 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
             )
         }
         let activeTabID = tabs.first { $0.id == stored?.activeTabID }?.id ?? tabs.first?.id
+        onWillChangeTabs?()
         workspace.persistTabs(tabs, activeTabID: activeTabID, enabledEdges: enabledEdges)
-        if notify {
-            onTabsDidChange?()
-        }
+        onTabsDidChange?()
     }
 
     /// The repository's own checkout first. When git answers with no

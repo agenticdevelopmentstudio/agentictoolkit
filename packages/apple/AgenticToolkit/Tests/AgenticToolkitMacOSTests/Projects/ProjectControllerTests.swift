@@ -128,9 +128,8 @@ final class ProjectControllerTests: XCTestCase {
     }
 
     /// Exercises the `guard stored == nil || !plan.isUnchanged else { return }`
-    /// short-circuit in `reconcile(notify:)` on the one path that can actually
-    /// fire a notification: `refreshCheckouts()`, called a second time with
-    /// nothing changed on disk. Also covers the NIT that a reused
+    /// short-circuit in `reconcile()`: `refreshCheckouts()`, called a second
+    /// time with nothing changed on disk. Also covers the NIT that a reused
     /// `BranchController` is not rebuilt across an unchanged reconcile.
     func testAnUnchangedRefreshFiresNoChangeAndLeavesStoredTabsAlone() async throws {
         let controller = try makeController()

@@ -263,7 +263,74 @@ final class ProjectPaneContentTests: XCTestCase {
         XCTAssertEqual(spy?.teardownCount, 0)
     }
 
+    // MARK: - Tab-level teardown
+
+    /// `reloadTabs()` discards whole split trees without going through
+    /// `remove(_:)`, which until now was the framework's only call site for
+    /// `paneWillBeRemoved()`. Every pane on a discarded tab kept whatever it
+    /// owned — a shell, an FSEvents stream — with nothing left able to reap it,
+    /// and the reconcile path runs this on every project open.
+    func testReloadingTabsTearsDownEveryPaneItDiscards() throws {
+        try installTeardownSpyLayout()
+        let window = ComposableTabsWindowController(project: project)
+        defer { window.close() }
+        let discarded = spies(in: window.allPanes())
+        XCTAssertFalse(discarded.isEmpty)
+        XCTAssertTrue(discarded.allSatisfy { $0.teardownCount == 0 })
+
+        window.reloadTabs()
+
+        XCTAssertTrue(
+            discarded.allSatisfy { $0.teardownCount == 1 },
+            "a tab thrown away by reloadTabs() must tell its panes they are being discarded"
+        )
+        // The replacements are live, not collaterally torn down.
+        XCTAssertTrue(spies(in: window.allPanes()).allSatisfy { $0.teardownCount == 0 })
+    }
+
+    /// The same gap on the other path that drops a whole tree: closing a tab.
+    func testClosingATabGroupTearsDownItsPanesAndLeavesTheRestRunning() throws {
+        try installTeardownSpyLayout()
+        let records = try seedTwoStoredTabGroups()
+        let window = ComposableTabsWindowController(project: project)
+        defer { window.close() }
+        let host = try XCTUnwrap(window.contentViewController as? WindowFooterContentViewController)
+        let tabbed = try XCTUnwrap(host.contentViewController as? MultiTabbedViewController)
+        let doomed = spies(in: window.panes(inTab: records[0].groupID.uuidString))
+        let survivors = spies(in: window.panes(inTab: records[1].groupID.uuidString))
+        XCTAssertFalse(doomed.isEmpty)
+        XCTAssertFalse(survivors.isEmpty)
+
+        window.multiTabbedViewController(tabbed, didRequestCloseTab: records[0].id, on: .top)
+
+        XCTAssertTrue(doomed.allSatisfy { $0.teardownCount == 1 })
+        XCTAssertTrue(survivors.allSatisfy { $0.teardownCount == 0 })
+    }
+
     // MARK: - Helpers
+
+    /// The teardown spies behind `panes`, with each pane's view forced to load
+    /// first: a pane nobody displayed has no content at all, which would let
+    /// these tests pass for the wrong reason.
+    private func spies(in panes: [ComposableTabsPaneViewController]) -> [TeardownSpyViewController] {
+        panes.compactMap { pane in
+            _ = pane.view
+            return pane.contentViewController as? TeardownSpyViewController
+        }
+    }
+
+    /// Two stored tab groups, because `didRequestCloseTab` refuses to close the
+    /// last one. The repo row has to exist first — tab rows reference it, and
+    /// `persistTabs` only logs the failure it would otherwise hit.
+    @discardableResult
+    private func seedTwoStoredTabGroups() throws -> [TabRecord] {
+        try project.database.insert(project.repo)
+        let records = ["alpha", "beta"].map { title in
+            TabRecord(edge: .top, title: title, root: project.layout.blueprint())
+        }
+        project.persistTabs(records, activeTabID: records.first?.id, enabledEdges: [.top])
+        return records
+    }
 
     /// A sidebar that names a fraction, plus two views with distinct minimums —
     /// the three shapes the metrics tests need.

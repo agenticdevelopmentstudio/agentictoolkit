@@ -213,6 +213,26 @@ open class MultiTabbedViewController: NSViewController {
         tabBars[edge]?.renameItem(id: id, title: title)
     }
 
+    /// Swaps out what a tab shows *in the bar*, leaving its content view
+    /// controller — and everything running inside it — exactly where it is.
+    ///
+    /// `renameTab` cannot do this: it only edits the text of a `.title` item,
+    /// and refuses a hosted one outright. A caller whose tab items come from a
+    /// data source that was not ready yet needs the other direction — a
+    /// `.title` placeholder becoming the real hosted item — and the whole
+    /// point of doing it here rather than by rebuilding the tab is that the
+    /// pane below the bar must not be disturbed.
+    ///
+    /// Re-syncing the bar is enough to hand the old hosted controller back:
+    /// `TabBarView.rebuildButtons()` reconciles its children on id *and*
+    /// payload identity, so the replaced one is torn down there.
+    public func setTabItem(id: UUID, item: TabItem) {
+        guard let edge = edge(forTabID: id), let state = edgeStates[edge] else { return }
+        guard let idx = state.tabs.firstIndex(where: { $0.id == id }) else { return }
+        state.tabs[idx].item = item
+        syncTabBar(for: edge)
+    }
+
     public func moveTab(id: UUID, to index: Int, on edge: Edge) {
         guard let state = edgeStates[edge] else { return }
         guard let from = state.tabs.firstIndex(where: { $0.id == id }) else { return }
