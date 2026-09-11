@@ -699,11 +699,18 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// id that names no tab is ignored — a window with no selected tab is not a
     /// state this window has, and it is a worse answer to a typo than doing
     /// nothing.
+    ///
+    /// A script picking a tab means what a click on it means, so it takes the
+    /// same tail: the tab is remembered, and the pane that was in front when
+    /// the tab was last left comes back. `tabbed.selectTab` alone reports only
+    /// `activeTabDidChange`, which deliberately does neither.
     public func selectTab(id: UUID) {
         guard let group = tabGroups.first(where: { $0.id == id }) else { return }
         for edge in Edge.allCases where tabbed.isEdgeEnabled(edge) {
             if let memberID = group.members[edge] {
+                guard tabbed.activeTabID != memberID else { return }
                 tabbed.selectTab(id: memberID, on: edge)
+                tabWasActivated()
                 return
             }
         }
@@ -1031,12 +1038,6 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         for edge in Edge.allCases where tabbed.isEdgeEnabled(edge) {
             toppedUp = topUpTabs(on: edge) || toppedUp
         }
-        // Save what the top-up made. Without this the same members are built
-        // from scratch on every launch — new ids, a default layout, and a fresh
-        // set of panes each time — because nothing ever wrote them down
-        // (`idempotency`).
-        if toppedUp { persistAllTabs() }
-
         if let record = initial.tabs.first(where: { $0.id == initial.activeTabID }) {
             tabbed.selectTab(id: record.id, on: record.edge)
         } else if let fallback = Edge.allCases
@@ -1050,6 +1051,21 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             // leaves the window with nothing selected and no visible pane.
             tabbed.selectTab(id: fallback.id, on: fallback.edge)
         }
+
+        // Save what the top-up made. Without this the same members are built
+        // from scratch on every launch — new ids, a default layout, and a fresh
+        // set of panes each time — because nothing ever wrote them down
+        // (`idempotency`).
+        //
+        // *After* the restore above, never before it. `persistAllTabs()` writes
+        // whichever tab is active at the moment it runs, and until the restore
+        // has run that is whatever the first `insertTab` happened to auto-select
+        // — so a top-up that wrote first would overwrite the remembered
+        // selection with the first tab of the first enabled edge, and the
+        // restore that followed would put the right tab on screen without ever
+        // writing it down. The window looked correct and the *next* launch
+        // opened on the wrong tab.
+        if toppedUp { persistAllTabs() }
     }
 
     /// Tears down every tab and re-installs from the workspace's stored tabs.
@@ -1344,6 +1360,13 @@ extension ComposableTabsWindowController: MultiTabbedViewControllerDelegate {
         on edge: Edge
     ) {
         guard !isReloadingTabs else { return }
+        tabWasActivated()
+    }
+
+    /// What "this tab is the one now" costs, wherever the choice came from —
+    /// a click on a tab card or a script writing `selected tab`. Both mean the
+    /// same thing to the window, so neither gets its own half of it (`dry`).
+    private func tabWasActivated() {
         restoreFocusedLeafForActiveTab()
         persistAllTabs()
         refreshActivePaneChrome()
