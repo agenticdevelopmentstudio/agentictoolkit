@@ -345,6 +345,19 @@ public enum KeychainPermissionLedger: Sendable {
         }
     }
 
+    /// Records the outcome of a real read from the `OSStatus` that read
+    /// returned.
+    ///
+    /// Which Security-framework statuses amount to a grant is knowledge this
+    /// module already holds — `request(.keychain(…))` decides it the same way —
+    /// so an app instrumenting its own `SecItem*` calls hands over the raw
+    /// status instead of re-deriving which constants mean "refused". Which is
+    /// the instrumentation the doc comment above asks for: the app's own reads
+    /// are where a grant is actually obtained.
+    public static func record(_ status: OSStatus, service: String) {
+        record(SystemPermissionChecker.keychainStatus(status), service: service)
+    }
+
     /// Forgets every remembered keychain grant — the reset the permission
     /// walkthrough needs, since a remembered grant would otherwise make a
     /// re-run skip the one permission it cannot re-derive.
