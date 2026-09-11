@@ -117,12 +117,47 @@ final class ProjectDatabaseWorkingDirectoryTests: XCTestCase {
         XCTAssertEqual(try reopened.schemaVersion(), 4)
     }
 
+    /// The crash window migration 4 used to leave open: the app was killed
+    /// between `ALTER TABLE ... ADD COLUMN working_directory` and the
+    /// `INSERT INTO schema_migrations (version) VALUES (4)` that records it.
+    /// The column is present, `MAX(version)` still says 3 — so the next
+    /// launch re-runs the `ALTER`, which fails with `duplicate column name`.
+    /// Before this was fixed that threw out of `init(path:)`, and did so on
+    /// every subsequent launch too: the user's projects, tabs and pane state
+    /// were unreachable for good. Opening it must recover instead.
+    func testOpeningADatabaseCrashedMidMigrationRecoversInsteadOfThrowing() throws {
+        let path = tempRoot.appendingPathComponent("Crashed.db").path
+        let repoID = UUID()
+        let nodeID = UUID()
+        let tabID = UUID()
+        try writeV3Database(
+            at: path, repoID: repoID, nodeID: nodeID, tabID: tabID, withWorkingDirectoryColumn: true)
+
+        let database = try ProjectDatabase(path: path)
+        XCTAssertEqual(try database.schemaVersion(), 4)
+
+        let loaded = try database.loadTabs(repoID: repoID)
+        XCTAssertEqual(loaded.tabs.map(\.id), [tabID])
+        XCTAssertEqual(loaded.tabs.first?.title, "from-v3")
+        XCTAssertNil(loaded.tabs.first?.workingDirectory)
+    }
+
     // MARK: - v3 fixture
 
     /// A hand-rolled schema at exactly the shape migration 3 leaves behind.
     /// Written directly with SQLite3, not through `ProjectDatabase`, because
     /// the app can no longer produce a v3 file once migration 4 ships.
-    private func writeV3Database(at path: String, repoID: UUID, nodeID: UUID, tabID: UUID) throws {
+    ///
+    /// - Parameter withWorkingDirectoryColumn: Adds migration 4's column
+    ///   without its version row, which is the state a crash between the two
+    ///   statements leaves behind.
+    private func writeV3Database(
+        at path: String,
+        repoID: UUID,
+        nodeID: UUID,
+        tabID: UUID,
+        withWorkingDirectoryColumn: Bool = false
+    ) throws {
         var handle: OpaquePointer?
         XCTAssertEqual(sqlite3_open(path, &handle), SQLITE_OK)
         defer { sqlite3_close(handle) }
@@ -219,6 +254,11 @@ final class ProjectDatabaseWorkingDirectoryTests: XCTestCase {
             "INSERT INTO schema_migrations (version) VALUES (2)",
             "INSERT INTO schema_migrations (version) VALUES (3)"
         ] {
+            XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, sql)
+        }
+
+        if withWorkingDirectoryColumn {
+            let sql = "ALTER TABLE project_tabs ADD COLUMN working_directory TEXT"
             XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, sql)
         }
     }

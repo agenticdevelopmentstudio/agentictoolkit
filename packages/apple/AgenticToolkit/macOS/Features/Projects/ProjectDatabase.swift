@@ -100,25 +100,62 @@ public final class ProjectDatabase {
 
     // MARK: - Migrations
 
+    /// One transaction around the whole chain, the same way `saveTabs` wraps
+    /// its own rewrite. SQLite's DDL is transactional, so this costs nothing
+    /// and closes the window every migration here used to leave open: each
+    /// one is a schema statement followed by the `INSERT` that records it,
+    /// and a crash, a kill or a power loss between the two left the schema
+    /// changed with `MAX(version)` still behind it. The next launch re-ran
+    /// the schema statement, `ALTER TABLE ... ADD COLUMN` failed with
+    /// `duplicate column name`, and `init(path:)` threw — on that launch and
+    /// on every one after it, with every project, tab and pane state in the
+    /// file unreachable. Rolled back, the file is exactly where it started
+    /// and the next launch migrates it cleanly.
     private func runMigrations() throws {
-        try execute("""
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version INTEGER PRIMARY KEY,
-                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-        """)
-        if try schemaVersion() < 1 {
-            try migration001_createSchema()
+        try execute("BEGIN IMMEDIATE TRANSACTION")
+        do {
+            try execute("""
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
+            if try schemaVersion() < 1 {
+                try migration001_createSchema()
+            }
+            if try schemaVersion() < 2 {
+                try migration002_dropMissingSince()
+            }
+            if try schemaVersion() < 3 {
+                try migration003_paneSizesAndState()
+            }
+            if try schemaVersion() < 4 {
+                try migration004_tabWorkingDirectory()
+            }
+            try execute("COMMIT")
+        } catch {
+            _ = try? execute("ROLLBACK")
+            throw error
         }
-        if try schemaVersion() < 2 {
-            try migration002_dropMissingSince()
+    }
+
+    /// Whether `table` already has a column called `column`.
+    ///
+    /// What makes a migration that adds a column safe to re-run. The
+    /// transaction above stops this state from being *created* from here on,
+    /// but a database already left mid-migration by an older build is still
+    /// on disk, and nothing else would ever open it again (`idempotency`).
+    func columnExists(_ column: String, in table: String) throws -> Bool {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?"
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw ProjectDatabaseError.prepareFailed(lastErrorMessage)
         }
-        if try schemaVersion() < 3 {
-            try migration003_paneSizesAndState()
-        }
-        if try schemaVersion() < 4 {
-            try migration004_tabWorkingDirectory()
-        }
+        bindText(stmt, 1, table)
+        bindText(stmt, 2, column)
+        guard try stepRow(stmt) else { return false }
+        return sqlite3_column_int(stmt, 0) > 0
     }
 
     func schemaVersion() throws -> Int {
@@ -262,8 +299,15 @@ public final class ProjectDatabase {
     /// only the column that remembers which directory that was. Nullable,
     /// and left null by every existing row: `nil` reads as "the project
     /// directory", not as an unset value that needs a default filled in.
+    ///
+    /// The column is added only if it is not already there: a database an
+    /// older build left between this migration's two statements still carries
+    /// it with no version row to say so, and re-running the bare `ALTER`
+    /// there is what used to make the file permanently unopenable.
     private func migration004_tabWorkingDirectory() throws {
-        try execute("ALTER TABLE project_tabs ADD COLUMN working_directory TEXT")
+        if try !columnExists("working_directory", in: "project_tabs") {
+            try execute("ALTER TABLE project_tabs ADD COLUMN working_directory TEXT")
+        }
         try execute("INSERT INTO schema_migrations (version) VALUES (4)")
     }
 
