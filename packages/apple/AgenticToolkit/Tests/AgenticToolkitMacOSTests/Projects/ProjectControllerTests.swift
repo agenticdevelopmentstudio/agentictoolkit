@@ -194,6 +194,36 @@ final class ProjectControllerTests: XCTestCase {
         XCTAssertEqual(branchIDs.count, 6)
     }
 
+    /// A checkout that drops out takes its commands with it. Left registered,
+    /// they act on a directory `git worktree remove` has already deleted, and
+    /// they stay in the palette for the rest of the process.
+    func testARemovedWorktreeUnregistersItsBranchCommands() async throws {
+        let registry = CommandRegistry()
+        let controller = try makeController(registry: registry)
+        await controller.open()
+        let gone = try XCTUnwrap(controller.checkouts.first { !$0.isMain })
+        XCTAssertEqual(registry.allCommands.filter { $0.id.hasSuffix(gone.identifier) }.count, 3)
+
+        try git(["worktree", "remove", "--force", worktreeRoot.path])
+        await controller.refreshCheckouts()
+
+        XCTAssertTrue(registry.allCommands.filter { $0.id.hasSuffix(gone.identifier) }.isEmpty)
+        XCTAssertEqual(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.count, 3)
+    }
+
+    /// And closing the project takes all of them, so a window the user closed
+    /// leaves no live commands behind in a registry that outlives it.
+    func testClosingTheProjectLeavesNoBranchCommandsBehind() async throws {
+        let registry = CommandRegistry()
+        let controller = try makeController(registry: registry)
+        await controller.open()
+        XCTAssertEqual(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.count, 6)
+
+        controller.markClosed()
+
+        XCTAssertTrue(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.isEmpty)
+    }
+
     func testTheStatusProviderResolverAnswersPerCheckout() async throws {
         let controller = try makeController()
         await controller.open()

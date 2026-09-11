@@ -139,6 +139,48 @@ struct CommandRegistryTests {
         #expect(ranReplacement)
     }
 
+    @Test("unregister removes the command from allCommands and from every lookup")
+    func unregisterRemovesTheCommand() {
+        let registry = CommandRegistry()
+        registry.register(command(id: "test.action.alpha"))
+        registry.register(command(id: "test.action.bravo"))
+        registry.register(command(id: "test.action.charlie"))
+
+        registry.unregister(id: "test.action.bravo")
+
+        #expect(registry.allCommands.map(\.id) == ["test.action.alpha", "test.action.charlie"])
+        #expect(registry.command(id: "test.action.bravo") == nil)
+        #expect(!registry.isEnabled(id: "test.action.bravo"))
+        #expect(throws: CommandRegistryError.unknownCommand(id: "test.action.bravo")) {
+            try registry.execute(id: "test.action.bravo")
+        }
+    }
+
+    @Test("Unregistering an id nothing registered is a no-op")
+    func unregisterOfUnknownIDIsANoOp() {
+        let registry = CommandRegistry()
+        registry.register(command(id: "test.action.alpha"))
+
+        registry.unregister(id: "test.action.missing")
+
+        #expect(registry.allCommands.map(\.id) == ["test.action.alpha"])
+    }
+
+    /// The half a dictionary-only removal gets wrong: `registrationOrder` is a
+    /// second structure, and leaving a stale id in it makes the *next*
+    /// registration of that id look new — appending a second entry, so the
+    /// palette lists one command twice.
+    @Test("Registering again after unregister leaves exactly one entry")
+    func reregisteringAfterUnregisterKeepsOneEntry() {
+        let registry = CommandRegistry()
+        registry.register(command(id: "test.action.alpha"))
+        registry.unregister(id: "test.action.alpha")
+        registry.register(command(id: "test.action.alpha", title: "Back"))
+
+        #expect(registry.allCommands.map(\.id) == ["test.action.alpha"])
+        #expect(registry.allCommands.first?.title == "Back")
+    }
+
     @Test("Registering a duplicate id keeps one entry, in its original position")
     func duplicateIDKeepsItsPosition() {
         let registry = CommandRegistry()

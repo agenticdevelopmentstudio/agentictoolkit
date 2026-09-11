@@ -68,7 +68,30 @@ final class BranchControllerTests: XCTestCase {
             "branch.action.revealInFinder.\(suffix)",
             "branch.action.copyPath.\(suffix)"
         ])
-        XCTAssertTrue(controller.commands.allSatisfy { $0.category == "Branch" })
+        XCTAssertTrue(controller.commands.allSatisfy { $0.category == "Branch — main" })
+    }
+
+    /// A palette row is title + category; the id is namespaced but never shown.
+    /// With every checkout's three commands reading "Refresh Status" under a
+    /// bare "Branch", a two-worktree project offered six rows the user could
+    /// not tell apart — and picking one was a coin flip over which directory it
+    /// acted on. The checkout's `displayName` goes in the category rather than
+    /// the title because the per-pane context menu renders titles alone, where
+    /// the pane already says which checkout it is.
+    func testCommandRowsAreDistinctAcrossTwoCheckouts() throws {
+        let otherRoot = tempRoot.appendingPathComponent("feature-worktree")
+        try FileManager.default.createDirectory(at: otherRoot, withIntermediateDirectories: true)
+        let main = makeController()
+        let feature = BranchController(
+            checkout: ProjectCheckout(directory: otherRoot, branch: "feature", isMain: false),
+            gitClient: GitClient(configuration: .default)
+        )
+
+        let rows = (main.commands + feature.commands).map { "\($0.title)\t\($0.category)" }
+        XCTAssertEqual(rows.count, 6)
+        XCTAssertEqual(Set(rows).count, 6, "every palette row must name the checkout it acts on")
+        XCTAssertTrue(main.commands.allSatisfy { $0.category == "Branch — main" })
+        XCTAssertTrue(feature.commands.allSatisfy { $0.category == "Branch — feature" })
     }
 
     func testTheContextMenuListsTheCommands() {

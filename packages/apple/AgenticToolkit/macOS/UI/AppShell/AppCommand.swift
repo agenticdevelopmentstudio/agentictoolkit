@@ -132,6 +132,30 @@ public final class CommandRegistry {
         commandsByID[command.id] = command
     }
 
+    /// Take back the command registered under `id`.
+    ///
+    /// The counterpart `register(_:)` needed from the moment commands stopped
+    /// being process-lifetime app features and started being per-object: a
+    /// branch controller registers three commands namespaced by its checkout,
+    /// and when that checkout goes away — `git worktree remove`, or the whole
+    /// project window closing — the commands must go with it. Left behind they
+    /// are worse than clutter: they act on a directory that no longer exists,
+    /// under a palette row the user has every reason to trust.
+    ///
+    /// An unknown id is a no-op rather than an error. Teardown is exactly where
+    /// "was this ever registered?" is least worth tracking, and making the
+    /// caller answer it would only invite it to guess (`idempotency`).
+    ///
+    /// Both structures are cleaned. Removing from `commandsByID` alone already
+    /// fixes `allCommands`, `command(id:)`, `isEnabled(id:)` and `execute(id:)`
+    /// — but it leaves the id in `registrationOrder`, where it makes the next
+    /// `register` of that id look new, append a second entry, and list one
+    /// command twice.
+    public func unregister(id: String) {
+        guard commandsByID.removeValue(forKey: id) != nil else { return }
+        registrationOrder.removeAll { $0 == id }
+    }
+
     /// Every registered command, in registration order — what a command palette
     /// lists.
     public var allCommands: [AppCommand] {

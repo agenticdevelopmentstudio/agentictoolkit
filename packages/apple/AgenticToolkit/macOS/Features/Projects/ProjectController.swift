@@ -86,8 +86,16 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// than its own turn, which is exactly long enough for a reconcile
     /// continuation enqueued ahead of that hop to resume, find the flag down,
     /// and persist for a window that is already gone.
+    ///
+    /// It also takes back every branch command. The registry outlives this
+    /// controller — it is the app's, not the window's — so a project the user
+    /// closed would otherwise keep contributing palette rows that act on its
+    /// checkouts for the rest of the process.
     public func markClosed() {
         isClosed = true
+        for controller in branchControllers.values {
+            unregisterCommands(of: controller)
+        }
     }
 
     public func shutdown() async {
@@ -183,9 +191,14 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// one (by directory, since `ProjectCheckout` also hashes on `branch`, and
     /// a checkout that switched branch must still find its controller) rather
     /// than rebuilding it. A checkout that drops out of `checkouts` drops its
-    /// controller here too, but `CommandRegistry` has no unregister: that
-    /// controller's commands stay registered, acting on a directory that is
-    /// now gone, until the app relaunches.
+    /// controller here *and* its commands: `git worktree remove` deletes the
+    /// directory those commands act on, so leaving them registered leaves a
+    /// palette row that reveals a folder which no longer exists.
+    ///
+    /// Dropping out is decided by directory, matching the reuse lookup above:
+    /// a checkout that merely switched branch is a different `ProjectCheckout`
+    /// (it hashes on `branch`) reached through the same controller, and must
+    /// not be mistaken for one that went away.
     private func syncBranchControllers() {
         var next: [ProjectCheckout: BranchController] = [:]
         for checkout in checkouts {
@@ -198,9 +211,23 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
                 }
             }
         }
+        let keptDirectories = Set(next.keys.map(\.directory))
+        for (checkout, controller) in branchControllers where !keptDirectories.contains(checkout.directory) {
+            unregisterCommands(of: controller)
+        }
         branchControllers = next
         workspace.gitStatusProviderResolver = { [weak self] directory in
             self?.branchController(forDirectory: directory)?.statusProvider
+        }
+    }
+
+    /// `commands` is computed, but every id in it is derived from
+    /// `checkout.identifier` — a hash of the resolved directory path — so the
+    /// ids a controller unregisters are exactly the ones it registered, even
+    /// after a branch switch.
+    private func unregisterCommands(of controller: BranchController) {
+        for command in controller.commands {
+            commandRegistry?.unregister(id: command.id)
         }
     }
 

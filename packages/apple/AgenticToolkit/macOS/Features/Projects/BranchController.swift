@@ -44,14 +44,30 @@ public final class BranchController: TabPaneDataSource, TabPaneDelegate {
 
     // MARK: Commands
 
+    /// Three commands per checkout, namespaced by `checkout.identifier` so two
+    /// worktrees of one repository do not collide on an id.
+    ///
+    /// The checkout's `displayName` goes in the **category**, not the title.
+    /// Ids are namespaced but never shown: a command palette renders a row as
+    /// title + category, so with a bare "Branch" a two-worktree project offered
+    /// six rows reading "Refresh Status — Branch" and the user picking one got
+    /// a coin flip over which directory it acted on. The title is what the
+    /// per-pane context menu renders — alone, inside a pane that already says
+    /// which checkout it is — so putting the name there would repeat it in the
+    /// one place it is already known.
+    ///
+    /// `revealInFinder` and `copyPath` capture `directory` by value rather than
+    /// reaching through `self`, so an unregister that races a menu already on
+    /// screen still does the right thing rather than silently nothing.
     public var commands: [AppCommand] {
         let suffix = checkout.identifier
         let directory = checkout.directory
+        let category = "Branch — \(checkout.displayName)"
         return [
             AppCommand(
                 id: "branch.action.refreshStatus.\(suffix)",
                 title: "Refresh Status",
-                category: "Branch"
+                category: category
             ) { [weak self] in
                 self?.statusProvider.refresh { _, _ in }
                 Task { [weak self] in await self?.refresh() }
@@ -59,14 +75,14 @@ public final class BranchController: TabPaneDataSource, TabPaneDelegate {
             AppCommand(
                 id: "branch.action.revealInFinder.\(suffix)",
                 title: "Reveal in Finder",
-                category: "Branch"
+                category: category
             ) {
                 NSWorkspace.shared.activateFileViewerSelecting([directory])
             },
             AppCommand(
                 id: "branch.action.copyPath.\(suffix)",
                 title: "Copy Path",
-                category: "Branch"
+                category: category
             ) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(directory.path, forType: .string)
