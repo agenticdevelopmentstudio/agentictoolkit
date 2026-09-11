@@ -8,7 +8,8 @@ struct PermissionMetadataTests {
         .accessibility,
         .notifications,
         .automation(targetBundleID: "com.googlecode.iterm2"),
-        .location
+        .location,
+        .keychain(service: "Claude Code-credentials")
     ]
 
     @Test("display names")
@@ -21,6 +22,17 @@ struct PermissionMetadataTests {
         // this displayName, so a drift here would silently answer .undetermined
         // for every location query there.
         #expect(Permission.location.displayName == "Location")
+        #expect(Permission.keychain(service: "Claude Code-credentials").displayName == "Keychain")
+    }
+
+    @Test("each keychain service is its own identifier and its own explanation")
+    func keychainServicesAreDistinct() {
+        let live = Permission.keychain(service: "Claude Code-credentials")
+        let saved = Permission.keychain(service: "Stenographer Claude Accounts")
+        #expect(live.identifierToken == "keychain-claude-code-credentials")
+        #expect(saved.identifierToken == "keychain-stenographer-claude-accounts")
+        #expect(live.explanation != saved.explanation)
+        #expect(live.explanation.contains("Claude Code-credentials"))
     }
 
     @Test("every permission has a non-empty SF Symbol and explanation")
@@ -34,20 +46,30 @@ struct PermissionMetadataTests {
     @Test("settings pane URLs point at the right panes")
     func settingsPaneURLs() {
         #expect(
-            Permission.accessibility.settingsPaneURL.absoluteString
+            Permission.accessibility.settingsPaneURL?.absoluteString
                 == "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         )
         #expect(
-            Permission.automation(targetBundleID: "com.googlecode.iterm2").settingsPaneURL.absoluteString
+            Permission.automation(targetBundleID: "com.googlecode.iterm2").settingsPaneURL?.absoluteString
                 == "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
         )
         #expect(
-            Permission.notifications.settingsPaneURL.absoluteString
-                .hasPrefix("x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=")
+            Permission.notifications.settingsPaneURL?.absoluteString
+                .hasPrefix("x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=") == true
         )
         #expect(
-            Permission.location.settingsPaneURL.absoluteString
+            Permission.location.settingsPaneURL?.absoluteString
                 == "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices"
         )
+    }
+
+    @Test("a keychain permission has no settings pane, and its button says so")
+    func keychainHasNoSettingsPane() {
+        // Not an oversight: Keychain access is not a TCC permission, so System
+        // Settings lists no pane for it and the grant happens in the dialog the
+        // app's own read raises.
+        #expect(Permission.keychain(service: "Claude Code-credentials").settingsPaneURL == nil)
+        #expect(Permission.keychain(service: "Claude Code-credentials").actionTitle == "Allow\u{2026}")
+        #expect(Permission.accessibility.actionTitle == "Open Settings")
     }
 }

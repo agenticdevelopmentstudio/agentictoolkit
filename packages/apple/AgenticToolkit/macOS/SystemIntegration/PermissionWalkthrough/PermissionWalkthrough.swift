@@ -38,8 +38,17 @@ public final class PermissionWalkthrough: AppFeature {
     }
 
     /// Resets the walkthrough so it runs again on next launch.
-    public static func reset() {
+    ///
+    /// Also forgets every remembered keychain grant, since that is the one
+    /// permission whose status is a record rather than a reading: leaving it
+    /// behind would make the re-run skip the row the user pressed Reset to see
+    /// again. The system permissions need no such clearing — they are read back
+    /// from the OS every time.
+    public static func reset(permissions: [AgenticToolkitPermissions.Permission] = defaultPermissions) {
         UserDefaults.standard.removeObject(forKey: walkthroughCompleteKey)
+        for case .keychain(let service) in permissions {
+            KeychainPermissionLedger.forget(service: service)
+        }
     }
 
     private let permissions: [AgenticToolkitPermissions.Permission]
@@ -61,15 +70,27 @@ public final class PermissionWalkthrough: AppFeature {
     /// would stack a second "Grant Permissions" alert inside the first.
     private var isPresenting = false
 
+    /// The toolkit app's own set. Include Automation so first-launch onboarding
+    /// covers the permission the terminal-activation feature actually needs
+    /// (Apple Events to the terminal).
+    public static let defaultPermissions: [AgenticToolkitPermissions.Permission] = [
+        .accessibility,
+        .notifications,
+        .automation(targetBundleID: defaultAutomationTarget)
+    ]
+
     public override init() {
-        // Include Automation so first-launch onboarding covers the permission the
-        // terminal-activation feature actually needs (Apple Events to the terminal).
-        self.permissions = [
-            .accessibility,
-            .notifications,
-            .automation(targetBundleID: Self.defaultAutomationTarget)
-        ]
+        self.permissions = Self.defaultPermissions
         self.checker = SystemPermissionChecker()
+    }
+
+    /// A host with a different set — Stenographer wants Automation and Keychain
+    /// and neither Accessibility nor Notifications — states it rather than
+    /// walking the user through grants its app will never ask for.
+    public init(permissions: [AgenticToolkitPermissions.Permission]) {
+        self.permissions = permissions
+        self.checker = SystemPermissionChecker()
+        super.init()
     }
 
     /// Runs the walkthrough if it hasn't been completed and something is still

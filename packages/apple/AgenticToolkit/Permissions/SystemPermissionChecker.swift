@@ -2,6 +2,7 @@ import ApplicationServices
 import CoreLocation
 import CoreServices
 import Foundation
+import Security
 import UserNotifications
 
 /// Production `PermissionChecking` over the real macOS permission APIs.
@@ -46,6 +47,13 @@ public struct SystemPermissionChecker: PermissionChecking {
         case .location:
             let status = await Self.locationCoordinator.currentStatus
             return Self.locationStatus(status)
+        case .keychain(let service):
+            // Deliberately does not touch the keychain. See
+            // `KeychainPermissionLedger` for why there is nothing to ask, and
+            // `PermissionsPanelView` for why asking would be harmful: it
+            // refreshes every row on every app activation, so a status check
+            // that could raise the ACL dialog would raise it over and over.
+            return KeychainPermissionLedger.status(service: service)
         }
     }
 
@@ -72,6 +80,63 @@ public struct SystemPermissionChecker: PermissionChecking {
             // user's actual answer rather than the pre-prompt status.
             let status = await Self.locationCoordinator.requestAlways()
             return Self.locationStatus(status)
+        case .keychain(let service):
+            // The request *is* the read: macOS grants access to a keychain
+            // item by putting up its own dialog the first time a process
+            // reads it, and there is no separate API to ask. Which is also
+            // what makes the alert name this app — the dialog names the
+            // process that called `SecItemCopyMatching`, so this has to
+            // happen in-process and never in a helper.
+            let status = await Self.keychainReadStatus(service: service)
+            KeychainPermissionLedger.record(status, service: service)
+            return status
+        }
+    }
+
+    /// Reads the item on a GCD queue, for the same reason the Apple Events
+    /// probe does: a first read blocks until the user dismisses the ACL
+    /// dialog, and a cooperative thread is not one you may block for that
+    /// long.
+    private static func keychainReadStatus(service: String) async -> PermissionStatus {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let query: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: service,
+                    // Both keychains: the item may be local to this Mac or
+                    // synchronised through iCloud, and the permission is the
+                    // same either way.
+                    kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+                    // The data, not just the attributes — reading attributes
+                    // does not touch the ACL, so a metadata-only query would
+                    // report success without having asked for anything.
+                    kSecReturnData as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitOne
+                ]
+                var result: CFTypeRef?
+                let status = SecItemCopyMatching(query as CFDictionary, &result)
+                continuation.resume(returning: keychainStatus(status))
+            }
+        }
+    }
+
+    /// Maps an `OSStatus` from a keychain read to a tri-state.
+    ///
+    /// `errSecItemNotFound` is `undetermined`, not a denial: there is no item,
+    /// so there is nothing to have been refused access to. Saying "denied"
+    /// there would send the user looking for a permission to grant that does
+    /// not exist yet.
+    static func keychainStatus(_ status: OSStatus) -> PermissionStatus {
+        switch status {
+        case errSecSuccess:
+            return .granted
+        case errSecItemNotFound:
+            return .undetermined
+        default:
+            // errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed,
+            // errSecMissingEntitlement — every one of them means this app did
+            // not get the bytes.
+            return .denied
         }
     }
 
@@ -234,4 +299,63 @@ private final class LocationAuthorizationCoordinator: NSObject, CLLocationManage
             continuation.resume(returning: status)
         }
     }
+}
+
+/// Remembers whether this app has ever successfully read a given keychain
+/// item, because macOS offers no way to ask.
+///
+/// The two candidate oracles contradict each other on the same item: a read
+/// with `SecKeychainSetUserInteractionAllowed(false)` returns
+/// `errSecAuthFailed`, while a `kSecUseAuthenticationUISkip` query against
+/// that same item, from the same process, returns the bytes without
+/// prompting. So neither answers "would this prompt?", and a status built on
+/// either would be a guess presented as a fact.
+///
+/// What *is* knowable is what already happened — the app read the item, or it
+/// was refused, or it has never tried — and that is what this records. A
+/// permission whose grant is remembered rather than probed is also the only
+/// kind a settings panel can redraw freely, which is what
+/// `PermissionsPanelView` does on every app activation.
+public enum KeychainPermissionLedger: Sendable {
+    /// What this app last learned about its access to `service`.
+    public static func status(service: String) -> PermissionStatus {
+        switch UserDefaults.standard.string(forKey: key(for: service)) {
+        case Self.granted: return .granted
+        case Self.denied: return .denied
+        default: return .undetermined
+        }
+    }
+
+    /// Records the outcome of a real read.
+    ///
+    /// Call this from wherever the app actually touches the item, not only
+    /// from the permissions panel — the panel is the least likely place a
+    /// grant is first obtained, and a ledger only the panel writes to would
+    /// report "not determined" for an app that has been reading the item all
+    /// along.
+    ///
+    /// `.undetermined` erases the record rather than storing a third string,
+    /// so "we no longer know" and "we never knew" stay the same state.
+    public static func record(_ status: PermissionStatus, service: String) {
+        let defaults = UserDefaults.standard
+        switch status {
+        case .granted: defaults.set(Self.granted, forKey: key(for: service))
+        case .denied: defaults.set(Self.denied, forKey: key(for: service))
+        case .undetermined: defaults.removeObject(forKey: key(for: service))
+        }
+    }
+
+    /// Forgets every remembered keychain grant — the reset the permission
+    /// walkthrough needs, since a remembered grant would otherwise make a
+    /// re-run skip the one permission it cannot re-derive.
+    public static func forget(service: String) {
+        record(.undetermined, service: service)
+    }
+
+    static func key(for service: String) -> String {
+        "permission.\(Permission.keychain(service: service).identifierToken).status"
+    }
+
+    private static let granted = "granted"
+    private static let denied = "denied"
 }

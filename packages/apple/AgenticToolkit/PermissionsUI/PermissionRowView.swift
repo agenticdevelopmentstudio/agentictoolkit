@@ -87,27 +87,23 @@ public final class PermissionRowView: NSView {
         // system's own consent prompt; taking a grant back never can — macOS
         // offers no revoke API — so both titles lead to the one place that can
         // do either, and only the wording differs.
-        actionButton.title = status == .granted ? Self.revokeTitle : Self.grantTitle
+        actionButton.title = status == .granted
+            ? Permission.ActionTitle.revoke
+            : permission.actionTitle
     }
 
-    /// What the button says while the permission is not granted. Named
-    /// "Open Settings" rather than "Grant" because that is where every one of
-    /// these ends up, prompt or no prompt.
-    private static let grantTitle = "Open Settings"
-    private static let revokeTitle = "Revoke"
-
-    /// The width both titles are given, so that flipping between them doesn't
+    /// The width every title is given, so that flipping between them doesn't
     /// reflow the card's description and rows in differing states still line
     /// their buttons up. Measured rather than spelled as a constant: these are
     /// words, and a number that fits them in English fits nothing else.
-    /// A `let`, so the two text measurements happen once for the process rather
+    /// A `let`, so the measurements happen once for the process rather
     /// than once per row — the answer depends only on the titles and the system
     /// font, and is the same for every row on screen.
     private static let widestActionWidth: CGFloat = {
         let probe = NSButton(title: "", target: nil, action: nil)
         probe.bezelStyle = .rounded
         probe.controlSize = .small
-        return [grantTitle, revokeTitle].reduce(0) { widest, title in
+        return Permission.ActionTitle.all.reduce(0) { widest, title in
             probe.title = title
             return max(widest, probe.fittingSize.width)
         }
@@ -149,7 +145,7 @@ public final class PermissionRowView: NSView {
         statusRow.translatesAutoresizingMaskIntoConstraints = false
 
         let button = actionButton
-        button.title = Self.grantTitle
+        button.title = permission.actionTitle
         button.target = self
         button.action = #selector(actionTapped)
         button.bezelStyle = .rounded
@@ -160,7 +156,8 @@ public final class PermissionRowView: NSView {
         // could not say which it clicked. Named for the slot rather than for
         // one of its titles — the same button reads "Revoke" on a granted row,
         // and an identifier that said "open-settings" there would promise a
-        // behaviour the element no longer has.
+        // behaviour the element no longer has. Which is doubly true now that
+        // the ungranted title is the permission's to choose.
         button.setAccessibilityIdentifier("permission.\(permission.identifierToken).action")
         // The row itself carries no identifier. A plain `NSView` is not an
         // accessibility element, so an identifier set on one is never

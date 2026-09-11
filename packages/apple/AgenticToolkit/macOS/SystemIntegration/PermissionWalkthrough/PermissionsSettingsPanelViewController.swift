@@ -38,7 +38,7 @@ public final class PermissionsSettingsPanelViewController: ComposableSettings.Se
     }
 
     public override var helpContent: ComposableSettings.PanelHelp? {
-        ComposableSettings.PanelHelp(topics: [
+        var topics: [ComposableSettings.PanelHelp.Topic] = [
             .init(
                 title: "What These Are For",
                 body: "macOS gates a few abilities behind an explicit grant. Accessibility "
@@ -52,15 +52,38 @@ public final class PermissionsSettingsPanelViewController: ComposableSettings.Se
                     + "here — this panel shows the live state and takes you there. A grant "
                     + "revoked while the app is running is picked up when the window comes "
                     + "back to the front, so you do not have to relaunch to see it."
-            ),
-            .init(
-                title: "Walkthrough",
-                body: "Resetting re-runs the first-launch permission walkthrough the next "
-                    + "time the app starts. It changes nothing that has already been "
-                    + "granted — it only clears the record that you have been shown the "
-                    + "walkthrough."
             )
-        ])
+        ]
+
+        // Only when this host actually asks for one: Keychain is the odd
+        // permission out in every respect, and explaining it to an app that
+        // never touches the keychain would be noise.
+        if permissions.contains(where: { if case .keychain = $0 { true } else { false } }) {
+            topics.append(.init(
+                title: "Keychain",
+                body: "Keychain is not a Privacy & Security setting and has no pane to open. "
+                    + "macOS grants it per item, per app, through a dialog it puts up the "
+                    + "first time this app reads that item — which is why the button here "
+                    + "says Allow and does the reading itself. The dialog names this app "
+                    + "because the app reads the item in its own process, with no helper "
+                    + "tool standing in between.\n\nThere is also no way to ask macOS what "
+                    + "the answer was, so this row reports what actually happened the last "
+                    + "time the app read the item, rather than a guess. Click Allow to find "
+                    + "out now; you can revoke it later in the Keychain Access app, under "
+                    + "the item's Access Control tab."
+            ))
+        }
+
+        topics.append(.init(
+            title: "Walkthrough",
+            body: "Resetting re-runs the first-launch permission walkthrough the next "
+                + "time the app starts. It changes nothing that has already been "
+                + "granted — it only clears the record that you have been shown the "
+                + "walkthrough, and the record of which keychain items the app has "
+                + "already read."
+        ))
+
+        return ComposableSettings.PanelHelp(topics: topics)
     }
 
     public override func viewDidLoad() {
@@ -98,14 +121,19 @@ public final class PermissionsSettingsPanelViewController: ComposableSettings.Se
             viewModel: ComposableSettings.ButtonViewModel(
                 title: "Reset Permission Walkthrough",
                 wasPressedCallback: { [weak self] in self?.resetWalkthrough() }
-            )
+            ),
+            // One act, not a choice between two: sized to its own title at the
+            // leading edge rather than stretched across the card.
+            fillsWidth: false
         ))
 
         return group
     }
 
     private func resetWalkthrough() {
-        PermissionWalkthrough.reset()
+        // This panel's own set, not the walkthrough's default: the keychain
+        // grants to forget are the ones shown here.
+        PermissionWalkthrough.reset(permissions: permissions)
 
         let alert = NSAlert()
         alert.messageText = "Permission Walkthrough Reset"
