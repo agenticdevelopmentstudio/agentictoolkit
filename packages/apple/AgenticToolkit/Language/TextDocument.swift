@@ -366,10 +366,24 @@ public final class TextDocument {
     /// the *current* `text` at the time of the call — `apply(_:)` guarantees
     /// this by resolving every offset before mutating anything and then
     /// working back-to-front.
+    ///
+    /// That guarantee holds only for edits that do not overlap. `apply(_:)`
+    /// clamps every offset against the length the document had *before* the
+    /// batch, so two edits whose ranges overlap — which the protocol forbids
+    /// but a misbehaving server still sends — leave the second one's `end`
+    /// pointing past the text the first one just shortened. `offsetBy:` alone
+    /// traps on that, taking the whole app down over one bad completion
+    /// response, so both offsets are walked with `limitedBy:` and pinned to
+    /// `endIndex` when they run off the end, and `start` is pinned to `end`
+    /// when the overlap inverts the range. The splice then lands at the
+    /// document's edge: wrong text, which the next `didChange` round-trip
+    /// reconciles, rather than a crash, which nothing does.
     private func replaceUTF16Range(start: Int, end: Int, with newText: String) {
         let units = text.utf16
-        let startIndex = units.index(units.startIndex, offsetBy: start)
-        let endIndex = units.index(units.startIndex, offsetBy: end)
+        let endIndex = units.index(units.startIndex, offsetBy: end, limitedBy: units.endIndex)
+            ?? units.endIndex
+        let startIndex = units.index(units.startIndex, offsetBy: start, limitedBy: endIndex)
+            ?? endIndex
         text.replaceSubrange(startIndex..<endIndex, with: newText)
     }
 

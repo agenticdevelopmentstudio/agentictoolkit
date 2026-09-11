@@ -162,12 +162,18 @@ struct LanguageServerSessionRaceTests {
             if offset > 0 { try? await Task.sleep(for: .microseconds(offset)) }
 
             // Generous next to every budget this session uses, and still short
-            // enough that a teardown which never returns fails the test.
+            // enough that a teardown which never returns fails the test. A
+            // timeout used to `return` straight out of the function, which
+            // skipped the sweep below for this iteration's own child and then
+            // ran the top-level `defer` — erasing the marker that records its
+            // pid before anything could ever kill it. `stopTimedOut` instead
+            // lets this iteration finish its sweep and only then ends the loop.
+            var stopTimedOut = false
             do {
                 try await withWallClockBudget(15) { await session.stop() }
             } catch {
                 Issue.record("stop() did not return within 15s at iteration \(iteration): \(error)")
-                return
+                stopTimedOut = true
             }
 
             // The abandoned start is allowed to finish: a leak is a child still
@@ -176,18 +182,19 @@ struct LanguageServerSessionRaceTests {
             _ = await starter.result
             try? await Task.sleep(for: .milliseconds(20))
 
-            guard let text = try? String(contentsOf: marker, encoding: .utf8),
-                  let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-                  isAlive(pid) else {
-                continue
+            if let text = try? String(contentsOf: marker, encoding: .utf8),
+               let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+               isAlive(pid) {
+                // Recorded as it happens rather than tallied at the end: the other
+                // half of this window is process-fatal, so a run that finds an
+                // orphan may not survive to a summary.
+                leaked.append("iteration \(iteration) = pid \(pid)")
+                Issue.record("orphaned child at iteration \(iteration): pid \(pid)")
+                // Do not leave the suite's own mess running.
+                kill(pid, SIGKILL)
             }
-            // Recorded as it happens rather than tallied at the end: the other
-            // half of this window is process-fatal, so a run that finds an
-            // orphan may not survive to a summary.
-            leaked.append("iteration \(iteration) = pid \(pid)")
-            Issue.record("orphaned child at iteration \(iteration): pid \(pid)")
-            // Do not leave the suite's own mess running.
-            kill(pid, SIGKILL)
+
+            if stopTimedOut { break }
         }
 
         #expect(leaked.isEmpty, "orphaned children: \(leaked)")

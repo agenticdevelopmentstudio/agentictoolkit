@@ -110,6 +110,47 @@ struct TextDocumentTests {
         #expect(events.count == 2)
     }
 
+    @Test("a batch whose edits overlap clamps the second splice instead of trapping")
+    func applyOverlappingEditsDoesNotTrap() {
+        // A server is not supposed to send overlapping edits, but nothing in
+        // the transport stops one, and the whole batch is clamped against the
+        // *pre-batch* length. Here the high-offset edit deletes eight of the
+        // twelve units first, leaving four — and the low-offset edit's end
+        // offset, a legal 8 against the original document, is then past the
+        // end of the shortened text. `index(_:offsetBy:)` traps on that,
+        // taking the editor down; `limitedBy:` clamps it to the text that is
+        // actually there.
+        let document = TextDocument(uri: "file:///overlap.txt", languageId: "plaintext", text: "abcdefghijkl")
+        let deleteTail = TextEdit(
+            range: LSPRange(start: Position(line: 0, character: 4), end: Position(line: 0, character: 12)),
+            newText: ""
+        )
+        let replaceAcrossIt = TextEdit(
+            range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 8)),
+            newText: "X"
+        )
+
+        let events = document.apply([deleteTail, replaceAcrossIt])
+
+        #expect(document.text == "X")
+        #expect(events.count == 2)
+    }
+
+    @Test("an edit whose range starts past the end of the document is clamped to the end")
+    func applyEditBeyondEndIsClamped() {
+        // `apply` clamps both offsets to `originalLength`, so this degenerates
+        // to an append rather than reaching `replaceUTF16Range` with an
+        // out-of-bounds offset at all — the assertion is that it stays an
+        // append and does not trap.
+        let document = TextDocument(uri: "file:///beyond.txt", languageId: "plaintext", text: "abc")
+        document.apply([TextEdit(
+            range: LSPRange(start: Position(line: 0, character: 40), end: Position(line: 0, character: 90)),
+            newText: "!"
+        )])
+
+        #expect(document.text == "abc!")
+    }
+
     @Test("version never decreases across a sequence of apply and replaceAll calls")
     func versionNeverDecreases() {
         let document = TextDocument(uri: "file:///version.txt", languageId: "plaintext", text: "abc")

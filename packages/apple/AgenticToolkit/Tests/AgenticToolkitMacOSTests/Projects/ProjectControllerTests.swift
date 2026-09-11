@@ -93,6 +93,21 @@ final class ProjectControllerTests: XCTestCase {
         )
     }
 
+    /// A second project window over the same checkout. It needs its own
+    /// database file because `git_repo.path` is `UNIQUE` — the point of the
+    /// fixture is two controllers sharing one `CommandRegistry` and one
+    /// repository on disk, which is what a second window really is.
+    private func makeSecondWindowController(registry: CommandRegistry) throws -> ProjectController {
+        let database = try ProjectDatabase(path: repoRoot.appendingPathComponent(".test-project-2.db").path)
+        let repo = GitRepo(path: repoRoot.path, name: "fixture")
+        try database.insert(repo)
+        return ProjectController(
+            workspace: ProjectWorkspace(repo: repo, database: database),
+            gitClient: GitClient(configuration: .default),
+            commandRegistry: registry
+        )
+    }
+
     func testOpenCreatesOneTabGroupPerCheckoutAndPersistsIt() async throws {
         let controller = try makeController()
         await controller.open()
@@ -219,6 +234,40 @@ final class ProjectControllerTests: XCTestCase {
         XCTAssertEqual(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.count, 6)
 
         controller.markClosed()
+
+        XCTAssertTrue(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.isEmpty)
+    }
+
+    /// Two windows over the *same* repository derive the same command ids from
+    /// the same checkout directories, and `CommandRegistry.register` replaces
+    /// on a duplicate id rather than refcounting (extension reload depends on
+    /// that). So the first window to close unregistered ids the surviving
+    /// window still owns, and its branch commands silently disappeared from
+    /// the palette. `reregisterCommands()` is the survivor taking back only
+    /// what went missing.
+    func testASecondWindowOverTheSameRepoTakesItsCommandsBackWhenTheFirstCloses() async throws {
+        let registry = CommandRegistry()
+        let first = try makeController(registry: registry)
+        await first.open()
+        let second = try makeSecondWindowController(registry: registry)
+        await second.open()
+        XCTAssertEqual(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.count, 6)
+
+        first.markClosed()
+        XCTAssertTrue(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.isEmpty)
+
+        second.reregisterCommands()
+        XCTAssertEqual(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.count, 6)
+    }
+
+    /// A closed controller is finished: it does not put its commands back.
+    func testAClosedControllerReregistersNothing() async throws {
+        let registry = CommandRegistry()
+        let controller = try makeController(registry: registry)
+        await controller.open()
+        controller.markClosed()
+
+        controller.reregisterCommands()
 
         XCTAssertTrue(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.isEmpty)
     }

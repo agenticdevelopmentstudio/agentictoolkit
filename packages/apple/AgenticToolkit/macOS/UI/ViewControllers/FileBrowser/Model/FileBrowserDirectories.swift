@@ -34,16 +34,39 @@ public final class FileBrowserDirectories: ObservableObject {
     /// did, and a lexical comparison would call those two different roots —
     /// two managers, two git status providers, one folder (`dry`).
     public init(primary: URL, additional: [URL] = []) {
-        self.primary = primary.resolvingSymlinksInPath()
-        // A stored list can name the primary (the user added the folder before
-        // it became the document's own), or the same folder twice. Repairing on
-        // the way in keeps every later `all` free of duplicate roots.
-        var seen: Set<URL> = [self.primary]
-        self.additional = additional.compactMap { url in
+        let resolvedPrimary = primary.resolvingSymlinksInPath()
+        self.primary = resolvedPrimary
+        self.additional = Self.normalize(additional, primary: resolvedPrimary)
+    }
+
+    /// A stored list can name the primary (the user added the folder before it
+    /// became the document's own), or the same folder twice. Repairing on the
+    /// way in keeps every later `all` free of duplicate roots.
+    private static func normalize(_ urls: [URL], primary: URL) -> [URL] {
+        var seen: Set<URL> = [primary]
+        return urls.compactMap { url in
             let resolved = url.resolvingSymlinksInPath()
             guard seen.insert(resolved).inserted else { return nil }
             return resolved
         }
+    }
+
+    /// Replaces the added roots wholesale **without** raising `onChange`.
+    ///
+    /// The one way a host tells this object that the project's roots changed
+    /// somewhere else. A project window shows one of these per checkout
+    /// directory — main worktree, each linked worktree — while the list they
+    /// each show is the *project's*, stored once for the whole repository. So
+    /// each object holds a mirror, and a mirror that is not refreshed is a
+    /// stale whole-list snapshot waiting to be written back over a newer one.
+    ///
+    /// Silent by design: `onChange` is the "the user changed this, persist it"
+    /// signal, and re-raising it here would send the host's own update back to
+    /// the host, which would persist it and fan it out again.
+    public func replaceAdditional(with urls: [URL]) {
+        let normalized = Self.normalize(urls, primary: primary)
+        guard normalized != additional else { return }
+        additional = normalized
     }
 
     /// Adds `url` unless it is already a root. Returns whether anything changed,

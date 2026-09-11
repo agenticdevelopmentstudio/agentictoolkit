@@ -307,6 +307,31 @@ final class ProjectPaneContentTests: XCTestCase {
         XCTAssertTrue(survivors.allSatisfy { $0.teardownCount == 0 })
     }
 
+    /// And the third path that drops trees whole: the window closing. It
+    /// discards every tab at once, and it is the *common* one — the user
+    /// closes the project window far more often than they close a single tab.
+    /// Left out, every pane on every tab kept its shell and its FSEvents
+    /// stream for the life of the process.
+    func testClosingTheWindowTearsDownEveryPaneOnEveryTab() throws {
+        try installTeardownSpyLayout()
+        try seedTwoStoredTabGroups()
+        let window = ComposableTabsWindowController(project: project)
+        // The window is built lazily, and `close()` on a controller that never
+        // built one is a no-op that posts nothing — so this has to show the
+        // window to have a `windowWillClose(_:)` to assert about at all.
+        window.showWindow()
+        let panes = spies(in: window.allPanes())
+        XCTAssertFalse(panes.isEmpty)
+        XCTAssertTrue(panes.allSatisfy { $0.teardownCount == 0 })
+
+        window.close()
+
+        XCTAssertTrue(
+            panes.allSatisfy { $0.teardownCount == 1 },
+            "closing the window must tell every pane it is being discarded"
+        )
+    }
+
     // MARK: - Helpers
 
     /// The teardown spies behind `panes`, with each pane's view forced to load

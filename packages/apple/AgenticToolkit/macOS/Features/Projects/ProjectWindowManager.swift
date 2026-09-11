@@ -484,6 +484,15 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
                 // before this turn ends, not merely soon.
                 let projectController = self.projectControllers.removeValue(forKey: repoID)
                 projectController?.markClosed()
+                // `markClosed()` takes back every branch command this window
+                // registered — but the ids are derived from the checkout's
+                // directory alone, so a second window over the same repository
+                // owns the identical ids and has just lost them. Offer every
+                // surviving controller its own commands back; the ones that
+                // never collided are still registered and are left alone.
+                for surviving in self.projectControllers.values {
+                    surviving.reregisterCommands()
+                }
                 if let observer = self.keyObservers.removeValue(forKey: repoID) {
                     NotificationCenter.default.removeObserver(observer)
                 }

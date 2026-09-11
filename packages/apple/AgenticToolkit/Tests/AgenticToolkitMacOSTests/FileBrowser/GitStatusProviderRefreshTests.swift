@@ -27,16 +27,23 @@ final class GitStatusProviderRefreshTests: XCTestCase {
         wait(for: [delivered], timeout: 10)
     }
 
-    func testAFailedStatusDeliversEmptyStatuses() {
+    func testAFailedStatusDeliversNothingRatherThanAnEmptyStatus() {
+        // An empty status is indistinguishable from a clean tree by the time
+        // it reaches the file browser: `FileTreeManager` assigns
+        // `node.gitStatus` from these maps unconditionally and the outline
+        // view draws no badge for `nil`. Delivering `.empty` on failure
+        // therefore repainted every modified, added and untracked file as
+        // unmodified whenever git was misconfigured or timed out. The
+        // completion is not called at all now, which leaves the last good
+        // status on screen.
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("missing-\(UUID().uuidString)")
         let provider = GitStatusProvider(repoRoot: missing, client: GitClient(configuration: .default))
         let delivered = expectation(description: "refresh completes")
-        provider.refresh { files, directories in
-            XCTAssertTrue(files.isEmpty)
-            XCTAssertTrue(directories.isEmpty)
+        delivered.isInverted = true
+        provider.refresh { _, _ in
             delivered.fulfill()
         }
-        wait(for: [delivered], timeout: 10)
+        wait(for: [delivered], timeout: 5)
     }
 }

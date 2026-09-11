@@ -280,7 +280,7 @@ public final class ProjectWorkspace {
             additional: projectDirectories()
         )
         directories.onChange = { [weak self] urls in
-            self?.persistProjectDirectories(urls)
+            self?.projectDirectoriesDidChange(urls, from: key)
         }
         fileBrowserDirectoriesByPrimary[key] = directories
         return directories
@@ -289,6 +289,37 @@ public final class ProjectWorkspace {
     /// The roots for panes working in the project's own directory.
     public var fileBrowserDirectories: FileBrowserDirectories {
         fileBrowserDirectories(primary: directoryURL)
+    }
+
+    /// One pane's `+`/`−`, applied to the whole project.
+    ///
+    /// The added-roots list is stored once per *repository*, and
+    /// `saveProjectDirectories` writes it by deleting every row for the repo
+    /// and re-inserting what it was handed. A project window that is showing a
+    /// worktree as well as the main checkout holds two
+    /// `FileBrowserDirectories` — one per checkout directory — each with its
+    /// own copy of that one list, taken when it was created. Left alone, the
+    /// second one to save wrote its stale copy over the first one's addition
+    /// and the folder vanished from disk with no error. Every sibling is
+    /// refreshed here, before anything else can save.
+    ///
+    /// The merge exists because an object cannot represent its own primary: it
+    /// filters that root out of `additional` (it is already shown, and it is
+    /// not removable). If the stored list names it — the user added a
+    /// worktree's folder as an extra root of the main checkout, then opened
+    /// that worktree in its own tab — the reporting object would otherwise
+    /// silently delete it on the next `+`.
+    private func projectDirectoriesDidChange(_ urls: [URL], from primary: URL) {
+        let stored = projectDirectories().map { $0.resolvingSymlinksInPath() }
+        var merged = urls.map { $0.resolvingSymlinksInPath() }
+        if stored.contains(primary), !merged.contains(primary) {
+            merged.append(primary)
+        }
+
+        persistProjectDirectories(merged)
+        for (key, directories) in fileBrowserDirectoriesByPrimary where key != primary {
+            directories.replaceAdditional(with: merged)
+        }
     }
 
     /// Persists the extra directories. Called whenever the browser's `+`/`−`

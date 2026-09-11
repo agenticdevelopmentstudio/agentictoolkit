@@ -60,4 +60,56 @@ final class ProjectWorkspaceTabsTests: XCTestCase {
         XCTAssertTrue(project.gitStatusProvider(forDirectory: worktree) === provider)
         XCTAssertNil(project.gitStatusProvider(forDirectory: tempRoot))
     }
+
+    /// A window showing the main checkout *and* a worktree holds two
+    /// `FileBrowserDirectories`, each with its own copy of the one list stored
+    /// per repository. Each writes the whole list back on any change, so the
+    /// second one to save used to write its snapshot — taken before the first
+    /// one's addition — over the newer list, and the added folder vanished
+    /// with no error.
+    func testARootAddedInOneBrowserReachesTheOtherAndSurvivesItsNextSave() throws {
+        let project = try makeProject()
+        let worktree = tempRoot.appendingPathComponent("wt")
+        let addedFromMain = tempRoot.appendingPathComponent("added-from-main")
+        let addedFromWorktree = tempRoot.appendingPathComponent("added-from-worktree")
+
+        let mainRoots = project.fileBrowserDirectories(primary: tempRoot)
+        let worktreeRoots = project.fileBrowserDirectories(primary: worktree)
+
+        mainRoots.add(addedFromMain)
+        XCTAssertEqual(
+            worktreeRoots.additional.map(\.path),
+            [addedFromMain.resolvingSymlinksInPath().path],
+            "the sibling browser must see the addition, not its own stale snapshot"
+        )
+
+        worktreeRoots.add(addedFromWorktree)
+        XCTAssertEqual(
+            Set(project.projectDirectories().map { $0.resolvingSymlinksInPath().path }),
+            Set([addedFromMain, addedFromWorktree].map { $0.resolvingSymlinksInPath().path })
+        )
+        XCTAssertEqual(mainRoots.additional.map(\.path), worktreeRoots.additional.map(\.path))
+    }
+
+    /// The stored list may name a directory that is some *other* browser's
+    /// primary — the user added the main checkout as a root while looking at a
+    /// worktree. That browser's own `additional` never contains its primary,
+    /// so its next save would drop the entry unless the merge puts it back.
+    func testARootThatIsAnotherBrowsersPrimaryIsNotDroppedByThatBrowsersSave() throws {
+        let project = try makeProject()
+        let worktree = tempRoot.appendingPathComponent("wt")
+        let addedFromMain = tempRoot.appendingPathComponent("added-from-main")
+
+        let mainRoots = project.fileBrowserDirectories(primary: tempRoot)
+        let worktreeRoots = project.fileBrowserDirectories(primary: worktree)
+
+        worktreeRoots.add(tempRoot)
+        XCTAssertTrue(mainRoots.additional.isEmpty, "a browser never lists its own primary as an added root")
+
+        mainRoots.add(addedFromMain)
+        XCTAssertEqual(
+            Set(project.projectDirectories().map { $0.resolvingSymlinksInPath().path }),
+            Set([tempRoot, addedFromMain].map { $0.resolvingSymlinksInPath().path })
+        )
+    }
 }

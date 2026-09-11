@@ -99,14 +99,29 @@ struct MCPClientRaceTests {
         let client = makeClient(marker: marker)
 
         let connecting = Task { try? await client.connect() }
-        // Wait for the spawn rather than for the connect: the connect cannot
-        // finish, because the child never answers `initialize`.
-        var spawned = try Self.processesMatching(marker)
-        for _ in 0..<50 where spawned.isEmpty {
-            try await Task.sleep(for: .milliseconds(50))
-            spawned = try Self.processesMatching(marker)
+        // Matches the three siblings below: `connecting` never finishes on its
+        // own, so it needs cancelling on every exit path, including the
+        // `#require` below failing before `disconnect()` is ever reached.
+        defer { connecting.cancel() }
+
+        do {
+            // Wait for the spawn rather than for the connect: the connect cannot
+            // finish, because the child never answers `initialize`.
+            var spawned = try Self.processesMatching(marker)
+            for _ in 0..<50 where spawned.isEmpty {
+                try await Task.sleep(for: .milliseconds(50))
+                spawned = try Self.processesMatching(marker)
+            }
+            try #require(!spawned.isEmpty, "the probe server never started")
+        } catch {
+            // `#require` throws to fail fast, but a real child may already be
+            // running by then — `disconnect()` is the only thing that reaps it,
+            // so it has to run here too, not just on the success path below.
+            await client.disconnect()
+            let orphans = (try? await Self.survivors(of: marker)) ?? []
+            for pid in orphans { kill(pid, SIGKILL) }
+            throw error
         }
-        try #require(!spawned.isEmpty, "the probe server never started")
 
         await client.disconnect()
         // Bounded by the disconnect above having already unwedged it.

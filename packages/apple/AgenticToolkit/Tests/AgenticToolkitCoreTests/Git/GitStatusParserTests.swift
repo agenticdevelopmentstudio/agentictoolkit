@@ -78,4 +78,36 @@ struct GitStatusParserTests {
         let status = GitStatus.parse(porcelain: " M café.txt\u{0}")
         #expect(status.files["café.txt"] == .modified)
     }
+
+    @Test("a path beginning with a combining mark keeps every byte")
+    func pathBeginningWithACombiningMarkIsNotTruncated() {
+        // U+0301 COMBINING ACUTE ACCENT is a legal leading byte sequence for a
+        // filename, and it clusters with whatever precedes it — here the space
+        // that separates the status columns from the path. Counted and sliced
+        // in `Character`s, the four-byte record `" M" + " " + "\u{301}"` has a
+        // `count` of 3 and `dropFirst(3)` consumed the accent along with the
+        // separator, leaving an empty path. That empty path then reached the
+        // directory roll-up, where `removeLast()` on no components trapped the
+        // process — a `git status` refresh in the file browser taking the app
+        // down.
+        let status = GitStatus.parse(porcelain: " M \u{301}.txt\u{0}")
+        #expect(status.files["\u{301}.txt"] == .modified)
+        #expect(status.files[""] == nil)
+    }
+
+    @Test("a record with nothing but a status and a separator is skipped")
+    func recordWithNoPathIsSkipped() {
+        // Malformed, and therefore exactly what must not cost more than the
+        // one record: `split` drops empty components, so an empty path yields
+        // no components at all and the roll-up's `removeLast()` would trap.
+        let status = GitStatus.parse(porcelain: " M \u{0} M kept.txt\u{0}")
+        #expect(status.files["kept.txt"] == .modified)
+        #expect(status.files[""] == nil)
+    }
+
+    @Test("a path that is only separators is skipped rather than trapping")
+    func pathOfSeparatorsOnlyIsSkipped() {
+        let status = GitStatus.parse(porcelain: " M ///\u{0}")
+        #expect(status.directories.isEmpty)
+    }
 }

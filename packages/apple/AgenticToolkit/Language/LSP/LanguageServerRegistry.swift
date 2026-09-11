@@ -94,6 +94,12 @@ public final class LanguageServerRegistry: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
 
+    /// Set by `shutdown()`, never cleared: a registry that has been shut down
+    /// is finished, and a project window that wants language servers again
+    /// gets a new one. The flag is what stops the still-live settings
+    /// subscription from re-populating `sessions` mid-teardown.
+    private var isShutDown = false
+
     public init(
         store: SettingsStore,
         workspaceURL: URL,
@@ -292,7 +298,22 @@ public final class LanguageServerRegistry: ObservableObject {
     /// Sessions are stopped **concurrently**. `SubprocessChannel.terminate()`
     /// costs up to 2.5 s flat per channel, is not cancellable, and the budgets
     /// do not share, so a `for` loop over five servers is a twelve-second quit.
+    ///
+    /// Shutdown is **terminal**, and `isShutDown` is set before the first
+    /// suspension rather than after the last one. `shutdown()` suspends at
+    /// `stopAll`, and the settings subscription installed in `init` is still
+    /// live across that suspension: a settings write delivered in the gap
+    /// re-entered `reconcile()`, found `sessions` empty — this method had just
+    /// emptied it — and treated every enabled configuration as new, spawning a
+    /// fresh set of language-server subprocesses into a registry that is being
+    /// torn down. `running` was captured before that, so nothing ever stopped
+    /// them; they outlived the project window that owned them.
     public func shutdown() async {
+        isShutDown = true
+        // Belt to the flag's braces: the subscription has no further work to
+        // do, and dropping it here means the flag is only load-bearing for a
+        // delivery already in flight.
+        cancellables.removeAll()
         let running = Array(sessions.values)
         sessions = [:]
         descriptors = [:]
@@ -323,6 +344,10 @@ public final class LanguageServerRegistry: ObservableObject {
         userConfigurations: [LanguageServerConfiguration],
         secrets: LanguageServerSecrets
     ) {
+        // A settings write that lands after `shutdown()` has begun — including
+        // one delivered while it is suspended inside `stopAll` — must not
+        // start anything. See `shutdown()`.
+        guard !isShutDown else { return }
         let effective = Self.effectiveConfigurations(builtIn: builtInConfigurations, user: userConfigurations)
 
         let enabled = effective.filter(\.isEnabled)

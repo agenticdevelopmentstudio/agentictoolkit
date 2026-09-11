@@ -53,7 +53,16 @@ public final class GitStatusProvider: Sendable {
                 let path = repoRoot.path
                 let reason = (error as? GitClientError)?.logDescription ?? String(describing: type(of: error))
                 Self.logger.error("Git status failed for \(path, privacy: .public): \(reason, privacy: .public)")
-                status = .empty
+                // Same policy as cancellation above, and for the same reason:
+                // an empty status is indistinguishable from a clean tree by
+                // the time it reaches a consumer. `FileTreeManager` assigns
+                // `node.gitStatus` from these maps unconditionally and the
+                // outline view draws no badge for `nil`, so delivering
+                // `.empty` here repainted every modified, added and untracked
+                // file as unmodified because git was misconfigured or timed
+                // out. Leaving the last good status in place is the honest
+                // answer to "we do not know"; the failure is in the log.
+                return
             }
             guard self.requestID.withLock({ $0 == id }) else { return }
             await MainActor.run {

@@ -115,6 +115,32 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
         }
     }
 
+    /// Re-files any branch command of this controller's that has gone missing
+    /// from the registry.
+    ///
+    /// Every command id is derived from `checkout.identifier`, a hash of the
+    /// resolved directory path and nothing else, so two project windows over
+    /// the same repository mint *identical* ids — and `readCheckouts()` makes
+    /// that routine rather than exotic, because it derives from `git worktree
+    /// list`, which answers the same worktree set for any subdirectory of one
+    /// repository. The registry is the app's, so the second window to open
+    /// replaced the first's entries, and the first window to close took them
+    /// back out from under whoever was still using them. `syncBranchControllers()`
+    /// only registers for a controller it just created, so nothing there ever
+    /// noticed: the surviving window's palette lost those rows for good.
+    ///
+    /// Called by `ProjectWindowManager` after a sibling window closes. Ids that
+    /// are still registered are left alone, so the common case — no overlap —
+    /// costs a dictionary lookup per command and logs nothing.
+    public func reregisterCommands() {
+        guard !isClosed, let commandRegistry else { return }
+        for controller in branchControllers.values {
+            for command in controller.commands where commandRegistry.command(id: command.id) == nil {
+                commandRegistry.register(command)
+            }
+        }
+    }
+
     public func shutdown() async {
         markClosed()
         await workspace.languageServices?.shutdown()

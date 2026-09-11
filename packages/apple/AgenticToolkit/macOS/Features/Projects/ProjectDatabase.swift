@@ -174,9 +174,15 @@ public final class ProjectDatabase {
     /// The original schema, left exactly as it shipped. Migrations are
     /// append-only — a fresh database runs this and then every later one, so
     /// this stays the description of v1 rather than of the current shape.
+    ///
+    /// `IF NOT EXISTS` throughout for the same reason the later migrations
+    /// check before they alter: a database an older, un-transacted build left
+    /// part-way through this chain is still on disk, and a bare `CREATE TABLE`
+    /// over a table that is already there fails and takes the whole file with
+    /// it (`idempotency`). The statements are otherwise as they shipped.
     private func migration001_createSchema() throws {
         try execute("""
-            CREATE TABLE git_repo (
+            CREATE TABLE IF NOT EXISTS git_repo (
                 id TEXT PRIMARY KEY,
                 path TEXT NOT NULL UNIQUE,
                 name TEXT NOT NULL,
@@ -187,10 +193,10 @@ public final class ProjectDatabase {
                 missing_since REAL
             )
         """)
-        try execute("CREATE INDEX idx_git_repo_name ON git_repo(name)")
+        try execute("CREATE INDEX IF NOT EXISTS idx_git_repo_name ON git_repo(name)")
 
         try execute("""
-            CREATE TABLE project_setting (
+            CREATE TABLE IF NOT EXISTS project_setting (
                 repo_id TEXT NOT NULL REFERENCES git_repo(id) ON DELETE CASCADE,
                 key TEXT NOT NULL,
                 value TEXT NOT NULL,
@@ -199,7 +205,7 @@ public final class ProjectDatabase {
         """)
 
         try execute("""
-            CREATE TABLE layout_nodes (
+            CREATE TABLE IF NOT EXISTS layout_nodes (
                 id TEXT PRIMARY KEY,
                 repo_id TEXT NOT NULL REFERENCES git_repo(id) ON DELETE CASCADE,
                 parent_id TEXT REFERENCES layout_nodes(id) ON DELETE CASCADE,
@@ -210,11 +216,11 @@ public final class ProjectDatabase {
                 pane_label TEXT
             )
         """)
-        try execute("CREATE INDEX idx_layout_nodes_parent ON layout_nodes(parent_id)")
-        try execute("CREATE INDEX idx_layout_nodes_repo ON layout_nodes(repo_id)")
+        try execute("CREATE INDEX IF NOT EXISTS idx_layout_nodes_parent ON layout_nodes(parent_id)")
+        try execute("CREATE INDEX IF NOT EXISTS idx_layout_nodes_repo ON layout_nodes(repo_id)")
 
         try execute("""
-            CREATE TABLE project_tabs (
+            CREATE TABLE IF NOT EXISTS project_tabs (
                 id TEXT PRIMARY KEY,
                 repo_id TEXT NOT NULL REFERENCES git_repo(id) ON DELETE CASCADE,
                 position INTEGER NOT NULL,
@@ -225,10 +231,10 @@ public final class ProjectDatabase {
                 focused_node_id TEXT REFERENCES layout_nodes(id)
             )
         """)
-        try execute("CREATE INDEX idx_project_tabs_repo ON project_tabs(repo_id, position)")
+        try execute("CREATE INDEX IF NOT EXISTS idx_project_tabs_repo ON project_tabs(repo_id, position)")
 
         try execute("""
-            CREATE TABLE project_state (
+            CREATE TABLE IF NOT EXISTS project_state (
                 repo_id TEXT PRIMARY KEY REFERENCES git_repo(id) ON DELETE CASCADE,
                 active_tab_id TEXT REFERENCES project_tabs(id),
                 enabled_edges TEXT NOT NULL DEFAULT 'top'
@@ -236,7 +242,7 @@ public final class ProjectDatabase {
         """)
 
         try execute("""
-            CREATE TABLE project_directories (
+            CREATE TABLE IF NOT EXISTS project_directories (
                 repo_id TEXT NOT NULL REFERENCES git_repo(id) ON DELETE CASCADE,
                 position INTEGER NOT NULL,
                 path TEXT NOT NULL,
@@ -259,8 +265,16 @@ public final class ProjectDatabase {
     /// scan that runs moments later is the thing qualified to judge them, and
     /// it keeps — id, settings and layout intact — the ones that turn out to
     /// be on disk after all.
+    ///
+    /// The drop is conditional for the same reason migration 4's add is: a
+    /// database an older, un-transacted build left between these two
+    /// statements has the column already gone and no version row to say so,
+    /// and the bare `ALTER` there fails with `no such column` on that launch
+    /// and every one after it (`idempotency`).
     private func migration002_dropMissingSince() throws {
-        try execute("ALTER TABLE git_repo DROP COLUMN missing_since")
+        if try columnExists("missing_since", in: "git_repo") {
+            try execute("ALTER TABLE git_repo DROP COLUMN missing_since")
+        }
         try execute("INSERT INTO schema_migrations (version) VALUES (2)")
     }
 
@@ -278,10 +292,18 @@ public final class ProjectDatabase {
     /// and rewrites that whole table on every layout change, which would
     /// cascade the state away seconds after it was written. `saveTabs` prunes
     /// by node id instead, so state outlives the rewrite but not the pane.
+    ///
+    /// Both statements are conditional, and this migration is the one that
+    /// most needs it: it shipped in an un-transacted build, so it is the one
+    /// likeliest to be half-applied on a database already on disk. Re-running
+    /// the bare `ALTER` there fails with `duplicate column name` and takes
+    /// every project, tab and pane in the file with it (`idempotency`).
     private func migration003_paneSizesAndState() throws {
-        try execute("ALTER TABLE layout_nodes ADD COLUMN thickness_fraction REAL")
+        if try !columnExists("thickness_fraction", in: "layout_nodes") {
+            try execute("ALTER TABLE layout_nodes ADD COLUMN thickness_fraction REAL")
+        }
         try execute("""
-            CREATE TABLE pane_state (
+            CREATE TABLE IF NOT EXISTS pane_state (
                 repo_id TEXT NOT NULL REFERENCES git_repo(id) ON DELETE CASCADE,
                 node_id TEXT NOT NULL,
                 key TEXT NOT NULL,

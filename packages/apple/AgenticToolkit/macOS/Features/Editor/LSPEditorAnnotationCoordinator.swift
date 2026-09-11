@@ -28,9 +28,11 @@ import LanguageServerProtocol
 /// therefore `nonisolated` with a `MainActor.assumeIsolated` body — the same
 /// spelling, and the same argument, as
 /// `LSPJumpToDefinitionDelegate.openLink(link:)`: `TextViewController` is an
-/// `NSViewController` and calls all six of these from its own main-actor
+/// `NSViewController` and calls five of these from its own main-actor
 /// methods, so the assertion is one the call graph already guarantees, and a
-/// `Task` hop would land after the text has moved on.
+/// `Task` hop would land after the text has moved on. `destroy()` is the
+/// sixth, and the exception — it is also called from a plain `deinit`, so it
+/// checks the thread rather than asserting it; see its own comment.
 @MainActor
 final class LSPEditorAnnotationCoordinator: TextViewCoordinator {
 
@@ -114,21 +116,44 @@ final class LSPEditorAnnotationCoordinator: TextViewCoordinator {
         }
     }
 
+    /// The one requirement of the six that is **not** always called from a
+    /// main-actor method.
+    ///
+    /// `TextViewController` calls the other five from its own main-actor
+    /// methods, but it calls this one from a plain `deinit`, which SE-0371
+    /// leaves `nonisolated`: it runs on whatever thread released the last
+    /// reference. A `SourceEditor` whose controller is let go from a
+    /// background continuation therefore reaches `MainActor.assumeIsolated`
+    /// off the main thread, and `assumeIsolated` traps rather than hops —
+    /// closing a document could take the process down.
+    ///
+    /// On the main thread the work stays synchronous, because that is the
+    /// common path and the popover should come down in the same turn the
+    /// editor goes away. Off it, the hop is the only correct answer: this
+    /// object is `@MainActor`-isolated and so implicitly `Sendable`, and it
+    /// outlives the controller that is calling — `FileEditorState.Slot` holds
+    /// it — so there is a `self` for the hop to land on.
     nonisolated func destroy() {
-        MainActor.assumeIsolated {
-            hover.invalidate()
-            hover.textView = nil
-            overlay?.removeFromSuperview()
-            overlay = nil
-            subscription = nil
-            if let editObserver {
-                NotificationCenter.default.removeObserver(editObserver)
-            }
-            editObserver = nil
-            observedStorage = nil
-            marks = []
-            controller = nil
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { tearDown() }
+        } else {
+            Task { @MainActor in self.tearDown() }
         }
+    }
+
+    private func tearDown() {
+        hover.invalidate()
+        hover.textView = nil
+        overlay?.removeFromSuperview()
+        overlay = nil
+        subscription = nil
+        if let editObserver {
+            NotificationCenter.default.removeObserver(editObserver)
+        }
+        editObserver = nil
+        observedStorage = nil
+        marks = []
+        controller = nil
     }
 
     // MARK: - Installation

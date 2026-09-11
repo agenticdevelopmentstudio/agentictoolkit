@@ -860,6 +860,48 @@ struct LanguageServerRegistryTests {
         #expect(log.stopped.count == 2, "both sessions must have been stopped")
     }
 
+    /// What it catches: `shutdown()` empties `sessions` and then suspends at
+    /// `stopAll`, while the settings subscription installed in `init` is still
+    /// live. A settings write delivered in that gap re-entered `reconcile()`,
+    /// found `sessions` empty — shutdown had just emptied it — treated every
+    /// enabled configuration as new, and spawned a fresh set of language-server
+    /// subprocesses into a registry being torn down. `running` was captured
+    /// before that, so nothing ever stopped them: they outlived the project
+    /// window that owned them.
+    @Test("a settings write delivered while shutdown is in flight starts nothing")
+    func aSettingsWriteDuringShutdownStartsNothing() async {
+        let store = makeStore()
+        let log = SessionLog()
+        let registry = makeRegistry(
+            store: store,
+            log: log,
+            behavior: FakeSessionBehavior(holdsStop: true)
+        )
+
+        let first = makeConfiguration(languageIds: ["swift"], command: "/nonexistent/first-server")
+        store.set([first], for: UserSettings.languageServerConfigurations)
+        guard let session = fake(registry, first.id) else {
+            Issue.record("no session was created")
+            return
+        }
+
+        let shutdown = Task { @MainActor in await registry.shutdown() }
+        // The held stop parks `stopAll`, so the registry stays in exactly the
+        // state the defect needed: emptied, and not finished.
+        let emptied = await poll(seconds: 1) { registry.sessions.isEmpty }
+        #expect(emptied, "shutdown never reached its suspension point")
+
+        let second = makeConfiguration(languageIds: ["python"], command: "/nonexistent/second-server")
+        store.set([first, second], for: UserSettings.languageServerConfigurations)
+        #expect(registry.sessions.isEmpty, "a settings write during shutdown repopulated the registry")
+
+        await session.releaseHeldStop()
+        await shutdown.value
+
+        #expect(registry.sessions.isEmpty)
+        #expect(log.started == [first.id], "a language server was started after shutdown began")
+    }
+
     /// Somewhere to record that an `await` returned, readable from the main
     /// actor without a second suspension point.
     @MainActor

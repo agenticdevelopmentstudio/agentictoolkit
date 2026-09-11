@@ -65,6 +65,29 @@ struct SubprocessTransportTests {
         Data(text.utf8) + Data([0x0A])
     }
 
+    /// Connects `transport` and runs `body` against it, disconnecting on
+    /// every exit path. `defer` cannot `await`, so this scope function is
+    /// what makes cleanup reachable from a throwing body — and it matters
+    /// more here than in most suites: unlike `SubprocessChannelTests`, this
+    /// suite is not `.serialized`, and `SubprocessTransport` has no
+    /// `deinit` at all, so a leaked child is not even cleaned up when the
+    /// test that spawned it goes out of scope. It just accumulates for the
+    /// rest of the run.
+    private func withConnectedTransport<T>(
+        _ transport: SubprocessTransport,
+        _ body: (SubprocessTransport) async throws -> T
+    ) async throws -> T {
+        try await transport.connect()
+        do {
+            let value = try await body(transport)
+            await transport.disconnect()
+            return value
+        } catch {
+            await transport.disconnect()
+            throw error
+        }
+    }
+
     /// The round trip the MCP SDK actually performs: a JSON-RPC message goes
     /// out through `send`, the child echoes it, and it comes back out of
     /// `receive` **with its newline delimiter still attached**. The SDK's JSON
@@ -73,16 +96,15 @@ struct SubprocessTransportTests {
     @Test("a JSON message round-trips through send/receive with its newline delimiter")
     func jsonMessageRoundTrips() async throws {
         let transport = makeTransport(executable: "/bin/cat")
-        try await transport.connect()
-        let stream = await transport.receive()
+        try await withConnectedTransport(transport) { transport in
+            let stream = await transport.receive()
 
-        let request = #"{"jsonrpc":"2.0","id":1,"method":"ping"}"#
-        try await transport.send(Data(request.utf8))
+            let request = #"{"jsonrpc":"2.0","id":1,"method":"ping"}"#
+            try await transport.send(Data(request.utf8))
 
-        let frames = try await collectFrames(from: stream, count: 1)
-        #expect(frames == [newlineTerminated(request)])
-
-        await transport.disconnect()
+            let frames = try await collectFrames(from: stream, count: 1)
+            #expect(frames == [newlineTerminated(request)])
+        }
     }
 
     /// Two messages in a row must arrive as two frames, in order — the framing
@@ -91,18 +113,17 @@ struct SubprocessTransportTests {
     @Test("successive messages arrive as separate frames in order")
     func successiveMessagesArriveInOrder() async throws {
         let transport = makeTransport(executable: "/bin/cat")
-        try await transport.connect()
-        let stream = await transport.receive()
+        try await withConnectedTransport(transport) { transport in
+            let stream = await transport.receive()
 
-        let first = #"{"id":1}"#
-        let second = #"{"id":2}"#
-        try await transport.send(Data(first.utf8))
-        try await transport.send(Data(second.utf8))
+            let first = #"{"id":1}"#
+            let second = #"{"id":2}"#
+            try await transport.send(Data(first.utf8))
+            try await transport.send(Data(second.utf8))
 
-        let frames = try await collectFrames(from: stream, count: 2)
-        #expect(frames == [newlineTerminated(first), newlineTerminated(second)])
-
-        await transport.disconnect()
+            let frames = try await collectFrames(from: stream, count: 2)
+            #expect(frames == [newlineTerminated(first), newlineTerminated(second)])
+        }
     }
 
     /// A blank stdout line must never reach the SDK. `StdioTransport` stripped
@@ -118,13 +139,12 @@ struct SubprocessTransportTests {
             executable: "/bin/sh",
             arguments: ["-c", #"printf '{"id":1}\n\n{"id":2}\n'"#]
         )
-        try await transport.connect()
-        let stream = await transport.receive()
+        try await withConnectedTransport(transport) { transport in
+            let stream = await transport.receive()
 
-        let frames = try await collectFrames(from: stream, count: 2)
-        #expect(frames == [newlineTerminated(#"{"id":1}"#), newlineTerminated(#"{"id":2}"#)])
-
-        await transport.disconnect()
+            let frames = try await collectFrames(from: stream, count: 2)
+            #expect(frames == [newlineTerminated(#"{"id":1}"#), newlineTerminated(#"{"id":2}"#)])
+        }
     }
 
     /// The same rule, one line ending later. A server on a CRLF runtime — a
@@ -138,13 +158,12 @@ struct SubprocessTransportTests {
             executable: "/bin/sh",
             arguments: ["-c", #"printf '{"id":1}\n\r\n   \n\t\n{"id":2}\n'"#]
         )
-        try await transport.connect()
-        let stream = await transport.receive()
+        try await withConnectedTransport(transport) { transport in
+            let stream = await transport.receive()
 
-        let frames = try await collectFrames(from: stream, count: 2)
-        #expect(frames == [newlineTerminated(#"{"id":1}"#), newlineTerminated(#"{"id":2}"#)])
-
-        await transport.disconnect()
+            let frames = try await collectFrames(from: stream, count: 2)
+            #expect(frames == [newlineTerminated(#"{"id":1}"#), newlineTerminated(#"{"id":2}"#)])
+        }
     }
 
     @Test("isBlankLine classifies exactly the whitespace-only frames as blank")
@@ -171,28 +190,29 @@ struct SubprocessTransportTests {
             executable: "/bin/sh",
             arguments: ["-c", "echo $$; exec cat"]
         )
-        try await transport.connect()
-        let stream = await transport.receive()
+        try await withConnectedTransport(transport) { transport in
+            let stream = await transport.receive()
 
-        let frames = try await collectFrames(from: stream, count: 1)
-        let announced = (String(bytes: frames.first ?? Data(), encoding: .utf8) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let childPID = try #require(pid_t(announced), "the child announces its own pid")
-        #expect(kill(childPID, 0) == 0, "the child is running before disconnect")
+            let frames = try await collectFrames(from: stream, count: 1)
+            let announced = (String(bytes: frames.first ?? Data(), encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let childPID = try #require(pid_t(announced), "the child announces its own pid")
+            #expect(kill(childPID, 0) == 0, "the child is running before disconnect")
 
-        await transport.disconnect()
+            await transport.disconnect()
 
-        // Polled rather than asserted once: the claim is that the child goes
-        // away, not that it has gone by any particular instruction.
-        var stillAlive = true
-        for _ in 0..<50 where stillAlive {
-            if kill(childPID, 0) != 0 && errno == ESRCH {
-                stillAlive = false
-            } else {
-                try await Task.sleep(for: .milliseconds(50))
+            // Polled rather than asserted once: the claim is that the child goes
+            // away, not that it has gone by any particular instruction.
+            var stillAlive = true
+            for _ in 0..<50 where stillAlive {
+                if kill(childPID, 0) != 0 && errno == ESRCH {
+                    stillAlive = false
+                } else {
+                    try await Task.sleep(for: .milliseconds(50))
+                }
             }
+            #expect(!stillAlive, "disconnect() left the child running")
         }
-        #expect(!stillAlive, "disconnect() left the child running")
     }
 
     /// The SDK calls `connect()` once, but a reconnect path could call it
@@ -200,17 +220,16 @@ struct SubprocessTransportTests {
     @Test("a second connect is a no-op")
     func secondConnectIsANoOp() async throws {
         let transport = makeTransport(executable: "/bin/cat")
-        try await transport.connect()
-        try await transport.connect()
+        try await withConnectedTransport(transport) { transport in
+            try await transport.connect()
 
-        let stream = await transport.receive()
-        let message = #"{"id":7}"#
-        try await transport.send(Data(message.utf8))
+            let stream = await transport.receive()
+            let message = #"{"id":7}"#
+            try await transport.send(Data(message.utf8))
 
-        let frames = try await collectFrames(from: stream, count: 1)
-        #expect(frames == [newlineTerminated(message)])
-
-        await transport.disconnect()
+            let frames = try await collectFrames(from: stream, count: 1)
+            #expect(frames == [newlineTerminated(message)])
+        }
     }
 
     /// Mirrors the double call `MCPClient.teardown()` makes: the SDK client
@@ -300,20 +319,21 @@ struct SubprocessTransportTests {
                     + "echo UP; while :; do sleep 0.05; done"
             ]
         )
-        try await transport.connect()
-        let stream = await transport.receive()
-        // Let the trap be installed and `UP` be written before signalling.
-        try await Task.sleep(for: .milliseconds(500))
+        try await withConnectedTransport(transport) { transport in
+            let stream = await transport.receive()
+            // Let the trap be installed and `UP` be written before signalling.
+            try await Task.sleep(for: .milliseconds(500))
 
-        await transport.disconnect()
+            await transport.disconnect()
 
-        let frames = try await drainToEOF(stream)
-        let text = frames.compactMap { String(bytes: $0, encoding: .utf8) }.joined()
-        #expect(text.contains("UP"))
-        #expect(
-            text.contains("BYE"),
-            "the shutdown frame written during the grace period never reached receive()"
-        )
+            let frames = try await drainToEOF(stream)
+            let text = frames.compactMap { String(bytes: $0, encoding: .utf8) }.joined()
+            #expect(text.contains("UP"))
+            #expect(
+                text.contains("BYE"),
+                "the shutdown frame written during the grace period never reached receive()"
+            )
+        }
     }
 
     /// The connect/disconnect race. `connect()` suspends at
@@ -344,44 +364,57 @@ struct SubprocessTransportTests {
             arguments: ["-c", "while :; do sleep 0.05; done", marker]
         )
 
-        let started = StartFlag()
-        let connecting = Task {
-            started.set()
-            try await transport.connect()
+        // The race under test means the child may never be reachable through
+        // `transport` at all by the time something goes wrong — it is found
+        // by `pgrep -f` on its `argv` marker instead of a pid `transport`
+        // hands back, so the cleanup below has to run on every exit path,
+        // not just the one where every assertion above it passed.
+        do {
+            let started = StartFlag()
+            let connecting = Task {
+                started.set()
+                try await transport.connect()
+            }
+            // The task body has been entered, so `connect()` is at most a few
+            // instructions from the actor. Yielding rather than sleeping keeps
+            // this from eating the window it is waiting for.
+            while !started.isSet { await Task.yield() }
+
+            // Each hop enters this actor, so each can only run while `connect()`
+            // is suspended — and its only suspension before it claims the
+            // connection is `await channel.launch()`. Several rather than one so a
+            // single scheduling quirk cannot land outside the window unnoticed.
+            //
+            // If this ever flakes on a loaded machine, the remedy is to raise 16
+            // to a few hundred — the hops are cheap actor round trips and the
+            // failure mode is landing *after* the window, never before it. Do not
+            // instead add a test-only hook to `SubprocessTransport` to make the
+            // probe deterministic: that was considered and rejected, because the
+            // hook would be permanent production surface bought for one test.
+            for _ in 0..<16 { _ = await transport.receive() }
+
+            await transport.disconnect()
+            try await connecting.value
+
+            var survivors = try Self.processesMatching(marker)
+            for _ in 0..<50 where !survivors.isEmpty {
+                try await Task.sleep(for: .milliseconds(50))
+                survivors = try Self.processesMatching(marker)
+            }
+            // Kill before asserting: a failure here means a real orphan, and
+            // leaving it running would outlive the whole test run.
+            for pid in survivors { kill(pid, SIGKILL) }
+            #expect(
+                survivors.isEmpty,
+                "disconnect() during a suspended connect() left the child running (pids \(survivors))"
+            )
+        } catch {
+            await transport.disconnect()
+            if let survivors = try? Self.processesMatching(marker) {
+                for pid in survivors { kill(pid, SIGKILL) }
+            }
+            throw error
         }
-        // The task body has been entered, so `connect()` is at most a few
-        // instructions from the actor. Yielding rather than sleeping keeps
-        // this from eating the window it is waiting for.
-        while !started.isSet { await Task.yield() }
-
-        // Each hop enters this actor, so each can only run while `connect()`
-        // is suspended — and its only suspension before it claims the
-        // connection is `await channel.launch()`. Several rather than one so a
-        // single scheduling quirk cannot land outside the window unnoticed.
-        //
-        // If this ever flakes on a loaded machine, the remedy is to raise 16
-        // to a few hundred — the hops are cheap actor round trips and the
-        // failure mode is landing *after* the window, never before it. Do not
-        // instead add a test-only hook to `SubprocessTransport` to make the
-        // probe deterministic: that was considered and rejected, because the
-        // hook would be permanent production surface bought for one test.
-        for _ in 0..<16 { _ = await transport.receive() }
-
-        await transport.disconnect()
-        try await connecting.value
-
-        var survivors = try Self.processesMatching(marker)
-        for _ in 0..<50 where !survivors.isEmpty {
-            try await Task.sleep(for: .milliseconds(50))
-            survivors = try Self.processesMatching(marker)
-        }
-        // Kill before asserting: a failure here means a real orphan, and
-        // leaving it running would outlive the whole test run.
-        for pid in survivors { kill(pid, SIGKILL) }
-        #expect(
-            survivors.isEmpty,
-            "disconnect() during a suspended connect() left the child running (pids \(survivors))"
-        )
     }
 
     /// The pids whose full command line contains `marker`. `pgrep` never

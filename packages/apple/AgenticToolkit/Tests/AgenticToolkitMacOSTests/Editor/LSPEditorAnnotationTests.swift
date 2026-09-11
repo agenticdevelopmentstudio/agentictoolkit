@@ -436,6 +436,39 @@ struct LSPEditorAnnotationTests {
         #expect(coordinator.hover.textView == nil)
     }
 
+    /// What it catches: `destroy()` reaching `MainActor.assumeIsolated` off the
+    /// main thread. `TextViewController` calls it from a plain `deinit`, which
+    /// SE-0371 leaves nonisolated — so it runs on whatever thread released the
+    /// last reference, and `assumeIsolated` traps rather than hops. Closing a
+    /// document from a background continuation took the process down.
+    @Test("destroy called off the main thread tears down instead of trapping")
+    func destroyOffTheMainThreadTearsDown() async throws {
+        let fixture = LSPEditorFixture(behavior: FakeEditorSessionBehavior(
+            capabilities: makeHoveringCapabilities()
+        ))
+        _ = try await fixture.startedSession()
+        let controller = laidOutEditor(text: "let value = 1\n")
+        let coordinator = LSPEditorAnnotationCoordinator(
+            document: makeEditorDocument(text: "let value = 1\n"),
+            registry: fixture.registry,
+            store: DiagnosticStore()
+        )
+        coordinator.prepareCoordinator(controller: controller)
+        #expect(controller.textView.subviews.contains { $0 is DiagnosticOverlayView })
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                coordinator.destroy()
+                continuation.resume()
+            }
+        }
+
+        // The tear-down hops to the main actor from here, so it lands on a
+        // later turn rather than inside the call.
+        #expect(await poll { !controller.textView.subviews.contains { $0 is DiagnosticOverlayView } })
+        #expect(coordinator.hover.textView == nil)
+    }
+
     // MARK: - The store reaches the overlay
 
     /// Not one of the numbered cases, and the one thing they leave uncovered:

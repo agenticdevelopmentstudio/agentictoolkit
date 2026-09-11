@@ -112,6 +112,31 @@ struct LanguageServerSessionTests {
         haystack.components(separatedBy: needle).count - 1
     }
 
+    /// Starts `session` and runs `body` against it, stopping it on every exit
+    /// path. Unlike `SubprocessChannel.launch()`, `LanguageServerSession
+    /// .start()` is not atomic — it can spawn the child and only then throw
+    /// (a truncated frame, a lapsed initialize budget), so `start()` itself
+    /// has to sit inside the guarded region, not just `body`. `defer` cannot
+    /// `await`, so this scope function is what makes `stop()` reachable from
+    /// either kind of throw — otherwise a failed assertion, or `start()`
+    /// failing after the child is already alive, leaks a real child that
+    /// `respondingServerScript`'s `cat >/dev/null` will never let exit on
+    /// its own.
+    private func withStartedSession<T>(
+        _ session: LanguageServerSession,
+        _ body: (LanguageServerSession) async throws -> T
+    ) async throws -> T {
+        do {
+            try await session.start()
+            let value = try await body(session)
+            await session.stop()
+            return value
+        } catch {
+            await session.stop()
+            throw error
+        }
+    }
+
     // MARK: - 1. Round trip
 
     /// The whole stack, end to end: `SubprocessChannel` frames the request,
@@ -129,27 +154,23 @@ struct LanguageServerSessionTests {
     func framedInitializeResponseRoundTrips() async throws {
         let session = makeSession(script: Self.respondingServerScript)
 
-        try await session.start()
+        try await withStartedSession(session) { session in
+            let state = await session.state
+            guard case .running = state else {
+                Issue.record("expected .running, got \(state)")
+                return
+            }
 
-        let state = await session.state
-        guard case .running = state else {
-            Issue.record("expected .running, got \(state)")
-            await session.stop()
-            return
+            let capabilities = await session.capabilities()
+            // Values only the child could have supplied, so they prove the body
+            // was decoded rather than defaulted.
+            guard case .optionA(let hoverProvider) = capabilities?.hoverProvider else {
+                Issue.record("expected a Bool hoverProvider, got \(String(describing: capabilities?.hoverProvider))")
+                return
+            }
+            #expect(hoverProvider)
+            #expect(capabilities?.completionProvider?.triggerCharacters == ["."])
         }
-
-        let capabilities = await session.capabilities()
-        // Values only the child could have supplied, so they prove the body
-        // was decoded rather than defaulted.
-        guard case .optionA(let hoverProvider) = capabilities?.hoverProvider else {
-            Issue.record("expected a Bool hoverProvider, got \(String(describing: capabilities?.hoverProvider))")
-            await session.stop()
-            return
-        }
-        #expect(hoverProvider)
-        #expect(capabilities?.completionProvider?.triggerCharacters == ["."])
-
-        await session.stop()
     }
 
     // MARK: - 2. Framing is applied exactly once
@@ -340,8 +361,7 @@ struct LanguageServerSessionTests {
     @Test("start after stop is refused rather than silently spawning an orphan")
     func startAfterStopIsRefused() async throws {
         let session = makeSession(script: Self.respondingServerScript)
-        try await session.start()
-        await session.stop()
+        try await withStartedSession(session) { _ in }
 
         await #expect(throws: LanguageServerSessionError.sessionHasBeenStopped) {
             try await session.start()
@@ -365,26 +385,35 @@ struct LanguageServerSessionTests {
     func concurrentStartJoinsTheFirstRatherThanReturningEarly() async throws {
         let session = makeSession(script: Self.respondingServerScript)
 
-        // Both calls are issued before either can finish, so exactly one takes
-        // the `.idle` path and the other meets `.starting`. Which one wins does
-        // not matter — that is the point.
-        async let first: Void = session.start()
-        async let second: Void = session.start()
-        _ = try await (first, second)
+        // Not `withStartedSession`: two `start()` calls race here rather than
+        // one, so the guarded region has to wrap both by hand. Cleanup still
+        // has to run on every exit path — a failed assertion between the race
+        // and `stop()` must not leak the child either.
+        do {
+            // Both calls are issued before either can finish, so exactly one takes
+            // the `.idle` path and the other meets `.starting`. Which one wins does
+            // not matter — that is the point.
+            async let first: Void = session.start()
+            async let second: Void = session.start()
+            _ = try await (first, second)
 
-        let state = await session.state
-        guard case .running = state else {
-            Issue.record("expected .running, got \(state)")
+            let state = await session.state
+            guard case .running = state else {
+                Issue.record("expected .running, got \(state)")
+                await session.stop()
+                return
+            }
+
+            // Values only the child could have supplied. Under the old guard this
+            // was `nil` whenever the joiner asked first.
+            let capabilities = await session.capabilities()
+            #expect(capabilities?.completionProvider?.triggerCharacters == ["."])
+
             await session.stop()
-            return
+        } catch {
+            await session.stop()
+            throw error
         }
-
-        // Values only the child could have supplied. Under the old guard this
-        // was `nil` whenever the joiner asked first.
-        let capabilities = await session.capabilities()
-        #expect(capabilities?.completionProvider?.triggerCharacters == ["."])
-
-        await session.stop()
         // Stopping is still terminal for every caller, joined or not.
         await #expect(throws: LanguageServerSessionError.sessionHasBeenStopped) {
             try await session.start()
@@ -477,13 +506,11 @@ struct LanguageServerSessionTests {
         let session = makeSession(script: Self.respondingServerScript)
         let recorder = StateRecorder(session.stateChanges)
 
-        try await session.start()
-
-        let arrived = await poll { await recorder.states.count >= 2 }
-        #expect(arrived)
-        #expect(Array(await recorder.states.prefix(2)) == ["starting", "running"])
-
-        await session.stop()
+        try await withStartedSession(session) { _ in
+            let arrived = await poll { await recorder.states.count >= 2 }
+            #expect(arrived)
+            #expect(Array(await recorder.states.prefix(2)) == ["starting", "running"])
+        }
     }
 
     /// What it catches: a failure recorded in `state` but never published, and
@@ -519,8 +546,7 @@ struct LanguageServerSessionTests {
         let session = makeSession(script: Self.respondingServerScript)
         let recorder = StateRecorder(session.stateChanges)
 
-        try await session.start()
-        await session.stop()
+        try await withStartedSession(session) { _ in }
 
         let ended = await poll { await recorder.didFinish }
         #expect(ended)
@@ -536,8 +562,7 @@ struct LanguageServerSessionTests {
         let session = makeSession(script: Self.respondingServerScript)
         let recorder = StateRecorder(session.stateChanges)
 
-        try await session.start()
-        await session.stop()
+        try await withStartedSession(session) { _ in }
         #expect(await poll { await recorder.didFinish })
 
         // And on the path with no child at all. A session retired before its
@@ -616,28 +641,29 @@ struct LanguageServerSessionTests {
     @Test("teardown waits for a request that is still on the wire")
     func teardownWaitsForOutstandingRequests() async throws {
         let session = makeSession(script: Self.respondingServerScript)
-        try await session.start()
 
-        // Never answered: the child's `cat >/dev/null` eats it.
-        let hover = Task { try? await session.hover(TextDocumentPositionParams(
-            uri: "file:///tmp/outstanding.swift",
-            position: Position(line: 0, character: 0)
-        )) }
-        // Long enough for the request to be counted and written, short next to
-        // the barrier budget it is about to be measured against.
-        try await Task.sleep(for: .milliseconds(300))
+        try await withStartedSession(session) { session in
+            // Never answered: the child's `cat >/dev/null` eats it.
+            let hover = Task { try? await session.hover(TextDocumentPositionParams(
+                uri: "file:///tmp/outstanding.swift",
+                position: Position(line: 0, character: 0)
+            )) }
+            // Long enough for the request to be counted and written, short next to
+            // the barrier budget it is about to be measured against.
+            try await Task.sleep(for: .milliseconds(300))
 
-        let started = Date()
-        await session.stop()
-        let elapsed = Date().timeIntervalSince(started)
+            let started = Date()
+            await session.stop()
+            let elapsed = Date().timeIntervalSince(started)
 
-        // The default barrier is 2s; the other budgets this session uses are
-        // 0.5s shutdown and 1s abandoned-start, and the scripted child dies on
-        // SIGTERM at once. A teardown with no barrier lands well under 1.5s.
-        #expect(elapsed >= 1.5, "stop() returned in \(elapsed)s; it did not wait for the request")
-        #expect(elapsed < 12, "stop() took \(elapsed)s; the barrier is not bounded")
+            // The default barrier is 2s; the other budgets this session uses are
+            // 0.5s shutdown and 1s abandoned-start, and the scripted child dies on
+            // SIGTERM at once. A teardown with no barrier lands well under 1.5s.
+            #expect(elapsed >= 1.5, "stop() returned in \(elapsed)s; it did not wait for the request")
+            #expect(elapsed < 12, "stop() took \(elapsed)s; the barrier is not bounded")
 
-        _ = await hover.value
+            _ = await hover.value
+        }
     }
 
     /// The barrier must be a wait *for* something, not a fixed cost on every
@@ -647,12 +673,13 @@ struct LanguageServerSessionTests {
     @Test("teardown does not wait when no request is outstanding")
     func teardownDoesNotWaitWithNothingOutstanding() async throws {
         let session = makeSession(script: Self.respondingServerScript)
-        try await session.start()
 
-        let started = Date()
-        await session.stop()
-        let elapsed = Date().timeIntervalSince(started)
+        try await withStartedSession(session) { session in
+            let started = Date()
+            await session.stop()
+            let elapsed = Date().timeIntervalSince(started)
 
-        #expect(elapsed < 1.5, "stop() took \(elapsed)s with nothing outstanding")
+            #expect(elapsed < 1.5, "stop() took \(elapsed)s with nothing outstanding")
+        }
     }
 }

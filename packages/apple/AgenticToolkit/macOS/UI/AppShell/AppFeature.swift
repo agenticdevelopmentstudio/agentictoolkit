@@ -29,15 +29,22 @@ open class AppFeature {
     open func start() throws {
     }
 
-    /// Called from `applicationWillTerminate(_:)`. Stop synchronous services
+    /// Called from `applicationShouldTerminate(_:)`. Stop synchronous services
     /// here. Pair with `terminate()` for async cleanup.
     ///
     /// `open` so host apps in other modules can override it.
     open func stop() {
     }
 
-    /// Called from `applicationWillTerminate(_:)`, after `stop()`. Use for
+    /// Called from `applicationShouldTerminate(_:)`, after `stop()`. Use for
     /// async shutdown work like flushing pending saves.
+    ///
+    /// The hook is *awaited* before the process exits, which is why it is
+    /// driven from `applicationShouldTerminate(_:)` and a deferred reply
+    /// rather than from `applicationWillTerminate(_:)`: that delegate method
+    /// is synchronous and returns straight into process exit, so async work
+    /// started there is abandoned mid-flight — a debounced save that had not
+    /// yet landed was simply lost.
     ///
     /// `open` so host apps in other modules can override it.
     open func terminate() async {
@@ -140,6 +147,19 @@ open class AppFeatureRegistry {
         for feature in features {
             feature.stop()
             logger.info("Stopped feature: \(feature.featureName)")
+        }
+    }
+
+    /// Runs every feature's async shutdown hook, in registration order.
+    ///
+    /// Sequential rather than concurrent: `terminate()` flushes writes, and a
+    /// feature is entitled to assume the features registered before it are
+    /// already done with theirs. Callers run this after `stopAll()` and await
+    /// it before letting the process exit.
+    public func terminateAll() async {
+        for feature in features {
+            await feature.terminate()
+            logger.info("Terminated feature: \(feature.featureName)")
         }
     }
 

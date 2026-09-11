@@ -829,6 +829,18 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// `weak self` nil by the time they run. "Usually deallocated first" is not
     /// a life cycle, and anything that holds the controller a moment longer —
     /// a script, a test — got the write.
+    ///
+    /// Closing the window also discards every pane in it, which is the third
+    /// whole-tree discard alongside `removeAllTabs()` and `didRequestCloseTab`
+    /// — and the one that was missing. Neither of the other two runs on this
+    /// path, no leaf defines a `deinit`, and `paneWillBeRemoved()` is what
+    /// reaches `TerminalSessionContentViewController`'s `terminateAll()` and
+    /// `FileBrowserViewController.stopWatching()`. Close a project window with
+    /// three terminals open and, without this, three shells kept running with
+    /// their file watchers still firing for the rest of the app's life.
+    ///
+    /// After `isClosing` is raised, so the tear-down cannot provoke a layout
+    /// callback that writes the emptied tab set over the project's saved tabs.
     public override func windowWillClose(_ notification: Notification) {
         super.windowWillClose(notification)
         isClosing = true
@@ -836,6 +848,9 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         if let firstResponderObserver {
             NotificationCenter.default.removeObserver(firstResponderObserver)
             self.firstResponderObserver = nil
+        }
+        for split in splitControllersByTabID.values {
+            tearDown(split: split)
         }
     }
 
@@ -1089,8 +1104,9 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// is the framework's only other call site for `paneWillBeRemoved()`. A
     /// pane's content may own a shell or an FSEvents stream, and "released
     /// whenever the last reference happens to drop" is not a life cycle for a
-    /// child process — so the two paths that discard a tree whole,
-    /// `removeAllTabs()` and `didRequestCloseTab`, go through here.
+    /// child process — so the three paths that discard a tree whole,
+    /// `removeAllTabs()`, `didRequestCloseTab` and `windowWillClose(_:)`, go
+    /// through here.
     private func tearDown(split: ComposableTabsViewController) {
         for leaf in split.allLeaves() {
             leaf.paneWillBeRemoved()

@@ -111,6 +111,44 @@ final class ProjectDatabaseTests: XCTestCase {
                        "/tmp/a.swift")
     }
 
+    /// The state an older, un-transacted build could leave behind: a schema
+    /// statement that landed and the `INSERT` recording it that did not. The
+    /// next launch re-ran the schema statement, `ALTER TABLE ... ADD COLUMN`
+    /// failed with `duplicate column name`, and every project, tab and pane in
+    /// the file became permanently unreachable. Each migration checks before
+    /// it alters, so the re-run is a no-op instead (`idempotency`).
+    func testAMigrationWhoseVersionRowIsMissingReRunsWithoutFailing() throws {
+        let path = tempRoot.appendingPathComponent("half-migrated.db").path
+        let repo = GitRepo(path: "/tmp/half", name: "half")
+        try autoreleasepool {
+            let database = try ProjectDatabase(path: path)
+            try database.insert(repo)
+        }
+        // The schema is current; only the bookkeeping is behind it.
+        try executeRaw("DELETE FROM schema_migrations WHERE version = 4", at: path)
+
+        let reopened = try ProjectDatabase(path: path)
+        XCTAssertEqual(try reopened.repo(id: repo.id)?.name, "half")
+        let tab = TabRecord(title: "Code", root: LayoutNode.leaf(contentType: ComposableTabsViewID("test.editor")))
+        try reopened.saveTabs([tab], activeTabID: tab.id, repoID: repo.id)
+        XCTAssertEqual(try reopened.loadTabs(repoID: repo.id).tabs.map(\.title), ["Code"])
+    }
+
+    /// The same thing at its limit: every version row gone, so the whole chain
+    /// re-runs over a schema that already has all of it.
+    func testTheWholeMigrationChainIsSafeToReRunOverACurrentSchema() throws {
+        let path = tempRoot.appendingPathComponent("rewound.db").path
+        let repo = GitRepo(path: "/tmp/rewound", name: "rewound")
+        try autoreleasepool {
+            let database = try ProjectDatabase(path: path)
+            try database.insert(repo)
+        }
+        try executeRaw("DELETE FROM schema_migrations", at: path)
+
+        let reopened = try ProjectDatabase(path: path)
+        XCTAssertEqual(try reopened.repo(id: repo.id)?.name, "rewound")
+    }
+
     func testMarkOpenedRecordsTheTimeWithoutTouchingAnythingElse() throws {
         let database = try makeDatabase()
         let repo = GitRepo(path: "/tmp/alpha", name: "alpha")
@@ -243,6 +281,15 @@ final class ProjectDatabaseTests: XCTestCase {
 
     private func makeDatabase() throws -> ProjectDatabase {
         try ProjectDatabase(path: tempRoot.appendingPathComponent("Test.db").path)
+    }
+
+    /// Edits a database behind `ProjectDatabase`'s back, which is the only way
+    /// to produce the half-applied states an older build could leave on disk.
+    private func executeRaw(_ sql: String, at path: String) throws {
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &handle), SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, sql)
     }
 
     /// The v1 tables the later migrations touch — `git_repo`, and the
