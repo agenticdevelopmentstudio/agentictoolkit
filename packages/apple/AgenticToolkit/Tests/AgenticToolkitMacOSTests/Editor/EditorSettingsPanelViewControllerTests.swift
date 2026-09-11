@@ -26,11 +26,13 @@ final class EditorSettingsPanelViewControllerTests: XCTestCase {
         panel.loadViewIfNeeded()
         panel.viewDidLoad()
 
+        // `accessibilityID(_:)` sets the *accessibility* identifier, not
+        // `NSView.identifier` -- reading the latter finds nothing.
         let toggles = panel.view.allSubviewsForTesting.compactMap { $0 as? NSSwitch }
-            .filter { $0.identifier?.rawValue.hasPrefix("settings.editor.") == true }
+            .filter { $0.accessibilityIdentifier().hasPrefix("settings.editor.") }
 
         XCTAssertEqual(
-            Set(toggles.compactMap { $0.identifier?.rawValue }),
+            Set(toggles.map { $0.accessibilityIdentifier() }),
             [
                 "settings.editor.show-line-numbers",
                 "settings.editor.show-overview",
