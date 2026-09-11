@@ -51,20 +51,31 @@ struct GitClientTests {
     }
 
     /// Redirects `--global` reads and writes at a throwaway file for the life of one
-    /// test, by setting `GIT_CONFIG_GLOBAL` in this process's environment.
+    /// test, via `GitClientConfiguration.extraEnvironment` rather than `setenv`.
     ///
     /// This is what makes the three global-config verbs testable without touching the
     /// developer's own `~/.gitconfig`. It works because `GitClient` spawns git with
-    /// `SubprocessChannel`'s `.mergeOverParent` policy, which merges the client's own
-    /// overrides *over* `ProcessInfo.processInfo.environment` — so a variable set here
-    /// reaches the child. `ProcessInfo` reads `environ` afresh on every access, so
-    /// `setenv` after launch is visible.
+    /// `SubprocessChannel`'s `.mergeOverParent` policy, which merges the configuration's
+    /// own overrides *over* the parent's environment — so `GIT_CONFIG_GLOBAL` set in
+    /// `extraEnvironment` reaches the child without ever touching this process's own
+    /// `environ`.
     ///
-    /// The suite is `.serialized` because that environment is process-wide.
+    /// An earlier version of this fixture called `setenv("GIT_CONFIG_GLOBAL", …)`
+    /// directly, mutating process-wide state and relying on `.serialized` above to keep
+    /// it safe — but `.serialized` only orders the tests *inside this suite*, and
+    /// swift-testing runs other suites in this same target (`SubprocessChannelTests`,
+    /// `MCPClientRaceTests`) concurrently with this one. Those suites spawn children that
+    /// read `ProcessInfo.processInfo.environment`, so a `setenv` here could race a
+    /// concurrent read of `environ` (a use-after-free presenting as an intermittent
+    /// runner crash) and could leak `GIT_CONFIG_GLOBAL` into an unrelated child pointed at
+    /// a directory this fixture's `tearDown()` then deletes (review A M4 / parked Task 1
+    /// F10). Carrying the redirect on the `GitClientConfiguration` instance instead makes
+    /// it travel with the one client this test owns and invisible to every other suite —
+    /// `.serialized` is no longer load-bearing for that reason, though it is left in place
+    /// since the tests in this suite still share one real `git` binary and disk fixtures.
     private struct IsolatedGlobalConfig {
         let directory: URL
         let file: URL
-        private let previousValue: String?
 
         /// Seeds the redirected file with one entry, so a read test does not depend on
         /// a write test having run first.
@@ -78,17 +89,16 @@ struct GitClientTests {
             file = directory.appendingPathComponent("config")
             try "[atkgitclienttest]\n\tseeded = \(Self.seededValue)\n"
                 .write(to: file, atomically: true, encoding: .utf8)
-            previousValue = ProcessInfo.processInfo.environment["GIT_CONFIG_GLOBAL"]
-            setenv("GIT_CONFIG_GLOBAL", file.path, 1)
         }
 
         func tearDown() {
-            if let previousValue {
-                setenv("GIT_CONFIG_GLOBAL", previousValue, 1)
-            } else {
-                unsetenv("GIT_CONFIG_GLOBAL")
-            }
             try? FileManager.default.removeItem(at: directory)
+        }
+
+        /// A `GitClientConfiguration` whose child processes see this redirected file as
+        /// `GIT_CONFIG_GLOBAL`, via `extraEnvironment` rather than a process-wide `setenv`.
+        var configuration: GitClientConfiguration {
+            GitClientConfiguration(extraEnvironment: ["GIT_CONFIG_GLOBAL": file.path])
         }
 
         /// The developer's real global config, read only so a test can assert it was
@@ -121,14 +131,13 @@ struct GitClientTests {
     func globalConfigRedirectIsInEffect() async throws {
         let isolated = try IsolatedGlobalConfig()
         defer { isolated.tearDown() }
-        #expect(ProcessInfo.processInfo.environment["GIT_CONFIG_GLOBAL"] == isolated.file.path)
 
         // Exactly the seeded entry and nothing else. This is what makes the two
         // "must be untouched" assertions below non-vacuous: the seeded key exists
         // only in the redirected file, and any key from the developer's own
         // `~/.gitconfig` — a `user.name`, an alias — would show up here if git were
         // still reading it.
-        let entries = try await GitClient(configuration: .default).globalConfig()
+        let entries = try await GitClient(configuration: isolated.configuration).globalConfig()
         #expect(entries.map(\.key) == [IsolatedGlobalConfig.seededKey])
     }
 
@@ -207,7 +216,7 @@ struct GitClientTests {
     func globalConfig() async throws {
         let isolated = try IsolatedGlobalConfig()
         defer { isolated.tearDown() }
-        let client = GitClient(configuration: .default)
+        let client = GitClient(configuration: isolated.configuration)
         let entries = try await client.globalConfig()
         let seeded = entries.first { $0.key == IsolatedGlobalConfig.seededKey }
         #expect(seeded?.value == IsolatedGlobalConfig.seededValue)
@@ -218,7 +227,7 @@ struct GitClientTests {
         let isolated = try IsolatedGlobalConfig()
         defer { isolated.tearDown() }
         let untouchedBefore = IsolatedGlobalConfig.RealGlobalConfig.read()
-        let client = GitClient(configuration: .default)
+        let client = GitClient(configuration: isolated.configuration)
         try await client.setGlobalConfig(key: "atkgitclienttest.added", value: "added-value")
 
         let entries = try await client.globalConfig()
@@ -235,7 +244,7 @@ struct GitClientTests {
         let isolated = try IsolatedGlobalConfig()
         defer { isolated.tearDown() }
         let untouchedBefore = IsolatedGlobalConfig.RealGlobalConfig.read()
-        let client = GitClient(configuration: .default)
+        let client = GitClient(configuration: isolated.configuration)
         #expect(try await client.globalConfig().contains { $0.key == IsolatedGlobalConfig.seededKey })
 
         try await client.unsetGlobalConfig(key: IsolatedGlobalConfig.seededKey)

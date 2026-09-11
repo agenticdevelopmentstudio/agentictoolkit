@@ -187,8 +187,13 @@ public actor GitClient {
             // A non-empty environment is what makes `.mergeOverParent` merge
             // rather than inherit wholesale; git needs PATH and HOME, and this
             // one override stops a credential prompt from hanging the child
-            // forever behind a terminal nobody is watching.
-            environment: ["GIT_TERMINAL_PROMPT": "0"],
+            // forever behind a terminal nobody is watching. `extraEnvironment`
+            // merges on top so a caller (a test redirecting
+            // `GIT_CONFIG_GLOBAL`, say) can add overrides of its own without
+            // touching process-wide state — see
+            // `GitClientConfiguration.extraEnvironment`.
+            environment: ["GIT_TERMINAL_PROMPT": "0"]
+                .merging(configuration.extraEnvironment) { _, override in override },
             environmentPolicy: .mergeOverParent,
             currentDirectoryURL: directory
         )
