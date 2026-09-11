@@ -13,9 +13,9 @@ import AppKit
 /// matter of editing this class.
 ///
 /// Subclass hooks, all `open`: `makeContentViewController()`,
-/// `makeContainerView()`, `makeOptionRows()`, `fallbackTitle`, `contentInset`
-/// and `paneAccessibilityIdentifier`. A subclass that overrides none of them
-/// still gets a working, empty pane.
+/// `makeContainerView()`, `makeOptionRows()`, `makeMenuItems()`,
+/// `fallbackTitle`, `contentInset` and `paneAccessibilityIdentifier`. A
+/// subclass that overrides none of them still gets a working, empty pane.
 ///
 /// Content that implements none of the six capability protocols is a supported
 /// case, not a degraded one: it gets `fallbackTitle`, no accessories, no
@@ -70,10 +70,18 @@ open class PaneViewController: NSViewController {
     /// item's 32pt maximum unsatisfiable, and AppKit recovers by breaking a
     /// constraint inside the title bar it happens to pick.
     private var titleBarTrailing: NSLayoutConstraint?
-    /// Internal rather than private so a test can close it: the gear is the
-    /// only way the spacing gesture ends, and nothing outside the framework
-    /// has any business reaching it.
-    private(set) var optionsPopover: WindowConfigPopover?
+    /// The gear itself, drawn by the chrome that draws every other gear. What
+    /// it *raises* is this pane's business — a menu — but what it looks like is
+    /// the window chrome's single answer, and asking for it rather than
+    /// respelling it keeps it that way (`dry`).
+    private let gearButton = WindowConfigPopover.makeGearButton(tooltip: "Pane options")
+
+    /// The options dialog, while it is on screen.
+    ///
+    /// Weak, and internal rather than private: the presenter owns a sheet for
+    /// exactly as long as it is up, and a pane still holding a dismissed one
+    /// would answer `refreshTitle()` by renaming a heading nobody can see.
+    private(set) weak var optionsSheet: PaneOptionsSheetViewController?
 
     /// This pane's spacing, and where it comes from. `lazy` because it asks
     /// `inheritedPaneSpacing`, which a subclass overrides — so it cannot be
@@ -137,12 +145,20 @@ open class PaneViewController: NSViewController {
         (contentViewController as? PaneContentSpacingConsuming)?.inheritedPaneSpacing ?? Spacing()
     }
 
-    /// The rows in the gear popover: the frame spacing control first, then the
-    /// content's own rows.
+    /// The rows in the options dialog: the frame spacing control first, then
+    /// the content's own rows.
     open func makeOptionRows() -> [NSView] {
         makeSpacingRows()
             + ((contentViewController as? PaneOptionsProviding)?.makePaneOptionRows() ?? [])
     }
+
+    /// The pane's own items in the gear menu, above `Settings…`.
+    ///
+    /// Empty here, and deliberately so: a bare pane has nothing to offer but
+    /// its settings, and it must not learn about split views to say so. A pane
+    /// that lives in a layout knows which ways it can move, and that knowledge
+    /// belongs to *that* pane (`srp`).
+    open func makeMenuItems() -> [NSMenuItem] { [] }
 
     // MARK: - Loading
 
@@ -233,23 +249,77 @@ open class PaneViewController: NSViewController {
     }
 
     private func installGear() {
-        let popover = WindowConfigPopover(
-            title: resolvedTitle,
-            tooltip: "Pane options",
-            // The gear is in ordinary unflipped content here, not in a title
-            // bar, so the panel drops from the other edge to land below it.
-            preferredEdge: .minY,
-            makeControls: { [weak self] in self?.makeOptionRows() ?? [] }
+        gearButton.target = self
+        gearButton.action = #selector(showOptionsMenu)
+        gearButton.accessibilityID("pane.options")
+        gearButton.setAccessibilityLabel("Pane Options")
+        titleBar.gearView = gearButton
+    }
+
+    /// What the gear raises: the pane's own items, then `Settings…`.
+    ///
+    /// Built fresh on every click, because what a pane may legally do — which
+    /// ways it can move, above all — changes with the layout around it, and a
+    /// menu built once at `viewDidLoad` would be answering for a layout that no
+    /// longer exists.
+    ///
+    /// `autoenablesItems` is off deliberately. A menu raised from a button has
+    /// no validation chain, so AppKit would grey out every item whose action
+    /// nothing claims to validate; each item states its own availability
+    /// instead (`explicit-over-implicit`).
+    ///
+    /// Internal rather than private so a test can read the menu without
+    /// raising it — clicking a gear is not something a unit test can do.
+    func makeOptionsMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let items = makeMenuItems()
+        for item in items { menu.addItem(item) }
+        if !items.isEmpty { menu.addItem(.separator()) }
+
+        let settings = NSMenuItem(
+            title: "Settings…",
+            action: #selector(showOptionsDialog),
+            keyEquivalent: ""
         )
-        // The spacing steppers coalesce their writes, so the last tick of a
-        // gesture is still waiting when the user dismisses the popover. The
-        // popover closing *is* the end of the gesture — and closing the window
-        // closes it too — so this is where the pane stops waiting and writes.
-        popover.onDidClose = { [weak self] in self?.spacingOverride.flushPendingPersist() }
-        optionsPopover = popover
-        popover.gearButton.accessibilityID("pane.options")
-        popover.gearButton.setAccessibilityLabel("Pane Options")
-        titleBar.gearView = popover.gearButton
+        settings.target = self
+        settings.image = NSImage(
+            systemSymbolName: "slider.horizontal.3",
+            accessibilityDescription: "Settings")
+        settings.accessibilityID("pane.options.settings")
+        menu.addItem(settings)
+
+        return menu
+    }
+
+    @objc private func showOptionsMenu(_ sender: NSButton) {
+        // `(0, 0)` is the button's own bottom-left — its content is unflipped —
+        // and `popUp` lands the menu's top-left there, so the menu hangs below
+        // the gear instead of covering it.
+        makeOptionsMenu().popUp(positioning: nil, at: .zero, in: sender)
+    }
+
+    @objc private func showOptionsDialog() {
+        let sheet = PaneOptionsSheetViewController(
+            heading: resolvedTitle,
+            rows: makeOptionRows()
+        )
+        sheet.onDidClose = { [weak self] in self?.optionsDialogDidClose() }
+        optionsSheet = sheet
+        presentAsSheet(sheet)
+    }
+
+    /// The spacing steppers coalesce their writes, so the last tick of a
+    /// gesture is still waiting when the dialog goes away. The dialog closing
+    /// *is* the end of the gesture — and closing the window closes it too — so
+    /// this is where the pane stops waiting and writes.
+    ///
+    /// Internal rather than private so a test can end the gesture without
+    /// putting a dialog on screen; nothing outside the framework has any
+    /// business reaching it.
+    func optionsDialogDidClose() {
+        spacingOverride.flushPendingPersist()
     }
 
     private func presentMinimizePicker(from anchor: NSButton) {
@@ -289,7 +359,7 @@ open class PaneViewController: NSViewController {
     /// needs it, since `inheritedPaneSpacing` is the hook.
     private var resolvedSpacing: Spacing { spacingOverride.resolved }
 
-    /// The gear's first rows: the picture, and the way back to inheriting.
+    /// The dialog's first rows: the picture, and the way back to inheriting.
     ///
     /// The control's own reset sets every number to zero, which is a *look* a
     /// user may want — so returning to the app's spacing needs its own button,
@@ -307,9 +377,9 @@ open class PaneViewController: NSViewController {
         reset.accessibilityID("pane.options.spacing.reset")
         reset.setAccessibilityLabel("Use Default Spacing")
         // Target/action rather than a closure: the pane is the target, and it
-        // outlives every popover the button is ever put in, so the unowned
+        // outlives every dialog the button is ever put in, so the unowned
         // `target` reference cannot dangle and there is no retain cycle to
-        // break — the pane holds the popover, not the other way round.
+        // break — the pane raises the dialog, not the other way round.
         reset.target = self
         reset.action = #selector(resetSpacing)
         spacingResetButton = reset
@@ -343,13 +413,14 @@ open class PaneViewController: NSViewController {
         (contentViewController as? PaneSearchable)?.paneSearch(for: query)
     }
 
-    /// The pane's name has three readers: its own title bar, the gear panel's
-    /// heading, and — through `onTitleChange` — the window footer. Content that
-    /// renames itself calls this, so all three are re-read together rather than
-    /// leaving the panel showing whatever the pane was called at `viewDidLoad`.
+    /// The pane's name has three readers: its own title bar, the options
+    /// dialog's heading, and — through `onTitleChange` — the window footer.
+    /// Content that renames itself calls this, so all three are re-read
+    /// together rather than leaving the dialog showing whatever the pane was
+    /// called when it opened.
     public func refreshTitle() {
         titleBar.title = resolvedTitle
-        optionsPopover?.title = resolvedTitle
+        optionsSheet?.heading = resolvedTitle
         onTitleChange?()
     }
 

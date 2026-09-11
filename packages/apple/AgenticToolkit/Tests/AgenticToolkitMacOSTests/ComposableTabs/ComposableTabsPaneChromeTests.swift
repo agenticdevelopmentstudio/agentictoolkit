@@ -83,6 +83,55 @@ final class ComposableTabsPaneChromeTests: XCTestCase {
         XCTAssertNotNil(pane.titleBar.gearView)
     }
 
+    // MARK: - The gear menu
+
+    /// `Move` is always in the menu, always with all four directions under it.
+    /// Which of them are lit is the tree's business, re-read at every click; the
+    /// menu's *shape* never changes, so the user learns one menu.
+    func testTheGearMenuOffersMoveInEveryDirectionAboveSettings() throws {
+        let pane = try makePane(plain)
+
+        let menu = pane.makeOptionsMenu()
+        XCTAssertEqual(menu.items.map(\.title), ["Move", "", "Settings…"])
+
+        let move = try XCTUnwrap(menu.items.first)
+        XCTAssertEqual(move.submenu?.items.map(\.title), ["Left", "Right", "Up", "Down"])
+        XCTAssertEqual(
+            move.submenu?.items.map { $0.accessibilityIdentifier() },
+            ["pane.options.move.left", "pane.options.move.right",
+             "pane.options.move.up", "pane.options.move.down"]
+        )
+    }
+
+    /// A pane that is not in a split has nowhere to go. `Move` stays in the
+    /// menu — the shape is fixed — but it is greyed out rather than opening
+    /// onto four dead items.
+    func testMoveIsDisabledForAPaneWithNoSplitAroundIt() throws {
+        let pane = try makePane(plain)
+
+        let move = try XCTUnwrap(pane.makeOptionsMenu().items.first)
+        XCTAssertFalse(move.isEnabled)
+        XCTAssertEqual(move.submenu?.items.filter(\.isEnabled).count, 0)
+    }
+
+    /// The overlay's pull-down and the gear menu are the same four items from
+    /// the same builder; only the identifiers differ, because a UI test
+    /// addresses two different surfaces.
+    func testTheMoveItemsComeFromOneBuilder() {
+        let builder = ComposableTabsMoveMenu()
+        builder.availableDirections = { [.right] }
+        var moved: [ComposableTabsViewController.Direction] = []
+        builder.onMove = { moved.append($0) }
+
+        let items = builder.makeItems(accessibilityPrefix: "surface.move")
+        XCTAssertEqual(items.map(\.title), ["Left", "Right", "Up", "Down"])
+        XCTAssertEqual(items.filter(\.isEnabled).map(\.title), ["Right"])
+        XCTAssertEqual(items[1].accessibilityIdentifier(), "surface.move.right")
+
+        _ = items[1].target?.perform(items[1].action, with: items[1])
+        XCTAssertEqual(moved, [.right])
+    }
+
     /// The registry's display name is the fallback, so a pane whose content has
     /// no opinion is still called what the Add popup called it.
     func testTheRegistryNamesAPaneWhoseContentDoesNot() throws {

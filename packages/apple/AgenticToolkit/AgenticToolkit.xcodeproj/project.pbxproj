@@ -225,6 +225,7 @@
 		278CA7A2D60F12C6B857BE9D /* Badge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6E8EA3F66DE979A9977004 /* Badge.swift */; };
 		2798A43C990BDE7D22D1FFE4 /* AgenticToolkitCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF857DF2BB3D2BE006BBA101 /* AgenticToolkitCore.framework */; };
 		279B8CFAF1FA7A8BE387F526 /* NotesSplitViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB33E0B488A72854EAA5272 /* NotesSplitViewControllerTests.swift */; };
+		27AD5FE1F41EBD7F73D958EB /* PaneOptionsSheetViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52F61EA8166CB865D47D005 /* PaneOptionsSheetViewController.swift */; };
 		282C238B07C73C6080DEF653 /* XcodeHeuristic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234428AD995F284FF4451931 /* XcodeHeuristic.swift */; };
 		286FF3676149675CCF311ADB /* StoredSettingsStorageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 922457ED5DA5D1D965AB21F5 /* StoredSettingsStorageProvider.swift */; };
 		28A32899F6A87E0C5EFC316A /* CommandPaletteWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52CBA1F61C6C8AF522DC598C /* CommandPaletteWindowController.swift */; };
@@ -643,6 +644,7 @@
 		9C0423364093895587EC7F34 /* SnippetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE96B6E1FE8C88EB8EA7B286 /* SnippetStore.swift */; };
 		9C3D07F7B6E4B6E4D56F8692 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = A2555524450E37D95C631675 /* GRDB */; };
 		9C68CC28C97B1C1C93D3B05C /* MathUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6C9D05F7EB1D05CAFE73F5E /* MathUtils.swift */; };
+		9C7D7757FDA88AA055779834 /* ComposableTabsMoveMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF68F1ED9C55006410E976B6 /* ComposableTabsMoveMenu.swift */; };
 		9C93997AFDF0159DCDDAC046 /* GitProcessBottleneckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 240EAD93749D3E6F57DC5FAC /* GitProcessBottleneckTests.swift */; };
 		9CFB203C23997333A3CF2E83 /* AIProviderConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10C06EB2ADBF3FE51A046E3D /* AIProviderConfigStoreTests.swift */; };
 		9D0EDE5E4875C66A08E1FEDD /* OpenAIModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EDB01019588E6CF7B6FE0CE /* OpenAIModelCatalog.swift */; };
@@ -2495,6 +2497,7 @@
 		CE7CD1AA3878CBD31E245D04 /* LocalModelServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelServer.swift; sourceTree = "<group>"; };
 		CED6D92BE5D6C405930E5386 /* SyncID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncID.swift; sourceTree = "<group>"; };
 		CF257F89CFF00A2F21772F08 /* FileTreeManagerInjectedProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeManagerInjectedProviderTests.swift; sourceTree = "<group>"; };
+		CF68F1ED9C55006410E976B6 /* ComposableTabsMoveMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsMoveMenu.swift; sourceTree = "<group>"; };
 		CFDA74414E7A1ACA14DDFC1C /* ReconcileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconcileView.swift; sourceTree = "<group>"; };
 		D0904313AC1BEE6662DBB5BC /* ProviderPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPickerTests.swift; sourceTree = "<group>"; };
 		D09BDE8501090F47DEE77632 /* ThemeSettingsWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettingsWidgets.swift; sourceTree = "<group>"; };
@@ -2509,6 +2512,7 @@
 		D3D70220CA98CB27CF718848 /* NotImplementedLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotImplementedLedger.swift; sourceTree = "<group>"; };
 		D41A6C44F445E6C29D2525E2 /* MCPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClient.swift; sourceTree = "<group>"; };
 		D447CD2BD719884D001C737F /* ExtensionManifestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionManifestTests.swift; sourceTree = "<group>"; };
+		D52F61EA8166CB865D47D005 /* PaneOptionsSheetViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneOptionsSheetViewController.swift; sourceTree = "<group>"; };
 		D566499EB2CFCAF2E14B55B8 /* LanguageServerStatusModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageServerStatusModelTests.swift; sourceTree = "<group>"; };
 		D58EB30775CD325FD1525437 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		D5B0001BBF3E59C64E36B8F2 /* ProjectControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectControllerTests.swift; sourceTree = "<group>"; };
@@ -3727,6 +3731,7 @@
 				8C41450A42A2BA27B4432260 /* ComposableTabsFocusable.swift */,
 				501F5C38DE7AEF4AB2D504C0 /* ComposableTabsLayout.swift */,
 				0E46550294E7E8457D2C8B65 /* ComposableTabsMove.swift */,
+				CF68F1ED9C55006410E976B6 /* ComposableTabsMoveMenu.swift */,
 				88FAED5D8E9BC07D386D1AF1 /* ComposableTabsPaneHost.swift */,
 				8C5EBCBE46FB9FF0162C243F /* ComposableTabsPaneViewController.swift */,
 				569BE7CA64E63BE8794FE653 /* ComposableTabsSettingsViewController.swift */,
@@ -4878,6 +4883,7 @@
 			children = (
 				274BFC7290E8324BACDE5E7D /* PaneCapabilities.swift */,
 				3FFE4D22F091B65284C53A0E /* PaneHost.swift */,
+				D52F61EA8166CB865D47D005 /* PaneOptionsSheetViewController.swift */,
 				CDBF90178A19FFA9BEEF106F /* PaneSpacingOverride.swift */,
 				5793B276EDE1C221ED92405F /* PaneStateStore.swift */,
 				80F57FD1E7E2D5E107DBD6D5 /* PaneViewController.swift */,
@@ -6372,6 +6378,7 @@
 				C1501D2650525E0A8F90D70F /* ComposableTabsFocusable.swift in Sources */,
 				C9462412D0700CE3C3D2FBAD /* ComposableTabsLayout.swift in Sources */,
 				E638095A95AB3354B41F57CD /* ComposableTabsMove.swift in Sources */,
+				9C7D7757FDA88AA055779834 /* ComposableTabsMoveMenu.swift in Sources */,
 				AD1C12CD5E2ABAE4E065D9C3 /* ComposableTabsPaneHost.swift in Sources */,
 				F49A964B68167270ADE07DCF /* ComposableTabsPaneViewController.swift in Sources */,
 				1A11B3EDBBA5ED8430537959 /* ComposableTabsSettingsViewController.swift in Sources */,
@@ -6501,6 +6508,7 @@
 				F076A8A28F0FCB6767756117 /* PaneCommands.swift in Sources */,
 				C80CCF58DDE66086BD256214 /* PaneHost.swift in Sources */,
 				77BE9B7BBBECF84144A0272C /* PaneMinimizeGeometry.swift in Sources */,
+				27AD5FE1F41EBD7F73D958EB /* PaneOptionsSheetViewController.swift in Sources */,
 				2125F6B2452D2F4219527E71 /* PaneSpacing.swift in Sources */,
 				8A9BC6986EB1A4E20059936C /* PaneSpacingOverride.swift in Sources */,
 				573B3303298911964F22D8BF /* PaneStateStore.swift in Sources */,

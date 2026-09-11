@@ -156,6 +156,37 @@ final class PaneViewControllerTests: XCTestCase {
         XCTAssertNotNil(pane.titleBar.gearView)
     }
 
+    /// A pane with nothing of its own to offer raises a menu of exactly one
+    /// item — no leading separator, because there is nothing to separate it
+    /// from.
+    func testABarePanesGearMenuIsOnlySettings() {
+        let (pane, _) = loadedPane(content: BareContent())
+
+        let menu = pane.makeOptionsMenu()
+        XCTAssertEqual(menu.items.count, 1)
+        XCTAssertEqual(menu.items.first?.title, "Settings…")
+        XCTAssertEqual(menu.items.first?.accessibilityIdentifier(), "pane.options.settings")
+    }
+
+    /// A pane that has its own items gets them above `Settings…`, separated —
+    /// and every item is enabled on its own say-so, since a menu raised from a
+    /// button has nothing to validate it.
+    func testAPanesOwnItemsComeFirstAndSettingsLast() {
+        final class ItemPane: PaneViewController {
+            override func makeMenuItems() -> [NSMenuItem] {
+                [NSMenuItem(title: "Move", action: nil, keyEquivalent: "")]
+            }
+        }
+
+        let pane = ItemPane()
+        pane.loadViewIfNeeded()
+
+        let menu = pane.makeOptionsMenu()
+        XCTAssertFalse(menu.autoenablesItems, "nothing validates a menu raised from a button")
+        XCTAssertEqual(menu.items.map(\.title), ["Move", "", "Settings…"])
+        XCTAssertTrue(menu.items[1].isSeparatorItem)
+    }
+
     // MARK: - Requests go to the host
 
     func testCloseAndZoomAreRequestsNotActions() {

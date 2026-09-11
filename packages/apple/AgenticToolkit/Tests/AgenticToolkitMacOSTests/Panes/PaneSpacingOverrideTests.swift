@@ -273,9 +273,9 @@ final class PaneSpacingOverrideTests: XCTestCase {
     }
 
     /// The coalescing is only safe because something ends the gesture. The
-    /// steppers live in the gear popover and nowhere else, so the popover
+    /// steppers live in the options dialog and nowhere else, so the dialog
     /// closing is that moment — and closing the window closes it too.
-    func testDismissingTheGearWritesWhatTheGestureLeftWaiting() {
+    func testDismissingTheOptionsDialogWritesWhatTheGestureLeftWaiting() {
         let store = CountingPaneStateStore()
         let pane = TestPane(content: PlainContent(), stateStore: store)
         pane.loadViewIfNeeded()
@@ -284,7 +284,7 @@ final class PaneSpacingOverrideTests: XCTestCase {
         control?.onChange?(Spacing(uniform: 2))
         XCTAssertEqual(store.writes, 0, "still mid-gesture")
 
-        pane.optionsPopover?.onDidClose?()
+        pane.optionsDialogDidClose()
 
         XCTAssertEqual(store.writes, 1)
         XCTAssertNotNil(store.paneStateValue(forKey: PaneStateKey.spacingOverride))

@@ -13,9 +13,14 @@ import AgenticToolkitCoreMacOS
 /// window knows — which registry vends the content, which background draws the
 /// active-pane outline, and what arrange mode does over the top.
 ///
-/// Nothing rearranges the layout while the user is working in it. Arrange mode
-/// is a mode precisely so that the affordance can be big and central instead of
-/// a small pull-down permanently in the corner of every pane.
+/// The layout can be rearranged two ways, and they answer different needs. The
+/// gear menu carries `Move` always, for the user who knows exactly which pane
+/// goes where. Arrange mode dims the content and puts the same four directions
+/// in a toolbar in the middle of the pane, for the user who is looking at the
+/// window deciding — which is why it can also add and remove, and why the
+/// affordance is big and central rather than a corner pull-down. Both ask
+/// `ComposableTabsMoveMenu` for the directions, so there is one answer to what
+/// `Move` means.
 @MainActor
 public final class ComposableTabsPaneViewController: PaneViewController {
 
@@ -30,6 +35,19 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     private weak var project: ProjectWorkspace?
 
     private var arrangeOverlay: ComposableTabsArrangeOverlayView?
+
+    /// The four directions, for the gear menu. Held rather than made per click
+    /// because `NSMenuItem` keeps its target unowned — the items would fire
+    /// into nothing if the thing that made them died with the call.
+    private lazy var moveMenu: ComposableTabsMoveMenu = {
+        let menu = ComposableTabsMoveMenu()
+        menu.availableDirections = { [weak self] in
+            guard let self else { return [] }
+            return self.enclosingSplitOnScreen?.availableMoveDirections(for: self) ?? []
+        }
+        menu.onMove = { [weak self] direction in self?.move(direction) }
+        return menu
+    }()
     private var arrowKeyMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
 
@@ -288,6 +306,28 @@ public final class ComposableTabsPaneViewController: PaneViewController {
             RefusalFeedback.announce()
             return
         }
+    }
+
+    // MARK: - The gear menu
+
+    /// `Move ▸`, above the pane's `Settings…`.
+    ///
+    /// Built fresh with the menu that holds it, so the four items are enabled
+    /// against the tree as it stands at the click — and the parent is disabled
+    /// outright when this pane is the only one there is, rather than opening
+    /// onto four dead items.
+    public override func makeMenuItems() -> [NSMenuItem] {
+        let items = moveMenu.makeItems(accessibilityPrefix: "pane.options.move")
+
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for item in items { submenu.addItem(item) }
+
+        let move = NSMenuItem(title: "Move", action: nil, keyEquivalent: "")
+        move.submenu = submenu
+        move.isEnabled = items.contains { $0.isEnabled }
+        move.accessibilityID("pane.options.move")
+        return [move]
     }
 
     /// The distinct views the spec will let this pane sit beside, named for the

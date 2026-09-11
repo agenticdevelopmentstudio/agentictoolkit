@@ -43,6 +43,10 @@ final class ComposableTabsArrangeOverlayView: NSView {
     private let addButton: NSButton
     private let removeButton: NSButton
     private let moveButton = NSPopUpButton(frame: .zero, pullsDown: true)
+
+    /// The four direction items, built by the one thing that knows them. The
+    /// pane's gear menu asks the same object for the same items.
+    private let moveMenu = ComposableTabsMoveMenu()
     private let doneButton: NSButton
 
     override init(frame frameRect: NSRect) {
@@ -65,6 +69,8 @@ final class ComposableTabsArrangeOverlayView: NSView {
         moveButton.addItem(withTitle: "Move")
         moveButton.menu?.autoenablesItems = false
         moveButton.accessibilityID("composable-tabs.arrange.move")
+        moveMenu.availableDirections = { [weak self] in self?.availableDirections() ?? [] }
+        moveMenu.onMove = { [weak self] direction in self?.onMove?(direction) }
 
         // Return, Enter and Escape already leave the mode, but none of them is
         // visible. A pane that shows every other thing arranging can do owes
@@ -144,43 +150,18 @@ final class ComposableTabsArrangeOverlayView: NSView {
         addButton.isEnabled = canAdd()
         removeButton.isEnabled = canRemove()
 
-        let available = availableDirections()
+        // A pull-down's first item is its own label, never a choice — so it
+        // survives the rebuild and the four real items follow it.
         let title = moveButton.menu?.items.first
         moveButton.menu?.removeAllItems()
         if let title { moveButton.menu?.addItem(title) }
 
-        for direction in Direction.allCases {
-            let item = NSMenuItem(
-                title: direction.movementName,
-                action: #selector(moveSelected(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = DirectionBox(direction)
-            item.isEnabled = available.contains(direction)
-            item.image = NSImage(
-                systemSymbolName: direction.arrowSymbolName,
-                accessibilityDescription: direction.movementName)
-            item.accessibilityID("composable-tabs.arrange.move.\(direction.movementName.lowercased())")
-            moveButton.menu?.addItem(item)
-        }
-        moveButton.isEnabled = !available.isEmpty
-    }
-
-    /// `representedObject` is `Any?`, and a bare enum bridges to `NSNull` under
-    /// Swift 6's stricter object-conversion rules; boxing keeps it a real
-    /// reference.
-    private final class DirectionBox: NSObject {
-        let direction: Direction
-        init(_ direction: Direction) { self.direction = direction }
+        let items = moveMenu.makeItems(accessibilityPrefix: "composable-tabs.arrange.move")
+        for item in items { moveButton.menu?.addItem(item) }
+        moveButton.isEnabled = items.contains { $0.isEnabled }
     }
 
     @objc private func addTapped(_ sender: Any?) { onAdd?() }
     @objc private func removeTapped(_ sender: Any?) { onRemove?() }
     @objc private func doneTapped(_ sender: Any?) { onDone?() }
-
-    @objc private func moveSelected(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? DirectionBox else { return }
-        onMove?(box.direction)
-    }
 }
