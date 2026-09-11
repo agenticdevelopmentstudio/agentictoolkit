@@ -480,6 +480,11 @@ internal struct GlobPattern {
     /// freedom the key would need to distinguish. For the same reason,
     /// `branch` can never itself contain `.alternation`, so there is no case
     /// for it below.
+    ///
+    /// Relax either of those two facts — the nested-`{` rejection, or one
+    /// branch belonging to one `.alternation` — and this key stops being
+    /// sufficient. It would then go on returning answers, just wrong ones,
+    /// so change the key in the same edit.
     private static func matchBranch(
         _ branchID: BranchID, _ branch: [Token], _ branchIndex: Int,
         _ outerTokens: [Token], _ outerTokenIndex: Int,
