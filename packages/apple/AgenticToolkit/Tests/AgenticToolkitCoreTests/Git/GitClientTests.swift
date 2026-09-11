@@ -18,6 +18,10 @@ struct GitClientTests {
             try await run(["init", "-b", "main"], in: root)
             try await run(["config", "user.email", "test@example.com"], in: root)
             try await run(["config", "user.name", "Test"], in: root)
+            // The developer's own global config may turn signing on; a signing
+            // prompt would hang this commit rather than fail it. Mirrors
+            // `TerminalSessionGitBranchTests.makeRepository`.
+            try await run(["config", "commit.gpgsign", "false"], in: root)
             try "one\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
             try await run(["add", "a.txt"], in: root)
             try await run(["commit", "-m", "initial"], in: root)
@@ -37,6 +41,7 @@ struct GitClientTests {
             let configuration = SubprocessChannel.Configuration(
                 executableURL: URL(fileURLWithPath: "/usr/bin/git"),
                 arguments: arguments,
+                environment: ["GIT_TERMINAL_PROMPT": "0"],
                 environmentPolicy: .mergeOverParent,
                 currentDirectoryURL: directory
             )
