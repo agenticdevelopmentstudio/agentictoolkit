@@ -52,6 +52,24 @@ struct GitStatusParserTests {
         #expect(status.files["old.txt -> new.txt"] == nil)
     }
 
+    @Test("a work-tree rename consumes its origin field instead of desynchronising")
+    func workTreeRenameConsumesItsOriginField() {
+        // `git mv a b` followed by `git add -N b` leaves " R" — renamed in
+        // the work tree, with the index column blank. The origin field is
+        // written for that shape too, so a parser that only recognised a
+        // rename in the index column read `App/Sources/Bar.swift` as the next
+        // status record: the rename vanished and a phantom `.added` entry
+        // appeared under `/Sources/Bar.swift`, three characters in.
+        let status = GitStatus.parse(
+            porcelain: " R App/Sources/Foo.swift\u{0}App/Sources/Bar.swift\u{0} M README.md\u{0}"
+        )
+        #expect(status.files["App/Sources/Foo.swift"] == .renamed)
+        #expect(status.files["App/Sources/Bar.swift"] == nil)
+        #expect(status.files["/Sources/Bar.swift"] == nil)
+        #expect(status.files["README.md"] == .modified)
+        #expect(status.files.count == 2)
+    }
+
     @Test("a non-ASCII path is keyed exactly, with no C-quoting")
     func nonASCIIPathIsKeyedExactly() {
         // Without `-z`, `core.quotePath` would C-quote this as

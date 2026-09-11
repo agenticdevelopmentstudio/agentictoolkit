@@ -517,14 +517,23 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         let windowController = try XCTUnwrap(manager.windowController(for: repo.id))
         // Read in the opening turn: these are the panes `init` built, before
         // any reconcile could have landed.
-        let panesAtOpen = windowController.allPanes().map(ObjectIdentifier.init)
+        // Held strongly, and compared by identity rather than by address: a
+        // rebuild would deallocate these, and a fresh pane could land on a
+        // recycled address and pass an `ObjectIdentifier` comparison for the
+        // wrong reason. Keeping them alive makes that impossible.
+        let panesAtOpen = windowController.allPanes()
         XCTAssertFalse(panesAtOpen.isEmpty, "the stored tab must have been installed by init")
 
         // Past the reconcile, and past the window's own 250 ms debounce.
         try await Task.sleep(for: .milliseconds(800))
 
+        let panesAfterScan = windowController.allPanes()
         XCTAssertEqual(
-            windowController.allPanes().map(ObjectIdentifier.init), panesAtOpen,
+            panesAfterScan.count, panesAtOpen.count,
+            "a reopen that changed nothing must not change how many panes the window has"
+        )
+        XCTAssertTrue(
+            zip(panesAfterScan, panesAtOpen).allSatisfy { $0 === $1 },
             "a reopen that changed nothing must not throw the window's panes away and rebuild them"
         )
         // The tab *buttons* are the one thing the scan does have to correct:

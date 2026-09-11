@@ -45,14 +45,24 @@ public struct GitStatus: Sendable, Equatable {
             // a `git mv` followed by an edit leaves) and `RD` must key under
             // the new path as renames, not fall through to the M/A/D ladder
             // below and get keyed under a bogus compound string.
-            if indexStatus == "R" || indexStatus == "C" {
+            //
+            // The two-field shape belongs to the record, not to the index
+            // column: git writes the origin path whenever *either* column is
+            // `R` or `C`, so " R" (renamed in the work tree, which is what a
+            // `git mv` followed by `git add -N` leaves) carries one too.
+            // Testing only the index column left that field unconsumed, and
+            // the loop then read the origin path as if it were the next
+            // status record — dropping the rename and minting a phantom entry
+            // keyed on the origin path minus its first three characters.
+            let isRename = indexStatus == "R" || workTreeStatus == "R"
+            if isRename || indexStatus == "C" || workTreeStatus == "C" {
                 // The origin path is a second NUL-terminated field. It must
                 // be consumed here regardless of whether this record is kept,
                 // or the next record parsed would be misaligned.
                 if index < fields.endIndex {
                     index += 1
                 }
-                if indexStatus == "R" {
+                if isRename {
                     fileStatuses[filePath] = .renamed
                 }
                 continue

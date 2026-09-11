@@ -176,7 +176,14 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// and the responder chain comes apart — and each of those reaches
     /// `persistAllTabs()`, which would write the dying window's tab set over
     /// whatever the project has written since. Nothing of value is lost by
-    /// refusing: every real change was already persisted when it happened.
+    /// refusing, with one deliberate exception. Every *structural* change —
+    /// split, close, add, remove, reorder, select, edge toggle — is written
+    /// synchronously as it happens, by `persistTreeToDocument()`. Only two
+    /// writers are debounced: divider thicknesses (300 ms) and the focused
+    /// leaf (250 ms). So releasing a divider drag, or moving focus, within
+    /// that window of closing the window drops that one write. That trade is
+    /// intended: a tab set written over by a dead window is corruption, and a
+    /// divider position is a preference.
     ///
     /// Deliberately one-way, and deliberately not `isReloadingTabs`: that flag
     /// is raised and lowered around one loop precisely so the top-up persist in
