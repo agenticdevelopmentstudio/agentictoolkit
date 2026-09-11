@@ -348,6 +348,50 @@ final class TabPaneViewControllerTests: XCTestCase {
         }
     }
 
+    /// The fan is on every side, not only the side facing the workspace: a
+    /// card two steps back is painted two steps smaller than the card, so the
+    /// column is a deck seen edge-on rather than a row of equal blocks at
+    /// different distances.
+    func testACardTwoStepsBackIsPaintedTwoStepsSmallerOnAVerticalBar() {
+        let source = StubSource()
+        for edge in Edge.allCases where edge.isVertical {
+            let pane = makePane(edge: edge, source: source)
+            pane.paneView.frame = NSRect(x: 0, y: 0, width: 260, height: 140)
+            for depth in 1...TabPaneView.maxStackDepth {
+                pane.stackDepth = depth
+                pane.paneView.layoutSubtreeIfNeeded()
+                let step = CGFloat(depth) * TabPaneView.inactiveInset
+                XCTAssertEqual(
+                    pane.paneView.cardPaintFrame,
+                    pane.paneView.bounds.insetBy(dx: step, dy: step),
+                    "depth \(depth) on \(edge)")
+            }
+        }
+    }
+
+    /// A card off screen lands at its new depth rather than moving to it —
+    /// there is nothing to watch, and an animated constraint would still read
+    /// its old value to whatever measured the card next.
+    func testACardOffScreenTakesItsNewDepthImmediately() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+        XCTAssertFalse(pane.paneView.animatesDepthChanges)
+
+        pane.stackDepth = 2
+        XCTAssertEqual(pane.paneView.workspaceOverhang, -2 * TabPaneView.inactiveInset)
+    }
+
+    /// On screen it moves instead, so the deck is seen to turn.
+    func testACardInAWindowMovesToItsNewDepth() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: true)
+        window.contentView?.addSubview(pane.paneView)
+        XCTAssertTrue(pane.paneView.animatesDepthChanges)
+    }
+
     /// Selection and depth arrive from the bar as two separate statements, and
     /// the card draws from one number: a card that is not selected is never
     /// drawn as the card in front, whichever order the two arrive in.

@@ -13,10 +13,11 @@ import AppKit
 ///
 /// A card behind stops short of its own edge instead, leaving the workspace's
 /// line whole where it passes: the outline belongs to the workspace and to
-/// whatever is joined to it, and a waiting card is not that. How far short is
-/// `stackDepth`'s doing — on a vertical bar, where the cards overlap down a
-/// column, each one further from the card in front stands another step back, so
-/// the column reads as a deck turned to the tab you are in.
+/// whatever is joined to it, and a waiting card is not that. How far short —
+/// and how much smaller — is `stackDepth`'s doing: on a vertical bar, where the
+/// cards overlap down a column, each one further from the card in front pulls
+/// in another step on every side, so the column reads as a deck turned to the
+/// tab you are in. A change of depth is animated, so the deck is seen to turn.
 ///
 /// `TabBarView` supplies the other half of the attachment: it pads the outer
 /// side of the bar and leaves the workspace side at zero.
@@ -37,13 +38,12 @@ final class TabPaneView: NSView {
     /// only across that one card's mouth.
     static let workspaceOverlap: CGFloat = 1
 
-    /// How much smaller a card behind is drawn on every side. It is the card's
-    /// paint that shrinks, never the card: the text stays where it was and only
-    /// the block around it pulls in, so the card in front reads as the one
-    /// standing nearer.
+    /// One step back: how much smaller a card behind is drawn, on every side.
+    /// It is the card's paint that shrinks, never the card: the text stays
+    /// where it was and only the block around it pulls in, so the card in front
+    /// reads as the one standing nearer.
     ///
-    /// It is also one step back from the workspace, and on a vertical bar those
-    /// steps accumulate — see `recession`.
+    /// On a vertical bar the steps accumulate — see `recession`.
     static let inactiveInset: CGFloat = 4
 
     /// How many steps back a card is drawn at before they stop adding up.
@@ -52,6 +52,13 @@ final class TabPaneView: NSView {
     /// text begins (`padding`), and a stack that has receded further than its
     /// words is no longer a stack of anything readable.
     static let maxStackDepth = 3
+
+    /// How long a card takes to move between depths.
+    ///
+    /// Quick, because the motion is the deck turning under the click that
+    /// turned it: long enough to be read as one movement, short enough that it
+    /// is over before the eye goes looking for what it landed on.
+    static let depthAnimationDuration: TimeInterval = 0.16
 
     /// The card's own padding, inside the border.
     private static let padding = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
@@ -70,7 +77,21 @@ final class TabPaneView: NSView {
     /// Which card in the deck this is: 0 for the one in front — the selected
     /// tab — 1 for a card immediately behind it, and on back. A card is behind
     /// until something says otherwise.
-    var stackDepth = 1 { didSet { applyDepth() } }
+    var stackDepth = 1 {
+        didSet {
+            guard stackDepth != oldValue else { return }
+            applyDepth(animated: animatesDepthChanges)
+        }
+    }
+
+    /// Whether a change of depth slides the paint into place or puts it there
+    /// at once.
+    ///
+    /// A card with no window is not on screen: there is nothing to watch move,
+    /// and an animated constraint reads its old value until the animation ends,
+    /// so anything measuring the card straight afterwards would measure where
+    /// it used to be.
+    var animatesDepthChanges: Bool { window != nil }
 
     private let edge: Edge
     private let background: TabCardBackgroundView
@@ -146,7 +167,7 @@ final class TabPaneView: NSView {
     /// facing the workspace: a point out over the workspace's outline while
     /// this is the card in front, and back inside the card by `recession`
     /// while it is not.
-    var workspaceOverhang: CGFloat { (cardSides?.workspace.constant ?? 0) * outwardSign }
+    var workspaceOverhang: CGFloat { cardSides?.workspaceOverhang ?? 0 }
 
     /// Where the painted block has landed inside the card, once laid out.
     var cardPaintFrame: NSRect { background.frame }
@@ -254,27 +275,19 @@ final class TabPaneView: NSView {
         return spacer
     }
 
-    /// Which way the workspace lies from this card, as that side's constraint
-    /// has to spell it: a trailing or bottom edge moves away from the card on a
-    /// positive constant, a leading or top edge on a negative one.
-    private var outwardSign: CGFloat {
-        switch edge {
-        case .top, .left: return 1
-        case .bottom, .right: return -1
-        }
-    }
-
     /// Whether this is the card the workspace is showing.
     private var isFrontCard: Bool { stackDepth == 0 }
 
-    /// How far back from the workspace this card's paint stands.
+    /// How far this card's paint pulls in from the card — on every side, the
+    /// one facing the workspace included.
     ///
     /// On a vertical bar the steps accumulate: each card further from the one
-    /// in front pulls back another `inactiveInset`, up to `maxStackDepth`, so a
-    /// column of cards fans away from the workspace like a deck being turned
-    /// rather than sitting in one flat row behind it. A horizontal bar has no
-    /// such column — its cards are laid out along their long side — so every
-    /// card behind takes the same single step.
+    /// in front pulls in another `inactiveInset`, up to `maxStackDepth`, so a
+    /// column of cards fans away from the workspace and shrinks as it goes,
+    /// like a deck being turned rather than one flat row of blocks waiting
+    /// behind the front card. A horizontal bar has no such column — its cards
+    /// are laid out along their long side — so every card behind takes the same
+    /// single step.
     private var recession: CGFloat {
         guard stackDepth > 0 else { return 0 }
         let steps = edge.isVertical ? min(stackDepth, Self.maxStackDepth) : 1
@@ -289,17 +302,16 @@ final class TabPaneView: NSView {
     /// surface under one line, and its agent name is the theme's accent — the
     /// one thing on the bar in a colour, so the eye finds it without reading
     /// anything. A card behind paints the plane the bar itself is on, is drawn
-    /// in the border tone, and pulls in `inactiveInset` on every side and
-    /// `recession` on the side facing the workspace — so it stands back from
-    /// the workspace's line rather than over it, leaving that line whole, and
-    /// is plainly the smaller of the two shapes. It reads as a waiting outline
+    /// in the border tone, and pulls in `recession` on every side — so it
+    /// stands back from the workspace's line rather than over it, leaving that
+    /// line whole, and is plainly the smaller of the two shapes, the more so
+    /// the further back it stands. It reads as a waiting outline
     /// rather than a dimmed copy of the card in front: its own text stays at
     /// the roles a body of text is meant to be read at, so only the card around
     /// it recedes, never the words.
-    private func applyDepth() {
+    private func applyDepth(animated: Bool = false) {
         let palette = resolvedThemeScope.palette
-        cardSides?.inset(by: isFrontCard ? 0 : Self.inactiveInset)
-        cardSides?.workspace.constant = outwardSign * (isFrontCard ? Self.workspaceOverlap : -recession)
+        place(animated: animated)
         background.reachesOverWorkspace = isFrontCard
         background.fillColor = isFrontCard
             ? NSColor(palette.projectPaneBackdrop)
@@ -315,6 +327,27 @@ final class TabPaneView: NSView {
         closeButton.contentTintColor = palette.nsColor(isFrontCard ? .secondaryText : .tertiaryText)
     }
 
+    /// Puts the paint where this depth wants it: pulled in by `recession` on
+    /// every side, except that the card in front is let out over the
+    /// workspace's own line instead.
+    ///
+    /// Animated, the whole deck moves at once — every card was told its new
+    /// depth in the same turn — so the cards read as one stack rotating rather
+    /// than as several blocks each deciding something separately.
+    private func place(animated: Bool) {
+        guard let cardSides else { return }
+        let overhang = isFrontCard ? Self.workspaceOverlap : -recession
+        guard animated else {
+            cardSides.place(inset: recession, overhang: overhang, animated: false)
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.depthAnimationDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            cardSides.place(inset: recession, overhang: overhang, animated: true)
+        }
+    }
+
     @objc private func closePressed() {
         onClose?()
     }
@@ -328,12 +361,17 @@ final class TabPaneView: NSView {
 /// workspace's line when this is the card in front.
 ///
 /// Each side is stored with the sign that moves it *inward*, which is what lets
-/// `inset(by:)` be one number rather than four — `top` and `leading` grow
-/// inward on a positive constant, `trailing` and `bottom` on a negative one.
+/// `place(inset:overhang:animated:)` take one number rather than four — `top`
+/// and `leading` grow inward on a positive constant, `trailing` and `bottom` on
+/// a negative one. Which side faces the workspace, and which way is out from
+/// it, are the same piece of knowledge and live here together.
 @MainActor
 private struct CardSides {
-    let workspace: NSLayoutConstraint
-
+    private let workspace: NSLayoutConstraint
+    /// Which way is away from the card on the workspace side, as that side's
+    /// constraint has to spell it: a trailing or bottom edge moves out on a
+    /// positive constant, a leading or top edge on a negative one.
+    private let outwardSign: CGFloat
     private let sides: [(constraint: NSLayoutConstraint, inward: CGFloat)]
 
     init(edge: Edge, card: NSView, background: NSView) {
@@ -343,17 +381,38 @@ private struct CardSides {
         let bottom = background.bottomAnchor.constraint(equalTo: card.bottomAnchor)
         sides = [(top, 1), (leading, 1), (trailing, -1), (bottom, -1)]
         switch edge {
-        case .top: workspace = bottom
-        case .bottom: workspace = top
-        case .left: workspace = trailing
-        case .right: workspace = leading
+        case .top: (workspace, outwardSign) = (bottom, 1)
+        case .bottom: (workspace, outwardSign) = (top, -1)
+        case .left: (workspace, outwardSign) = (trailing, 1)
+        case .right: (workspace, outwardSign) = (leading, -1)
         }
     }
 
     var constraints: [NSLayoutConstraint] { sides.map(\.constraint) }
 
-    func inset(by amount: CGFloat) {
-        for side in sides { side.constraint.constant = side.inward * amount }
+    /// How far the block stands past the card on the side facing the
+    /// workspace — negative while it stands short of it.
+    var workspaceOverhang: CGFloat { workspace.constant * outwardSign }
+
+    /// Pulls every side in by `inset`, then lets the workspace side out by
+    /// `overhang` — the one side the two numbers can disagree about, because
+    /// the card in front reaches over the workspace's line rather than stopping
+    /// short of it.
+    func place(inset: CGFloat, overhang: CGFloat, animated: Bool) {
+        for side in sides { side.constraint.set(side.inward * inset, animated: animated) }
+        workspace.set(overhang * outwardSign, animated: animated)
+    }
+}
+
+private extension NSLayoutConstraint {
+    /// Moves this constraint, either over the enclosing animation context's
+    /// duration or at once.
+    func set(_ value: CGFloat, animated: Bool) {
+        if animated {
+            animator().constant = value
+        } else {
+            constant = value
+        }
     }
 }
 
