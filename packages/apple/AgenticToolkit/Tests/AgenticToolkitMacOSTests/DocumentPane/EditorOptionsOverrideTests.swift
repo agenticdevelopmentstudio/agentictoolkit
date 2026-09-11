@@ -61,12 +61,16 @@ final class EditorOptionsOverrideTests: XCTestCase {
 
     func testChangingTheGlobalNotifiesAnUnpinnedPane() {
         let override = EditorOptionsOverride(store: EphemeralPaneStateStore())
-        var notifications = 0
-        override.onChange = { notifications += 1 }
+        // `UserSettingObserver` hops to the next main-queue turn before it
+        // delivers, so the pane cannot have heard anything by the time the
+        // assignment below returns. Waiting is the test, not a workaround.
+        let notified = expectation(description: "the pane heard the global change")
+        notified.assertForOverFulfill = false
+        override.onChange = { notified.fulfill() }
 
         UserSettings.editorShowInvisibles.value.toggle()
         defer { UserSettings.editorShowInvisibles.value.toggle() }
 
-        XCTAssertGreaterThan(notifications, 0)
+        wait(for: [notified], timeout: 2)
     }
 }
