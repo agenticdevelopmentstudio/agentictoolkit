@@ -14,11 +14,20 @@ public enum ProjectTabReconciler {
         public var isUnchanged: Bool { add.isEmpty && drop.isEmpty }
     }
 
+    /// - Parameter volumeIsMounted: Answers whether the volume that would hold
+    ///   a directory is currently mounted. A record is dropped only when its
+    ///   directory is missing *and* reachable storage says so, because
+    ///   dropping deletes the tab, its layout tree and its remembered pane
+    ///   state for good — an unplugged drive or a dismounted share must not
+    ///   cost the user a tab they can never get back. Defaults to
+    ///   `volumeIsMounted(for:projectDirectory:)`; injecting it keeps the
+    ///   tests off real volumes.
     public static func plan(
         stored: [TabRecord],
         checkouts: [ProjectCheckout],
         projectDirectory: URL,
-        existsOnDisk: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+        existsOnDisk: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) },
+        volumeIsMounted: ((URL) -> Bool)? = nil
     ) -> Plan {
         // Resolved, not merely standardized, and for the same reason
         // `ProjectCheckout.init` resolves: a checkout's directory came from
@@ -27,6 +36,9 @@ public enum ProjectTabReconciler {
         // into a miss — and a miss here adds a duplicate tab group for a
         // checkout that already has one.
         let projectDirectory = projectDirectory.resolvingSymlinksInPath()
+        let isMounted = volumeIsMounted ?? {
+            ProjectTabReconciler.volumeIsMounted(for: $0, projectDirectory: projectDirectory)
+        }
         let checkoutDirectories = Set(checkouts.map(\.directory))
         var keep: [TabRecord] = []
         var drop: [UUID] = []
@@ -34,16 +46,46 @@ public enum ProjectTabReconciler {
 
         for record in stored {
             let directory = (record.workingDirectory ?? projectDirectory).resolvingSymlinksInPath()
-            if checkoutDirectories.contains(directory) || existsOnDisk(directory) {
+            let isGone = !checkoutDirectories.contains(directory) && !existsOnDisk(directory)
+            if isGone && isMounted(directory) {
+                drop.append(record.id)
+            } else {
                 keep.append(record)
                 coveredDirectories.insert(directory)
-            } else {
-                drop.append(record.id)
             }
         }
 
         let add = checkouts.filter { !coveredDirectories.contains($0.directory) }
         return Plan(keep: keep, add: add, drop: drop)
+    }
+
+    /// Walks up to the deepest ancestor of `directory` that does exist. If
+    /// that ancestor is `/Volumes` itself, the path names a mount point with
+    /// nothing mounted on it. If it sits on a different volume than the
+    /// project does, the storage the path belongs to is not the storage we
+    /// can see — either way the directory is unreachable rather than deleted.
+    ///
+    /// The project directory is walked up the same way, so a caller reasoning
+    /// about a directory that no longer exists at all still gets a comparable
+    /// volume rather than `nil`.
+    public static func volumeIsMounted(for directory: URL, projectDirectory: URL) -> Bool {
+        let ancestor = deepestExistingAncestor(of: directory)
+        guard ancestor.path != "/Volumes" else { return false }
+        return volumeURL(of: ancestor) == volumeURL(of: deepestExistingAncestor(of: projectDirectory))
+    }
+
+    private static func deepestExistingAncestor(of directory: URL) -> URL {
+        var candidate = directory.resolvingSymlinksInPath()
+        while !FileManager.default.fileExists(atPath: candidate.path) {
+            let parent = candidate.deletingLastPathComponent()
+            guard parent.path != candidate.path else { return candidate }
+            candidate = parent
+        }
+        return candidate
+    }
+
+    private static func volumeURL(of directory: URL) -> URL? {
+        try? directory.resourceValues(forKeys: [.volumeURLKey]).volume
     }
 
     /// One member per enabled edge, all in one group, all in the checkout's

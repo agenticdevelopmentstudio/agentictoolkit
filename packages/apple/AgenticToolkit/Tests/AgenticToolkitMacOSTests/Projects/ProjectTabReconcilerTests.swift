@@ -49,6 +49,44 @@ final class ProjectTabReconcilerTests: XCTestCase {
         XCTAssertEqual(plan.add, [main])
     }
 
+    /// A tab rooted on an external drive or a network share — a supported
+    /// shape, per `testAUserTabInAnotherExistingFolderSurvives` — opened with
+    /// the drive unplugged. The directory is missing, but it is missing
+    /// because its volume is not mounted, and dropping the record deletes the
+    /// tab, its layout tree and (via `saveTabs`'s orphan sweep) its remembered
+    /// pane state permanently: plugging the drive back in does not bring any
+    /// of it back. `/Volumes/<uuid>` is a mount point that cannot exist, so
+    /// the default predicate answers this without touching a real volume.
+    func testATabOnAnUnmountedVolumeIsKeptNotDropped() {
+        let external = URL(fileURLWithPath: "/Volumes/absent-\(UUID().uuidString)/notes")
+        let stored = [TabRecord(edge: .left, title: "notes", root: leaf, workingDirectory: external)]
+        let plan = ProjectTabReconciler.plan(
+            stored: stored, checkouts: [main], projectDirectory: project, existsOnDisk: { _ in false }
+        )
+        XCTAssertEqual(plan.keep.map(\.id), stored.map(\.id))
+        XCTAssertTrue(plan.drop.isEmpty)
+    }
+
+    /// The same distinction through the injected seam, so the rule is pinned
+    /// without depending on what is mounted on the machine running the test:
+    /// missing plus mounted is a deletion, missing plus unmounted is not.
+    func testAMissingDirectoryIsDroppedOnlyWhenItsVolumeIsMounted() {
+        let gone = URL(fileURLWithPath: "/repo/.claude/worktrees/gone")
+        let stored = [TabRecord(edge: .left, title: "gone", root: leaf, workingDirectory: gone)]
+        let dropped = ProjectTabReconciler.plan(
+            stored: stored, checkouts: [main], projectDirectory: project,
+            existsOnDisk: { _ in false }, volumeIsMounted: { _ in true }
+        )
+        XCTAssertEqual(dropped.drop, stored.map(\.id))
+
+        let kept = ProjectTabReconciler.plan(
+            stored: stored, checkouts: [main], projectDirectory: project,
+            existsOnDisk: { _ in false }, volumeIsMounted: { _ in false }
+        )
+        XCTAssertEqual(kept.keep.map(\.id), stored.map(\.id))
+        XCTAssertTrue(kept.drop.isEmpty)
+    }
+
     func testAUserTabInAnotherExistingFolderSurvives() {
         let elsewhere = URL(fileURLWithPath: "/somewhere/else")
         let stored = [TabRecord(edge: .left, title: "notes", root: leaf, workingDirectory: elsewhere)]
