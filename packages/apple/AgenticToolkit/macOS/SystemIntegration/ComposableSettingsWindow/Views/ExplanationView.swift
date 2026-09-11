@@ -14,6 +14,14 @@ extension ComposableSettings {
             self.translatesAutoresizingMaskIntoConstraints = false
 
             self.label.translatesAutoresizingMaskIntoConstraints = false
+            // `ThemedLabel` is single-line by default — deliberately, so a
+            // caption in a toolbar doesn't ask for two lines' height. A blurb is
+            // the other case, and has to say so: `lineBreakMode` and
+            // `maximumNumberOfLines` are both ignored while the cell is in
+            // single-line mode, so without these two the text below set its wrap
+            // policy and then ran off the right edge anyway.
+            self.label.cell?.wraps = true
+            self.label.cell?.usesSingleLineMode = false
             self.label.lineBreakMode = .byWordWrapping
             self.label.maximumNumberOfLines = 0
             self.label.setContentCompressionResistancePriority(.required, for: .vertical)
