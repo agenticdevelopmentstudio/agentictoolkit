@@ -26,7 +26,7 @@ public final class ProjectDatabase {
     var database: OpaquePointer?
     public let databasePath: String
 
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     /// `~/.<token>/Projects.db` — e.g. `~/.coffeegrinder/Projects.db`.
     ///
@@ -116,9 +116,12 @@ public final class ProjectDatabase {
         if try schemaVersion() < 3 {
             try migration003_paneSizesAndState()
         }
+        if try schemaVersion() < 4 {
+            try migration004_tabWorkingDirectory()
+        }
     }
 
-    private func schemaVersion() throws -> Int {
+    func schemaVersion() throws -> Int {
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         let sql = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
@@ -250,6 +253,18 @@ public final class ProjectDatabase {
             )
         """)
         try execute("INSERT INTO schema_migrations (version) VALUES (3)")
+    }
+
+    /// Version 4: every tab remembers the directory its panes run in.
+    ///
+    /// A later task opens one tab per git worktree, with the terminal and
+    /// file browser rooted there instead of the project directory — this is
+    /// only the column that remembers which directory that was. Nullable,
+    /// and left null by every existing row: `nil` reads as "the project
+    /// directory", not as an unset value that needs a default filled in.
+    private func migration004_tabWorkingDirectory() throws {
+        try execute("ALTER TABLE project_tabs ADD COLUMN working_directory TEXT")
+        try execute("INSERT INTO schema_migrations (version) VALUES (4)")
     }
 
     // MARK: - Repositories

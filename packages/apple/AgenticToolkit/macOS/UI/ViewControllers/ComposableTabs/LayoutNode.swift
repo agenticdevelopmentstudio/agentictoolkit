@@ -72,6 +72,8 @@ public struct TabRecord {
     public var title: String
     public var root: LayoutNode
     public var focusedNodeID: UUID?
+    /// The directory this tab's panes work in. `nil` means the project directory.
+    public var workingDirectory: URL?
 
     public init(
         id: UUID = UUID(),
@@ -79,7 +81,8 @@ public struct TabRecord {
         edge: Edge = .top,
         title: String,
         root: LayoutNode,
-        focusedNodeID: UUID? = nil
+        focusedNodeID: UUID? = nil,
+        workingDirectory: URL? = nil
     ) {
         self.id = id
         self.groupID = groupID ?? id
@@ -87,5 +90,6 @@ public struct TabRecord {
         self.title = title
         self.root = root
         self.focusedNodeID = focusedNodeID
+        self.workingDirectory = workingDirectory
     }
 }

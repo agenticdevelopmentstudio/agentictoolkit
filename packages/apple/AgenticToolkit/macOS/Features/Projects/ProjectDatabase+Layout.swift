@@ -15,7 +15,7 @@ extension ProjectDatabase {
     public func loadTabs(repoID: UUID) throws -> (tabs: [TabRecord], activeTabID: UUID?, enabledEdges: [Edge]) {
         let allRows = try fetchNodeRows(repoID: repoID)
         let sql = """
-            SELECT id, title, root_node_id, focused_node_id, edge, group_id
+            SELECT id, title, root_node_id, focused_node_id, edge, group_id, working_directory
             FROM project_tabs WHERE repo_id = ? ORDER BY position
             """
         var stmt: OpaquePointer?
@@ -38,7 +38,8 @@ extension ProjectDatabase {
                 edge: edge,
                 title: columnText(stmt, 1) ?? "",
                 root: try buildTree(id: rootID, rows: allRows),
-                focusedNodeID: columnText(stmt, 3).flatMap { UUID(uuidString: $0) }
+                focusedNodeID: columnText(stmt, 3).flatMap { UUID(uuidString: $0) },
+                workingDirectory: columnText(stmt, 6).map { URL(fileURLWithPath: $0) }
             ))
         }
 
@@ -91,8 +92,9 @@ extension ProjectDatabase {
                 try insertNode(tab.root, parentID: nil, position: 0, repoID: repoID)
                 try executeBound("""
                     INSERT INTO project_tabs
-                        (id, repo_id, position, title, edge, group_id, root_node_id, focused_node_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, repo_id, position, title, edge, group_id, root_node_id, focused_node_id,
+                         working_directory)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """) { stmt in
                     bindText(stmt, 1, tab.id.uuidString)
                     bindText(stmt, 2, repoKey)
@@ -102,6 +104,7 @@ extension ProjectDatabase {
                     bindText(stmt, 6, tab.groupID.uuidString)
                     bindText(stmt, 7, tab.root.id.uuidString)
                     bindOptionalText(stmt, 8, tab.focusedNodeID?.uuidString)
+                    bindOptionalText(stmt, 9, tab.workingDirectory?.path)
                 }
             }
 
