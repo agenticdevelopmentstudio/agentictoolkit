@@ -874,6 +874,7 @@
 		E0DE9D0A4A49B5B20D3B53D9 /* SettingsViewProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24D9B70A850325218B915C39 /* SettingsViewProtocol.swift */; };
 		E101955BC9F4A9F80D5DC82A /* LogCellValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = CABB4CBFA5A6B8DEA5140CF2 /* LogCellValue.swift */; };
 		E10D5A649092BC472D06968A /* ProjectTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6955FB0BB19459F31EC1BB25 /* ProjectTree.swift */; };
+		E10E5FE2D4268F3E1798011A /* ComposableTabsMoveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 092B04C39C683A6735C1412E /* ComposableTabsMoveTests.swift */; };
 		E11925F3E5FAF07A8C37B196 /* TTYResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4344896C3D142D30AC54BB97 /* TTYResolver.swift */; };
 		E1F033A6E64E0391B5B98665 /* FileEditorHighlightProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 709AC1D916C7F34F31438D09 /* FileEditorHighlightProviderTests.swift */; };
 		E1F5AD2FB4A52A627D7B36EE /* MultiTabbedHostedItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3049C1C30EAC6D3BEFCBFF9 /* MultiTabbedHostedItemTests.swift */; };
@@ -1858,6 +1859,7 @@
 		083F9ED5C24717B457577C92 /* ComposableTabsPaneHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsPaneHostTests.swift; sourceTree = "<group>"; };
 		085D01FE73EBFAD731A18864 /* AgenticToolkitSync.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AgenticToolkitSync.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		08A3577F4FEE879C36A46F8D /* CommandPaletteCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteCoordinatorTests.swift; sourceTree = "<group>"; };
+		092B04C39C683A6735C1412E /* ComposableTabsMoveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsMoveTests.swift; sourceTree = "<group>"; };
 		092DDF4AA6EF01E9761B5F2C /* SystemWindowContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowContext.swift; sourceTree = "<group>"; };
 		0958863976662F3A84AE254D /* AutomationProbing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationProbing.swift; sourceTree = "<group>"; };
 		09C1D47037BB4EDCAD1B5026 /* PermissionPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionPresenter.swift; sourceTree = "<group>"; };
@@ -3598,6 +3600,7 @@
 			isa = PBXGroup;
 			children = (
 				9F3B15D40C11A39F8FA044E4 /* ComposableTabLayoutSpecTests.swift */,
+				092B04C39C683A6735C1412E /* ComposableTabsMoveTests.swift */,
 				CBA8C42F9BB7AEDB993FBCE1 /* ComposableTabsPaneChromeTests.swift */,
 				083F9ED5C24717B457577C92 /* ComposableTabsPaneHostTests.swift */,
 				29EE920E924A2FB534330CD0 /* ComposableTabsTabItemDataSourceTests.swift */,
@@ -6924,6 +6927,7 @@
 				9DBE75DBDADCD9AC90144112 /* CommandPaletteModelTests.swift in Sources */,
 				B9FE64F11B0D2458D218763F /* CommandRegistryTests.swift in Sources */,
 				A9A2D08E18BB7F9E87F84AF5 /* ComposableTabLayoutSpecTests.swift in Sources */,
+				E10E5FE2D4268F3E1798011A /* ComposableTabsMoveTests.swift in Sources */,
 				FDD004A058E8EEE7A5A40072 /* ComposableTabsPaneChromeTests.swift in Sources */,
 				A6DD1C18CDD822003B466624 /* ComposableTabsPaneHostTests.swift in Sources */,
 				DF7B62BAF5C4F5A85985C5A9 /* ComposableTabsTabItemDataSourceTests.swift in Sources */,

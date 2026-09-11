@@ -30,14 +30,17 @@ public enum ComposableTabsMove {
     ///
     /// 1. If some ancestor splits *along* the direction and holds the pane on
     ///    the far side of it, the subtree on the near side is what the pane
-    ///    moves into — one slot, not all the way to the edge.
-    /// 2. Failing that, `left`/`right` may still pull the pane sideways out of
-    ///    the vertical stack it sits in. That is the whole of "right is
-    ///    available if there are panes above or below": a lone column has a
-    ///    left and a right even when nothing is there yet.
+    ///    moves into. The *nearest* such ancestor, so a move is one slot rather
+    ///    than a jump to the edge. Sideways the pane steps across into that
+    ///    slot; up and down it expands into it, keeping its own band as well.
+    /// 2. Failing that, the pane may still be pulled out of the split it sits in
+    ///    *across* the direction — out of a column to the left or right, out of
+    ///    a row above or below. That is the whole of "right is available if
+    ///    there are panes above or below", and its mirror image: a pane with
+    ///    anything beside it always has an up and a down, even when nothing is
+    ///    there yet.
     ///
-    /// Up and down get no such fallback — a row of panes has no above or below
-    /// to escape into.
+    /// Only a pane that is alone in its tab has nowhere to go at all.
     public static func moving(
         _ leafID: UUID,
         _ direction: Direction,
@@ -53,26 +56,62 @@ public enum ComposableTabsMove {
 
         if let split = ancestors.last(where: { $0.axis == direction.axis && $0.childIndex == paneSide }) {
             return replacing(split.node.id, in: root) { node in
-                stepAcross(node, pane: pane, paneSide: paneSide, direction: direction)
+                direction.axis == .vertical
+                    ? expanding(node, pane: pane, paneSide: paneSide)
+                    : stepAcross(node, pane: pane, paneSide: paneSide, direction: direction)
             }
         }
 
-        guard direction.axis == .horizontal,
-              let stack = ancestors.last(where: { $0.axis == .vertical }) else { return nil }
+        guard let stack = ancestors.last(where: { $0.axis != direction.axis }) else { return nil }
 
         return replacing(stack.node.id, in: root) { node in
             // The pane is inside this stack, and a stack always holds two
             // children, so something always survives its departure.
             guard let survivor = removing(leafID, from: node) else { return node }
-            return pair(pane, survivor, axis: .horizontal, paneFirst: direction.placesNewPaneFirst)
+            return pair(pane, survivor, axis: direction.axis, paneFirst: direction.placesNewPaneFirst)
                 .occupying(node)
         }
     }
 
-    // MARK: - The two moves
+    // MARK: - The moves
 
-    /// Rule 1: lift the pane out of its side of `split` and put it into the
-    /// other side.
+    /// Rule 1, up or down: the pane grows into the band the other side of
+    /// `split` occupies, and everything it displaces is pushed to its right.
+    ///
+    /// The pane keeps its own band *and* gains the neighbouring one, so it ends
+    /// up spanning both — which is what makes this an expansion rather than the
+    /// swap up and down used to perform, where the pane came out exactly the
+    /// size it went in. What it displaces stays stacked in the order it already
+    /// had, in a column beside the pane: the neighbour it expanded into reduces
+    /// in width to make room, and anything that shared the pane's own band was
+    /// already that width and simply moves to the right.
+    ///
+    /// Sideways there is no equivalent — `stepAcross` below — because a pane
+    /// expanding left or right would have to push its neighbour *below* it, and
+    /// a row is not asking to become a column.
+    private static func expanding(
+        _ split: LayoutNode,
+        pane: LayoutNode,
+        paneSide: Int
+    ) -> LayoutNode {
+        guard case .split(let axis, let first, let second) = split.kind else { return split }
+        let paneSubtree = paneSide == 0 ? first : second
+        let neighbour = paneSide == 0 ? second : first
+
+        // The pane was this whole band, so there is nothing left to stack with
+        // the neighbour and it stands beside the pane on its own.
+        guard let survivor = removing(pane.id, from: paneSubtree) else {
+            return pair(pane, neighbour, axis: .horizontal, paneFirst: true).occupying(split)
+        }
+
+        let displaced = paneSide == 0
+            ? LayoutNode.split(orientation: axis, first: survivor, second: neighbour)
+            : LayoutNode.split(orientation: axis, first: neighbour, second: survivor)
+        return pair(pane, displaced, axis: .horizontal, paneFirst: true).occupying(split)
+    }
+
+    /// Rule 1, left or right: lift the pane out of its side of `split` and put
+    /// it into the other side.
     private static func stepAcross(
         _ split: LayoutNode,
         pane: LayoutNode,
