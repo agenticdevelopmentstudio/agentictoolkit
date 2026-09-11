@@ -483,6 +483,16 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         tabItemDataSource?.composableTabsWindowController(self, tabItemFor: record, on: edge) ?? .title(record.title)
     }
 
+    /// The `TabItem` actually installed for every tab on `edge`, right now.
+    /// Internal, not `private`, and reached only through `@testable import` —
+    /// a test needs to tell a hosted pane (`.viewController`) apart from a
+    /// plain title button (`.title`), which `scriptingTabs(branch:)` cannot
+    /// answer: it reports a group's stored title regardless of which case
+    /// installed it.
+    func tabItems(on edge: Edge) -> [TabItem] {
+        tabbed.tabs(on: edge).map(\.item)
+    }
+
     private func makeSplitController(
         for tabID: UUID, workingDirectory: URL
     ) -> ComposableTabsViewController {

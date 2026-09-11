@@ -29,6 +29,18 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// always the one left standing.
     private var inFlightReconcile: Task<Void, Never>?
 
+    /// Set synchronously, before any `await`, at the top of `shutdown()`.
+    /// `reconcile(notify:)` checks it again after its own git call returns,
+    /// so a reconcile already in flight when the window closes — the open
+    /// scan taking its ~100ms while `observeClose` drops this controller —
+    /// bails before persisting tabs or notifying, instead of writing a dead
+    /// window's checkouts into the database and asking it to reload. One flag
+    /// covers both `open()` and `refreshCheckouts()`, since both funnel
+    /// through `serializedReconcile(notify:)`; a stored, cancelled `Task`
+    /// handle was the alternative, rejected because it would be a second
+    /// lifecycle to keep in step with this one.
+    private var isClosed = false
+
     public init(workspace: ProjectWorkspace, gitClient: GitClient, commandRegistry: CommandRegistry?) {
         self.workspace = workspace
         self.gitClient = gitClient
@@ -51,7 +63,9 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
         let previous = inFlightReconcile
         let task = Task {
             _ = await previous?.value
+            guard !self.isClosed else { return }
             await self.reconcile(notify: notify)
+            guard !self.isClosed else { return }
             for controller in self.branchControllers.values {
                 await controller.refresh()
             }
@@ -61,6 +75,7 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     }
 
     public func shutdown() async {
+        isClosed = true
         await workspace.languageServices?.shutdown()
     }
 
@@ -81,7 +96,14 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// something changed or nothing was stored, so an unchanged reopen leaves
     /// the database and the window alone.
     private func reconcile(notify: Bool) async {
-        checkouts = await readCheckouts()
+        let freshCheckouts = await readCheckouts()
+        // Checked again here, not only at the top of `serializedReconcile`'s
+        // task: `readCheckouts()` is the `await` a window close can land
+        // inside of, and everything past this point writes — to `checkouts`,
+        // to `branchControllers`, and (below) to the database. A close that
+        // lands mid-scan must stop here, before any of that runs.
+        guard !isClosed else { return }
+        checkouts = freshCheckouts
         syncBranchControllers()
 
         let stored = workspace.storedTabs()

@@ -49,6 +49,16 @@ public final class ProjectLanguageServices {
     private var isStarted = false
     private var isShutDown = false
 
+    /// Counts every `shutdown()` entry, including one blocked by the
+    /// `isShutDown` guard below. Internal, not `private`, and reached only
+    /// through `@testable import` — the sole consumer is
+    /// `ProjectWindowManagerControllerTests`, which needs an observable way
+    /// to prove `ProjectWindowManager`'s two teardown branches (the
+    /// controller path and the adopted-window fallback) are mutually
+    /// exclusive. This type is `final`, which rules out a spy subclass, so a
+    /// counter is the seam instead.
+    private(set) var shutdownCallCount = 0
+
     public init(documentStore: TextDocumentStore, registry: LanguageServerRegistry) {
         self.registry = registry
         self.documentStore = documentStore
@@ -89,6 +99,7 @@ public final class ProjectLanguageServices {
     /// Best-effort by contract: it never throws, and a session that refuses to
     /// exit is the registry's problem to bound, not this one's.
     public func shutdown() async {
+        shutdownCallCount += 1
         guard !isShutDown else { return }
         isShutDown = true
         await sync.shutdown()

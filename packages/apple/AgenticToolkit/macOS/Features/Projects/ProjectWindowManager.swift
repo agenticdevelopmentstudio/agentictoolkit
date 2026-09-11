@@ -206,6 +206,15 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         projectControllers[repoID]
     }
 
+    /// Whether a `NSWindow.didBecomeKeyNotification` observer is still
+    /// registered for `repoID`. Internal, not `public`, and reached only
+    /// through `@testable import` — the sole consumer is a test proving that
+    /// closing a window's observer is actually gone, not merely unreachable
+    /// because `projectControllers[repoID]` already went with it.
+    func hasKeyObserver(for repoID: UUID) -> Bool {
+        keyObservers[repoID] != nil
+    }
+
     // MARK: - ProjectOpening
 
     public func openProject(_ repo: GitRepo) {
@@ -243,13 +252,32 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         openOrder.append(repo.id)
         refreshOpenWorkspaceIDs()
         controller.showWindow(nil)
+        // `makeKeyAndOrderFront(nil)` runs before `observeBecameKey` is
+        // installed below, so whether this window's own *initial* key
+        // notification is seen by that observer is left to AppKit timing.
+        // That is deliberately not guarded against: `reconcile(notify:)`
+        // early-returns on `plan.isUnchanged` before ever calling
+        // `onTabsDidChange?()`, so a redundant refresh this ordering might
+        // let through costs one `git worktree list` and no rebuild — not
+        // worth reordering two calls whose relative order is otherwise
+        // arbitrary.
         controller.window?.makeKeyAndOrderFront(nil)
         observeClose(of: controller, repoID: repo.id, recordsOpenState: true)
         observeBecameKey(of: controller, repoID: repo.id)
         // The window is on screen with whatever tabs were stored; the checkout
         // scan runs git, so it is a task, and the window reloads when it lands.
-        Task { [weak controller] in
+        //
+        // Ruling Q: `projectController` is captured strongly, so it outlives
+        // its removal from `projectControllers` if the window closes mid-scan
+        // — `ProjectController`'s own closed flag (set synchronously by
+        // `shutdown()`) stops that from persisting a dead window's tabs, but
+        // this call site is outside `ProjectController` entirely, so it needs
+        // its own guard: only reload when this controller is still the one
+        // registered for `repo.id`, so a resurrected or replaced controller
+        // can never drive a window that is no longer its own.
+        Task { [weak self, weak controller] in
             await projectController.open()
+            guard let self, self.projectControllers[repo.id] === projectController else { return }
             controller?.reloadTabs()
         }
         setWindowOpen(true, repoID: repo.id)

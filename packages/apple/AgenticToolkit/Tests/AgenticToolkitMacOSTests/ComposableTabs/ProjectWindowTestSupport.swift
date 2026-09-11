@@ -46,10 +46,15 @@ enum ProjectWindowTestSupport {
     ///   - registered: pass `false` for the one case that wants a workspace
     ///     whose repo is *not* in `git_repo` — the state in which the chrome
     ///     still has to work while `setSetting` swallows every failure.
+    ///   - languageServices: `nil` by default, matching every existing
+    ///     caller. A suite proving something about per-window language-server
+    ///     teardown passes its own instance rather than this helper building
+    ///     one every caller would otherwise pay for.
     static func makeProject(
         label: String,
         named name: String = "api-server",
-        registered: Bool = true
+        registered: Bool = true,
+        languageServices: ProjectLanguageServices? = nil
     ) -> ProjectWorkspace {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(label)-\(UUID().uuidString)")
@@ -61,6 +66,6 @@ enum ProjectWindowTestSupport {
             // swiftlint:disable:next force_try
             try! database.insert(repo)
         }
-        return ProjectWorkspace(repo: repo, database: database)
+        return ProjectWorkspace(repo: repo, database: database, languageServices: languageServices)
     }
 }
