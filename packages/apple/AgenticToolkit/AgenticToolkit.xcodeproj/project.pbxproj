@@ -233,7 +233,6 @@
 		2CE22DA8A12D26CF5D126155 /* Spacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3E5D84B295AC71E18A40CEC /* Spacing.swift */; };
 		2DE3C49225FD1D17E521B235 /* RealScreenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8090E4632F4B24F141C13BD /* RealScreenProvider.swift */; };
 		2DEEC08B5CA73AF9635CE0C7 /* ProjectDatabaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B778B8D9F7C5605505C85761 /* ProjectDatabaseTests.swift */; };
-		2E090ACB0081583A1FD67DB8 /* PermissionWalkthroughWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0357CF470FAAD88AB7E432C /* PermissionWalkthroughWindowController.swift */; };
 		2E3AA1CC5AE9F49AB95548FD /* ThemeSettingsWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = D09BDE8501090F47DEE77632 /* ThemeSettingsWidgets.swift */; };
 		2E502A3D8E63420790F6C73B /* WallClockBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6950109609A0756344AC4863 /* WallClockBudgetTests.swift */; };
 		2E8A83A5A5995AD8CA8B9C8F /* SemanticPaletteEditorThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2010C4B4B4CA90979B8A2B8 /* SemanticPaletteEditorThemeTests.swift */; };
@@ -2488,7 +2487,6 @@
 		EFD2BBCC2012C29FB43AF306 /* push-request.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "push-request.json"; sourceTree = "<group>"; };
 		EFDEE9F962B2E16174881932 /* GeneralSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsTab.swift; sourceTree = "<group>"; };
 		EFFAA37CE8334ABDAEEFAEE6 /* KeychainSecureSettingsStorageProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecureSettingsStorageProviderTests.swift; sourceTree = "<group>"; };
-		F0357CF470FAAD88AB7E432C /* PermissionWalkthroughWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionWalkthroughWindowController.swift; sourceTree = "<group>"; };
 		F03FB5CC81FF718A106A6513 /* AgenticToolkitMacOS.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AgenticToolkitMacOS.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		F055899B54CE2F0A16060100 /* SecureTextEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureTextEditView.swift; sourceTree = "<group>"; };
 		F06A26884C3D24D8045E627D /* MultiTabbedActiveTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiTabbedActiveTabTests.swift; sourceTree = "<group>"; };
@@ -3443,7 +3441,6 @@
 			children = (
 				068A462BB3B6D36768A88DE2 /* PermissionsSettingsPanelViewController.swift */,
 				3479F947731ED8E46F346060 /* PermissionWalkthrough.swift */,
-				F0357CF470FAAD88AB7E432C /* PermissionWalkthroughWindowController.swift */,
 			);
 			path = PermissionWalkthrough;
 			sourceTree = "<group>";
@@ -6289,7 +6286,6 @@
 				06099EFAD972380C3A378B8E /* PanelScrollView.swift in Sources */,
 				A8015051FAA788EF06396405 /* PanelView.swift in Sources */,
 				159987FF6536AA9ACFA29FA0 /* PermissionWalkthrough.swift in Sources */,
-				2E090ACB0081583A1FD67DB8 /* PermissionWalkthroughWindowController.swift in Sources */,
 				A45DA85AFB35BAC1E1B72BE4 /* PermissionsSettingsPanelViewController.swift in Sources */,
 				3A9F7E9837216316A434A162 /* PersistedWindowState.swift in Sources */,
 				68E5AABD3AE353705371E2A0 /* PickerKeyboardController.swift in Sources */,

@@ -13,6 +13,7 @@ public final class PermissionRowView: NSView {
     private let titleLabel: NSTextField
     private let statusDot = NSView()
     private let statusLabel = NSTextField(labelWithString: "Checking…")
+    private let actionButton = NSButton()
 
     public init(
         permission: Permission,
@@ -34,6 +35,9 @@ public final class PermissionRowView: NSView {
 
     /// Test seam: current status label text.
     var statusText: String { statusLabel.stringValue }
+
+    /// Test seam: current action-button title.
+    var actionTitle: String { actionButton.title }
 
     /// Re-reads the grant state and updates the status dot + label.
     public func refresh() async {
@@ -59,6 +63,32 @@ public final class PermissionRowView: NSView {
         statusDot.layer?.backgroundColor = color.cgColor
         statusLabel.stringValue = text
         statusLabel.textColor = color
+        // The button names what is left to do, which is not the same thing in
+        // both directions. Granting can often happen inline, through the
+        // system's own consent prompt; taking a grant back never can — macOS
+        // offers no revoke API — so both titles lead to the one place that can
+        // do either, and only the wording differs.
+        actionButton.title = status == .granted ? Self.revokeTitle : Self.grantTitle
+    }
+
+    /// What the button says while the permission is not granted. Named
+    /// "Open Settings" rather than "Grant" because that is where every one of
+    /// these ends up, prompt or no prompt.
+    private static let grantTitle = "Open Settings"
+    private static let revokeTitle = "Revoke"
+
+    /// The width both titles are given, so that flipping between them doesn't
+    /// reflow the card's description and rows in differing states still line
+    /// their buttons up. Measured rather than spelled as a constant: these are
+    /// words, and a number that fits them in English fits nothing else.
+    private static func widestActionWidth() -> CGFloat {
+        let probe = NSButton(title: "", target: nil, action: nil)
+        probe.bezelStyle = .rounded
+        probe.controlSize = .small
+        return [grantTitle, revokeTitle].reduce(0) { widest, title in
+            probe.title = title
+            return max(widest, probe.fittingSize.width)
+        }
     }
 
     private func buildLayout() {
@@ -96,10 +126,19 @@ public final class PermissionRowView: NSView {
         statusRow.alignment = .centerY
         statusRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let button = NSButton(title: "Open Settings", target: self, action: #selector(actionTapped))
+        let button = actionButton
+        button.title = Self.grantTitle
+        button.target = self
+        button.action = #selector(actionTapped)
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.translatesAutoresizingMaskIntoConstraints = false
+        // Hug the title, so the button stays button-sized however wide the row
+        // gets. Without this it and the wrapping description both stretch to
+        // fill, and the card in a wide window grows a button several inches
+        // long. The width floor below keeps that hug from re-flowing the
+        // description every time the title changes.
+        button.setContentHuggingPriority(.required, for: .horizontal)
         // Namespaced by permission: the panel shows one row per pending
         // permission, so an unqualified "open-settings" would name several
         // buttons at once and a test could not say which it clicked.
@@ -141,7 +180,8 @@ public final class PermissionRowView: NSView {
             statusDot.heightAnchor.constraint(equalToConstant: 8),
 
             button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            button.centerYAnchor.constraint(equalTo: centerYAnchor)
+            button.centerYAnchor.constraint(equalTo: centerYAnchor),
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.widestActionWidth())
         ])
     }
 

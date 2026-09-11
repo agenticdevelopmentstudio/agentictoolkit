@@ -36,4 +36,20 @@ struct PermissionRowViewTests {
         await row.refresh()
         #expect(row.statusText == "Unknown")
     }
+
+    @Test("a granted row offers to revoke instead of to open settings")
+    func grantedOffersRevoke() async {
+        let row = row(.granted)
+        await row.refresh()
+        #expect(row.actionTitle == "Revoke")
+    }
+
+    @Test("a row that is not granted offers to open settings")
+    func ungrantedOffersOpenSettings() async {
+        for status in [PermissionStatus.denied, .undetermined] {
+            let row = row(status)
+            await row.refresh()
+            #expect(row.actionTitle == "Open Settings")
+        }
+    }
 }

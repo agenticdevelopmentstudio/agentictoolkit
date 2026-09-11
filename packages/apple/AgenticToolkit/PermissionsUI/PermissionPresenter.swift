@@ -3,10 +3,19 @@ import AgenticToolkitPermissions
 
 /// Drives the most useful grant flow for a permission from a user action, and
 /// falls back to opening the relevant System Settings pane when an inline grant
-/// isn't possible (e.g. notifications already denied, automation declined).
+/// isn't possible (e.g. notifications already denied, automation declined) or
+/// when the permission is already granted and the user wants it back.
 @MainActor
 public enum PermissionPresenter {
     public static func present(_ permission: Permission, using checker: any PermissionChecking) async {
+        // Already granted: there is nothing left to ask for, and no API to hand
+        // a grant back — only the user can, in System Settings. So the one
+        // useful thing to do is take them to the very pane the grant flow would
+        // have ended at, which is what the row's "Revoke" title promises.
+        if await checker.status(permission) == .granted {
+            NSWorkspace.shared.open(permission.settingsPaneURL)
+            return
+        }
         switch permission {
         case .accessibility:
             // AXIsProcessTrustedWithOptions both prompts and opens the
