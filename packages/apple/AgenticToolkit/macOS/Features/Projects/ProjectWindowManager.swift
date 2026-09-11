@@ -71,6 +71,26 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
     private var adoptedForScripting: Set<UUID> = []
     private weak var coordinator: ProjectsCoordinator?
 
+    /// One `ProjectController` per open window, keyed the same way
+    /// `controllers` is. Built in `openProject(_:)`, dropped in
+    /// `observeClose(of:repoID:recordsOpenState:)`.
+    private var projectControllers: [UUID: ProjectController] = [:]
+
+    /// `NSWindow.didBecomeKeyNotification` observers installed by
+    /// `observeBecameKey(of:repoID:)`, one per open window, so a worktree
+    /// added or removed in a terminal shows up without a relaunch.
+    private var keyObservers: [UUID: NSObjectProtocol] = [:]
+
+    /// Injected so tests run against a throwaway client and hosts can share
+    /// one rather than each `ProjectController` reaching for `GitClient.shared`
+    /// on its own (`dependency-injection`).
+    public var gitClient: GitClient = .shared
+
+    /// Where each project's branch commands are registered. `nil` registers
+    /// nothing — the configuration every test that does not ask for commands
+    /// already runs in.
+    public var commandRegistry: CommandRegistry?
+
     /// Builds the language-server stack for a project about to be opened, given
     /// its directory. Set once by the host at startup; `nil` in a host that
     /// wants no language support, and in every test that has not asked for it.
@@ -179,6 +199,13 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         controllers[repoID]
     }
 
+    /// The project controller behind a window this manager opened. `nil` for
+    /// a repo with no window, and for a window `adoptForScripting(_:)` merely
+    /// registered — those are built and owned by whoever adopted them.
+    public func projectController(for repoID: UUID) -> ProjectController? {
+        projectControllers[repoID]
+    }
+
     // MARK: - ProjectOpening
 
     public func openProject(_ repo: GitRepo) {
@@ -203,13 +230,28 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         }
         let workspace = ProjectWorkspace(repo: repo, database: database, languageServices: languageServices)
         languageServices?.start()
+        let projectController = ProjectController(
+            workspace: workspace,
+            gitClient: gitClient,
+            commandRegistry: commandRegistry
+        )
+        projectControllers[repo.id] = projectController
         let controller = ComposableTabsWindowController(project: workspace)
+        controller.tabItemDataSource = projectController
+        projectController.onTabsDidChange = { [weak controller] in controller?.reloadTabs() }
         controllers[repo.id] = controller
         openOrder.append(repo.id)
         refreshOpenWorkspaceIDs()
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         observeClose(of: controller, repoID: repo.id, recordsOpenState: true)
+        observeBecameKey(of: controller, repoID: repo.id)
+        // The window is on screen with whatever tabs were stored; the checkout
+        // scan runs git, so it is a task, and the window reloads when it lands.
+        Task { [weak controller] in
+            await projectController.open()
+            controller?.reloadTabs()
+        }
         setWindowOpen(true, repoID: repo.id)
     }
 
@@ -317,6 +359,22 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         }
     }
 
+    /// Re-reads worktrees when the window comes back to the front, so a
+    /// worktree added or removed in a terminal shows up without a relaunch.
+    private func observeBecameKey(of controller: ComposableTabsWindowController, repoID: UUID) {
+        guard let window = controller.window else { return }
+        keyObservers[repoID] = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let projectController = self?.projectControllers[repoID] else { return }
+                Task { await projectController.refreshCheckouts() }
+            }
+        }
+    }
+
     /// Drops the controller when its window closes, so reopening the project
     /// builds a fresh window rather than resurrecting a closed one.
     ///
@@ -357,12 +415,25 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
                 // it schedules runs. Nothing waits for it *here* — a window
                 // close must not block the main thread on a subprocess
                 // exiting — but the quit path does, through `closeTeardowns`.
+                //
+                // Routed through the project controller when there is one,
+                // since `ProjectController.shutdown()` and this inline path
+                // both end at `languageServices.shutdown()` — running both
+                // would shut the same services down twice. The inline path
+                // stays for a window `adoptForScripting(_:)` registered,
+                // which has no project controller of its own.
+                let projectController = self.projectControllers.removeValue(forKey: repoID)
+                if let observer = self.keyObservers.removeValue(forKey: repoID) {
+                    NotificationCenter.default.removeObserver(observer)
+                }
                 let services = self.controllers[repoID]?.project.languageServices
                 self.controllers.removeValue(forKey: repoID)
                 self.openOrder.removeAll { $0 == repoID }
                 self.adoptedForScripting.remove(repoID)
                 self.refreshOpenWorkspaceIDs()
-                if let services {
+                if let projectController {
+                    self.closeTeardowns.add { await projectController.shutdown() }
+                } else if let services {
                     self.closeTeardowns.add { await services.shutdown() }
                 }
                 if let observer = self.closeObservers.removeValue(forKey: repoID) {

@@ -241,6 +241,148 @@ final class ProjectControllerTests: XCTestCase {
         XCTAssertEqual(controller.branchControllers.count, 2)
         XCTAssertEqual(try XCTUnwrap(controller.workspace.storedTabs()).tabs.map(\.id), before)
     }
+
+    /// A window opening starts `open()`; the window becoming key moments later
+    /// (before `open()`'s git scan has returned) starts `refreshCheckouts()`.
+    /// Both read-then-write against the same stored tabs, and nothing about
+    /// `async` guarantees the earlier call's write lands before the later
+    /// call's read starts — a slow first git call finishing after a fast
+    /// second one must not let the first's now-stale answer overwrite the
+    /// second's fresh one.
+    ///
+    /// The fake git below makes this deterministic rather than a hope about
+    /// process scheduling: the test starts `open()`, waits for proof its git
+    /// call has actually begun (`first-started`), *then* starts
+    /// `refreshCheckouts()` — so the fake can always answer the first
+    /// `worktree list` call with the stale, single-checkout state (after an
+    /// artificial delay) and the second with the fresh, two-checkout state,
+    /// regardless of which call — `open()` or `refreshCheckouts()` — the
+    /// guard makes wait on the other.
+    func testOverlappingOpenAndRefreshCannotLetAStaleWorktreeReadOverwriteAFreshOne() async throws {
+        let markerDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("project-controller-race-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: markerDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: markerDir) }
+
+        let fakeGitURL = try makeFakeGitExecutable(markerDir: markerDir)
+        let gitClient = GitClient(configuration: GitClientConfiguration(executableURL: fakeGitURL, timeout: 10))
+        let controller = try makeController(gitClient: gitClient)
+
+        let taskA = Task { await controller.open() }
+
+        let startedMarker = markerDir.appendingPathComponent("first-started").path
+        let startDeadline = Date().addingTimeInterval(5)
+        while !FileManager.default.fileExists(atPath: startedMarker), Date() < startDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: startedMarker),
+            "the fixture's first git call never started — the fixture itself is broken, not the code under test"
+        )
+
+        let taskB = Task { await controller.refreshCheckouts() }
+        await taskB.value
+        await taskA.value
+
+        XCTAssertEqual(
+            controller.checkouts.map(\.displayName), ["main", "feature"],
+            "refreshCheckouts() started after open(), so its write must be the one left standing"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(controller.workspace.storedTabs()).tabs.map(\.title),
+            ["main", "feature"]
+        )
+    }
+
+    /// Writes an executable fake `git` to `markerDir` that answers only
+    /// `worktree list --porcelain` and `rev-parse --abbrev-ref HEAD` — the two
+    /// verbs `open()`/`refreshCheckouts()` and the branch controllers they
+    /// build actually call.
+    ///
+    /// The first `worktree list` call it ever receives (claimed atomically
+    /// with `O_CREAT|O_EXCL`, so there is no ambiguity about which one that
+    /// was) writes `first-started`, sleeps briefly, then answers with a single
+    /// checkout — `repoRoot`, branch `main`. Every later call answers
+    /// immediately with two checkouts — `repoRoot` (`main`) and
+    /// `worktreeRoot` (`feature`), which is what `setUp()`'s real `feature`
+    /// worktree would actually report. `rev-parse` always answers `main`
+    /// immediately; its output is never asserted on, only that it does not
+    /// block.
+    private func makeFakeGitExecutable(markerDir: URL) throws -> URL {
+        let script = """
+        #!/usr/bin/env python3
+        import os
+        import sys
+        import time
+
+        MARKER_DIR = \(pythonLiteral(markerDir.path))
+        REPO_ROOT = \(pythonLiteral(repoRoot.path))
+        WORKTREE_ROOT = \(pythonLiteral(worktreeRoot.path))
+
+
+        def stale_porcelain():
+            return (
+                "worktree " + REPO_ROOT + "\\n"
+                "HEAD 0000000000000000000000000000000000000001\\n"
+                "branch refs/heads/main\\n"
+            )
+
+
+        def fresh_porcelain():
+            return (
+                "worktree " + REPO_ROOT + "\\n"
+                "HEAD 0000000000000000000000000000000000000001\\n"
+                "branch refs/heads/main\\n"
+                "\\n"
+                "worktree " + WORKTREE_ROOT + "\\n"
+                "HEAD 0000000000000000000000000000000000000002\\n"
+                "branch refs/heads/feature\\n"
+            )
+
+
+        def main():
+            args = sys.argv[1:]
+            verb = args[0] if args else ""
+            if verb == "worktree":
+                claim_path = os.path.join(MARKER_DIR, "claimed-first")
+                try:
+                    fd = os.open(claim_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.close(fd)
+                    is_first = True
+                except FileExistsError:
+                    is_first = False
+                if is_first:
+                    with open(os.path.join(MARKER_DIR, "first-started"), "w") as marker:
+                        marker.write("1")
+                    time.sleep(0.4)
+                    sys.stdout.write(stale_porcelain())
+                else:
+                    sys.stdout.write(fresh_porcelain())
+                sys.exit(0)
+            elif verb == "rev-parse":
+                sys.stdout.write("main\\n")
+                sys.exit(0)
+            else:
+                sys.exit(1)
+
+
+        main()
+        """
+        let scriptURL = markerDir.appendingPathComponent("fake-git.py")
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        return scriptURL
+    }
+
+    /// A Python single-quoted string literal for `value`, escaping backslashes
+    /// and single quotes so an absolute path — which on this OS never contains
+    /// a newline — can be spliced straight into the generated script.
+    private func pythonLiteral(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        return "'\(escaped)'"
+    }
 }
 
 /// Flips a `GitClientConfiguration` from a real git executable to a path that

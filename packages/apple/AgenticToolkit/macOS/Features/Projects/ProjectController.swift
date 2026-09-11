@@ -16,6 +16,19 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     private let gitClient: GitClient
     private let commandRegistry: CommandRegistry?
 
+    /// The reconcile currently running, if any. `open()` and
+    /// `refreshCheckouts()` both chain onto this rather than starting their
+    /// own work straight away, so two overlapping callers — `open()` from the
+    /// window opening and `refreshCheckouts()` from `observeBecameKey` firing
+    /// moments later — cannot interleave at the `await` inside
+    /// `readCheckouts()` and let whichever's git call happens to finish last
+    /// win, even when that is the earlier of the two calls. Chaining onto the
+    /// previous `Task` keeps them running one at a time in call order
+    /// instead: the second caller's own read only happens once the first's
+    /// write has already landed, so the second's write — the later one — is
+    /// always the one left standing.
+    private var inFlightReconcile: Task<Void, Never>?
+
     public init(workspace: ProjectWorkspace, gitClient: GitClient, commandRegistry: CommandRegistry?) {
         self.workspace = workspace
         self.gitClient = gitClient
@@ -25,17 +38,26 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     // MARK: Lifecycle
 
     public func open() async {
-        await reconcile(notify: false)
-        for controller in branchControllers.values {
-            await controller.refresh()
-        }
+        await serializedReconcile(notify: false)
     }
 
     public func refreshCheckouts() async {
-        await reconcile(notify: true)
-        for controller in branchControllers.values {
-            await controller.refresh()
+        await serializedReconcile(notify: true)
+    }
+
+    /// Waits for whatever reconcile is already in flight, then runs this
+    /// caller's own — see `inFlightReconcile`.
+    private func serializedReconcile(notify: Bool) async {
+        let previous = inFlightReconcile
+        let task = Task {
+            _ = await previous?.value
+            await self.reconcile(notify: notify)
+            for controller in self.branchControllers.values {
+                await controller.refresh()
+            }
         }
+        inFlightReconcile = task
+        await task.value
     }
 
     public func shutdown() async {
