@@ -264,4 +264,40 @@ struct ActivationEventMatcherTests {
 
         #expect(!matcher.matches(.workspaceScanned(relativePaths: [path])))
     }
+
+    /// Same adversarial shape as `manyDoubleStarSegmentsDoNotBlowUp`, but
+    /// wrapped in a single, comma-less `{...}` group. That parses to one
+    /// `.alternation` with one branch holding the same 15-token list, and
+    /// exercises `matchBranch`'s own cache rather than `matchTokens`'s —
+    /// without a per-branch cache, this pattern reproduces the exponential
+    /// blowup with no bound at all, since `matchBranch`'s only prior contact
+    /// with any cache was the one terminal delegation back to `matchTokens`.
+    @Test("the same ** blowup wrapped in a single, comma-less brace group also resolves correctly and fast")
+    func manyDoubleStarSegmentsInsideABranchDoNotBlowUp() throws {
+        let pattern = "{a**a**a**a**a**a**a**b}"
+        let path = String(repeating: "a", count: 25)
+        let manifest = try Self.manifest(activationEvents: ["workspaceContains:\(pattern)"])
+        let matcher = ActivationEventMatcher(manifest: manifest)
+
+        #expect(!matcher.matches(.workspaceScanned(relativePaths: [path])))
+    }
+
+    /// Catches a branch memo key too coarse to distinguish one branch from
+    /// another. `{ax,bx}` against `"bx"` only matches via the *second*
+    /// branch ("bx"): the first branch ("ax") is tried first and fails
+    /// immediately at `(branchIndex: 0, pathIndex: 0)` because `path[0]` is
+    /// `"b"`, not `"a"`. If the memo key were only `(branchIndex, pathIndex)`
+    /// — omitting which branch it belongs to — that failed result would get
+    /// cached under a key the second branch's `(branchIndex: 0, pathIndex:
+    /// 0)` state collides with, and looking it up would short-circuit to
+    /// "false" without ever inspecting the second branch's own `"b"`
+    /// literal — turning a real match into a wrong, silent non-match rather
+    /// than a slow one.
+    @Test("two branches of one alternation that disagree at the same (branchIndex, pathIndex) both resolve correctly")
+    func branchesWithTheSameLocalStateDoNotShareAMemoResult() throws {
+        let manifest = try Self.manifest(activationEvents: ["workspaceContains:{ax,bx}"])
+        let matcher = ActivationEventMatcher(manifest: manifest)
+
+        #expect(matcher.matches(.workspaceScanned(relativePaths: ["bx"])))
+    }
 }
