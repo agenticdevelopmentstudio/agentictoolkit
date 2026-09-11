@@ -1,6 +1,6 @@
 import Foundation
 
-/// The working tree's status as `git status --porcelain=v1` reports it,
+/// The working tree's status as `git status --porcelain=v1 -z` reports it,
 /// keyed by repository-relative path, plus the merged status of every
 /// directory that contains a changed file.
 public struct GitStatus: Sendable, Equatable {
@@ -14,17 +14,49 @@ public struct GitStatus: Sendable, Equatable {
 
     public static let empty = GitStatus(files: [:], directories: [:])
 
-    /// Parses `git status --porcelain=v1` output into file and directory status maps.
+    /// Parses `git status --porcelain=v1 -z` output into file and directory
+    /// status maps. `-z` NUL-delimits every record instead of newline-
+    /// terminating it, which keeps `core.quotePath`'s C-quoting off entirely
+    /// — a path with a byte outside printable ASCII, or one that literally
+    /// contains `" -> "`, arrives as its own field, unmangled. A rename or
+    /// copy record (`XY` starting with `R` or `C`) carries **two** fields
+    /// instead of one: the new path first, then a second NUL-terminated
+    /// field with the original path — so this parser consumes that second
+    /// field rather than splitting on an arrow, which is also what makes the
+    /// old arrow-splitting bug (mis-keying `RM`/`RD` as
+    /// `"old -> new"`) impossible: there is no arrow to look for any more.
     public static func parse(porcelain output: String) -> GitStatus {
         var fileStatuses: [String: GitFileStatus] = [:]
 
-        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard line.count >= 3 else { continue }
-            let statusChars = String(line.prefix(2))
-            let filePath = String(line.dropFirst(3))
+        let fields = output.split(separator: "\u{0}", omittingEmptySubsequences: true)
+        var index = fields.startIndex
+        while index < fields.endIndex {
+            let record = fields[index]
+            index += 1
+            guard record.count >= 3 else { continue }
+            let statusChars = String(record.prefix(2))
+            let filePath = String(record.dropFirst(3))
 
             let indexStatus = statusChars.first ?? " "
             let workTreeStatus = statusChars.last ?? " "
+
+            // Rename/copy records are recognised and consumed first, ahead
+            // of every other test: `RM` (renamed *and* modified — the state
+            // a `git mv` followed by an edit leaves) and `RD` must key under
+            // the new path as renames, not fall through to the M/A/D ladder
+            // below and get keyed under a bogus compound string.
+            if indexStatus == "R" || indexStatus == "C" {
+                // The origin path is a second NUL-terminated field. It must
+                // be consumed here regardless of whether this record is kept,
+                // or the next record parsed would be misaligned.
+                if index < fields.endIndex {
+                    index += 1
+                }
+                if indexStatus == "R" {
+                    fileStatuses[filePath] = .renamed
+                }
+                continue
+            }
 
             let status: GitFileStatus?
             if indexStatus == "?" || workTreeStatus == "?" {
@@ -39,13 +71,6 @@ public struct GitStatus: Sendable, Equatable {
                 status = .added
             } else if workTreeStatus == "D" || indexStatus == "D" {
                 status = .deleted
-            } else if indexStatus == "R" {
-                status = .renamed
-                if let arrowRange = filePath.range(of: " -> ") {
-                    let newPath = String(filePath[arrowRange.upperBound...])
-                    fileStatuses[newPath] = status
-                    continue
-                }
             } else {
                 status = nil
             }

@@ -49,10 +49,14 @@ public actor GitClient {
 
     // MARK: - Read-only verbs
 
-    /// The working tree's status, as `git status --porcelain=v1 -uall` reports it.
+    /// The working tree's status, as `git status --porcelain=v1 -z -uall`
+    /// reports it. `-z` NUL-delimits each record instead of newline-
+    /// terminating it and disables `core.quotePath`'s C-quoting of non-ASCII
+    /// paths, so `GitStatus.parse` sees every path exactly as it is on disk.
+    /// See `GitStatus.parse` for the record shape this produces.
     public func status(in directory: URL, caller: GitCaller = GitCaller()) async throws -> GitStatus {
         let configuration = await configurationProvider()
-        var arguments = ["--porcelain=v1", "-uall"]
+        var arguments = ["--porcelain=v1", "-z", "-uall"]
         if configuration.submoduleHandling == .ignore {
             arguments.append("--ignore-submodules")
         }
