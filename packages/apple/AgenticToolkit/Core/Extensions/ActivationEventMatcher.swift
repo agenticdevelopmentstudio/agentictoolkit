@@ -1,0 +1,365 @@
+//
+//  ActivationEventMatcher.swift
+//  AgenticToolkit
+//
+
+import Foundation
+
+/// One parsed `activationEvents` entry.
+///
+/// VS Code extensions declare activation events as free-form strings — this
+/// is what turns `"onLanguage:swift"` into something a host can actually
+/// compare against a trigger, rather than re-parsing the same five prefixes
+/// at every call site.
+public struct ActivationEvent: Sendable, Equatable {
+
+    public enum Kind: Sendable, Equatable {
+        case any                        // "*"
+        case startupFinished            // "onStartupFinished"
+        case language(String)           // "onLanguage:swift"      -> "swift"
+        case command(String)            // "onCommand:foo.bar"     -> "foo.bar"
+        case workspaceContains(String)  // "workspaceContains:**/*.csproj" -> the glob
+    }
+
+    public let kind: Kind
+
+    /// The entry exactly as the manifest spelled it, so a diagnostic can quote
+    /// what the author wrote rather than what we understood.
+    public let rawValue: String
+
+    /// Parses one `activationEvents` entry.
+    ///
+    /// Leading and trailing whitespace is trimmed before recognising the
+    /// shape — a manifest with `"  onStartupFinished  "` is not unusual, and
+    /// there is nothing for the trailing space to mean once it is not part of
+    /// a payload. What follows a colon is taken verbatim and is
+    /// case-sensitive: VS Code language and command ids are lowercase by
+    /// convention but the editor never normalises them, so normalising here
+    /// would accept manifests VS Code itself would not activate.
+    ///
+    /// An entry with an empty payload after the colon (`"onLanguage:"`) is
+    /// unrecognized rather than read as matching the empty string — an author
+    /// who wrote that made a mistake, and there is no trigger this host could
+    /// ever produce that such an entry should fire on.
+    public init?(rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        if trimmed == "*" {
+            kind = .any
+        } else if trimmed == "onStartupFinished" {
+            kind = .startupFinished
+        } else if let payload = Self.payload(afterPrefix: "onLanguage:", in: trimmed) {
+            kind = .language(payload)
+        } else if let payload = Self.payload(afterPrefix: "onCommand:", in: trimmed) {
+            kind = .command(payload)
+        } else if let payload = Self.payload(afterPrefix: "workspaceContains:", in: trimmed) {
+            kind = .workspaceContains(payload)
+        } else {
+            return nil
+        }
+
+        self.rawValue = rawValue
+    }
+
+    /// `nil` when `value` does not start with `prefix`, or when everything
+    /// after it is empty — the shared rule that makes `"onLanguage:"` and
+    /// friends unrecognized rather than a match on `""`.
+    private static func payload(afterPrefix prefix: String, in value: String) -> String? {
+        guard value.hasPrefix(prefix) else { return nil }
+        let payload = String(value.dropFirst(prefix.count))
+        return payload.isEmpty ? nil : payload
+    }
+}
+
+/// A thing that just happened, which may or may not wake an extension.
+public enum ActivationTrigger: Sendable, Equatable {
+    case startupFinished
+    case documentOpened(languageID: String)
+    case commandInvoked(String)
+
+    /// The workspace's contents, as paths relative to the workspace root, with
+    /// `/` separators and no leading slash. The caller does the directory walk;
+    /// this type does pure pattern matching and touches no filesystem.
+    case workspaceScanned(relativePaths: [String])
+}
+
+/// Decides whether a manifest's `activationEvents` (and, from VS Code 1.74,
+/// its declared commands) wake it for a given trigger.
+///
+/// Built once from a manifest and then queried repeatedly — `events` is
+/// captured at `init` rather than re-parsed on every `matches(_:)` call, since
+/// a host may check the same extension against many triggers over its
+/// lifetime (each document opened, each command invoked).
+public struct ActivationEventMatcher: Sendable, Equatable {
+
+    /// Every entry we understood, in manifest order.
+    public let events: [ActivationEvent]
+
+    /// Entries we did not understand, raw, in manifest order. Never dropped
+    /// silently — a later task reports them.
+    public let unrecognizedEvents: [String]
+
+    /// `workspaceContains:` globs whose syntax this matcher does not support.
+    /// They never match; they are surfaced here so a report can say so rather
+    /// than leaving an author wondering why their extension never woke.
+    public let unsupportedPatterns: [String]
+
+    /// Command ids that wake this extension *without* an `onCommand:` entry,
+    /// because it declares an engine of 1.74.0 or later. Empty otherwise.
+    public let implicitlyActivatingCommands: Set<String>
+
+    /// True when the manifest declares `"*"`. Such an extension activates as
+    /// soon as the host is ready, without waiting for a specific trigger.
+    public var activatesEagerly: Bool {
+        events.contains { $0.kind == .any }
+    }
+
+    /// The VS Code version, as a `SemanticVersion`, from which a declared
+    /// command activates its extension without an explicit `onCommand:`
+    /// entry — see the "Implicit activation from contributions.commands"
+    /// note on `matches(_:)`.
+    private static let implicitCommandActivationFloor = SemanticVersion(major: 1, minor: 74, patch: 0)
+
+    public init(manifest: ExtensionManifest) {
+        var parsed: [ActivationEvent] = []
+        var unrecognized: [String] = []
+        for raw in manifest.activationEvents {
+            if let event = ActivationEvent(rawValue: raw) {
+                parsed.append(event)
+            } else {
+                unrecognized.append(raw)
+            }
+        }
+        events = parsed
+        unrecognizedEvents = unrecognized
+
+        var unsupported: [String] = []
+        for event in parsed {
+            if case .workspaceContains(let glob) = event.kind, GlobPattern(glob) == nil {
+                unsupported.append(glob)
+            }
+        }
+        unsupportedPatterns = unsupported
+
+        // The version test is the extension's own declared engine, not the
+        // host's: VS Code 1.74 made an `onCommand:` entry unnecessary for a
+        // command already declared in `contributes.commands`, but an
+        // extension that still targets an older VS Code cannot rely on
+        // behaviour its stated minimum predates. A manifest whose
+        // `engines.vscode` does not parse gets no implicit activation — an
+        // engine string this host cannot evaluate is not evidence the
+        // extension supports the newer inference.
+        if let range = VSCodeEngineRange(manifest.engines.vscode),
+           range.minimumVersion >= Self.implicitCommandActivationFloor {
+            let commandIDs = manifest.contributes?.commands.map(\.command) ?? []
+            implicitlyActivatingCommands = Set(commandIDs)
+        } else {
+            implicitlyActivatingCommands = []
+        }
+    }
+
+    /// Whether `trigger` wakes this extension.
+    ///
+    /// An extension with no recognised events and no implicitly activating
+    /// commands never matches anything here — it does not fall back to
+    /// eager activation. `"*"` is the only entry that means "activate
+    /// unconditionally," and it is handled explicitly rather than by
+    /// treating an empty `events` as a wildcard.
+    public func matches(_ trigger: ActivationTrigger) -> Bool {
+        if activatesEagerly { return true }
+
+        switch trigger {
+        case .startupFinished:
+            return events.contains { $0.kind == .startupFinished }
+
+        case .documentOpened(let languageID):
+            return events.contains {
+                if case .language(let declared) = $0.kind { return declared == languageID }
+                return false
+            }
+
+        case .commandInvoked(let commandID):
+            if implicitlyActivatingCommands.contains(commandID) { return true }
+            return events.contains {
+                if case .command(let declared) = $0.kind { return declared == commandID }
+                return false
+            }
+
+        case .workspaceScanned(let relativePaths):
+            return events.contains { event in
+                guard case .workspaceContains(let glob) = event.kind else { return false }
+                // A glob already recorded in `unsupportedPatterns` fails to
+                // construct here too and simply never matches — the two
+                // never disagree because both ask the same question.
+                guard let pattern = GlobPattern(glob) else { return false }
+                return relativePaths.contains { pattern.matches($0) }
+            }
+        }
+    }
+}
+
+/// A minimal glob matcher for `workspaceContains:` patterns.
+///
+/// Deliberately file-local for now rather than its own file: `abstractr
+/// exports` has no glob, fnmatch or wildcard matcher anywhere in this
+/// toolkit, and creating a second new file in this shared tier for a type
+/// with exactly one caller would trip the placement gate for no benefit.
+/// Promote it to its own file the moment a second consumer arrives — task
+/// 5.4's `workspace.findFiles` is the likely one — rather than growing a
+/// second copy elsewhere.
+///
+/// Implemented as a straightforward backtracking matcher over the pattern's
+/// tokens and the path's characters, not `NSRegularExpression`: translating
+/// glob to regex requires escaping every regex metacharacter that is also a
+/// legal filename character, and a missed one turns a literal `.` or `+` in
+/// a real filename into a wildcard.
+internal struct GlobPattern {
+
+    private enum Token {
+        case literal(Character)
+        /// `*` — any run of characters except `/`, including empty.
+        case star
+        /// `**` on its own — any run of characters *including* `/`,
+        /// including empty. Distinct from `anyDirectories` below: a bare
+        /// `**` not immediately followed by `/` carries no directory-segment
+        /// meaning, just "anything, including slashes."
+        case doubleStar
+        /// `?` — exactly one character, not `/`.
+        case question
+        /// `**/` as one unit, tokenized together rather than as `doubleStar`
+        /// followed by a literal `/`. That distinction is the whole reason
+        /// this case exists: a leading `**/` must also match *zero*
+        /// directories, i.e. the slash itself is allowed to vanish along
+        /// with everything `**` would have consumed. A plain literal `/`
+        /// token after `doubleStar` could never do that — it would still
+        /// demand an actual `/` character in the path even when `**` matched
+        /// nothing. This token instead matches zero or more path segments,
+        /// each ending in `/`.
+        case anyDirectories
+        /// `{a,b,c}` — each branch already tokenized, so the same
+        /// backtracking matcher recurses into it. Nested `{` is rejected at
+        /// parse time.
+        case alternation([[Token]])
+    }
+
+    private let tokens: [Token]
+
+    /// `nil` when `pattern` uses syntax this matcher does not support: a
+    /// `[...]` character class, a leading `!` negation, or a nested `{`
+    /// inside a `{...}` group. Those are refused rather than approximated —
+    /// silently treating `[` as a literal would make a pattern match paths
+    /// its author never intended it to.
+    init?(_ pattern: String) {
+        guard !pattern.contains("["), !pattern.hasPrefix("!") else { return nil }
+        guard let tokens = Self.tokenize(Array(pattern)) else { return nil }
+        self.tokens = tokens
+    }
+
+    private static func tokenize(_ characters: [Character]) -> [Token]? {
+        var tokens: [Token] = []
+        var index = 0
+        while index < characters.count {
+            switch characters[index] {
+            case "*":
+                if index + 1 < characters.count, characters[index + 1] == "*" {
+                    if index + 2 < characters.count, characters[index + 2] == "/" {
+                        tokens.append(.anyDirectories)
+                        index += 3
+                    } else {
+                        tokens.append(.doubleStar)
+                        index += 2
+                    }
+                } else {
+                    tokens.append(.star)
+                    index += 1
+                }
+
+            case "?":
+                tokens.append(.question)
+                index += 1
+
+            case "{":
+                guard let closeIndex = characters[(index + 1)...].firstIndex(of: "}") else { return nil }
+                let inner = characters[(index + 1)..<closeIndex]
+                guard !inner.contains("{") else { return nil }
+
+                let alternatives = inner.split(separator: ",", omittingEmptySubsequences: false)
+                var branches: [[Token]] = []
+                for alternative in alternatives {
+                    guard let branchTokens = tokenize(Array(alternative)) else { return nil }
+                    branches.append(branchTokens)
+                }
+                tokens.append(.alternation(branches))
+                index = closeIndex + 1
+
+            case let character:
+                tokens.append(.literal(character))
+                index += 1
+            }
+        }
+        return tokens
+    }
+
+    /// Whether `path` matches this pattern, anchored at both ends — the
+    /// whole relative path, not a substring of it.
+    func matches(_ path: String) -> Bool {
+        Self.matchTokens(tokens, 0, Array(path), 0)
+    }
+
+    private static func matchTokens(
+        _ tokens: [Token], _ tokenIndex: Int, _ path: [Character], _ pathIndex: Int
+    ) -> Bool {
+        guard tokenIndex < tokens.count else { return pathIndex == path.count }
+
+        switch tokens[tokenIndex] {
+        case .literal(let expected):
+            guard pathIndex < path.count, path[pathIndex] == expected else { return false }
+            return matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1)
+
+        case .question:
+            guard pathIndex < path.count, path[pathIndex] != "/" else { return false }
+            return matchTokens(tokens, tokenIndex + 1, path, pathIndex + 1)
+
+        case .star:
+            if matchTokens(tokens, tokenIndex + 1, path, pathIndex) { return true }
+            var cursor = pathIndex
+            while cursor < path.count, path[cursor] != "/" {
+                cursor += 1
+                if matchTokens(tokens, tokenIndex + 1, path, cursor) { return true }
+            }
+            return false
+
+        case .doubleStar:
+            if matchTokens(tokens, tokenIndex + 1, path, pathIndex) { return true }
+            var cursor = pathIndex
+            while cursor < path.count {
+                cursor += 1
+                if matchTokens(tokens, tokenIndex + 1, path, cursor) { return true }
+            }
+            return false
+
+        case .anyDirectories:
+            // Zero directories first — the case a plain `doubleStar` +
+            // literal `/` could never express.
+            if matchTokens(tokens, tokenIndex + 1, path, pathIndex) { return true }
+            var cursor = pathIndex
+            while cursor < path.count {
+                if path[cursor] == "/" {
+                    // Consumed one segment ending at this slash; recurse on
+                    // the *same* token so further segments can follow.
+                    if matchTokens(tokens, tokenIndex, path, cursor + 1) { return true }
+                }
+                cursor += 1
+            }
+            return false
+
+        case .alternation(let branches):
+            let remainder = Array(tokens[(tokenIndex + 1)...])
+            for branch in branches where matchTokens(branch + remainder, 0, path, pathIndex) {
+                return true
+            }
+            return false
+        }
+    }
+}
