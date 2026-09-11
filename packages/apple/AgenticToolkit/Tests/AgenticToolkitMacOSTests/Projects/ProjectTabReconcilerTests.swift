@@ -82,4 +82,34 @@ final class ProjectTabReconcilerTests: XCTestCase {
         )
         XCTAssertEqual(Set(records.map(\.root.id)).count, 2)
     }
+
+    /// A stored record reached the directory by one route and the checkout by
+    /// another — which is what actually happens, since `git worktree list`
+    /// resolves symlinks and the window's own directory does not. Matching
+    /// only after standardizing would add a second tab group for a checkout
+    /// that already has a tab.
+    func testARecordReachingACheckoutThroughASymlinkIsStillTheSameTab() throws {
+        let manager = FileManager.default
+        let target = manager.temporaryDirectory
+            .appendingPathComponent("reconciler-symlink-test-\(UUID().uuidString)")
+        try manager.createDirectory(at: target, withIntermediateDirectories: true)
+        let link = target.deletingLastPathComponent()
+            .appendingPathComponent(target.lastPathComponent + "-link")
+        try manager.createSymbolicLink(at: link, withDestinationURL: target)
+        defer {
+            try? manager.removeItem(at: link)
+            try? manager.removeItem(at: target)
+        }
+
+        let checkout = ProjectCheckout(directory: target, branch: "main", isMain: true)
+        let stored = [TabRecord(edge: .left, title: "main", root: makeBlueprint(), workingDirectory: link)]
+        let plan = ProjectTabReconciler.plan(
+            stored: stored, checkouts: [checkout], projectDirectory: project, existsOnDisk: { _ in true }
+        )
+
+        XCTAssertEqual(plan.keep.map(\.id), stored.map(\.id))
+        XCTAssertTrue(plan.add.isEmpty)
+        XCTAssertTrue(plan.drop.isEmpty)
+        XCTAssertTrue(plan.isUnchanged)
+    }
 }

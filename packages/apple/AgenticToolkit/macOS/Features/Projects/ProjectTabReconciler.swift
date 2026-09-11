@@ -20,14 +20,20 @@ public enum ProjectTabReconciler {
         projectDirectory: URL,
         existsOnDisk: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
     ) -> Plan {
-        let projectDirectory = projectDirectory.standardizedFileURL
+        // Resolved, not merely standardized, and for the same reason
+        // `ProjectCheckout.init` resolves: a checkout's directory came from
+        // `git worktree list` and a record's from whatever the window was
+        // opened with, so an unresolved symlink on either side turns a match
+        // into a miss — and a miss here adds a duplicate tab group for a
+        // checkout that already has one.
+        let projectDirectory = projectDirectory.resolvingSymlinksInPath()
         let checkoutDirectories = Set(checkouts.map(\.directory))
         var keep: [TabRecord] = []
         var drop: [UUID] = []
         var coveredDirectories = Set<URL>()
 
         for record in stored {
-            let directory = (record.workingDirectory ?? projectDirectory).standardizedFileURL
+            let directory = (record.workingDirectory ?? projectDirectory).resolvingSymlinksInPath()
             if checkoutDirectories.contains(directory) || existsOnDisk(directory) {
                 keep.append(record)
                 coveredDirectories.insert(directory)

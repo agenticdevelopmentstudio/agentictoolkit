@@ -9,14 +9,22 @@ public struct ProjectCheckout: Hashable, Sendable {
     public let branch: String?
     public let isMain: Bool
 
+    /// `resolvingSymlinksInPath()`, not `standardizedFileURL`: the latter
+    /// collapses `.` and `..` but leaves a symlink alone, and the two sides
+    /// that get compared here reach a directory by different routes. `git
+    /// worktree list` prints the fully resolved path (`/private/var/…`),
+    /// while a workspace's directory comes from the path the user gave
+    /// (`/var/…`) — the same directory, two URLs, and every `Set` lookup and
+    /// dictionary key that pairs them would miss. Resolving also subsumes
+    /// standardizing, so the `..` case below still normalizes.
     public init(directory: URL, branch: String?, isMain: Bool) {
-        self.directory = directory.standardizedFileURL
+        self.directory = directory.resolvingSymlinksInPath()
         self.branch = branch
         self.isMain = isMain
     }
 
     /// Path-derived so a checkout keeps its identity across branch switches.
-    /// djb2 over the standardized path, in hex, so it is safe in a command id.
+    /// djb2 over the resolved path, in hex, so it is safe in a command id.
     public var identifier: String {
         var hash: UInt64 = 5381
         for byte in directory.path.utf8 {
