@@ -53,8 +53,10 @@ public final class ScriptableProjectTab: NSObject {
 
     @objc var tabProject: String { self.project }
 
+    /// Backs the sdef's `project tab` property `working directory`.
     @objc var tabWorkingDirectory: String { self.workingDirectory }
 
+    /// Backs the sdef's `project tab` property `branch`.
     @objc var tabBranch: String { self.branch }
 
     public override nonisolated var objectSpecifier: NSScriptObjectSpecifier? {

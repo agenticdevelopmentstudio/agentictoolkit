@@ -29,15 +29,22 @@ extension ProjectWindowManager {
 
     // MARK: - Tabs
 
-    /// `branch: { _ in nil }` is a placeholder: a later task (branch lookup)
-    /// supplies a real resolver here.
+    /// The branch a tab's directory is on comes from the project controller's
+    /// branch controller; a tab in a folder that is not a checkout has none.
+    private func scriptingTabs(of controller: ComposableTabsWindowController) -> [ScriptableProjectTab] {
+        let projectController = self.projectController(for: controller.project.id)
+        return controller.scriptingTabs(branch: { directory in
+            projectController?.branchController(forDirectory: directory)?.currentBranch
+        })
+    }
+
     public var scriptableProjectTabs: [ScriptableProjectTab] {
-        self.openWindowControllers.flatMap { $0.scriptingTabs(branch: { _ in nil }) }
+        self.openWindowControllers.flatMap { self.scriptingTabs(of: $0) }
     }
 
     public func scriptableProjectTab(uniqueID: String) -> ScriptableProjectTab? {
         self.openWindowControllers.lazy
-            .flatMap { $0.scriptingTabs(branch: { _ in nil }) }
+            .flatMap { self.scriptingTabs(of: $0) }
             .first { $0.uniqueID == uniqueID }
     }
 

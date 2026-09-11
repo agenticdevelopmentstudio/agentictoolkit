@@ -366,6 +366,41 @@ final class ProjectScriptingTests: XCTestCase {
         XCTAssertEqual(controller.scriptingTabs(branch: { _ in nil }).count, 1)
     }
 
+    /// `scriptingTabs(branch:)` resolves each tab's own working directory
+    /// through the supplied closure — a characterization of the resolver
+    /// parameter itself (Task 20). The routing that supplies a *real*
+    /// resolver from `ProjectWindowManager` is proven end to end in
+    /// `ProjectWindowManagerControllerTests`, not here: this suite calls the
+    /// closure directly, so it cannot observe whether the manager wires one
+    /// up at all.
+    func testATabReportsItsWorkingDirectoryAndBranch() {
+        let project = makeProject()
+        let directory = URL(fileURLWithPath: "/tmp/scripting-branch-fixture")
+        let tabID = UUID()
+        project.persistTabs(
+            [TabRecord(id: tabID, edge: .top, title: "Tab 1",
+                       root: .leaf(id: UUID(), contentType: alpha), workingDirectory: directory)],
+            activeTabID: tabID,
+            enabledEdges: [.top]
+        )
+        let controller = makeController(for: project)
+        let tabs = controller.scriptingTabs(branch: { $0 == directory ? "feature" : nil })
+        XCTAssertEqual(tabs.map(\.tabWorkingDirectory), [directory.path])
+        XCTAssertEqual(tabs.map(\.tabBranch), ["feature"])
+    }
+
+    /// A resolver that never finds a branch (the default project's own
+    /// directory is not a checkout the closure recognises) reports the empty
+    /// string, not `nil` stringified or a crash.
+    func testATabWithNoBranchReportsAnEmptyString() {
+        let project = makeProject()
+        let controller = makeController(for: project)
+        let tabs = controller.scriptingTabs(branch: { _ in nil })
+        XCTAssertEqual(tabs.count, 1, "the default project has exactly one tab")
+        XCTAssertEqual(tabs.map(\.tabBranch), Array(repeating: "", count: tabs.count))
+        XCTAssertEqual(tabs.map(\.tabWorkingDirectory), Array(repeating: project.directoryURL.path, count: tabs.count))
+    }
+
     // MARK: - The window
 
     /// Read back out of `git_repo` rather than off the workspace this test is

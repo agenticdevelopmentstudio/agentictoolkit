@@ -580,8 +580,11 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     }
 
     /// This window's tabs, as scripting values. `branch` resolves a working
-    /// directory to a branch name; Task 23 supplies a real lookup, so today
-    /// every caller passes `{ _ in nil }`.
+    /// directory to a branch name — `ProjectWindowManager+Scripting.swift`
+    /// supplies the real lookup, through the project's `ProjectController`
+    /// and its per-checkout `BranchController`; a caller with no such
+    /// controller (or a directory that is not a checkout) passes `{ _ in
+    /// nil }`, which `ScriptableProjectTab` reports as an empty string.
     public func scriptingTabs(branch: (URL) -> String?) -> [ScriptableProjectTab] {
         scriptingTabGroups.map { group in
             let directory = tabGroups.first { $0.id == group.id }?.workingDirectory ?? project.directoryURL

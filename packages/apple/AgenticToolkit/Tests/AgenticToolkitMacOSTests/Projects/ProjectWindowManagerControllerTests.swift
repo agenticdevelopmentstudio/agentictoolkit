@@ -427,6 +427,84 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         )
     }
 
+    /// Task 23: `ProjectWindowManager`'s scripting surface must route through
+    /// `projectController(for:)` to a real `BranchController.currentBranch`
+    /// lookup, not the `{ _ in nil }` placeholder Task 20 left behind. This
+    /// drives `scriptableProjectTabs` / `scriptableProjectTab(uniqueID:)`
+    /// end to end over a real two-checkout repo (main + a `feature`
+    /// worktree, same fixture as `testTheWindowBecomingKeyRefreshesCheckouts`
+    /// above) so the main-checkout tab must report branch "main" and its own
+    /// directory, and the worktree tab must report "feature" and its own —
+    /// proof the resolver is wired to the *right* checkout's branch
+    /// controller, not just *a* branch controller.
+    func testScriptableProjectTabsReportEachCheckoutsOwnBranchAndDirectory() async throws {
+        let database = try ProjectDatabase(path: repoRoot.appendingPathComponent(".test-project.db").path)
+        let repo = GitRepo(path: repoRoot.path, name: "fixture")
+        try database.insert(repo)
+        let coordinator = try ProjectsCoordinator(database: database, scanner: nil, commandRegistry: CommandRegistry())
+        let manager = ProjectWindowManager()
+        manager.attach(to: coordinator)
+        manager.gitClient = GitClient(configuration: .default)
+
+        manager.openProject(repo)
+        let controller = try XCTUnwrap(manager.projectController(for: repo.id))
+
+        let firstDeadline = Date().addingTimeInterval(5)
+        while controller.workspace.storedTabs() == nil, Date() < firstDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(controller.workspace.storedTabs()?.tabs.map(\.title), ["main"])
+
+        let worktreeRoot = repoRoot.deletingLastPathComponent()
+            .appendingPathComponent(repoRoot.lastPathComponent + "-wt")
+        let commit = Process()
+        commit.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        commit.arguments = ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "init"]
+        commit.currentDirectoryURL = repoRoot
+        try commit.run()
+        commit.waitUntilExit()
+        XCTAssertEqual(commit.terminationStatus, 0, "git commit")
+        let worktreeAdd = Process()
+        worktreeAdd.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        worktreeAdd.arguments = ["worktree", "add", "-b", "feature", worktreeRoot.path]
+        worktreeAdd.currentDirectoryURL = repoRoot
+        try worktreeAdd.run()
+        worktreeAdd.waitUntilExit()
+        XCTAssertEqual(worktreeAdd.terminationStatus, 0, "git worktree add")
+        defer { try? FileManager.default.removeItem(at: worktreeRoot) }
+
+        let window = try XCTUnwrap(manager.windowController(for: repo.id).flatMap(\.window))
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+
+        let refreshDeadline = Date().addingTimeInterval(5)
+        while controller.checkouts.map(\.displayName) != ["main", "feature"], Date() < refreshDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(controller.checkouts.map(\.displayName), ["main", "feature"])
+
+        let windowController = try XCTUnwrap(manager.windowController(for: repo.id))
+        let tabDeadline = Date().addingTimeInterval(5)
+        while windowController.tabItems(on: .top).count != 2, Date() < tabDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let tabs = manager.scriptableProjectTabs
+        XCTAssertEqual(tabs.count, 2, "one scriptable tab per checkout")
+
+        let mainDirectory = repoRoot.resolvingSymlinksInPath().path
+        let worktreeDirectory = worktreeRoot.resolvingSymlinksInPath().path
+        let mainTab = try XCTUnwrap(tabs.first { $0.tabWorkingDirectory == mainDirectory })
+        let featureTab = try XCTUnwrap(tabs.first { $0.tabWorkingDirectory == worktreeDirectory })
+        XCTAssertEqual(mainTab.tabBranch, "main")
+        XCTAssertEqual(featureTab.tabBranch, "feature")
+
+        let lookedUp = try XCTUnwrap(manager.scriptableProjectTab(uniqueID: mainTab.uniqueID))
+        XCTAssertEqual(lookedUp.tabBranch, "main")
+        XCTAssertEqual(lookedUp.tabWorkingDirectory, mainDirectory)
+
+        manager.closeProject(repoID: repo.id)
+    }
+
     // MARK: - Fixtures
 
     private func makeLanguageServices() -> ProjectLanguageServices {
