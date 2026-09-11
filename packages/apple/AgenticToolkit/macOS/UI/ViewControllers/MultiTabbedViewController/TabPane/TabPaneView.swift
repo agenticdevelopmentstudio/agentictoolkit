@@ -4,15 +4,16 @@ import AppKit
 
 /// The card drawn in the edge bar: a stacked block, the same on all four edges.
 ///
-/// Every card paints what the workspace paints, in the workspace's own outline
-/// colour, and its background overhangs the bar by `workspaceOverlap` — far
-/// enough to cover the line the workspace draws down that side. So there is no
-/// seam where the two meet: a single unbroken 1pt line runs up one side of a
-/// card, around its two outer corners, down the other side, across the bare
-/// workspace edge to the next card, and on around the workspace itself.
+/// The card in front paints what the workspace paints, in the workspace's own
+/// outline colour, and its background overhangs the bar by `workspaceOverlap` —
+/// far enough to cover the line the workspace draws down that side. So there is
+/// no seam where those two meet: one unbroken line runs up the active card's
+/// side, around its two outer corners, down the other side, and on around the
+/// workspace itself.
 ///
-/// Which card is in front is therefore carried by its text, not by its fill:
-/// the active card's labels sit a role brighter than the rest.
+/// A card behind stops at its own edge instead, leaving the workspace's line
+/// whole where it passes: the outline belongs to the workspace and to whatever
+/// is joined to it, and a waiting card is not that.
 ///
 /// `TabBarView` supplies the other half of the attachment: it pads the outer
 /// side of the bar and leaves the workspace side at zero.
@@ -27,10 +28,17 @@ final class TabPaneView: NSView {
     /// over: the card is a block you read, not a strip you squint at.
     static let minHeight: CGFloat = 136
 
-    /// How far the card's background reaches past the bar and over the
+    /// How far the active card's background reaches past the bar and over the
     /// workspace's own outline. One point is that outline's whole width, which
-    /// is the point: the line ceases to exist across the card's mouth.
+    /// is the point: the line ceases to exist across the card's mouth — and
+    /// only across that one card's mouth.
     static let workspaceOverlap: CGFloat = 1
+
+    /// How much smaller a card behind is drawn on every side. It is the card's
+    /// paint that shrinks, never the card: the text stays where it was and only
+    /// the block around it pulls in, so the card in front reads as the one
+    /// standing nearer.
+    static let inactiveInset: CGFloat = 4
 
     /// The card's own padding, inside the border.
     private static let padding = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
@@ -51,6 +59,9 @@ final class TabPaneView: NSView {
     private let background: TabCardBackgroundView
     private let content = NSStackView()
     private var statusViews: [NSImageView] = []
+    /// The four sides of the painted block, and which of them faces the
+    /// workspace. `applyHighlight` moves them.
+    private var cardSides: CardSides?
 
     init(edge: Edge, tabID: UUID) {
         self.edge = edge
@@ -109,6 +120,20 @@ final class TabPaneView: NSView {
         )
     }
 
+    /// What the card is painted with, as the theme resolved it — the fill
+    /// inside its three sides, and the line along them.
+    var cardFillColor: NSColor { background.fillColor }
+    var cardBorderColor: NSColor { background.borderColor }
+
+    /// How far the painted block stands past the card's own edge on the side
+    /// facing the workspace: a point out over the workspace's outline while
+    /// this is the card in front, and back inside the card by
+    /// `inactiveInset` while it is not.
+    var workspaceOverhang: CGFloat { (cardSides?.workspace.constant ?? 0) * outwardSign }
+
+    /// Where the painted block has landed inside the card, once laid out.
+    var cardPaintFrame: NSRect { background.frame }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         contextMenuProvider?(event) ?? super.menu(for: event)
     }
@@ -156,12 +181,9 @@ final class TabPaneView: NSView {
         }
         addSubview(content)
 
-        let overhang = overhangInsets()
-        NSLayoutConstraint.activate([
-            background.topAnchor.constraint(equalTo: topAnchor, constant: -overhang.top),
-            background.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -overhang.left),
-            background.trailingAnchor.constraint(equalTo: trailingAnchor, constant: overhang.right),
-            background.bottomAnchor.constraint(equalTo: bottomAnchor, constant: overhang.bottom),
+        let sides = CardSides(edge: edge, card: self, background: background)
+        cardSides = sides
+        NSLayoutConstraint.activate(sides.constraints + [
             content.topAnchor.constraint(equalTo: topAnchor),
             content.leadingAnchor.constraint(equalTo: leadingAnchor),
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -215,36 +237,88 @@ final class TabPaneView: NSView {
         return spacer
     }
 
-    /// How far the background reaches past each side of the card. Only the
-    /// side facing the workspace overhangs; the other three end where the card
-    /// ends.
-    private func overhangInsets() -> NSEdgeInsets {
-        let over = Self.workspaceOverlap
+    /// Which way the workspace lies from this card, as that side's constraint
+    /// has to spell it: a trailing or bottom edge moves away from the card on a
+    /// positive constant, a leading or top edge on a negative one.
+    private var outwardSign: CGFloat {
         switch edge {
-        case .top: return NSEdgeInsets(top: 0, left: 0, bottom: over, right: 0)
-        case .bottom: return NSEdgeInsets(top: over, left: 0, bottom: 0, right: 0)
-        case .left: return NSEdgeInsets(top: 0, left: 0, bottom: 0, right: over)
-        case .right: return NSEdgeInsets(top: 0, left: over, bottom: 0, right: 0)
+        case .top, .left: return 1
+        case .bottom, .right: return -1
         }
     }
 
-    /// Every card paints the workspace's own backdrop and outline, so the two
-    /// are one surface under one line. Which card is in front is the text: the
-    /// active card's labels sit a role brighter than the rest.
+    /// The active card and an inactive one are two different objects, not one
+    /// object at two brightnesses.
+    ///
+    /// The active card paints the workspace's own backdrop and outline and
+    /// reaches over the workspace's line, so it and the workspace are one
+    /// surface under one line, and its agent name is the theme's accent — the
+    /// one thing on the bar in a colour, so the eye finds it without reading
+    /// anything. An inactive card paints the plane the bar itself is on, is
+    /// drawn in the border tone, and pulls in `inactiveInset` on every side —
+    /// so it stands back from the workspace's line rather than over it, leaving
+    /// that line whole, and is plainly the smaller of the two shapes. It reads
+    /// as a waiting outline rather than a dimmed copy of the active one: its
+    /// own text stays at the roles a body of text is meant to be read at, so
+    /// only the card around it recedes, never the words.
     private func applyHighlight() {
         let palette = resolvedThemeScope.palette
-        background.fillColor = NSColor(palette.projectPaneBackdrop)
-        background.borderColor = NSColor(palette.projectPaneOutline)
-        agentLabel.role = isHighlighted ? .primaryText : .secondaryText
+        cardSides?.inset(by: isHighlighted ? 0 : Self.inactiveInset)
+        if isHighlighted { cardSides?.workspace.constant = outwardSign * Self.workspaceOverlap }
+        background.reachesOverWorkspace = isHighlighted
+        background.fillColor = isHighlighted
+            ? NSColor(palette.projectPaneBackdrop)
+            : palette.nsColor(.windowBackground)
+        background.borderColor = isHighlighted
+            ? NSColor(palette.projectPaneOutline)
+            : palette.nsColor(.border)
+        agentLabel.role = isHighlighted ? .accent : .primaryText
         sessionLabel.role = isHighlighted ? .primaryText : .secondaryText
-        directoryLabel.role = isHighlighted ? .secondaryText : .placeholderText
+        directoryLabel.role = isHighlighted ? .secondaryText : .tertiaryText
         branchLabel.role = isHighlighted ? .secondaryText : .tertiaryText
         summaryLabel.role = isHighlighted ? .secondaryText : .tertiaryText
-        closeButton.contentTintColor = palette.nsColor(isHighlighted ? .secondaryText : .placeholderText)
+        closeButton.contentTintColor = palette.nsColor(isHighlighted ? .secondaryText : .tertiaryText)
     }
 
     @objc private func closePressed() {
         onClose?()
+    }
+}
+
+// MARK: - Where the paint sits on the card
+
+/// The four constraints holding the painted block over its card, kept together
+/// because they are only ever moved together: the block is inset from the card
+/// by one number, and the side facing the workspace is then let out over the
+/// workspace's line when this is the card in front.
+///
+/// Each side is stored with the sign that moves it *inward*, which is what lets
+/// `inset(by:)` be one number rather than four — `top` and `leading` grow
+/// inward on a positive constant, `trailing` and `bottom` on a negative one.
+@MainActor
+private struct CardSides {
+    let workspace: NSLayoutConstraint
+
+    private let sides: [(constraint: NSLayoutConstraint, inward: CGFloat)]
+
+    init(edge: Edge, card: NSView, background: NSView) {
+        let top = background.topAnchor.constraint(equalTo: card.topAnchor)
+        let leading = background.leadingAnchor.constraint(equalTo: card.leadingAnchor)
+        let trailing = background.trailingAnchor.constraint(equalTo: card.trailingAnchor)
+        let bottom = background.bottomAnchor.constraint(equalTo: card.bottomAnchor)
+        sides = [(top, 1), (leading, 1), (trailing, -1), (bottom, -1)]
+        switch edge {
+        case .top: workspace = bottom
+        case .bottom: workspace = top
+        case .left: workspace = trailing
+        case .right: workspace = leading
+        }
+    }
+
+    var constraints: [NSLayoutConstraint] { sides.map(\.constraint) }
+
+    func inset(by amount: CGFloat) {
+        for side in sides { side.constraint.constant = side.inward * amount }
     }
 }
 
@@ -261,6 +335,9 @@ final class TabPaneView: NSView {
 private final class TabCardBackgroundView: NSView {
     var fillColor: NSColor = .clear { didSet { needsDisplay = true } }
     var borderColor: NSColor = .clear { didSet { needsDisplay = true } }
+    /// Whether this card's own edge is standing over the workspace's outline
+    /// rather than short of it; see `strokeBounds()`.
+    var reachesOverWorkspace = false { didSet { needsDisplay = true } }
 
     private let edge: Edge
 
@@ -315,14 +392,18 @@ private final class TabCardBackgroundView: NSView {
     }
 
     /// `bounds` pulled in by half a point on the three stroked sides, so a
-    /// 1pt line lands inside the card instead of straddling its edge. The open
-    /// side keeps its half point: nothing is drawn there, and both the fill
-    /// and the two side strokes have to run all the way out through the
-    /// overhang and over the workspace's own outline, which is what leaves no
-    /// seam between them.
+    /// 1pt line lands inside the card instead of straddling its edge.
+    ///
+    /// The open side gets its half point back only while the card reaches over
+    /// the workspace: nothing is drawn along that side, and the fill and the
+    /// two side strokes have to run all the way out through the overhang and
+    /// over the workspace's own outline, which is what leaves no seam between
+    /// them. A card standing short of the outline keeps the inset instead, so
+    /// not even the ends of its two side strokes cross the line.
     private func strokeBounds() -> NSRect {
         let half: CGFloat = 0.5
         var rect = bounds.insetBy(dx: half, dy: half)
+        guard reachesOverWorkspace else { return rect }
         switch edge {
         case .top:
             rect.origin.y -= half

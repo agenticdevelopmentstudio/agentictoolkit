@@ -400,12 +400,11 @@ public final class ComposableTabsPaneBackgroundView: NSView, Themeable {
             && isWindowFocused
             && ComposableTabsActivePane.shared.activeNodeID(in: window) == nodeID
         layer?.borderWidth = isActive ? 2 : 0
-        // The outline gray, not the accent: this rectangle says which pane you
-        // are in, and it sits around content the user is reading, so a
-        // saturated frame would compete with what is inside it. It is also not
-        // a *surface* tone — the first version drew it in the raised-surface
-        // gray, which is now the color of the backdrop the pane sits on, and a
-        // line the color of the plane behind it is a line nobody can see.
-        layer?.borderColor = isActive ? NSColor(palette.projectPaneOutline).cgColor : nil
+        // The accent, and the only line in the window drawn in it: this
+        // rectangle is the answer to "which pane am I in", and the workspace
+        // around it is deliberately drawn in the panes' own hairline tone so
+        // that this is the one thing standing out from the frame rather than
+        // one highlight among several.
+        layer?.borderColor = isActive ? NSColor(palette.projectActivePaneOutline).cgColor : nil
     }
 }

@@ -244,18 +244,83 @@ final class TabPaneViewControllerTests: XCTestCase {
         }
     }
 
-    /// A selected tab is not highlighted — it is promoted. Its text goes to
-    /// the primary role rather than to `.selectionText`, because the card is
-    /// painting the workspace's own plane underneath it, not a selection fill.
+    /// A selected tab is not highlighted — it is promoted. Its name goes to the
+    /// accent rather than to `.selectionText`, because the card is painting the
+    /// workspace's own plane underneath it, not a selection fill.
     func testSelectionPromotesTheTextInsteadOfHighlightingIt() {
         let source = StubSource()
         let pane = makePane(edge: .left, source: source)
 
-        XCTAssertEqual(pane.paneView.agentLabel.role, .secondaryText)
+        XCTAssertEqual(pane.paneView.agentLabel.role, .primaryText)
 
         pane.isHighlighted = true
-        XCTAssertEqual(pane.paneView.agentLabel.role, .primaryText)
+        XCTAssertEqual(pane.paneView.agentLabel.role, .accent)
         XCTAssertEqual(pane.paneView.sessionLabel.role, .primaryText)
+    }
+
+    /// An inactive card is not a dimmed copy of the active one: the two sit on
+    /// different planes, and the inactive card's is the one the bar is on.
+    func testAnInactiveCardSitsOnTheBarsPlaneAndTheActiveOneOnTheWorkspaces() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+        let palette = pane.paneView.resolvedThemeScope.palette
+
+        XCTAssertEqual(pane.paneView.cardFillColor, palette.nsColor(.windowBackground))
+        XCTAssertEqual(pane.paneView.cardBorderColor, palette.nsColor(.border))
+
+        pane.isHighlighted = true
+        XCTAssertEqual(pane.paneView.cardFillColor, NSColor(palette.projectPaneBackdrop))
+        XCTAssertEqual(pane.paneView.cardBorderColor, NSColor(palette.projectPaneOutline))
+    }
+
+    /// The workspace's outline is covered by the one card that is joined to the
+    /// workspace, and by nothing else: a card behind stands back from that line
+    /// instead, so it runs past whole.
+    func testOnlyTheActiveCardReachesOverTheWorkspacesOutline() {
+        let source = StubSource()
+        for edge in Edge.allCases {
+            let pane = makePane(edge: edge, source: source)
+            XCTAssertEqual(
+                pane.paneView.workspaceOverhang, -TabPaneView.inactiveInset, "inactive card on \(edge)")
+
+            pane.isHighlighted = true
+            XCTAssertEqual(
+                pane.paneView.workspaceOverhang, TabPaneView.workspaceOverlap, "active card on \(edge)")
+
+            pane.isHighlighted = false
+            XCTAssertEqual(
+                pane.paneView.workspaceOverhang, -TabPaneView.inactiveInset, "deselected card on \(edge)")
+        }
+    }
+
+    /// A card behind is the smaller shape on every side, not only on the side
+    /// facing the workspace — that is what makes the card in front look nearer
+    /// rather than merely attached.
+    func testACardBehindIsPaintedSmallerThanTheCardInFront() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+        pane.paneView.frame = NSRect(x: 0, y: 0, width: 260, height: 140)
+        pane.paneView.layoutSubtreeIfNeeded()
+        let inset = TabPaneView.inactiveInset
+        let behind = pane.paneView.cardPaintFrame
+        XCTAssertEqual(behind, pane.paneView.bounds.insetBy(dx: inset, dy: inset))
+
+        pane.isHighlighted = true
+        pane.paneView.layoutSubtreeIfNeeded()
+        let front = pane.paneView.cardPaintFrame
+        XCTAssertGreaterThan(front.width, behind.width)
+        XCTAssertGreaterThan(front.height, behind.height)
+    }
+
+    /// The words are readable whichever card they are on — an inactive tab
+    /// recedes by its plane, never by fading its own text out of legibility.
+    func testAnInactiveCardsTextStaysAtReadableRoles() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+        for role in [pane.paneView.agentLabel.role, pane.paneView.sessionLabel.role,
+                     pane.paneView.directoryLabel.role, pane.paneView.branchLabel.role] {
+            XCTAssertNotEqual(role, .placeholderText)
+        }
     }
 
     func testClosePressedFiresOnClose() {
