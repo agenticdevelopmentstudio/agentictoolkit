@@ -96,6 +96,11 @@ public final class DiagnosticStore: ObservableObject {
     private var observations: [ObjectIdentifier: Observation] = [:]
 
     private var cancellables: Set<AnyCancellable> = []
+
+    /// The document-store observer that prunes closed documents, held because
+    /// dropping the token is what unregisters it.
+    private var documentObservation: TextDocumentStoreObservation?
+
     private var isShutDown = false
 
     public init() {}
@@ -194,6 +199,32 @@ public final class DiagnosticStore: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Forgets a document's diagnostics when the last editor on it closes.
+    ///
+    /// Without this the map only ever grows: every file a user has opened once
+    /// keeps its last published set — message, ranges, source, related
+    /// information, code description — for the life of the window, keyed by a
+    /// URI no editor is showing. A project is browsed file by file, so "every
+    /// file ever opened" is the steady state rather than a corner case, and
+    /// `clear(uri:)` existing with no caller is not a smaller version of the
+    /// same defect: it is the same defect.
+    ///
+    /// **`.closed` is the right event precisely because it is refcounted.**
+    /// `TextDocumentStore` emits it only when the last open on a URI goes away,
+    /// so a split view showing one file in two panes keeps its squiggles when
+    /// one pane closes. Pruning on anything finer would blank a document that
+    /// is still on screen.
+    ///
+    /// Idempotent: a second call is a no-op rather than a second observer, for
+    /// the same reason `observe(_:)` refuses a session it already reads.
+    public func observeDocuments(in store: TextDocumentStore) {
+        guard !isShutDown, documentObservation == nil else { return }
+        documentObservation = store.addObserver { [weak self] event in
+            guard case .closed(let uri) = event else { return }
+            self?.clear(uri: uri)
+        }
+    }
+
     // MARK: - Reading
 
     /// The diagnostics for one document; an empty array when a server has said
@@ -263,6 +294,11 @@ public final class DiagnosticStore: ObservableObject {
         }
         observations = [:]
         cancellables = []
+        // Dropping the token unregisters the observer, which is what stops a
+        // close arriving during teardown from clearing diagnostics a view still
+        // on screen is showing — the same reason the stored sets themselves are
+        // left alone above.
+        documentObservation = nil
     }
 
     /// A net under `shutdown()`, not a replacement for it: an owner released

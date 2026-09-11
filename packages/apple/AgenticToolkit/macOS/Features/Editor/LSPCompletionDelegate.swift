@@ -3,6 +3,7 @@
 //  AgenticToolkit
 //
 
+import AgenticToolkitCore
 import AgenticToolkitLanguage
 import AppKit
 import CodeEditSourceEditor
@@ -34,6 +35,36 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     /// be synchronous.
     private var cachedEntries: [LSPCompletionEntry] = []
     private var cacheAnchorOffset: Int?
+
+    /// The caret offset the cached set was *requested* at, and whether the
+    /// server called that set incomplete.
+    ///
+    /// `isIncomplete` is the server saying "this is what I could compute in the
+    /// time I had — ask me again once you know more". Filtering such a set
+    /// locally narrows something that was never the whole answer, so an item
+    /// the user is typing towards stays missing however much more they type.
+    /// The offset is what makes "once you know more" decidable: only a caret
+    /// *past* the one the list was computed at is new information, so a cursor
+    /// move that has not moved is not a reason to ask again.
+    private var cachedListIsIncomplete = false
+    private var cacheRequestOffset: Int?
+
+    /// Set when `completionOnCursorMove` gave up on an incomplete list, read
+    /// and cleared by the request that gives up prompts.
+    ///
+    /// The hand-off exists because the two halves are different calls made by
+    /// the package: `SuggestionController.cursorsUpdated(..., presentIfNot:)`
+    /// closes the window when this delegate answers `nil` and then calls
+    /// `showCompletions` again, which arrives here as an ordinary request with
+    /// nothing on it to say why it was made. `.triggerForIncompleteCompletions`
+    /// is what tells the server it is being re-asked rather than asked, and it
+    /// is the difference between a server recomputing the narrowed set and one
+    /// handing back the same truncated list.
+    ///
+    /// Deliberately **not** cleared by `clearCache()`: the window closing is
+    /// exactly what happens between the two halves, so a flag that did not
+    /// survive it would never once be read.
+    private var pendingIncompleteRefresh = false
 
     /// The server's `completionProvider.triggerCharacters`, once resolved.
     ///
@@ -262,6 +293,11 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         let languageId = document.languageId
         let prefixStart = identifierStart(before: offset)
         let position = document.position(forUTF16Offset: offset)
+        // Read here, with every other pre-suspension fact, because it is a fact
+        // *about the caret this request was made at* — after an await the
+        // document may have moved on, and a character read then would describe
+        // a request nobody made.
+        let characterBeforeCaret = Self.character(before: offset, in: document.text as NSString)
         let defaultRange = LSPRange(
             start: document.position(forUTF16Offset: prefixStart),
             end: position
@@ -281,6 +317,7 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
                 snippetItems: snippetItems,
                 defaultRange: defaultRange,
                 prefixStart: prefixStart,
+                requestOffset: offset,
                 generation: generation
             )
         }
@@ -294,6 +331,7 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
                 snippetItems: snippetItems,
                 defaultRange: defaultRange,
                 prefixStart: prefixStart,
+                requestOffset: offset,
                 generation: generation
             )
         }
@@ -320,8 +358,16 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         // other, and a second liveness guard at this call site would only
         // teach the next reader that liveness is checked ad hoc rather than
         // once, at the source.
+        //
+        // Bound rather than discarded because the same set answers a second
+        // question: whether *this* request was provoked by a trigger character.
+        // Taken from the capabilities this request itself read, not from the
+        // cache the line below writes — the cache is ordered by information age
+        // across every caller, and what this request needs is what this
+        // server declared, now.
+        let triggerCharacters = Set(completionProvider.triggerCharacters ?? [])
         _ = storeTriggerCharacters(
-            Set(completionProvider.triggerCharacters ?? []),
+            triggerCharacters,
             from: session,
             readAt: triggerStamp
         )
@@ -330,10 +376,12 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         do {
             response = try await session.completion(
                 CompletionParams(
-                    uri: uri,
+                    textDocument: TextDocumentIdentifier(uri: uri),
                     position: position,
-                    triggerKind: .invoked,
-                    triggerCharacter: nil
+                    context: completionContext(
+                        characterBeforeCaret: characterBeforeCaret,
+                        triggerCharacters: triggerCharacters
+                    )
                 )
             )
         } catch {
@@ -344,6 +392,7 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
                 snippetItems: snippetItems,
                 defaultRange: defaultRange,
                 prefixStart: prefixStart,
+                requestOffset: offset,
                 generation: generation
             )
         }
@@ -351,10 +400,61 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         return publish(
             items: response?.items ?? [],
             snippetItems: snippetItems,
+            // `?? false`: a server that answered with a bare item array, or
+            // with nothing at all, has made no claim of incompleteness — and
+            // "no claim" is the complete case, which is what LSP's default for
+            // the field says too.
+            isIncomplete: response?.isIncomplete ?? false,
             defaultRange: defaultRange,
             prefixStart: prefixStart,
+            requestOffset: offset,
             generation: generation
         )
+    }
+
+    /// Why this request is being made, as the server will read it.
+    ///
+    /// Three kinds, in the one order that is not ambiguous. A refresh of an
+    /// incomplete list wins over a trigger character because it is a statement
+    /// about *this exchange* — the server said "ask me again", and this is the
+    /// again — where a trigger character is only a statement about the text.
+    /// The two coincide whenever a list is incomplete and the user's next
+    /// keystroke happens to be a `.`, and answering `.triggerCharacter` there
+    /// would tell the server to start a fresh member completion instead of
+    /// finishing the one it asked to be re-asked about.
+    private func completionContext(
+        characterBeforeCaret: String?,
+        triggerCharacters: Set<String>
+    ) -> CompletionContext {
+        if pendingIncompleteRefresh {
+            // Consumed here rather than at entry, because every path above
+            // this one returns without having asked the server anything — and
+            // a refresh that was never sent must stay owed.
+            pendingIncompleteRefresh = false
+            return CompletionContext(triggerKind: .triggerForIncompleteCompletions, triggerCharacter: nil)
+        }
+        // The server's own declared set, never a guess: `.` is sourcekit-lsp's
+        // and clangd's, `<` is not, and a client that assumed punctuation
+        // triggers completion would claim a trigger the server never asked for.
+        if let characterBeforeCaret, triggerCharacters.contains(characterBeforeCaret) {
+            return CompletionContext(triggerKind: .triggerCharacter, triggerCharacter: characterBeforeCaret)
+        }
+        // `.invoked` is the honest answer for a request made in the middle of
+        // an identifier, which is what the package's own trigger model produces
+        // for every letter and digit typed.
+        return CompletionContext(triggerKind: .invoked, triggerCharacter: nil)
+    }
+
+    /// The single UTF-16 unit immediately before `offset`, or `nil` at the
+    /// start of the document.
+    ///
+    /// One unit rather than one `Character`, because that is what a trigger
+    /// character is: the declared set is punctuation, all of it in the basic
+    /// plane. A lone surrogate read out of an emoji is not in any server's set
+    /// and falls through to `.invoked`, which is the right answer for it.
+    private static func character(before offset: Int, in text: NSString) -> String? {
+        guard offset > 0, offset <= text.length else { return nil }
+        return text.substring(with: NSRange(location: offset - 1, length: 1))
     }
 
     /// The window for a completed request: the server's items first, snippets
@@ -372,8 +472,10 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
     private func publish(
         items: [CompletionItem],
         snippetItems: [CompletionItem],
+        isIncomplete: Bool = false,
         defaultRange: LSPRange,
         prefixStart: Int,
+        requestOffset: Int,
         generation: Int
     ) -> (windowPosition: CursorPosition, items: [CodeSuggestionEntry])? {
         // Snippets come after the server's items, at equal relevance rather
@@ -406,6 +508,8 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         if isCurrent(generation) {
             cachedEntries = entries
             cacheAnchorOffset = prefixStart
+            cachedListIsIncomplete = isIncomplete
+            cacheRequestOffset = requestOffset
         }
 
         // The window is anchored at the start of the token being completed, not
@@ -436,6 +540,23 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         let typed = text.substring(with: NSRange(location: anchor, length: offset - anchor))
         // Any whitespace means the caret has left the identifier entirely.
         guard !typed.contains(where: { $0.isWhitespace }) else { return nil }
+
+        // An incomplete list, with the caret now past where it was computed:
+        // the server asked to be re-asked, and this is the only way to ask.
+        // `nil` closes the window, and `cursorsUpdated(..., presentIfNot: true)`
+        // — which is what called this — reopens it through
+        // `completionSuggestionsRequested`, where the flag below turns the
+        // reopen into `.triggerForIncompleteCompletions`.
+        //
+        // Filtering instead would be the defect: the set is by construction not
+        // everything the server would say about this prefix, so the item being
+        // typed towards may simply not be in it, and no amount of further
+        // typing would ever bring it back.
+        if cachedListIsIncomplete, let requestOffset = cacheRequestOffset, offset > requestOffset {
+            pendingIncompleteRefresh = true
+            return nil
+        }
+
         guard !typed.isEmpty else { return cachedEntries }
 
         let prefix = typed.lowercased()
@@ -464,8 +585,135 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
             range = NSRange(location: range.location, length: max(0, end - range.location))
         }
 
-        textView.textView.replaceCharacters(in: range, with: Self.insertionText(for: entry.item))
+        // Every range is converted against the document **as it is now**,
+        // before a single character is written. That is what LSP promises
+        // about `additionalTextEdits` — each one names a range in the document
+        // the completion was computed for — and it is the whole reason this
+        // cannot be a loop that converts and writes in turn: the first write
+        // moves every later offset, and a range converted afterwards describes
+        // text that has already shifted under it.
+        let primary = Edit(range: range, text: Self.insertionText(for: entry.item))
+        let edits = [primary] + Self.applicableAdditionalEdits(
+            of: entry.item,
+            around: primary,
+            document: document,
+            limit: textView.textView.documentRange.length
+        )
+
+        // Descending by start offset, so each not-yet-applied range still
+        // describes the characters it was converted against — the same
+        // back-to-front rule, for the same reason, as `TextDocument.apply(_:)`,
+        // which is the other place in this codebase that lands a batch of
+        // `TextEdit`s.
+        //
+        // The tiebreak is where the two differ, because the sets they sort do.
+        // `apply(_:)` takes whatever a server sends, co-located inserts
+        // included, and orders those by declared index. Here, everything that
+        // could tie has already been through `applicableAdditionalEdits`: two
+        // inserts at one offset are dropped as a conflict, and so are two
+        // overlapping replacements — so the *only* tie that survives is an
+        // insert sharing an offset with a replacement, and for that one there
+        // is a right answer rather than a convention. **Longer range first.**
+        // A replacement's range stops being valid the moment anything is
+        // spliced in front of it, while a zero-length splice at that same
+        // offset is still valid after the replacement lands, and lands in front
+        // of it, which is where an edit at the range's start belongs. The index
+        // is a final tiebreak that nothing reaching here can need; it is what
+        // makes the comparator total, which `sorted(by:)` requires and does not
+        // check.
+        let ordered = edits.enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.range.location != rhs.element.range.location {
+                    return lhs.element.range.location > rhs.element.range.location
+                }
+                if lhs.element.range.length != rhs.element.range.length {
+                    return lhs.element.range.length > rhs.element.range.length
+                }
+                return lhs.offset > rhs.offset
+            }
+            .map(\.element)
+
+        // One undo step, and only when there is more than one write to group.
+        // `CEUndoManager` groups by adjacency, and an import at the top of the
+        // file is not adjacent to a call in the middle of it — so two writes
+        // become two groups, and a single ⌘Z leaves the import behind without
+        // the code that needed it. Left ungrouped in the ordinary one-edit
+        // case, because `beginUndoGrouping`/`endUndoGrouping` also force a
+        // break on each side, and breaking the group around a plain completion
+        // would change undo behaviour this finding is not about.
+        let undoManager = ordered.count > 1 ? textView.textView.undoManager : nil
+        undoManager?.beginUndoGrouping()
+        for edit in ordered {
+            textView.textView.replaceCharacters(in: edit.range, with: edit.text)
+        }
+        undoManager?.endUndoGrouping()
+
         clearCache()
+    }
+
+    /// One replacement, already resolved against the pre-edit document.
+    private struct Edit {
+        let range: NSRange
+        let text: String
+    }
+
+    /// The item's `additionalTextEdits`, converted, bounds-checked, and with
+    /// anything that collides dropped.
+    ///
+    /// LSP requires additional edits to overlap neither the primary edit nor
+    /// each other, and a server that breaks that has handed us two writes to
+    /// the same characters — which produce text neither edit describes,
+    /// whichever order they land in. Dropped rather than applied, and dropped
+    /// individually rather than refusing the whole item: the primary insertion
+    /// is the thing the user actually chose and it is still well defined on its
+    /// own.
+    ///
+    /// `limit` is the text view's length, not the document's.
+    /// `TextDocument.nsRange(for:)` clamps to the *document*, and the two are
+    /// the same length in every ordinary case — but `replaceCharacters` traps
+    /// rather than complains, and these ranges come off a socket.
+    private static func applicableAdditionalEdits(
+        of item: CompletionItem,
+        around primary: Edit,
+        document: TextDocument,
+        limit: Int
+    ) -> [Edit] {
+        var accepted: [Edit] = []
+        for edit in item.additionalTextEdits ?? [] {
+            let range = document.nsRange(for: edit.range)
+            guard range.location >= 0, NSMaxRange(range) <= limit else { continue }
+            let candidate = Edit(range: range, text: edit.newText)
+            guard !conflicts(candidate.range, primary.range),
+                  !accepted.contains(where: { conflicts(candidate.range, $0.range) }) else {
+                logger.error(
+                    """
+                    Language server sent an additionalTextEdit overlapping another edit of the \
+                    same completion item. Discarding it.
+                    """
+                )
+                continue
+            }
+            accepted.append(candidate)
+        }
+        return accepted
+    }
+
+    /// Whether two edit ranges are writes to the same place.
+    ///
+    /// Sharing a character is the obvious case. The two insertion cases are
+    /// not: an insertion point strictly inside a replaced range has no defined
+    /// meaning once that range is gone, and two insertions at the same point
+    /// are the case LSP calls out by name ("including the same insert
+    /// position"). An insertion exactly at a replacement's start or end is
+    /// *not* a conflict — the ordering above places it unambiguously.
+    private static func conflicts(_ lhs: NSRange, _ rhs: NSRange) -> Bool {
+        let start = max(lhs.location, rhs.location)
+        let end = min(NSMaxRange(lhs), NSMaxRange(rhs))
+        if start < end { return true }
+        if lhs.length == 0 && rhs.length == 0 { return lhs.location == rhs.location }
+        let (empty, span) = lhs.length == 0 ? (lhs, rhs) : (rhs, lhs)
+        guard empty.length == 0 else { return false }
+        return empty.location > span.location && empty.location < NSMaxRange(span)
     }
 
     func completionWindowDidClose() {
@@ -582,6 +830,11 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         currentRequestGeneration += 1
         cachedEntries = []
         cacheAnchorOffset = nil
+        // Facts *about* the cached set, so they go with it. Not
+        // `pendingIncompleteRefresh`, which is a fact about the next request
+        // and whose whole purpose is to outlive the window closing.
+        cachedListIsIncomplete = false
+        cacheRequestOffset = nil
     }
 
     /// Empties the cache only if `generation` is still the newest request.
@@ -593,6 +846,8 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         guard isCurrent(generation) else { return }
         cachedEntries = []
         cacheAnchorOffset = nil
+        cachedListIsIncomplete = false
+        cacheRequestOffset = nil
     }
 
     // MARK: - Item text
@@ -657,4 +912,8 @@ final class LSPCompletionDelegate: CodeSuggestionDelegate {
         }
         return result
     }
+}
+
+extension LSPCompletionDelegate: Loggable {
+    static nonisolated let logger = makeLogger()
 }

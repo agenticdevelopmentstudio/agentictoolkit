@@ -5,6 +5,7 @@
 
 import AppKit
 import CodeEditSourceEditor
+import CodeEditTextView
 import Foundation
 import LanguageServerProtocol
 import Testing
@@ -579,6 +580,343 @@ struct LSPCompletionDelegateTests {
         #expect(controller.textView.string == "let x = print")
     }
 
+    // MARK: - F12: additionalTextEdits
+
+    /// ★ F12. What it catches: an item's `additionalTextEdits` being read off
+    /// the wire, carried all the way to the apply, and then never written.
+    ///
+    /// This is the finding's whole point, so the assertion is on the buffer
+    /// rather than on a field being read: an import a completion promised and
+    /// did not add leaves code that does not compile, and the user has no way
+    /// to know the completion was supposed to add it.
+    @Test("a completion's additionalTextEdits land in the buffer alongside the insertion")
+    func appliesAdditionalTextEdits() async throws {
+        let item = CompletionItem(
+            label: "print",
+            insertText: "print",
+            additionalTextEdits: [
+                TextEdit(
+                    range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 0)),
+                    newText: "import Foo\n"
+                )
+            ]
+        )
+        let applied = try await applyFirstItem(
+            text: Self.sampleText,
+            caretOffset: Self.caretOffset,
+            response: .optionA([item])
+        )
+
+        #expect(applied.controller.textView.string == "import Foo\nlet x = print")
+    }
+
+    /// ★ F12, the co-located half. An additional edit whose insertion point is
+    /// exactly the start of the range the completion itself replaces is *not* a
+    /// conflict — LSP forbids overlap, and an insert at a boundary overlaps
+    /// nothing — but it is the one arrangement where "back to front" is not
+    /// enough on its own. Both edits start at the same offset, so the tiebreak
+    /// decides, and the wrong one splices the insert in first and then lets the
+    /// replacement eat the front of it.
+    ///
+    /// The rule the tiebreak encodes: at equal offsets the *replacement* goes
+    /// first, because a zero-length splice at that offset is still valid
+    /// afterwards while a replacement's range is not.
+    @Test("an additional edit at the very start of the replaced range lands in front of it")
+    func appliesAnAdditionalEditColocatedWithTheInsertion() async throws {
+        let item = CompletionItem(
+            label: "print",
+            insertText: "print",
+            additionalTextEdits: [
+                TextEdit(
+                    range: LSPRange(start: Position(line: 0, character: 8), end: Position(line: 0, character: 8)),
+                    newText: "/*x*/"
+                )
+            ]
+        )
+        let applied = try await applyFirstItem(
+            text: Self.sampleText,
+            caretOffset: Self.caretOffset,
+            response: .optionA([item])
+        )
+
+        #expect(applied.controller.textView.string == "let x = /*x*/print")
+    }
+
+    /// ★ F12, the ordering half. Every edit in the set names a range in the
+    /// *pre-edit* document — that is what LSP guarantees and the only thing a
+    /// server can promise — so applying them front-to-back makes every later
+    /// range wrong by the length delta of every earlier one.
+    ///
+    /// Written across two lines with an insert above the insertion point and a
+    /// replacement below it, because that is the arrangement an "add the import
+    /// and fix the call" completion actually produces, and it is the one where
+    /// ascending order silently lands in the wrong place instead of trapping.
+    @Test("additional edits are applied back-to-front so each range still means what the server meant")
+    func appliesAdditionalTextEditsBackToFront() async throws {
+        let text = "let x = prin\nlet y = 0\n"
+        let item = CompletionItem(
+            label: "print",
+            insertText: "print",
+            additionalTextEdits: [
+                // Ascending on purpose: the delegate must not depend on the
+                // server having sorted them, and the spec does not require it.
+                TextEdit(
+                    range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 0)),
+                    newText: "import Foo\n"
+                ),
+                TextEdit(
+                    range: LSPRange(start: Position(line: 1, character: 8), end: Position(line: 1, character: 9)),
+                    newText: "42"
+                )
+            ]
+        )
+        let applied = try await applyFirstItem(
+            text: text,
+            caretOffset: 12,
+            response: .optionA([item])
+        )
+
+        // Front-to-back would put the `42` one character late — inside
+        // `"let y = 0"` rather than over the `0` — and the eleven characters of
+        // the import would have moved it ten further still.
+        #expect(applied.controller.textView.string == "import Foo\nlet x = print\nlet y = 42\n")
+    }
+
+    /// ★ F12, the malformed-server half. LSP requires additional edits to
+    /// overlap neither the main edit nor each other; a server that breaks that
+    /// hands us two writes to the same characters, and applying both produces
+    /// text neither edit describes.
+    ///
+    /// Dropped rather than applied, and dropped rather than the whole item
+    /// refused: the primary insertion is what the user chose and it is still
+    /// well-defined on its own.
+    @Test("an additional edit overlapping the insertion is dropped rather than doubled")
+    func dropsAdditionalTextEditsThatOverlapTheInsertion() async throws {
+        let item = CompletionItem(
+            label: "print",
+            insertText: "print",
+            additionalTextEdits: [
+                // Over `in` — inside the `prin` the insertion itself replaces.
+                TextEdit(
+                    range: LSPRange(start: Position(line: 0, character: 10), end: Position(line: 0, character: 12)),
+                    newText: "XX"
+                )
+            ]
+        )
+        let applied = try await applyFirstItem(
+            text: Self.sampleText,
+            caretOffset: Self.caretOffset,
+            response: .optionA([item])
+        )
+
+        #expect(applied.controller.textView.string == "let x = print")
+    }
+
+    /// ★ F12, the undo half. Two `replaceCharacters` calls are two mutations,
+    /// and `CEUndoManager` groups by adjacency — an import at offset 0 and an
+    /// insertion at offset 8 are not adjacent, so they land in two groups and
+    /// one ⌘Z leaves the import behind without the call that needed it.
+    ///
+    /// `undoCount` is the assertion because it is the one observable that says
+    /// how many times the user has to press the key.
+    @Test("a completion with additional edits is one undo step, not two")
+    func additionalTextEditsAreOneUndoStep() async throws {
+        let item = CompletionItem(
+            label: "print",
+            insertText: "print",
+            additionalTextEdits: [
+                TextEdit(
+                    range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 0)),
+                    newText: "import Foo\n"
+                )
+            ]
+        )
+        // The harness controller has no undo manager at all — `TextView`'s is
+        // installed by `TextViewController` only when it builds its own view
+        // hierarchy — so one is supplied here.
+        let undoManager = CEUndoManager()
+        let applied = try await applyFirstItem(
+            text: Self.sampleText,
+            caretOffset: Self.caretOffset,
+            response: .optionA([item]),
+            undoManager: undoManager
+        )
+
+        #expect(applied.controller.textView.string == "import Foo\nlet x = print")
+        #expect(undoManager.undoCount == 1)
+    }
+
+    // MARK: - F13: CompletionList.isIncomplete
+
+    /// ★ F13. What it catches: `isIncomplete` being thrown away by
+    /// `response?.items`.
+    ///
+    /// An incomplete list is the server saying "this is what I could compute in
+    /// the time I had — ask me again when you know more". Filtering it locally
+    /// instead narrows a set that was never complete, so the item the user is
+    /// typing towards is missing and stays missing no matter how much more they
+    /// type.
+    ///
+    /// `nil` from `completionOnCursorMove` is the re-request: the package's
+    /// `cursorsUpdated(..., presentIfNot: true)` closes the window on `nil` and
+    /// immediately calls `showCompletions` again, which is the only channel
+    /// this delegate has for asking the server a second time.
+    @Test("an incomplete list is re-requested rather than filtered locally")
+    func anIncompleteListIsReRequested() async throws {
+        let text = "let x = print"
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(capabilities: makeCompletingCapabilities())
+        )
+        let session = try await fixture.startedSession()
+        await session.enqueueCompletionResponses([
+            .optionB(CompletionList(isIncomplete: true, items: [CompletionItem(label: "print")])),
+            .optionA([CompletionItem(label: "print"), CompletionItem(label: "printerName")])
+        ])
+        let document = makeEditorDocument(text: text)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: text)
+
+        _ = try #require(await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: 12)
+        ))
+
+        // One more character typed. A complete list would be filtered here —
+        // test 11 asserts exactly that — and an incomplete one must not be.
+        let moved = delegate.completionOnCursorMove(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: 13)
+        )
+        #expect(moved == nil, "an incomplete list was filtered locally instead of being re-requested")
+
+        // And the re-request says *why* it is being made, which is what lets a
+        // server compute the narrowed set rather than repeat the truncated one.
+        _ = await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: 13)
+        )
+        #expect(await session.lastCompletionParams?.context?.triggerKind == .triggerForIncompleteCompletions)
+    }
+
+    @Test("a complete list is filtered locally rather than re-requested")
+    func aCompleteListIsFilteredLocally() async throws {
+        let text = "let x = print"
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(),
+                completionResponse: .optionB(
+                    CompletionList(isIncomplete: false, items: [CompletionItem(label: "print")])
+                )
+            )
+        )
+        let session = try await fixture.startedSession()
+        let document = makeEditorDocument(text: text)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: text)
+
+        _ = try #require(await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: 12)
+        ))
+        let moved = delegate.completionOnCursorMove(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: 13)
+        )
+        #expect(moved?.map(\.label) == ["print"])
+
+        // Nothing about a complete list makes the *next* request an
+        // incomplete-completions refresh.
+        _ = await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: 13)
+        )
+        #expect(await session.lastCompletionParams?.context?.triggerKind == .invoked)
+    }
+
+    // MARK: - F30: the request's triggerKind
+
+    /// ★ F30. What it catches: `triggerKind: .invoked` hardcoded, so every
+    /// request claims the user pressed the completion key.
+    ///
+    /// `.` after an expression is the case that matters: sourcekit-lsp and
+    /// clangd both use the context to decide between "members of this type" and
+    /// "everything in scope", and an `.invoked` claim asks for the second when
+    /// the user typed the first.
+    @Test("a request made after a trigger character says so, and says which character")
+    func sendsTheTriggerCharacterContext() async throws {
+        let text = "let x = foo."
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: [".", ":"]),
+                completionResponse: items(["bar"])
+            )
+        )
+        let session = try await fixture.startedSession()
+        let document = makeEditorDocument(text: text)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: text)
+
+        _ = await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: (text as NSString).length)
+        )
+
+        let context = try #require(await session.lastCompletionParams?.context)
+        #expect(context.triggerKind == .triggerCharacter)
+        #expect(context.triggerCharacter == ".")
+    }
+
+    @Test("a request made mid-identifier is invoked, with no trigger character")
+    func sendsTheInvokedContextMidIdentifier() async throws {
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: [".", ":"]),
+                completionResponse: items(["print"])
+            )
+        )
+        let session = try await fixture.startedSession()
+        let document = makeEditorDocument(text: Self.sampleText)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: Self.sampleText)
+
+        _ = await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: Self.caretOffset)
+        )
+
+        let context = try #require(await session.lastCompletionParams?.context)
+        // `n` is not a trigger character, and `.` being *in* the set must not
+        // be enough to claim one was typed.
+        #expect(context.triggerKind == .invoked)
+        #expect(context.triggerCharacter == nil)
+    }
+
+    /// A character the *server* did not declare is not a trigger character,
+    /// however punctuation-shaped it looks. The set is per-server for a reason.
+    @Test("a character the server did not declare is not treated as a trigger")
+    func anUndeclaredCharacterIsNotATrigger() async throws {
+        let text = "let x = foo;"
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(triggerCharacters: ["."]),
+                completionResponse: items(["bar"])
+            )
+        )
+        let session = try await fixture.startedSession()
+        let document = makeEditorDocument(text: text)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: text)
+
+        _ = await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: (text as NSString).length)
+        )
+
+        let context = try #require(await session.lastCompletionParams?.context)
+        #expect(context.triggerKind == .invoked)
+        #expect(context.triggerCharacter == nil)
+    }
+
     // MARK: - Shared driver
 
     /// Runs one full request/apply cycle against `Self.sampleText` and returns
@@ -614,6 +952,52 @@ struct LSPCompletionDelegateTests {
             cursorPosition: cursorPosition
         )
         return controller
+    }
+
+    /// What one request-and-apply cycle leaves behind.
+    private struct AppliedCompletion {
+        let controller: TextViewController
+        let delegate: LSPCompletionDelegate
+        let document: TextDocument
+    }
+
+    /// The same cycle as `applyFirstItem(response:cursorPosition:)`, over text
+    /// the test chooses.
+    ///
+    /// A second driver rather than more parameters on the first: every existing
+    /// caller of that one is written against `sampleText` and its two derived
+    /// offsets, and threading them through would put the fixture's own
+    /// constants into thirty call sites that do not care about them.
+    private func applyFirstItem(
+        text: String,
+        caretOffset: Int,
+        response: CompletionResponse,
+        undoManager: CEUndoManager? = nil
+    ) async throws -> AppliedCompletion {
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeCompletingCapabilities(),
+                completionResponse: response
+            )
+        )
+        _ = try await fixture.startedSession()
+        let document = makeEditorDocument(text: text)
+        let delegate = makeDelegate(document: document, fixture: fixture)
+        let controller = makeEditorTextViewController(text: text)
+        if let undoManager {
+            controller.textView.setUndoManager(undoManager)
+        }
+
+        let result = try #require(await delegate.completionSuggestionsRequested(
+            textView: controller,
+            cursorPosition: makeCursor(atOffset: caretOffset)
+        ))
+        delegate.completionWindowApplyCompletion(
+            item: try #require(result.items.first),
+            textView: controller,
+            cursorPosition: nil
+        )
+        return AppliedCompletion(controller: controller, delegate: delegate, document: document)
     }
 
     // MARK: - Overlapping-request driver

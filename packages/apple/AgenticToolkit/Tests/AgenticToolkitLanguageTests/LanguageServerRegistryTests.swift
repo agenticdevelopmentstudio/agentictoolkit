@@ -918,4 +918,62 @@ struct LanguageServerRegistryTests {
         #expect(registry.sessions.count == 1)
         #expect(violations.isEmpty, "\(violations)")
     }
+
+    // MARK: - 6b. What the Root Markers help text claims (F50)
+
+    /// ★ F50. What it catches: help text that describes an algorithm the code
+    /// does not implement.
+    ///
+    /// "Most specific first" tells the user their ordering decides which marker
+    /// wins. It does not: the walk climbs one directory at a time and stops at
+    /// the first *directory* containing **any** marker, so the winner is decided
+    /// by the filesystem, never by the list. A user who believes the text puts
+    /// `Package.swift` before `.git` to keep a package root, and then gets the
+    /// repository root anyway whenever the `.git` is the nearer of the two, has
+    /// no way to tell the advice was wrong rather than the feature broken.
+    ///
+    /// The behaviour comes first here on purpose: the assertion on the wording
+    /// is only meaningful beside the walk it is a claim about.
+    @Test("marker order does not change the root, which is what the help text has to say")
+    func rootMarkerOrderDoesNotChangeTheRoot() throws {
+        try withTemporaryDirectory { fixture in
+            let outer = fixture.appendingPathComponent("outer", isDirectory: true)
+            let inner = outer.appendingPathComponent("inner", isDirectory: true)
+            let sources = inner.appendingPathComponent("Sources", isDirectory: true)
+            try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
+            // The "more specific" marker is the *outer* one, so a walk that
+            // honoured the list order would answer `outer` for the first case.
+            try Data().write(to: outer.appendingPathComponent("Package.swift"))
+            try FileManager.default.createDirectory(
+                at: inner.appendingPathComponent(".git", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            let file = sources.appendingPathComponent("Thing.swift")
+            try Data().write(to: file)
+
+            let specificFirst = LanguageServerRegistry.workspaceRoot(
+                startingAt: file,
+                markers: ["Package.swift", ".git"]
+            )
+            let specificLast = LanguageServerRegistry.workspaceRoot(
+                startingAt: file,
+                markers: [".git", "Package.swift"]
+            )
+
+            #expect(specificFirst?.standardizedFileURL == inner.standardizedFileURL)
+            #expect(specificLast?.standardizedFileURL == inner.standardizedFileURL)
+        }
+    }
+
+    @Test("the Root Markers help text describes the walk rather than an ordering that does nothing")
+    func rootMarkersHelpTextDescribesTheWalk() {
+        let text = LanguageServerRegistry.rootMarkersHelpText
+
+        #expect(
+            !text.lowercased().contains("specific first"),
+            "the help text still tells users to order the list, which the walk ignores"
+        )
+        // The fact the user actually needs in order to predict the answer.
+        #expect(text.lowercased().contains("nearest"))
+    }
 }

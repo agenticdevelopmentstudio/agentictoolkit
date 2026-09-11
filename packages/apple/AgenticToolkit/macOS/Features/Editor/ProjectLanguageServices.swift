@@ -33,6 +33,12 @@ public final class ProjectLanguageServices {
     /// something from this object needs the registry.
     private let sync: LanguageServerDocumentSync
 
+    /// Held, not merely passed through to the sync, because `start()` needs it
+    /// too: this object is the only one that holds both the document store and
+    /// the diagnostic store, so it is the only place the two can be wired
+    /// together.
+    private let documentStore: TextDocumentStore
+
     /// Everything the servers have said, unasked, about this project's files.
     ///
     /// Public where `sync` is private because this one *does* have consumers:
@@ -45,6 +51,7 @@ public final class ProjectLanguageServices {
 
     public init(documentStore: TextDocumentStore, registry: LanguageServerRegistry) {
         self.registry = registry
+        self.documentStore = documentStore
         self.sync = LanguageServerDocumentSync(store: documentStore, registry: registry)
         self.diagnostics = DiagnosticStore()
     }
@@ -64,6 +71,10 @@ public final class ProjectLanguageServices {
         // open before its server has finished handshaking, and a store wired
         // only to what existed at construction would show nothing for it.
         diagnostics.observeSessions(from: registry)
+        // And the other end of the store's lifetime: a document that closes
+        // takes its diagnostics with it, instead of leaving them in a map that
+        // grows by one entry per file the user has ever opened.
+        diagnostics.observeDocuments(in: documentStore)
     }
 
     /// Tears the stack down, sync first.

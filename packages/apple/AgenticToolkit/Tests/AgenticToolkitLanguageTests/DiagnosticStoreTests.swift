@@ -418,6 +418,88 @@ struct DiagnosticStoreTests {
 
         store.shutdown()
     }
+
+    // MARK: - 8. Pruning on close (F42)
+
+    /// ★ F42. What it catches: a store that grows for the life of the window.
+    ///
+    /// `clear(uri:)` has always existed and nothing has ever called it, so a
+    /// project where every file has been opened once holds every diagnostic
+    /// every server ever published about it — each one a `Diagnostic` with its
+    /// message, range, source, related information and code-description, keyed
+    /// by a URI no editor is showing. "The API exists" is not the behaviour;
+    /// the behaviour is that closing a file forgets it, and that is what this
+    /// asserts.
+    ///
+    /// The refcount half is the part that would be a bug in the fix rather than
+    /// in the code: two panes on one file are two opens and one document, and a
+    /// store that cleared on the first close would blank the squiggles in the
+    /// pane still on screen.
+    @Test("a document's diagnostics are forgotten when its last editor closes")
+    func closingTheLastEditorForgetsTheDocument() async {
+        let store = DiagnosticStore()
+        let documents = TextDocumentStore()
+        store.observeDocuments(in: documents)
+        let session = makeSession()
+        store.observe(session)
+
+        documents.open(uri: Self.firstURI, languageId: "swift", text: "let x = 1")
+        documents.open(uri: Self.secondURI, languageId: "swift", text: "let y = 2")
+        session.publish(PublishDiagnosticsParams(
+            uri: Self.firstURI,
+            version: 1,
+            diagnostics: [makeDiagnostic("first")]
+        ))
+        session.publish(PublishDiagnosticsParams(
+            uri: Self.secondURI,
+            version: 1,
+            diagnostics: [makeDiagnostic("second")]
+        ))
+        #expect(await poll { store.diagnostics(for: Self.firstURI).count == 1 })
+        #expect(await poll { store.diagnostics(for: Self.secondURI).count == 1 })
+
+        // A second pane on the same file. `TextDocumentStore` emits `.closed`
+        // only when the last one goes, so this close must change nothing.
+        documents.open(uri: Self.firstURI, languageId: "swift", text: "let x = 1")
+        documents.close(uri: Self.firstURI)
+        #expect(store.diagnostics(for: Self.firstURI).count == 1)
+
+        documents.close(uri: Self.firstURI)
+        #expect(store.diagnostics(for: Self.firstURI).isEmpty)
+        // And only that document: a prune keyed on the wrong thing would take
+        // the whole map with it.
+        #expect(store.diagnostics(for: Self.secondURI).count == 1)
+
+        store.shutdown()
+    }
+
+    /// A store that has been torn down stops listening, like every other
+    /// observation it holds.
+    ///
+    /// Not a tidiness assertion: `shutdown()` deliberately leaves the stored
+    /// diagnostics in place so a view still on screen keeps what it is showing,
+    /// and a close arriving during teardown must not undo that.
+    @Test("shutdown stops the document observation")
+    func shutdownStopsPruningOnClose() async {
+        let store = DiagnosticStore()
+        let documents = TextDocumentStore()
+        store.observeDocuments(in: documents)
+        let session = makeSession()
+        store.observe(session)
+
+        documents.open(uri: Self.firstURI, languageId: "swift", text: "let x = 1")
+        session.publish(PublishDiagnosticsParams(
+            uri: Self.firstURI,
+            version: 1,
+            diagnostics: [makeDiagnostic("first")]
+        ))
+        #expect(await poll { store.diagnostics(for: Self.firstURI).count == 1 })
+
+        store.shutdown()
+        documents.close(uri: Self.firstURI)
+
+        #expect(store.diagnostics(for: Self.firstURI).count == 1)
+    }
 }
 
 /// Test 7 — the stream's *lifetime*, which only the real session can answer.

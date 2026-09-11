@@ -437,7 +437,7 @@ private struct LanguageServerAddSheet: View {
                     .help("Space-separated arguments")
                     .accessibilityIdentifier("language-servers.add.arguments")
                 TextField("Root Markers", text: $rootMarkersText)
-                    .help("Comma-separated, most specific first, e.g. Package.swift, .git")
+                    .help(LanguageServerRegistry.rootMarkersHelpText)
                     .accessibilityIdentifier("language-servers.add.root-markers")
             }
 

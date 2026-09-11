@@ -111,6 +111,17 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     /// cancelled-but-still-running fetch from writing.
     private var fetchTask: Task<Void, Never>?
 
+    /// The stamp of the fetch `fetchTask` is running.
+    ///
+    /// Only `abandonFetch` reads it, and only to answer one question: *is the
+    /// task I am about to drop still mine?* `highlightsStamp` cannot answer it
+    /// — that bar moves only when a fetch writes, so it says nothing about
+    /// which fetch is currently in flight — and without the distinction a
+    /// fetch resuming with an unreadable response would drop the handle to a
+    /// newer fetch that is about to answer correctly, turning that newer
+    /// fetch's parked queries into permanent empties.
+    private var fetchTaskStamp = 0
+
     /// Queries that arrived before there was anything to answer them with.
     ///
     /// A query **must** call its completion exactly once. Parking them here
@@ -151,24 +162,51 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     // spelling `FileEditorState.deinit` uses, for the same reason.
     isolated deinit {
         fetchTask?.cancel()
-        // The package drops its `weak` reference to this provider when the pane
-        // closes, and a parked query's timeout would otherwise sleep on for the
-        // rest of its five seconds with nothing left to answer.
-        for query in pendingQueries {
-            query.timeout?.cancel()
-        }
+        // Every parked query is *completed*, not merely un-timed-out. A query
+        // whose completion is never called leaves its range in
+        // `HighlightProviderState`'s `pendingSet` forever, and `getNextRange()`
+        // subtracts that set — so if that state object outlives this provider,
+        // as it does whenever the language changes rather than the pane
+        // closing, the range is never asked about again by anybody.
+        // Cancelling the timeouts alone is exactly that: it removes the one
+        // thing that would have answered them.
+        //
+        // `failPendingQueries()` rather than a teardown of its own, because
+        // `operationCancelled` is the one result the package retries, and
+        // "retry" is the honest answer from an object that is going away
+        // without having learned anything.
+        failPendingQueries()
     }
 
     // MARK: - HighlightProviding
 
     /// Called once, from `HighlightProviderState.init`, and again if the
     /// language changes.
+    ///
+    /// Resets exactly as `applyEdit` does, and for the same reason stated the
+    /// other way round: a second `setUp` is new information about *what this
+    /// provider is describing*, so everything derived from the old answer is
+    /// stale the moment it arrives. Without the reset, a query arriving inside
+    /// the new fetch's round trip is answered from the previous language's
+    /// tokens — settled, because any success moves the range into the package's
+    /// `validSet` — and a fetch still in flight from before could still store
+    /// over the new one.
     func setUp(textView: TextView, codeLanguage: CodeLanguage) {
         self.textView = textView
+        // The stored ranges describe a document this provider is no longer
+        // being asked about, and the bar is advanced past every fetch already
+        // in flight so none of them can land as though it were current.
+        highlights = nil
+        fetchClock += 1
+        highlightsStamp = fetchClock
+
         // Started here rather than lazily on the first query because the first
         // query arrives immediately after this and would otherwise have nothing
         // to wait for.
         startFetch(afterDelay: nil)
+
+        // Empty on the first call, which is what makes this a no-op there.
+        failPendingQueries()
     }
 
     func queryHighlightsFor(
@@ -181,8 +219,12 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
             return
         }
         guard fetchTask != nil else {
-            // Nothing is known and nothing is coming. Only reachable before
-            // `setUp`, which the package always calls first.
+            // Nothing is known and nothing is coming: either `setUp` has not
+            // run yet — the package always calls it first, so that window is
+            // narrow — or a fetch ended in a response we could not read a
+            // single token of and dropped its handle on the way out (see
+            // `abandonFetch`). Both are settled answers, and `[]` is the same
+            // answer parking would have reached once the timeout expired.
             completion(.success([]))
             return
         }
@@ -279,6 +321,7 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         fetchTask?.cancel()
         fetchClock += 1
         let stamp = fetchClock
+        fetchTaskStamp = stamp
         fetchTask = Task { @MainActor [weak self] in
             if let delay {
                 // A cancelled sleep is the debounce doing its job: a newer edit
@@ -376,6 +419,40 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     /// information would reach state a newer fetch owns.
     private func abandonFetch(stamp: Int) {
         guard stamp >= highlightsStamp else { return }
+        // The handle goes **before** the queries are failed, not after,
+        // because failing them re-enters this class synchronously:
+        // `HighlightProviderState` answers `operationCancelled` by invalidating
+        // the range, and `invalidate(_:)` calls `highlightInvalidRanges()`
+        // straight through to `queryHighlightsFor` inside the completion.
+        // Dropping the handle afterwards would hand that retry the exact state
+        // this is removing — `highlights` nil, `fetchTask` non-nil — and it
+        // would park for the full timeout.
+        //
+        // The handle goes at all because otherwise this provider is stalled
+        // rather than settled: `highlights` is still `nil` and `fetchTask` is
+        // still non-`nil`, which is precisely the state
+        // `queryHighlightsFor` reads as "an answer is coming". Nothing is
+        // coming — this fetch was the answer, and it is over — so every query
+        // from here on parks for the full `queryTimeout` before being handed
+        // the same `[]` the timeout would have produced anyway. Dropping the
+        // handle makes that answer immediate.
+        //
+        // No re-fetch is armed. A server that answered once with an
+        // unreadable frame will answer the same way again, and a provider that
+        // retried on its own would loop against it for the life of the pane.
+        // `applyEdit` and `setUp` both start a fresh fetch, so the next edit —
+        // or the next language change — is the recovery, and that is the same
+        // recovery this path has always had, minus the five-second wait in
+        // front of every query until then.
+        //
+        // Guarded on the *task's* stamp rather than the write bar: a fetch
+        // superseded while it was suspended must not drop its successor's
+        // handle. `store(_:stamp:)` has no such guard and needs none — it is
+        // already refused by `highlightsStamp` — but the bar this one moves is
+        // a different bar.
+        if stamp == fetchTaskStamp {
+            fetchTask = nil
+        }
         failPendingQueries()
     }
 

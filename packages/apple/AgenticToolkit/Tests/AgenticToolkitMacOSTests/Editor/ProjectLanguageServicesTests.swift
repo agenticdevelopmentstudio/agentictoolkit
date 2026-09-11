@@ -86,4 +86,66 @@ struct ProjectLanguageServicesTests {
         #expect(fixture.log.events.filter { $0 == "stop" }.count == 1)
         #expect(!fixture.log.events.contains("didOpen(\(uri))"))
     }
+
+    /// ★ F42, the wiring half. The store's pruning is only a behaviour if
+    /// something calls it, and `ProjectLanguageServices` is the only object
+    /// that holds both the document store and the diagnostic store — so a
+    /// `clear(uri:)` with no caller is exactly as much of a defect as no
+    /// `clear(uri:)` at all.
+    ///
+    /// Asserted through the real stack rather than on the store alone, because
+    /// the thing that was missing is the wire, not the method.
+    @Test("closing a document prunes its diagnostics from the project's store")
+    func closingADocumentPrunesItsDiagnostics() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("ProjectLanguageServicesTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let fixture = LSPEditorFixture(
+            workspaceURL: root,
+            behavior: FakeEditorSessionBehavior(capabilities: makeSyncingCapabilities())
+        )
+        let store = TextDocumentStore()
+        let services = ProjectLanguageServices(documentStore: store, registry: fixture.registry)
+        services.start()
+        let session = try await fixture.startedSession()
+
+        let uri = root.appendingPathComponent("Inside.swift").documentUri
+        store.open(uri: uri, languageId: "swift", text: "let x = 1")
+        session.publish(PublishDiagnosticsParams(
+            uri: uri,
+            version: 1,
+            diagnostics: [
+                Diagnostic(
+                    range: LSPRange(start: Position(line: 0, character: 0), end: Position(line: 0, character: 3)),
+                    severity: .error,
+                    message: "no"
+                )
+            ]
+        ))
+        #expect(await poll { services.diagnostics.diagnostics(for: uri).count == 1 })
+
+        // A split view on the same file: one document, two opens.
+        store.open(uri: uri, languageId: "swift", text: "let x = 1")
+        store.close(uri: uri)
+        #expect(services.diagnostics.diagnostics(for: uri).count == 1)
+
+        store.close(uri: uri)
+        #expect(services.diagnostics.diagnostics(for: uri).isEmpty)
+
+        await services.shutdown()
+    }
+
+    /// Ceiling on the one poll here: the publish lands from an unstructured
+    /// `Task` draining an `AsyncStream`, so it is not visible on the statement
+    /// after the push.
+    private func poll(seconds: TimeInterval = 5, until condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
 }

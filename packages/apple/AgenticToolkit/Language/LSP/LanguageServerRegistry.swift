@@ -199,6 +199,20 @@ public final class LanguageServerRegistry: ObservableObject {
 
     // MARK: - Root markers
 
+    /// How the walk below is described to the user, kept beside the walk.
+    ///
+    /// The Add-Server sheet's Root Markers field shows this as its help text.
+    /// It lives here rather than in that sheet because it is a *claim about
+    /// `workspaceRoot(startingAt:markers:fileManager:)`*, and a claim that sits
+    /// four directories away from the code it describes is one nobody edits
+    /// when the code changes: this string spent its whole life telling users to
+    /// list markers "most specific first", which the walk has never done.
+    /// Next to the walk, a test can hold the two together.
+    public static let rootMarkersHelpText =
+        "Comma-separated; order does not matter. The nearest enclosing "
+        + "directory containing any of them is the root. e.g. Package.swift, "
+        + ".git, *.xcodeproj"
+
     /// Walks up from `startingURL` looking for the first directory containing
     /// any of `markers`, and returns it.
     ///

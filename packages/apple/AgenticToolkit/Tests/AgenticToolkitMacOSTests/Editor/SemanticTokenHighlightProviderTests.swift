@@ -667,4 +667,212 @@ struct SemanticTokenHighlightProviderTests {
         let highlights = try query(harness, range: NSRange(location: 6, length: 4))
         #expect(highlights.map(\.range) == [NSRange(location: 6, length: 3)])
     }
+
+    // MARK: - Lifecycle resets (F27, F28, F31)
+
+    /// ★ F27. What it catches: a provider that abandons a fetch and then has no
+    /// way back — `highlights` still `nil` and `fetchTask` still non-`nil`, so
+    /// every query after the unreadable response parks for the full
+    /// `queryTimeout` before being answered with the same `[]` it could have
+    /// been answered with at once.
+    ///
+    /// The eventual answer is deliberately unchanged by the fix: a response we
+    /// could not read a single token of settles as "no semantic highlights" and
+    /// tree-sitter paints the pane. What changes is that the user does not wait
+    /// five seconds per range to be told so, and that the only recovery is no
+    /// longer "type something", which a reader never does.
+    ///
+    /// `query(_:range:)` is the assertion: it requires the completion to have
+    /// run before it returns, so a parked query fails this test rather than
+    /// slowing it down.
+    @Test("a query after an unreadable response is answered at once rather than parked for the timeout")
+    func aQueryAfterAnAbandonedFetchIsAnsweredAtOnce() async throws {
+        let harness = try await makeHarness(
+            text: "let value = 1\n",
+            capabilities: makeSemanticTokenCapabilities(legend: Self.legend),
+            // One whole token and two stray values — the ragged array that
+            // `fetch(stamp:)` refuses as a unit.
+            response: SemanticTokens(data: [0, 4, 5, 3, 0, 0, 4])
+        )
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        await harness.provider.awaitPendingFetch()
+
+        let highlights = try query(harness)
+        #expect(highlights.isEmpty)
+        // And the abandon did not turn into a retry loop against a server that
+        // just proved it cannot be read.
+        #expect(harness.requestCount == 1)
+    }
+
+    /// ★ F27, re-entrantly. What it catches: the same stall one step further
+    /// on. `abandonFetch` fails the parked queries, and
+    /// `HighlightProviderState` answers `operationCancelled` by invalidating
+    /// the range and re-querying **synchronously, from inside the completion**
+    /// — so a provider that drops its fetch handle *after* failing the queries
+    /// hands the retry the very state the fix exists to remove, and the retry
+    /// parks for the full timeout.
+    ///
+    /// Written as a re-query issued from inside the failure completion because
+    /// that is exactly the package's own control flow (`invalidate(_:)` →
+    /// `highlightInvalidRanges()` → `queryHighlightsFor`), and nothing else
+    /// reproduces the ordering.
+    @Test("a query re-issued from inside the cancellation is answered at once, not parked again")
+    func aReQueryFromInsideTheCancellationIsAnsweredAtOnce() async throws {
+        let harness = try await makeHarness(
+            text: "let value = 1\n",
+            capabilities: makeSemanticTokenCapabilities(legend: Self.legend),
+            response: SemanticTokens(data: [0, 4, 5, 3, 0, 0, 4])
+        )
+        await harness.session.holdNextSemanticTokens(1)
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        try await waitUntil("the request to reach the server") {
+            await harness.session.heldSemanticTokensCount == 1
+        }
+
+        // Parked while the ragged response is still inside the server, which is
+        // the only way to be holding a query when `abandonFetch` runs.
+        let range = harness.textView.documentRange
+        var reQueryResults: [Result<[HighlightRange], Error>] = []
+        var firstResults: [Result<[HighlightRange], Error>] = []
+        harness.provider.queryHighlightsFor(textView: harness.textView, range: range) { result in
+            firstResults.append(result)
+            // What `HighlightProviderState` does with `operationCancelled`,
+            // synchronously, right here.
+            harness.provider.queryHighlightsFor(textView: harness.textView, range: range) {
+                reQueryResults.append($0)
+            }
+        }
+        #expect(firstResults.isEmpty)
+
+        await harness.session.releaseHeldSemanticTokens()
+        await harness.provider.awaitPendingFetch()
+
+        try #require(firstResults.count == 1)
+        #expect(throws: HighlightProvidingError.operationCancelled) { try firstResults[0].get() }
+        try #require(reQueryResults.count == 1, "the retry parked instead of being answered")
+        #expect(try reQueryResults[0].get().isEmpty)
+    }
+
+    /// ★ F28. What it catches: `setUp` starting a fetch without discarding what
+    /// the last one stored. `setUp` runs again on a language change, and the
+    /// tokens already in hand describe the text that was there before it — so a
+    /// query arriving inside the round trip is answered from an array keyed to
+    /// a document that is no longer on screen.
+    ///
+    /// Asserted as "the query waits", not as "the query is empty": the point is
+    /// that the provider has nothing to say until the new fetch answers, and an
+    /// empty answer would be a settled one (`HighlightProviderState` marks the
+    /// range valid on any success and never asks again).
+    @Test("a second setUp does not answer from the tokens the first one fetched")
+    func setUpDiscardsThePreviousTokens() async throws {
+        let harness = try await makeHarness(
+            text: "let value = 1\n",
+            capabilities: makeSemanticTokenCapabilities(legend: Self.legend)
+        )
+        await harness.session.enqueueSemanticTokensResponses([
+            Self.makeTokens([WireToken(deltaLine: 0, deltaStartChar: 4, length: 5, typeIndex: 3)]),
+            Self.makeTokens([WireToken(deltaLine: 0, deltaStartChar: 0, length: 3, typeIndex: 1)])
+        ])
+
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        await harness.provider.awaitPendingFetch()
+        let firstAnswer = try query(harness)
+        #expect(firstAnswer.map(\.range) == [NSRange(location: 4, length: 5)])
+
+        // The second setup's request is held inside the server, which is the
+        // whole window this defect lives in.
+        await harness.session.holdNextSemanticTokens(1)
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        try await waitUntil("the second request to reach the server") {
+            await harness.session.heldSemanticTokensCount == 1
+        }
+
+        var results: [Result<[HighlightRange], Error>] = []
+        harness.provider.queryHighlightsFor(
+            textView: harness.textView,
+            range: harness.textView.documentRange
+        ) { results.append($0) }
+        #expect(results.isEmpty, "the query was answered from the previous setup's tokens")
+
+        await harness.session.releaseHeldSemanticTokens()
+        await harness.provider.awaitPendingFetch()
+
+        try #require(results.count == 1, "expected exactly one completion call, got \(results.count)")
+        #expect(try results[0].get().map(\.range) == [NSRange(location: 0, length: 3)])
+    }
+
+    /// ★ F31. What it catches: a `deinit` that cancels the timeout which would
+    /// have answered a parked query and then drops the query with it. A
+    /// completion never called leaves its range in `HighlightProviderState`'s
+    /// `pendingSet`, and `getNextRange()` subtracts that set — so if that state
+    /// object outlives the provider, the range is never queried again.
+    ///
+    /// The setup is contrived in one respect only, and it has to be: a fetch
+    /// suspended *inside* the server call holds `self` in its own frame, so the
+    /// provider cannot be released while one is in flight. A fetch still
+    /// sleeping out its debounce holds nothing — `[weak self]` is resolved
+    /// after the sleep — which is the state this drives to.
+    @Test("a provider released with a query parked completes it rather than dropping it")
+    func releasingTheProviderCompletesParkedQueries() async throws {
+        ensureEditorLanguageResourcesLocated()
+        let text = "let value = 1\n"
+        let fixture = LSPEditorFixture(
+            behavior: FakeEditorSessionBehavior(
+                capabilities: makeSemanticTokenCapabilities(legend: Self.legend),
+                semanticTokensResponse: Self.makeTokens([
+                    WireToken(deltaLine: 0, deltaStartChar: 4, length: 5, typeIndex: 3)
+                ])
+            )
+        )
+        _ = try await fixture.startedSession()
+        let controller = makeEditorTextViewController(text: text)
+        var provider: SemanticTokenHighlightProvider? = SemanticTokenHighlightProvider(
+            document: makeEditorDocument(text: text),
+            registry: fixture.registry,
+            refetchDebounce: .seconds(60),
+            queryTimeout: .seconds(60)
+        )
+
+        provider?.setUp(textView: controller.textView, codeLanguage: .default)
+        await provider?.awaitPendingFetch()
+        // Discards the fetched tokens and arms a refetch that will still be
+        // sleeping when the provider goes away.
+        provider?.applyEdit(
+            textView: controller.textView,
+            range: NSRange(location: 0, length: 0),
+            delta: 0
+        ) { _ in }
+
+        var results: [Result<[HighlightRange], Error>] = []
+        provider?.queryHighlightsFor(
+            textView: controller.textView,
+            range: controller.textView.documentRange
+        ) { results.append($0) }
+        #expect(results.isEmpty)
+
+        provider = nil
+        // `isolated deinit` runs synchronously when the last release happens on
+        // the actor it is isolated to, which is where this test is — but the
+        // assertion is written as a wait so that a runtime that hops instead
+        // reports the real defect rather than a timing artefact.
+        try await waitUntil("the parked query to be completed on teardown") { results.count == 1 }
+
+        try #require(results.count == 1, "the parked query was dropped rather than completed")
+        guard case .failure(let error) = results[0] else {
+            Issue.record(
+                """
+                the parked query succeeded on teardown; any success marks the range permanently valid, \
+                and this provider never had an answer to give
+                """
+            )
+            return
+        }
+        // `operationCancelled` is the one result `HighlightProviderState`
+        // re-invalidates and re-queries on, which is what a teardown owes a
+        // query it cannot answer.
+        guard case .operationCancelled? = error as? HighlightProvidingError else {
+            Issue.record("expected HighlightProvidingError.operationCancelled, got \(error)")
+            return
+        }
+    }
 }
