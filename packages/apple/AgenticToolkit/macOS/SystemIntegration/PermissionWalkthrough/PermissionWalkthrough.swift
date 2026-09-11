@@ -173,10 +173,15 @@ public final class PermissionWalkthrough: AppFeature {
 
     // MARK: - The alert
 
+    /// Says nothing about *which* permissions, because the set is the host's to
+    /// choose: this used to describe the toolkit app's own trio, and read as a
+    /// promise of notifications to a host that asks for none. Each row below
+    /// already explains itself, so the blurb's job is only to say what the list
+    /// is and that it keeps itself current.
     private static let explanation =
-        "These permissions let the app find and activate terminal windows, open new"
-        + " ones, and post notifications. Grant them in System Settings — this list"
-        + " updates automatically."
+        "macOS gates each of these behind an explicit grant. Every row says what the"
+        + " app needs it for and where it stands right now — this list updates"
+        + " itself as you make the grants."
 
     /// The width the permission cards are laid out at. An alert sizes itself
     /// around its accessory view, and a view laid out by constraints has no

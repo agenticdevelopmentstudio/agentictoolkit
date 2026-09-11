@@ -40,11 +40,24 @@ public enum PermissionPresenter {
             // AXIsProcessTrustedWithOptions both prompts and opens the
             // Accessibility pane, so opening the URL too would be redundant.
             _ = await checker.request(permission)
-        case .notifications, .automation, .location, .keychain:
-            // Only fall back to System Settings on a hard denial. An undetermined
-            // result (consent dialog cancelled/dismissed, or target app not running)
-            // means the inline prompt already handled it — opening the pane on top
-            // would be redundant, jarring UI.
+        case .automation:
+            // Asking means sending the target app an Apple Event, so when that
+            // app isn't running there is nothing to send one to and the answer
+            // is `.undetermined` — "could not ask", not "the user dismissed a
+            // dialog". Treating it as a dismissal is what made this button do
+            // nothing at all on a machine where the terminal happens to be
+            // closed, which is the ordinary case for a permission you grant
+            // before you start using the thing that needs it. So anything short
+            // of a grant ends where the button's title already promises.
+            guard await checker.request(permission) != .granted else { return }
+            guard let pane = permission.settingsPaneURL else { return }
+            NSWorkspace.shared.open(pane)
+        case .notifications, .location, .keychain:
+            // These three can always be asked — the system owns the dialog and
+            // puts it up whatever else is or isn't running — so an undetermined
+            // answer here really is the user declining to answer, and opening
+            // the pane on top of the dialog they just dismissed would be
+            // redundant, jarring UI. Only a hard denial is a handoff.
             guard await checker.request(permission) == .denied else { return }
             // …and some permissions have no pane to fall back to. `.keychain` is
             // granted by the dialog the request above already raised, and System

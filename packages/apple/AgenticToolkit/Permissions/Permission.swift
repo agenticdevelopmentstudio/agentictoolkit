@@ -75,20 +75,35 @@ extension Permission {
     }
 
     /// One-line explanation of why the permission is needed.
+    ///
+    /// An Automation target is named by its bundle id here. A caller that can
+    /// turn one into the name a person recognises should use
+    /// `explanation(namingAutomationTarget:)` instead — see it for why that
+    /// caller is not this type.
     public var explanation: String {
+        explanation { $0 }
+    }
+
+    /// `explanation`, with an Automation target named by whatever the caller
+    /// can resolve a bundle id to.
+    ///
+    /// Two Automation grants are two different grants, exactly as two keychain
+    /// items are, so each row has to say which app it is about. Resolving
+    /// `com.googlecode.iterm2` to "iTerm" takes `NSWorkspace`, and this target
+    /// is Foundation-only so a daemon can link it — so the resolving is the
+    /// caller's and the sentence stays here, rather than the sentence being
+    /// written out a second time wherever a resolver happens to exist.
+    public func explanation(namingAutomationTarget name: (String) -> String) -> String {
         switch self {
         case .accessibility:
             "Required to discover and activate terminal windows for your sessions."
         case .notifications:
             "Allows notifications when sessions start, end, or become stale."
-        case .automation:
-            "Needed to control terminal apps like iTerm2, Terminal, and Warp."
+        case .automation(let targetBundleID):
+            "Needed to find, raise and open windows in \(name(targetBundleID))."
         case .location:
             "Records where you are and which Wi-Fi network you're on, so activity can be grouped by place."
         case .keychain(let service):
-            // Names the item, unlike `.automation` above: two keychain rows on
-            // one panel are two different grants, and "Keychain" twice would
-            // not say which is which.
             "Lets this app read the \u{201C}\(service)\u{201D} item in your keychain "
                 + "directly, instead of asking another tool for it."
         }

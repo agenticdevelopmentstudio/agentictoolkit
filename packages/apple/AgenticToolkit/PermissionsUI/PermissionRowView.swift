@@ -31,7 +31,7 @@ public final class PermissionRowView: NSView {
         self.permission = permission
         self.checker = checker
         self.onAction = onAction
-        self.titleLabel = NSTextField(labelWithString: permission.displayName)
+        self.titleLabel = NSTextField(labelWithString: Self.rowTitle(for: permission))
         super.init(frame: .zero)
         buildLayout()
     }
@@ -39,6 +39,36 @@ public final class PermissionRowView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// The title one row shows.
+    ///
+    /// `Permission.displayName` collapses every Automation grant onto the one
+    /// word "Automation", which reads fine for a host that drives one terminal
+    /// and names nothing for a host that drives two — two rows with the same
+    /// title and the same description say only that there are two of something.
+    /// Resolving a bundle id to the name a person recognises needs
+    /// `NSWorkspace`, which is why this is here and not next to `displayName`:
+    /// the Permissions module is Foundation-only so a daemon can link it. It is
+    /// also why `displayName` must stay as it is — `SystemPermissionChecker`
+    /// matches on it.
+    private static func rowTitle(for permission: Permission) -> String {
+        guard case .automation(let targetBundleID) = permission else {
+            return permission.displayName
+        }
+        return "\(permission.displayName) — \(applicationName(for: targetBundleID))"
+    }
+
+    /// What to call the app behind a bundle id — the resolver both the title
+    /// and the description above ask `Permission` for. Falls back to the id
+    /// itself when nothing installed claims it: an unfamiliar string is still a
+    /// distinct one, and a row that silently dropped the name would be the
+    /// ambiguity this exists to remove.
+    private static func applicationName(for bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return bundleID
+        }
+        return url.deletingPathExtension().lastPathComponent
     }
 
     /// Test seam: current status label text.
@@ -126,7 +156,9 @@ public final class PermissionRowView: NSView {
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let descLabel = NSTextField(wrappingLabelWithString: permission.explanation)
+        let descLabel = NSTextField(
+            wrappingLabelWithString: permission.explanation(namingAutomationTarget: Self.applicationName)
+        )
         descLabel.font = .systemFont(ofSize: 11)
         descLabel.textColor = .secondaryLabelColor
         descLabel.translatesAutoresizingMaskIntoConstraints = false
