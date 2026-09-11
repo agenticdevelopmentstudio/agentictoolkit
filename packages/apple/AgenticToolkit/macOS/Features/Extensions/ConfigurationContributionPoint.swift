@@ -62,12 +62,23 @@ public final class ConfigurationContributionPoint: ContributionPoint {
         let built = ContributedSettingsBuilder.sections(
             for: contributions.configuration,
             ofExtension: manifest.identifier,
-            fallbackTitle: manifest.displayName ?? manifest.name
+            fallbackTitle: manifest.displayName ?? manifest.name,
+            // The failures are what separate "declared nothing" from "declared
+            // something unreadable". Taken from the parameter, not from
+            // `manifest.contributes`, for the reason the configuration itself
+            // is — the contributions handed in are the contract.
+            decodingFailures: contributions.decodingFailures
         )
         // An extension that declared no `configuration` at all is not
         // registered: `declaration(for:)` answers `.undeclared` for an
         // identifier it has never heard of, which is the same true sentence.
-        guard case .declared = built.declaration else { return }
+        // `.unreadable` *is* registered, and that is the point — nobody can
+        // tell a reader that a settings page failed to build if the failure
+        // was never written down.
+        switch built.declaration {
+        case .undeclared: return
+        case .declared, .unreadable: break
+        }
 
         registrations.append(Registration(
             identifier: manifest.identifier,

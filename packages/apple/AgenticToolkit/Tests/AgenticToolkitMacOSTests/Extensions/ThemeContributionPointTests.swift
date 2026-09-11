@@ -513,6 +513,36 @@ struct ThemeContributionPointTests {
         #expect(ids4 == ["vscode.test.kept.One"])
     }
 
+    @Test("a theme row left under an unfolded attribution is pruned, not left as a duplicate")
+    func pruneOrphansHealsAThemeRowWrittenBeforeIdentifiersWereFolded() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try write(ExtensionFixtures.goodThemeJSON, to: "themes/one.json", in: directory)
+
+        let storage = ExtensionTestThemeStorage()
+        let store = ThemeStore(storage: storage)
+        // The row a build from before identifiers were case-folded (F39) would
+        // have persisted for this same extension: the manifest's own
+        // capitalisation, straight into both the id and the attribution.
+        store.add(try ExtensionFixtures.colorTheme(
+            id: "vscode.Test.Kept.One", attribution: "extension:Test.Kept", in: directory))
+        let point = ThemeContributionPoint(themeStore: store)
+        let entry = themeEntry(label: "One", path: "./themes/one.json")
+        try apply(try manifest(name: "kept", themes: "[\(entry)]"), to: point, at: directory)
+        // Two rows for one theme: `apply` reconciles against *its* attribution
+        // only, and the stale row does not carry it.
+        try #require(storage.customThemes.count == 2)
+
+        // The comparison in `pruneOrphans` is exact, and that is the clause
+        // that heals this: no installed extension answers to "Test.Kept" in
+        // that spelling any more, so the stale row is an orphan and goes.
+        // Folding the comparison would make it match the installed
+        // "test.kept" and leave the user two copies of one theme forever.
+        point.pruneOrphans(installedIdentifiers: ["test.kept"])
+
+        #expect(storage.customThemes.map(\.id) == ["vscode.test.kept.One"])
+    }
+
     @Test("prune orphans keeps every theme this app did not contribute")
     func pruneOrphansKeepsEveryThemeThisAppDidNotContribute() throws {
         let directory = try makeTempDirectory()

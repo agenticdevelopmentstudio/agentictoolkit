@@ -431,4 +431,68 @@ struct ConfigurationContributionPointTests {
         #expect(Int.settingsExactInt(from: NSNumber(value: 1.5)) == nil)
         #expect(Int.settingsExactInt(from: NSNumber(value: Double.nan)) == nil)
     }
+
+    // MARK: - F38 — contradictory bounds are ignored, not applied in sequence
+
+    @Test("a field whose bounds contradict each other holds what the user typed")
+    func contradictoryBoundsAreIgnoredRatherThanPinning() throws {
+        let setting = UserSetting("extensions.test.numberfield.contradictory", default: 5)
+        defer { setting.remove() }
+
+        // `minimum > maximum` cannot be satisfied. Applying both in sequence
+        // pins every value to the maximum; refusing both leaves the field
+        // usable.
+        let field = ComposableSettings.NumberFieldView(
+            viewModel: ComposableSettings.ViewModel(title: "contradictory", setting: setting),
+            minimum: 10,
+            maximum: 1)
+
+        field.textField.stringValue = "50"
+        field.commit()
+        #expect(setting.value == 50)
+        #expect(field.textField.stringValue == "50")
+
+        field.textField.stringValue = "5"
+        field.commit()
+        #expect(setting.value == 5)
+    }
+
+    @Test("bounds that agree still clamp from both ends")
+    func agreeingBoundsStillClamp() throws {
+        let setting = UserSetting("extensions.test.numberfield.bothends", default: 5)
+        defer { setting.remove() }
+
+        let field = ComposableSettings.NumberFieldView(
+            viewModel: ComposableSettings.ViewModel(title: "bounded", setting: setting),
+            minimum: 2,
+            maximum: 8)
+
+        field.textField.stringValue = "50"
+        field.commit()
+        #expect(setting.value == 8)
+
+        field.textField.stringValue = "-50"
+        field.commit()
+        #expect(setting.value == 2)
+    }
+
+    // MARK: - F46 — an unreadable configuration reaches the panel as such
+
+    @Test("a configuration key present but unreadable registers as unreadable")
+    func unreadableConfigurationIsRegistered() throws {
+        let point = ConfigurationContributionPoint()
+        let unreadable = try manifest(name: "unreadable", configuration: "\"see the docs\"")
+        try point.apply(
+            try #require(unreadable.contributes),
+            from: unreadable,
+            at: Self.unusedDirectory)
+
+        if case .unreadable = point.declaration(for: unreadable.identifier) {
+            // expected
+        } else {
+            Issue.record(
+                "expected .unreadable, got \(point.declaration(for: unreadable.identifier))")
+        }
+        #expect(point.contributingExtensions.isEmpty)
+    }
 }

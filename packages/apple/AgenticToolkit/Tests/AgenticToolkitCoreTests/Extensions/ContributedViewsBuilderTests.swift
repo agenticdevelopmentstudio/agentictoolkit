@@ -257,9 +257,9 @@ struct ContributedViewsBuilderTests {
         #expect(built.initialSize == 2)
     }
 
-    // MARK: - 9 — the manifest's own order is gone, so sort
+    // MARK: - 9 — the location order is gone, so sort; the declared order is not
 
-    @Test("containers and views come back in a sorted order, not a hashed one")
+    @Test("containers and views come back grouped by location, in declared order")
     func orderingIsDeterministic() throws {
         let built = try build(
             views: #"""
@@ -287,11 +287,16 @@ struct ContributedViewsBuilderTests {
             }
             """#)
 
-        #expect(built.containers.map(\.containerID) == ["acme.a1", "acme.a2", "acme.p1", "acme.p2"])
+        // Locations are dictionary keys, so their order genuinely is gone and
+        // something has to fix it — hence alphabetical across locations. The
+        // order *within* a location is not gone: it is the array the author
+        // wrote, and it is the order the containers appear in on screen, so
+        // `a2` before `a1` is preserved rather than alphabetised away (F49).
+        #expect(built.containers.map(\.containerID) == ["acme.a2", "acme.a1", "acme.p2", "acme.p1"])
         #expect(built.containers.map(\.location)
             == ["activitybar", "activitybar", "panel", "panel"])
         #expect(built.views.map(\.viewID)
-            == ["acme.viewB", "acme.viewM", "acme.viewA", "acme.viewZ"])
+            == ["acme.viewM", "acme.viewB", "acme.viewZ", "acme.viewA"])
         #expect(built.views.map(\.targetContainerID)
             == ["acme.a1", "acme.a1", "acme.p1", "acme.p1"])
         // The axis follows the container the view landed in, which is the one
@@ -423,5 +428,35 @@ struct ContributedViewsBuilderTests {
         try #require(built.containers.count == 1)
         #expect(built.containers[0].when == "isMac")
         #expect(built.containers[0].icon == "i.svg")
+    }
+
+    // MARK: - F49 — the manifest's order is the presentation order
+
+    @Test("views keep the order their container declared them in")
+    func viewsKeepDeclaredOrder() throws {
+        let built = try build(views: """
+        {
+            "explorer": [
+                { "id": "overview", "name": "Overview" },
+                { "id": "details", "name": "Details" }
+            ]
+        }
+        """)
+
+        #expect(built.views.map(\.viewID) == ["overview", "details"])
+    }
+
+    @Test("view containers keep the order their location declared them in")
+    func viewContainersKeepDeclaredOrder() throws {
+        let built = try build(viewsContainers: """
+        {
+            "activitybar": [
+                { "id": "zulu", "title": "Zulu", "icon": "$(beaker)" },
+                { "id": "alpha", "title": "Alpha", "icon": "$(beaker)" }
+            ]
+        }
+        """)
+
+        #expect(built.containers.map(\.containerID) == ["zulu", "alpha"])
     }
 }

@@ -351,4 +351,85 @@ struct ExtensionManifestTests {
         // this line rendering a compiler dump and nothing would say so.
         #expect(failure.reason == "no “command”")
     }
+
+    // MARK: - F09 — a tolerated top-level field must not sink the manifest
+
+    @Test("a capabilities block this host cannot read costs the manifest its capabilities, not its identity")
+    func unreadableCapabilitiesDoesNotSinkTheManifest() throws {
+        let json = """
+        {
+            "name": "foo",
+            "publisher": "acme",
+            "version": "1.0.0",
+            "engines": { "vscode": "^1.74.0" },
+            "capabilities": { "untrustedWorkspaces": { "supported": "partial" } },
+            "contributes": { "commands": [ { "command": "acme.foo.run", "title": "Run" } ] }
+        }
+        """
+        let manifest = try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
+
+        #expect(manifest.identifier == "acme.foo")
+        #expect(manifest.capabilities == nil)
+        #expect(manifest.contributes?.commands.count == 1)
+    }
+
+    @Test("an extensionKind that is not a list of strings is dropped, not fatal")
+    func unreadableExtensionKindDoesNotSinkTheManifest() throws {
+        let json = """
+        {
+            "name": "foo",
+            "publisher": "acme",
+            "version": "1.0.0",
+            "engines": { "vscode": "^1.74.0" },
+            "extensionKind": "workspace"
+        }
+        """
+        let manifest = try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
+
+        #expect(manifest.identifier == "acme.foo")
+        #expect(manifest.extensionKind == nil)
+    }
+
+    @Test("an activationEvents that is not a list of strings is dropped, not fatal")
+    func unreadableActivationEventsDoesNotSinkTheManifest() throws {
+        let json = """
+        {
+            "name": "foo",
+            "publisher": "acme",
+            "version": "1.0.0",
+            "engines": { "vscode": "^1.74.0" },
+            "activationEvents": { "onStartupFinished": true }
+        }
+        """
+        let manifest = try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
+
+        #expect(manifest.identifier == "acme.foo")
+        #expect(manifest.activationEvents.isEmpty)
+    }
+
+    // MARK: - F39 — identity is case-insensitive, the way VS Code reads it
+
+    @Test("identifier folds case so two spellings of one extension are one identity")
+    func identifierFoldsCase() throws {
+        func manifest(publisher: String, name: String) throws -> ExtensionManifest {
+            let json = """
+            {
+                "name": "\(name)",
+                "publisher": "\(publisher)",
+                "version": "1.0.0",
+                "engines": { "vscode": "^1.74.0" }
+            }
+            """
+            return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
+        }
+
+        let shouty = try manifest(publisher: "MS-vscode", name: "Foo")
+        let quiet = try manifest(publisher: "ms-vscode", name: "foo")
+
+        #expect(shouty.identifier == "ms-vscode.foo")
+        #expect(shouty.identifier == quiet.identifier)
+        // The declared spelling is still available for anything that shows it.
+        #expect(shouty.displayIdentifier == "MS-vscode.Foo")
+        #expect(quiet.displayIdentifier == "ms-vscode.foo")
+    }
 }

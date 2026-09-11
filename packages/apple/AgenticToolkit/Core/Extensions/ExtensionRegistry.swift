@@ -159,7 +159,15 @@ public final class ExtensionRegistry {
                 continue
             }
 
-            for directory in contents {
+            // Sorted, because `contentsOfDirectory` is not. Its order is the
+            // file system's, which on APFS is neither alphabetical nor stable
+            // across machines or across a reinstall of the same extension —
+            // and order decides real outcomes here. Two directories claiming
+            // one identifier: which one wins and which is recorded as a
+            // duplicate. `extensions` is published in scan order, so a
+            // settings list reshuffles itself for no visible reason. A bug
+            // reproduces on one machine and not the next.
+            for directory in contents.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 let isDirectory = (try? directory.resourceValues(
                     forKeys: [.isDirectoryKey]))?.isDirectory
                 guard let isDirectory else {
@@ -222,10 +230,31 @@ public final class ExtensionRegistry {
 
         let manifest: ExtensionManifest
         do {
-            manifest = try JSONDecoder().decode(ExtensionManifest.self, from: data)
+            // Through the JSONC preprocessor, not straight into the decoder.
+            // A `package.json` is strict JSON by npm's rules, but this host
+            // reads what is *on disk*, and what is on disk was frequently
+            // written by VS Code or hand-edited beside a `settings.json` in
+            // the same dialect: `//` comments, a trailing comma, a BOM left by
+            // a Windows editor. The same three files the theme and snippet
+            // readers already tolerate through this exact helper. A manifest
+            // rejected here is not a degraded extension — it is an extension
+            // that does not exist as far as this host is concerned.
+            manifest = try JSONDecoder().decode(
+                ExtensionManifest.self, from: JSONCPreprocessor.jsonData(from: data))
         } catch {
-            // No identifier: the file that carries it did not parse.
-            record(.manifestMalformed(error.localizedDescription), at: directory)
+            // The manifest did not decode — but a failure that cannot name its
+            // extension sets `establishedIdentifiers` to `nil`, which turns
+            // orphan pruning off for *every other* extension in the scan. So
+            // before giving up, read `name` and `publisher` out of the raw
+            // bytes directly: they are two string fields, they do not depend
+            // on the rest of the document being well-formed, and recovering
+            // them is the difference between one broken extension and a whole
+            // reconciliation pass declining to run.
+            record(
+                .manifestMalformed(error.localizedDescription),
+                at: directory,
+                identifier: Self.identifier(inRawManifest: data)
+            )
             return
         }
 
@@ -290,6 +319,29 @@ public final class ExtensionRegistry {
             ExtensionLoadFailure(directory: directory, reason: reason, identifier: identifier))
         // swiftlint:disable:next line_length
         logger.warning("Failed to load extension at \(directory.path, privacy: .public): \(String(describing: reason), privacy: .public)")
+    }
+
+    /// `publisher.name` read out of manifest bytes that did not decode, or
+    /// `nil` when even that much is unavailable.
+    ///
+    /// Deliberately not a second manifest parser: it asks
+    /// `JSONSerialization` (through the same JSONC preprocessor the real
+    /// decode uses) for the top-level object and reads two string keys. A
+    /// document too broken for *that* genuinely has no identity to recover,
+    /// and `nil` is then the honest answer — the one that keeps pruning off.
+    ///
+    /// Folded to lower case to match `ExtensionManifest.identifier`, so a
+    /// failure and a successful load of the same extension compare equal.
+    private static func identifier(inRawManifest data: Data) -> String? {
+        guard
+            let object = try? JSONCPreprocessor.jsonObject(from: data) as? [String: Any],
+            let name = object["name"] as? String,
+            !name.isEmpty
+        else { return nil }
+        guard let publisher = object["publisher"] as? String, !publisher.isEmpty else {
+            return name.lowercased()
+        }
+        return "\(publisher).\(name)".lowercased()
     }
 
     private func applyContributions(
@@ -363,8 +415,15 @@ public final class ExtensionRegistry {
     /// Whether `identifier` is enabled. Disabled is the tracked state
     /// (`UserSettings.disabledExtensionIdentifiers`), so an identifier this
     /// setting has never seen is enabled by default.
+    ///
+    /// Case-insensitive, on both sides. `ExtensionManifest.identifier` folds
+    /// case, but this set is *persisted* and predates that, so it can still
+    /// hold `Ms-Python.Foo` written by an older build — and a caller outside
+    /// this file may well pass a display spelling. Comparing raw made a
+    /// disable silently stop applying the first time either spelling drifted.
     public func isEnabled(_ identifier: String) -> Bool {
-        !UserSettings.disabledExtensionIdentifiers.value.contains(identifier)
+        let folded = identifier.lowercased()
+        return !UserSettings.disabledExtensionIdentifiers.value.contains { $0.lowercased() == folded }
     }
 
     /// Enables or disables `identifier`, applying or withdrawing its
@@ -380,15 +439,22 @@ public final class ExtensionRegistry {
         let wasEnabled = isEnabled(identifier)
         guard wasEnabled != enabled else { return }
 
+        // Every case variant goes, then the folded form is what gets written.
+        // Removing only the exact spelling the caller passed leaves an older
+        // build's differently-cased entry behind, and the extension stays
+        // disabled through a re-enable that reported success — the state this
+        // whole method exists to keep from happening. It also migrates the
+        // persisted set to folded form, one identifier at a time, as the user
+        // touches each toggle.
+        let folded = identifier.lowercased()
         var disabled = UserSettings.disabledExtensionIdentifiers.value
-        if enabled {
-            disabled.remove(identifier)
-        } else {
-            disabled.insert(identifier)
+        disabled = disabled.filter { $0.lowercased() != folded }
+        if !enabled {
+            disabled.insert(folded)
         }
         UserSettings.disabledExtensionIdentifiers.value = disabled
 
-        guard let loaded = extensions.first(where: { $0.identifier == identifier }) else { return }
+        guard let loaded = extensions.first(where: { $0.identifier == folded }) else { return }
 
         if enabled {
             // `.empty` for an absent `contributes`, as at load: re-enabling
@@ -397,7 +463,7 @@ public final class ExtensionRegistry {
                 loaded.manifest.contributes ?? .empty, from: loaded.manifest, at: loaded.directory)
         } else {
             for point in contributionPoints {
-                point.withdraw(extensionIdentifier: identifier)
+                point.withdraw(extensionIdentifier: folded)
             }
             // A disabled extension contributes nothing, so a record saying one
             // of its contributions was refused describes a state that no
@@ -423,14 +489,15 @@ public final class ExtensionRegistry {
     /// uninstalling something already gone gets a silent no-op with no side
     /// effects, not a throw.
     public func uninstall(_ identifier: String) throws {
-        guard let index = extensions.firstIndex(where: { $0.identifier == identifier }) else { return }
+        let folded = identifier.lowercased()
+        guard let index = extensions.firstIndex(where: { $0.identifier == folded }) else { return }
         let directory = extensions[index].directory
 
         try FileManager.default.removeItem(at: directory)
 
         extensions.remove(at: index)
         for point in contributionPoints {
-            point.withdraw(extensionIdentifier: identifier)
+            point.withdraw(extensionIdentifier: folded)
         }
         // The directory is gone from disk; a failure entry still naming it
         // would point a settings row at nothing. `ExtensionLoadFailure` carries
@@ -443,8 +510,10 @@ public final class ExtensionRegistry {
         // the extension: reinstalling later comes back disabled with nothing
         // in any UI to explain why, breaking the "freshly installed is on by
         // default" promise the setting is shaped around.
+        // Every case variant, for the same reason `setEnabled` removes them
+        // all: one left behind is a tombstone that outlives the reinstall.
         var disabled = UserSettings.disabledExtensionIdentifiers.value
-        disabled.remove(identifier)
+        disabled = disabled.filter { $0.lowercased() != folded }
         UserSettings.disabledExtensionIdentifiers.value = disabled
     }
 }

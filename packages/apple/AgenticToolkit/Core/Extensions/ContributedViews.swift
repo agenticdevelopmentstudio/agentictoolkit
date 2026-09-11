@@ -409,11 +409,18 @@ public enum ContributedViewsBuilder {
                 )))
             }
         }
-        // `sort` is not stable, so the declaration index is part of the key
-        // rather than something left to chance.
+        // Location, then **declared order** — not container ID. The ID was in
+        // the key ahead of the index, which alphabetised the containers inside
+        // one location and threw away the order the manifest wrote them in.
+        // That order is the author's: a sidebar's containers appear in it in
+        // VS Code, and an extension that ships `zulu` before `alpha` meant it.
+        // Grouping by location is still deterministic — the dictionary is
+        // unordered, so something must fix it — and `(location, index)` is
+        // already a total order, because each location has exactly one array
+        // and an array has no repeated index. `sort` is not stable, which is
+        // why the index has to be *in* the key rather than relied upon.
         flattened.sort {
-            ($0.container.location, $0.container.containerID, $0.index)
-                < ($1.container.location, $1.container.containerID, $1.index)
+            ($0.container.location, $0.index) < ($1.container.location, $1.index)
         }
         return flattened.map(\.container)
     }
@@ -427,9 +434,10 @@ public enum ContributedViewsBuilder {
                 flattened.append((target, index, view))
             }
         }
-        flattened.sort {
-            ($0.target, $0.view.id, $0.index) < ($1.target, $1.view.id, $1.index)
-        }
+        // Same shape, same reason: the view ID sorted the views within one
+        // target alphabetically and discarded the declared order, which is the
+        // order they are shown in. `(target, index)` is a total order.
+        flattened.sort { ($0.target, $0.index) < ($1.target, $1.index) }
         return flattened
     }
 

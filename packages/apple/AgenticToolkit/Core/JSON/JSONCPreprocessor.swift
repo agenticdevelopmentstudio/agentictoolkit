@@ -61,6 +61,33 @@ public enum JSONCPreprocessor {
         return try JSONSerialization.jsonObject(with: data)
     }
 
+    /// The bytes in `data` as strict JSON a `JSONDecoder` will accept, with
+    /// comments, trailing commas, a BOM and a non-UTF-8 encoding all taken
+    /// out of the way first.
+    ///
+    /// The sibling of `jsonObject(from:)`, for the callers that want a
+    /// `Decodable` rather than an object graph. Without it every such caller
+    /// re-spells the round-trip — `jsonObject(from:)`, then
+    /// `JSONSerialization.data(withJSONObject:)` — and the ones that do not
+    /// bother stay on the strict decoder and reject files VS Code accepts.
+    ///
+    /// Bytes that are already strict JSON are handed back **unchanged** rather
+    /// than round-tripped. That is not only a saved allocation: a re-serialised
+    /// document is not byte-identical to the one that came in — `1e3` comes
+    /// back as `1000`, key order changes — and a decoder that never has to see
+    /// the rewritten form cannot be surprised by it. Only a file the strict
+    /// parser refuses pays the transform.
+    ///
+    /// - Throws: whatever `JSONSerialization` throws for the raw bytes when no
+    ///   candidate encoding yields a parseable document.
+    public static func jsonData(from data: Data) throws -> Data {
+        if (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil {
+            return data
+        }
+        let object = try jsonObject(from: data)
+        return try JSONSerialization.data(withJSONObject: object, options: [.fragmentsAllowed])
+    }
+
     // MARK: - Encodings
 
     /// The encodings a JSONC file can legally arrive in, in the order they are

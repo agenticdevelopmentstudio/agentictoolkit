@@ -218,6 +218,16 @@ public final class ThemeContributionPoint: ContributionPoint {
         // themes stay exactly where they are until a launch that can name
         // every directory it looked at.
         guard let installedIdentifiers else { return }
+        // Compared exactly, not case-folded, and that is deliberate. Every
+        // producer of an attribution and every member of this set now comes
+        // from `ExtensionManifest.identifier`, which case-folds (F39), so in a
+        // consistent store folding here would be a no-op. Where it is *not* a
+        // no-op is a store written before the folding — `extension:Ms-Python.Foo`
+        // beside the freshly written `extension:ms-python.foo` — and there the
+        // exact comparison is the one that heals: the stale row names an
+        // extension identifier that no longer exists in any spelling, so it is
+        // an orphan, and pruning it is how the duplicate goes away instead of
+        // sitting in the user's theme list forever.
         let installed = Set(installedIdentifiers.map { Self.attribution(for: $0) })
         for theme in themeStore.customThemes {
             // A theme with no attribution is the user's own import — never ours

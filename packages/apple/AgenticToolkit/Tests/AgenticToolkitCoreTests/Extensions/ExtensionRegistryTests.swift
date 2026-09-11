@@ -765,4 +765,244 @@ struct ExtensionRegistryTests {
             #expect(registry.establishedIdentifiers == ["acme.good"])
         }
     }
+
+    // MARK: - F33 — the manifest is JSONC, the dialect VS Code writes
+
+    @Test("a manifest with comments, a trailing comma and a BOM loads")
+    func jsoncManifestLoads() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            let jsonc = """
+            \u{FEFF}{
+                // The extension's identity.
+                "name": "jsonc",
+                "publisher": "acme",
+                "version": "1.0.0",
+                /* block comments too */
+                "engines": { "vscode": "^1.74.0" },
+                "contributes": {
+                    "commands": [ { "command": "acme.jsonc.run", "title": "Run" }, ]
+                },
+            }
+            """
+            try writeManifest(jsonc, named: "jsonc-ext", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            #expect(registry.failures.isEmpty)
+            #expect(registry.extensions.first?.identifier == "acme.jsonc")
+            #expect(registry.extensions.first?.manifest.contributes?.commands.count == 1)
+        }
+    }
+
+    // MARK: - F40 — directory enumeration is ordered, so the answer is reproducible
+
+    @Test("extensions load in sorted directory order, not in readdir order")
+    func directoriesAreEnumeratedInSortedOrder() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            // Twenty directories: whatever order the filesystem hands back, it
+            // is not going to be lexicographic by accident twenty entries deep.
+            let names = (0..<20).map { String(format: "e%02d", $0) }
+            for name in names {
+                try writeManifest(manifestJSON(name: name), named: "\(name)-ext", in: root)
+            }
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            #expect(registry.extensions.map(\.identifier) == names.map { "acme.\($0)" })
+        }
+    }
+
+    @Test("the lexicographically first directory wins a contested identifier")
+    func duplicateResolutionIsDeterministic() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest(manifestJSON(name: "tool"), named: "acme.tool-1.1.0", in: root)
+            try writeManifest(manifestJSON(name: "tool"), named: "acme.tool-1.0.0", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            #expect(registry.extensions.count == 1)
+            #expect(
+                normalizedPath(registry.extensions.first?.directory)
+                    == normalizedPath(root.appendingPathComponent("acme.tool-1.0.0")))
+            #expect(registry.failures.count == 1)
+            #expect(
+                normalizedPath(registry.failures.first?.directory)
+                    == normalizedPath(root.appendingPathComponent("acme.tool-1.1.0")))
+        }
+    }
+
+    // MARK: - F09 — a manifest that will not decode is still nameable
+
+    @Test("a malformed manifest whose name survives keeps the scan complete")
+    func malformedManifestStillNamesItsExtension() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            // `version` is required and is the wrong JSON type, so the strict
+            // decode fails — but `name` and `publisher` are right there.
+            try writeManifest("""
+            {
+                "name": "broken",
+                "publisher": "acme",
+                "version": 3,
+                "engines": { "vscode": "^1.74.0" }
+            }
+            """, named: "broken-ext", in: root)
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            #expect(registry.failures.count == 1)
+            #expect(registry.failures.first?.identifier == "acme.broken")
+            // The whole point: one unparseable manifest must not switch
+            // orphan pruning off for every other extension.
+            #expect(registry.establishedIdentifiers == ["acme.broken", "acme.good"])
+        }
+    }
+
+    @Test("a manifest with no readable name still leaves the scan incomplete")
+    func namelessMalformedManifestStillBlocksPruning() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest("{ not valid json", named: "broken-ext", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            #expect(registry.failures.first?.identifier == nil)
+            #expect(registry.establishedIdentifiers == nil)
+        }
+    }
+
+    // MARK: - F39 — one extension in two spellings is one extension
+
+    @Test("two casings of one identifier are one identity, and either spelling disables it")
+    func caseVariantsAreOneExtension() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest(
+                manifestJSON(name: "Foo", publisher: "MS-vscode"), named: "A-ext", in: root)
+            try writeManifest(
+                manifestJSON(name: "foo", publisher: "ms-vscode"), named: "b-ext", in: root)
+
+            let point = RecordingContributionPoint()
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(point)
+            registry.loadAll()
+
+            #expect(registry.extensions.count == 1)
+            #expect(registry.extensions.first?.identifier == "ms-vscode.foo")
+            #expect(point.applyCalls == ["ms-vscode.foo"])
+            #expect(registry.failures.count == 1)
+
+            // The user turns it off by the marketplace spelling.
+            registry.setEnabled(false, for: "ms-vscode.foo")
+            #expect(!registry.isEnabled("MS-vscode.Foo"))
+            #expect(point.appliedIdentifiers.isEmpty)
+        }
+    }
+
+    @Test("a disabled identifier persisted in another casing still disables")
+    func persistedDisabledIdentifierMigratesCase() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            UserSettings.disabledExtensionIdentifiers.value = ["MS-vscode.Foo"]
+            try writeManifest(
+                manifestJSON(name: "foo", publisher: "ms-vscode"), named: "b-ext", in: root)
+
+            let point = RecordingContributionPoint()
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(point)
+            registry.loadAll()
+
+            #expect(registry.extensions.count == 1)
+            #expect(!registry.isEnabled("ms-vscode.foo"))
+            #expect(point.applyCalls.isEmpty)
+        }
+    }
+    // MARK: - F52 — the load path is synchronous, so its cost is the launch's
+
+    @Test("a hundred fat manifests all load, in order, on one synchronous pass")
+    func aHundredExtensionsLoadInSortedOrder() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            // Sized like real manifests rather than like the two-line fixtures
+            // above — four themes, a dozen commands, twenty configuration
+            // properties — because `loadAll()` runs synchronously on the main
+            // actor at launch (Ruling FN) and what it costs is decided by what
+            // it decodes. This is the fixture F52 was measured on; the numbers
+            // are in the D7 report, and the reason there is no timing
+            // assertion here is that a wall-clock threshold on a shared
+            // machine fails for reasons that have nothing to do with this code.
+            func fat(_ index: Int) -> String {
+                let themes = (0..<4).map {
+                    "{ \"label\": \"T\($0)\", \"uiTheme\": \"vs-dark\", \"path\": \"./t\($0).json\" }"
+                }.joined(separator: ",")
+                let commands = (0..<12).map {
+                    "{ \"command\": \"acme.e\(index).c\($0)\", \"title\": \"Command \($0)\" }"
+                }.joined(separator: ",")
+                let properties = (0..<20).map {
+                    // swiftlint:disable:next line_length
+                    "\"acme.e\(index).p\($0)\": { \"type\": \"string\", \"default\": \"v\($0)\", \"description\": \"A setting number \($0).\" }"
+                }.joined(separator: ",")
+                return """
+                {
+                    "name": "e\(index)", "publisher": "acme", "version": "1.0.0",
+                    "displayName": "Extension \(index)",
+                    "description": "A synthetic extension for the load benchmark.",
+                    "engines": { "vscode": "^1.74.0" },
+                    "activationEvents": ["onLanguage:swift", "onCommand:acme.e\(index).c0"],
+                    "contributes": {
+                        "themes": [\(themes)],
+                        "commands": [\(commands)],
+                        "configuration": { "title": "Extension \(index)", "properties": { \(properties) } }
+                    }
+                }
+                """
+            }
+
+            let count = 100
+            for index in 0..<count {
+                try writeManifest(fat(index), named: String(format: "ext-%03d", index), in: root)
+            }
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            let point = RecordingContributionPoint()
+            registry.register(point)
+            registry.loadAll()
+
+            #expect(registry.failures.isEmpty)
+            #expect(registry.extensions.count == count)
+            // Directory order, which `contentsOfDirectory` does not give (F40).
+            #expect(registry.extensions.map(\.identifier) == (0..<count).map { "acme.e\($0)" })
+            #expect(point.applyCalls.count == count)
+            // Every fat manifest decoded whole — the strict-first shortcut in
+            // `LenientDecoding` must not quietly drop what the slow path kept.
+            #expect(registry.extensions.allSatisfy { $0.manifest.contributes?.commands.count == 12 })
+            #expect(registry.extensions.allSatisfy { $0.manifest.contributes?.themes.count == 4 })
+        }
+    }
+
 }

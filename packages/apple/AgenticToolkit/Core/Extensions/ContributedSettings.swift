@@ -121,6 +121,12 @@ public struct ContributedSettingNote: Sendable, Equatable {
         case enumDescriptionsDropped
         case deprecated
         case missingSectionTitle
+        /// One extension declared one property key in two sections.
+        case duplicateKey
+        /// `minimum` and `maximum` that cannot both be satisfied.
+        case contradictoryBounds
+        /// A declared `default` outside the property's own bounds.
+        case defaultOutOfRange
     }
 
     public let extensionIdentifier: String
@@ -149,10 +155,13 @@ public enum ContributedSettingsDeclaration: Sendable, Equatable {
     /// Declared. `sections` is still empty when every declared section held no
     /// properties (33 sections in the corpus do).
     case declared(sections: [ContributedSettingsSection])
+    /// `contributes.configuration` was there and could not be read.
+    case unreadable(reason: String)
 
     public var sections: [ContributedSettingsSection] {
         switch self {
         case .undeclared: []
+        case .unreadable: []
         case .declared(let sections): sections
         }
     }
@@ -176,7 +185,8 @@ public enum ContributedSettingsBuilder {
         sections(
             for: manifest.contributes?.configuration ?? [],
             ofExtension: manifest.identifier,
-            fallbackTitle: manifest.displayName ?? manifest.name
+            fallbackTitle: manifest.displayName ?? manifest.name,
+            decodingFailures: manifest.contributes?.decodingFailures ?? []
         )
     }
 
@@ -200,33 +210,41 @@ public enum ContributedSettingsBuilder {
     ///
     /// - Parameter fallbackTitle: the title a section with none borrows —
     ///   `displayName ?? name`. 21 of the corpus's 741 sections have no title.
+    ///
+    /// - Parameter decodingFailures: what the manifest could not read. Only
+    ///   the entries naming `contributes.configuration` matter here, and only
+    ///   when nothing at all decoded: that is the difference between "this
+    ///   extension has no settings" and "this extension has settings I could
+    ///   not read", which `.undeclared` collapses into the first — and a panel
+    ///   that says "no settings" about an extension whose settings page is its
+    ///   whole point is worse than one that says it failed.
     public static func sections(
         for configuration: [ExtensionManifest.Configuration],
         ofExtension identifier: String,
-        fallbackTitle: String
+        fallbackTitle: String,
+        decodingFailures: [DecodingFailure] = []
     ) -> (declaration: ContributedSettingsDeclaration, notes: [ContributedSettingNote]) {
-        guard !configuration.isEmpty else { return (.undeclared, []) }
+        if configuration.isEmpty {
+            if let failure = decodingFailures.first(where: { $0.key == "contributes.configuration" }) {
+                return (.unreadable(reason: failure.reason), [])
+            }
+            return (.undeclared, [])
+        }
 
         var notes: [ContributedSettingNote] = []
         var built: [(index: Int, section: ContributedSettingsSection)] = []
+        // One key is one storage slot (`storageName(forKey:ofExtension:)` is
+        // `extensions.<id>.<key>`), so two sections declaring the same key are
+        // two rows over one slot — and the second is usually a *different type*
+        // of row, which is how a Bool slot ends up with a text field bound to
+        // it. The first declaration stands, because it is the one a reader of
+        // the manifest would expect to win, and the second becomes a note.
+        var claimedKeys: Set<String> = []
 
         for (index, section) in configuration.enumerated() {
             // A section with no properties is not an empty group on screen;
             // it is nothing at all.
             guard !section.properties.isEmpty else { continue }
-
-            let title: String
-            if let declared = section.title, !declared.isEmpty {
-                title = declared
-            } else {
-                title = fallbackTitle
-                notes.append(ContributedSettingNote(
-                    extensionIdentifier: identifier,
-                    key: title,
-                    kind: .missingSectionTitle,
-                    detail: "section \(index) declared no title; using \"\(fallbackTitle)\""
-                ))
-            }
 
             var settings: [ContributedSetting] = []
             // Sorted keys, not `for (key, property) in`: a `Dictionary`'s
@@ -234,6 +252,15 @@ public enum ContributedSettingsBuilder {
             // reach the outside world here through `notes`.
             for key in section.properties.keys.sorted() {
                 guard let property = section.properties[key] else { continue }
+                guard claimedKeys.insert(key).inserted else {
+                    notes.append(ContributedSettingNote(
+                        extensionIdentifier: identifier,
+                        key: key,
+                        kind: .duplicateKey,
+                        detail: "already declared by an earlier section; this declaration is ignored"
+                    ))
+                    continue
+                }
                 let (kind, propertyNotes) = classify(property, key: key, ofExtension: identifier)
                 notes.append(contentsOf: propertyNotes)
                 if let deprecation = deprecation(of: property) {
@@ -247,6 +274,26 @@ public enum ContributedSettingsBuilder {
                     explanation: explanation(of: property),
                     kind: kind,
                     order: property.order
+                ))
+            }
+
+            // Every property in this section was claimed by an earlier one, so
+            // there is no group left to draw — the same reason a section with
+            // no properties at all is skipped above. Checked before the title
+            // is resolved, so a section that draws nothing does not also
+            // report a missing title nobody would have seen.
+            guard !settings.isEmpty else { continue }
+
+            let title: String
+            if let declared = section.title, !declared.isEmpty {
+                title = declared
+            } else {
+                title = fallbackTitle
+                notes.append(ContributedSettingNote(
+                    extensionIdentifier: identifier,
+                    key: title,
+                    kind: .missingSectionTitle,
+                    detail: "section \(index) declared no title; using \"\(fallbackTitle)\""
                 ))
             }
 
@@ -342,16 +389,29 @@ public enum ContributedSettingsBuilder {
         case "integer":
             // The bounds round *inward* — a minimum of 0.5 admits 1, not 0 —
             // because a bound that widens when narrowed is the one direction
-            // that could let a clamp store a value the schema forbids.
-            return (.integer(
-                default: integer(from: property.default, note: note),
+            // that could let a clamp store a value the schema forbids. The
+            // rounding is also why the inversion check has to happen *after*
+            // it: `minimum: 1.2, maximum: 1.8` does not invert as written and
+            // does invert as `2...1`.
+            let (low, high) = agreeing(
                 minimum: property.minimum.flatMap { Int(exactly: $0.rounded(.up)) },
-                maximum: property.maximum.flatMap { Int(exactly: $0.rounded(.down)) }), notes)
+                maximum: property.maximum.flatMap { Int(exactly: $0.rounded(.down)) },
+                note: note)
+            return (.integer(
+                default: clamped(
+                    integer(from: property.default, note: note),
+                    minimum: low, maximum: high, note: note),
+                minimum: low,
+                maximum: high), notes)
         case "number":
+            let (low, high) = agreeing(
+                minimum: property.minimum, maximum: property.maximum, note: note)
             return (.number(
-                default: number(from: property.default, note: note),
-                minimum: property.minimum,
-                maximum: property.maximum), notes)
+                default: clamped(
+                    number(from: property.default, note: note),
+                    minimum: low, maximum: high, note: note),
+                minimum: low,
+                maximum: high), notes)
         case "array", "object":
             // Not a note: this is where a structured value is *supposed* to
             // land, not a compromise.
@@ -417,6 +477,64 @@ public enum ContributedSettingsBuilder {
         return .choice(options: options, default: selected)
     }
 
+    // MARK: - Bounds
+
+    /// The declared bounds, or **neither of them** when they cannot both be
+    /// satisfied.
+    ///
+    /// `minimum: 10, maximum: 1` is not a narrow range, it is an empty one,
+    /// and it reaches here from real manifests (a copy-pasted property, a
+    /// `maximum` someone meant as a default). Passing it through pins the
+    /// field: every clamp lands on one of the two bounds, so whatever the user
+    /// types, exactly one value is storable — and which one depends on the
+    /// order the clamps happen to run in. Dropping both leaves the field
+    /// unbounded, which is what the schema would have said had the author
+    /// declared nothing, and the note is what tells them they did not.
+    ///
+    /// Neither bound alone can contradict anything, so a property with one is
+    /// untouched.
+    private static func agreeing<Value: Comparable>(
+        minimum: Value?,
+        maximum: Value?,
+        note: (ContributedSettingNote.Kind, String) -> Void
+    ) -> (minimum: Value?, maximum: Value?) {
+        guard let low = minimum, let high = maximum, low > high else {
+            return (minimum, maximum)
+        }
+        note(
+            .contradictoryBounds,
+            "minimum \(low) exceeds maximum \(high); both are ignored")
+        return (nil, nil)
+    }
+
+    /// A default brought inside bounds that already agree.
+    ///
+    /// The bounds are the schema's claim about what is storable, and the
+    /// default is the value this host writes when nobody has chosen one — so a
+    /// default outside them is a value the same schema forbids, shipped as the
+    /// starting point. Clamping rather than dropping keeps a row's initial
+    /// value at the nearest legal thing instead of at whatever this builder
+    /// would have invented.
+    ///
+    /// Runs after `agreeing`, never before: clamping into an empty range is
+    /// how a contradiction turns into a value.
+    private static func clamped<Value: Comparable>(
+        _ value: Value,
+        minimum: Value?,
+        maximum: Value?,
+        note: (ContributedSettingNote.Kind, String) -> Void
+    ) -> Value {
+        if let minimum, value < minimum {
+            note(.defaultOutOfRange, "default \(value) is below minimum \(minimum); using \(minimum)")
+            return minimum
+        }
+        if let maximum, value > maximum {
+            note(.defaultOutOfRange, "default \(value) is above maximum \(maximum); using \(maximum)")
+            return maximum
+        }
+        return value
+    }
+
     /// What a property with no usable `type` can be read off its default.
     ///
     /// 136 corpus properties declare no `type`; 34 of those declare nothing
@@ -434,12 +552,19 @@ public enum ContributedSettingsBuilder {
             return .toggle(default: flag)
         case .number(let value):
             guard let exact = integral(value) else {
-                return .number(default: value, minimum: property.minimum, maximum: property.maximum)
+                let (low, high) = agreeing(
+                    minimum: property.minimum, maximum: property.maximum, note: note)
+                return .number(
+                    default: clamped(value, minimum: low, maximum: high, note: note),
+                    minimum: low, maximum: high)
             }
-            return .integer(
-                default: exact,
+            let (low, high) = agreeing(
                 minimum: property.minimum.flatMap { Int(exactly: $0.rounded(.up)) },
-                maximum: property.maximum.flatMap { Int(exactly: $0.rounded(.down)) })
+                maximum: property.maximum.flatMap { Int(exactly: $0.rounded(.down)) },
+                note: note)
+            return .integer(
+                default: clamped(exact, minimum: low, maximum: high, note: note),
+                minimum: low, maximum: high)
         case .string(let text):
             return .text(default: text, multiline: property.editPresentation == "multilineText")
         case .array, .object:

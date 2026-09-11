@@ -326,9 +326,25 @@ extension ComposableSettings {
                 sync()
                 return
             }
+            // Bounds that cannot both be satisfied are not bounds. `minimum: 10,
+            // maximum: 1` clamps up to 10 and then down to 1, so the field
+            // accepts exactly one value — 1 — whatever the user types, and
+            // which of the two it lands on is decided by the order these two
+            // lines happen to be in. A contradictory pair comes from a caller's
+            // own mistake, and the field's job then is to stay usable, not to
+            // enforce an empty range. Unbounded is what the caller would have
+            // got by declaring neither.
+            let boundsContradict: Bool
+            if let minimum, let maximum {
+                boundsContradict = minimum > maximum
+            } else {
+                boundsContradict = false
+            }
             var clamped = typed
-            if let minimum, clamped < minimum { clamped = minimum }
-            if let maximum, clamped > maximum { clamped = maximum }
+            if !boundsContradict {
+                if let minimum, clamped < minimum { clamped = minimum }
+                if let maximum, clamped > maximum { clamped = maximum }
+            }
 
             let text = clamped.settingsFieldString
             if textField.stringValue != text {

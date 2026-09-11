@@ -140,6 +140,41 @@ struct ExtensionsSettingsPanelTests {
         }
     }
 
+    @Test("the identifier on screen is the one the manifest spelled, not the folded one")
+    func theIdentifierOnScreenKeepsTheManifestSpelling() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try write(
+                """
+                {
+                    "name": "Foo",
+                    "publisher": "Ms-Python",
+                    "version": "1.0.0",
+                    "displayName": "Foo",
+                    "engines": { "vscode": "^1.74.0" },
+                    "contributes": { "commands": [] }
+                }
+                """,
+                to: "package.json",
+                in: root.appendingPathComponent("Foo-1.0.0")
+            )
+
+            try withPanel(searchPaths: [root]) { _, panel in
+                let detail = try #require(panel.extensionPanels.first)
+                // Matching folds (F39), so everything keyed by identity agrees
+                // with itself no matter how the manifest capitalised it …
+                #expect(detail.extensionIdentifier == "ms-python.foo")
+                _ = detail.view
+                // … but the line the reader is shown is their manifest, not a
+                // normalisation of it. Folding the displayed string would tell
+                // an author their extension is called something it is not, and
+                // this is the one place the app states the identifier back.
+                #expect(labels(in: detail.view).contains("Identifier: Ms-Python.Foo"))
+            }
+        }
+    }
+
     @Test("a refused contribution is not reported as a failed load")
     func contributionPointFailedIsNotReportedAsAFailedLoad() throws {
         try withInMemorySettings {
@@ -352,6 +387,46 @@ struct ExtensionsSettingsPanelTests {
                 // both be a lie about a value that is not in an array at all.
                 #expect(text.contains(
                     "contributes.views.explorer could not be read: expected an array"))
+            }
+        }
+    }
+
+    @Test("a top-level key the manifest decoder dropped reaches the Decisions group too")
+    func aTopLevelKeyTheDecoderDroppedReachesTheDecisionsGroup() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            // `capabilities` is a field nothing in this host reads, so a
+            // malformed one used to take the whole extension down with it
+            // (F09). It is skipped now — which would make it silent, were it
+            // not for this line.
+            try write(
+                """
+                {
+                    "name": "shouty",
+                    "publisher": "test",
+                    "version": "1.0.0",
+                    "displayName": "Shouty",
+                    "engines": { "vscode": "^1.74.0" },
+                    "capabilities": "none at all",
+                    "contributes": { "commands": [{ "command": "test.shouty.go", "title": "Go" }] }
+                }
+                """,
+                to: "package.json",
+                in: root.appendingPathComponent("shouty-1.0.0")
+            )
+
+            try withPanel(searchPaths: [root]) { coordinator, panel in
+                let loaded = try #require(coordinator.registry.extensions.first)
+                #expect(loaded.identifier == "test.shouty")
+                #expect(loaded.manifest.capabilities == nil)
+                #expect(loaded.manifest.contributes?.commands.count == 1)
+                try #require(loaded.manifest.decodingFailures.count == 1)
+
+                let detail = try #require(panel.extensionPanels.first)
+                _ = detail.view
+                let text = labels(in: detail.view)
+                #expect(text.contains { $0.hasPrefix("capabilities could not be read: ") })
             }
         }
     }

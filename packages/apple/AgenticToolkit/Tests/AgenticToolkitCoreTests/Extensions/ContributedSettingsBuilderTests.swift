@@ -571,4 +571,99 @@ struct ContributedSettingsBuilderTests {
         #expect(try setting("a.flag", "{ \"type\": \"boolean\" }").kind == .toggle(default: false))
         #expect(try notes("a.name", "{ \"type\": \"string\" }").map(\.kind) == [.missingDefault])
     }
+
+    // MARK: - F36 — one key is one storage slot, so one key is one row
+
+    @Test("a key declared by two sections of one extension yields one row")
+    func aKeyDeclaredTwiceYieldsOneRow() throws {
+        let built = try build(configuration: """
+        [
+            {
+                "title": "General",
+                "properties": { "acme.mode": { "type": "boolean", "default": false } }
+            },
+            {
+                "title": "Advanced",
+                "properties": { "acme.mode": { "type": "string", "default": "auto" } }
+            }
+        ]
+        """)
+
+        let rows = built.declaration.sections.flatMap(\.settings)
+        #expect(rows.count == 1)
+        // The first declaration stands: a second row would bind a String view
+        // to the slot the Bool view already owns.
+        #expect(rows.first?.kind == .toggle(default: false))
+        #expect(built.notes.contains { $0.kind == .duplicateKey && $0.key == "acme.mode" })
+    }
+
+    // MARK: - F37 — bounds that contradict each other are not bounds
+
+    @Test("an inverted minimum and maximum are dropped rather than passed on")
+    func invertedBoundsAreDropped() throws {
+        let row = try setting(
+            "acme.size", """
+            { "type": "number", "default": 5, "minimum": 10, "maximum": 1 }
+            """)
+        #expect(row.kind == .number(default: 5, minimum: nil, maximum: nil))
+
+        let notes = try notes(
+            "acme.size", """
+            { "type": "number", "default": 5, "minimum": 10, "maximum": 1 }
+            """)
+        #expect(notes.contains { $0.kind == .contradictoryBounds })
+    }
+
+    @Test("integer bounds that invert only after rounding inward are dropped too")
+    func integerBoundsThatInvertAfterRoundingAreDropped() throws {
+        let row = try setting(
+            "acme.count", """
+            { "type": "integer", "default": 1, "minimum": 0.5, "maximum": 0.9 }
+            """)
+        #expect(row.kind == .integer(default: 1, minimum: nil, maximum: nil))
+    }
+
+    @Test("a default outside its own bounds is brought inside them and said so")
+    func defaultOutsideItsBoundsIsClamped() throws {
+        let row = try setting(
+            "acme.size", """
+            { "type": "number", "default": 5, "minimum": 10, "maximum": 20 }
+            """)
+        #expect(row.kind == .number(default: 10, minimum: 10, maximum: 20))
+
+        let notes = try notes(
+            "acme.size", """
+            { "type": "number", "default": 5, "minimum": 10, "maximum": 20 }
+            """)
+        #expect(notes.contains { $0.kind == .defaultOutOfRange })
+    }
+
+    // MARK: - F46 — "declares nothing" is not "I could not read what it declares"
+
+    @Test("a configuration key that is present but unreadable is not undeclared")
+    func unreadableConfigurationIsNotUndeclared() throws {
+        let built = try build(configuration: "\"see the docs\"")
+
+        #expect(built.declaration != .undeclared)
+        #expect(built.declaration.sections.isEmpty)
+        if case .unreadable = built.declaration {
+            // expected
+        } else {
+            Issue.record("expected .unreadable, got \(built.declaration)")
+        }
+    }
+
+    @Test("a configuration key that is genuinely absent stays undeclared")
+    func absentConfigurationStaysUndeclared() throws {
+        let none = try JSONDecoder().decode(
+            ExtensionManifest.self,
+            from: Data("""
+            {
+                "name": "sample", "publisher": "acme", "version": "1.0.0",
+                "engines": { "vscode": "^1.74.0" },
+                "contributes": { "commands": [] }
+            }
+            """.utf8))
+        #expect(ContributedSettingsBuilder.sections(for: none).declaration == .undeclared)
+    }
 }

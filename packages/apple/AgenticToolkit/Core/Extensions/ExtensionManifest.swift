@@ -44,10 +44,39 @@ public struct ExtensionManifest: Codable, Sendable, Equatable {
     public let capabilities: Capabilities?
     public let contributes: Contributions?
 
-    /// `publisher.name` when a publisher is declared, otherwise `name`. This
-    /// is the identity everything else keys on — settings, uninstall,
-    /// contribution withdrawal.
+    /// Top-level keys that were present and unreadable.
+    ///
+    /// The same record `Contributions` keeps for a malformed `contributes.*`
+    /// entry, one level up. It exists because `capabilities`, `extensionKind`
+    /// and `activationEvents` used to be decoded with a plain `try`: a
+    /// manifest that spelled any one of them wrongly failed to decode at all,
+    /// and an extension this host would otherwise have loaded correctly —
+    /// nothing here reads those three — disappeared instead, taking its name
+    /// with it.
+    ///
+    /// Not in `CodingKeys`, so it is never encoded and never round-trips: it
+    /// describes *this decode*, not the manifest.
+    public let decodingFailures: [DecodingFailure]
+
+    /// `publisher.name` when a publisher is declared, otherwise `name`,
+    /// **case-folded**. This is the identity everything else keys on —
+    /// settings storage, the disabled list, uninstall, contribution
+    /// withdrawal.
+    ///
+    /// Folded because the VS Code marketplace treats a publisher and
+    /// extension name case-insensitively, and the gallery's own spelling of
+    /// one drifts from what the manifest says. Left unfolded, `Ms-Python.foo`
+    /// and `ms-python.foo` are two extensions to this host: disabling one
+    /// leaves the other enabled, their settings land in two different storage
+    /// keys, and an uninstall clears a tombstone nobody set. Show
+    /// `displayIdentifier` in UI; key on this.
     public var identifier: String {
+        displayIdentifier.lowercased()
+    }
+
+    /// The identifier exactly as the manifest spelled it — for display, never
+    /// for lookup.
+    public var displayIdentifier: String {
         guard let publisher else { return name }
         return "\(publisher).\(name)"
     }
@@ -163,20 +192,55 @@ public struct ExtensionManifest: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Identity first, and deliberately so: `name` and `publisher` are what
+        // a failure further down is *reported against*, and
+        // `ExtensionRegistry.establishedIdentifiers` goes `nil` — disabling
+        // orphan pruning for the whole scan — the moment one failure cannot
+        // name its extension. Decoding them before anything that can throw is
+        // the cheap half of keeping that from happening.
         name = try container.decode(String.self, forKey: .name)
         publisher = try container.decodeIfPresent(String.self, forKey: .publisher)
         version = try container.decode(String.self, forKey: .version)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         engines = try container.decode(Engines.self, forKey: .engines)
-        // VS Code 1.74+ infers activation events from `contributes`, so a
-        // manifest that relies on that inference omits the key entirely.
-        activationEvents = try container.decodeIfPresent([String].self, forKey: .activationEvents) ?? []
         main = try container.decodeIfPresent(String.self, forKey: .main)
         browser = try container.decodeIfPresent(String.self, forKey: .browser)
-        extensionKind = try container.decodeIfPresent([String].self, forKey: .extensionKind)
-        capabilities = try container.decodeIfPresent(Capabilities.self, forKey: .capabilities)
+
+        // `name`, `version` and `engines.vscode` above are the extension's
+        // identity: without them this is not a VS Code extension and there is
+        // nothing to load. The three below are not. Nothing in this host reads
+        // `activationEvents`, `extensionKind` or `capabilities` — they are
+        // carried for display and for a future activation model — so a
+        // malformed one is recorded and skipped, exactly as a malformed
+        // `contributes` entry is, rather than costing the extension its themes,
+        // commands and settings.
+        var failures: [DecodingFailure] = []
+        // VS Code 1.74+ infers activation events from `contributes`, so a
+        // manifest that relies on that inference omits the key entirely.
+        activationEvents = LenientDecoding.array(
+            String.self, from: container, key: .activationEvents,
+            manifestKey: "activationEvents", failures: &failures)
+        // `nil`, not `[]`, when the key is absent or its value was unreadable:
+        // `[]` would be this manifest saying "runs in no extension host at
+        // all", which is a claim, where `nil` is the absence of one.
+        let kinds = LenientDecoding.array(
+            String.self, from: container, key: .extensionKind,
+            manifestKey: "extensionKind", failures: &failures)
+        extensionKind = kinds.isEmpty ? nil : kinds
+        capabilities = LenientDecoding.value(
+            Capabilities.self, from: container, key: .capabilities,
+            manifestKey: "capabilities", failures: &failures)
+        // `contributes` stays strict, and deliberately so: it is not a field
+        // nothing reads. A `contributes` of the wrong shape is not a manifest
+        // with one bad key, it is a manifest whose entire contribution block
+        // this host cannot see, and loading it as an extension that happens to
+        // contribute nothing is the silent-wrong-answer the pinned test
+        // "a contributes key of the wrong shape sinks the manifest rather than
+        // reading as empty" exists to forbid. Its *elements* are already
+        // lenient one level down, which is where leniency belongs.
         contributes = try container.decodeIfPresent(Contributions.self, forKey: .contributes)
+        decodingFailures = failures
     }
 }
 
@@ -253,44 +317,44 @@ extension ExtensionManifest {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             var failures: [DecodingFailure] = []
 
-            themes = Self.decodeLenientArray(
+            themes = LenientDecoding.array(
                 Theme.self, from: container, key: .themes,
                 manifestKey: "contributes.themes", failures: &failures
             )
-            snippets = Self.decodeLenientArray(
+            snippets = LenientDecoding.array(
                 Snippet.self, from: container, key: .snippets,
                 manifestKey: "contributes.snippets", failures: &failures
             )
-            languages = Self.decodeLenientArray(
+            languages = LenientDecoding.array(
                 Language.self, from: container, key: .languages,
                 manifestKey: "contributes.languages", failures: &failures
             )
-            commands = Self.decodeLenientArray(
+            commands = LenientDecoding.array(
                 Command.self, from: container, key: .commands,
                 manifestKey: "contributes.commands", failures: &failures
             )
-            keybindings = Self.decodeLenientArray(
+            keybindings = LenientDecoding.array(
                 Keybinding.self, from: container, key: .keybindings,
                 manifestKey: "contributes.keybindings", failures: &failures
             )
-            configuration = Self.decodeLenientArray(
+            configuration = LenientDecoding.array(
                 Configuration.self, from: container, key: .configuration,
                 manifestKey: "contributes.configuration", failures: &failures
             )
-            languageModelTools = Self.decodeLenientArray(
+            languageModelTools = LenientDecoding.array(
                 LanguageModelTool.self, from: container, key: .languageModelTools,
                 manifestKey: "contributes.languageModelTools", failures: &failures
             )
 
-            menus = Self.decodeLenientDictionary(
+            menus = LenientDecoding.dictionary(
                 MenuItem.self, from: container, key: .menus,
                 manifestKeyPrefix: "contributes.menus", failures: &failures
             )
-            views = Self.decodeLenientDictionary(
+            views = LenientDecoding.dictionary(
                 View.self, from: container, key: .views,
                 manifestKeyPrefix: "contributes.views", failures: &failures
             )
-            viewsContainers = Self.decodeLenientDictionary(
+            viewsContainers = LenientDecoding.dictionary(
                 ViewContainer.self, from: container, key: .viewsContainers,
                 manifestKeyPrefix: "contributes.viewsContainers", failures: &failures
             )
@@ -328,6 +392,23 @@ extension ExtensionManifest {
             try container.encode(languageModelTools, forKey: .languageModelTools)
         }
 
+    }
+
+    /// The manifest's one lenient-decoding implementation, shared by
+    /// `Contributions` and by `ExtensionManifest` itself.
+    ///
+    /// It lived inside `Contributions` until the top-level manifest needed the
+    /// same tolerance. `capabilities`, `activationEvents` and `extensionKind`
+    /// decoded with a plain `try`, so one field nothing in this host reads
+    /// could sink a whole extension — and take its *name* down with it, since
+    /// the name is what a failure is reported against. That is what switched
+    /// `ExtensionRegistry.establishedIdentifiers` to `nil` and turned orphan
+    /// pruning off for every *other* extension in the scan.
+    ///
+    /// Generic over the key type so both callers' `CodingKeys` fit; otherwise
+    /// unchanged from the version `Contributions` kept to itself.
+    enum LenientDecoding {
+
         /// Decodes `contributes.<key>` element-wise: each element round-trips
         /// through `JSONValue` first (which always succeeds for well-formed
         /// JSON, sidestepping `UnkeyedDecodingContainer`'s cursor-stuck
@@ -348,14 +429,31 @@ extension ExtensionManifest {
         /// no correct manifest produces, and the only consequence of accepting
         /// it is that this host loads something VS Code would have rejected —
         /// never that a correct manifest decodes wrongly.
-        private static func decodeLenientArray<Element: Decodable>(
+        static func array<Element: Decodable, Key: CodingKey>(
             _ type: Element.Type,
-            from container: KeyedDecodingContainer<CodingKeys>,
-            key: CodingKeys,
+            from container: KeyedDecodingContainer<Key>,
+            key: Key,
             manifestKey: String,
             failures: inout [DecodingFailure]
         ) -> [Element] {
             guard container.contains(key) else { return [] }
+
+            // The whole array, in one pass, when nothing is wrong with it —
+            // which is every well-formed manifest, i.e. all of them, nearly
+            // always. The element-wise path below is a *recovery* path and
+            // costs what recovery costs: it builds a `JSONValue` graph for
+            // every entry and then re-encodes and re-decodes each one, roughly
+            // three parses per element. Measured on 100 synthetic extensions
+            // (4 themes, 12 commands, 20 configuration properties each,
+            // `ExtensionRegistryTests`' F52 benchmark), paying that for good
+            // input cost ~275 ms of main-actor CPU at load against ~4 ms of
+            // file reading — the launch stall F52 describes is this, not I/O.
+            // Trying strict first leaves the recovery behaviour untouched: a
+            // strict decode fails if and only if some element does, and that
+            // is exactly when the slow path runs and isolates it.
+            if let decoded = try? container.decode([Element].self, forKey: key) {
+                return decoded
+            }
 
             let raw: [JSONValue]
             if let array = try? container.decode([JSONValue].self, forKey: key) {
@@ -367,11 +465,17 @@ extension ExtensionManifest {
                 return []
             }
 
+            // One pair for the whole array. Neither is configured per element and
+            // both are safe to reuse for this round-trip, and an encoder allocates
+            // real internal state — a manifest contributing a few hundred entries
+            // was paying for a few hundred of them, on the launch path.
+            let encoder = JSONEncoder()
+            let decoder = JSONDecoder()
             var result: [Element] = []
             for (index, item) in raw.enumerated() {
                 do {
-                    let data = try JSONEncoder().encode(item)
-                    result.append(try JSONDecoder().decode(Element.self, from: data))
+                    let data = try encoder.encode(item)
+                    result.append(try decoder.decode(Element.self, from: data))
                 } catch {
                     failures.append(DecodingFailure(key: manifestKey, index: index, reason: describe(error)))
                 }
@@ -389,7 +493,7 @@ extension ExtensionManifest {
         /// one of these as "The data couldn't be read because it is missing.",
         /// naming neither the key nor the entry. So each case is written out,
         /// and every one of them names the thing the author has to go and fix.
-        private static func describe(_ error: Error) -> String {
+        static func describe(_ error: Error) -> String {
             guard let decoding = error as? DecodingError else { return error.localizedDescription }
             switch decoding {
             case .keyNotFound(let key, _):
@@ -419,7 +523,7 @@ extension ExtensionManifest {
         /// The nouns are JSON's own rather than a settings panel's ("a group of
         /// settings"): this one table serves `themes`, `commands`, `menus` and
         /// `languages` as well as `configuration`, where an object is not a
-        /// group of settings — and `decodeLenientDictionary` twenty lines below
+        /// group of settings — and `LenientDecoding.dictionary` twenty lines below
         /// already says "expected an object", so anything else would have one
         /// file contradicting itself within a screen (Ruling GU).
         ///
@@ -453,24 +557,34 @@ extension ExtensionManifest {
             return path.isEmpty ? "this entry" : "“\(path)”"
         }
 
-        /// Same posture as `decodeLenientArray`, for the menu/view/
+        /// Same posture as `LenientDecoding.array`, for the menu/view/
         /// view-container contributions keyed by location (`commandPalette`,
         /// `activitybar`, …). A location whose value isn't itself an array is
         /// one failure naming that location; each element within it decodes
         /// independently.
-        private static func decodeLenientDictionary<Element: Decodable>(
+        static func dictionary<Element: Decodable, Key: CodingKey>(
             _ type: Element.Type,
-            from container: KeyedDecodingContainer<CodingKeys>,
-            key: CodingKeys,
+            from container: KeyedDecodingContainer<Key>,
+            key: Key,
             manifestKeyPrefix: String,
             failures: inout [DecodingFailure]
         ) -> [String: [Element]] {
             guard container.contains(key) else { return [:] }
+
+            // The same strict-first shortcut `array` takes, for the same
+            // measured reason: the element-wise path is recovery, and a
+            // well-formed manifest should not pay for it.
+            if let decoded = try? container.decode([String: [Element]].self, forKey: key) {
+                return decoded
+            }
+
             guard let raw = try? container.decode([String: JSONValue].self, forKey: key) else {
                 failures.append(DecodingFailure(key: manifestKeyPrefix, index: nil, reason: "expected an object"))
                 return [:]
             }
 
+            let encoder = JSONEncoder()
+            let decoder = JSONDecoder()
             var result: [String: [Element]] = [:]
             for (location, value) in raw {
                 guard case .array(let items) = value else {
@@ -481,8 +595,8 @@ extension ExtensionManifest {
                 var decoded: [Element] = []
                 for (index, item) in items.enumerated() {
                     do {
-                        let data = try JSONEncoder().encode(item)
-                        decoded.append(try JSONDecoder().decode(Element.self, from: data))
+                        let data = try encoder.encode(item)
+                        decoded.append(try decoder.decode(Element.self, from: data))
                     } catch {
                         let locationKey = "\(manifestKeyPrefix).\(location)"
                         failures.append(
@@ -493,6 +607,31 @@ extension ExtensionManifest {
                 result[location] = decoded
             }
             return result
+        }
+
+        /// One optional field, decoded the same way: a key that is present and
+        /// unreadable records a failure and answers `nil` rather than throwing
+        /// out of the whole manifest.
+        ///
+        /// The single-value sibling of `array` and `dictionary`, for a field
+        /// whose JSON shape is one object and where a per-element recovery
+        /// means nothing. Absent is still `nil` and still records nothing —
+        /// "not declared" is not a failure.
+        static func value<Value: Decodable, Key: CodingKey>(
+            _ type: Value.Type,
+            from container: KeyedDecodingContainer<Key>,
+            key: Key,
+            manifestKey: String,
+            failures: inout [DecodingFailure]
+        ) -> Value? {
+            guard container.contains(key) else { return nil }
+            do {
+                return try container.decodeIfPresent(Value.self, forKey: key)
+            } catch {
+                failures.append(
+                    DecodingFailure(key: manifestKey, index: nil, reason: describe(error)))
+                return nil
+            }
         }
     }
 
@@ -535,7 +674,7 @@ extension ExtensionManifest {
         /// VS Code also allows an object form (`{light, dark}`) here, and
         /// published extensions use it constantly. Only the plain-string form
         /// is modeled, so the object form decodes to `nil` rather than
-        /// throwing: `decodeLenientArray` isolates at element granularity, so
+        /// throwing: `LenientDecoding.array` isolates at element granularity, so
         /// a throw from this one field would cost the whole command — its
         /// identifier, its title, its place in the palette — over a
         /// decoration. Dropping the icon is the smaller loss, and the only
@@ -598,7 +737,7 @@ extension ExtensionManifest {
         }
 
         /// Every field is `try?` rather than `decodeIfPresent`, because
-        /// `decodeLenientArray` isolates failures at the *section*: one
+        /// `LenientDecoding.array` isolates failures at the *section*: one
         /// mistyped scalar here throws out of this initializer and takes
         /// every sibling property in the section with it. A section holds up
         /// to 186 properties in the corpus, and eight properties there
@@ -640,7 +779,7 @@ extension ExtensionManifest {
         /// Modelled rather than spelled `String?` because the union form is
         /// live — 383 of the corpus's 7,464 properties use it — and a
         /// `String?` throws a `typeMismatch` on every one. That throw does
-        /// not cost the property alone: `decodeLenientArray` isolates at the
+        /// not cost the property alone: `LenientDecoding.array` isolates at the
         /// section, so it costs every sibling property in the section too.
         public enum PropertyType: Codable, Sendable, Equatable {
             case single(String)
@@ -800,7 +939,7 @@ extension ExtensionManifest {
         ///
         /// Dropping a field silently would trade a loud failure for a quiet
         /// one: before the widened decoder, a `when` given as a number threw,
-        /// `decodeLenientDictionary` caught it, and a `DecodingFailure` was
+        /// `LenientDecoding.dictionary` caught it, and a `DecodingFailure` was
         /// recorded with the key and the reason. Keeping the view is the right
         /// trade, but a `String?` cannot tell "absent" from "present and
         /// unreadable", so the difference is carried here instead and
@@ -825,7 +964,7 @@ extension ExtensionManifest {
         /// `id` and `name` are strict; everything else is `try?`.
         ///
         /// Not tidying — a measured hazard this task would otherwise have
-        /// introduced. `decodeLenientDictionary` isolates a failure at the
+        /// introduced. `LenientDecoding.dictionary` isolates a failure at the
         /// *view*, so any throw from here costs the whole entry: its id, its
         /// name, its place in the pane list. With `initialSize` added as a
         /// plain `Double?`, a manifest spelling it `"2"` as a string throws
@@ -871,7 +1010,7 @@ extension ExtensionManifest {
         /// Optional, and that is the fix rather than the modelling.
         ///
         /// Declared non-optional, a container that omits its icon throws,
-        /// `decodeLenientDictionary` catches it at the element, and the whole
+        /// `LenientDecoding.dictionary` catches it at the element, and the whole
         /// container disappears — its title, its id, and with the id gone,
         /// every view targeting it becomes an unknown-container note. Losing a
         /// container over a missing decoration is the wrong trade.
