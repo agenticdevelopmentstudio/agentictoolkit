@@ -28,16 +28,24 @@ public final class FileViewerViewController: NSViewController {
     /// completion without ever saying so.
     private let languageServices: ProjectLanguageServices?
 
+    /// This pane's resolved display options — line numbers, minimap,
+    /// invisibles. Defaulted so `FileBrowserSplitViewController`'s existing
+    /// call site keeps compiling untouched; Task 9 removes that call site
+    /// entirely.
+    private let options: EditorOptionsOverride
+
     public init(
         selection: FileBrowserSelection,
         documentStore: TextDocumentStore,
         saveScheduler: TextDocumentSaveScheduler,
-        languageServices: ProjectLanguageServices?
+        languageServices: ProjectLanguageServices?,
+        options: EditorOptionsOverride = EditorOptionsOverride()
     ) {
         self.selection = selection
         self.documentStore = documentStore
         self.saveScheduler = saveScheduler
         self.languageServices = languageServices
+        self.options = options
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -52,7 +60,8 @@ public final class FileViewerViewController: NSViewController {
                 selection: selection,
                 documentStore: documentStore,
                 saveScheduler: saveScheduler,
-                languageServices: languageServices
+                languageServices: languageServices,
+                options: options
             ).themedRoot()
         )
         hosting.frame = NSRect(x: 0, y: 0, width: 520, height: 400)
@@ -67,6 +76,7 @@ private struct FileViewerPaneView: View {
     let documentStore: TextDocumentStore
     let saveScheduler: TextDocumentSaveScheduler
     let languageServices: ProjectLanguageServices?
+    let options: EditorOptionsOverride
 
     var body: some View {
         FileEditorView(
@@ -74,6 +84,7 @@ private struct FileViewerPaneView: View {
             documentStore: documentStore,
             saveScheduler: saveScheduler,
             languageServices: languageServices,
+            options: options,
             openFile: openFile
         )
     }

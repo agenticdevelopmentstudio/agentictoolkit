@@ -94,6 +94,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -134,6 +135,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -166,6 +168,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -203,6 +206,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -253,6 +257,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -288,6 +293,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
         state?.load(from: fileURL)
@@ -318,12 +324,14 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
         let paneTwo = FileEditorState(
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
         paneOne?.load(from: fileURL)
@@ -391,6 +399,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -443,6 +452,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 
@@ -471,6 +481,7 @@ struct FileEditorStateTests {
             documentStore: store,
             saveScheduler: scheduler,
             languageServices: nil,
+            options: EditorOptionsOverride(),
             openFile: nil
         )
 

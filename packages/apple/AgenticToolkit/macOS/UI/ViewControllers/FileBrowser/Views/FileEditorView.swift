@@ -40,6 +40,8 @@ public struct FileEditorView: View {
     ///   - languageServices: This project's language servers, or `nil` for a
     ///     browser that has none. No default value: a default would let a new
     ///     call site lose completion and go-to-definition without saying so.
+    ///   - options: This pane's resolved display options — line numbers,
+    ///     minimap, invisibles.
     ///   - openFile: How to show a cross-file go-to-definition target. Supplied
     ///     from above rather than decided here — this view has no selection to
     ///     drive.
@@ -48,6 +50,7 @@ public struct FileEditorView: View {
         documentStore: TextDocumentStore,
         saveScheduler: TextDocumentSaveScheduler,
         languageServices: ProjectLanguageServices?,
+        options: EditorOptionsOverride,
         openFile: (@MainActor (URL) -> Void)?
     ) {
         self.selectedNode = selectedNode
@@ -56,6 +59,7 @@ public struct FileEditorView: View {
                 documentStore: documentStore,
                 saveScheduler: saveScheduler,
                 languageServices: languageServices,
+                options: options,
                 openFile: openFile
             )
         )
