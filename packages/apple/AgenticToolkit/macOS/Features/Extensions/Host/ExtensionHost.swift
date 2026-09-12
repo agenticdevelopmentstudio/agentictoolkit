@@ -862,13 +862,18 @@ public final class ExtensionHost {
     }
 
     /// Installs the host block table, evaluates the shim, captures
-    /// `__extensionRuntime`, and then removes both globals.
+    /// `__extensionRuntime`, installs the `VSCodeAPI` ceremony that has to be
+    /// in place before any extension code runs (the command-dispatch
+    /// trampoline, `vscode.Uri`), replays every adaptor-registered
+    /// `vscode.*` member onto the fresh runtime, and then removes both
+    /// globals.
     ///
-    /// Removing them is the difference between "the extension is given a
-    /// bounded runtime" and "the extension is given a bounded runtime plus a
-    /// direct line to the app": `__host` carries blocks that schedule timers
-    /// and write to the log, and an extension that found it could use them
-    /// without going through any of the shim's checks.
+    /// Removing `__host` and `__extensionRuntime` is the difference between
+    /// "the extension is given a bounded runtime" and "the extension is given
+    /// a bounded runtime plus a direct line to the app": `__host` carries
+    /// blocks that schedule timers and write to the log, and an extension
+    /// that found it could use them without going through any of the shim's
+    /// checks.
     private func installRuntime(runtimeSource: String, into context: JSContext) throws -> JSValue? {
         guard let table = JSValue(newObjectIn: context) else {
             throw ExtensionHostError.javaScriptEngineUnavailable(identifier: identifier)
@@ -916,6 +921,44 @@ public final class ExtensionHost {
 
         let runtime = context.objectForKeyedSubscript("__extensionRuntime")
         guard let runtime, !runtime.isUndefined, !runtime.isNull else { return nil }
+
+        // Eager, ahead of every adaptor-registered member below and ahead of
+        // the extension's own module code: `VSCodeAPI.installTrampoline(in:)`
+        // caches the command-dispatch trampoline under its non-configurable,
+        // non-writable global *before* anything else in this context can
+        // write to that name first. See `VSCodeAPI.sharedHelper(in:)` for
+        // exactly what that closes (a same-named top-level assignment the
+        // extension makes afterwards becomes a silent sloppy-mode no-op
+        // instead of being adopted) and what it cannot (a context this call
+        // does not succeed in still falls back to the old lazy install, with
+        // the old window). Not fatal to activation: a context that cannot
+        // host the trampoline yet is exactly what the lazy fallback exists
+        // for, and `installTrampoline(in:)` has already logged the failure.
+        VSCodeAPI.installTrampoline(in: context)
+
+        // Same eagerness, for `vscode.Uri`: installed directly into the local
+        // `runtime` rather than through `defineVSCodeMember`, because that
+        // public API's "apply immediately" branch reads `self.runtime`, which
+        // is still `nil` here — `performActivation` only assigns it once this
+        // method returns. Not queued onto `vscodeMemberDefinitions` either:
+        // that list exists for adaptors with an owner to tear down and a
+        // reason to be replayed on a later activation, and `Uri` is neither —
+        // it is host ceremony, installed the same way on every activation,
+        // exactly like the trampoline above. A failure here is logged and
+        // left as the shim's not-implemented stub; it is not fatal to
+        // activation, for the same reason a missing trampoline is not.
+        if let uriClass = VSCodeAPI.installUriClass(in: context) {
+            pendingException = nil
+            runtime.invokeMethod("defineMember", withArguments: ["vscode", "Uri", uriClass])
+            if let message = pendingException {
+                pendingException = nil
+                logger.error(
+                    """
+                    Extension '\(self.identifier, privacy: .public)' could not have 'vscode.Uri' \
+                    installed (\(message, privacy: .public)); it stays the shim's not-implemented stub
+                    """)
+            }
+        }
 
         // Before the extension's first statement runs, so a member defined by
         // an adaptor is already there when the module body reaches for it —
