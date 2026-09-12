@@ -339,12 +339,16 @@ public final class MainThreadWorkspace {
         let identifier = self.extensionIdentifier
         let recordMiss: @convention(block) (String) -> Void = { memberPath in
             MainActor.assumeIsolated {
-                ledger.record(memberPath: memberPath, extensionIdentifier: identifier)
+                // `record`/`recordProbe` answer the deduplicated access; this
+                // call site only needs the recording side effect.
+                _ = ledger.record(memberPath: memberPath, extensionIdentifier: identifier)
             }
         }
         let recordProbe: @convention(block) (String) -> Void = { memberPath in
             MainActor.assumeIsolated {
-                ledger.recordProbe(memberPath: memberPath, extensionIdentifier: identifier)
+                // `record`/`recordProbe` answer the deduplicated access; this
+                // call site only needs the recording side effect.
+                _ = ledger.recordProbe(memberPath: memberPath, extensionIdentifier: identifier)
             }
         }
         let members: [String: Any] = [
@@ -551,6 +555,12 @@ public final class MainThreadWorkspace {
         resolveWith: @escaping @MainActor (Value, JSContext) -> Any
     ) -> JSValue? {
         JSValue(newPromiseIn: context) { [weak self] resolveValue, rejectValue in
+            // `valueWithNewPromiseInContext:fromExecutor:` declares both
+            // executor arguments `_Null_unspecified`, so Swift types them
+            // `JSValue?` here. JavaScriptCore always supplies both; with
+            // either missing there is nothing to settle the promise through,
+            // so the only honest answer is to leave it pending.
+            guard let resolveValue, let rejectValue else { return }
             let settlement = SettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
