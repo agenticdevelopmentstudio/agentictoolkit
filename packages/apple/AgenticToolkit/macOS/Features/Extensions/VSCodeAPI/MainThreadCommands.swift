@@ -172,8 +172,13 @@ public final class MainThreadCommands {
         // that the real one would then have to displace. The `contributes`
         // wiring task is the one that fixes it.
         let token = registry.register(AppCommand(id: command, title: command, run: { rawArguments in
-            MainThreadCommands.invoke(
-                callback, thisArg: boundThisArg, arguments: rawArguments, commandID: command)
+            // The dispatch starting here consumes `dispatchHasCaller`: it is
+            // the dispatch the bit was set for, and anything nested inside it
+            // must read `false`. See the property's doc.
+            let hasCaller = MainThreadCommands.consumeDispatchHasCaller()
+            return MainThreadCommands.invoke(
+                callback, thisArg: boundThisArg, arguments: rawArguments, commandID: command,
+                hasCaller: hasCaller)
         }))
         ownedCallbacks[command] = OwnedCommand(callback: callback, token: token)
 
@@ -209,12 +214,21 @@ public final class MainThreadCommands {
     /// properly as an app fault, and at volume. The round-1 ruling this
     /// descends from said a palette dispatch is logged and swallowed *because
     /// there is no caller to tell* — so where there is a caller, the caller is
-    /// told and the log stays quiet. `dispatchHasCaller` is that bit, and both
-    /// failure shapes below read it: one rule rather than two, which is also
-    /// the cheaper thing to keep true as tasks 5.4–5.7 copy this ceremony.
-    /// Note what this does *not* touch: the exception still never reaches
-    /// `ExtensionHost.pendingException` on either path. F3/F4 were about where
-    /// it goes, not about who writes it down.
+    /// told and the log stays quiet. `hasCaller` is that bit, read off
+    /// `dispatchHasCaller` and consumed by the registry closure that calls
+    /// this; both failure shapes below read it, one rule rather than two,
+    /// which is also the cheaper thing to keep true as tasks 5.4–5.7 copy this
+    /// ceremony.
+    /// Note what this does *not* touch: for a callback reached through the
+    /// trampoline this host installs, the exception still does not land in
+    /// `ExtensionHost.pendingException` on either path — F3/F4 were about
+    /// where it goes, not about who writes it down. **That is a claim about
+    /// this host's trampoline, not about every context.** An extension that
+    /// pre-empts `globalThis.__vscodeAPITrampoline` with a `call` that
+    /// *throws* rather than returning a record puts its exception into
+    /// `pendingException` by way of JavaScriptCore's `notifyException:`,
+    /// before anything here runs; `VSCodeAPI.call`'s doc has the full account
+    /// and the reason that case is bounded to the extension that did it.
     ///
     /// **An `async` callback does not throw — it rejects**, and a rejection is
     /// not a return value either path can notice: the call itself succeeded,
@@ -242,11 +256,12 @@ public final class MainThreadCommands {
         _ callback: JSValue,
         thisArg: JSValue?,
         arguments: [Any],
-        commandID: String
+        commandID: String,
+        hasCaller: Bool
     ) -> Any? {
         switch VSCodeAPI.call(callback, thisArg: thisArg, arguments: arguments) {
         case .returned(let value):
-            if !dispatchHasCaller, let value, let context = value.context {
+            if !hasCaller, let value, let context = value.context {
                 VSCodeAPI.observeRejection(of: value, in: context) { reason in
                     MainThreadCommands.logger.error(
                         """
@@ -260,11 +275,13 @@ public final class MainThreadCommands {
             // Same rule as the rejection above, and deliberately one rule
             // rather than two: an extension awaiting `executeCommand` receives
             // this as a rejection and owns it. What F3/F4 were about is where
-            // the exception *goes* — never into
-            // `ExtensionHost.pendingException` — and `VSCodeAPI.call` still
-            // guarantees that on both paths. Whether the adaptor also logs is
-            // a separate question, answered here by who is listening.
-            if !dispatchHasCaller {
+            // the exception *goes* — out through the trampoline's record
+            // rather than into `ExtensionHost.pendingException` — which
+            // `VSCodeAPI.call` holds on both paths for the trampoline this
+            // host installs, though not for one an extension replaced with a
+            // `call` that throws. Whether the adaptor also logs is a separate
+            // question, answered here by who is listening.
+            if !hasCaller {
                 logger.error(
                     """
                     Extension command '\(commandID, privacy: .public)' threw: \
@@ -287,11 +304,22 @@ public final class MainThreadCommands {
         }
     }
 
-    /// Whether the dispatch currently running has a caller that will be handed
-    /// its result — an extension's `await vscode.commands.executeCommand(…)` —
-    /// as opposed to a palette or menu-item dispatch through
-    /// `CommandRegistry.execute(id:)`, which returns `Void` and has nobody to
-    /// tell.
+    /// Whether the **next** dispatch on this actor has a caller that will be
+    /// handed its result — an extension's `await
+    /// vscode.commands.executeCommand(…)` — as opposed to a palette or
+    /// menu-item dispatch through `CommandRegistry.execute(id:)`, which
+    /// returns `Void` and has nobody to tell.
+    ///
+    /// **It describes one dispatch, and that dispatch consumes it.**
+    /// `consumeDispatchHasCaller()` reads it and puts it back to `false` at
+    /// the top of the closure `handleRegisterCommand` hands `AppCommand`, so
+    /// the answer belongs to exactly the dispatch `executeCommand` set it for.
+    /// Anything that dispatch nests inside itself — a command callback that
+    /// calls some other host member which in turn dispatches a command, which
+    /// is what tasks 5.4–5.7 will add — reads `false` and is logged, and that
+    /// is correct: a nested caller-less dispatch genuinely has nobody to tell.
+    /// Leaving the bit set for the whole synchronous `registry.execute` span
+    /// would silence it instead.
     ///
     /// **`static` because the bit belongs to the dispatch, not to the
     /// adaptor** — this is the reason, and it is not a compromise. When
@@ -318,15 +346,24 @@ public final class MainThreadCommands {
     /// could lose its own exception into it. This is one `Bool` in this file,
     /// on the main actor, saved and restored around a *synchronous* call
     /// (`dispatchingForACaller`), observable by nothing outside this type, and
-    /// owning no resource anyone else depends on. Nesting is correct by
-    /// construction: a command that dispatches another command restores the
-    /// outer value on the way out.
+    /// owning no resource anyone else depends on.
     private static var dispatchHasCaller = false
 
+    /// Reads `dispatchHasCaller` and puts it back to `false`, answering for
+    /// the one dispatch it was set for.
+    private static func consumeDispatchHasCaller() -> Bool {
+        let hasCaller = dispatchHasCaller
+        dispatchHasCaller = false
+        return hasCaller
+    }
+
     /// Runs `body` with `dispatchHasCaller` set, restoring whatever it was
-    /// before. The save-and-restore is a nested dispatch's correctness, not
-    /// tidiness: `executeCommand` from inside a command callback is ordinary
-    /// VS Code practice.
+    /// before. The dispatch itself consumes the bit
+    /// (`consumeDispatchHasCaller`), so the restore covers the paths that
+    /// never reach a registered callback — an unknown command id, a registry
+    /// throw, an early return — and leaves an outer `executeCommand`'s bit as
+    /// it found it, which matters because `executeCommand` from inside a
+    /// command callback is ordinary VS Code practice.
     private static func dispatchingForACaller<Value>(_ body: () throws -> Value) rethrows -> Value {
         let previous = dispatchHasCaller
         dispatchHasCaller = true
