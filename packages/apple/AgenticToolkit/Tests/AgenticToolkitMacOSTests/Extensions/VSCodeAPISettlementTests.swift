@@ -21,7 +21,7 @@ private final class ValueCapture {
     /// installs.
     ///
     /// No formal parameters, read through `VSCodeAPI.currentArguments()`, for
-    /// the reason `VSCodeAPI.member(path:owner:response:body:)` gives: the
+    /// the reason `VSCodeAPI.member(_:of:whenTornDown:body:)` gives: the
     /// argument is read off the actual argument list rather than off however
     /// many parameters the block happened to declare.
     var implementation: Any {
@@ -109,8 +109,8 @@ private final class ExceptionRecorder {
 /// `then` can be a `Proxy` trap or a throwing accessor written by an
 /// extension, and a Swift-built object is neither.
 ///
-/// The one exception is the last test, which needs a context whose trampoline
-/// cannot answer `thenOf` and therefore cannot have a working
+/// The one exception is the `.unavailable` test, which needs a context whose
+/// trampoline cannot answer `thenOf` and therefore cannot have a working
 /// `ExtensionHost` around it — a bare `JSContext`, as `VSCodeAPISubNamespaceTests`
 /// uses throughout.
 @MainActor
@@ -405,12 +405,21 @@ struct VSCodeAPISettlementTests {
     /// primitive answered `.rejected` with the getter's own error *and* that
     /// nothing arrived at the handler in between.
     ///
-    /// Without part two this test passes against an implementation that reads
-    /// `.then` with `forProperty` — that implementation also answers
-    /// `.rejected`, because `JSValue.forProperty` answers `nil` for a throwing
-    /// getter and the throw goes to the handler instead. The exception would
-    /// then be attributed to whatever the host was doing at the time, which is
-    /// the defect `thenFunction(of:in:)` exists to prevent.
+    /// Both assertions in part two are live against the mutant requirement 2
+    /// exists to kill — an implementation that reads `.then` with
+    /// `forProperty`. That read is `-[JSValue valueForProperty:]`, which on a
+    /// throwing getter hands the exception to
+    /// `-[JSContext valueFromNotifyException:]` and answers a `JSValue`
+    /// holding **`undefined`**, not `nil` (`JSValue.mm:419-426`,
+    /// `JSContext.mm:370-374`; `VSCodeAPI.CallOutcome.returned`'s own doc
+    /// records the `undefined`-rather-than-`nil` answer for the missing-key
+    /// case). Reading `undefined`, that implementation concludes "not a
+    /// thenable" and answers `.fulfilled(value)` — so it fails the `#require`
+    /// below. It also pushed the getter's error into the context's
+    /// `exceptionHandler` on the way, which is what the message-count
+    /// assertion catches, and that is the defect `thenFunction(of:in:)` exists
+    /// to prevent: the exception gets attributed to whatever the host was
+    /// doing at the time.
     @Test
     func aThrowingThenGetterRejectsWithoutReachingTheHostsExceptionHandler() async throws {
         let directory = try makeTempDirectory()
@@ -529,7 +538,6 @@ struct VSCodeAPISettlementTests {
         let settled = try await settlement(of: captured.value, in: captured.context)
         let value = try #require(fulfilledValue(settled))
         #expect(value.isUndefined)
-        #expect(!value.isNull)
     }
 
     // MARK: - 10. A context whose trampoline cannot answer `thenOf` is `.unavailable`
@@ -573,5 +581,42 @@ struct VSCodeAPISettlementTests {
         let settled = await VSCodeAPI.settlement(of: healthyItems, in: healthy)
         let items = try #require(fulfilledValue(settled))
         #expect(items.atIndex(0)?.toString() == "alpha")
+    }
+
+    // MARK: - 11. `resolve` then a throw: the fulfilment wins over the throw
+
+    /// The arm of the once-only guard tests 7 and 8 leave unpinned. Test 7
+    /// pins which *handler* wins and test 8 which *call* to the same handler
+    /// does; this is the only case where the competing settlement does not
+    /// come from a handler at all — it comes from `settlement(of:in:)`'s own
+    /// `.threw` arm, which runs after the fulfilment handler has already
+    /// fired on the same stack frame and must not overwrite it.
+    ///
+    /// Three mutations, one assertion each. An implementation whose `.threw`
+    /// arm overwrote the settlement answers `.rejected`, so `fulfilledValue`
+    /// records an Issue. One that swallowed the throw but fulfilled with the
+    /// wrong argument still answers `.fulfilled`, so only `'settled-first'`
+    /// separates it. And one without the box at all resumes twice, which is a
+    /// `fatalError` rather than a failed expectation — reaching the
+    /// assertions is itself part of the test.
+    @Test
+    func resolveFollowedByAThrowAnswersTheFulfilmentAndNotTheThrownReason() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let thenable = """
+        {
+                    then: function (onFulfilled) {
+                        onFulfilled(['settled-first']);
+                        throw new Error('thrown-after');
+                    }
+                }
+        """
+        let captured = try await capture(source(handing: thenable), in: directory)
+        defer { captured.host.dispose() }
+
+        let settled = try await settlement(of: captured.value, in: captured.context)
+        let items = try #require(fulfilledValue(settled))
+        #expect(items.toArray()?.count == 1)
+        #expect(items.atIndex(0)?.toString() == "settled-first")
     }
 }

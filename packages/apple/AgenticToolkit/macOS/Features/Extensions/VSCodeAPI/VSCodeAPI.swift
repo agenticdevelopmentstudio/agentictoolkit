@@ -473,10 +473,12 @@ public enum VSCodeAPI {
         /// throwing anything, so it is not narrowed.
         case rejected(JSValue)
 
-        /// **The question could not be asked.** No trampoline in this
-        /// context, a trampoline that answered something other than its
-        /// contracted record, or a context that could no longer mint a
-        /// `JSValue`.
+        /// **The question could not be asked.** Every producer is one step of
+        /// `settlement(of:in:)` declining: the `thenOf` lookup, the `call` to
+        /// `then`, or a context that could no longer mint the `undefined` a
+        /// handler invoked with no argument settles with. The causes behind
+        /// the first two are listed where they are raised — see
+        /// `ThenLookup.unavailable` and `CallOutcome.unavailable`.
         ///
         /// A separate case rather than `.fulfilled` of some stand-in, on
         /// `CallOutcome.unavailable`'s own grounds: an adaptor that read this
@@ -496,8 +498,9 @@ public enum VSCodeAPI {
     /// answers a `Bool`. This is the fulfilment direction, for a member whose
     /// *argument* is a thenable rather than its result:
     /// `vscode.window.showQuickPick` types its first parameter
-    /// `readonly T[] | Thenable<readonly T[]>` in all four of its overloads
-    /// (`vscode.d.ts:11421`, `:11431`, `:11441`, `:11451`), and
+    /// `readonly X[] | Thenable<readonly X[]>` in all four of its overloads —
+    /// `X` is `string` at `vscode.d.ts:11421` and `:11431`, and the item
+    /// generic `T` at `:11441` and `:11451` — and
     /// `InputBoxOptions.validateInput` may answer a `Thenable` too
     /// (`vscode.d.ts:2280`), so neither adaptor can read what it was given
     /// synchronously.
@@ -512,17 +515,20 @@ public enum VSCodeAPI {
     /// trampoline, for the reason `thenFunction(of:in:)` and
     /// `observeRejection(of:in:_:)` each give for their own step: `then` on a
     /// `Proxy`, or a lazily-defined accessor, is extension code, and it can
-    /// throw from the getter *and* from the call. Either throw would
-    /// otherwise leave `callWithArguments:` through JavaScriptCore's
-    /// `notifyException:` and land in `ExtensionHost.pendingException`,
-    /// attributed to whatever the host happened to be doing. A getter that
+    /// throw from the getter *and* from the call. Unguarded, each throw
+    /// reaches JavaScriptCore's `notifyException:` by its own route — a
+    /// getter through `-[JSValue valueForProperty:]`, which hands its failure
+    /// to `-[JSContext valueFromNotifyException:]` (`JSValue.mm:419-426`,
+    /// `JSContext.mm:370-374`), and a call through `callWithArguments:` — and
+    /// lands in `ExtensionHost.pendingException`, attributed to whatever the
+    /// host happened to be doing. A getter that
     /// throws answers `.rejected` with what it threw, following
     /// `settledPromise(for:in:)`'s precedent verbatim: it is what
     /// `Promise.resolve` does with the same object.
     ///
     /// Both handlers declare no formal parameters and read their argument off
     /// `currentArguments()`, which is `observeRejection(of:in:_:)`'s idiom and
-    /// `member(path:owner:response:body:)`'s reason: the value is read off the
+    /// `member(_:of:whenTornDown:body:)`'s reason: the value is read off the
     /// actual argument list rather than off however many parameters the block
     /// happened to declare.
     ///
@@ -548,18 +554,35 @@ public enum VSCodeAPI {
     /// wrong: the extension would be told the user dismissed a picker they
     /// never saw.
     ///
-    /// The cost is one leaked continuation per un-settling thenable, and the
-    /// extension that wrote that thenable is the only one harmed — the same
-    /// bound `call(_:thisArg:arguments:)`'s own doc invokes for the trampoline
-    /// it cannot protect against. That leak is reported rather than silent,
-    /// and only at one moment: `CheckedContinuation` checks for it in its
-    /// `deinit` and logs `"SWIFT TASK CONTINUATION MISUSE: … leaked its
-    /// continuation without resuming it"` rather than trapping. The box holds
-    /// the continuation, and the two handler blocks hold the box, so that
-    /// `deinit` runs when whatever `then` did with those blocks lets go of
-    /// them — for a `Promise.prototype.then` on a promise that never settles,
-    /// when the context is torn down. That is the correct moment for it, and
-    /// it is a diagnostic rather than a defect.
+    /// The cost is one leaked continuation per un-settling thenable — the box
+    /// below, the continuation it holds, and the two blocks JavaScript holds —
+    /// and the extension that wrote that thenable is the only one harmed, the
+    /// same bound `call(_:thisArg:arguments:)`'s own doc invokes for the
+    /// trampoline it cannot protect against.
+    ///
+    /// **Keeping the cost that small is why neither handler captures a
+    /// `JSValue`.** A `JSValue` retains its `JSContext` — `-[JSValue dealloc]`
+    /// (`JSValue.mm:77`) does `[_context release]` (`:81`) — so a block that
+    /// captured one and was then handed to JavaScript would be the retain
+    /// cycle `JSManagedValue.h:49` names outright: "It is incorrect to store a
+    /// JSValue in an object that is exported to JavaScript, since doing so
+    /// creates a retain cycle." The leak would then be the whole context and
+    /// everything in it rather than one continuation, which is the same reason
+    /// `sharedHelper(in:)` caches the trampoline on `globalThis` rather than in
+    /// a Swift dictionary. So the handlers capture only the box, and the
+    /// `undefined` they may need is minted when they run, by
+    /// `settlementHandlerArgument()`, from `JSContext.current()`.
+    ///
+    /// The leak is reported rather than silent. The check is in
+    /// `CheckedContinuationCanary.deinit` — `CheckedContinuation` is a
+    /// `struct` (`CheckedContinuation.swift:126`) holding that `internal final
+    /// class` (`:22`) privately at `:127` — and it logs `"SWIFT TASK
+    /// CONTINUATION MISUSE: … leaked its continuation without resuming it"`
+    /// (`:81`) rather than trapping. It fires when the last reference to the
+    /// continuation goes: the box holds it and the two handler blocks are the
+    /// box's only owners, so not before JavaScript lets go of them. Whether
+    /// that ever happens for a given thenable is the extension's `then` to
+    /// decide, and this primitive does not claim to know when.
     ///
     /// - Parameters:
     ///   - value: What the extension supplied. A non-thenable is answered
@@ -577,22 +600,31 @@ public enum VSCodeAPI {
         case .thenable(let thenValue):
             then = thenValue
         }
-        // Minted here rather than inside the handlers, so a context that can
-        // no longer produce `undefined` is answered before anything is
-        // attached: a handler that then fired would have nothing honest to
-        // settle with.
-        guard let undefinedValue = JSValue(undefinedIn: context) else { return .unavailable }
+        // A probe, not a value to keep: a context that can no longer produce
+        // `undefined` is answered before anything is attached, rather than
+        // after a handler has fired with nothing honest to settle with. What
+        // it mints is not stored anywhere — capturing it would be the retain
+        // cycle the doc above sets out, so the handlers mint their own.
+        guard JSValue(undefinedIn: context) != nil else { return .unavailable }
 
         let answer: UncheckedSettlementBox = await withCheckedContinuation { continuation in
             let box = SettlementContinuationBox(continuation: continuation)
             let onFulfilled: @convention(block) () -> Void = {
                 MainActor.assumeIsolated {
-                    box.settle(.fulfilled(currentArguments().first ?? undefinedValue))
+                    if let fulfilledWith = settlementHandlerArgument() {
+                        box.settle(.fulfilled(fulfilledWith))
+                    } else {
+                        box.settle(.unavailable)
+                    }
                 }
             }
             let onRejected: @convention(block) () -> Void = {
                 MainActor.assumeIsolated {
-                    box.settle(.rejected(currentArguments().first ?? undefinedValue))
+                    if let reason = settlementHandlerArgument() {
+                        box.settle(.rejected(reason))
+                    } else {
+                        box.settle(.unavailable)
+                    }
                 }
             }
             let thenArguments: [Any] = [onFulfilled, onRejected]
@@ -611,32 +643,66 @@ public enum VSCodeAPI {
         return answer.settlement
     }
 
+    /// The value one of `settlement(of:in:)`'s handler blocks was invoked
+    /// with, or a freshly minted `undefined` for a handler invoked with none —
+    /// `resolve()` fulfils with `undefined` in JavaScript, so a missing
+    /// argument is an answer rather than an absence.
+    ///
+    /// A function rather than a captured `JSValue`, and that is its whole
+    /// reason for existing: a `JSValue` captured by a block that is then
+    /// exported to JavaScript retains the block's `JSContext`
+    /// (`JSManagedValue.h:49`, `JSValue.mm:77-81`). It reads the context from
+    /// `JSContext.current()`, which JavaScriptCore fills in for the duration
+    /// of a block call — the same source `tornDown(path:response:)` reads it
+    /// from, and the same one `currentArguments()` reads the arguments from.
+    ///
+    /// `nil` when there is no argument and no context to mint one in, which
+    /// the caller answers `.unavailable` rather than with a fabricated
+    /// stand-in (`fail-fast`).
+    private static func settlementHandlerArgument() -> JSValue? {
+        if let argument = currentArguments().first { return argument }
+        guard let context = JSContext.current() else { return nil }
+        return JSValue(undefinedIn: context)
+    }
+
     /// Carries a `Settlement` through `CheckedContinuation.resume(returning:)`.
     ///
     /// `@unchecked Sendable`, on `UncheckedJSValueBox`'s terms: `resume`
-    /// declares its parameter `sending`, and a `Settlement` built inside a
-    /// `@MainActor` handler — from `value` and from the `undefined` minted
-    /// above — is main-actor-isolated rather than disconnected, which the
-    /// compiler rejects by name ("sending 'settlement' risks causing data
-    /// races"). Nothing actually crosses an isolation domain: both the
-    /// handlers that build one and the `await` that receives it are on the
-    /// same main actor. The box states that guarantee rather than widening
-    /// `Settlement` itself, which is public and carries a `JSValue` no caller
-    /// should be told is safe to move.
+    /// declares its parameter `sending` (`CheckedContinuation.swift:164`), and
+    /// a `Settlement` reaching it through `@MainActor`
+    /// `SettlementContinuationBox.settle(_:)` is main-actor-isolated rather
+    /// than disconnected, which the compiler rejects by name ("sending
+    /// 'settlement' risks causing data races"). Nothing actually crosses an
+    /// isolation domain: the handlers that build one, the box that takes it
+    /// and the `await` that receives it are all on the same main actor. The
+    /// box states that guarantee rather than widening `Settlement` itself,
+    /// which is public and carries a `JSValue` no caller should be told is
+    /// safe to move.
     private struct UncheckedSettlementBox: @unchecked Sendable {
         let settlement: Settlement
     }
 
     /// Holds a `settlement(of:in:)` continuation and resumes it at most once.
     ///
-    /// The same shape `MainThreadWorkspace.runFileSystemOperation`'s own
-    /// `SettlementBox` has, for the mirror-image problem: there, two
-    /// JavaScript functions settle a promise Swift created; here, two Swift
-    /// blocks settle a continuation JavaScript calls. Holding rather than
-    /// borrowing is load-bearing — the two `@convention(block)` handlers are
-    /// this box's only owners, and the continuation has to outlive
-    /// `settlement(of:in:)`'s own stack frame for a thenable that settles
-    /// later.
+    /// The once-only guard is new here, and this tier has no precedent for it.
+    /// The two boxes that share the name — `MainThreadWorkspace`'s
+    /// `SettlementBox` (`MainThreadWorkspace.swift:151-164`) and
+    /// `MainThreadWindow`'s — are each a `struct` of two `JSValue`s whose
+    /// stated reason for existing is `Task.init`'s `Sendable` check; neither
+    /// holds a continuation and neither has a `hasSettled` flag.
+    ///
+    /// Holding rather than borrowing is load-bearing — the two
+    /// `@convention(block)` handlers are this box's only owners, and the
+    /// continuation has to outlive `settlement(of:in:)`'s own stack frame for
+    /// a thenable that settles later.
+    ///
+    /// `@MainActor` written out, not inherited: a global actor on a type does
+    /// **not** propagate to a type nested inside it, so `VSCodeAPI`'s own
+    /// `@MainActor` would leave this class nonisolated and `hasSettled` a
+    /// `var` the type system does not protect. Every caller is already on the
+    /// main actor — the two handlers through `MainActor.assumeIsolated`, the
+    /// `call` arms through `settlement(of:in:)` itself.
+    @MainActor
     private final class SettlementContinuationBox {
         private let continuation: CheckedContinuation<UncheckedSettlementBox, Never>
         private var hasSettled = false
