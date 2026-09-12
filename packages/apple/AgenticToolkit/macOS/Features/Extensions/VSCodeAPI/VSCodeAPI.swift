@@ -128,8 +128,15 @@ public enum VSCodeAPI {
     /// so a member can `return VSCodeAPI.raise(…)` in one line.
     ///
     /// Setting `context.exception` is how a `@convention(block)` throws — a
-    /// Swift `throw` has nowhere to go from inside one. The returned `nil`
-    /// never reaches JavaScript as a value: the exception supersedes it.
+    /// Swift `throw` has nowhere to go from inside one. The returned `nil` is
+    /// then superseded by the exception rather than reaching JavaScript as a
+    /// value — *provided the exception was built*. `JSValue(newErrorFromMessage:in:)`
+    /// imports as an implicitly unwrapped optional, and if it ever answers
+    /// nothing this assigns `nil` to `context.exception`, which clears it: the
+    /// member returns `undefined` and the extension sees a silent success. No
+    /// caller can distinguish the two outcomes from the `nil`, which is why
+    /// this is written down rather than guarded — the guard would have nothing
+    /// better to do.
     @discardableResult
     public static func raise(_ message: String, in context: JSContext) -> JSValue? {
         context.exception = JSValue(newErrorFromMessage: message, in: context)
@@ -234,9 +241,13 @@ public enum VSCodeAPI {
         ///
         /// `nil` is vanishingly rare and never means "returned nothing": a
         /// callback that returns nothing answers a `JSValue` holding
-        /// `undefined`. It means the trampoline's record carried no `value`
-        /// property at all, which the shape check in `outcome(of:in:)` has
-        /// already ruled out for every record it accepts.
+        /// `undefined`, and so does a record with no `value` property at all,
+        /// because `forProperty(_:)` answers `undefined` for a missing key
+        /// rather than `nil`. What is left is the bridge itself declining to
+        /// answer — a context torn down between the call and the read. The
+        /// shape check in `outcome(of:in:)` does **not** rule that out: it
+        /// inspects `ok`, and a record can pass it and still hand back nothing
+        /// here. Treat `nil` as "no value", never as "the callback's answer".
         case returned(JSValue?)
 
         /// The callback threw, with this value. Almost always an `Error`, but
@@ -258,10 +269,21 @@ public enum VSCodeAPI {
     }
 
     /// Calls `function` — an extension's own callback — and answers with what
-    /// it returned *or* what it threw, without the throw ever reaching the
-    /// host.
+    /// it returned *or* what it threw, without the throw reaching the host.
     ///
-    /// That last clause is the whole reason this exists. `ExtensionHost`
+    /// **That last clause holds for the trampoline this file installs, not for
+    /// one an extension planted in its place.** The catch that makes it true
+    /// lives inside `helperSource`; a pre-empting object is under no obligation
+    /// to have one, and if its `call` throws rather than returning, the
+    /// exception leaves `callWithArguments:` through JavaScriptCore's
+    /// `notifyException:` and lands in `ExtensionHost.pendingException` before
+    /// anything here can inspect a record. `outcome(of:in:)` cannot reach that
+    /// case — it examines a *returned* value — and nothing short of
+    /// re-evaluating `helperSource` on every dispatch could. See
+    /// `outcome(of:in:)` for why that trade was refused and for the bound that
+    /// makes it tolerable: the extension doing it is the only one harmed.
+    ///
+    /// That clause is the whole reason this exists. `ExtensionHost`
     /// installs a `context.exceptionHandler` that records into its
     /// `pendingException` and is read after `callActivate`; an exception thrown
     /// by a command callback while an `async activate()` is still in flight
@@ -326,14 +348,23 @@ public enum VSCodeAPI {
         """
     }
 
-    /// Whether `context` can dispatch extension callbacks at all — both halves
-    /// of the trampoline present and reachable.
+    /// Whether `context` has both halves of the trampoline under the names the
+    /// dispatch path will look them up by.
     ///
     /// For the member that has something to refuse *before* any callback runs:
     /// `registerCommand` returns a `Disposable`, and handing one back for a
     /// command that could never be invoked is the same silent lie
     /// `.unavailable` exists to stop. Calling this also installs the
     /// trampoline, so a later dispatch in the same context finds it cached.
+    ///
+    /// **A `true` here is not a promise that a dispatch will work.** It checks
+    /// that the two properties are present and not nullish, which is the
+    /// strongest thing checkable without invoking them — and invoking them to
+    /// find out would be running an extension-supplied function for no reason
+    /// at registration time. A non-callable property, or a pre-empted
+    /// trampoline that answers nonsense, passes this and is caught later by
+    /// `outcome(of:in:)`. What it does rule out is the case it exists for: a
+    /// context where the trampoline could not be installed at all.
     public static func canDispatch(in context: JSContext) -> Bool {
         helperFunction("call", in: context) != nil && helperFunction("thenOf", in: context) != nil
     }
@@ -354,8 +385,11 @@ public enum VSCodeAPI {
     /// *derived* promise, and handing that one back would be the swallow this
     /// is supposed to prevent: the derived promise resolves (the handler
     /// returned normally), so an extension awaiting it would see success where
-    /// its own command failed. The derived promise is discarded here — it is
-    /// settled and handled, so it is not itself an unobserved rejection — and
+    /// its own command failed. The derived promise is discarded here — for a
+    /// `then` that behaves like `Promise.prototype.then` it is settled and
+    /// handled, so discarding it adds no unobserved rejection of its own; a
+    /// hand-rolled `then` that answers an already-rejected promise instead
+    /// would, and that is the extension's own object doing it to itself — and
     /// `value`, still rejecting, is what `executeCommand` hands to the
     /// extension.
     ///
@@ -450,22 +484,37 @@ public enum VSCodeAPI {
     /// "`error` is absent" because a callback is perfectly entitled to
     /// `throw undefined`.
     ///
-    /// **The shape check is the security boundary, and it is here rather than
-    /// at the property lookup, deliberately.** `sharedHelper(in:)` adopts
-    /// whatever object it finds under the trampoline's global name, and an
-    /// extension's own top-level code runs before the first command dispatch,
-    /// so an extension can get there first and be adopted. No identity check
-    /// fixes that — a JavaScript object cannot prove its provenance to
-    /// JavaScript, and every test a liar would have to pass, a liar can fake.
-    /// What can be bounded is the damage: the one thing a fake trampoline
-    /// bought was an uncaught throw out of the API-level `call` below, which
-    /// reaches `ExtensionHost`'s `exceptionHandler` and its `pendingException`
-    /// — *host* state, shared with `activate()` and misattributed there, which
-    /// is precisely the F3/F4 defect the JavaScript catch was introduced to
-    /// close. A record that is not an object, or whose `ok` is absent or not a
-    /// boolean, is therefore `.unavailable`: the dispatch fails, loudly, and
-    /// an extension that pre-empted the global has broken only its own
-    /// commands in its own context, which is its right.
+    /// **This check catches a trampoline that *returns* the wrong thing. It
+    /// does not, and cannot, catch one that *throws*.** Be precise about the
+    /// difference, because an earlier ruling was not. `sharedHelper(in:)`
+    /// adopts whatever object it finds under the trampoline's global name, and
+    /// an extension's own top-level code runs before the first command
+    /// dispatch, so an extension can get there first and be adopted. No
+    /// identity check fixes that — a JavaScript object cannot prove its
+    /// provenance to JavaScript, and every test a liar would have to pass, a
+    /// liar can fake. What this function does is refuse the *answers* such an
+    /// object gives: a record that is not an object, or whose `ok` is absent or
+    /// not a boolean, is `.unavailable`, so the dispatch fails loudly instead
+    /// of being read as a successful call.
+    ///
+    /// An impostor whose `call` **throws** is a different case and reaches
+    /// none of this. The exception leaves `callWithArguments:` through
+    /// JavaScriptCore's `notifyException:`, so it is in
+    /// `ExtensionHost.pendingException` before there is any record to inspect —
+    /// exactly as an uncaught callback throw would be, which is the F3/F4
+    /// defect in its original shape. The only defence that would close it is to
+    /// stop trusting the cached global and re-evaluate `helperSource` on every
+    /// dispatch, and that was weighed and refused: it costs a JavaScript
+    /// evaluation per command invocation, forever, for every adaptor tasks
+    /// 5.4–5.7 add, to buy one outcome.
+    ///
+    /// The bound is what makes that trade defensible, and it is a bound on
+    /// *blast radius*, not on occurrence. An extension that pre-empts this
+    /// global is attacking itself: the confused activation report belongs to
+    /// that extension's own host, nothing crosses into another extension's
+    /// context, and no other extension's commands change behaviour. Breaking
+    /// its own commands is its right; it cannot make the app misreport anyone
+    /// else's.
     private static func outcome(of settled: JSValue?, in context: JSContext) -> CallOutcome {
         guard let settled, settled.isObject,
               let succeeded = settled.forProperty("ok"), succeeded.isBoolean else {
@@ -510,10 +559,16 @@ public enum VSCodeAPI {
     /// its own context (see `outcome(of:in:)` for why it stops there), which
     /// is why this is documented rather than defended against.
     ///
-    /// Every risky step is inside a JavaScript `try`, including the caching
-    /// itself, so evaluating this can never be the thing that writes to
-    /// `ExtensionHost.pendingException`. A context hostile enough to break it
-    /// answers `null`, and `call` refuses to invoke anything there.
+    /// Every risky step *inside* the IIFE is within a JavaScript `try`,
+    /// including the caching, so a reassigned `Reflect`, a throwing
+    /// `Object.defineProperty` or a frozen `globalThis` makes this answer
+    /// `null` rather than write to `ExtensionHost.pendingException` — and
+    /// `call` then refuses to invoke anything in that context. What no `try`
+    /// written here can cover is an exception raised *entering* the function:
+    /// a stack already exhausted by extension code throws `RangeError` before
+    /// the first statement runs, and that one does reach the host's handler.
+    /// It is not defended against because a context in that state is failing
+    /// the extension's own next frame too, whatever the host does.
     private static nonisolated let helperSource = """
     (function () {
         'use strict';
@@ -579,9 +634,12 @@ public enum VSCodeAPI {
     /// `defineProperty` below never runs. Nothing here can prevent that: a
     /// JavaScript object cannot prove its provenance to JavaScript. What is
     /// bounded instead is what a liar gains, and the answer is nothing outside
-    /// its own context: `outcome(of:in:)` validates every record before
-    /// believing it, so an extension that pre-empts this global is lying to
-    /// its own dispatches and breaking its own commands.
+    /// its own context. Two mechanisms, and only the first is a check:
+    /// `outcome(of:in:)` refuses every malformed record an impostor *returns*,
+    /// and an impostor that *throws* instead lands its exception in its own
+    /// host's `pendingException`, where it confuses that extension's own
+    /// activation report and nobody else's. An extension that pre-empts this
+    /// global is lying to its own dispatches and breaking its own commands.
     ///
     /// It is not withdrawn the way `__host` and `__extensionRuntime` are,
     /// because unlike those it is not a line back into the app: it is a pure
