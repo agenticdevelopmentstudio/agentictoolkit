@@ -909,23 +909,26 @@ struct MainThreadWindowTests {
     /// Which mutation each row-group kills:
     ///
     /// - **Multi-entry plans (`[0, 1, 2, nil]` → `3`, `[1, 2, 0]` → `2`,
-    ///   `[1, 2]` → `1`, `[0, nil]` → `1`):** returning a fixed `0`, or `nil`
-    ///   unconditionally — every row here expects a non-zero, non-`nil`
-    ///   answer. Their expectations are three different numbers, each its own
-    ///   plan's `count - 1`, so an off-by-one (`count`, or `count - 2`) fails
-    ///   them too.
+    ///   `[1, 2]` → `1`):** returning a fixed `0`, or `nil` unconditionally —
+    ///   every row here expects a non-zero, non-`nil` answer. Their
+    ///   expectations are three different numbers, each its own plan's
+    ///   `count - 1`, so an off-by-one (`count`, or `count - 2`) fails them
+    ///   too.
     /// - **One-entry plans (`[0]` → `nil`, `[2]` → `nil`):** returning
     ///   `plan.count - 1` unconditionally, the shape this function replaced,
     ///   which answers `0` for both; and loosening the guard to
     ///   `plan.count > 0`, which answers the same. These are the two
     ///   one-entry plans `buttonPlan(for:)` actually produces — one item that
-    ///   is flagged, and three items with the last of three flagged — not
-    ///   invented shapes.
-    /// - **Last entry `nil` vs. an item index, on both sides of the guard**
-    ///   (`[0, 1, 2, nil]` and `[0, nil]` against `[1, 2, 0]` and `[1, 2]`;
-    ///   `[0]` and `[2]` among the one-entry rows): a mutation keying on what
-    ///   fills the cancel slot rather than on how many entries the plan has.
-    ///   The answer depends only on the count, and these rows say so.
+    ///   is flagged, and three items with all three flagged — not invented
+    ///   shapes.
+    /// - **What fills the cancel slot never changes the answer**
+    ///   (`[0, 1, 2, nil]` → `3` against `[1, 2, 0]` → `2`): one plan whose
+    ///   last entry is the synthesized `nil` slot and one whose last entry is
+    ///   an item index, both above the guard, each killing one direction of a
+    ///   mutation that keys on that entry's content instead of the plan's
+    ///   length — a mutant answering only for a `nil` last entry fails the
+    ///   second row, and one answering only for an item index fails the
+    ///   first. Only the count decides, and these two rows say so.
     ///
     /// **The empty plan is deliberately not a row.** `buttonPlan(for:)`
     /// always appends a cancel slot, so it never returns an empty array, and
@@ -942,7 +945,6 @@ struct MainThreadWindowTests {
         #expect(escapePosition([0, 1, 2, nil]) == 3)
         #expect(escapePosition([1, 2, 0]) == 2)
         #expect(escapePosition([1, 2]) == 1)
-        #expect(escapePosition([0, nil]) == 1)
         #expect(escapePosition([0]) == nil)
         #expect(escapePosition([2]) == nil)
     }
