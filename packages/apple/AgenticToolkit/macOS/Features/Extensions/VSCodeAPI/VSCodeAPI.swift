@@ -449,6 +449,213 @@ public enum VSCodeAPI {
         }
     }
 
+    // MARK: - Awaiting an extension's thenable
+
+    /// What an extension-supplied thenable eventually answered.
+    ///
+    /// Not `Result`, for `CallOutcome`'s reason: the failure here is a
+    /// `JSValue`, which conforms to nothing and is not the app's error to
+    /// begin with — it is the extension's, being carried back into Swift.
+    public enum Settlement {
+
+        /// The thenable fulfilled with this value — or `value` was not a
+        /// thenable at all, in which case this carries `value` itself.
+        ///
+        /// Non-optional, unlike `CallOutcome.returned`: a handler invoked with
+        /// no argument at all settles with a `JSValue` holding `undefined`,
+        /// because that is what `resolve()` fulfils with in JavaScript, and a
+        /// context that can no longer mint one answers `.unavailable` rather
+        /// than a fabricated stand-in (`fail-fast`).
+        case fulfilled(JSValue)
+
+        /// The thenable rejected with this value, or reading or calling its
+        /// `then` threw it. Almost always an `Error`, but JavaScript permits
+        /// throwing anything, so it is not narrowed.
+        case rejected(JSValue)
+
+        /// **The question could not be asked.** No trampoline in this
+        /// context, a trampoline that answered something other than its
+        /// contracted record, or a context that could no longer mint a
+        /// `JSValue`.
+        ///
+        /// A separate case rather than `.fulfilled` of some stand-in, on
+        /// `CallOutcome.unavailable`'s own grounds: an adaptor that read this
+        /// as a value would hand an extension an answer nothing ever produced
+        /// — for `showQuickPick` that is a list of items the caller never
+        /// supplied, or a dismissal the user never made.
+        case unavailable
+    }
+
+    /// Waits for `value` to settle, and hands the fulfilled or rejected value
+    /// back to **Swift**.
+    ///
+    /// The direction `settledPromise(for:in:)` deliberately does not go. That
+    /// one passes a thenable *through* to JavaScript unchanged — its doc gives
+    /// the reason, identity — so Swift never sees what it settled with, and
+    /// `observeRejection(of:in:_:)` attaches a rejection handler only and
+    /// answers a `Bool`. This is the fulfilment direction, for a member whose
+    /// *argument* is a thenable rather than its result:
+    /// `vscode.window.showQuickPick` types its first parameter
+    /// `readonly T[] | Thenable<readonly T[]>` in all four of its overloads
+    /// (`vscode.d.ts:11421`, `:11431`, `:11441`, `:11451`), and
+    /// `InputBoxOptions.validateInput` may answer a `Thenable` too
+    /// (`vscode.d.ts:2280`), so neither adaptor can read what it was given
+    /// synchronously.
+    ///
+    /// **A non-thenable answers `.fulfilled(value)` — itself.** That is what
+    /// lets a caller have one code path for `showQuickPick(['a', 'b'])` and
+    /// `showQuickPick(promiseOfItems)` rather than branching on a lookup it
+    /// cannot make itself, and it is what `Promise.resolve` answers for a
+    /// non-thenable.
+    ///
+    /// Every step that touches `value` goes through the JavaScript
+    /// trampoline, for the reason `thenFunction(of:in:)` and
+    /// `observeRejection(of:in:_:)` each give for their own step: `then` on a
+    /// `Proxy`, or a lazily-defined accessor, is extension code, and it can
+    /// throw from the getter *and* from the call. Either throw would
+    /// otherwise leave `callWithArguments:` through JavaScriptCore's
+    /// `notifyException:` and land in `ExtensionHost.pendingException`,
+    /// attributed to whatever the host happened to be doing. A getter that
+    /// throws answers `.rejected` with what it threw, following
+    /// `settledPromise(for:in:)`'s precedent verbatim: it is what
+    /// `Promise.resolve` does with the same object.
+    ///
+    /// Both handlers declare no formal parameters and read their argument off
+    /// `currentArguments()`, which is `observeRejection(of:in:_:)`'s idiom and
+    /// `member(path:owner:response:body:)`'s reason: the value is read off the
+    /// actual argument list rather than off however many parameters the block
+    /// happened to declare.
+    ///
+    /// **The continuation is resumed exactly once**, and the box below is what
+    /// makes that true rather than hoped for. An extension's `then` is
+    /// arbitrary code: it may call both handlers, one handler twice, or
+    /// neither, and it may throw *after* calling one — for which the first
+    /// settlement wins, which is `Promise.resolve`'s own rule for a thenable
+    /// whose `then` throws once it has already resolved. Without the guard the
+    /// second resume is not a wrong answer but a crash:
+    /// `CheckedContinuation.resume(returning:)` is documented to trap on a
+    /// second resume and does, through a `fatalError` reading `"SWIFT TASK
+    /// CONTINUATION MISUSE: … tried to resume its continuation more than
+    /// once"` in the standard library's `CheckedContinuation.swift`.
+    ///
+    /// ### A thenable that never settles is left pending, deliberately
+    ///
+    /// There is no timeout, and one would be wrong rather than merely
+    /// unnecessary. Upstream does not settle either — `showQuickPick` given a
+    /// promise that never resolves shows a quick pick that waits — so
+    /// answering after N seconds would invent behaviour VS Code does not
+    /// produce, and for `showQuickPick` the invented answer is user-visible
+    /// wrong: the extension would be told the user dismissed a picker they
+    /// never saw.
+    ///
+    /// The cost is one leaked continuation per un-settling thenable, and the
+    /// extension that wrote that thenable is the only one harmed — the same
+    /// bound `call(_:thisArg:arguments:)`'s own doc invokes for the trampoline
+    /// it cannot protect against. That leak is reported rather than silent,
+    /// and only at one moment: `CheckedContinuation` checks for it in its
+    /// `deinit` and logs `"SWIFT TASK CONTINUATION MISUSE: … leaked its
+    /// continuation without resuming it"` rather than trapping. The box holds
+    /// the continuation, and the two handler blocks hold the box, so that
+    /// `deinit` runs when whatever `then` did with those blocks lets go of
+    /// them — for a `Promise.prototype.then` on a promise that never settles,
+    /// when the context is torn down. That is the correct moment for it, and
+    /// it is a diagnostic rather than a defect.
+    ///
+    /// - Parameters:
+    ///   - value: What the extension supplied. A non-thenable is answered
+    ///     with itself.
+    ///   - context: The context `value` belongs to.
+    public static func settlement(of value: JSValue, in context: JSContext) async -> Settlement {
+        let then: JSValue
+        switch thenFunction(of: value, in: context) {
+        case .notThenable:
+            return .fulfilled(value)
+        case .threw(let reason):
+            return .rejected(reason)
+        case .unavailable:
+            return .unavailable
+        case .thenable(let thenValue):
+            then = thenValue
+        }
+        // Minted here rather than inside the handlers, so a context that can
+        // no longer produce `undefined` is answered before anything is
+        // attached: a handler that then fired would have nothing honest to
+        // settle with.
+        guard let undefinedValue = JSValue(undefinedIn: context) else { return .unavailable }
+
+        let answer: UncheckedSettlementBox = await withCheckedContinuation { continuation in
+            let box = SettlementContinuationBox(continuation: continuation)
+            let onFulfilled: @convention(block) () -> Void = {
+                MainActor.assumeIsolated {
+                    box.settle(.fulfilled(currentArguments().first ?? undefinedValue))
+                }
+            }
+            let onRejected: @convention(block) () -> Void = {
+                MainActor.assumeIsolated {
+                    box.settle(.rejected(currentArguments().first ?? undefinedValue))
+                }
+            }
+            let thenArguments: [Any] = [onFulfilled, onRejected]
+            // Through `call`, not `invokeMethod`, for `observeRejection`'s
+            // stated reason: a `Proxy`'s `then` trap can throw from the call
+            // as well as from the getter.
+            switch call(then, thisArg: value, arguments: thenArguments) {
+            case .returned:
+                break
+            case .threw(let reason):
+                box.settle(.rejected(reason))
+            case .unavailable:
+                box.settle(.unavailable)
+            }
+        }
+        return answer.settlement
+    }
+
+    /// Carries a `Settlement` through `CheckedContinuation.resume(returning:)`.
+    ///
+    /// `@unchecked Sendable`, on `UncheckedJSValueBox`'s terms: `resume`
+    /// declares its parameter `sending`, and a `Settlement` built inside a
+    /// `@MainActor` handler — from `value` and from the `undefined` minted
+    /// above — is main-actor-isolated rather than disconnected, which the
+    /// compiler rejects by name ("sending 'settlement' risks causing data
+    /// races"). Nothing actually crosses an isolation domain: both the
+    /// handlers that build one and the `await` that receives it are on the
+    /// same main actor. The box states that guarantee rather than widening
+    /// `Settlement` itself, which is public and carries a `JSValue` no caller
+    /// should be told is safe to move.
+    private struct UncheckedSettlementBox: @unchecked Sendable {
+        let settlement: Settlement
+    }
+
+    /// Holds a `settlement(of:in:)` continuation and resumes it at most once.
+    ///
+    /// The same shape `MainThreadWorkspace.runFileSystemOperation`'s own
+    /// `SettlementBox` has, for the mirror-image problem: there, two
+    /// JavaScript functions settle a promise Swift created; here, two Swift
+    /// blocks settle a continuation JavaScript calls. Holding rather than
+    /// borrowing is load-bearing — the two `@convention(block)` handlers are
+    /// this box's only owners, and the continuation has to outlive
+    /// `settlement(of:in:)`'s own stack frame for a thenable that settles
+    /// later.
+    private final class SettlementContinuationBox {
+        private let continuation: CheckedContinuation<UncheckedSettlementBox, Never>
+        private var hasSettled = false
+
+        init(continuation: CheckedContinuation<UncheckedSettlementBox, Never>) {
+            self.continuation = continuation
+        }
+
+        /// Resumes with `settlement` the first time, and ignores every later
+        /// call. Ignoring rather than logging: an extension's `then` calling
+        /// `resolve` twice is legal JavaScript that a native promise also
+        /// ignores, so there is nothing here to report.
+        func settle(_ settlement: Settlement) {
+            guard !hasSettled else { return }
+            hasSettled = true
+            continuation.resume(returning: UncheckedSettlementBox(settlement: settlement))
+        }
+    }
+
     // MARK: - The JavaScript trampoline
 
     /// What `thenFunction(of:in:)` found.
