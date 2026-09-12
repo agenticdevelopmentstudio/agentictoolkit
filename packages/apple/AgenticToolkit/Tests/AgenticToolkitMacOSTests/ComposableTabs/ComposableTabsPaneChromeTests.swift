@@ -1,4 +1,5 @@
 import AppKit
+import AgenticDeveloperToolkitUI
 import XCTest
 @testable import AgenticToolkitMacOS
 
@@ -154,6 +155,35 @@ final class ComposableTabsPaneChromeTests: XCTestCase {
 
     func testTheContainerIsStillTheBackgroundThatDrawsTheFocusOutline() throws {
         XCTAssertTrue(try makePane(plain).view is ComposableTabsPaneBackgroundView)
+    }
+
+    // MARK: - The two planes a pane's backdrop paints
+
+    /// The track the active-pane border is drawn in is the workspace's own
+    /// backdrop — the plane the frame spacing, the gutters and the tab docked
+    /// to the workspace's edge all show. Painted in the pane's fill instead, it
+    /// put a hairline of window background between a tab and the workspace it
+    /// belongs to, all the way round.
+    func testTheTrackAroundAPaneIsTheWorkspaceBackdrop() throws {
+        let view = try makePane(plain).view
+        let palette = view.resolvedThemeScope.palette
+
+        XCTAssertEqual(view.layer?.backgroundColor, NSColor(palette.projectPaneBackdrop).cgColor)
+    }
+
+    /// And the pane itself still paints `windowBackground`, inside that track:
+    /// a pane reads as an object on the backdrop, which is the whole reason the
+    /// two tones differ.
+    func testThePaneItselfIsFilledInsideThatTrack() throws {
+        let view = try makePane(plain).view
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        view.layoutSubtreeIfNeeded()
+
+        let fill = try XCTUnwrap(view.subviews.compactMap { $0 as? ThemedBackgroundView }.first)
+        let inset = ComposableTabsPaneBackgroundView.borderInset
+        XCTAssertEqual(fill.frame, view.bounds.insetBy(dx: inset, dy: inset))
+        XCTAssertEqual(fill.role, .windowBackground)
+        XCTAssertEqual(view.subviews.firstIndex(of: fill), 0, "the fill must stay under the pane's chrome")
     }
 
     // MARK: - Identifiers

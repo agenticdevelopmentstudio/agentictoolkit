@@ -167,7 +167,8 @@ public final class ComposableTabsPaneViewController: PaneViewController {
 
     /// The active-pane border is drawn on the backdrop's own layer, so the
     /// content is held off its edge by that much or the border lands under it.
-    private static let borderInset: CGFloat = 2
+    /// One number, spelled where the border is drawn (`dry`).
+    private static var borderInset: CGFloat { ComposableTabsPaneBackgroundView.borderInset }
 
     /// How far below a pane's own top edge its title bar ends: the border
     /// inset the chrome is held off by, plus the title bar itself.

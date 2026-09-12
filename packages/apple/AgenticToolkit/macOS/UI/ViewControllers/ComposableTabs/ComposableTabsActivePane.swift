@@ -301,10 +301,27 @@ public final class ComposableTabsActivePane {
 /// A pane's backdrop, which also draws the "this is the pane you are working
 /// in" border. It is one view rather than an overlay so the border can never
 /// end up under the pane's content.
+///
+/// Two planes, not one. The outer edge — the track the active-pane border is
+/// drawn in — is the *workspace's* backdrop, the same plane as the frame
+/// spacing, the gutters between panes and the tab attached to the workspace's
+/// edge. The pane's own fill starts inside that track. Painted as one plane it
+/// put a hairline of window background between the tab and the pane it belongs
+/// to, all the way round the workspace, and the tab read as something stuck on
+/// top of the workspace rather than part of it.
 @MainActor
 public final class ComposableTabsPaneBackgroundView: NSView, Themeable {
 
+    /// How far the pane's own fill — and with it every piece of its chrome —
+    /// is held off this view's edge, leaving the active-pane border somewhere
+    /// to draw. Lives here because this is the view that draws that border.
+    public static let borderInset: CGFloat = 2
+
     public let nodeID: UUID
+
+    /// The pane itself: `windowBackground`, the plane a pane paints, inside
+    /// the backdrop track.
+    private let fill = ThemedBackgroundView(role: .windowBackground)
 
     private var observer: ThemePaletteObserver?
     private var cancellables = Set<AnyCancellable>()
@@ -326,6 +343,18 @@ public final class ComposableTabsPaneBackgroundView: NSView, Themeable {
         self.nodeID = nodeID
         super.init(frame: .zero)
         self.wantsLayer = true
+
+        // First subview, so it stays underneath the chrome the pane controller
+        // adds after this initialiser returns.
+        fill.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(fill)
+        let inset = Self.borderInset
+        NSLayoutConstraint.activate([
+            fill.topAnchor.constraint(equalTo: topAnchor, constant: inset),
+            fill.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            trailingAnchor.constraint(equalTo: fill.trailingAnchor, constant: inset),
+            bottomAnchor.constraint(equalTo: fill.bottomAnchor, constant: inset)
+        ])
 
         observer = ThemePaletteObserver(host: self) { [weak self] palette in self?.applyTheme(palette) }
 
@@ -389,7 +418,12 @@ public final class ComposableTabsPaneBackgroundView: NSView, Themeable {
     }
 
     public func applyTheme(_ palette: SemanticPalette) {
-        layer?.backgroundColor = palette.nsColor(.windowBackground).cgColor
+        // The backdrop, not the window background — the same argument
+        // `PaneSplitView.drawDivider` makes for a gutter. Everything around a
+        // pane is one plane: the frame spacing, the gutters, and the tab docked
+        // to the workspace's edge. Paint this track in the pane's own fill and
+        // the tab is cut off from the workspace by a dark hairline.
+        layer?.backgroundColor = NSColor(palette.projectPaneBackdrop).cgColor
 
         // A theme may override both the switch and the color; neither is set
         // until the user edits the theme's Project topic, so by default the
