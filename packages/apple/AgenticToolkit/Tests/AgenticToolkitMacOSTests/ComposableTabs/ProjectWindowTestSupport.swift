@@ -87,7 +87,8 @@ enum ProjectWindowTestSupport {
                 store: ProjectPaneStateStore(project: context.project, nodeID: context.nodeID),
                 documentStore: TextDocumentStore(),
                 saveScheduler: TextDocumentSaveScheduler(write: { _ in }),
-                languageServices: nil
+                languageServices: nil,
+                rootURL: context.workingDirectory
             )
         }
         return try ComposableTabsLayout(

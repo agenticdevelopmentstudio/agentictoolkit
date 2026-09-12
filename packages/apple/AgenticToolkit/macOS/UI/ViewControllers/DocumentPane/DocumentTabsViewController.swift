@@ -35,9 +35,23 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
 
     private var splitsByTabID: [UUID: ComposableTabsViewController] = [:]
 
+    /// The editors `wireTitles(in:tabID:)` has already hooked. It walks every
+    /// editor in a tab, and `openToTheSide` calls it again after each split,
+    /// so without this an editor that survives three side-splits ends up with
+    /// three chained copies of the same handler and fires it three times per
+    /// change. Weak, so a closed pane's editor drops out rather than keeping
+    /// its identity alive for a later allocation to collide with.
+    private let wiredEditors = NSHashTable<DocumentEditorViewController>.weakObjects()
+
     /// Fires with the file the focused editor is showing, so the tree can move
     /// its highlight to follow.
     public var onFocusedDocumentChange: ((URL?) -> Void)?
+
+    /// Fires with a file any editor in this container asked to open — a
+    /// go-to-definition target, or a file chosen from a breadcrumb popover.
+    /// Routed out to the session rather than opened directly: choosing in the
+    /// breadcrumb is the same as clicking in the tree.
+    public var onOpenRequest: ((URL) -> Void)?
 
     public init(
         project: ProjectWorkspace,
@@ -95,8 +109,11 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
         return tab.id
     }
 
-    /// Hooks every editor currently in `root` so a title change retitles the
-    /// tab and reports the focus change outward.
+    /// Hooks every not-yet-hooked editor in `root` so a title change retitles
+    /// the tab and reports the focus change outward. Idempotent: `openToTheSide`
+    /// calls this over a whole tab after adding one pane, and an editor must
+    /// come away with exactly one copy of each handler however many times it
+    /// is walked.
     ///
     /// `DocumentEditorViewController.onTitleChange` is the same storage
     /// `PaneTitleProviding.onPaneTitleChange` writes through, and
@@ -105,12 +122,21 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
     /// would silently stop that. Capturing and chaining the previous closure
     /// keeps both listeners alive rather than the second one winning.
     private func wireTitles(in root: ComposableTabsViewController, tabID: UUID) {
-        for editor in editors(in: root) {
+        for editor in editors(in: root) where !wiredEditors.contains(editor) {
+            wiredEditors.add(editor)
             let previousTitleHandler = editor.onTitleChange
             editor.onTitleChange = { [weak self] in
                 previousTitleHandler?()
                 self?.retitle(tabID)
                 self?.onFocusedDocumentChange?(self?.focusedEditor?.fileURL)
+            }
+            // Same chaining concern as `onTitleChange` above: the editor may
+            // already have an owner for this handler, and overwriting it
+            // outright would silently drop them.
+            let previousOpenHandler = editor.onOpenRequest
+            editor.onOpenRequest = { [weak self] url in
+                previousOpenHandler?(url)
+                self?.onOpenRequest?(url)
             }
         }
     }
