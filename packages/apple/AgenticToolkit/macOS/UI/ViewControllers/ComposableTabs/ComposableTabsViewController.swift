@@ -210,6 +210,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
                 split.arranger = arranger
                 split.layoutOverride = layoutOverride
                 split.stateOwnerNodeID = stateOwnerNodeID
+                split.clampsToContainer = clampsToContainer
             }
         }
     }
@@ -298,6 +299,24 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// and for the same reason: it is a fact about a tree, not about a node,
     /// and a split that appears later has to inherit it.
     public var stateOwnerNodeID: UUID? {
+        didSet { stampOwnershipOnChildren() }
+    }
+
+    /// Whether this tree's width is the container's to decide rather than its
+    /// own — true for a tree living inside one pane of a bigger tree.
+    ///
+    /// A split item's `minimumThickness` is a **required** constraint on the
+    /// split view holding it, and constraints do not stop at a view controller
+    /// boundary. A window's own tree wants exactly that: the window can grow, so
+    /// a pane that needs 400pt gets them. A tree nested inside a single pane
+    /// cannot — growing means taking width from the pane's neighbours — so the
+    /// same constraint instead pushes the enclosing pane wider, and switching
+    /// between two tabs with different pane counts resizes the pane holding
+    /// them. Here the panes divide the width the container has, however little
+    /// that is, which is what `ProportionalArranger` already assumes.
+    ///
+    /// Stamped down the subtree like the two above, and for the same reason.
+    public var clampsToContainer: Bool = false {
         didSet { stampOwnershipOnChildren() }
     }
 
@@ -702,6 +721,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         inner.arranger = arranger
         inner.layoutOverride = layoutOverride
         inner.stateOwnerNodeID = stateOwnerNodeID
+        inner.clampsToContainer = clampsToContainer
 
         layoutChildren[index] = inner
         if isViewLoaded {
@@ -1132,8 +1152,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         let registry = layout.registry
         let descriptor = (viewController as? ComposableTabsPaneViewController)
             .map { registry.descriptor(for: $0.viewID) }
-        item.minimumThickness = Self.minimumThickness(
-            of: viewController, along: axis, registry: registry)
+        item.minimumThickness = minimumThickness(of: viewController, registry: registry)
         item.canCollapse = descriptor?.isCollapsible ?? false
         if let fraction = descriptor?.preferredThicknessFraction {
             item.preferredThicknessFraction = fraction
@@ -1162,11 +1181,27 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     func restoreSizing(of item: NSSplitViewItem) {
         let registry = layout.registry
         item.maximumThickness = NSSplitViewItem.unspecifiedDimension
-        item.minimumThickness = Self.minimumThickness(
-            of: item.viewController, along: axis, registry: registry)
+        item.minimumThickness = minimumThickness(
+            of: item.viewController, registry: registry)
         let descriptor = (item.viewController as? ComposableTabsPaneViewController)
             .map { registry.descriptor(for: $0.viewID) }
         item.holdingPriority = descriptor?.resolvedHoldingPriority ?? .defaultLow
+    }
+
+    /// What an item in *this* split may be shrunk to.
+    ///
+    /// One wrapper over the recursive answer, so the two call sites that set
+    /// `minimumThickness` cannot disagree about whether this tree imposes one
+    /// (`dry`). `unspecifiedDimension` rather than zero: it is AppKit's own word
+    /// for "no constraint", the same one `restoreSizing(of:)` uses to lift a
+    /// ceiling, and it keeps `applyPreferredThicknessesIfNeeded`'s
+    /// `max(item.minimumThickness, …)` picking the fraction.
+    private func minimumThickness(
+        of viewController: NSViewController,
+        registry: ComposableTabsViewRegistry
+    ) -> CGFloat {
+        guard !clampsToContainer else { return NSSplitViewItem.unspecifiedDimension }
+        return Self.minimumThickness(of: viewController, along: axis, registry: registry)
     }
 
     /// What a subtree needs along `axis`. A leaf answers from its registration;
