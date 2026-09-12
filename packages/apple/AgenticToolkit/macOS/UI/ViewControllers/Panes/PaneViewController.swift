@@ -432,13 +432,19 @@ open class PaneViewController: NSViewController {
             (contentViewController as? PaneAccessoryProviding)?.makePaneAccessoryViews() ?? []
     }
 
-    /// Re-asks the host which edges are legal. The answer changes whenever the
-    /// layout around this pane does, which is why it is a call and not a
-    /// property set once.
+    /// Re-asks the host which controls are legal. Both answers change whenever
+    /// the layout around this pane does, which is why this is a call and not two
+    /// properties set once.
+    ///
+    /// A pane with no host yet keeps both buttons live: the answer arrives with
+    /// the host, and a pane that greyed its controls while being wired up would
+    /// have to be re-asked by whatever wired it — which is the bug this method
+    /// exists to avoid.
     public func refreshControlAvailability() {
         guard isViewLoaded else { return }
         let edges = host?.availableMinimizeEdges(for: self) ?? []
         titleBar.controls.canMinimize = !edges.isEmpty
+        titleBar.controls.canClose = host?.canClose(self) ?? true
     }
 
     // MARK: - State the host hands back
