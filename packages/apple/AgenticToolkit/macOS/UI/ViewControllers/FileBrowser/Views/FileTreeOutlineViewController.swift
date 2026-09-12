@@ -585,8 +585,9 @@ final class FileTreeOutlineViewController: NSViewController {
     // MARK: - Context menu
 
     /// The three verbs a file can be opened with, as items belonging to no menu
-    /// yet, or `nil` for anything that is not an openable file — which is what
-    /// leaves directories, repo roots and a path nothing lives at without a menu.
+    /// yet, or `nil` for anything that is not an openable file — a directory, a
+    /// repo root, a path nothing lives at. Those still get a menu; they get the
+    /// path verbs only, which is what `contextMenuItems(for:)` assembles.
     ///
     /// The items are free rather than pre-installed because `menuNeedsUpdate`
     /// has to fill the menu AppKit already owns: an item that still belongs to
@@ -609,10 +610,44 @@ final class FileTreeOutlineViewController: NSViewController {
         }
     }
 
-    /// The same three verbs as a standalone menu, for anywhere that needs a menu
+    /// Reveal and copy, which apply to anything that exists — a file, a folder,
+    /// a repo root — and are therefore what stops a right-click on a folder
+    /// being a gesture that does nothing.
+    ///
+    /// `nil` for a path nothing lives at: revealing a file that is not there
+    /// opens its parent with nothing selected, and copying its path hands over a
+    /// string that cannot be pasted anywhere useful. A stale row is better
+    /// answered with no menu than with two items that lie.
+    func pathMenuItems(for url: URL) -> [NSMenuItem]? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return [
+            ("Reveal in Finder", #selector(revealInFinder(_:))),
+            ("Copy Path", #selector(copyPath(_:)))
+        ].map { title, action in
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = url as NSURL
+            return item
+        }
+    }
+
+    /// The whole menu for one row, open verbs first and a separator between the
+    /// two groups — the open verbs act on the document, the path verbs act on
+    /// the file, and a folder gets only the second group because it has no
+    /// document.
+    ///
+    /// Free items again, for `menuNeedsUpdate`'s benefit; `nil` only when there
+    /// is nothing to say about the path at all.
+    func contextMenuItems(for url: URL) -> [NSMenuItem]? {
+        guard let path = pathMenuItems(for: url) else { return nil }
+        guard let open = openMenuItems(for: url) else { return path }
+        return open + [.separator()] + path
+    }
+
+    /// The same items as a standalone menu, for anywhere that needs a menu
     /// object rather than items to install.
     func makeContextMenu(for url: URL) -> NSMenu? {
-        guard let items = openMenuItems(for: url) else { return nil }
+        guard let items = contextMenuItems(for: url) else { return nil }
         let menu = NSMenu()
         for item in items { menu.addItem(item) }
         return menu
@@ -632,6 +667,22 @@ final class FileTreeOutlineViewController: NSViewController {
     @objc private func openFromMenu(_ sender: NSMenuItem) {
         guard let request = sender.representedObject as? OpenRequest else { return }
         onOpenRequest?(request.url, request.destination)
+    }
+
+    /// Finder's own "show me this" call, which selects the item inside its
+    /// parent rather than opening the item — the same one `BranchController`
+    /// makes for a worktree directory.
+    @objc private func revealInFinder(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? NSURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url as URL])
+    }
+
+    /// The POSIX path, not the URL: it is what a terminal, an editor and every
+    /// other tool the user is about to paste it into will accept.
+    @objc private func copyPath(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? NSURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString((url as URL).path, forType: .string)
     }
 
     // MARK: - Items
@@ -678,9 +729,23 @@ extension FileTreeOutlineViewController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         guard outline.clickedRow >= 0,
-              let node = outline.item(atRow: outline.clickedRow) as? FileTreeNode,
-              let items = openMenuItems(for: node.url) else { return }
+              let url = contextMenuURL(forRow: outline.clickedRow),
+              let items = contextMenuItems(for: url) else { return }
         for item in items { menu.addItem(item) }
+    }
+
+    /// The path a row stands for, whatever kind of row it is.
+    ///
+    /// A repo root's row is a `FileTreeManager`, not a node, which is why the
+    /// section headers used to be the one part of the tree a right-click could
+    /// not reach — and they are the rows whose path a user most often wants to
+    /// copy. The "nothing here" placeholder stands for no path and gets no menu.
+    private func contextMenuURL(forRow row: Int) -> URL? {
+        switch outline.item(atRow: row) {
+        case let node as FileTreeNode: return node.url
+        case let manager as FileTreeManager: return manager.repoRootURL
+        default: return nil
+        }
     }
 }
 
