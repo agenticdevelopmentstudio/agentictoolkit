@@ -96,11 +96,33 @@ struct VSCodeAPISubNamespaceTests {
     /// this file) so "without recording" is an observed empty array rather
     /// than an absence of anything that could have recorded — a real
     /// regression this closes is a *miss* recording being added to the
-    /// symbol path; a deleted symbol branch is instead caught by the
-    /// `#expect(result.toString() == "undefined")` assertion below, since a
-    /// symbol key falling through to the ordinary miss path throws
-    /// `TypeError: Cannot convert a Symbol value to a string` while building
-    /// `path + '.' + key`, not `undefined`.
+    /// symbol path.
+    ///
+    /// Kills the mutation that deletes `get`'s own `typeof key === 'symbol'`
+    /// branch. **The assertion that flips is
+    /// `#expect(result.forProperty("answeredUndefined")?.toBool() == true)`**,
+    /// with `#expect(result.forProperty("threw")?.toBool() == false)`
+    /// corroborating it. The script catches its own throw and reports it as a
+    /// property, so the Swift side reads a *datum* rather than inferring one
+    /// from evaluation semantics: `JSContext.evaluateScript` answers a
+    /// non-`nil` `undefined` for a script that threw — this repo pins that at
+    /// `MainThreadCommandsTests.swift:610-614` — so a test whose only evidence
+    /// were the evaluation's own return value could not tell "the script
+    /// threw" from "the script answered `undefined`", and a mutation that
+    /// turns the first into the second would be invisible to it. Because the
+    /// flipping assertion expects `true`, it fails on an absent property too,
+    /// which is what an `undefined` result would present.
+    ///
+    /// Measured under `node` against the factory text extracted verbatim from
+    /// `subNamespaceFactorySource`, with that branch deleted: the symbol key
+    /// falls through to the ordinary miss path and `path + '.' + key` throws
+    /// `TypeError: Cannot convert a Symbol value to a string`, so the script
+    /// returns `{ threw: true, name: 'TypeError' }` instead of
+    /// `{ threw: false, answeredUndefined: true }`. Note what does *not* flip:
+    /// `missRecorder.paths` stays empty under that mutant, because the
+    /// `TypeError` is raised while building `memberPath`, before `recordMiss`
+    /// is ever called. The two emptiness assertions state the contract; they
+    /// do not catch this mutation.
     @Test
     func aSymbolKeyAnswersUndefinedWithoutRecording() throws {
         let context = try makeContext()
@@ -117,8 +139,19 @@ struct VSCodeAPISubNamespaceTests {
             recordMiss: recordMiss, recordProbe: recordProbe))
         context.setObject(namespace, forKeyedSubscript: "ns" as NSString)
 
-        let result = try #require(context.evaluateScript("typeof ns[Symbol.iterator]"))
-        #expect(result.toString() == "undefined")
+        let result = try #require(context.evaluateScript(
+            """
+            (function () {
+                try {
+                    return { threw: false, answeredUndefined: typeof ns[Symbol.iterator] === 'undefined' };
+                } catch (error) {
+                    return { threw: true, name: error.name };
+                }
+            })()
+            """
+        ))
+        #expect(result.forProperty("threw")?.toBool() == false)
+        #expect(result.forProperty("answeredUndefined")?.toBool() == true)
         #expect(missRecorder.paths.isEmpty)
         #expect(probeRecorder.paths.isEmpty)
     }
@@ -294,15 +327,34 @@ struct VSCodeAPISubNamespaceTests {
     /// A symbol key reaching `has` or `getOwnPropertyDescriptor` — not `get`,
     /// which already has its own symbol branch and its own test above —
     /// records nothing, the same guard `recordNegativeProbe` applies to a
-    /// `PROBE_KEYS` name. Kills the mutation that deletes that guard's
-    /// `typeof key === 'symbol'` check: without it, `recordNegativeProbe`
-    /// would try to build `path + '.' + key` with a symbol `key`, which
-    /// throws `TypeError: Cannot convert a Symbol value to a string` —
-    /// measured directly under `node` against the shipped factory with that
-    /// check removed, both `in` and `getOwnPropertyDescriptor` throw instead
-    /// of answering `false`/`undefined`, so this test's assertions that
-    /// neither throws and that nothing is recorded both fail against that
-    /// mutant.
+    /// `PROBE_KEYS` name.
+    ///
+    /// Kills the mutation that deletes that guard's `typeof key === 'symbol'`
+    /// check. **The assertions that flip are
+    /// `#expect(result.forProperty("answeredFalse")?.toBool() == true)` and
+    /// `#expect(result.forProperty("descriptorIsUndefined")?.toBool() == true)`**,
+    /// with `#expect(result.forProperty("threw")?.toBool() == false)`
+    /// corroborating. The script catches its own throw and reports it as a
+    /// property — the same shape
+    /// `aThrowingRecordMissDoesNotReplaceTheNotImplementedError` uses, and for
+    /// the same reason: `JSContext.evaluateScript` answers a non-`nil`
+    /// `undefined` for a script that threw
+    /// (`MainThreadCommandsTests.swift:610-614`), so an assertion that read
+    /// only the evaluation's return value could not tell a throw from an
+    /// `undefined` answer. The two flipping assertions expect `true`, so they
+    /// fail on an absent property as well, which is what an `undefined`
+    /// result would present.
+    ///
+    /// Measured under `node` against the factory text extracted verbatim from
+    /// `subNamespaceFactorySource`, with that check removed:
+    /// `recordNegativeProbe` builds `path + '.' + key` with a symbol `key` and
+    /// throws `TypeError: Cannot convert a Symbol value to a string` out of
+    /// `has`, so the script returns `{ threw: true, name: 'TypeError' }`
+    /// instead of `{ threw: false, answeredFalse: true,
+    /// descriptorIsUndefined: true }`. Note what does *not* flip:
+    /// `recorder.paths` is empty under that mutant too — the mutant throws
+    /// *before* it would record — so `#expect(recorder.paths.isEmpty)` states
+    /// the contract rather than catching the mutation.
     @Test
     func aSymbolKeyThroughInOrGetOwnPropertyDescriptorNeverRecordsAProbe() throws {
         let context = try makeContext()
@@ -318,16 +370,21 @@ struct VSCodeAPISubNamespaceTests {
             """
             (function () {
                 var sym = Symbol('probe');
-                return {
-                    inResult: sym in ns,
-                    gopdResult: Object.getOwnPropertyDescriptor(ns, sym)
-                };
+                try {
+                    return {
+                        threw: false,
+                        answeredFalse: (sym in ns) === false,
+                        descriptorIsUndefined: Object.getOwnPropertyDescriptor(ns, sym) === undefined
+                    };
+                } catch (error) {
+                    return { threw: true, name: error.name };
+                }
             })()
             """
         ))
-        #expect(result.forProperty("inResult")?.toBool() == false)
-        let gopdResult = result.forProperty("gopdResult")
-        #expect(gopdResult == nil || gopdResult!.isUndefined)
+        #expect(result.forProperty("threw")?.toBool() == false)
+        #expect(result.forProperty("answeredFalse")?.toBool() == true)
+        #expect(result.forProperty("descriptorIsUndefined")?.toBool() == true)
         #expect(recorder.paths.isEmpty)
     }
 
@@ -339,13 +396,29 @@ struct VSCodeAPISubNamespaceTests {
     /// error propagates instead, so `error.name` is not `"NotImplementedError"`
     /// — measured directly under `node` against the shipped factory with that
     /// `try`/`catch` removed, the thrown error is the recorder's own
-    /// (`Error: recorder blew up`), not a `NotImplementedError`, so this
-    /// test's assertion on `error.name` fails against that mutant.
+    /// (`Error: recorder blew up`), not a `NotImplementedError`, so
+    /// **the assertion that flips is
+    /// `#expect(result.forProperty("name")?.toString() == "NotImplementedError")`**,
+    /// with the `memberPath` assertion flipping alongside it.
+    ///
+    /// The recorder captures `context` weakly and returns if it is gone: a
+    /// strong capture into a `@convention(block)` the context itself retains
+    /// (through the Proxy handler, through the namespace, through
+    /// `globalThis`) is the cycle
+    /// `subNamespace(path:members:in:)`'s own doc warns callers about, and a
+    /// test that leaks a `JSContext` per run has no business being the worked
+    /// example the next adaptor tasks copy. The `_ =` on `VSCodeAPI.raise` is
+    /// load-bearing too: `MainActor.assumeIsolated` is generic over a
+    /// `Sendable` return, `raise` answers `JSValue?`, and `JSValue` has no
+    /// `Sendable` conformance in this tree — discarding the result types the
+    /// operation as `Void`, which is what every other `assumeIsolated` here
+    /// either does or routes through `UncheckedJSValueBox` to avoid.
     @Test
     func aThrowingRecordMissDoesNotReplaceTheNotImplementedError() throws {
         let context = try makeContext()
-        let recordMiss: @convention(block) (String) -> Void = { [context] _ in
-            MainActor.assumeIsolated { VSCodeAPI.raise("recorder blew up", in: context) }
+        let recordMiss: @convention(block) (String) -> Void = { [weak context] _ in
+            guard let context else { return }
+            MainActor.assumeIsolated { _ = VSCodeAPI.raise("recorder blew up", in: context) }
         }
         let namespace = try #require(VSCodeAPI.subNamespace(
             path: "vscode.workspace.fs", members: [:], in: context, recordMiss: recordMiss))
@@ -371,17 +444,42 @@ struct VSCodeAPISubNamespaceTests {
     /// A `recordProbe` block that throws must not turn `has` or
     /// `getOwnPropertyDescriptor`'s honest `false`/`undefined` answer into an
     /// uncaught error. Kills the mutation that deletes the `try`/`catch`
-    /// around the `recordProbe` call inside `recordNegativeProbe`: without
-    /// it, the recorder's own thrown error propagates out of `has`/
-    /// `getOwnPropertyDescriptor` instead — measured directly under `node`
-    /// against the shipped factory with that `try`/`catch` removed, both
-    /// `in` and `getOwnPropertyDescriptor` throw instead of answering, so
-    /// this test's assertions that neither throws fail against that mutant.
+    /// around the `recordProbe` call inside `recordNegativeProbe`.
+    /// **The assertions that flip are
+    /// `#expect(result.forProperty("answeredFalse")?.toBool() == true)` and
+    /// `#expect(result.forProperty("descriptorIsUndefined")?.toBool() == true)`**,
+    /// with `#expect(result.forProperty("threw")?.toBool() == false)`
+    /// corroborating. The script catches its own throw and reports it as a
+    /// property, so the Swift side reads a datum rather than inferring one:
+    /// `JSContext.evaluateScript` answers a non-`nil` `undefined` for a script
+    /// that threw (`MainThreadCommandsTests.swift:610-614`), which is exactly
+    /// the case an assertion on the evaluation's own result could not
+    /// distinguish from a real answer. Expecting `true` also fails on an
+    /// absent property, which is what an `undefined` result presents.
+    ///
+    /// Measured under `node` against the factory text extracted verbatim from
+    /// `subNamespaceFactorySource`, with that `try`/`catch` removed: the
+    /// recorder's own error propagates out of `has`, and the script returns
+    /// `{ threw: true, name: 'Error', message: 'recorder blew up' }` instead
+    /// of `{ threw: false, answeredFalse: true, descriptorIsUndefined: true }`.
+    /// One caveat that measurement cannot cover: under `node` the throwing
+    /// recorder is a JavaScript function that throws, whereas here it is a
+    /// `@convention(block)` that sets `context.exception`. Whether
+    /// JavaScriptCore turns that into an exception the factory's own JS
+    /// `try`/`catch` can catch is a runtime fact about JSC that no build has
+    /// confirmed for this file yet; if it cannot, this test fails against the
+    /// real code rather than only against the mutant, which is how that would
+    /// announce itself.
+    ///
+    /// The weak `context` capture and the `_ =` on `raise` are there for the
+    /// reasons spelled out on
+    /// `aThrowingRecordMissDoesNotReplaceTheNotImplementedError` above.
     @Test
     func aThrowingRecordProbeStillAnswersFalseOrUndefined() throws {
         let context = try makeContext()
-        let recordProbe: @convention(block) (String) -> Void = { [context] _ in
-            MainActor.assumeIsolated { VSCodeAPI.raise("recorder blew up", in: context) }
+        let recordProbe: @convention(block) (String) -> Void = { [weak context] _ in
+            guard let context else { return }
+            MainActor.assumeIsolated { _ = VSCodeAPI.raise("recorder blew up", in: context) }
         }
         let namespace = try #require(VSCodeAPI.subNamespace(
             path: "vscode.workspace.fs", members: [:], in: context, recordProbe: recordProbe))
@@ -390,16 +488,21 @@ struct VSCodeAPISubNamespaceTests {
         let result = try #require(context.evaluateScript(
             """
             (function () {
-                return {
-                    inResult: 'writeFile' in ns,
-                    gopdResult: Object.getOwnPropertyDescriptor(ns, 'writeFile')
-                };
+                try {
+                    return {
+                        threw: false,
+                        answeredFalse: ('writeFile' in ns) === false,
+                        descriptorIsUndefined: Object.getOwnPropertyDescriptor(ns, 'writeFile') === undefined
+                    };
+                } catch (error) {
+                    return { threw: true, name: error.name, message: error.message };
+                }
             })()
             """
         ))
-        #expect(result.forProperty("inResult")?.toBool() == false)
-        let gopdResult = result.forProperty("gopdResult")
-        #expect(gopdResult == nil || gopdResult!.isUndefined)
+        #expect(result.forProperty("threw")?.toBool() == false)
+        #expect(result.forProperty("answeredFalse")?.toBool() == true)
+        #expect(result.forProperty("descriptorIsUndefined")?.toBool() == true)
     }
 }
 
