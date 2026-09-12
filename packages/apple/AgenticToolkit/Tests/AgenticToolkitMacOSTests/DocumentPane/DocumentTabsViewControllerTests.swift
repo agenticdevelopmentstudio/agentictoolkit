@@ -67,6 +67,25 @@ final class DocumentTabsViewControllerTests: XCTestCase {
         }
     }
 
+    /// `openToTheSide` re-walks the whole tab after each split, so an editor
+    /// that survives several splits gets handed to the wiring code several
+    /// times. The handlers chain rather than replace, so a non-idempotent
+    /// wiring pass would make the first editor report every open request once
+    /// per split it lived through.
+    func testAnEditorReportsAnOpenRequestExactlyOncePerRequest() throws {
+        let controller = try makeController()
+        controller.loadViewIfNeeded()
+        let firstEditor = try XCTUnwrap(controller.focusedEditor)
+        controller.openToTheSide(URL(fileURLWithPath: "/tmp/example/B.swift"))
+        controller.openToTheSide(URL(fileURLWithPath: "/tmp/example/C.swift"))
+
+        var reported: [URL] = []
+        controller.onOpenRequest = { reported.append($0) }
+        firstEditor.onOpenRequest?(URL(fileURLWithPath: "/tmp/example/Target.swift"))
+
+        XCTAssertEqual(reported.count, 1, "two side-splits must not triple one editor's handler")
+    }
+
     func testTheLastTabCannotBeClosed() throws {
         let controller = try makeController()
         controller.loadViewIfNeeded()

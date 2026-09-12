@@ -26,12 +26,17 @@ public final class DocumentEditorViewController: NSViewController {
     private let saveScheduler: TextDocumentSaveScheduler
     private let languageServices: ProjectLanguageServices?
 
+    /// The project root the breadcrumb reads its crumbs relative to.
+    private let rootURL: URL
+    private let breadcrumb: BreadcrumbView
+
     /// Fires when the displayed file changes, so the tab bar can retitle.
     public var onTitleChange: (() -> Void)?
 
     /// Asked to show a file the editor itself resolved — a go-to-definition
-    /// target in another file. Routed out rather than handled here, because
-    /// the browser's selection is the one place that decides what is open.
+    /// target in another file, or a file chosen from the breadcrumb's
+    /// popover. Routed out rather than handled here, because the browser's
+    /// selection is the one place that decides what is open.
     public var onOpenRequest: ((URL) -> Void)?
 
     public var fileURL: URL? {
@@ -43,14 +48,18 @@ public final class DocumentEditorViewController: NSViewController {
         store: PaneStateStore,
         documentStore: TextDocumentStore,
         saveScheduler: TextDocumentSaveScheduler,
-        languageServices: ProjectLanguageServices?
+        languageServices: ProjectLanguageServices?,
+        rootURL: URL
     ) {
         self.store = store
         self.options = EditorOptionsOverride(store: store)
         self.documentStore = documentStore
         self.saveScheduler = saveScheduler
         self.languageServices = languageServices
+        self.rootURL = rootURL
+        self.breadcrumb = BreadcrumbView(rootURL: rootURL)
         super.init(nibName: nil, bundle: nil)
+        breadcrumb.onSelect = { [weak self] url in self?.onOpenRequest?(url) }
         restoreStoredDocument()
     }
 
@@ -73,6 +82,7 @@ public final class DocumentEditorViewController: NSViewController {
 
     private func show(_ url: URL?, persist: Bool) {
         selection.selectedNode = url.map { FileTreeNode(url: $0, isDirectory: false) }
+        breadcrumb.fileURL = url
         if persist {
             store.setPaneStateValue(url?.path, forKey: Self.fileURLKey)
         }
@@ -96,8 +106,31 @@ public final class DocumentEditorViewController: NSViewController {
                 openFile: { [weak self] url in self?.onOpenRequest?(url) }
             ).themedRoot()
         )
-        hosting.frame = NSRect(x: 0, y: 0, width: 520, height: 400)
-        view = hosting
+
+        let stack = NSStackView(views: [breadcrumb, hosting])
+        stack.orientation = .vertical
+        stack.spacing = 0
+        stack.distribution = .fill
+        breadcrumb.translatesAutoresizingMaskIntoConstraints = false
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            breadcrumb.heightAnchor.constraint(equalToConstant: 24),
+            breadcrumb.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            breadcrumb.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
+            hosting.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: stack.trailingAnchor)
+        ])
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 424))
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: root.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+        ])
+        view = root
     }
 }
 

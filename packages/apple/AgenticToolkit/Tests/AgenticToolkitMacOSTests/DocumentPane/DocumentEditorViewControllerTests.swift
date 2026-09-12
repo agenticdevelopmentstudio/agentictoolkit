@@ -12,7 +12,8 @@ final class DocumentEditorViewControllerTests: XCTestCase {
             store: store,
             documentStore: TextDocumentStore(),
             saveScheduler: TextDocumentSaveScheduler(write: { _ in }),
-            languageServices: nil
+            languageServices: nil,
+            rootURL: URL(fileURLWithPath: "/tmp")
         )
     }
 
