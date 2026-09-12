@@ -918,6 +918,61 @@ struct MainThreadWorkspaceTests {
         #expect(fsPath?.hasSuffix("/") == false)
     }
 
+    /// A root whose own literal path already begins `/private/` still
+    /// answers a `fsPath` with that prefix intact — the case neither test
+    /// above reaches, because both build their root under
+    /// `FileManager.default.temporaryDirectory`, which is already
+    /// `/var/folders/...` and so is untouched by `standardizedFileURL`
+    /// either way. `standardizedFileURL` strips a leading `/private` **only
+    /// when the collapsed result currently exists on disk** — measured
+    /// against Foundation directly, not assumed — so this fixture creates
+    /// `root-private` at its literal `/private/...` path before asserting
+    /// anything, via `#require`: without that precondition, a regression to
+    /// `standardizedFileURL` would find the collapsed `/var/...` path does
+    /// not exist, strip nothing, and pass this test for the wrong reason —
+    /// vacuously, exactly as the brief warned.
+    ///
+    /// Two mutations, one each: `fsPath == privateRoot.path` kills a
+    /// revert of `workspaceFolderValue` back to
+    /// `url.standardizedFileURL.path`, since standardizing this real,
+    /// on-disk `/private` root collapses it to `/var/folders/...` and the
+    /// equality fails. `fsPath.hasPrefix("/private/")` kills a narrower
+    /// mutation that strips a leading `/private/` some other way (a
+    /// hand-written `replacingOccurrences`, say) while still passing the
+    /// first assertion by coincidence on a differently-shaped path.
+    @Test
+    func workspaceFoldersAnswersAPrivatePrefixedRootWithThePrefixIntact() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let privateRoot = URL(fileURLWithPath: "/private" + directory.path, isDirectory: true)
+            .appendingPathComponent("root-private", isDirectory: true)
+        try FileManager.default.createDirectory(at: privateRoot, withIntermediateDirectories: true)
+        try #require(FileManager.default.fileExists(atPath: privateRoot.path))
+        let roots = TestWorkspaceRoots(displayName: nil, roots: [privateRoot])
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__fsPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+            };
+            """,
+            in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: roots,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
+        defer { host.dispose(); workspace.dispose() }
+        try install(workspace, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let fsPath = context.evaluateScript("globalThis.__fsPath")?.toString()
+        #expect(fsPath == privateRoot.path)
+        #expect(fsPath?.hasPrefix("/private/") == true)
+    }
+
     // MARK: - name
 
     /// `vscode.workspace.name` answers the display name a real workspace
@@ -1159,9 +1214,23 @@ struct MainThreadWorkspaceTests {
     /// Before that fix, `fs`'s `subNamespace` call passed `recordMiss: nil,
     /// recordProbe: nil`: the throw still happened (it is unconditional in
     /// the shim's `get` trap), but nothing under `fs` ever reached the
-    /// ledger. Kills a mutation that reverts either `recordMiss` or
-    /// `recordProbe` back to `nil` in `MainThreadWorkspace.fs`, or that wires
-    /// them to the wrong `extensionIdentifier`.
+    /// ledger.
+    ///
+    /// The fixture probes before it calls: `'copy' in vscode.workspace.fs`
+    /// first, then `vscode.workspace.fs.copy(...)`. `copy` is not in `fs`'s
+    /// stub `members` table and not in the shim's `PROBE_KEYS`
+    /// (`VSCodeAPI.swift`'s `has` trap), so the `in` check reaches
+    /// `recordNegativeProbe` and genuinely bumps `probeCount`, landing on the
+    /// same row the later `get` miss bumps `count` on
+    /// (`NotImplementedLedger.bump` keys both on `(extensionIdentifier,
+    /// memberPath)`, so a probe and a miss on the same member share one row,
+    /// not two). Asserting the row whole — `count == 1`, `probeCount == 1`,
+    /// `extensionIdentifier == host.identifier` — is what actually kills a
+    /// mutation that reverts `recordMiss` or `recordProbe` to `nil` in
+    /// `MainThreadWorkspace.fs` (either would leave its own counter at `0`
+    /// instead of `1` on this row, where the prior assertion, reading only
+    /// `memberPath`, saw no difference), or that wires either closure to the
+    /// wrong `extensionIdentifier`.
     @Test
     func anUnimplementedFsMemberThrowsAndIsRecordedInTheLedger() async throws {
         let directory = try makeTempDirectory()
@@ -1170,6 +1239,7 @@ struct MainThreadWorkspaceTests {
             source: """
             var vscode = require('vscode');
             exports.activate = function () {
+                globalThis.__probed = 'copy' in vscode.workspace.fs;
                 globalThis.__err = null;
                 try {
                     vscode.workspace.fs.copy('\\/tmp\\/a.txt', '\\/tmp\\/b.txt');
@@ -1190,8 +1260,15 @@ struct MainThreadWorkspaceTests {
         try await host.activate()
 
         let context = try #require(host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.__probed")?.toBool() == false)
         #expect(context.evaluateScript("globalThis.__err")?.toString() == "NotImplementedError")
-        #expect(host.notImplementedLedger.accesses.map(\.memberPath) == ["vscode.workspace.fs.copy"])
+        let accesses = host.notImplementedLedger.accesses
+        #expect(accesses.count == 1)
+        let access = try #require(accesses.first)
+        #expect(access.memberPath == "vscode.workspace.fs.copy")
+        #expect(access.extensionIdentifier == host.identifier)
+        #expect(access.count == 1)
+        #expect(access.probeCount == 1)
     }
 
     // MARK: - Teardown: an in-flight operation rejects rather than crashing
@@ -1207,11 +1284,14 @@ struct MainThreadWorkspaceTests {
     /// specifically exercises `runFileSystemOperation`'s *first* teardown
     /// check (`guard let self, !self.isDisposed else { … }`, before
     /// `operation()` ever runs) — not the second one after `operation()`
-    /// completes, which a synchronous test cannot force without a mock
-    /// `FileSystemService` this task does not have. Kills a mutation that
-    /// removes or weakens that first guard: without it, `operation()` runs
-    /// to completion and the promise resolves with the file's real contents
-    /// instead of rejecting.
+    /// completes, which this test's real `FileSystemService` resolves too
+    /// fast to reach mid-flight. `disposingWhileAnOperationIsGenuinelySuspendedRejectsRatherThanDeliveringAResult`
+    /// below is the other half of this pair: it uses
+    /// `SuspendingFileSystemService` to hold `operation()` open across
+    /// `dispose()` and exercises that second, post-`await` guard instead.
+    /// Kills a mutation that removes or weakens *this* test's first guard:
+    /// without it, `operation()` runs to completion and the promise resolves
+    /// with the file's real contents instead of rejecting.
     @Test
     func disposingWhileAnOperationIsInFlightRejectsRatherThanCrashing() async throws {
         let directory = try makeTempDirectory()
