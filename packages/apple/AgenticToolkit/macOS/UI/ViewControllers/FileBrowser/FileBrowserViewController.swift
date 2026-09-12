@@ -24,14 +24,25 @@ public final class FileBrowserViewController: NSViewController {
     /// primary root, not about a directory someone dragged in beside it.
     public var manager: FileTreeManager { managerForPrimary }
 
-    /// What the user has clicked. Shared rather than private so a host can put
-    /// a viewer next to the tree — see `FileBrowserSplitViewController`.
+    /// What the user has clicked. Shared rather than private so a host can
+    /// drive it directly — restoring a selection, or reacting to one.
     public let selection: FileBrowserSelection
 
     /// What was open and what was selected last time. Shared rather than
     /// private for the same reason `selection` is: the host that persists it
     /// owns it, and a browser used alone gets one of its own that nobody reads.
     public let restoration: FileBrowserRestorationState
+
+    /// `PaneSelectionDescribing`'s change callback. Stored here rather than in
+    /// the conformance below because Swift has no stored properties in
+    /// extensions, and the protocol declares it `{ get set }`.
+    public var onPaneSelectionChange: (() -> Void)?
+
+    /// Watches `selection` so `onPaneSelectionChange` fires for every way a
+    /// file gets selected — the tree, a restore, a host setting it directly —
+    /// rather than only for the clicks the tree happens to route through a
+    /// delegate (`dry`).
+    private var selectionObserver: AnyCancellable?
 
     private let excludedURL: URL
     private let config: FileTreeConfig
@@ -110,6 +121,20 @@ public final class FileBrowserViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuildManagers() }
             .store(in: &cancellables)
+
+        // `@Published` publishes from `willSet`, so a synchronous sink reads
+        // the *previous* node back out of `selection` — the footer would name
+        // the file clicked before this one. Hopping to the run loop lets the
+        // store complete first. `removeDuplicates` keeps a re-click on the row
+        // that is already selected from re-rendering the whole path, and
+        // `dropFirst` drops the value `@Published` replays on subscribe: a
+        // report made before the host installs `onPaneSelectionChange` would
+        // otherwise surface one turn late, as a change nobody asked about.
+        selectionObserver = selection.$selectedNode
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.onPaneSelectionChange?() }
     }
 
     /// A browser over a single directory, with nothing to add to or remove.
@@ -372,6 +397,16 @@ extension FileBrowserViewController: PaneContentTeardown {
     /// work, whether or not the view ever got a `viewDidDisappear`.
     public func paneContentWillBeDiscarded() {
         stopWatching()
+    }
+}
+
+extension FileBrowserViewController: PaneSelectionDescribing {
+    /// The selected file's name, not its path: the footer already names the
+    /// project and the pane in the segments before this one, and a repo-rooted
+    /// path repeated there would push the part the user is looking for off the
+    /// truncation.
+    public var paneSelectionDescription: String? {
+        selection.selectedNode?.name
     }
 }
 
