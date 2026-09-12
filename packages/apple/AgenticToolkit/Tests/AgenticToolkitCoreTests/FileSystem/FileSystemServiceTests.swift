@@ -363,6 +363,50 @@ struct FileSystemServiceTests {
         #expect(!FileManager.default.fileExists(atPath: populated.path))
     }
 
+    @Test("delete with recursive: false removes a directory that has no entries")
+    func deletingAnEmptyDirectoryWithoutRecursiveRemovesIt() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let empty = directory.appendingPathComponent("empty")
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+
+        // The other half of the pair. Without it, an implementation that
+        // dropped the emptiness check and simply refused every non-recursive
+        // directory delete would pass the whole suite.
+        try await FileSystemService().delete(atPath: empty.path, recursive: false, useTrash: false)
+
+        #expect(!FileManager.default.fileExists(atPath: empty.path))
+    }
+
+    @Test("delete with useTrash: true moves the item to the Trash instead of erasing it")
+    func deletingThroughTheTrashMovesTheItemThere() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = FileManager.default
+        // A UUID name cannot collide with anything already in the Trash, which
+        // is what makes the landing place predictable: the Trash renames an
+        // item only to avoid a collision.
+        let name = "FileSystemServiceTests-\(UUID().uuidString).txt"
+        let victim = directory.appendingPathComponent(name)
+        let payload = Data("bound for the trash".utf8)
+        try payload.write(to: victim)
+        let trash = try manager.url(
+            for: .trashDirectory,
+            in: .userDomainMask,
+            appropriateFor: victim,
+            create: false
+        )
+        let landed = trash.appendingPathComponent(name)
+        defer { try? manager.removeItem(at: landed) }
+
+        try await FileSystemService().delete(atPath: victim.path, recursive: false, useTrash: true)
+
+        #expect(!manager.fileExists(atPath: victim.path))
+        #expect(manager.fileExists(atPath: landed.path))
+        let recovered = try Data(contentsOf: landed)
+        #expect(recovered == payload)
+    }
+
     @Test("delete on a symbolic link removes the link and leaves its target")
     func deletingASymbolicLinkLeavesItsTarget() async throws {
         let directory = try makeTemporaryDirectory()
@@ -428,6 +472,49 @@ struct FileSystemServiceTests {
         #expect(!FileManager.default.fileExists(atPath: source.path))
         let onDisk = try Data(contentsOf: target)
         #expect(onDisk == sourceBytes)
+    }
+
+    @Test("a rename that only changes the case of the name keeps the file")
+    func renamingOnlyTheCaseKeepsTheFile() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let lower = directory.appendingPathComponent("casechange.txt")
+        let upper = directory.appendingPathComponent("CASECHANGE.txt")
+        let payload = Data("must survive the rename".utf8)
+        try payload.write(to: lower)
+
+        // On the default case-insensitive volume the destination "exists"
+        // because it *is* the source, so removing it before the move destroys
+        // the file. The assertions below hold on a case-sensitive volume too,
+        // where the destination genuinely does not exist.
+        try await FileSystemService().rename(
+            fromPath: lower.path,
+            toPath: upper.path,
+            overwrite: true
+        )
+
+        let survivor = try Data(contentsOf: upper)
+        #expect(survivor == payload)
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        #expect(remaining == ["CASECHANGE.txt"])
+    }
+
+    @Test("renaming a path onto itself keeps the file")
+    func renamingAPathOntoItselfKeepsTheFile() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("unmoved.txt")
+        let payload = Data("must survive the no-op".utf8)
+        try payload.write(to: file)
+
+        try await FileSystemService().rename(
+            fromPath: file.path,
+            toPath: file.path,
+            overwrite: true
+        )
+
+        let survivor = try Data(contentsOf: file)
+        #expect(survivor == payload)
     }
 
     @Test("rename from a missing path reports fileNotFound, naming the source")
@@ -587,13 +674,12 @@ struct FileSystemServiceTests {
         #expect(stat.type.rawValue == 64)
     }
 
-    @Test("stat reports the link's own size, not its target's")
-    func statDoesNotReportTheTargetsSize() async throws {
+    @Test("stat reports the link's own size — the byte length of its target path")
+    func statReportsTheLinksOwnSize() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let target = directory.appendingPathComponent("target.bin")
-        let payload = Data(repeating: 3, count: 4096)
-        try payload.write(to: target)
+        try Data(repeating: 3, count: 4096).write(to: target)
         let link = directory.appendingPathComponent("link")
         try FileManager.default.createSymbolicLink(
             atPath: link.path,
@@ -602,7 +688,11 @@ struct FileSystemServiceTests {
 
         let stat = try await FileSystemService().stat(atPath: link.path)
 
-        #expect(stat.size != payload.count)
+        // The exact equality, not merely "not the target's 4096": a `!=`
+        // against the target's size is satisfied by the `0` that `FileStat`
+        // falls back to when the attribute is absent, so it would pass against
+        // an implementation that never read `.size` at all.
+        #expect(stat.size == target.path.utf8.count)
     }
 
     @Test("readDirectory follows a symbolic link to the directory it lists")
@@ -625,8 +715,12 @@ struct FileSystemServiceTests {
 
     // MARK: - Concurrency
 
-    @Test("eight concurrent reads each answer their own file's bytes")
-    func concurrentReadsEachAnswerTheirOwnBytes() async throws {
+    /// Named for what it proves. Eight callers await the one actor at once,
+    /// but they serialise on its queue, so this is evidence that the
+    /// continuation bridge returns each caller its own result — not evidence
+    /// that any two reads ran concurrently.
+    @Test("eight overlapping reads do not mix up their results")
+    func overlappingReadsDoNotMixUpTheirResults() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         var paths: [String] = []
