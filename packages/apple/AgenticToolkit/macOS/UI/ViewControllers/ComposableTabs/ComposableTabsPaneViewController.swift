@@ -55,6 +55,9 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     /// kind. `nil` — the common case — leaves the identifier unnumbered.
     private var paneIndex: Int?
 
+    /// Set by the enclosing split when it is itself overridden.
+    public var layoutOverride: ComposableTabsLayout?
+
     public init(
         nodeID: UUID,
         paneNumber: Int,
@@ -86,7 +89,8 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     /// `nil` only if the project went away first.
     public override func makeContentViewController() -> NSViewController? {
         guard let project else { return nil }
-        return project.layout.registry.makeContentViewController(
+        let registry = (layoutOverride ?? project.layout).registry
+        return registry.makeContentViewController(
             for: viewID,
             nodeID: nodeID,
             project: project,
