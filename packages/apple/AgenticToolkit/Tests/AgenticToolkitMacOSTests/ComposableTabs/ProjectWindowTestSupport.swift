@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+@testable import AgenticToolkitLanguage
 @testable import AgenticToolkitMacOS
 
 /// Scaffolding shared by the project-window suites.
@@ -67,5 +68,31 @@ enum ProjectWindowTestSupport {
             try! database.insert(repo)
         }
         return ProjectWorkspace(repo: repo, database: database, languageServices: languageServices)
+    }
+
+    /// A one-entry registry holding only an editor, matching what the
+    /// Document pane installs as its `layoutOverride` in the running app: a
+    /// tab there may hold editors and nothing else.
+    ///
+    /// `min: 1` on the allowance is what makes the container's floor a fact
+    /// about the layout spec rather than something `DocumentTabsViewController`
+    /// has to police on its own — a tab can never be split down to zero
+    /// editors because the spec itself refuses to remove the last one.
+    static func makeDocumentLayout(
+        viewID: ComposableTabsViewID = ComposableTabsViewID("document")
+    ) throws -> ComposableTabsLayout {
+        let registry = ComposableTabsViewRegistry()
+        registry.register(viewID, descriptor: .init(displayName: "Editor")) { context in
+            DocumentEditorViewController(
+                store: ProjectPaneStateStore(project: context.project, nodeID: context.nodeID),
+                documentStore: TextDocumentStore(),
+                saveScheduler: TextDocumentSaveScheduler(write: { _ in }),
+                languageServices: nil
+            )
+        }
+        return try ComposableTabsLayout(
+            registry: registry,
+            spec: .pane(viewID, allows: [.unbounded(viewID, min: 1)])
+        )
     }
 }
