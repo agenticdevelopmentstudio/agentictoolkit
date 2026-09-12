@@ -199,11 +199,16 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
 
         let enabledEdges = stored?.enabledEdges ?? [.top]
         var tabs = plan.keep
+        // A tab is a place — a checkout, an edge — and the panes in it are the
+        // project's, so a checkout that has just appeared opens on what the
+        // project is already arranged as. Only a project with no tab left to
+        // copy falls back to the layout's blueprint.
+        let arrangement = ProjectTabReconciler.arrangement(of: plan.keep, activeTabID: stored?.activeTabID)
         for checkout in plan.add {
             tabs += ProjectTabReconciler.makeRecords(
                 for: checkout,
                 enabledEdges: enabledEdges,
-                blueprint: workspace.layout.blueprint
+                blueprint: { arrangement?.inFreshIDs() ?? self.workspace.layout.blueprint() }
             )
         }
         let activeTabID = tabs.first { $0.id == stored?.activeTabID }?.id ?? tabs.first?.id

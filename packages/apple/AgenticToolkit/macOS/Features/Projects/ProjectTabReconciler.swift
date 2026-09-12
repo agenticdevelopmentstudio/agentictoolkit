@@ -88,6 +88,18 @@ public enum ProjectTabReconciler {
         try? directory.resourceValues(forKeys: [.volumeURLKey]).volume
     }
 
+    /// The arrangement this project's tabs wear: the active tab's, or the
+    /// first tab's when the stored active id names no tab in `tabs` (a tab
+    /// dropped with its directory, a project that never recorded one).
+    ///
+    /// One arrangement per project, so any tab can answer for all of them —
+    /// but which one is asked still has to be decided the same way twice, or a
+    /// reconcile and the window that follows it disagree about the shape a new
+    /// tab should have. `nil` for a project with no tabs at all.
+    public static func arrangement(of tabs: [TabRecord], activeTabID: UUID?) -> LayoutNode? {
+        (tabs.first { $0.id == activeTabID } ?? tabs.first)?.root
+    }
+
     /// One member per enabled edge, all in one group, all in the checkout's
     /// directory. `blueprint` is a factory, not a value: `layout_nodes.id` is
     /// a `TEXT PRIMARY KEY` and `saveTabs` inserts one member's `root` per

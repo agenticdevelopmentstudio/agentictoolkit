@@ -123,7 +123,18 @@ public final class ProjectWorkspace {
             record.root = layout.spec.reconcile(record.root)
             return record
         }
-        return (repaired, stored.activeTabID ?? repaired[0].id, stored.enabledEdges)
+        // One arrangement per project. Tabs stored before that was true — and
+        // any that drifted since, a repair above included — take the shape of
+        // the tab that is coming up in front, each in its own node ids so the
+        // panes it remembers come back with it.
+        let arrangement = ProjectTabReconciler.arrangement(of: repaired, activeTabID: stored.activeTabID)
+        let shared = repaired.map { record -> TabRecord in
+            guard let arrangement else { return record }
+            var record = record
+            record.root = record.root.reshaped(toMatch: arrangement)
+            return record
+        }
+        return (shared, stored.activeTabID ?? shared[0].id, stored.enabledEdges)
     }
 
     /// Persists the current tabs, which one is active, and the enabled edges.

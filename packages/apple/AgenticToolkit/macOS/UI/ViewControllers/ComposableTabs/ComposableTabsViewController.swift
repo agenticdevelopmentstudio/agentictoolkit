@@ -445,6 +445,62 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         }
     }
 
+    // MARK: - Wearing another tab's sizes
+
+    /// Takes `template`'s divider positions without rebuilding anything.
+    ///
+    /// One arrangement per project means a divider dragged in one tab is that
+    /// divider dragged in all of them, and a drag posts a change per mouse
+    /// event — so the tabs that merely *follow* must not pay a `rebuild(from:)`
+    /// per frame, which would discard and re-host every pane in them. Sizes
+    /// are all that differ here, and a size is a number on a child plus a
+    /// divider to put back.
+    ///
+    /// `template` is a snapshot, so a root holding one child is that child
+    /// (see `snapshotNode()`), and any split with siblings has exactly two.
+    /// A tree that does not line up is left alone rather than half-applied:
+    /// the caller reaches for `rebuild(from:)` when the structures differ, and
+    /// this is only ever asked of a tab that already matches.
+    public func applySizes(from template: LayoutNode) {
+        adoptSizes(from: template)
+        replaceDividers()
+    }
+
+    private func adoptSizes(from template: LayoutNode) {
+        switch layoutChildren.count {
+        case 1:
+            adopt(template, into: layoutChildren[0])
+        case 2:
+            guard case .split(_, let first, let second) = template.kind else { return }
+            adopt(first, into: layoutChildren[0])
+            adopt(second, into: layoutChildren[1])
+        default:
+            return
+        }
+    }
+
+    private func adopt(_ node: LayoutNode, into child: any ComposableTabsChild) {
+        child.thicknessFraction = node.thicknessFraction.map { CGFloat($0) }
+        (child as? ComposableTabsViewController)?.adoptSizes(from: node)
+    }
+
+    /// Puts the dividers back where the newly adopted fractions say.
+    ///
+    /// Unlatching alone would do it eventually — `viewDidLayout` applies the
+    /// fractions on the next pass — and for a tab that is off screen (another
+    /// edge's bar, or a tab nobody has selected) that is exactly right: its
+    /// bounds are stale, `applyPreferredThicknessesIfNeeded` declines a
+    /// zero-thickness pass, and the latch stays down until the tab is really
+    /// laid out. A tab that *is* on screen has its bounds now, so it moves now.
+    private func replaceDividers() {
+        guard isViewLoaded else { return }
+        hasAppliedPreferredThicknesses = false
+        applyPreferredThicknessesIfNeeded()
+        for child in layoutChildren {
+            (child as? ComposableTabsViewController)?.replaceDividers()
+        }
+    }
+
     /// Saves the dividers once they have stopped moving.
     ///
     /// A drag posts a resize notification per mouse event and a window resize

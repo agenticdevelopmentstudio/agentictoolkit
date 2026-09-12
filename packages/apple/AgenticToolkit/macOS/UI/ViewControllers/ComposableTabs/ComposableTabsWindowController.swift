@@ -191,6 +191,17 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// the window never comes back.
     private var isClosing = false
 
+    /// Raised while one tab's arrangement is being put on the others.
+    ///
+    /// Both ways a tab wears the arrangement end in a layout change of its own
+    /// — `rebuild(from:)` finishes by persisting the tree, and moving a divider
+    /// makes the split view post a resize that the debounce turns into another
+    /// change — so every tab the mirror touches calls the callback back. The
+    /// flag stops the mirror recurring into itself and suppresses the per-tab
+    /// writes; the tab the user actually touched writes once, for all of them,
+    /// when the mirror is done.
+    private var isMirroringArrangement = false
+
     private var titlebarAccessory: NSTitlebarAccessoryViewController?
     private var arrangeButton: NSButton?
     private var cancellables = Set<AnyCancellable>()
@@ -547,7 +558,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         for tabID: UUID, workingDirectory: URL
     ) -> ComposableTabsViewController {
         let split = ComposableTabsViewController.make(
-            from: project.layout.blueprint(),
+            from: currentArrangement()?.inFreshIDs() ?? project.layout.blueprint(),
             project: project,
             workingDirectory: workingDirectory,
             isRoot: true
@@ -555,6 +566,26 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         wireLayoutCallback(on: split, tabID: tabID)
         splitControllersByTabID[tabID] = split
         return split
+    }
+
+    /// The arrangement this project's tabs wear: the tab in front, or the
+    /// first tab there is when nothing is active yet.
+    ///
+    /// `nil` only before any tab exists — the very first tab of a project has
+    /// nothing to copy and starts from the layout's blueprint. Read in tab
+    /// order rather than off `splitControllersByTabID`, whose order is a
+    /// dictionary's: a project reopening two tabs must not get one shape or the
+    /// other depending on how the hashing fell.
+    private func currentArrangement() -> LayoutNode? {
+        if let activeTabID = tabbed.activeTabID, let split = splitControllersByTabID[activeTabID] {
+            return split.snapshotNode()
+        }
+        for edge in Edge.allCases {
+            for tab in tabbed.tabs(on: edge) {
+                if let split = splitControllersByTabID[tab.id] { return split.snapshotNode() }
+            }
+        }
+        return nil
     }
 
     // MARK: - Scripting accessors
@@ -1167,6 +1198,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
                 self.focusedLeafByTabID[tabID] = nil
                 focusWasCleared = true
             }
+            self.mirrorArrangement(node, from: tabID)
             self.persistAllTabs()
             // Losing the focus record is a change of *pane*: `activePane` falls
             // through to the split's first leaf, so the field's target moved
@@ -1181,6 +1213,34 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             }
         }
         wirePaneObservers(on: split)
+    }
+
+    /// Puts `arrangement` on every tab in the project but the one it came from.
+    ///
+    /// The panes are a project's, not a tab's: a tab is a *place* — a checkout,
+    /// an edge — and the user arranges the project's panes once, in whichever
+    /// tab happens to be in front. So the tab the user just rearranged is the
+    /// arrangement now, and the rest follow.
+    ///
+    /// What travels is the shape and the sizes; the ids stay where they are
+    /// (`reshaped(toMatch:)` says why). A tab already in that shape takes the
+    /// sizes where it stands — the overwhelmingly common case, since the mirror
+    /// runs on every tab for every frame of a divider drag, and a rebuild per
+    /// frame would throw away every pane in every other tab.
+    private func mirrorArrangement(_ arrangement: LayoutNode, from tabID: UUID) {
+        guard !isMirroringArrangement, !isReloadingTabs, !isClosing else { return }
+        isMirroringArrangement = true
+        defer { isMirroringArrangement = false }
+
+        for (otherTabID, other) in splitControllersByTabID where otherTabID != tabID {
+            let current = other.snapshotNode()
+            let wanted = current.reshaped(toMatch: arrangement)
+            if current.hasSameStructure(as: wanted) {
+                other.applySizes(from: wanted)
+            } else {
+                other.rebuild(from: wanted)
+            }
+        }
     }
 
     private static func leafIDs(in node: LayoutNode) -> Set<UUID> {
@@ -1202,9 +1262,12 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// mid-loop that callback would write the shrinking tab set — pruning
     /// tabs `installInitialTabs()` is about to read straight back out of
     /// storage. A no-op once the window is closing, for the reasons on
-    /// `isClosing`.
+    /// `isClosing`. A no-op while the arrangement is being mirrored: every tab
+    /// the mirror dresses calls back, and a write per tab would put a
+    /// half-mirrored project in the database. The mirror's caller writes once,
+    /// for all of them, when the mirror is done.
     private func persistAllTabs() {
-        guard !isReloadingTabs, !isClosing else { return }
+        guard !isReloadingTabs, !isClosing, !isMirroringArrangement else { return }
         project.persistTabs(
             currentTabRecords().map(\.record),
             activeTabID: tabbed.activeTabID,
