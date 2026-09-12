@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import AgenticToolkitMacOS
 
+@MainActor
 final class WindowStateNamespaceTests: XCTestCase {
 
     override func tearDown() {

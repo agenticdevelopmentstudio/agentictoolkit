@@ -287,6 +287,157 @@ final class ComposableTabLayoutSpecTests: XCTestCase {
         XCTAssertEqual(leafViewIDs(in: spec.reconcile(tree)), [list, terminal])
     }
 
+    // MARK: - Reconciliation: a view the spec requires
+
+    /// The repair that carries a window across a release making a pane
+    /// mandatory: the pane arrives *beside* what was stored, and where the
+    /// blueprint would have put it.
+    func testAViewTheSpecRequiresAndTheTreeLacksIsAddedWhereTheBlueprintPutsIt() {
+        let spec = ComposableTabLayoutSpec.split(
+            axis: .horizontal,
+            children: [.pane(list), .pane(editor), .pane(terminal)],
+            allows: [.init(list, min: 1, max: 1),
+                     .init(editor, min: 1, max: 1),
+                     .unbounded(terminal)]
+        )
+        let stored = LayoutNode.split(
+            orientation: .horizontal,
+            first: LayoutNode.leaf(contentType: list),
+            second: LayoutNode.leaf(contentType: terminal)
+        )
+
+        XCTAssertEqual(leafViewIDs(in: spec.reconcile(stored)), [list, editor, terminal])
+    }
+
+    /// Nothing precedes it in the blueprint, so it goes to the front rather
+    /// than the end — a sidebar stays a sidebar.
+    func testARequiredViewTheBlueprintPutsFirstIsAddedAtTheFront() {
+        let spec = ComposableTabLayoutSpec.split(
+            axis: .horizontal,
+            children: [.pane(list), .pane(terminal)],
+            allows: [.init(list, min: 1, max: 1), .unbounded(terminal)]
+        )
+
+        let repaired = spec.reconcile(LayoutNode.leaf(contentType: terminal))
+
+        XCTAssertEqual(leafViewIDs(in: repaired), [list, terminal])
+    }
+
+    /// The panes the user arranged are the same panes afterwards — only the
+    /// missing one is new, so nothing they had sized or scrolled is rebuilt.
+    func testTheRepairKeepsTheStoredLeavesAndAddsOnlyTheMissingOne() {
+        let listID = UUID(), terminalID = UUID()
+        let spec = ComposableTabLayoutSpec.split(
+            axis: .horizontal,
+            children: [.pane(list), .pane(editor), .pane(terminal)],
+            allows: [.init(list, min: 1, max: 1),
+                     .init(editor, min: 1, max: 1),
+                     .unbounded(terminal)]
+        )
+        let stored = LayoutNode.split(
+            orientation: .horizontal,
+            first: LayoutNode.leaf(id: listID, contentType: list),
+            second: LayoutNode.leaf(id: terminalID, contentType: terminal)
+        )
+
+        let ids = leafIDs(in: spec.reconcile(stored))
+
+        XCTAssertEqual(ids.count, 3)
+        XCTAssertEqual([ids.first, ids.last], [listID, terminalID])
+        XCTAssertFalse([listID, terminalID].contains(ids[1]), "the added pane is a new node")
+    }
+
+    /// A `min` on one side of a split says how many *that side* must hold, and
+    /// nothing in the spec says which of the live tree's nodes below the root
+    /// should be the one to gain a pane. Inventing an answer would move panes
+    /// the user arranged, so the repair stays at the root.
+    func testAMinimumDeclaredBelowTheRootIsNotRepaired() {
+        let spec = ComposableTabLayoutSpec.split(
+            axis: .horizontal,
+            children: [
+                .pane(list),
+                .split(
+                    axis: .vertical,
+                    children: [.pane(editor), .pane(terminal)],
+                    allows: [.init(editor, min: 1, max: 1)])
+            ],
+            allows: [.init(list, min: 1, max: 1), .unbounded(terminal)]
+        )
+        let stored = LayoutNode.split(
+            orientation: .horizontal,
+            first: LayoutNode.leaf(contentType: list),
+            second: LayoutNode.leaf(contentType: terminal)
+        )
+
+        XCTAssertEqual(leafViewIDs(in: spec.reconcile(stored)), [list, terminal])
+    }
+
+    func testAMinimumOfTwoAddsAsManyPanesAsAreMissing() {
+        let spec = ComposableTabLayoutSpec.split(
+            axis: .horizontal,
+            children: [.pane(terminal), .pane(terminal)],
+            allows: [.unbounded(terminal, min: 2)]
+        )
+
+        let repaired = spec.reconcile(LayoutNode.leaf(contentType: terminal))
+
+        XCTAssertEqual(leafViewIDs(in: repaired), [terminal, terminal])
+    }
+
+    /// The root's axis is the row the repair inserts into. A stored tree that
+    /// leans the other way is one segment of that row, not two, so the added
+    /// pane arrives beside the whole of it rather than inside it.
+    func testATreeOnTheOtherAxisGainsTheRequiredPaneBesideItWhole() {
+        let spec = ComposableTabLayoutSpec.split(
+            axis: .horizontal,
+            children: [
+                .pane(list),
+                .split(axis: .vertical, children: [.pane(editor), .pane(terminal)])
+            ],
+            allows: [.init(list, min: 1, max: 1),
+                     .init(editor, min: 0, max: 1),
+                     .unbounded(terminal)]
+        )
+        let stored = LayoutNode.split(
+            orientation: .vertical,
+            first: LayoutNode.leaf(contentType: editor),
+            second: LayoutNode.leaf(contentType: terminal)
+        )
+
+        let repaired = spec.reconcile(stored)
+
+        XCTAssertEqual(leafViewIDs(in: repaired), [list, editor, terminal])
+        guard case .split(let axis, _, let second) = repaired.kind else {
+            return XCTFail("the repair rebuilds the row along the root's axis")
+        }
+        XCTAssertEqual(axis, .horizontal)
+        guard case .split(let storedAxis, _, _) = second.kind else {
+            return XCTFail("the stored split survives whole, as one segment of that row")
+        }
+        XCTAssertEqual(storedAxis, .vertical)
+    }
+
+    /// Reconciliation runs on every load, including the load after the one that
+    /// repaired the tree — so a second pass must add nothing.
+    func testASecondReconciliationAddsNothingMore() {
+        let spec = ComposableTabLayoutSpec.split(
+            axis: .horizontal,
+            children: [.pane(list), .pane(editor), .pane(terminal)],
+            allows: [.init(list, min: 1, max: 1),
+                     .init(editor, min: 1, max: 1),
+                     .unbounded(terminal)]
+        )
+        let stored = LayoutNode.split(
+            orientation: .horizontal,
+            first: LayoutNode.leaf(contentType: list),
+            second: LayoutNode.leaf(contentType: terminal)
+        )
+
+        let once = spec.reconcile(stored)
+
+        XCTAssertEqual(leafIDs(in: spec.reconcile(once)), leafIDs(in: once))
+    }
+
     // MARK: - Helpers
 
     private func leafViewIDs(in node: LayoutNode) -> [ComposableTabsViewID] {
