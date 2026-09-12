@@ -925,8 +925,16 @@ public enum VSCodeAPI {
                     if (!hasRecordProbe || typeof key === 'symbol' || PROBE_KEYS.indexOf(key) !== -1) {
                         return;
                     }
+                    // `memberPath` is built *outside* the `try` deliberately: the `try`
+                    // exists to swallow a throw from `recordProbe` itself, not to swallow
+                    // whatever this function does internally. If the guard above were ever
+                    // weakened (e.g. the `typeof key === 'symbol'` check deleted), building
+                    // the path here would throw `TypeError: Cannot convert a Symbol value
+                    // to a string` — and that throw should surface, not vanish into the
+                    // same catch meant for the caller-supplied `recordProbe`.
+                    var memberPath = path + '.' + key;
                     try {
-                        recordProbe(path + '.' + key);
+                        recordProbe(memberPath);
                     } catch (ignored) {
                         // Swallowed — see the comment above this function.
                     }
@@ -944,8 +952,12 @@ public enum VSCodeAPI {
                             return probeValue(path, table, key);
                         }
                         if (hasRecordMiss) {
+                            // `memberPath` outside the `try`, same reasoning as
+                            // `recordNegativeProbe` above: the `try` swallows a throw
+                            // from `recordMiss`, not a throw from building its argument.
+                            var memberPath = path + '.' + key;
                             try {
-                                recordMiss(path + '.' + key);
+                                recordMiss(memberPath);
                             } catch (ignored) {
                                 // Swallowed for the same reason as
                                 // `recordNegativeProbe` above: the
@@ -1074,11 +1086,16 @@ public enum VSCodeAPI {
     ///     this one will not do for you — when the caller wants task 5.8's
     ///     report to include this sub-namespace's misses. Defaults to `nil`,
     ///     in which case the factory throws exactly as it always did,
-    ///     unrecorded. **A throw from this block is caught inside the JS and
-    ///     discarded**, so a misbehaving recorder cannot replace the
+    ///     unrecorded. **A throw from this block itself is caught inside the
+    ///     JS and discarded** — the `try` wraps only the call to `recordMiss`,
+    ///     with `memberPath` built beforehand outside it, so the swallow
+    ///     covers exactly the recorder call and nothing the factory does on
+    ///     its own — so a misbehaving recorder cannot replace the
     ///     `NotImplementedError` the extension is entitled to see with
-    ///     whatever the recorder threw instead; the one record that call
-    ///     would have made is lost, and nothing else is affected.
+    ///     whatever the recorder threw instead. The one record that call
+    ///     would have made is simply never written to the ledger; nothing
+    ///     else observes the loss, since the extension's own view (the thrown
+    ///     `NotImplementedError`) is identical either way.
     ///   - recordProbe: Called with `path + '.' + key` for a key that is a
     ///     quiet feature-detection miss — reached only from `has`
     ///     (`'writeFile' in ns`) and `getOwnPropertyDescriptor`, never from a
@@ -1089,9 +1106,12 @@ public enum VSCodeAPI {
     ///     built the same way as `recordMiss`, around
     ///     `host.notImplementedLedger.recordProbe(memberPath:extensionIdentifier:)`.
     ///     Defaults to `nil`. A throw from this block is swallowed the same
-    ///     way `recordMiss`'s is, for the same reason: `has` and
+    ///     narrow way `recordMiss`'s is — `memberPath` built first, the `try`
+    ///     wrapping only the call itself — for the same reason: `has` and
     ///     `getOwnPropertyDescriptor` owe their caller a boolean or a
-    ///     descriptor, never an uncaught error from bookkeeping.
+    ///     descriptor, never an uncaught error from bookkeeping. The lost
+    ///     record is simply never written; the caller's `false`/`undefined`
+    ///     is unaffected either way.
     ///
     /// **Both blocks are retained for the context's lifetime, not the call's**
     /// — the Proxy handler this factory builds closes over them, and the
