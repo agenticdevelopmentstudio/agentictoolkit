@@ -29,7 +29,7 @@ extension SubprocessChannel {
     /// `MessageFramingDecoder.maximumFrameBytes` cap, which fires when no
     /// delimiter has arrived in that many bytes. Output with no `0x0A` in it
     /// at all is then indistinguishable from a peer that has stopped framing,
-    /// and git's machine-readable status (`GitVerb.status`, whose records are
+    /// and git's machine-readable status (`GitClient.status(in:)`, whose records are
     /// NUL-terminated and newline-free) on a large repository is exactly
     /// that: the capture is discarded and the verb fails on output that was
     /// never malformed. The run therefore decodes as

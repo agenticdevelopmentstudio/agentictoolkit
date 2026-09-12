@@ -28,7 +28,7 @@ public enum MessageFraming: Sendable {
     /// `MessageFramingDecoder.maximumFrameBytes`, which is the right guard
     /// against a peer that never sends a delimiter and exactly the wrong one
     /// against a child whose whole output legitimately contains no delimiter.
-    /// git's machine-readable status (`GitVerb.status`) is that child: its
+    /// git's machine-readable status (`GitClient.status(in:)`) is that child: its
     /// records are NUL-terminated and carry no `0x0A` anywhere, so a large
     /// repository's status is one 16 MB-plus "frame" and a guard meant for a
     /// malformed peer throws away a correct answer. Nothing accumulates
