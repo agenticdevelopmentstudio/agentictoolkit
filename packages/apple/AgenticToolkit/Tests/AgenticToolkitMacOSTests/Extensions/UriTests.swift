@@ -10,9 +10,16 @@ import JavaScriptCore
 /// A bare `JSContext`, not an `ExtensionHost`: every function under test here
 /// takes a `JSContext` and nothing else, so a suite exercising them needs no
 /// extension, no manifest and no activation — the ceremony this file tests is
-/// deliberately usable before any of that exists. `MainThreadCommandsTests`
-/// covers the same class reached through a real host's `vscode.Uri` member;
-/// this suite covers the class and the bridge directly.
+/// deliberately usable before any of that exists. That also means this suite
+/// does **not** cover `vscode.Uri` reached through a real host — an earlier
+/// version of this doc claimed `MainThreadCommandsTests` already did that,
+/// which was false: that suite only had a doc aside naming `vscode.Uri` as a
+/// future case, no test reaching it. `MainThreadCommandsTests.vscodeUriIsUsableAndFrozenThroughARealHost`
+/// and `.vscodeUriParseReassignmentIsRefusedThroughARealHost` are the tests
+/// that now cover that path — through `ExtensionHost.installRuntime`'s eager
+/// install, extension activation and all — while this suite covers the class
+/// and the bridge (`VSCodeAPI.url(from:in:)` / `VSCodeAPI.uriValue(for:in:)`)
+/// directly, against a bare `JSContext`.
 @MainActor
 @Suite
 struct UriTests {
@@ -185,6 +192,77 @@ struct UriTests {
         let context = try makeContext()
         let uri = try #require(context.evaluateScript("Uri.joinPath(Uri.file('/a/b/'), 'c.txt')"))
         #expect(uri.forProperty("path")?.toString() == "/a/b/c.txt")
+    }
+
+    // MARK: - instanceof and toJSON
+
+    /// `Uri.file(...)` and `Uri.parse(...)` both answer a real instance of
+    /// the `Uri` class, not a plain object shaped like one — the reason this
+    /// task built a class at all rather than a factory returning a bag of
+    /// properties, and the one JS-level check that actually observes the
+    /// difference.
+    @Test
+    func uriInstancesAreInstancesOfUri() throws {
+        let context = try makeContext()
+        let fileResult = try #require(context.evaluateScript("Uri.file('/tmp') instanceof Uri"))
+        #expect(fileResult.toBool() == true)
+        let parseResult = try #require(context.evaluateScript("Uri.parse('https://h/a') instanceof Uri"))
+        #expect(parseResult.toBool() == true)
+        let plainObjectResult = try #require(
+            context.evaluateScript("({ scheme: 'file', path: '/tmp' }) instanceof Uri"))
+        #expect(plainObjectResult.toBool() == false)
+    }
+
+    /// `toJSON()` is what `JSON.stringify` calls implicitly, and what a
+    /// command argument serialised across a boundary depends on — it answers
+    /// a plain object carrying every component, including `fsPath`, rather
+    /// than the class instance itself (which `JSON.stringify` would
+    /// otherwise render as `{}`, since none of its properties are its own
+    /// enumerable properties on a class built via getters).
+    @Test
+    func toJSONAnswersEveryComponentIncludingFsPath() throws {
+        let context = try makeContext()
+        let json = try #require(context.evaluateScript("Uri.parse('file://server/share/a%20b').toJSON()"))
+        #expect(json.forProperty("scheme")?.toString() == "file")
+        #expect(json.forProperty("authority")?.toString() == "server")
+        #expect(json.forProperty("path")?.toString() == "/share/a%20b")
+        #expect(json.forProperty("fsPath")?.toString() == "//server/share/a b")
+        #expect(json.forProperty("query")?.toString() == "")
+        #expect(json.forProperty("fragment")?.toString() == "")
+
+        let stringified = try #require(context.evaluateScript(
+            "JSON.stringify(Uri.file('/tmp'))"
+        ))
+        #expect(stringified.toString()?.contains("\"path\":\"/tmp\"") == true)
+    }
+
+    // MARK: - Freezing (F2)
+
+    /// `Uri` and `Uri.prototype` are frozen the moment `uriClassSource`
+    /// installs them — not from Swift, and not with a window between
+    /// construction and freezing. Reassigning a static method is refused the
+    /// same way reassigning a prototype method is.
+    @Test
+    func uriClassAndPrototypeAreFrozen() throws {
+        let context = try makeContext()
+        let isClassFrozen = try #require(context.evaluateScript("Object.isFrozen(Uri)"))
+        #expect(isClassFrozen.toBool() == true)
+        let isPrototypeFrozen = try #require(context.evaluateScript("Object.isFrozen(Uri.prototype)"))
+        #expect(isPrototypeFrozen.toBool() == true)
+
+        context.evaluateScript(
+            """
+            var originalParse = Uri.parse;
+            var originalToString = Uri.prototype.toString;
+            Uri.parse = function () { return 'impostor'; };
+            Uri.prototype.toString = function () { return 'impostor'; };
+            """
+        )
+        let parseUnchanged = try #require(context.evaluateScript("Uri.parse === originalParse"))
+        #expect(parseUnchanged.toBool() == true)
+        let toStringUnchanged = try #require(
+            context.evaluateScript("Uri.prototype.toString === originalToString"))
+        #expect(toStringUnchanged.toBool() == true)
     }
 
     // MARK: - Swift bridge: url(from:in:)

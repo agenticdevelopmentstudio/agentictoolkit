@@ -5,6 +5,8 @@
 
 import Foundation
 import JavaScriptCore
+import OSLog
+import AgenticToolkitCore
 
 /// `vscode.Uri` and its Swift↔JS bridge — shared ceremony for task 5.4a, built
 /// once so `workspace`, `window` and every later adaptor construct and read
@@ -42,7 +44,7 @@ extension VSCodeAPI {
     /// functions, so a reader moving between this file and that one is not
     /// asked to switch style for no reason.
     ///
-    /// **Deliberately narrower than real VS Code's `Uri`.** Three
+    /// **Deliberately narrower than real VS Code's `Uri`.** Five
     /// simplifications, each a stated boundary rather than an oversight:
     ///
     ///   1. No Windows drive-letter or UNC handling in `Uri.file` — this host
@@ -52,13 +54,30 @@ extension VSCodeAPI {
     ///      built straight into) the URI string; `fsPath` is
     ///      `decodeURIComponent(path)`, falling back to `path` unchanged if
     ///      that throws on a malformed escape rather than propagating a
-    ///      `URIError` out of a getter. Real VS Code stores components
-    ///      decoded internally and re-encodes for `toString()`; this is the
-    ///      other way round, and it is enough for `path` to be "the URI
-    ///      string's path segment" and `fsPath` to be "that segment, usable
-    ///      to open a file" — the two properties this task's tests ask for.
-    ///   3. Query and fragment are not decoded at all. Nothing in this task
-    ///      reads them for anything but their string form.
+    ///      `URIError` out of a getter, prefixed with `//authority` when the
+    ///      URI carries one — a UNC-shaped answer for a UNC-shaped input.
+    ///      Real VS Code stores components decoded internally and re-encodes
+    ///      for `toString()`; this is the other way round, and it is enough
+    ///      for `path` to be "the URI string's path segment" and `fsPath` to
+    ///      be "that segment, usable to open a file" — the two properties
+    ///      this task's tests ask for.
+    ///   3. Query and fragment are not decoded through their own `.query` /
+    ///      `.fragment` getters, nor by `toString()`'s default output — both
+    ///      always answer the percent-encoded form exactly as parsed.
+    ///      `toString(true)` is the one exception: passing `skipEncoding` a
+    ///      truthy value decodes all four percent-encodable components
+    ///      (`authority`, `path`, `query`, `fragment`) for that call's return
+    ///      value only, which is the display string extension code asks for
+    ///      when it wants a path to show a user rather than a URI to store.
+    ///   4. `Uri.parse`'s `strict` parameter checks only that *some* scheme is
+    ///      present; it does not validate the scheme's grammar (the set of
+    ///      characters RFC 3986 permits in one) the way a full parser would.
+    ///      A schemeless value is the failure mode `strict` exists to guard
+    ///      against, and it is the one every real caller means.
+    ///   5. `Uri.joinPath` collapses the duplicate `/` separators its own
+    ///      join can produce, but does not resolve `.` or `..` path segments
+    ///      the way a full path-normalization pass would — nothing in this
+    ///      task builds or joins a path containing either.
     ///
     /// No regex literal (`/…/`) appears anywhere in this pattern on purpose:
     /// a bare `/` inside a regex literal's delimiters ends the literal early
@@ -75,6 +94,15 @@ extension VSCodeAPI {
             var URI_PATTERN = new RegExp(
                 '^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)([?]([^#]*))?([#](.*))?'
             );
+            var MULTIPLE_SLASHES = new RegExp('/{2,}', 'g');
+
+            function decodeComponent(value) {
+                try {
+                    return decodeURIComponent(value);
+                } catch (malformedEscape) {
+                    return value;
+                }
+            }
 
             function Uri(scheme, authority, path, query, fragment, hasAuthority) {
                 this._scheme = scheme || '';
@@ -96,11 +124,8 @@ extension VSCodeAPI {
             defineReadOnly('query', function () { return this._query; });
             defineReadOnly('fragment', function () { return this._fragment; });
             defineReadOnly('fsPath', function () {
-                try {
-                    return decodeURIComponent(this._path);
-                } catch (malformedEscape) {
-                    return this._path;
-                }
+                var decodedPath = decodeComponent(this._path);
+                return this._authority ? '//' + this._authority + decodedPath : decodedPath;
             });
 
             Uri.prototype.with = function (change) {
@@ -115,20 +140,30 @@ extension VSCodeAPI {
                 return new Uri(scheme, authority, path, query, fragment, hasAuthority);
             };
 
-            Uri.prototype.toString = function () {
+            Uri.prototype.toString = function (skipEncoding) {
+                var authority = this._authority;
+                var path = this._path;
+                var query = this._query;
+                var fragment = this._fragment;
+                if (skipEncoding) {
+                    authority = decodeComponent(authority);
+                    path = decodeComponent(path);
+                    query = decodeComponent(query);
+                    fragment = decodeComponent(fragment);
+                }
                 var result = '';
                 if (this._scheme) {
                     result += this._scheme + ':';
                 }
                 if (this._hasAuthority) {
-                    result += '//' + this._authority;
+                    result += '//' + authority;
                 }
-                result += this._path;
-                if (this._query) {
-                    result += '?' + this._query;
+                result += path;
+                if (query) {
+                    result += '?' + query;
                 }
-                if (this._fragment) {
-                    result += '#' + this._fragment;
+                if (fragment) {
+                    result += '#' + fragment;
                 }
                 return result;
             };
@@ -164,20 +199,28 @@ extension VSCodeAPI {
                 return new Uri('file', '', encodePath(path), '', '', true);
             };
 
-            Uri.parse = function (value) {
+            Uri.parse = function (value, strict) {
                 var match = URI_PATTERN.exec(String(value));
-                var scheme = (match && match[2]) || '';
+                var scheme = ((match && match[2]) || '').toLowerCase();
                 var hasAuthority = Boolean(match && match[3] !== undefined);
                 var authority = (match && match[4]) || '';
                 var path = (match && match[5]) || '';
                 var query = (match && match[7]) || '';
                 var fragment = (match && match[9]) || '';
+                if (strict && !scheme) {
+                    throw new Error(
+                        "Uri.parse: '" + String(value) + "' must contain a scheme when 'strict' is true"
+                    );
+                }
                 return new Uri(scheme, authority, path, query, fragment, hasAuthority);
             };
 
             Uri.joinPath = function (base) {
+                if (!(base instanceof Uri)) {
+                    throw new TypeError('Uri.joinPath: the base argument must be a vscode.Uri');
+                }
                 var appended = Array.prototype.slice.call(arguments, 1);
-                var basePath = (base && base._path) || '';
+                var basePath = base._path || '';
                 var suffix = encodePath(appended.join('/'));
                 var joinedPath;
                 if (suffix === '') {
@@ -187,8 +230,20 @@ extension VSCodeAPI {
                 } else {
                     joinedPath = basePath + '/' + suffix;
                 }
-                return new Uri(base._scheme, base._authority, joinedPath, '', '', base._hasAuthority);
+                joinedPath = joinedPath.replace(MULTIPLE_SLASHES, '/');
+                return new Uri(
+                    base._scheme, base._authority, joinedPath, base._query, base._fragment, base._hasAuthority
+                );
             };
+
+            // Frozen after every static and prototype member is attached, and
+            // inside the same evaluation that built them — there is no window
+            // between this class coming into existence and its being locked
+            // down for extension code to run in. See `installUriClass(in:)`'s
+            // doc for what that buys the rest of this file, and
+            // `uriValue(for:in:)` for the one call site that depends on it.
+            Object.freeze(Uri.prototype);
+            Object.freeze(Uri);
 
             try {
                 Object.defineProperty(globalThis, '\(uriClassGlobalName)', {
@@ -218,6 +273,20 @@ extension VSCodeAPI {
     /// separately installs the *same* object as `vscode.Uri`, so extension
     /// code and this bridge are always looking at one constructor, never two
     /// that happen to look alike.
+    ///
+    /// **That object is frozen, and its `prototype` is frozen with it —
+    /// `uriClassSource` does both before caching either.** `Uri.parse`,
+    /// `Uri.file`, `Uri.joinPath` and every prototype accessor and method are
+    /// therefore non-writable and non-configurable from the moment extension
+    /// code can first see them: `vscode.Uri.parse = function () { … }`
+    /// answers `undefined` in sloppy mode and throws `TypeError` in strict
+    /// mode, in both cases leaving the property untouched. What freezing does
+    /// **not** do is stop code from reshaping the class before this function
+    /// ever installs it, or from replacing what `uriClassGlobalName` is bound
+    /// to — the binding itself is `writable: false, configurable: false`, so
+    /// there is nothing left to replace it with, but a context in which this
+    /// evaluation itself was somehow tampered with before it ran is out of
+    /// scope for the same reason it is for `helperSource`.
     public static func installUriClass(in context: JSContext) -> JSValue? {
         if let cached = context.objectForKeyedSubscript(uriClassGlobalName), cached.isObject {
             return cached
@@ -287,11 +356,23 @@ extension VSCodeAPI {
     /// `untitled:`, anything a later stage adds — behaving the same way, and
     /// `absoluteString` already carries whatever percent-encoding the `URL`
     /// itself settled on, which `Uri.parse` reads back as this class's own
-    /// `path`. Calling `Uri.parse` directly (not through the `call` guard
-    /// `url(from:in:)` uses) is safe here for the same reason evaluating
-    /// `uriClassSource` itself is: this is host-authored JavaScript, run with
-    /// no extension code anywhere on its call stack, not a value extension
-    /// code could have reshaped.
+    /// `path`.
+    ///
+    /// Calling `Uri.parse` directly here (not through the `call` guard
+    /// `url(from:in:)` uses) is safe **because `uriClassSource` freezes both
+    /// `Uri` and `Uri.prototype` before caching either**, not because this
+    /// call runs with no extension code on its stack — `ExtensionHost.installRuntime`
+    /// hands this exact object out as `vscode.Uri` (`ExtensionHost.swift:950`),
+    /// so extension code can reach it too. Freezing is what makes the
+    /// property read here provably the implementation this file wrote: once
+    /// `Uri` is frozen, `Uri.parse` cannot have been reassigned, by
+    /// extension code or anything else, between installation and this call.
+    /// What this still does not guard against is that implementation
+    /// *throwing on its own* — `strict` is never passed here, so the one
+    /// path that can throw is never taken, and nothing else in `Uri.parse`
+    /// raises given a `URL`'s own `absoluteString` — but a future caller that
+    /// does need `strict` here would need the same `call(_:thisArg:arguments:)`
+    /// guard `url(from:in:)` uses, not this direct invocation.
     public static func uriValue(for url: URL, in context: JSContext) -> JSValue? {
         guard let uriClass = installUriClass(in: context),
               let parseFunction = uriClass.forProperty("parse"), parseFunction.isObject else {
