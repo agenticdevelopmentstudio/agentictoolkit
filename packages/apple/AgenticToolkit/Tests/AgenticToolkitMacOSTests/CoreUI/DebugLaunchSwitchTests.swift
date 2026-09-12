@@ -2,6 +2,9 @@ import Foundation
 import XCTest
 @testable import AgenticToolkitMacOS
 
+// `QuietWindowPresentation` is `@MainActor`, and XCTAssert's autoclosure is
+// non-isolated, so reading its statics needs the suite on the main actor.
+@MainActor
 final class DebugLaunchSwitchTests: XCTestCase {
 
     private func scratchDefaults(

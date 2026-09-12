@@ -2,11 +2,16 @@ import Foundation
 import XCTest
 @testable import AgenticToolkitMacOS
 
+// `WindowStateStorage` is `@MainActor`, so the cases that exercise a storage
+// instance have to be too. `WindowStateNamespace` itself is lock-guarded and
+// non-isolated by design (it composes keys for storage that isn't main-actor
+// code), which is why only this suite, not the namespace, carries the annotation.
+@MainActor
 final class WindowStateNamespaceTests: XCTestCase {
 
-    override func tearDown() {
+    override func tearDown() async throws {
         WindowStateNamespace.reset()
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testWindowStateIsUnNamespacedUntilAHostAsksForOne() {
@@ -45,7 +50,7 @@ final class WindowStateNamespaceTests: XCTestCase {
         let storage = UserDefaultsWindowStateStorage(
             keyPrefix: "TestWindowState_\(UUID().uuidString)_",
             visibilityKeyPrefix: "TestWindowVisible_\(UUID().uuidString)_")
-        addTeardownBlock {
+        addTeardownBlock { @MainActor in
             WindowStateNamespace.reset()
             storage.removeState(for: "log")
             storage.removeVisibility(for: "log")
