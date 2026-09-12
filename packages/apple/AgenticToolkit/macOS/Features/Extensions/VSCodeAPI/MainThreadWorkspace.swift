@@ -339,15 +339,25 @@ public final class MainThreadWorkspace {
         let identifier = self.extensionIdentifier
         let recordMiss: @convention(block) (String) -> Void = { memberPath in
             MainActor.assumeIsolated {
-                // `record`/`recordProbe` answer the deduplicated access; this
-                // call site only needs the recording side effect.
+                // The `_ =` is load-bearing: removing it breaks the build.
+                // `MainActor.assumeIsolated` is generic in its closure's result
+                // and is not `@discardableResult`, so a single-expression body
+                // here infers `T == NotImplementedAccess` against this
+                // `Void`-returning `@convention(block)` closure and fails to
+                // type-check. `record`'s own `@discardableResult`
+                // (`NotImplementedLedger.swift:113`) does not cover that.
                 _ = ledger.record(memberPath: memberPath, extensionIdentifier: identifier)
             }
         }
         let recordProbe: @convention(block) (String) -> Void = { memberPath in
             MainActor.assumeIsolated {
-                // `record`/`recordProbe` answer the deduplicated access; this
-                // call site only needs the recording side effect.
+                // The `_ =` is load-bearing: removing it breaks the build.
+                // `MainActor.assumeIsolated` is generic in its closure's result
+                // and is not `@discardableResult`, so a single-expression body
+                // here infers `T == NotImplementedAccess` against this
+                // `Void`-returning `@convention(block)` closure and fails to
+                // type-check. `recordProbe`'s own `@discardableResult`
+                // (`NotImplementedLedger.swift:124`) does not cover that.
                 _ = ledger.recordProbe(memberPath: memberPath, extensionIdentifier: identifier)
             }
         }
