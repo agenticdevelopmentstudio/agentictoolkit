@@ -69,6 +69,12 @@ extension SessionWatcher {
         /// The session summarizer for manual AI summarization.
         public var sessionSummarizer: SessionSummarizing?
 
+        /// Whether rows show the AI-summary line at all. Which preference answers
+        /// that is the host's business — Whippet summarizes in-app off
+        /// `aiSummariesEnabled`, Stenographer off its own daemon-pushed toggle — so
+        /// the window asks rather than reading a setting it doesn't own.
+        public var summariesEnabled: @MainActor () -> Bool = { UserSettings.aiSummariesEnabled.value }
+
         /// SessionWatcherSession IDs currently being summarized (for UI progress indication).
         @Published private(set) var summarizingSessionIds: Set<String> = []
 

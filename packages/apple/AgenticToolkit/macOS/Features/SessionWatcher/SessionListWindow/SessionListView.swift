@@ -63,6 +63,14 @@ extension SessionWatcher {
             // Empty state
             emptyStateView.translatesAutoresizingMaskIntoConstraints = false
             emptyStateView.isHidden = true
+            // Hidden views still hold their constraints, and this one is pinned to all
+            // four edges — so its hugging priority is an opinion about how tall the
+            // whole list may be. At the default 250 it outranks a host that has
+            // deliberately made the list the view that yields (Stenographer's window
+            // caps the list at the screen bottom), and the session rows collapse to the
+            // empty state's own height. It has no business having that opinion.
+            emptyStateView.setContentHuggingPriority(.init(rawValue: 1), for: .vertical)
+            emptyStateView.setContentCompressionResistancePriority(.init(rawValue: 1), for: .vertical)
 
             addSubview(scrollView)
             addSubview(emptyStateView)
@@ -116,7 +124,8 @@ extension SessionWatcher {
                         onSessionClick: { [weak self] session in self?.viewModel.handleSessionClick(session) },
                         summarizingSessionIds: viewModel.summarizingSessionIds,
                         onSummarize: { [weak self] session in self?.viewModel.summarizeSession(session) },
-                        frontmostSessionId: viewModel.frontmostSessionId
+                        frontmostSessionId: viewModel.frontmostSessionId,
+                        summariesEnabled: viewModel.summariesEnabled()
                     )
                     stackView.addArrangedSubview(groupView)
                     groupView.widthAnchor.constraint(equalTo: stackView.widthAnchor, constant: -16).isActive = true
@@ -224,6 +233,7 @@ extension SessionWatcher {
         private let summarizingSessionIds: Set<String>
         private let onSummarize: ((SessionWatcherSession) -> Void)?
         private let frontmostSessionId: String?
+        private let summariesEnabled: Bool
 
         // Theme-sensitive subviews
         private var folderIconView: NSImageView!
@@ -238,13 +248,15 @@ extension SessionWatcher {
             onSessionClick: ((SessionWatcherSession) -> Void)?,
             summarizingSessionIds: Set<String>,
             onSummarize: ((SessionWatcherSession) -> Void)?,
-            frontmostSessionId: String?
+            frontmostSessionId: String?,
+            summariesEnabled: Bool
         ) {
             self.group = group
             self.onSessionClick = onSessionClick
             self.summarizingSessionIds = summarizingSessionIds
             self.onSummarize = onSummarize
             self.frontmostSessionId = frontmostSessionId
+            self.summariesEnabled = summariesEnabled
             super.init(frame: .zero)
             accessibilityID("session-panel.group.\(AccessibilityID.slug(group.projectName))")
             wantsLayer = true
@@ -300,18 +312,24 @@ extension SessionWatcher {
                 ])
                 stack.addArrangedSubview(wrapper)
             } else {
+                // Breathing room between the divider and the first row, and between
+                // rows — the cards each draw a border, so butting them together
+                // reads as one box rather than a list.
+                stack.setCustomSpacing(4, after: divider)
                 for session in group.sessions {
                     let row = SessionWatcherRowAppKitView(
                         session: session,
                         onTap: onSessionClick,
                         isSummarizing: summarizingSessionIds.contains(session.sessionId),
                         onSummarize: onSummarize,
-                        isFrontmost: session.sessionId == frontmostSessionId
+                        isFrontmost: session.sessionId == frontmostSessionId,
+                        summariesEnabled: summariesEnabled
                     )
                     row.translatesAutoresizingMaskIntoConstraints = false
                     stack.addArrangedSubview(row)
-                    row.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8).isActive = true
-                    row.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -8).isActive = true
+                    row.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 6).isActive = true
+                    row.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -6).isActive = true
+                    stack.setCustomSpacing(4, after: row)
                 }
             }
 
@@ -331,7 +349,7 @@ extension SessionWatcher {
             // Folder icon — the group is a project (git) directory now.
             let iconView = NSImageView()
             iconView.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
-            iconView.symbolConfiguration = .init(pointSize: 18, weight: .regular)
+            iconView.symbolConfiguration = .init(pointSize: 13, weight: .regular)
             iconView.toolTip = group.id  // full project-root path
             iconView.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(iconView)
@@ -354,14 +372,14 @@ extension SessionWatcher {
             container.addSubview(count)
 
             NSLayoutConstraint.activate([
-                container.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
+                container.heightAnchor.constraint(greaterThanOrEqualToConstant: 26),
 
-                iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+                iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
                 iconView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: 22),
-                iconView.heightAnchor.constraint(equalToConstant: 22),
+                iconView.widthAnchor.constraint(equalToConstant: 16),
+                iconView.heightAnchor.constraint(equalToConstant: 16),
 
-                title.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+                title.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
                 title.centerYAnchor.constraint(equalTo: container.centerYAnchor),
 
                 count.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
@@ -389,20 +407,21 @@ extension SessionWatcher {
         private let isSummarizing: Bool
         private let onSummarize: ((SessionWatcherSession) -> Void)?
         private let isFrontmost: Bool
+        private let summariesEnabled: Bool
         private var trackingArea: NSTrackingArea?
         private var isHovered = false
 
         // Theme-sensitive subviews
         private var projectLabel: NSTextField!
-        private var statusDot: NSView!
-        private var timeLabel: NSTextField!
-        private var summaryLabel: NSTextField!
-        private var detailIconViews: [NSImageView] = []
-        private var detailLabels: [NSTextField] = []
+        /// The "»" glyphs between the header's three segments.
+        private var separatorLabels: [NSTextField] = []
+        /// Git branch and session name — the header's dimmer segments.
+        private var subtitleLabels: [NSTextField] = []
+        private var activityIcon: SessionWatcherActivityIconView!
+        private var outputLabel: NSTextField!
+        private var summaryLabel: NSTextField?
         private var themeObserver: ThemePaletteObserver?
 
-        // Cached status for theming the dot color correctly
-        private let dotStatus: SessionWatcher.SessionWatcherStatus
         private let isFrontmostSession: Bool
 
         public init(
@@ -410,14 +429,15 @@ extension SessionWatcher {
             onTap: ((SessionWatcherSession) -> Void)?,
             isSummarizing: Bool,
             onSummarize: ((SessionWatcherSession) -> Void)?,
-            isFrontmost: Bool
+            isFrontmost: Bool,
+            summariesEnabled: Bool
         ) {
             self.session = session
             self.onTap = onTap
             self.isSummarizing = isSummarizing
             self.onSummarize = onSummarize
             self.isFrontmost = isFrontmost
-            self.dotStatus = session.status
+            self.summariesEnabled = summariesEnabled
             self.isFrontmostSession = isFrontmost
             super.init(frame: .zero)
             accessibilityID("session-panel.row.\(session.sessionId)")
@@ -432,46 +452,38 @@ extension SessionWatcher {
         public required init?(coder: NSCoder) { fatalError() }
 
         private func applyTheme(_ palette: SemanticPalette) {
-            // Card background: subtle surface tint (idle)
+            // Card background: subtle surface tint (idle). The frontmost session's
+            // row carries the accent on its border — the status dot it used to be
+            // shown by is gone, its job now done by the activity icon.
             layer?.backgroundColor = palette.surfaceColor.withAlphaComponent(0.5).cgColor
-            layer?.borderColor = palette.borderColor.cgColor
-            layer?.borderWidth = 0.5
+            layer?.borderColor = (isFrontmostSession ? palette.accentColor : palette.borderColor).cgColor
+            layer?.borderWidth = isFrontmostSession ? 1.0 : 0.5
 
-            // Header row labels
+            // Header line: the project leads, branch and session name follow dimmer.
             projectLabel.textColor = palette.primaryTextColor
             projectLabel.font = palette.font(.body)
-
-            // Status dot color
-            let dotColor: NSColor
-            if isFrontmostSession {
-                dotColor = palette.accentColor
-            } else {
-                switch dotStatus {
-                case .active: dotColor = palette.successColor
-                case .stale:  dotColor = palette.warningColor
-                case .ended:  dotColor = palette.tertiaryTextColor
-                }
+            for lbl in subtitleLabels {
+                lbl.textColor = palette.secondaryTextColor
+                lbl.font = palette.font(.caption)
             }
-            statusDot.layer?.backgroundColor = dotColor.cgColor
+            for lbl in separatorLabels {
+                lbl.textColor = palette.tertiaryTextColor
+                lbl.font = palette.font(.caption)
+            }
 
-            // Time label
-            timeLabel.textColor = palette.tertiaryTextColor
-            timeLabel.font = palette.font(.code)
+            activityIcon.applyTheme(palette)
 
-            // Summary line
-            summaryLabel.textColor = session.summary.isEmpty
+            // Second line: the agent's last word.
+            outputLabel.textColor = session.lastOutput.isEmpty
                 ? palette.tertiaryTextColor
                 : palette.secondaryTextColor
-            summaryLabel.font = palette.font(.caption)
+            outputLabel.font = palette.font(.caption)
 
-            // Detail lines (cwd / branch / session ID)
-            for iconView in detailIconViews {
-                iconView.contentTintColor = palette.tertiaryTextColor
-            }
-            for lbl in detailLabels {
-                lbl.textColor = palette.tertiaryTextColor
-                lbl.font = palette.font(.code)
-            }
+            // Summary line (only present when the summaries feature is on).
+            summaryLabel?.textColor = session.summary.isEmpty
+                ? palette.tertiaryTextColor
+                : palette.secondaryTextColor
+            summaryLabel?.font = palette.font(.caption)
         }
 
         /// App icon for the terminal a session runs in, from its `TERM_PROGRAM`.
@@ -498,167 +510,236 @@ extension SessionWatcher {
         }
 
         private func setupViews() {
-            let padding: CGFloat = 12
+            let hPadding: CGFloat = 8
+            let vPadding: CGFloat = 6
 
-            // --- Header row: project name + dot + spinner + time ---
+            // --- App icon: the "go to session" affordance, spanning both text lines.
+            // A button rather than an image view so the icon itself is clickable;
+            // the whole row still is too, via mouseUp.
+            let iconButton = NSButton()
+            iconButton.image = Self.appIcon(forTermProgram: session.termProgram)
+            iconButton.imagePosition = .imageOnly
+            iconButton.imageScaling = .scaleProportionallyUpOrDown
+            iconButton.isBordered = false
+            iconButton.bezelStyle = .shadowlessSquare
+            iconButton.target = self
+            iconButton.action = #selector(goToSessionAction)
+            iconButton.toolTip = session.termProgram.isEmpty
+                ? "Go to session"
+                : "Go to session in \(session.termProgram)"
+            iconButton.accessibilityID("session-panel.row.\(session.sessionId).app-icon")
+            iconButton.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(iconButton)
+
+            // --- Line 1: project » branch » session name, then the activity icon ---
             let headerRow = NSStackView()
             headerRow.orientation = .horizontal
-            headerRow.spacing = 6
+            headerRow.spacing = 4
             headerRow.alignment = .centerY
             headerRow.translatesAutoresizingMaskIntoConstraints = false
 
-            // App icon for the terminal the session runs in (leftmost in the header).
-            let iconView = NSImageView()
-            iconView.image = Self.appIcon(forTermProgram: session.termProgram)
-            iconView.imageScaling = .scaleProportionallyUpOrDown
-            iconView.toolTip = session.termProgram.isEmpty ? nil : session.termProgram
-            iconView.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                iconView.widthAnchor.constraint(equalToConstant: 15),
-                iconView.heightAnchor.constraint(equalToConstant: 15)
-            ])
-            headerRow.addArrangedSubview(iconView)
-
-            // Project name (first, upper left)
             let projLabel = NSTextField(labelWithString: session.projectName)
             projLabel.lineBreakMode = .byTruncatingTail
             projLabel.maximumNumberOfLines = 1
+            projLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
             headerRow.addArrangedSubview(projLabel)
             projectLabel = projLabel
 
-            // Status dot
-            let dot = NSView()
-            dot.wantsLayer = true
-            dot.layer?.cornerRadius = 3
-            dot.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                dot.widthAnchor.constraint(equalToConstant: 6),
-                dot.heightAnchor.constraint(equalToConstant: 6)
-            ])
-            headerRow.addArrangedSubview(dot)
-            statusDot = dot
+            // Branch and session name are both optional — a session outside a git
+            // tree has no branch, one nobody has named has no name — and each
+            // separator goes with its segment rather than leaving a dangling "»".
+            for (index, text) in [session.gitBranch, session.sessionName].enumerated() where !text.isEmpty {
+                let sep = NSTextField(labelWithString: "»")
+                sep.setContentCompressionResistancePriority(.required, for: .horizontal)
+                headerRow.addArrangedSubview(sep)
+                separatorLabels.append(sep)
 
-            // Spacer
-            let spacer = NSView()
-            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            headerRow.addArrangedSubview(spacer)
-
-            if isSummarizing {
-                let spinner = NSProgressIndicator()
-                spinner.style = .spinning
-                spinner.controlSize = .small
-                spinner.startAnimation(nil)
-                spinner.translatesAutoresizingMaskIntoConstraints = false
-                NSLayoutConstraint.activate([
-                    spinner.widthAnchor.constraint(equalToConstant: 14),
-                    spinner.heightAnchor.constraint(equalToConstant: 14)
-                ])
-                headerRow.addArrangedSubview(spinner)
+                let lbl = NSTextField(labelWithString: text)
+                lbl.lineBreakMode = .byTruncatingTail
+                lbl.maximumNumberOfLines = 1
+                // In a narrow window the session name gives way first, then the
+                // branch; the project name is the segment that must survive.
+                lbl.setContentCompressionResistancePriority(
+                    index == 0 ? .init(rawValue: 240) : .defaultLow,
+                    for: .horizontal
+                )
+                headerRow.addArrangedSubview(lbl)
+                subtitleLabels.append(lbl)
             }
 
-            // Relative time
-            let timeLbl = NSTextField(labelWithString: relativeTime(session.lastActivityAt))
-            timeLbl.setContentCompressionResistancePriority(.required, for: .horizontal)
-            headerRow.addArrangedSubview(timeLbl)
-            timeLabel = timeLbl
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+            headerRow.addArrangedSubview(spacer)
+
+            let activity = SessionWatcherActivityIconView(
+                activity: session.activity,
+                isSummarizing: isSummarizing
+            )
+            headerRow.addArrangedSubview(activity)
+            activityIcon = activity
 
             addSubview(headerRow)
 
-            // --- Summary line ---
-            let summaryText = session.summary.isEmpty ? "thinking..." : session.summary
-            let summaryLbl = NSTextField(wrappingLabelWithString: summaryText)
-            summaryLbl.maximumNumberOfLines = 2
-            summaryLbl.lineBreakMode = .byTruncatingTail
-            summaryLbl.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(summaryLbl)
-            summaryLabel = summaryLbl
+            // --- Line 2: the agent's last output, one line ---
+            let outputLbl = NSTextField(labelWithString: Self.outputText(for: session))
+            outputLbl.lineBreakMode = .byTruncatingTail
+            outputLbl.maximumNumberOfLines = 1
+            outputLbl.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(outputLbl)
+            outputLabel = outputLbl
 
-            // --- Detail lines: cwd, branch, session ID ---
-            let detailStack = NSStackView()
-            detailStack.orientation = .vertical
-            detailStack.spacing = 2
-            detailStack.alignment = .leading
-            detailStack.translatesAutoresizingMaskIntoConstraints = false
+            // The ids and paths the old detail lines showed now live in the tooltip
+            // (and in the context menu's Show Info), keeping the row two lines tall.
+            toolTip = Self.infoText(for: session)
 
-            if !session.cwd.isEmpty, session.cwd != "/" {
-                detailStack.addArrangedSubview(makeDetailLine(
-                    icon: "folder",
-                    text: tildeAbbreviate(session.cwd)
-                ))
+            var lastAnchor = outputLbl.bottomAnchor
+
+            // --- Line 3: the AI summary, only when the feature is on ---
+            if summariesEnabled {
+                let summaryLbl = NSTextField(wrappingLabelWithString: summaryText())
+                summaryLbl.maximumNumberOfLines = 2
+                summaryLbl.lineBreakMode = .byTruncatingTail
+                summaryLbl.translatesAutoresizingMaskIntoConstraints = false
+                addSubview(summaryLbl)
+                summaryLabel = summaryLbl
+                NSLayoutConstraint.activate([
+                    summaryLbl.topAnchor.constraint(equalTo: outputLbl.bottomAnchor, constant: 3),
+                    summaryLbl.leadingAnchor.constraint(equalTo: leadingAnchor, constant: hPadding),
+                    summaryLbl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -hPadding)
+                ])
+                lastAnchor = summaryLbl.bottomAnchor
             }
-            if !session.gitBranch.isEmpty {
-                detailStack.addArrangedSubview(makeDetailLine(
-                    icon: "arrow.triangle.branch",
-                    text: session.gitBranch
-                ))
-            }
-            detailStack.addArrangedSubview(makeDetailLine(
-                icon: "terminal",
-                text: session.sessionId
-            ))
-            addSubview(detailStack)
 
             NSLayoutConstraint.activate([
-                headerRow.topAnchor.constraint(equalTo: topAnchor, constant: padding),
-                headerRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-                headerRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+                iconButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: hPadding),
+                // Centred on the seam between the two text lines, so it reads as
+                // belonging to both of them.
+                iconButton.centerYAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 1),
+                iconButton.widthAnchor.constraint(equalToConstant: 22),
+                iconButton.heightAnchor.constraint(equalToConstant: 22),
 
-                summaryLbl.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 4),
-                summaryLbl.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-                summaryLbl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+                headerRow.topAnchor.constraint(equalTo: topAnchor, constant: vPadding),
+                headerRow.leadingAnchor.constraint(equalTo: iconButton.trailingAnchor, constant: 6),
+                headerRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -hPadding),
 
-                detailStack.topAnchor.constraint(equalTo: summaryLbl.bottomAnchor, constant: 4),
-                detailStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-                detailStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
-                detailStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding)
+                outputLbl.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 1),
+                outputLbl.leadingAnchor.constraint(equalTo: iconButton.trailingAnchor, constant: 6),
+                outputLbl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -hPadding),
+
+                bottomAnchor.constraint(equalTo: lastAnchor, constant: vPadding)
             ])
         }
 
-        private func makeDetailLine(icon: String, text: String) -> NSView {
-            let imgView = NSImageView()
-            if let image = NSImage(systemSymbolName: icon, accessibilityDescription: nil) {
-                imgView.image = image
-            }
-            imgView.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                imgView.widthAnchor.constraint(equalToConstant: 11),
-                imgView.heightAnchor.constraint(equalToConstant: 11)
-            ])
-            detailIconViews.append(imgView)
-
-            let lbl = NSTextField(labelWithString: text)
-            lbl.lineBreakMode = .byTruncatingMiddle
-            lbl.maximumNumberOfLines = 1
-            detailLabels.append(lbl)
-
-            let line = NSStackView(views: [imgView, lbl])
-            line.orientation = .horizontal
-            line.spacing = 4
-            line.alignment = .centerY
-            return line
+        /// Line 2's text: what the agent last said, or a placeholder for a session
+        /// that hasn't said anything yet.
+        private static func outputText(for session: SessionWatcherSession) -> String {
+            session.lastOutput.isEmpty ? "No output yet." : session.lastOutput
         }
 
-        /// Strips .claude/worktrees/<name>/<project> suffixes to show the real project dir,
-        /// then abbreviates the home directory to ~.
-        private func tildeAbbreviate(_ path: String) -> String {
-            var resolved = path
-            // .claude/worktrees/<worktree-name>/<project> → strip to project root
-            if let range = resolved.range(of: #"/.claude/worktrees/[^/]+/"#, options: .regularExpression) {
-                resolved = String(resolved[resolved.startIndex..<range.lowerBound])
+        /// Line 3's text. This used to read "thinking..." for every session without a
+        /// summary, which conflated three different states: summarized, waiting on the
+        /// summarizer, and nothing to summarize in the first place.
+        private func summaryText() -> String {
+            if !session.summary.isEmpty { return session.summary }
+            // No agent output and no tool use: there is no transcript to describe,
+            // and saying "Summarizing..." would promise a summary that never comes.
+            if !isSummarizing, session.lastOutput.isEmpty, session.lastTool.isEmpty {
+                return "Nothing to summarize."
             }
-            let home = FileManager.default.homeDirectoryForCurrentUser.path
-            if resolved == home { return "~" }
-            if resolved.hasPrefix(home + "/") { return "~" + resolved.dropFirst(home.count) }
-            return resolved
+            return "Summarizing..."
         }
+
+        /// Everything the two-line row can't show — ids, paths, model, timing. Used
+        /// as the row's tooltip and as the body of the context menu's Show Info.
+        private static func infoText(for session: SessionWatcherSession) -> String {
+            var fields: [(String, String)] = [
+                ("Session ID", session.sessionId),
+                ("Name", session.sessionName),
+                ("Project", session.projectGroupName),
+                ("Project Root", session.projectRoot),
+                ("Working Dir", session.cwd),
+                ("Git Branch", session.gitBranch),
+                ("Model", session.model),
+                ("Status", session.status.rawValue),
+                ("Activity", session.activity.rawValue),
+                ("Last Event", session.lastEventType),
+                ("Last Tool", session.lastTool),
+                ("Started", session.startedAt),
+                ("Last Activity", lastActivityDescription(session)),
+                ("Terminal", session.termProgram),
+                ("Term Session", session.termSessionId),
+                ("PID", session.pid == 0 ? "" : String(session.pid)),
+                ("Last Output", session.lastOutput),
+                ("Summary", session.summary)
+            ]
+            fields.removeAll { $0.1.isEmpty }
+            return fields.map { "\($0.0): \($0.1)" }.joined(separator: "\n")
+        }
+
+        private static func lastActivityDescription(_ session: SessionWatcherSession) -> String {
+            let relative = relativeTime(session.lastActivityAt)
+            guard !relative.isEmpty else { return session.lastActivityAt }
+            return "\(session.lastActivityAt) (\(relative))"
+        }
+
+        // MARK: - Context menu
 
         private func setupContextMenu() {
             let menu = NSMenu()
-            let item = NSMenuItem(title: "Summarize with AI", action: #selector(summarizeAction), keyEquivalent: "")
-            item.target = self
-            item.isEnabled = !isSummarizing
-            menu.addItem(item)
+            // Hand-managed enablement: with autoenabling on, AppKit ignores
+            // `isEnabled` and asks the responder chain instead.
+            menu.autoenablesItems = false
+            let hasPath = !session.cwd.isEmpty
+            menu.addItem(menuItem("Go to Session", #selector(goToSessionAction)))
+            menu.addItem(menuItem("Reveal in Finder", #selector(revealInFinderAction), enabled: hasPath))
+            menu.addItem(menuItem("Copy Path", #selector(copyPathAction), enabled: hasPath))
+            menu.addItem(menuItem("Show Info", #selector(showInfoAction)))
+            menu.addItem(.separator())
+            menu.addItem(menuItem("Summarize with AI", #selector(summarizeAction), enabled: !isSummarizing))
             self.menu = menu
+        }
+
+        private func menuItem(_ title: String, _ action: Selector, enabled: Bool = true) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.isEnabled = enabled
+            return item
+        }
+
+        @objc private func goToSessionAction() {
+            onTap?(session)
+        }
+
+        @objc private func revealInFinderAction() {
+            guard !session.cwd.isEmpty else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session.cwd)])
+        }
+
+        @objc private func copyPathAction() {
+            guard !session.cwd.isEmpty else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(session.cwd, forType: .string)
+        }
+
+        @objc private func showInfoAction() {
+            let title = session.projectName
+            let body = Self.infoText(for: session)
+            // Deferred: running a modal from inside menu tracking leaves the alert's
+            // controls unresponsive until tracking unwinds.
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.alertStyle = .informational
+                alert.messageText = title
+                alert.informativeText = body
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Copy")
+                if alert.runModal() == .alertSecondButtonReturn {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(body, forType: .string)
+                }
+            }
         }
 
         @objc private func summarizeAction() {
@@ -708,7 +789,7 @@ extension SessionWatcher {
 
         // MARK: - Helpers
 
-        private func relativeTime(_ timestamp: String) -> String {
+        private static func relativeTime(_ timestamp: String) -> String {
             guard !timestamp.isEmpty else { return "" }
             let formatter = ISO8601DateFormatter()
             if let date = formatter.date(from: timestamp) {
@@ -721,7 +802,7 @@ extension SessionWatcher {
             return ""
         }
 
-        private func relativeTimeFromDate(_ date: Date) -> String {
+        private static func relativeTimeFromDate(_ date: Date) -> String {
             let interval = Date().timeIntervalSince(date)
             if interval < 60 { return "now" }
             if interval < 3600 { return "\(Int(interval / 60))m" }

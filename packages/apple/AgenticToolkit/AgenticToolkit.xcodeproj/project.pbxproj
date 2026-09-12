@@ -626,6 +626,7 @@
 		94DE8A75AB403AFD6B253541 /* SystemWindowControlError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AA9EC2686794F2DDE4DABB9 /* SystemWindowControlError.swift */; };
 		95657C1C5367A92F48264057 /* LanguageServerProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = B34D83F0409157F2341DFEC8 /* LanguageServerProtocol */; };
 		956673336C906CF1234B52E9 /* SystemWindowContextsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CB4DD7F9E79CBD2FF2D70E /* SystemWindowContextsModel.swift */; };
+		9579A25455361401804EC20D /* SessionWatcherActivityIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F1ACC30C69A6911D5738F3 /* SessionWatcherActivityIconView.swift */; };
 		959B7EF3B0A0AE2A602DB396 /* ProjectTabReconcilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E393284AD4F968CB29C9A27C /* ProjectTabReconcilerTests.swift */; };
 		95EDBFDADFA6BA4D21D4899A /* SystemWindowFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0943720365027F131F29F4 /* SystemWindowFingerprint.swift */; };
 		9608E169F7BF2D69DF3141FD /* ButtonViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7107EEE6C4A62A28A42C7FEE /* ButtonViewModel.swift */; };
@@ -2013,6 +2014,7 @@
 		33ED62A78F2D392CAEC3AF9A /* WindowExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowExplorerView.swift; sourceTree = "<group>"; };
 		33F852968686967ACD65E1B5 /* KeychainSecureSettingsStorageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecureSettingsStorageProvider.swift; sourceTree = "<group>"; };
 		3479F947731ED8E46F346060 /* PermissionWalkthrough.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionWalkthrough.swift; sourceTree = "<group>"; };
+		34F1ACC30C69A6911D5738F3 /* SessionWatcherActivityIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWatcherActivityIconView.swift; sourceTree = "<group>"; };
 		352356572860CD9B9F8BCFF2 /* SingleConfigurationChatConfigProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleConfigurationChatConfigProviderTests.swift; sourceTree = "<group>"; };
 		354720009B7C806A03318365 /* ProjectFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilter.swift; sourceTree = "<group>"; };
 		358F81A2A2BB3272DE0FCA8F /* LocalModelServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelServerTests.swift; sourceTree = "<group>"; };
@@ -3212,6 +3214,7 @@
 			children = (
 				14CA1670EBFA9E13E74A71B7 /* SessionListView.swift */,
 				D32DB64D049628A66B23446A /* SessionListViewController.swift */,
+				34F1ACC30C69A6911D5738F3 /* SessionWatcherActivityIconView.swift */,
 				339250B6C2715F71635C6744 /* SessionWatcherListViewModel.swift */,
 			);
 			path = SessionListWindow;
@@ -6629,6 +6632,7 @@
 				13CBEE54D88F01BBEABE34BC /* SessionSources.swift in Sources */,
 				725C6F9A3A38FFADCF8B52AC /* SessionWatcher.swift in Sources */,
 				F0FE665C2F8F54A8CF20F11A /* SessionWatcherActionHandler.swift in Sources */,
+				9579A25455361401804EC20D /* SessionWatcherActivityIconView.swift in Sources */,
 				643E9AC1ACA4DC63E0391D56 /* SessionWatcherClickAction.swift in Sources */,
 				A6E59EDD83C247327C242D05 /* SessionWatcherListViewModel.swift in Sources */,
 				A550F3AD5FC8720B890E7CEB /* SessionWatcherSession.swift in Sources */,
