@@ -116,6 +116,29 @@ public enum CommandRegistryError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+/// Which registration of an id a caller is talking about.
+///
+/// Ids are not unique over time. `CommandRegistry.register` replaces a live id
+/// in place (see its doc comment for why), so "the command registered as
+/// `notes.action.newNote`" names one thing today and can name a different one
+/// a moment later — and a caller holding a `Disposable`, or tearing down an
+/// extension, means *the registration it made*, not whatever now answers to
+/// that id. Without this, `unregister(id:)` was the only tool either caller
+/// had, and an extension that shadowed an app command could delete the app's
+/// command outright on the way out.
+///
+/// Opaque on purpose: a `UUID` nobody outside this file can mint or read. The
+/// only way to hold one is to have performed the registration it names, which
+/// is exactly the claim `unregister(id:token:)` checks.
+public struct CommandRegistration: Hashable, Sendable {
+
+    private let rawValue: UUID
+
+    fileprivate init() {
+        self.rawValue = UUID()
+    }
+}
+
 /// The one place that knows how to turn a command id into work.
 ///
 /// An **instance**, not a singleton, and not a namespace of statics: the demo
@@ -132,7 +155,19 @@ public enum CommandRegistryError: Error, Equatable, CustomStringConvertible {
 @MainActor
 public final class CommandRegistry {
 
-    private var commandsByID: [String: AppCommand] = [:]
+    /// One command and the token that names *this* registration of its id.
+    ///
+    /// Kept together in one dictionary rather than as a second `[String:
+    /// CommandRegistration]` beside `commandsByID`, because two dictionaries
+    /// keyed the same way are two places for one fact to drift — and the fact
+    /// here is precisely that a command and its token are the same
+    /// registration.
+    private struct Registration {
+        let command: AppCommand
+        let token: CommandRegistration
+    }
+
+    private var registrationsByID: [String: Registration] = [:]
 
     /// Registration order, so `allCommands` is stable. A `Dictionary`'s value
     /// order is seeded per process, and a command palette whose rows reshuffle
@@ -162,15 +197,25 @@ public final class CommandRegistry {
     /// silently lose one of them, so the collision is logged at `warning`:
     /// visible to whoever is looking, without breaking reload for whoever is
     /// not.
-    public func register(_ command: AppCommand) {
-        if commandsByID[command.id] != nil {
+    ///
+    /// - Returns: A token naming *this* registration, for a caller that will
+    ///   later want to remove what it registered and nothing else — see
+    ///   `unregister(id:token:)`. `@discardableResult` because the app's own
+    ///   commands live as long as the app does and have nothing to do with the
+    ///   token; only a registrant that can be torn down independently, which
+    ///   today means an extension, has a use for it.
+    @discardableResult
+    public func register(_ command: AppCommand) -> CommandRegistration {
+        if registrationsByID[command.id] != nil {
             Self.logger.warning(
                 "Command id already registered, replacing: \(command.id, privacy: .public)"
             )
         } else {
             registrationOrder.append(command.id)
         }
-        commandsByID[command.id] = command
+        let token = CommandRegistration()
+        registrationsByID[command.id] = Registration(command: command, token: token)
+        return token
     }
 
     /// Take back the command registered under `id`.
@@ -200,19 +245,19 @@ public final class CommandRegistry {
     /// Every registered command, in registration order — what a command palette
     /// lists.
     public var allCommands: [AppCommand] {
-        registrationOrder.compactMap { commandsByID[$0] }
+        registrationOrder.compactMap { registrationsByID[$0]?.command }
     }
 
     /// The command registered under `id`, or `nil`.
     public func command(id: String) -> AppCommand? {
-        commandsByID[id]
+        registrationsByID[id]?.command
     }
 
     /// Whether `id` names a command that is registered *and* says it applies
     /// right now. An unregistered id answers `false` rather than `true`: a menu
     /// item pointing at a command nobody registered must not look available.
     public func isEnabled(id: String) -> Bool {
-        commandsByID[id]?.isEnabled() ?? false
+        registrationsByID[id]?.command.isEnabled() ?? false
     }
 
     /// Run the command registered under `id`, with no arguments.
@@ -241,10 +286,20 @@ public final class CommandRegistry {
     /// and shortcuts — which route through `execute(id:)` above — never want
     /// the value back, and only an extension's `executeCommand` does.
     ///
+    /// `arguments` and the returned value are deliberately untyped and
+    /// **unconverted**. An extension-originated call carries the caller's own
+    /// `JSValue`s straight through, so an object stays the same object, a class
+    /// instance keeps its prototype, and a returned `Promise` is still a
+    /// `Promise` when it reaches the `await` that asked for it; an app-side
+    /// caller passes native Swift values and JavaScriptCore bridges them itself
+    /// at `JSValue.call(withArguments:)`. Nothing in this registry should
+    /// "helpfully" convert either direction — a round trip through `toObject()`
+    /// is what loses all three of those.
+    ///
     /// - Throws: the same two cases as `execute(id:)`, for the same reason.
     @discardableResult
     public func execute(id: String, arguments: [Any]) throws -> Any? {
-        guard let command = commandsByID[id] else {
+        guard let command = registrationsByID[id]?.command else {
             throw CommandRegistryError.unknownCommand(id: id)
         }
         guard command.isEnabled() else {
@@ -253,21 +308,54 @@ public final class CommandRegistry {
         return command.run(arguments)
     }
 
-    /// Removes `id` and its entry in `registrationOrder`, so a torn-down
-    /// extension's commands stop appearing in the palette rather than sitting
-    /// there pointing at whatever the id used to mean.
+    /// Removes whatever is currently registered under `id`, and its entry in
+    /// `registrationOrder`.
     ///
-    /// Additive beside `register`'s replace-and-warn behaviour, not a
-    /// replacement for it: replacing a live id in place is still what a
-    /// reloaded extension or a reloaded app feature needs, and nothing about
-    /// wanting to remove an id outright changes that argument. Silent on an
-    /// unknown id — `MainThreadCommands.dispose()` calls this for every id it
-    /// ever owned, including one a duplicate registration already displaced,
-    /// and that is not a mistake worth `fail-fast`ing over the way an
-    /// unregistered `execute` is: nothing was supposed to run and nothing did.
+    /// **"Whatever is currently registered" is the literal contract**, and a
+    /// caller that means "remove the registration *I* made" wants
+    /// `unregister(id:token:)` below instead. The distinction is real because
+    /// `register` replaces in place: an id can be registered, displaced by a
+    /// second registrant, and unregistered by the first, and only the token
+    /// form can tell those apart.
+    ///
+    /// **A displaced command is not restored, and is not restorable.** There is
+    /// no stack of registrations here — `register`'s replace-and-warn destroys
+    /// the previous command at the moment of replacement, so from that moment
+    /// the app's own command is gone whatever happens next. Unregistering the
+    /// displacer therefore leaves the id unregistered rather than reverting to
+    /// what used to be there. That is deliberate for now: stacking
+    /// registrations would be a statement about how far an extension is
+    /// trusted to shadow the app, and that policy belongs with
+    /// `ExtensionRegistry` and the permissions work, not with a registry whose
+    /// whole job is turning an id into work.
+    ///
+    /// Silent on an unknown id, which is not a mistake worth `fail-fast`ing
+    /// over the way an unregistered `execute` is: nothing was supposed to run
+    /// and nothing did.
     public func unregister(id: String) {
-        guard commandsByID.removeValue(forKey: id) != nil else { return }
+        guard registrationsByID.removeValue(forKey: id) != nil else { return }
         registrationOrder.removeAll { $0 == id }
+    }
+
+    /// Removes `id` **only** if the registration currently under it is the one
+    /// `token` names.
+    ///
+    /// This is what a registrant with a lifetime shorter than the app's — an
+    /// extension, today — should call, and the failure it prevents is concrete:
+    /// an extension registers an id the app already owned (Ruling 5 permits
+    /// it), the app or another extension later re-registers that id, and the
+    /// first extension's `Disposable` fires. By id alone that deletes a command
+    /// it never registered, for the rest of the process, with only
+    /// `register`'s collision warning anywhere in the log. By token it is a
+    /// no-op, which is the honest answer: the thing the caller registered is
+    /// already gone.
+    ///
+    /// Silent when the token does not match, for the same reason
+    /// `unregister(id:)` is silent on an unknown id — and a stale `Disposable`
+    /// firing is the *expected* case here, not an anomaly.
+    public func unregister(id: String, token: CommandRegistration) {
+        guard registrationsByID[id]?.token == token else { return }
+        unregister(id: id)
     }
 }
 

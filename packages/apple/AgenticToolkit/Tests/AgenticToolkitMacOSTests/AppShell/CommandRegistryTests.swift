@@ -292,6 +292,74 @@ struct CommandRegistryTests {
         #expect(registry.allCommands.map(\.id) == ["test.action.bravo", "test.action.alpha"])
         #expect(registry.command(id: "test.action.alpha")?.title == "Alpha again")
     }
+
+    // MARK: - Registration tokens
+
+    @Test("unregister(id:token:) removes the registration the token came from")
+    func unregisterByTokenRemovesItsOwnRegistration() {
+        let registry = CommandRegistry()
+        let token = registry.register(command(id: "test.action.alpha"))
+        registry.register(command(id: "test.action.bravo"))
+
+        registry.unregister(id: "test.action.alpha", token: token)
+
+        #expect(registry.allCommands.map(\.id) == ["test.action.bravo"])
+    }
+
+    /// The reason the token exists. Two registrants want the same id; the
+    /// second replaces the first (Ruling 5 permits that, loudly), and only
+    /// afterwards does the first let go of its `Disposable`. By id alone that
+    /// deletes the *second* registrant's command — silently, permanently, and
+    /// from code that believes it is only cleaning up after itself.
+    @Test("A token from a replaced registration unregisters nothing")
+    func aStaleTokenUnregistersNothing() {
+        let registry = CommandRegistry()
+        let stale = registry.register(command(id: "test.action.shared", title: "First"))
+        registry.register(command(id: "test.action.shared", title: "Second"))
+
+        registry.unregister(id: "test.action.shared", token: stale)
+
+        #expect(registry.command(id: "test.action.shared")?.title == "Second")
+    }
+
+    @Test("Each registration mints a distinct token, including re-registration of one id")
+    func everyRegistrationGetsItsOwnToken() {
+        let registry = CommandRegistry()
+        let first = registry.register(command(id: "test.action.shared"))
+        let second = registry.register(command(id: "test.action.shared"))
+        let other = registry.register(command(id: "test.action.other"))
+
+        #expect(first != second)
+        #expect(first != other)
+        #expect(second != other)
+        // And a token equals itself, so the guard's `==` is an identity test
+        // and not a type that compares equal to everything.
+        #expect(second == second)
+    }
+
+    @Test("unregister(id:token:) on an unknown id is a silent no-op")
+    func unregisterByTokenOfUnknownIDIsANoOp() {
+        let registry = CommandRegistry()
+        let token = registry.register(command(id: "test.action.alpha"))
+
+        registry.unregister(id: "test.action.missing", token: token)
+
+        #expect(registry.allCommands.map(\.id) == ["test.action.alpha"])
+    }
+
+    /// A token is spent once: the second call finds the id already gone and
+    /// must not remove whatever has since taken the id over.
+    @Test("A token does not unregister a command registered after it was used")
+    func aSpentTokenDoesNotReachTheNextRegistration() {
+        let registry = CommandRegistry()
+        let token = registry.register(command(id: "test.action.alpha", title: "First"))
+
+        registry.unregister(id: "test.action.alpha", token: token)
+        registry.register(command(id: "test.action.alpha", title: "Second"))
+        registry.unregister(id: "test.action.alpha", token: token)
+
+        #expect(registry.command(id: "test.action.alpha")?.title == "Second")
+    }
 }
 
 /// Pins the additive command-ID `MenuContribution` initializer (task 4.1): it

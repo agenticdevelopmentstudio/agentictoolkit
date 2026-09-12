@@ -425,8 +425,12 @@ struct MainThreadCommandsTests {
         let context = try #require(host.javaScriptContext)
         #expect(context.evaluateScript("globalThis.secondError")?.toString() == "command 'ext.dup' already exists")
 
-        let result = try registry.execute(id: "ext.dup", arguments: [])
-        #expect(result as? String == "first")
+        // The callback's value crosses back untouched, so what the registry
+        // hands over is the `JSValue` the callback returned — not a bridged
+        // Swift `String`. The conversion is the reader's to make, here, rather
+        // than something the adaptor does silently on the way past.
+        let result = try #require(registry.execute(id: "ext.dup", arguments: []) as? JSValue)
+        #expect(result.toString() == "first")
     }
 
     // MARK: - Ruling 6: registerCommand raises synchronously
@@ -530,17 +534,28 @@ struct MainThreadCommandsTests {
         let allIDs = (all.toArray() as? [String]) ?? []
         let filteredIDs = (filtered.toArray() as? [String]) ?? []
 
-        #expect(Set(allIDs) == ["ext.visible", "_ext.hidden"])
+        // Asserted as an ordered array, not a `Set`: Ruling 8 says ids come
+        // back "in registration order", and a `Set` comparison would leave
+        // that half of the ruling pinned by nothing.
+        #expect(allIDs == ["ext.visible", "_ext.hidden"])
         #expect(filteredIDs == ["ext.visible"])
     }
 
     // MARK: - Ruling 6 verification: pendingException bookkeeping
 
     /// The host's `pendingException` bookkeeping survives a `registerCommand`
-    /// that raises: a later `defineVSCodeMember` call must not fail, and must
-    /// not report a stale message from the exception raised above. This is
-    /// the empirical check Ruling 6 asks for, not just an argument from
-    /// reading `ExtensionHost.apply(_:to:)`.
+    /// that raises — where "raises" means the exception genuinely escapes into
+    /// `ExtensionHost`'s own `exceptionHandler`, not into a JavaScript `catch`
+    /// the test wrote for it.
+    ///
+    /// That distinction is the whole test. An exception an extension catches
+    /// never reaches the host's handler at all, so `pendingException` is never
+    /// written and a test built that way proves that an interaction which
+    /// cannot happen does not happen. Here the duplicate registration is
+    /// triggered from a bare `evaluateScript`, with nothing between it and the
+    /// host: JavaScriptCore reports it to the context's handler, which is the
+    /// one that writes `pendingException`. What Ruling 6 asks is what the host
+    /// does *next*, and the answer must be "nothing stale".
     @Test
     func pendingExceptionBookkeepingSurvivesARaisedException() async throws {
         let directory = try makeTempDirectory()
@@ -552,13 +567,12 @@ struct MainThreadCommandsTests {
             var vscode = require('vscode');
             exports.activate = function () {
                 vscode.commands.registerCommand('ext.dup', function () {});
-                try {
+                // Deliberately *not* wrapped in a `try`: called below from
+                // `evaluateScript`, so the duplicate's exception leaves
+                // JavaScript entirely and lands in the host's handler.
+                globalThis.registerDuplicate = function () {
                     vscode.commands.registerCommand('ext.dup', function () {});
-                } catch (error) {
-                    // Swallowed deliberately: the extension already saw its
-                    // own exception. What this test pins is what the *host*
-                    // does with `pendingException` afterwards, not this catch.
-                }
+                };
                 // Captured now, called later, exactly as
                 // `aMemberDefinedAfterActivationIsLiveImmediately` does in
                 // `ExtensionHostTests` — `vscode` is a `require('vscode')`
@@ -577,16 +591,418 @@ struct MainThreadCommandsTests {
         try install(commands, on: host)
         try await host.activate()
 
-        // If `registerCommand`'s raise had left `pendingException` set, this
-        // call would throw `vscodeMemberNotDefinable` carrying that stale
-        // message instead of succeeding.
+        let context = try #require(host.javaScriptContext)
+
+        // `evaluateScript` answers `undefined` rather than the trailing
+        // expression exactly when the script threw, so this pins that the
+        // exception really did escape to the host instead of being swallowed
+        // somewhere on the way. Without the throw, this would be `'reached'`.
+        let raised = context.evaluateScript("globalThis.registerDuplicate(); 'reached';")
+        #expect(raised?.isUndefined == true)
+        #expect(registry.allCommands.map(\.id) == ["ext.dup"])
+
+        // If that raise had left `pendingException` set, this call would throw
+        // `vscodeMemberNotDefinable` carrying the stale message
+        // ("command 'ext.dup' already exists") instead of succeeding.
         let real: @convention(block) () -> String = { "ok" }
         try host.defineVSCodeMember(
             namespacePath: "vscode.window", name: "showSomethingReal", implementation: real)
 
-        let context = try #require(host.javaScriptContext)
         let answer = context.evaluateScript("globalThis.callReal()")
         #expect(answer?.toString() == "ok")
+    }
+
+    // MARK: - A command callback's exception belongs to the adaptor
+
+    /// A command callback that throws rejects `executeCommand`'s promise with
+    /// the extension's own error — and, crucially, does **not** reach
+    /// `ExtensionHost.pendingException` on the way.
+    ///
+    /// The ordering here is the damaging one, reproduced deliberately. The
+    /// extension's `activate` is `async`, so `callActivate` returns while its
+    /// promise is still pending and the host then reads `pendingException` to
+    /// decide whether activation threw. A command callback that throws inside
+    /// that synchronous window used to write there, so the host failed the
+    /// extension with `activationThrew` carrying a message from a command
+    /// dispatch that had nothing to do with `activate()`. `await
+    /// host.activate()` returning normally *is* the assertion that it no
+    /// longer does: were the exception still reaching the host's handler, this
+    /// line would throw.
+    @Test
+    func aThrowingCallbackRejectsAndNeverReachesTheHostsBookkeeping() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = async function () {
+                vscode.commands.registerCommand('ext.throws', function () {
+                    var error = new Error('callback-boom');
+                    error.name = 'CallbackError';
+                    throw error;
+                });
+                globalThis.__settled = null;
+                vscode.commands.executeCommand('ext.throws').then(
+                    function (value) { globalThis.__settled = { ok: true, value: value }; },
+                    function (error) {
+                        globalThis.__settled = { ok: false, message: error.message, name: error.name };
+                    }
+                );
+                await Promise.resolve();
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+
+        // Would throw `activationThrew(message: "CallbackError: callback-boom")`
+        // if the callback's exception still landed in `pendingException`.
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        #expect(settled.forProperty("message")?.toString() == "callback-boom")
+        // The raw error object, not a paraphrase: the extension's own
+        // subclassed `name` survives the round trip.
+        #expect(settled.forProperty("name")?.toString() == "CallbackError")
+    }
+
+    /// The palette's path — `CommandRegistry.execute(id:)`, which returns
+    /// `Void` — swallows a throwing callback rather than trapping or leaking
+    /// the exception, because there is no caller to tell. The command after it
+    /// must still run.
+    @Test
+    func aThrowingCallbackOnTheSwiftPathIsSwallowed() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.laterRan = false;
+                vscode.commands.registerCommand('ext.throws', function () { throw new Error('boom'); });
+                vscode.commands.registerCommand('ext.later', function () { globalThis.laterRan = true; });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        // Does not throw: `CommandRegistryError` is about *dispatch* refusing,
+        // and the registry is deliberately kept ignorant of JavaScript.
+        try registry.execute(id: "ext.throws")
+        try registry.execute(id: "ext.later")
+
+        let context = try #require(host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.laterRan")?.toBool() == true)
+        // And the extension context is still usable afterwards — the absorbed
+        // exception left nothing latched anywhere.
+        #expect(context.evaluateScript("1 + 1")?.toInt32() == 2)
+    }
+
+    // MARK: - Values cross the boundary untouched
+
+    /// An `async` command's eventual value arrives at `await
+    /// executeCommand(...)`.
+    ///
+    /// The failure this replaces: the callback's returned `Promise` was pushed
+    /// through `toObject()`, which yields an empty dictionary for an object
+    /// with no enumerable own properties, so `await` resolved with `{}`
+    /// instead of the number the command computed — with no error anywhere.
+    @Test
+    func anAsyncCommandsValueArrivesAtTheAwait() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.commands.registerCommand('ext.async', async function (n) {
+                    await Promise.resolve();
+                    return n * 2;
+                });
+                globalThis.__awaited = null;
+                globalThis.run = function () {
+                    (async function () {
+                        var value = await vscode.commands.executeCommand('ext.async', 21);
+                        globalThis.__awaited = { type: typeof value, value: value };
+                    })();
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+
+        let awaited = try #require(await waitForGlobal(context, "globalThis.__awaited"))
+        #expect(awaited.forProperty("type")?.toString() == "number")
+        #expect(awaited.forProperty("value")?.toInt32() == 42)
+    }
+
+    /// An object passed to `executeCommand` and handed straight back is the
+    /// **same** object in JavaScript — `===`, with the mutations the callback
+    /// made visible to the caller.
+    ///
+    /// VS Code passes command arguments by reference, and the moment tasks
+    /// 5.4–5.7 introduce a typed object (`vscode.Uri`, `Range`), a copy would
+    /// arrive stripped of its prototype and every method on it.
+    @Test
+    func objectsCrossExecuteCommandByReference() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            function Marker(label) { this.label = label; }
+            Marker.prototype.describe = function () { return 'marker:' + this.label; };
+            exports.activate = function () {
+                vscode.commands.registerCommand('ext.identity', function (marker) {
+                    marker.touched = true;
+                    return marker;
+                });
+                globalThis.__identity = null;
+                globalThis.run = function () {
+                    var sent = new Marker('one');
+                    vscode.commands.executeCommand('ext.identity', sent).then(function (got) {
+                        globalThis.__identity = {
+                            same: got === sent,
+                            described: typeof got.describe === 'function' ? got.describe() : null,
+                            mutationSeenByCaller: sent.touched === true
+                        };
+                    });
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+
+        let identity = try #require(await waitForGlobal(context, "globalThis.__identity"))
+        #expect(identity.forProperty("same")?.toBool() == true)
+        #expect(identity.forProperty("described")?.toString() == "marker:one")
+        #expect(identity.forProperty("mutationSeenByCaller")?.toBool() == true)
+    }
+
+    /// A callback that returns nothing resolves with `undefined`; one that
+    /// returns `null` resolves with `null`. An extension's `if (result ===
+    /// undefined)` takes the wrong branch if those are conflated, and
+    /// `toObject()` conflated them — both became `nil`, and `nil as Any`
+    /// bridges back as `null`.
+    @Test
+    func undefinedAndNullResultsStayDistinct() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.commands.registerCommand('ext.nothing', function () {});
+                vscode.commands.registerCommand('ext.null', function () { return null; });
+                globalThis.__shapes = null;
+                globalThis.run = function () {
+                    var shapes = {};
+                    function describe(value) {
+                        if (value === undefined) { return 'undefined'; }
+                        if (value === null) { return 'null'; }
+                        return 'other:' + String(value);
+                    }
+                    vscode.commands.executeCommand('ext.nothing').then(function (value) {
+                        shapes.nothing = describe(value);
+                        if (shapes.nothing && shapes.null) { globalThis.__shapes = shapes; }
+                    });
+                    vscode.commands.executeCommand('ext.null').then(function (value) {
+                        shapes.null = describe(value);
+                        if (shapes.nothing && shapes.null) { globalThis.__shapes = shapes; }
+                    });
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+
+        let shapes = try #require(await waitForGlobal(context, "globalThis.__shapes"))
+        #expect(shapes.forProperty("nothing")?.toString() == "undefined")
+        #expect(shapes.forProperty("null")?.toString() == "null")
+    }
+
+    // MARK: - Unregistering removes this adaptor's registration, not the id
+
+    /// A `Disposable` held past a *later* registration of the same id removes
+    /// nothing.
+    ///
+    /// The scenario, end to end: the extension registers an id, the app then
+    /// registers that same id (Ruling 5 permits the shadowing, and `register`
+    /// replaces in place), and only afterwards does the extension's
+    /// `Disposable` fire. By id alone that deletes the app's brand-new
+    /// command, permanently, with only `register`'s collision warning anywhere
+    /// in the log. The registration token is what makes it the no-op it should
+    /// be.
+    @Test
+    func aStaleDisposableDoesNotRemoveSomebodyElsesCommand() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.disposable =
+                    vscode.commands.registerCommand('shared.id', function () { return 'extension'; });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        // Somebody else takes the id over, replacing the extension's
+        // registration in place.
+        registry.register(AppCommand(id: "shared.id", title: "App owns it now", run: { _ in "app" }))
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.disposable.dispose();")
+
+        #expect(registry.command(id: "shared.id")?.title == "App owns it now")
+        let answer = try registry.execute(id: "shared.id", arguments: [])
+        #expect(answer as? String == "app")
+    }
+
+    /// The same guard on the wholesale path: `MainThreadCommands.dispose()`
+    /// unregisters what the adaptor registered, and leaves an id another
+    /// registrant has since taken over alone.
+    @Test
+    func adaptorDisposeLeavesAnIDSomebodyElseHasTakenOver() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.commands.registerCommand('shared.id', function () { return 'extension'; });
+                vscode.commands.registerCommand('ext.own', function () { return 'own'; });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        registry.register(AppCommand(id: "shared.id", title: "App owns it now", run: { _ in "app" }))
+
+        commands.dispose()
+
+        #expect(registry.command(id: "ext.own") == nil)
+        #expect(registry.command(id: "shared.id")?.title == "App owns it now")
+    }
+
+    // MARK: - A torn-down adaptor
+
+    /// Once the adaptor has been deallocated while JavaScript still holds the
+    /// installed functions, all three members answer in the shape their return
+    /// type promises: `registerCommand` raises, and the two `Thenable`s reject.
+    ///
+    /// What none of them may do is answer `undefined`, which is what returning
+    /// `nil` from the block reaches JavaScript as. For `executeCommand` and
+    /// `getCommands` that makes the extension's own `.then` throw
+    /// synchronously — precisely the failure Ruling 6 exists to prevent, in its
+    /// worst form. For `registerCommand` it lets the extension push `undefined`
+    /// onto `context.subscriptions` and believe it registered a command.
+    @Test
+    func aTornDownAdaptorRaisesOrRejectsButNeverAnswersUndefined() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        var commands: MainThreadCommands? = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__afterTeardown = null;
+                globalThis.run = function () {
+                    var out = {};
+                    function done() {
+                        if (out.register && out.execute && out.getCommands) {
+                            globalThis.__afterTeardown = out;
+                        }
+                    }
+                    try {
+                        vscode.commands.registerCommand('ext.late', function () {});
+                        out.register = 'no-throw';
+                    } catch (error) {
+                        out.register = error.message;
+                    }
+                    vscode.commands.executeCommand('ext.late').then(
+                        function () { out.execute = 'resolved'; done(); },
+                        function (error) { out.execute = error.message; done(); }
+                    );
+                    vscode.commands.getCommands().then(
+                        function () { out.getCommands = 'resolved'; done(); },
+                        function (error) { out.getCommands = error.message; done(); }
+                    );
+                    done();
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        // Scoped deliberately: a `let` binding at test scope would itself keep
+        // the adaptor alive past the `commands = nil` below and the teardown
+        // this test is about would never happen.
+        if let live = commands { try install(live, on: host) }
+        try await host.activate()
+
+        // Nothing else holds the adaptor now: the registry holds no command of
+        // its making (this extension's `activate` registers none), and the
+        // three installed blocks capture it weakly.
+        commands = nil
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+
+        let out = try #require(await waitForGlobal(context, "globalThis.__afterTeardown"))
+        #expect(out.forProperty("register")?.toString()
+            == "vscode.commands.registerCommand is unavailable: this extension's host has been torn down.")
+        #expect(out.forProperty("execute")?.toString()
+            == "vscode.commands.executeCommand is unavailable: this extension's host has been torn down.")
+        #expect(out.forProperty("getCommands")?.toString()
+            == "vscode.commands.getCommands is unavailable: this extension's host has been torn down.")
+        #expect(registry.command(id: "ext.late") == nil)
     }
 
     // MARK: - registerTextEditorCommand stays a stub
