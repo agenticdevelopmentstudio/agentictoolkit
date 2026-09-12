@@ -89,6 +89,20 @@ private final class UnusedMessagePresenter: ExtensionMessagePresenting {
     }
 }
 
+/// The input box seam, for a suite that presents no input box, on
+/// `UnusedMessagePresenter`'s own reasoning: `MainThreadWindow.init` does not
+/// default `inputBoxPresenter:` either.
+@MainActor
+private final class UnusedInputBoxPresenter: ExtensionInputBoxPresenting {
+    func presentInputBox(
+        _ request: ExtensionInputBoxRequest,
+        validate: @escaping (String) async -> ExtensionInputValidation?
+    ) async -> String? {
+        Issue.record("presentInputBox was called by a suite that exercises no input box.")
+        return nil
+    }
+}
+
 /// `vscode.window.showQuickPick` (task 5.5b-ii), wired onto a real
 /// `ExtensionHost` and an `ExtensionQuickPickPresenting` double.
 ///
@@ -178,6 +192,7 @@ struct MainThreadWindowQuickPickTests {
     ) async throws -> MainThreadWindow {
         let window = MainThreadWindow(
             presenter: UnusedMessagePresenter(), quickPickPresenter: presenter,
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         try install(window, on: host)
         try await host.activate()
