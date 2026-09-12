@@ -7,9 +7,8 @@ final class PaneViewControllerTests: XCTestCase {
 
     /// Windows created by `loadedPane` to give the pane's view a real window —
     /// `NSPopover.show` (the minimize picker) throws "view has no window"
-    /// without one. Held here, the same way `ChatViewFocusTests` and
-    /// `WindowConfigPopoverTests.rebuildRereadsTheState` hold theirs, and torn
-    /// down after each test.
+    /// without one. Held here, the same way `ChatViewFocusTests` holds its own,
+    /// and torn down after each test.
     private var windows: [NSWindow] = []
 
     override func tearDown() async throws {

@@ -74,14 +74,14 @@ open class PaneViewController: NSViewController {
     /// it *raises* is this pane's business — a menu — but what it looks like is
     /// the window chrome's single answer, and asking for it rather than
     /// respelling it keeps it that way (`dry`).
-    private let gearButton = WindowConfigPopover.makeGearButton(tooltip: "Pane options")
+    private let gearButton = WindowOptionsDialog.makeGearButton(tooltip: "Pane options")
 
     /// The options dialog, while it is on screen.
     ///
     /// Weak, and internal rather than private: the presenter owns a sheet for
     /// exactly as long as it is up, and a pane still holding a dismissed one
     /// would answer `refreshTitle()` by renaming a heading nobody can see.
-    private(set) weak var optionsSheet: PaneOptionsSheetViewController?
+    private(set) weak var optionsSheet: OptionsDialogViewController?
 
     /// This pane's spacing, and where it comes from. `lazy` because it asks
     /// `inheritedPaneSpacing`, which a subclass overrides — so it cannot be
@@ -301,10 +301,18 @@ open class PaneViewController: NSViewController {
     }
 
     @objc private func showOptionsDialog() {
-        let sheet = PaneOptionsSheetViewController(
+        let sheet = OptionsDialogViewController(
             heading: resolvedTitle,
-            rows: makeOptionRows()
+            rows: makeOptionRows(),
+            // Wide enough for the spacing control's diagram, which is the
+            // widest thing any pane puts in here.
+            width: 340,
+            accessibilityPrefix: "pane.options"
         )
+        sheet.onDone = { [weak sheet, weak self] in
+            guard let sheet else { return }
+            self?.dismiss(sheet)
+        }
         sheet.onDidClose = { [weak self] in self?.optionsDialogDidClose() }
         optionsSheet = sheet
         presentAsSheet(sheet)

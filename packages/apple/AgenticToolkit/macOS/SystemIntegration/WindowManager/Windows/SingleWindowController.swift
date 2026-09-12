@@ -32,8 +32,7 @@ import AgenticDeveloperToolkitUI
 /// NSViewController lifecycle fires correctly. Override `makeContentView()`
 /// if you only need an `NSView`.
 @MainActor
-open class SingleWindowController: NSWindowController, NSWindowDelegate,
-                                   ContentRefittingWindowController {
+open class SingleWindowController: NSWindowController, NSWindowDelegate {
 
     public static let defaultSize = NSSize(width: 600, height: 480)
 
@@ -221,27 +220,19 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
         window?.isVisible ?? false
     }
 
-    /// Resizes the window to hug `contentSize`, keeping the visual top-left
-    /// corner fixed so growth extends down and to the right. When the
-    /// desired size would push past the screen edge, the spec's
-    /// `overflowPolicy` decides: stop at the edge and let the content
-    /// scroll, or keep the size and move the window minimally until fully
-    /// disclosed. Content-hugging windows call this instead of hand-rolled
-    /// `setFrame` math; the resulting resize persists through the normal
-    /// delegate hooks (harmless — the top-left anchor is unchanged unless
-    /// the policy moved the window, which is a real position change).
+    /// Resizes the window to hug `contentSize`, anchored on whichever screen
+    /// edge it sits nearest and moved rather than pushed off when it runs out
+    /// of room — `FrameCalculator.contentHuggingFrame` states the rule.
+    /// Content-hugging windows call this instead of hand-rolled `setFrame`
+    /// math; the resulting resize persists through the normal delegate hooks
+    /// (harmless — a fit that moved the window moved it for a reason).
     ///
     /// This is for **non-resizable, content-hugging** windows that own both
     /// dimensions. Resizable list windows that only auto-fit *height* (and let
     /// the user own width) use `NSWindow.fitHeight(toContentHeight:)` instead —
     /// a deliberately separate, simpler mechanism, not a duplicate.
     public func fitWindow(toContentSize contentSize: NSSize) {
-        // `!isContentRefitSuppressed`: while a config popover is open the window
-        // is frozen (see `suppressContentRefit()`), so both the explicit refit
-        // path (`performContentRefit`) and any other caller are no-ops until the
-        // popover closes and `resumeContentRefit()` applies one fit.
-        guard let window, !isContentRefitSuppressed,
-              contentSize.width > 0, contentSize.height > 0 else { return }
+        guard let window, contentSize.width > 0, contentSize.height > 0 else { return }
         let frameSize = window.frameRect(
             forContentRect: NSRect(origin: .zero, size: contentSize)
         ).size
@@ -250,14 +241,12 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
         // frame it produced then. Bail before the screen scan + geometry math
         // rather than after.
         //
-        // All three inputs have to match, not just the size. The fit clamps
-        // the desired size to the room between the window's own top-left
-        // anchor and the screen's edges, so *where* the window sits is as much
-        // an input as how big its content wants to be: a window dragged toward
-        // an edge — or onto a smaller display — asks for exactly the size it
-        // asked for before and must still be told it can't have it. A
-        // size-only test would bail on precisely the moves this fit exists to
-        // answer.
+        // All three inputs have to match, not just the size. The fit reads
+        // *where* the window sits — which screen edge it is nearest, and how
+        // much room is left that way — so a window dragged toward an edge, or
+        // onto a smaller display, asks for exactly the size it asked for
+        // before and gets a different answer. A size-only test would bail on
+        // precisely the moves this fit exists to answer.
         let currentVisibleFrame = window.screen?.visibleFrame
         if let currentVisibleFrame,
            lastContentFit == ContentFit(desiredFrameSize: frameSize,
@@ -269,17 +258,15 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
         guard let screen = WindowFrameManager.bestScreen(
             for: window, among: frames.screenProvider.screens
         ) else { return }
-        let spec = windowSpec
         let target = FrameCalculator.contentHuggingFrame(
             currentFrame: window.frame,
             desiredFrameSize: frameSize,
             screenVisibleFrame: screen.visibleFrame,
-            policy: spec?.overflowPolicy ?? .scrollContent,
-            minSize: spec?.minSize ?? window.minSize
+            minSize: windowSpec?.minSize ?? window.minSize
         )
         // Recorded for the bail above *after* the fit, so it describes what the
         // fit settled on: the frame it produced, on the screen it ended up on
-        // (the `.moveToDisclose` policy can move it onto another one).
+        // (a fit that moves the window can move it onto another one).
         defer {
             lastContentFit = window.screen.map {
                 ContentFit(desiredFrameSize: frameSize,
@@ -316,27 +303,16 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
     // MARK: - Content refit seam
 
     /// Supplies the window's desired content size on demand. A content-hugging
-    /// controller (e.g. the Usage HUD / Details window) registers this once;
-    /// `performContentRefit()` and the config popover's resume-on-close both
-    /// recompute the fit from this single source. A `nil` result means "no refit
-    /// yet" (content not built), not zero.
+    /// controller (e.g. the Usage HUD / Details window) registers this once and
+    /// `performContentRefit()` recomputes the fit from this single source. A
+    /// `nil` result means "no refit yet" (content not built), not zero.
     public var contentSizeProvider: (() -> NSSize?)?
 
-    /// True while a `WindowConfigPopover` is open on this window: the window is
-    /// frozen at its current size (content min == max) so a size/text slider drag
-    /// *inside* the popover can't resize the window out from under the pointer.
-    public private(set) var isContentRefitSuppressed = false
-
-    /// Content min/max captured at freeze time, restored when the freeze lifts.
-    private var suppressedContentMinSize: NSSize?
-    private var suppressedContentMaxSize: NSSize?
-
     /// Recomputes the fit from `contentSizeProvider` and applies it — the single
-    /// content-refit entry point for content-hugging windows. A no-op while a
-    /// config popover is open (`isContentRefitSuppressed`) or before a provider
-    /// is registered.
+    /// content-refit entry point for content-hugging windows. A no-op before a
+    /// provider is registered.
     public func performContentRefit() {
-        guard !isContentRefitSuppressed, let size = contentSizeProvider?() else { return }
+        guard let size = contentSizeProvider?() else { return }
         fitWindow(toContentSize: size)
     }
 
@@ -351,12 +327,12 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
     private var moveRefitSettleTask: Task<Void, Never>?
 
     /// Whether a move should re-fit this window at all: only a content-hugging
-    /// window owns its own size (a resizable window's size is the user's), and
-    /// not while a config popover has it frozen. Overridden by windows that hug
-    /// their content through some other mechanism than `contentSizeProvider` —
-    /// a list window that owns only its height, say.
+    /// window owns its own size (a resizable window's size is the user's).
+    /// Overridden by windows that hug their content through some other
+    /// mechanism than `contentSizeProvider` — a list window that owns only its
+    /// height, say.
     open var wantsRefitAfterMove: Bool {
-        contentSizeProvider != nil && !isContentRefitSuppressed && !isApplyingContentFit
+        contentSizeProvider != nil && !isApplyingContentFit
     }
 
     /// The fit a settled move applies. The default is the whole-size content
@@ -389,38 +365,6 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
                 return
             }
         }
-    }
-
-    /// Freezes the window at its current size while a config popover is open, so a
-    /// slider drag inside the popover can't shift the window under the pointer.
-    /// Pins the content min/max to the live size (which also stops the AppKit
-    /// auto-size-from-content path a borderless HUD uses). Idempotent; driven by
-    /// `WindowConfigPopover` on popover-open.
-    public func suppressContentRefit() {
-        guard !isContentRefitSuppressed, let window else { return }
-        isContentRefitSuppressed = true
-        suppressedContentMinSize = window.contentMinSize
-        suppressedContentMaxSize = window.contentMaxSize
-        let current = window.contentRect(forFrameRect: window.frame).size
-        window.contentMinSize = current
-        window.contentMaxSize = current
-    }
-
-    /// Lifts the freeze set by `suppressContentRefit()`: restores the content
-    /// min/max and applies one refit, so any content change made while the popover
-    /// was open lands now. Idempotent; driven by `WindowConfigPopover` on
-    /// popover-close.
-    public func resumeContentRefit() {
-        guard isContentRefitSuppressed else { return }
-        isContentRefitSuppressed = false
-        if let window {
-            window.contentMinSize = suppressedContentMinSize ?? .zero
-            window.contentMaxSize = suppressedContentMaxSize
-                ?? NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
-        }
-        suppressedContentMinSize = nil
-        suppressedContentMaxSize = nil
-        performContentRefit()
     }
 
     /// If the spec opts in to visibility persistence and the last saved

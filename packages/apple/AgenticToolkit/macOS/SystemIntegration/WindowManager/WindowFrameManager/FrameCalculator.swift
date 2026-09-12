@@ -131,53 +131,88 @@ public enum FrameCalculator {
         )
     }
 
-    /// Frame for a content-hugging window that wants `desiredFrameSize`:
-    /// the top-left corner stays fixed and growth extends down and to the
-    /// right. When the desired size would push past the visible area's
-    /// right/bottom edge, `policy` decides:
+    /// Frame for a content-hugging window that wants `desiredFrameSize`,
+    /// kept whole and kept on screen.
     ///
-    /// - `.scrollContent`: the window stops at the edge (size is clamped to
-    ///   the room available from its anchor) and the content scrolls.
-    /// - `.moveToDisclose`: the window keeps the desired size (clamped to
-    ///   the screen) and moves as little as possible — stopping the moment
-    ///   it is fully on screen.
+    /// Two rules, applied to each axis independently:
+    ///
+    /// 1. **The window keeps the edge it is nearest.** A window sitting close
+    ///    to the bottom of the screen holds its distance from the bottom, so
+    ///    shrinking walks it back down and growing lifts it up; one sitting
+    ///    close to the top holds its distance from the top and grows downward.
+    ///    Ties keep the top-left edge, which is where a window that is nowhere
+    ///    near an edge grows from.
+    /// 2. **It is then pushed back on screen, and only then clamped.** Growth
+    ///    that would carry the far edge past the screen moves the window
+    ///    instead — as far as the near edge, never past it or under the menu
+    ///    bar. A window with nowhere left to move stops growing: the size is
+    ///    capped at the visible extent (`minSize` still wins, so a window on a
+    ///    screen too small for it overhangs rather than collapsing) and its
+    ///    content is left to scroll or compress.
+    ///
+    /// The two together are why a size slider can be dragged up and back down:
+    /// the anchor is read from the frame each time, so the move out is the
+    /// move back.
     public static func contentHuggingFrame(
         currentFrame: NSRect,
         desiredFrameSize: NSSize,
         screenVisibleFrame visible: NSRect,
-        policy: WindowSpec.OverflowPolicy,
         minSize: NSSize
     ) -> NSRect {
-        var size = NSSize(
-            width: Swift.max(desiredFrameSize.width, minSize.width),
-            height: Swift.max(desiredFrameSize.height, minSize.height)
+        // Both axes are solved in the user's terms — offsets from the visible
+        // area's left and top edges, growing right and down — so "the edge it
+        // started from" is the same sentence twice rather than one sentence and
+        // its mirror image in AppKit's upward y.
+        let offset = topLeftOffset(windowFrame: currentFrame, screenVisibleFrame: visible)
+        let horizontal = fittedAxis(
+            offset: offset.x, length: currentFrame.width,
+            desiredLength: desiredFrameSize.width,
+            visibleLength: visible.width, minLength: minSize.width
         )
-        switch policy {
-        case .scrollContent:
-            // Room from the fixed top-left anchor to the visible right/bottom
-            // edges; never below minSize (a window already hanging past the
-            // edge keeps its minimum rather than collapsing).
-            let roomRight = visible.maxX - currentFrame.minX
-            let roomDown = currentFrame.maxY - visible.minY
-            size.width = Swift.min(size.width, Swift.max(roomRight, minSize.width))
-            size.height = Swift.min(size.height, Swift.max(roomDown, minSize.height))
-            return NSRect(
-                x: currentFrame.minX,
-                y: currentFrame.maxY - size.height,
-                width: size.width,
-                height: size.height
-            )
-        case .moveToDisclose:
-            let grown = NSRect(
-                x: currentFrame.minX,
-                y: currentFrame.maxY - size.height,
-                width: size.width,
-                height: size.height
-            )
-            // validateFrame's push-into-bounds is exactly "move as little as
-            // possible, stop as soon as fully on screen."
-            return validateFrame(grown, screenVisibleFrame: visible, minSize: minSize)
-        }
+        let vertical = fittedAxis(
+            offset: offset.y, length: currentFrame.height,
+            desiredLength: desiredFrameSize.height,
+            visibleLength: visible.height, minLength: minSize.height
+        )
+        return frame(
+            topLeftOffset: CGPoint(x: horizontal.offset, y: vertical.offset),
+            size: NSSize(width: horizontal.length, height: vertical.length),
+            screenVisibleFrame: visible
+        )
+    }
+
+    /// One axis of `contentHuggingFrame`. `offset` is the gap from the visible
+    /// area's start edge (its left, or its top) to the window's own start edge.
+    ///
+    /// Split out and pure because the rule is the same rule on both axes, and a
+    /// second spelling of it is a second place for left/right and top/bottom to
+    /// drift apart (`dry`).
+    static func fittedAxis(
+        offset: CGFloat,
+        length: CGFloat,
+        desiredLength: CGFloat,
+        visibleLength: CGFloat,
+        minLength: CGFloat
+    ) -> (offset: CGFloat, length: CGFloat) {
+        // `max(visibleLength, minLength)`: a window whose minimum is larger than
+        // the screen keeps its minimum and overhangs. Collapsing it to the
+        // screen would break the promise `minSize` makes.
+        let newLength = Swift.min(
+            Swift.max(desiredLength, minLength),
+            Swift.max(visibleLength, minLength)
+        )
+        let gapStart = offset
+        let gapEnd = visibleLength - offset - length
+        // `<`, not `<=`: a window equidistant from both edges — including one
+        // already filling the axis, where both gaps are zero — keeps its start
+        // edge, the anchor it had before any of this moved it.
+        var newOffset = gapEnd < gapStart ? offset + length - newLength : offset
+        // Push back on screen: past the end edge first, then the start edge, so
+        // a window that cannot fit either way ends up flush with the start
+        // rather than flush with the end.
+        newOffset = Swift.min(newOffset, visibleLength - newLength)
+        newOffset = Swift.max(newOffset, 0)
+        return (newOffset, newLength)
     }
 
     /// Ensures a frame is fully visible within a screen's visible area.
