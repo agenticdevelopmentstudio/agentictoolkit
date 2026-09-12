@@ -12,7 +12,7 @@ import AgenticToolkitCore
 // MARK: - The presentation seam
 
 /// How urgently a `vscode.window.show*Message` call wants to be noticed.
-public enum ExtensionMessageSeverity: Sendable {
+public enum ExtensionMessageSeverity: Sendable, Equatable {
     case information, warning, error
 }
 
@@ -24,6 +24,13 @@ public struct ExtensionMessageRequest: Sendable {
     public let detail: String?
     public let isModal: Bool
     public let itemTitles: [String]
+
+    /// The index into `itemTitles` of the item whose `isCloseAffordance` was
+    /// truthy, or `nil` when none was — VS Code's rule for which item, if
+    /// any, *is* the dismissal rather than one more button next to an
+    /// implicit Cancel. See `NSAlertMessagePresenter.presentMessage(_:)` for
+    /// what a presenter does with this.
+    public let closeAffordanceIndex: Int?
 }
 
 /// What `MainThreadWindow` depends on instead of AppKit directly, so the
@@ -89,6 +96,11 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
         self.window = window
     }
 
+    /// **The empty-items case (a single "OK" that resolves `nil`) is measured
+    /// against upstream, not merely assumed:** with no items at all, VS
+    /// Code's own `mainThreadMessageService.ts` shows a single **OK** that
+    /// resolves `undefined` — exactly what this branch already did before
+    /// this fix round, and is unchanged by it.
     public func presentMessage(_ request: ExtensionMessageRequest) async -> Int? {
         let alert = NSAlert()
         alert.messageText = request.message
@@ -96,18 +108,50 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
             alert.informativeText = detail
         }
         alert.alertStyle = NSAlertMessagePresenter.alertStyle(for: request.severity)
-        if request.itemTitles.isEmpty {
+
+        guard !request.itemTitles.isEmpty else {
             alert.addButton(withTitle: "OK")
-        } else {
-            for title in request.itemTitles {
-                alert.addButton(withTitle: title)
-            }
+            _ = await presentedResponse(for: alert)
+            return nil
         }
 
+        let buttonItemIndices = NSAlertMessagePresenter.addButtons(for: request, to: alert)
         let response = await presentedResponse(for: alert)
-        guard !request.itemTitles.isEmpty else { return nil }
-        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-        return request.itemTitles.indices.contains(index) ? index : nil
+        let buttonIndex = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        guard buttonItemIndices.indices.contains(buttonIndex) else { return nil }
+        return buttonItemIndices[buttonIndex]
+    }
+
+    /// Adds one button per item, **in order, skipping**
+    /// `request.closeAffordanceIndex`, then one more button in the "cancel
+    /// slot": that item's own title when there is a close affordance
+    /// (answering its own index), otherwise `"Cancel"` (answering `nil`).
+    ///
+    /// This matches `mainThreadMessageService.ts`'s button construction
+    /// exactly, measured against upstream during this fix round — including
+    /// the detail that the close-affordance item is pulled **out of** the
+    /// ordinary button list and put in the cancel slot; it does not render
+    /// in its own item position, so button order and item order diverge
+    /// whenever a close affordance is present. Returns, for each button
+    /// added in order, the item index that button should resolve to (`nil`
+    /// for the synthesized `"Cancel"`) — read back by position after
+    /// `NSAlert` answers, rather than recovered with
+    /// `response - .alertFirstButtonReturn` arithmetic read straight into
+    /// `itemTitles`, which no longer holds once a button has been skipped.
+    private static func addButtons(for request: ExtensionMessageRequest, to alert: NSAlert) -> [Int?] {
+        var buttonItemIndices: [Int?] = []
+        for (index, title) in request.itemTitles.enumerated() where index != request.closeAffordanceIndex {
+            alert.addButton(withTitle: title)
+            buttonItemIndices.append(index)
+        }
+        if let closeAffordanceIndex = request.closeAffordanceIndex {
+            alert.addButton(withTitle: request.itemTitles[closeAffordanceIndex])
+            buttonItemIndices.append(closeAffordanceIndex)
+        } else {
+            alert.addButton(withTitle: "Cancel")
+            buttonItemIndices.append(nil)
+        }
+        return buttonItemIndices
     }
 
     /// `.information → .informational`, `.warning → .warning`,
@@ -123,6 +167,21 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// A sheet when `window()` answers one, an app-modal alert otherwise —
     /// see this type's own doc for the reasoning and for the hazard the
     /// app-modal branch carries.
+    ///
+    /// **No other `beginSheetModal` site under `macOS/` is bridged into a
+    /// continuation** — measured by searching this tier: every other
+    /// `beginSheetModal` call (`ComposableTabsPaneViewController`,
+    /// `AISettingsViewPanelController`, `ExtensionsSettingsPanelViewController`,
+    /// `NotesFolderListViewController`, `NotesSplitViewController`) drives its
+    /// completion handler directly rather than bridging it into `async`.
+    /// (`withCheckedContinuation`/`withCheckedThrowingContinuation` is not
+    /// itself unprecedented in this tier — `ExtensionHost.swift` uses one for
+    /// bridging a JS activation callback — so the narrower, accurate claim is
+    /// about `beginSheetModal`/`NSAlert` sites specifically, not continuations
+    /// in general.) The continuation is kept here anyway — it is what makes
+    /// `presentMessage` itself `async`, matching `ExtensionMessagePresenting`
+    /// — but nothing about it should be read as matching how this tier's
+    /// other `NSAlert` call sites are written, because it does not.
     private func presentedResponse(for alert: NSAlert) async -> NSApplication.ModalResponse {
         guard let window = window() else {
             return alert.runModal()
@@ -240,19 +299,23 @@ public final class MainThreadWindow {
     /// return a `Thenable`, matching `MainThreadWorkspace`'s `fs` operations
     /// and `MainThreadCommands.executeCommand`.
     ///
-    /// Argument shape, per this task's brief:
+    /// Argument shape, matching `extHostMessageService.ts` (confirmed against
+    /// upstream during this fix round, not merely this task's original brief):
     /// 1. **argument 0 — the message.** Required; a missing argument 0
-    ///    rejects. Present but not a string, it is coerced through its own
-    ///    JavaScript string conversion (`JSValue.toString()`), the same
-    ///    treatment `Uri.url(from:in:)` gives a `Uri | string` argument that
-    ///    turns out to be a plain string.
-    /// 2. **argument 1 — options**, read as `{ modal?: boolean, detail?:
-    ///    string }` only when it is an object that is neither a string nor an
-    ///    array. Anything else in that position is the first item.
+    ///    rejects. Present but not a string, it is coerced through
+    ///    `coercedString(from:)`: a well-behaved `toString` is honoured, a
+    ///    throwing or missing one rejects the call rather than presenting a
+    ///    blank alert.
+    /// 2. **argument 1 — options or the first item, by VS Code's actual rule
+    ///    (`isMessageItem`): a string, or an object with a truthy `title`, is
+    ///    an item; anything else — including an array, whose own `title` is
+    ///    `undefined` — is read as options
+    ///    (`{ modal?: boolean, detail?: string }`). See `isOptionsArgument`.
     /// 3. **the rest — items.** A string is its own title. An object with a
-    ///    string `title` (VS Code's `MessageItem`) uses that title. Anything
-    ///    else rejects, naming the offending argument's index — a silently
-    ///    dropped button is worse than a rejected call.
+    ///    string `title` (VS Code's `MessageItem`) uses that title, and its
+    ///    `isCloseAffordance` is recorded if truthy. Anything else rejects,
+    ///    naming the offending argument's index — a silently dropped button
+    ///    is worse than a rejected call.
     private func handleShowMessage(severity: ExtensionMessageSeverity, memberPath: String) -> JSValue? {
         guard let context = JSContext.current() else { return nil }
         let arguments = VSCodeAPI.currentArguments()
@@ -261,25 +324,36 @@ public final class MainThreadWindow {
             return VSCodeAPI.rejectedPromise(
                 message: "\(memberPath) requires a message argument.", in: context)
         }
-        let message = messageArgument.toString() ?? ""
+        guard let message = MainThreadWindow.coercedString(from: messageArgument) else {
+            return VSCodeAPI.rejectedPromise(
+                message: "\(memberPath)'s argument 0 could not be converted to a string.", in: context)
+        }
 
         var detail: String?
         var isModal = false
         var itemsStartIndex = 1
-        if arguments.count > 1, MainThreadWindow.isOptionsArgument(arguments[1], in: context) {
+        if arguments.count > 1, MainThreadWindow.isOptionsArgument(arguments[1]) {
             let options = arguments[1]
             isModal = options.forProperty("modal")?.toBool() ?? false
-            if let detailValue = options.forProperty("detail"), detailValue.isString {
-                detail = detailValue.toString()
+            // A `nil` here — a missing `detail`, or one whose coercion
+            // failed — is simply omitted: `detail` is optional decoration,
+            // and rejecting the whole call over an unusable subtitle would
+            // be worse than showing the message without one.
+            if let detailValue = options.forProperty("detail"), !detailValue.isUndefined, !detailValue.isNull {
+                detail = MainThreadWindow.coercedString(from: detailValue)
             }
             itemsStartIndex = 2
         }
 
         var itemTitles: [String] = []
         var itemValues: [JSValue] = []
+        var closeAffordanceIndex: Int?
         for index in itemsStartIndex..<arguments.count {
             let item = arguments[index]
             if item.isString, let title = item.toString() {
+                // A string item is never a close affordance — matching
+                // `extHostMessageService.ts`'s own item loop, which
+                // hard-codes `isCloseAffordance: false` for this branch.
                 itemTitles.append(title)
                 itemValues.append(item)
                 continue
@@ -288,6 +362,20 @@ public final class MainThreadWindow {
                let title = titleValue.toString() {
                 itemTitles.append(title)
                 itemValues.append(item)
+                // Reading `isCloseAffordance` here can run an extension's own
+                // getter — the same accepted, read-only risk named below for
+                // `title` in `isOptionsArgument`, and the same precedent
+                // `Uri.url(from:in:)`'s own doc names for its
+                // `forProperty("toString")` read (`Uri.swift:352-358`),
+                // bounded to the extension that wrote the getter acting on
+                // its own context. First truthy one wins, matching upstream,
+                // which warns and ignores a second one — this loop has no
+                // logger to warn through, so it simply never overwrites an
+                // index already recorded.
+                if closeAffordanceIndex == nil,
+                   let closeAffordanceValue = item.forProperty("isCloseAffordance"), closeAffordanceValue.toBool() {
+                    closeAffordanceIndex = itemTitles.count - 1
+                }
                 continue
             }
             return VSCodeAPI.rejectedPromise(
@@ -297,24 +385,93 @@ public final class MainThreadWindow {
         }
 
         let request = ExtensionMessageRequest(
-            severity: severity, message: message, detail: detail, isModal: isModal, itemTitles: itemTitles)
+            severity: severity, message: message, detail: detail, isModal: isModal, itemTitles: itemTitles,
+            closeAffordanceIndex: closeAffordanceIndex)
         return presentMessagePromise(memberPath: memberPath, request: request, itemValues: itemValues, in: context)
     }
 
     /// Whether `value` — argument 1 of a `show*Message` call — is options
-    /// rather than the first item: an object that is neither a string nor an
-    /// array, matching this task's brief exactly.
-    private static func isOptionsArgument(_ value: JSValue, in context: JSContext) -> Bool {
-        value.isObject && !value.isString && !isArrayArgument(value, in: context)
+    /// rather than the first item, per VS Code's actual rule in
+    /// `extHostMessageService.ts`'s `isMessageItem` (confirmed verbatim
+    /// against upstream during this fix round): an item is a string, or an
+    /// object with a **truthy** `title`; anything else in this position is
+    /// options.
+    ///
+    /// Truthiness, not shape — and deliberately not the same bar as the
+    /// item-collection loop below. `{ title: 42 }` classifies as an item
+    /// here (`42` is truthy), then is correctly rejected by that loop's own,
+    /// stricter, string-`title` requirement — which is strictly better than
+    /// silently swallowing it as options, and is why that loop's string
+    /// check must not change to match this one.
+    ///
+    /// **An array in this position has no `Array.isArray` carve-out** — VS
+    /// Code's real code has none either. An array's own `title` is
+    /// `undefined` (falsy), so it already falls out as options with no
+    /// special-casing: this is deliberate parity with upstream, not an
+    /// oversight, and nothing here should reintroduce an array check.
+    private static func isOptionsArgument(_ value: JSValue) -> Bool {
+        if value.isString { return false }
+        guard value.isObject else { return true }
+        // Reading `title` here can run an extension's own getter — the same
+        // accepted, read-only risk `Uri.url(from:in:)`'s own doc names for
+        // its `forProperty("toString")` read (`Uri.swift:352-358`), bounded
+        // to the extension that wrote the getter acting on its own context.
+        guard let titleValue = value.forProperty("title") else { return true }
+        return !titleValue.toBool()
     }
 
-    /// `value instanceof Array`, checked the same way `MainThreadCommands`
-    /// checks `callback instanceof Function`: there is only ever one realm in
-    /// a context this host builds, so the cross-realm gap that check's own
-    /// comment names does not apply here either.
-    private static func isArrayArgument(_ value: JSValue, in context: JSContext) -> Bool {
-        guard let arrayConstructor = context.objectForKeyedSubscript("Array") else { return false }
-        return value.isInstance(of: arrayConstructor)
+    /// Coerces `value` to a `String`, used for both the message and `detail`
+    /// arguments of a `show*Message` call.
+    ///
+    /// **What this replaces, and why:** this task's original round called
+    /// `value.toString()` — JavaScriptCore's own, unguarded conversion —
+    /// directly on any non-string argument, with its doc comment claiming
+    /// that matched how `Uri.url(from:in:)` treats a `Uri | string` argument.
+    /// That claim was false: `Uri.url(from:in:)` (`Uri.swift:359-375`) calls
+    /// `.toString()` unguarded **only inside `if value.isString`** — it never
+    /// runs arbitrary extension code that way — and routes the real
+    /// `toString` *invocation* for a non-string value through the guarded
+    /// `VSCodeAPI.call` trampoline. This helper now does exactly that, for
+    /// both branches:
+    /// - `value.isString` → `value.toString()`, matching `Uri.url(from:in:)`'s
+    ///   own string branch precisely.
+    /// - otherwise → `toString` is read via `forProperty` (an accepted,
+    ///   read-only risk — the same one named in `isOptionsArgument` above)
+    ///   and, only if it is itself an object, invoked through
+    ///   `VSCodeAPI.call(_:thisArg:arguments:)`. Only `case .returned(let
+    ///   result)` with `result.isString` counts as success.
+    ///
+    /// **Why the guard matters:** measured in this fix round (via `pyobjc`
+    /// driving `JavaScriptCore.framework` directly): for an object whose
+    /// `toString` throws, `JSValue.toString()` returns `nil` **and leaves
+    /// `context.exception` set**. Unguarded, `?? ""` would swallow the
+    /// failure — an alert with a blank `messageText` still reaches the
+    /// screen — while the pending exception is separately routed by
+    /// `ExtensionHost.makeContext()`'s `context.exceptionHandler`
+    /// (`ExtensionHost.swift:896`) into `pendingException`, which
+    /// `callActivate` reads: an extension calling this during `activate()`
+    /// could fail its own activation naming an unrelated cause.
+    /// `VSCodeAPI.call` exists precisely to keep a thrown exception from
+    /// escaping into that path (`VSCodeAPI.swift:300-320`), which is why the
+    /// non-string branch goes through it rather than calling `toString()`
+    /// directly.
+    ///
+    /// `nil` covers a throw, a non-string return, and a missing or
+    /// non-callable `toString` alike — callers decide what `nil` means for
+    /// their own argument (the message rejects the call; `detail` is simply
+    /// omitted).
+    private static func coercedString(from value: JSValue) -> String? {
+        if value.isString {
+            return value.toString()
+        }
+        guard let toStringFunction = value.forProperty("toString"), toStringFunction.isObject else {
+            return nil
+        }
+        guard case .returned(let result) = VSCodeAPI.call(toStringFunction, thisArg: value, arguments: []),
+              let result, result.isString else {
+            return nil
+        }
+        return result.toString()
     }
 
     // MARK: - The promise bridge
