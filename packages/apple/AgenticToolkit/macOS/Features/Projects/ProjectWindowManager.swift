@@ -101,6 +101,14 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
     /// only has to know *when* to ask (`dependency-injection`).
     public var languageServicesFactory: (@MainActor (URL) -> ProjectLanguageServices)?
 
+    /// Fires once, synchronously, from the same `willClose` handler that tears
+    /// down a project's language services — a host that keys its own state off
+    /// a `ProjectWorkspace` (the app's `DocumentSession`, one per project
+    /// window) needs exactly this moment to discard it, and this type is the
+    /// only one that knows a window's project is going away rather than
+    /// merely losing focus.
+    public var onProjectClosed: (@MainActor (ProjectWorkspace) -> Void)?
+
     public init() {}
 
     /// Wires the manager to the registry it opens projects from and registers
@@ -501,6 +509,9 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
                     NotificationCenter.default.removeObserver(observer)
                 }
                 let services = self.controllers[repoID]?.project.languageServices
+                if let project = self.controllers[repoID]?.project {
+                    self.onProjectClosed?(project)
+                }
                 self.controllers.removeValue(forKey: repoID)
                 self.openOrder.removeAll { $0 == repoID }
                 self.adoptedForScripting.remove(repoID)

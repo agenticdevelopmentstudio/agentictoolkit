@@ -38,6 +38,16 @@ public final class FileBrowserViewController: NSViewController {
     /// extensions, and the protocol declares it `{ get set }`.
     public var onPaneSelectionChange: (() -> Void)?
 
+    /// Where a file the user picked in the tree should be shown — a plain
+    /// click, or one of the context menu's three verbs. Forwarded straight
+    /// from `tree`, whose own `onOpenRequest` is `internal`: this is the seam
+    /// a host outside the module (the app, wiring the File Browser pane to the
+    /// Document pane) actually reaches.
+    public var onOpenRequest: ((URL, DocumentDestination) -> Void)? {
+        get { tree.onOpenRequest }
+        set { tree.onOpenRequest = newValue }
+    }
+
     /// Watches `selection` so `onPaneSelectionChange` fires for every way a
     /// file gets selected — the tree, a restore, a host setting it directly —
     /// rather than only for the clicks the tree happens to route through a
