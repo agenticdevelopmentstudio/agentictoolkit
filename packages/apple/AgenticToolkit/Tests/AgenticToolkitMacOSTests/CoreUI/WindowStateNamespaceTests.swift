@@ -41,11 +41,16 @@ final class WindowStateNamespaceTests: XCTestCase {
 
     // MARK: - What the namespace is for
 
+    // `WindowStateStorage` is `@MainActor` — `WindowFrameManager` is its only
+    // consumer and is itself main-actor — so the test that touches a real
+    // storage has to be too. Cleanup runs in a `defer` rather than
+    // `addTeardownBlock`, whose `@Sendable` block cannot carry that isolation.
+    @MainActor
     func testANamespacedInstanceNeitherReadsNorClobbersTheSharedLayout() throws {
         let storage = UserDefaultsWindowStateStorage(
             keyPrefix: "TestWindowState_\(UUID().uuidString)_",
             visibilityKeyPrefix: "TestWindowVisible_\(UUID().uuidString)_")
-        addTeardownBlock {
+        defer {
             WindowStateNamespace.reset()
             storage.removeState(for: "log")
             storage.removeVisibility(for: "log")

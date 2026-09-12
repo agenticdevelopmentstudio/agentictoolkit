@@ -37,6 +37,9 @@ final class DebugLaunchSwitchTests: XCTestCase {
         #endif
     }
 
+    // `QuietWindowPresentation` is `@MainActor` (it reads `NSWindow` state), so
+    // reading its two statics has to be too.
+    @MainActor
     func testTheKeyIsTheArgumentName() {
         // `open --args -QuietWindowPresentation YES` writes the argument domain
         // under exactly this name; if the two ever diverge the switch silently
