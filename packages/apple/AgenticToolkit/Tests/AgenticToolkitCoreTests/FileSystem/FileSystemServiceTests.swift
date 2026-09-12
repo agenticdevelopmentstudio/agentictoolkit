@@ -517,16 +517,47 @@ struct FileSystemServiceTests {
         #expect(survivor == payload)
     }
 
-    @Test("rename from a missing path reports fileNotFound, naming the source")
+    @Test("renaming onto a hard link to the same file replaces the other name")
+    func renamingOntoAHardLinkReplacesTheOtherName() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = directory.appendingPathComponent("link-one.txt")
+        let second = directory.appendingPathComponent("link-two.txt")
+        let payload = Data("two names, one inode".utf8)
+        try payload.write(to: first)
+        // A second directory entry for the same inode. Comparing st_dev/st_ino
+        // cannot tell this from a case-only alias, so any identity test here
+        // refuses a move the caller is entitled to.
+        try FileManager.default.linkItem(at: first, to: second)
+
+        try await FileSystemService().rename(
+            fromPath: first.path,
+            toPath: second.path,
+            overwrite: true
+        )
+
+        #expect(!FileManager.default.fileExists(atPath: first.path))
+        let survivor = try Data(contentsOf: second)
+        #expect(survivor == payload)
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        #expect(remaining == ["link-two.txt"])
+    }
+
+    @Test("rename from a missing path reports fileNotFound and spares the destination")
     func renamingFromAMissingPathReportsFileNotFound() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let missing = directory.appendingPathComponent("absent.txt").path
-        let target = directory.appendingPathComponent("target.txt").path
+        let target = directory.appendingPathComponent("target.txt")
+        // The destination exists and holds bytes, so the second assertion
+        // fails against any rename that clears the destination before it has
+        // established that the source is there to move.
+        let occupant = Data("the destination must be left alone".utf8)
+        try occupant.write(to: target)
         let service = FileSystemService()
 
         let thrown = await expectingFileSystemError("rename from a missing path") {
-            try await service.rename(fromPath: missing, toPath: target, overwrite: true)
+            try await service.rename(fromPath: missing, toPath: target.path, overwrite: true)
         }
 
         guard let thrown else { return }
@@ -535,7 +566,8 @@ struct FileSystemServiceTests {
             return
         }
         #expect(reported == missing)
-        #expect(!FileManager.default.fileExists(atPath: target))
+        let survivor = try Data(contentsOf: target)
+        #expect(survivor == occupant)
     }
 
     // MARK: - Kind mismatches

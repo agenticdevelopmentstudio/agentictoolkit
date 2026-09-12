@@ -529,26 +529,29 @@ public actor FileSystemService {
     /// at `fromPath`, and ``FileSystemServiceError/fileExists(path:)`` when
     /// something is at `toPath` and `overwrite` is `false`.
     ///
-    /// Overwriting removes the existing item and then moves, which is two
-    /// steps and not atomic: a failure of the move leaves `toPath` empty.
+    /// **The destination is never pre-checked.** The move is attempted first,
+    /// and only a move that fails because something is already at `toPath`
+    /// leads to a removal. That ordering is what makes a case-only rename and
+    /// `fromPath == toPath` safe: on the default macOS volume, which is
+    /// case-insensitive, `FOO.txt` names the same file as `foo.txt`, so a
+    /// removal of `toPath` before the move destroys the very file being
+    /// renamed. `FileManager.moveItem` was measured on this machine to succeed
+    /// outright for both of those cases, so neither ever reaches a removal.
+    ///
+    /// Comparing the two items instead — by path string, by folded case, or by
+    /// their device and file numbers — does not work either. A hard link is two
+    /// names for one inode and is indistinguishable from a case-only alias
+    /// under that comparison, so an identity test refuses a legitimate
+    /// overwrite. Letting the filesystem answer avoids the question.
+    ///
+    /// Overwriting is therefore move, remove, move again: three steps and not
+    /// atomic. What it does not have is a window in which the source is gone
+    /// and the move has not happened — a failed `moveItem` was measured to
+    /// leave both items exactly as they were. Removing a hard-linked
+    /// destination was likewise measured to leave the source's bytes intact,
+    /// because unlinking one of two names only decrements the link count.
     /// Foundation offers no atomic replace that spans files and directories
     /// alike, and nothing in this surface's contract promises one.
-    ///
-    /// **The removal is skipped when `toPath` names the same item as
-    /// `fromPath`.** On the default macOS volume, which is case-insensitive,
-    /// `toPath` `FOO.txt` finds `foo.txt` — the source — and removing it would
-    /// destroy the file the rename was asked to keep. The same is true of
-    /// `fromPath == toPath`. Identity is decided by
-    /// ``sameItem(_:_:)``'s device-and-file-number pair rather than by
-    /// comparing the two strings, which `foo.txt` against `./foo.txt` defeats,
-    /// or by folding their case, which assumes a volume this tier cannot see.
-    /// The move itself still runs: it is what applies a case-only rename.
-    ///
-    /// Where identity cannot be established — either identity attribute
-    /// missing from either item — the removal is refused rather than risked,
-    /// and the operation throws ``FileSystemServiceError/fileExists(path:)``.
-    /// The cost is that an overwrite that would have succeeded fails instead;
-    /// the alternative is destroying a file on a guess.
     public func rename(fromPath: String, toPath: String, overwrite: Bool) async throws {
         try await perform {
             let manager = FileManager()
@@ -565,43 +568,41 @@ public actor FileSystemService {
                 using: manager,
                 onFailure: failed
             )
-            guard let sourceAttributes = source else {
+            guard source != nil else {
                 throw FileSystemServiceError.fileNotFound(path: fromPath)
             }
-            let destination = try Self.linkAttributes(
-                atPath: toPath,
-                reportedAs: toPath,
-                using: manager,
-                onFailure: failed
-            )
-            if let destinationAttributes = destination {
-                guard overwrite else {
-                    throw FileSystemServiceError.fileExists(path: toPath)
-                }
-                guard let same = Self.sameItem(sourceAttributes, destinationAttributes) else {
-                    throw FileSystemServiceError.fileExists(path: toPath)
-                }
-                if !same {
-                    do {
-                        try manager.removeItem(at: URL(fileURLWithPath: toPath))
-                    } catch {
-                        throw Self.distinguished(error, path: toPath)
-                            ?? FileSystemServiceError.deleteFailed(path: toPath, underlying: error)
-                    }
-                }
+            let sourceURL = URL(fileURLWithPath: fromPath)
+            let destinationURL = URL(fileURLWithPath: toPath)
+            let moveFailure: Error?
+            do {
+                try manager.moveItem(at: sourceURL, to: destinationURL)
+                moveFailure = nil
+            } catch {
+                moveFailure = error
+            }
+            guard let moveError = moveFailure else {
+                return
+            }
+            // Classified against `toPath`, because the one condition this
+            // branch acts on is about the destination. Naming `fromPath` here
+            // would hand the caller the wrong path for a `fileExists`.
+            // Everything else keeps the operation-shaped case, which carries
+            // both paths and so cannot misattribute either.
+            guard case .some(.fileExists) = Self.distinguished(moveError, path: toPath) else {
+                throw failed(moveError)
+            }
+            guard overwrite else {
+                throw FileSystemServiceError.fileExists(path: toPath)
             }
             do {
-                try manager.moveItem(
-                    at: URL(fileURLWithPath: fromPath),
-                    to: URL(fileURLWithPath: toPath)
-                )
+                try manager.removeItem(at: destinationURL)
             } catch {
-                throw Self.distinguished(error, path: fromPath)
-                    ?? FileSystemServiceError.renameFailed(
-                        path: fromPath,
-                        destination: toPath,
-                        underlying: error
-                    )
+                throw Self.distinguished(error, path: toPath) ?? failed(error)
+            }
+            do {
+                try manager.moveItem(at: sourceURL, to: destinationURL)
+            } catch {
+                throw failed(error)
             }
         }
     }
@@ -695,7 +696,10 @@ public actor FileSystemService {
     /// Terminal symbolic links are not followed, so a dangling link answers
     /// its own attributes and counts as present. `reportedAs` is the path the
     /// thrown error names, which is the caller's path even when `path` is a
-    /// resolved one.
+    /// resolved one. It is kept rather than collapsed because
+    /// ``resolvedTypeBits(atPath:using:onFailure:)`` is exactly that case: it
+    /// passes the symlink-resolved path as `atPath` and the caller's own path
+    /// as `reportedAs`. The direct callers pass the two equal.
     private static func linkAttributes(
         atPath path: String,
         reportedAs reportedPath: String,
@@ -753,36 +757,6 @@ public actor FileSystemService {
             return nil
         }
         return typeBits(for: attributes[.type] as? FileAttributeType)
-    }
-
-    /// Whether two attribute dictionaries describe the same file, or `nil`
-    /// when that cannot be told.
-    ///
-    /// The test is the pair `FileAttributeKey.systemNumber` and
-    /// `.systemFileNumber` — what `stat(2)` calls `st_dev` and `st_ino`, which
-    /// together are the filesystem's own answer to "is this the same file".
-    /// The two alternatives both fail: comparing the path strings is defeated
-    /// by `foo.txt` against `./foo.txt`, and folding their case bakes in an
-    /// assumption about the volume that is true of the default macOS install
-    /// and false of a case-sensitive one.
-    ///
-    /// `nil` when either key is missing from either dictionary. Both are
-    /// listed in `NSFileManager.h` among the attributes
-    /// `attributesOfItem(atPath:)` reports, but nothing there promises they
-    /// are always present, so the caller decides what an unproven answer
-    /// costs rather than this function guessing.
-    private static func sameItem(
-        _ first: [FileAttributeKey: Any],
-        _ second: [FileAttributeKey: Any]
-    ) -> Bool? {
-        guard let firstFile = (first[.systemFileNumber] as? NSNumber)?.uint64Value,
-              let firstSystem = (first[.systemNumber] as? NSNumber)?.uint64Value,
-              let secondFile = (second[.systemFileNumber] as? NSNumber)?.uint64Value,
-              let secondSystem = (second[.systemNumber] as? NSNumber)?.uint64Value
-        else {
-            return nil
-        }
-        return firstFile == secondFile && firstSystem == secondSystem
     }
 
     // MARK: - Error classification
