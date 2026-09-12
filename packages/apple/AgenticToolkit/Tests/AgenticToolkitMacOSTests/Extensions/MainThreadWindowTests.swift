@@ -1,0 +1,552 @@
+import Testing
+import Foundation
+import JavaScriptCore
+@testable import AgenticToolkitCore
+@testable import AgenticToolkitMacOS
+
+/// `severity` has no `Equatable` conformance (the brief's shape is `Sendable`
+/// only), so tests compare this name rather than the case itself — the
+/// mismatch a swapped `case` produces is exactly as visible either way.
+private func severityName(_ severity: ExtensionMessageSeverity) -> String {
+    switch severity {
+    case .information: return "information"
+    case .warning: return "warning"
+    case .error: return "error"
+    }
+}
+
+/// A non-suspending `ExtensionMessagePresenting` double: it records every
+/// request and answers immediately, keyed by `request.message` rather than by
+/// call order, so a suite that fires several calls in the same script turn
+/// gets each one's own prepared answer regardless of how `Task` happens to
+/// schedule them. A message with no entry answers `nil` (dismissed) — the
+/// same default a real presenter with no items gives.
+@MainActor
+private final class RecordingMessagePresenter: ExtensionMessagePresenting {
+    private(set) var requests: [ExtensionMessageRequest] = []
+    var responseForMessage: [String: Int?] = [:]
+
+    func presentMessage(_ request: ExtensionMessageRequest) async -> Int? {
+        requests.append(request)
+        return responseForMessage[request.message] ?? nil
+    }
+}
+
+/// An `ExtensionMessagePresenting` double whose `presentMessage` suspends
+/// until the test releases it — for the two tests that need a presentation
+/// genuinely in flight rather than merely called: disposal racing an
+/// in-flight presentation, and two calls whose overlap must be real, not
+/// just two calls issued back-to-back and settled one at a time before the
+/// next begins.
+///
+/// `waitUntilEntered(_:)` blocks until `count` calls are simultaneously
+/// parked awaiting `release`, the same "wait for the real thing, not a
+/// delay" shape `SuspendingFileSystemService` uses in
+/// `MainThreadWorkspaceTests`. `release(at:with:)` resumes the call that
+/// entered at that 0-based position, in call order, so a test can release
+/// two overlapping calls in either order and confirm neither answer crosses
+/// over to the other call.
+@MainActor
+private final class SuspendingMessagePresenter: ExtensionMessagePresenting {
+    private(set) var requests: [ExtensionMessageRequest] = []
+    private var releaseContinuations: [CheckedContinuation<Int?, Never>] = []
+    private var enteredWaiters: [(threshold: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    func waitUntilEntered(_ count: Int) async {
+        if releaseContinuations.count >= count { return }
+        await withCheckedContinuation { continuation in
+            enteredWaiters.append((count, continuation))
+        }
+    }
+
+    func release(at index: Int, with result: Int?) {
+        releaseContinuations[index].resume(returning: result)
+    }
+
+    func presentMessage(_ request: ExtensionMessageRequest) async -> Int? {
+        requests.append(request)
+        return await withCheckedContinuation { continuation in
+            releaseContinuations.append(continuation)
+            let enteredCount = releaseContinuations.count
+            let satisfied = enteredWaiters.filter { enteredCount >= $0.threshold }
+            enteredWaiters.removeAll { enteredCount >= $0.threshold }
+            for waiter in satisfied {
+                waiter.continuation.resume()
+            }
+        }
+    }
+}
+
+/// `vscode.window` (task 5.5a): `showInformationMessage`,
+/// `showWarningMessage` and `showErrorMessage`, wired onto a real
+/// `ExtensionHost` and a recording or suspending `ExtensionMessagePresenting`
+/// double — never `NSAlertMessagePresenter`, which this bundle has no UI to
+/// drive and no business exercising: the point of this suite is the argument
+/// parsing, the promise settlement, and the disposal races, all of which sit
+/// in `MainThreadWindow` itself, upstream of AppKit.
+@MainActor
+@Suite
+struct MainThreadWindowTests {
+
+    // MARK: - Fixtures
+
+    private func makeTempDirectory() throws -> URL {
+        try ExtensionFixtures.makeTemporaryDirectory("MainThreadWindowTests")
+    }
+
+    private func manifest(name: String, browser: String) throws -> ExtensionManifest {
+        let json = """
+        {
+            "name": "\(name)",
+            "publisher": "test",
+            "version": "1.0.0",
+            "engines": { "vscode": "^1.74.0" },
+            "browser": "\(browser)"
+        }
+        """
+        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
+    }
+
+    /// Writes `source` as the extension's `browser` entry point and returns a
+    /// host over the result. `MainThreadWindow` needs no `workspaceRoots`, so
+    /// unlike `MainThreadWorkspaceTests.makeHost` this one omits it entirely
+    /// rather than threading through a parameter nothing here would ever
+    /// pass.
+    private func makeHost(
+        name: String = "alpha",
+        source: String,
+        entryPath: String = "dist/web.js",
+        in directory: URL,
+        ledger: NotImplementedLedger = NotImplementedLedger()
+    ) throws -> ExtensionHost {
+        try ExtensionFixtures.write(source, to: entryPath, in: directory)
+        let loaded = LoadedExtension(
+            manifest: try manifest(name: name, browser: entryPath),
+            directory: directory
+        )
+        return ExtensionHost(loadedExtension: loaded, notImplementedLedger: ledger)
+    }
+
+    /// Installs all three of `window`'s members onto `host`'s `vscode.window`
+    /// namespace, exactly as a later `ExtensionsCoordinator` task will.
+    private func install(_ window: MainThreadWindow, on host: ExtensionHost) throws {
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "showInformationMessage",
+            implementation: window.showInformationMessage)
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "showWarningMessage",
+            implementation: window.showWarningMessage)
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "showErrorMessage",
+            implementation: window.showErrorMessage)
+    }
+
+    /// Polls `expression` until it evaluates to something other than
+    /// `null`/`undefined`, or gives up after two seconds — the same helper
+    /// `MainThreadWorkspaceTests` and `MainThreadCommandsTests` use, for the
+    /// same reason: a `.then()` reaction is a microtask, never invoked
+    /// synchronously no matter how settled the promise already is by the time
+    /// `evaluateScript` returns.
+    private func waitForGlobal(_ context: JSContext, _ expression: String) async throws -> JSValue? {
+        for _ in 0..<400 {
+            if let value = context.evaluateScript(expression), !value.isNull, !value.isUndefined {
+                return value
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        return nil
+    }
+
+    // MARK: - 1. No items resolves `undefined`, message and severity verbatim
+
+    /// Kills a mutation that resolves with `null`, with the message string
+    /// itself, or with any other stand-in for "nothing chosen" — an
+    /// extension's `if (result === undefined)` would read any of those as a
+    /// different answer. Also kills a mutation that drops or mangles the
+    /// message text, or that mis-tags the severity `showInformationMessage`
+    /// is supposed to carry.
+    @Test
+    func noItemsResolvesUndefinedAndThePresenterSeesTheMessageVerbatimWithInformationSeverity() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showInformationMessage('hello world').then(function (result) {
+                    globalThis.__settled = { ok: true, isUndefined: result === undefined };
+                }, function (error) {
+                    globalThis.__settled = { ok: false, message: error.message };
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == true)
+        #expect(settled.forProperty("isUndefined")?.toBool() == true)
+
+        #expect(presenter.requests.count == 1)
+        let request = try #require(presenter.requests.first)
+        #expect(request.message == "hello world")
+        #expect(severityName(request.severity) == "information")
+        #expect(request.itemTitles.isEmpty)
+    }
+
+    // MARK: - 2. showWarningMessage and showErrorMessage carry distinguishable severities
+
+    /// Two calls, one per member, in one activation. Kills a mutation that
+    /// swaps `.warning` and `.error` between the two members, or that gives
+    /// either the same severity as `showInformationMessage`. Comparing
+    /// `severityName` at each recorded request's own index (rather than
+    /// merely asserting "one warning and one error exist somewhere") also
+    /// kills a mutation that reorders which member's request lands where.
+    @Test
+    func showWarningMessageAndShowErrorMessageCarryDistinguishableSeverities() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showWarningMessage('warn-msg');
+                vscode.window.showErrorMessage('err-msg').then(function () {
+                    globalThis.__settled = true;
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__settled"))
+
+        #expect(presenter.requests.count == 2)
+        #expect(presenter.requests[0].message == "warn-msg")
+        #expect(severityName(presenter.requests[0].severity) == "warning")
+        #expect(presenter.requests[1].message == "err-msg")
+        #expect(severityName(presenter.requests[1].severity) == "error")
+    }
+
+    // MARK: - 3. String items reach the presenter as titles in order; index 1 resolves the second item
+
+    /// Kills a mutation that reverses, drops, or otherwise reorders
+    /// `itemTitles` relative to the arguments the extension passed, and a
+    /// mutation that resolves with the wrong item for a given chosen index
+    /// (off-by-one in either direction would resolve `"Alpha"` or `"Gamma"`
+    /// here instead of `"Beta"`).
+    @Test
+    func stringItemsReachThePresenterAsTitlesInOrderAndIndexOneResolvesTheSecondItem() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        presenter.responseForMessage["pick one"] = 1
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showInformationMessage('pick one', 'Alpha', 'Beta', 'Gamma').then(function (result) {
+                    globalThis.__settled = { ok: true, result: result };
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+
+        let request = try #require(presenter.requests.first)
+        #expect(request.itemTitles == ["Alpha", "Beta", "Gamma"])
+        #expect(settled.forProperty("result")?.toString() == "Beta")
+    }
+
+    // MARK: - 4. A MessageItem object resolves with the same object — identity, not title
+
+    /// Two items deliberately share a title (`"Retry"`). Kills a mutation
+    /// that resolves by re-matching the chosen title against `itemTitles`
+    /// instead of returning the original argument by index: a title-based
+    /// match cannot distinguish these two objects and would either resolve
+    /// the wrong one or resolve a value that fails both identity checks
+    /// below.
+    @Test
+    func aMessageItemObjectResolvesWithTheSameObjectEvenWhenTitlesCollide() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        presenter.responseForMessage["conflict"] = 1
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                var itemA = { title: 'Retry' };
+                var itemB = { title: 'Retry' };
+                globalThis.__itemA = itemA;
+                globalThis.__itemB = itemB;
+                vscode.window.showWarningMessage('conflict', itemA, itemB).then(function (result) {
+                    globalThis.__settled = {
+                        isItemA: result === globalThis.__itemA,
+                        isItemB: result === globalThis.__itemB
+                    };
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("isItemA")?.toBool() == false)
+        #expect(settled.forProperty("isItemB")?.toBool() == true)
+    }
+
+    // MARK: - 5. `{ modal, detail }` is read as options, not as the first item
+
+    /// Kills a mutation that treats a plain object argument as an item
+    /// regardless of position (which would make `itemTitles` non-empty
+    /// here, since `[object Object]` or a `title`-less object would either
+    /// be rejected or wrongly accepted), and a mutation that drops `modal`
+    /// or `detail` while still correctly recognising the argument as
+    /// options.
+    @Test
+    func optionsArgumentIsReadAsOptionsNotAsAnItem() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showInformationMessage('with options', { modal: true, detail: 'd' }).then(function () {
+                    globalThis.__settled = true;
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__settled"))
+
+        let request = try #require(presenter.requests.first)
+        #expect(request.itemTitles.isEmpty)
+        #expect(request.isModal == true)
+        #expect(request.detail == "d")
+    }
+
+    // MARK: - 6. An invalid item rejects, naming the argument index
+
+    /// The invalid value (`99`) sits at argument index 2 — after the message
+    /// (0) and an options object (1) — so this also kills a mutation that
+    /// miscomputes where items start once an options argument has been
+    /// consumed (which would name index 1, not 2, or accept `99` outright).
+    @Test
+    func anInvalidItemRejectsNamingTheArgumentIndex() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showErrorMessage('msg', { modal: true }, 99).then(
+                    function () { globalThis.__settled = { ok: true }; },
+                    function (error) { globalThis.__settled = { ok: false, message: error.message }; }
+                );
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        let message = try #require(settled.forProperty("message")?.toString())
+        #expect(message.contains("argument 2"))
+        #expect(presenter.requests.isEmpty)
+    }
+
+    // MARK: - 7. dispose() while genuinely suspended rejects rather than delivering a result
+
+    /// `SuspendingMessagePresenter.presentMessage` is actually parked on a
+    /// continuation — confirmed by waiting for it to enter — before
+    /// `dispose()` runs, and is released only afterward. Kills a mutation
+    /// that removes or weakens the post-`await` `!self.isDisposed` guard in
+    /// `presentMessagePromise`: without it, this test would observe
+    /// `ok: true` with the presenter's answer delivered into a torn-down
+    /// window instead of a "torn down" rejection.
+    @Test
+    func disposeWhileGenuinelySuspendedRejectsRatherThanDeliveringAResult() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = SuspendingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                globalThis.run = function () {
+                    vscode.window.showInformationMessage('suspend me').then(
+                        function () { globalThis.__settled = { ok: true }; },
+                        function (error) { globalThis.__settled = { ok: false, message: error.message }; }
+                    );
+                };
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+        await presenter.waitUntilEntered(1)
+        // `presentMessage` is now suspended, past the pre-flight guard and
+        // before the post-await guard has run.
+        window.dispose()
+        presenter.release(at: 0, with: nil)
+
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        #expect(settled.forProperty("message")?.toString()?.contains("torn down") == true)
+    }
+
+    // MARK: - 8. Two overlapping calls both settle, with the right result each
+
+    /// Both calls are confirmed genuinely overlapping — `waitUntilEntered(2)`
+    /// only returns once *both* are parked mid-`presentMessage` — and are
+    /// then released **out of order** (the second call's continuation first),
+    /// so a mutation that shares state between the two `SettlementBox`
+    /// instances, or that resolves whichever promise happens to settle last
+    /// with the wrong presenter answer, would cross the results: `__settledA`
+    /// would come back `"B2"` or `__settledB` would come back `"A1"` instead
+    /// of each answering its own call.
+    @Test
+    func twoOverlappingCallsBothSettleWithTheRightResultEach() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = SuspendingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settledA = null;
+                globalThis.__settledB = null;
+                globalThis.run = function () {
+                    vscode.window.showInformationMessage('call-a', 'A1', 'A2').then(function (r) {
+                        globalThis.__settledA = r;
+                    });
+                    vscode.window.showWarningMessage('call-b', 'B1', 'B2').then(function (r) {
+                        globalThis.__settledB = r;
+                    });
+                };
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+        await presenter.waitUntilEntered(2)
+        // Both calls are now genuinely overlapping. Release the second call
+        // first, deliberately out of arrival order.
+        presenter.release(at: 1, with: 1)
+        presenter.release(at: 0, with: 0)
+
+        let settledA = try #require(await waitForGlobal(context, "globalThis.__settledA"))
+        let settledB = try #require(await waitForGlobal(context, "globalThis.__settledB"))
+        #expect(settledA.toString() == "A1")
+        #expect(settledB.toString() == "B2")
+        #expect(presenter.requests.map(\.message) == ["call-a", "call-b"])
+    }
+
+    // MARK: - 9. An undefined `window` member still throws and is recorded
+
+    /// Proves the three installs did not flatten the rest of `vscode.window`'s
+    /// stubs: `showQuickPick` (task 5.5b's, not yet installed) still throws
+    /// the shim's own `NotImplementedError` and is recorded in the ledger.
+    /// Kills a mutation that installs the three members onto a fresh
+    /// namespace object instead of the shim's existing `vscode.window` proxy,
+    /// which would either make this call resolve as `undefined()` (a
+    /// `TypeError`, not `NotImplementedError`) or silently drop the ledger
+    /// recording.
+    @Test
+    func anUnimplementedWindowMemberRemainsAThrowingStub() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ledger = NotImplementedLedger()
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__err = null;
+                try {
+                    vscode.window.showQuickPick(['a', 'b']);
+                } catch (error) {
+                    globalThis.__err = error.name;
+                }
+            };
+            """,
+            in: directory,
+            ledger: ledger
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.__err")?.toString() == "NotImplementedError")
+        #expect(ledger.accesses.map(\.memberPath) == ["vscode.window.showQuickPick"])
+    }
+}
