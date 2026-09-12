@@ -932,14 +932,21 @@ struct MainThreadWorkspaceTests {
     /// not exist, strip nothing, and pass this test for the wrong reason —
     /// vacuously, exactly as the brief warned.
     ///
-    /// Two mutations, one each: `fsPath == privateRoot.path` kills a
-    /// revert of `workspaceFolderValue` back to
-    /// `url.standardizedFileURL.path`, since standardizing this real,
-    /// on-disk `/private` root collapses it to `/var/folders/...` and the
-    /// equality fails. `fsPath.hasPrefix("/private/")` kills a narrower
-    /// mutation that strips a leading `/private/` some other way (a
-    /// hand-written `replacingOccurrences`, say) while still passing the
-    /// first assertion by coincidence on a differently-shaped path.
+    /// One mutation kill and one fixture guard, not two mutation kills:
+    /// `fsPath == privateRoot.path` is what kills a revert of
+    /// `workspaceFolderValue` back to `url.standardizedFileURL.path`, since
+    /// standardizing this real, on-disk `/private` root collapses it to
+    /// `/var/folders/...` and the equality fails. `fsPath.hasPrefix(
+    /// "/private/")` kills nothing beyond that — `privateRoot.path` already
+    /// begins `/private/`, so nothing can pass the first assertion and fail
+    /// this one. It is a second precondition on the fixture instead, the
+    /// same family as the `#require` above: it asserts the test's own
+    /// premise, that the root the rest of this test reasons about really is
+    /// `/private`-prefixed. If `privateRoot` ever stopped being so — a
+    /// fixture edit, a change to how `URL(fileURLWithPath:isDirectory:)`
+    /// builds a path — the first assertion would keep passing while this
+    /// test silently stopped testing anything, and this is what would catch
+    /// that.
     @Test
     func workspaceFoldersAnswersAPrivatePrefixedRootWithThePrefixIntact() async throws {
         let directory = try makeTempDirectory()
