@@ -317,19 +317,107 @@ public struct ComposableTabLayoutSpec: Sendable {
     /// tree that contradicts its spec would let the user reach states the spec
     /// forbids. Offending leaves become placeholders rather than being deleted,
     /// because the shape of the layout is the user's and the content is ours.
+    ///
+    /// The repair runs both ways: a view the spec no longer allows is demoted,
+    /// and a view it *requires* and the tree does not have is added.
     public func reconcile(_ tree: LayoutNode) -> LayoutNode {
         let demoted = demotedLeaves(in: tree)
-        guard !demoted.isEmpty else { return tree }
-        return Self.demoting(tree, leaves: demoted)
+        let trimmed = demoted.isEmpty ? tree : Self.demoting(tree, leaves: demoted)
+        return addingRequiredViews(to: trimmed)
     }
 
-    /// Whether this spec would leave `tree` exactly as it is — nothing in it
-    /// for `reconcile(_:)` to demote.
+    /// The other half of the repair: a `min` the stored tree does not meet is
+    /// met, by adding the view where this spec's own blueprint puts it.
+    ///
+    /// This is what carries a layout across a release that makes a pane
+    /// mandatory. A window stored before the Document pane existed comes back
+    /// with one, beside the panes it was stored with rather than instead of
+    /// them, and every pane already there keeps the share of the window it had.
+    ///
+    /// Only a `min` declared on the spec's **root** is repaired, and only along
+    /// the root's own axis. A `min` on one side of a split says how many that
+    /// side must hold, and nothing in the spec says which of the live tree's
+    /// nodes below it should be the one to gain a pane — inventing an answer
+    /// would move panes the user arranged (`principle-of-least-astonishment`).
+    private func addingRequiredViews(to tree: LayoutNode) -> LayoutNode {
+        guard case .split(let axis, _) = kind else { return tree }
+        let required = allows.filter { $0.min > 0 }
+        guard !required.isEmpty else { return tree }
+
+        let order = Self.leafViewIDs(in: blueprint())
+        var segments = Self.chainSegments(of: tree, along: axis)
+        var added = false
+        for allowance in required {
+            while Self.count(allowance.viewID, in: segments) < allowance.min {
+                let index = Self.insertionIndex(
+                    for: allowance.viewID, among: segments, blueprintOrder: order)
+                // No fraction: a pane nobody has sized takes the share its
+                // registration asks for, which is the same share it would have
+                // had in a window opened fresh today.
+                segments.insert(.leaf(contentType: allowance.viewID), at: index)
+                added = true
+            }
+        }
+        guard added else { return tree }
+        return Self.chain(segments, axis: axis)
+    }
+
+    /// The views a chain of same-axis splits is made of, left to right.
+    ///
+    /// A tree the user has rearranged can lean either way — a pane split off
+    /// the left half nests to the left — so both halves are flattened, and what
+    /// comes back is the row as the eye reads it. The spine's own nodes are
+    /// dropped: `chain(_:axis:)` puts an equivalent one back, and a split node
+    /// carries nothing but the slot it sits in, which its segments carry
+    /// themselves.
+    private static func chainSegments(
+        of node: LayoutNode,
+        along axis: ComposableTabsAxis
+    ) -> [LayoutNode] {
+        guard case .split(let orientation, let first, let second) = node.kind,
+              orientation == axis else { return [node] }
+        return chainSegments(of: first, along: axis) + chainSegments(of: second, along: axis)
+    }
+
+    /// Where a view belongs in a row that is missing it: after the last view
+    /// the blueprint puts before it, and otherwise at the front. So a stored
+    /// layout of browser · notes gains its Document pane between the two,
+    /// exactly where a window opened today would have it.
+    private static func insertionIndex(
+        for viewID: ComposableTabsViewID,
+        among segments: [LayoutNode],
+        blueprintOrder: [ComposableTabsViewID]
+    ) -> Int {
+        guard let position = blueprintOrder.firstIndex(of: viewID) else { return segments.count }
+        let precedents = Set(blueprintOrder[..<position])
+        let last = segments.lastIndex { segment in
+            !leafViewIDs(in: segment).filter(precedents.contains).isEmpty
+        }
+        return last.map { $0 + 1 } ?? 0
+    }
+
+    private static func leafViewIDs(in node: LayoutNode) -> [ComposableTabsViewID] {
+        leaves(in: node).compactMap { leaf in
+            guard case .leaf(let contentType, _) = leaf.kind else { return nil }
+            return contentType
+        }
+    }
+
+    private static func count(_ viewID: ComposableTabsViewID, in segments: [LayoutNode]) -> Int {
+        segments.reduce(0) { $0 + leafViewIDs(in: $1).filter { $0 == viewID }.count }
+    }
+
+    /// Whether there is nothing in `tree` for `reconcile(_:)` to demote.
     ///
     /// The question a rearrangement has to ask before it commits: moving a pane
     /// can land it in a region whose spec does not allow that view, and a tree
     /// the user is looking at which the next load will gut is worse than an
     /// arrow that was never offered (`fail-fast`).
+    ///
+    /// Deliberately silent about the other half of the repair. A move carries a
+    /// pane from one slot to another and changes no count, so a tree that met
+    /// every `min` before a move still meets it after — the only way to fail
+    /// one is to remove a pane, which `canRemove(_:from:)` already refuses.
     public func allows(_ tree: LayoutNode) -> Bool {
         demotedLeaves(in: tree).isEmpty
     }

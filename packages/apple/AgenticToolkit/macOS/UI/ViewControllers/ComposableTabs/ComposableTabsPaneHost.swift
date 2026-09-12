@@ -41,13 +41,13 @@ extension ComposableTabsViewController: PaneHost {
         // pane the spec will not let go of keeps its zoom instead of quietly
         // losing it on every rejected click.
         //
-        // And a refusal is said out loud. `PaneHost` gives the pane no
-        // `canClose` to grey its button with, deliberately — the host decides,
-        // and it may decide differently a moment later — so the only place the
-        // "no" can be reported is here, where it is made. Arrange mode's
-        // `confirmAndRemove()` already beeps at exactly this refusal; the title
-        // bar's close button reached the same rule and said nothing, which
-        // reads as a dead button rather than a protected pane.
+        // And a refusal is still said out loud, even though `canClose(_:)` now
+        // greys the button the spec vetoes. The two are not redundant: the grey
+        // button answers the user who is looking at it, and this answers every
+        // click that arrives anyway — a scripted close, a pane whose controls
+        // have not been refreshed since the tree changed, or the first guard
+        // below, which is a wiring fact no button can predict. Arrange mode's
+        // `confirmAndRemove()` beeps at exactly this refusal too.
         guard layoutChildren.contains(where: { $0.viewController === leaf }),
               (rootSplit() ?? self).canRemoveLeaf(leaf) else {
             RefusalFeedback.announce()
@@ -57,6 +57,19 @@ extension ComposableTabsViewController: PaneHost {
         // every other pane collapsed with nothing to restore them.
         if rootSplit()?.zoomedLeaf === leaf { setZoomedLeaf(nil) }
         remove(leaf)
+    }
+
+    /// The spec's veto, asked before the click instead of after it.
+    ///
+    /// Deliberately the same call `paneDidRequestClose` guards on, from the same
+    /// root: one rule, one implementation, and a button that cannot say yes to
+    /// something the close would then refuse (`dry`). `refreshPaneControls()`
+    /// re-asks this for every pane whenever the tree changes, so a pane that
+    /// becomes closable — the tab gains a second file browser, say — gets its
+    /// button back without anything else having to notice.
+    public func canClose(_ pane: PaneViewController) -> Bool {
+        guard let leaf = pane as? ComposableTabsPaneViewController else { return true }
+        return (rootSplit() ?? self).canRemoveLeaf(leaf)
     }
 
     // MARK: - Minimizing
