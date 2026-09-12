@@ -1024,6 +1024,19 @@ struct ExtensionHostTests {
     /// not a flag. A `fetch` reach is in here too: the shim's `fetch` stub is
     /// the standing record of a deliberate decision, and it must show up in
     /// the same ledger the report reads.
+    ///
+    /// `vscode.Uri.file('/tmp')` is deliberately **not** one of the two
+    /// recorded reaches any more. Task 5.4a installed a real `vscode.Uri`
+    /// class (eagerly, ahead of any extension code), so the member is
+    /// implemented rather than missing, and recording a successful call as a
+    /// not-implemented access would be the wrong answer for task 5.8's
+    /// report. This test now pins the other half of that change instead: the
+    /// call succeeds, through a real host, and answers a genuine `Uri`
+    /// instance — the one place in this suite that reaches `vscode.Uri`
+    /// through `ExtensionHost` rather than a bare `JSContext` (see
+    /// `UriTests`, which covers the class and the bridge directly, and
+    /// `MainThreadCommandsTests.vscodeUriIsUsableAndFrozenThroughARealHost`,
+    /// which additionally pins the freeze this task's fix round added).
     @Test
     func distinctMembersAreRecordedSeparatelyIncludingFetch() async throws {
         let directory = try makeTempDirectory()
@@ -1036,9 +1049,12 @@ struct ExtensionHostTests {
             exports.activate = function () {
                 var reached = [];
                 try { vscode.window.showInformationMessage('hi'); } catch (error) { reached.push(error.memberPath); }
-                try { vscode.Uri.file('/tmp'); } catch (error) { reached.push(error.memberPath); }
                 try { fetch('https://example.com'); } catch (error) { reached.push(error.memberPath); }
                 console.log(reached.join(','));
+
+                var uri = vscode.Uri.file('/tmp');
+                globalThis.__uriFileSucceeded =
+                    uri instanceof vscode.Uri && uri.scheme === 'file' && uri.path === '/tmp';
             };
             """,
             in: directory,
@@ -1051,11 +1067,15 @@ struct ExtensionHostTests {
 
         try await host.activate()
 
-        #expect(recorder.texts == ["vscode.window.showInformationMessage,vscode.Uri,fetch"])
+        #expect(recorder.texts == ["vscode.window.showInformationMessage,fetch"])
         #expect(ledger.accesses.map(\.memberPath) == [
-            "fetch", "vscode.Uri", "vscode.window.showInformationMessage"
+            "fetch", "vscode.window.showInformationMessage"
         ])
         #expect(ledger.accesses.allSatisfy { $0.count == 1 })
+
+        let context = try #require(host.javaScriptContext)
+        let uriFileSucceeded = try #require(context.evaluateScript("globalThis.__uriFileSucceeded"))
+        #expect(uriFileSucceeded.toBool() == true)
     }
 
     /// One ledger, two extensions: the rows stay attributed. Task 5.8's report

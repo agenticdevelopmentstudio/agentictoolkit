@@ -927,13 +927,21 @@ public final class ExtensionHost {
         // caches the command-dispatch trampoline under its non-configurable,
         // non-writable global *before* anything else in this context can
         // write to that name first. See `VSCodeAPI.sharedHelper(in:)` for
-        // exactly what that closes (a same-named top-level assignment the
-        // extension makes afterwards becomes a silent sloppy-mode no-op
-        // instead of being adopted) and what it cannot (a context this call
-        // does not succeed in still falls back to the old lazy install, with
-        // the old window). Not fatal to activation: a context that cannot
-        // host the trampoline yet is exactly what the lazy fallback exists
-        // for, and `installTrampoline(in:)` has already logged the failure.
+        // exactly what that closes and what it cannot. A same-named top-level
+        // assignment the extension makes afterwards has one of two outcomes,
+        // not one: in sloppy-mode extension code it is a silent no-op
+        // (`helperSource` also freezes the trampoline object itself, not
+        // just the global binding, so a member-level hijack like
+        // `.call = ...` no-ops the same way); in strict-mode extension code —
+        // what a `tsc`-compiled extension's own `"use strict"` prologue makes
+        // its top-level statements — the identical assignment throws
+        // `TypeError` instead, and that failure is the extension's own module
+        // evaluation failing, which fails its own activation. What this call
+        // cannot do: a context it does not succeed in still falls back to
+        // the old lazy install, with the old window. Not fatal to
+        // activation: a context that cannot host the trampoline yet is
+        // exactly what the lazy fallback exists for, and
+        // `installTrampoline(in:)` has already logged the failure.
         VSCodeAPI.installTrampoline(in: context)
 
         // Same eagerness, for `vscode.Uri`: installed directly into the local
