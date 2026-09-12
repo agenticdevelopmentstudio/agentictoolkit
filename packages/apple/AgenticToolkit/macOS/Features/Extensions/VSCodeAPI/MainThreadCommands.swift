@@ -201,6 +201,21 @@ public final class MainThreadCommands {
     /// the logging happens here, on the one path both share, rather than in
     /// `handleExecuteCommand`.
     ///
+    /// **One rule decides whether it is logged: is anyone waiting on it.** An
+    /// extension that writes
+    /// `try { await vscode.commands.executeCommand('x') } catch { … }` has
+    /// handled its own failure correctly and completely, so logging it at
+    /// `error` in the host's subsystem would report an extension behaving
+    /// properly as an app fault, and at volume. The round-1 ruling this
+    /// descends from said a palette dispatch is logged and swallowed *because
+    /// there is no caller to tell* — so where there is a caller, the caller is
+    /// told and the log stays quiet. `dispatchHasCaller` is that bit, and both
+    /// failure shapes below read it: one rule rather than two, which is also
+    /// the cheaper thing to keep true as tasks 5.4–5.7 copy this ceremony.
+    /// Note what this does *not* touch: the exception still never reaches
+    /// `ExtensionHost.pendingException` on either path. F3/F4 were about where
+    /// it goes, not about who writes it down.
+    ///
     /// **An `async` callback does not throw — it rejects**, and a rejection is
     /// not a return value either path can notice: the call itself succeeded,
     /// and the failure arrives on a later microtask. So on the caller-less
@@ -209,17 +224,14 @@ public final class MainThreadCommands {
     /// of `async () => { throw new Error('disk full') }` produce a log line
     /// instead of complete silence. Attaching it does not consume the
     /// rejection: the value handed back is still the extension's own promise,
-    /// still rejecting.
+    /// still rejecting. On the caller's path nothing is attached at all —
+    /// the extension's own `await` is the observer.
     ///
-    /// **Only on the caller-less path**, and the asymmetry is the whole point
-    /// of `dispatchHasCaller`. An extension that writes `try { await
-    /// vscode.commands.executeCommand('x') } catch { … }` has handled its own
-    /// failure correctly and completely; logging it at `error` in the host's
-    /// subsystem would report an extension behaving properly as an app fault,
-    /// and at volume. The round-1 ruling this descends from said a palette
-    /// dispatch is logged and swallowed *because there is no caller to tell* —
-    /// so where there is a caller, the caller is told and the log stays quiet.
-    /// The extension owns the rejection; the palette has nobody to own it.
+    /// The one report that is *not* conditional is `.unavailable`. That is a
+    /// host fault rather than an extension's, the extension is told as well
+    /// (its promise rejects), and an operator who has to know the host could
+    /// not dispatch at all should not need an extension to have been written
+    /// without an `await` before it reaches the log.
     ///
     /// Deliberately **not** made to throw. `AppCommand.run` is `([Any]) ->
     /// Any?` and staying that way keeps the registry free of any knowledge
@@ -245,11 +257,20 @@ public final class MainThreadCommands {
             }
             return value
         case .threw(let exception):
-            logger.error(
-                """
-                Extension command '\(commandID, privacy: .public)' threw: \
-                \(exception.toString() ?? "<unprintable>", privacy: .public)
-                """)
+            // Same rule as the rejection above, and deliberately one rule
+            // rather than two: an extension awaiting `executeCommand` receives
+            // this as a rejection and owns it. What F3/F4 were about is where
+            // the exception *goes* — never into
+            // `ExtensionHost.pendingException` — and `VSCodeAPI.call` still
+            // guarantees that on both paths. Whether the adaptor also logs is
+            // a separate question, answered here by who is listening.
+            if !dispatchHasCaller {
+                logger.error(
+                    """
+                    Extension command '\(commandID, privacy: .public)' threw: \
+                    \(exception.toString() ?? "<unprintable>", privacy: .public)
+                    """)
+            }
             return CallbackFailure(reason: exception)
         case .unavailable:
             // The callback was never invoked. `VSCodeAPI` has already logged
@@ -272,6 +293,20 @@ public final class MainThreadCommands {
     /// `CommandRegistry.execute(id:)`, which returns `Void` and has nobody to
     /// tell.
     ///
+    /// **`static` because the bit belongs to the dispatch, not to the
+    /// adaptor** — this is the reason, and it is not a compromise. When
+    /// extension A awaits a command extension B registered, B's callback is
+    /// running on a path that genuinely has a caller, and B's adaptor is not
+    /// the one that knows it. A per-adaptor flag would read `false` there and
+    /// log B's rejection as though nobody were waiting on it, which is the
+    /// exact noise this exists to remove. **Do not "fix" this into an instance
+    /// property.** A second reason points the same way: the closure
+    /// `handleRegisterCommand` hands to `CommandRegistry` captures no `self`,
+    /// which is what keeps the adaptor out of the registry's retain graph and
+    /// what the class doc's teardown paragraph rests on — reaching an instance
+    /// flag from `invoke` would have to reintroduce exactly that edge, or read
+    /// a weak reference that is `nil` after teardown and answer wrongly.
+    ///
     /// **Yes, this is save-and-restore around a call, which is the shape
     /// `absorbingExceptions` was withdrawn for two rounds ago.** The
     /// distinction matters enough to write down, because the next reader will
@@ -286,16 +321,6 @@ public final class MainThreadCommands {
     /// owning no resource anyone else depends on. Nesting is correct by
     /// construction: a command that dispatches another command restores the
     /// outer value on the way out.
-    ///
-    /// `static`, not an instance property, and that is deliberate twice over.
-    /// The closure `handleRegisterCommand` hands to `CommandRegistry`
-    /// captures no `self` — which is what keeps the adaptor out of the
-    /// registry's retain graph, and what the class doc's teardown paragraph
-    /// depends on — so an instance flag would have to be reached through a
-    /// capture that reintroduces exactly that edge. And the bit describes the
-    /// *dispatch*, not the adaptor: when extension A awaits a command
-    /// registered by extension B, B's adaptor is on a path that genuinely has
-    /// a caller, and a per-adaptor flag would get that backwards.
     private static var dispatchHasCaller = false
 
     /// Runs `body` with `dispatchHasCaller` set, restoring whatever it was

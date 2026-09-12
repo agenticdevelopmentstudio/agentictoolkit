@@ -1000,6 +1000,88 @@ struct MainThreadCommandsTests {
         #expect(observed.isNull)
     }
 
+    /// A dispatch that cannot be performed **rejects**, and never reads as a
+    /// successful `void` command.
+    ///
+    /// This is the one test that exercises `CallOutcome.unavailable` end to
+    /// end, and therefore the only thing standing under item 4's whole reason
+    /// for existing: before it, `call` answered `.returned(nil)` on this path,
+    /// which resolves the extension's promise with `undefined` — precisely
+    /// what a successful callback returning nothing answers. The extension was
+    /// told its command had run when nothing had.
+    ///
+    /// The genuinely-uninstallable context is not reachable from a test
+    /// without a test-only seam in `VSCodeAPI`, which is shared ceremony that
+    /// tasks 5.4–5.7 would inherit. So the failure is provoked from the other
+    /// side of the same choke point: the extension's module code pre-empts the
+    /// trampoline's global with an object whose `call` answers something that
+    /// is not the contracted `{ ok, … }` record. `VSCodeAPI.sharedHelper`
+    /// adopts it (it is an object, and by design nothing here can prove an
+    /// object's provenance to JavaScript), `outcome(of:in:)` refuses the
+    /// record, and the dispatch lands in exactly the handling a missing
+    /// trampoline reaches.
+    ///
+    /// **This test depends on the trampoline's global name**, and that is the
+    /// deliberate trade. The name is already a documented part of the design
+    /// with its own doc comment on `helperGlobalName`, so a test that must be
+    /// updated when it changes is honest coupling; the alternative was leaving
+    /// the fail-fast path asserted by nothing at all.
+    @Test
+    func aPreemptedTrampolineMakesTheDispatchFailRatherThanLookSuccessful() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            // Top-level, so it runs before the host's first use of the
+            // trampoline and is adopted in its place.
+            globalThis.__vscodeAPITrampoline = {
+                call: function () { return { impostor: true }; },
+                thenOf: function () { return { impostor: true }; }
+            };
+            exports.activate = function () {
+                globalThis.__callbackRan = false;
+                vscode.commands.registerCommand('ext.preempted', function () {
+                    globalThis.__callbackRan = true;
+                    return 'this value must never reach the caller';
+                });
+                globalThis.__settled = null;
+                globalThis.run = function () {
+                    (async function () {
+                        try {
+                            var value = await vscode.commands.executeCommand('ext.preempted');
+                            globalThis.__settled = { ok: true, value: String(value) };
+                        } catch (error) {
+                            globalThis.__settled = { ok: false, message: String(error.message) };
+                        }
+                    })();
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        // Rejected, not resolved with `undefined`. The `ok` here is the
+        // test fixture's own flag, not the trampoline record's.
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        let message = settled.forProperty("message")?.toString() ?? ""
+        #expect(message.contains("dispatch trampoline"))
+
+        // The impostor never called the real callback, and the adaptor did not
+        // paper over that by answering as though it had.
+        let callbackRan = try #require(context.evaluateScript("globalThis.__callbackRan"))
+        #expect(callbackRan.toBool() == false)
+    }
+
     /// An object passed to `executeCommand` and handed straight back is the
     /// **same** object in JavaScript — `===`, with the mutations the callback
     /// made visible to the caller.
