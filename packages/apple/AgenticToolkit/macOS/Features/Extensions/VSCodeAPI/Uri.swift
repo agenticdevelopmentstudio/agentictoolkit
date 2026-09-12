@@ -278,15 +278,40 @@ extension VSCodeAPI {
     /// `uriClassSource` does both before caching either.** `Uri.parse`,
     /// `Uri.file`, `Uri.joinPath` and every prototype accessor and method are
     /// therefore non-writable and non-configurable from the moment extension
-    /// code can first see them: `vscode.Uri.parse = function () { … }`
-    /// answers `undefined` in sloppy mode and throws `TypeError` in strict
-    /// mode, in both cases leaving the property untouched. What freezing does
-    /// **not** do is stop code from reshaping the class before this function
-    /// ever installs it, or from replacing what `uriClassGlobalName` is bound
-    /// to — the binding itself is `writable: false, configurable: false`, so
-    /// there is nothing left to replace it with, but a context in which this
-    /// evaluation itself was somehow tampered with before it ran is out of
-    /// scope for the same reason it is for `helperSource`.
+    /// code can first see them: `vscode.Uri.parse = function () { … }`, in
+    /// sloppy-mode extension code, *evaluates to* `'X'` or whatever was
+    /// assigned — a sloppy-mode assignment to a non-writable property answers
+    /// the assigned value, not `undefined` — while `Uri.parse` itself stays
+    /// the original function; the same assignment in strict-mode extension
+    /// code throws `TypeError` instead. In neither case is the property
+    /// touched. What freezing does **not** do is stop code from reshaping the
+    /// class before this function ever installs it, or from replacing what
+    /// `uriClassGlobalName` is bound to — the binding itself is
+    /// `writable: false, configurable: false`, so there is nothing left to
+    /// replace it with once installed.
+    ///
+    /// **The residual this leaves is not out of scope — it is the same
+    /// lazy-adoption window `sharedHelper(in:)` documents at length, landed
+    /// on `Uri` instead of the trampoline.** `ExtensionHost.installRuntime`
+    /// installs the real `Uri` eagerly, before any extension code runs; a
+    /// context where that eager install did not happen or failed reaches
+    /// this function the same way `sharedHelper(in:)` is reached lazily —
+    /// from the first caller that needs `Uri` after the extension's own
+    /// top-level code has already had a chance to run — and this function
+    /// adopts whatever object already sits under `uriClassGlobalName`, real
+    /// or not, with no way to tell the difference. What depends on that: this
+    /// function is the one `uriValue(for:in:)` calls before doing an
+    /// unguarded `Uri.parse.call(withArguments:)` (see that function, below)
+    /// rather than the defensive `call(_:thisArg:arguments:)` guard
+    /// `url(from:in:)` uses —
+    /// safe only because a *genuinely* frozen `Uri.parse` from
+    /// `uriClassSource` cannot throw on a `URL`'s own `absoluteString`. An
+    /// extension that won the lazy-adoption window and supplied its own
+    /// `Uri` is under no such obligation: its `parse` can throw on anything,
+    /// and that throw lands directly in `ExtensionHost.pendingException` with
+    /// no guard between it and this call. This is the original F2 defect
+    /// (`Uri` reachable before it is trustworthy), narrowed by the freeze to
+    /// its one remaining corner rather than eliminated.
     public static func installUriClass(in context: JSContext) -> JSValue? {
         if let cached = context.objectForKeyedSubscript(uriClassGlobalName), cached.isObject {
             return cached
