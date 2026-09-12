@@ -48,6 +48,20 @@ public final class FileBrowserViewController: NSViewController {
         set { tree.onOpenRequest = newValue }
     }
 
+    /// Moves the highlight onto a file an editor has come into focus showing,
+    /// opening whatever folders it takes to get there. The return trip of
+    /// `onOpenRequest`, and forwarded for the same reason: `tree` is internal,
+    /// and the host wiring these two panes together is outside the module.
+    public func reveal(_ url: URL) {
+        tree.reveal(url)
+    }
+
+    /// Clears the highlight — the editor the tree is following has no file
+    /// open, so there is nothing in the tree to point at.
+    public func revealNothing() {
+        tree.revealNothing()
+    }
+
     /// Watches `selection` so `onPaneSelectionChange` fires for every way a
     /// file gets selected — the tree, a restore, a host setting it directly —
     /// rather than only for the clicks the tree happens to route through a
