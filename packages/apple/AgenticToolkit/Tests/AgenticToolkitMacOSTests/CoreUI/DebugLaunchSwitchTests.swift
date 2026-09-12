@@ -37,6 +37,10 @@ final class DebugLaunchSwitchTests: XCTestCase {
         #endif
     }
 
+    /// `@MainActor` because `QuietWindowPresentation` is, and this is the only
+    /// test here that reads it — the rest exercise `DebugLaunchSwitch` itself,
+    /// which is nonisolated, and must stay nonisolated to keep saying so.
+    @MainActor
     func testTheKeyIsTheArgumentName() {
         // `open --args -QuietWindowPresentation YES` writes the argument domain
         // under exactly this name; if the two ever diverge the switch silently

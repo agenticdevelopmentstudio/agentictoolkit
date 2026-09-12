@@ -41,6 +41,11 @@ final class WindowStateNamespaceTests: XCTestCase {
 
     // MARK: - What the namespace is for
 
+    /// `@MainActor` because `WindowStateStorage` is, and this is the only test
+    /// here that touches an implementation of it — the rest exercise
+    /// `WindowStateNamespace`'s nonisolated statics and must stay nonisolated
+    /// to keep saying so.
+    @MainActor
     func testANamespacedInstanceNeitherReadsNorClobbersTheSharedLayout() throws {
         let storage = UserDefaultsWindowStateStorage(
             keyPrefix: "TestWindowState_\(UUID().uuidString)_",
