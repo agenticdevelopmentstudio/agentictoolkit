@@ -176,6 +176,35 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
         return plan
     }
 
+    /// The position in a `buttonPlan(for:)` result that should be given
+    /// Escape explicitly — the cancel slot, `plan.count - 1` — or `nil` when
+    /// no button should be given it, which is a plan of one entry or none.
+    ///
+    /// **`internal`, not `private`, deliberately,** for the same reason as
+    /// `buttonPlan(for:)`: `MainThreadWindowTests` reaches this through
+    /// `@testable import AgenticToolkitMacOS`, and it is otherwise
+    /// unreachable from a test — its caller is the rendering half, which
+    /// needs an `NSAlert` this bundle has no UI to drive. Tightening it back
+    /// to `private` compiles here and breaks that suite.
+    ///
+    /// **Why one entry is the exception.** The cancel slot is always the
+    /// plan's last entry, so with two or more entries it is never the *first*
+    /// button and Escape costs nothing. With exactly one entry that slot is
+    /// also the first button, and two header facts collide: `NSAlert.h:96`,
+    /// the doc on `-addButtonWithTitle:`, gives the first button a key
+    /// equivalent of Return by default, while `NSButton.h:164` says
+    /// `keyEquivalent` is a single `NSString` — "Setting the key equivalent to
+    /// the Return character causes it to act as the default button for its
+    /// window." Assigning Escape therefore *replaces* Return, and the
+    /// default-button status with it. Nothing is bought by the trade: a
+    /// one-entry plan means no item survived the skip, so — `presentMessage`
+    /// having already short-circuited on empty `itemTitles` — every item is
+    /// flagged and the only button *is* the close affordance. Return on it
+    /// already produces the outcome Escape would.
+    static func escapeKeyEquivalentPosition(in plan: [Int?]) -> Int? {
+        plan.count > 1 ? plan.count - 1 : nil
+    }
+
     /// Adds one button per `buttonPlan(for:)` entry, in plan order — the
     /// item's own title for an entry naming an item, `"Cancel"` for the `nil`
     /// entry — and returns that plan unchanged. `presentMessage` reads the
@@ -184,7 +213,11 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// `itemTitles`, which no longer holds once a button has been skipped.
     ///
     /// **The final button — always the cancel slot — is given Escape
-    /// explicitly.** `NSAlert.h:96`, the doc on `-addButtonWithTitle:`, gives
+    /// explicitly, but only when there is more than one button:**
+    /// `escapeKeyEquivalentPosition(in:)` decides, because on a one-button
+    /// alert that slot is also the first button and the assignment would take
+    /// away the Return it has by default (see that function's doc).
+    /// `NSAlert.h:96`, the doc on `-addButtonWithTitle:`, gives
     /// Escape only to a button whose *title* is "Cancel", so the
     /// close-affordance path, where the slot carries the flagged item's own
     /// title, would otherwise have no Escape at all — and that is the path
@@ -198,10 +231,11 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// `- Returns: The button that was added to the alert.`).
     private static func addButtons(for request: ExtensionMessageRequest, to alert: NSAlert) -> [Int?] {
         let plan = buttonPlan(for: request)
+        let escapePosition = escapeKeyEquivalentPosition(in: plan)
         for (position, itemIndex) in plan.enumerated() {
             let title = itemIndex.map { request.itemTitles[$0] } ?? "Cancel"
             let button = alert.addButton(withTitle: title)
-            if position == plan.count - 1 {
+            if position == escapePosition {
                 button.keyEquivalent = "\u{1b}"
             }
         }
