@@ -132,14 +132,29 @@ public enum VSCodeAPI {
     /// then superseded by the exception rather than reaching JavaScript as a
     /// value — *provided the exception was built*. `JSValue(newErrorFromMessage:in:)`
     /// imports as an implicitly unwrapped optional, and if it ever answers
-    /// nothing this assigns `nil` to `context.exception`, which clears it: the
-    /// member returns `undefined` and the extension sees a silent success. No
-    /// caller can distinguish the two outcomes from the `nil`, which is why
-    /// this is written down rather than guarded — the guard would have nothing
-    /// better to do.
+    /// nothing, assigning that to `context.exception` would clear it instead
+    /// of setting it: the member would return `undefined` and the extension
+    /// would see a silent success where it should have seen a thrown error.
+    /// No caller can distinguish the two outcomes from the `nil` this function
+    /// itself returns, and there is no channel back to the *extension* for
+    /// that failure — raising is the only channel this function has, and it
+    /// is the one that just failed. What is left is the host's own log, which
+    /// is what the guard below writes to before making the same assignment
+    /// either way; nothing here can make the extension's view of the call any
+    /// more honest than "it returned `undefined`."
     @discardableResult
     public static func raise(_ message: String, in context: JSContext) -> JSValue? {
-        context.exception = JSValue(newErrorFromMessage: message, in: context)
+        let error = JSValue(newErrorFromMessage: message, in: context)
+        if error == nil {
+            logger.error(
+                """
+                JSValue(newErrorFromMessage:in:) answered nothing while raising \
+                '\(message, privacy: .public)' in context '\(name(of: context), privacy: .public)'; \
+                the assignment below clears 'context.exception' instead of setting it, so the \
+                extension sees this call return 'undefined' rather than throw
+                """)
+        }
+        context.exception = error
         return nil
     }
 
@@ -487,15 +502,23 @@ public enum VSCodeAPI {
     /// **This check catches a trampoline that *returns* the wrong thing. It
     /// does not, and cannot, catch one that *throws*.** Be precise about the
     /// difference, because an earlier ruling was not. `sharedHelper(in:)`
-    /// adopts whatever object it finds under the trampoline's global name, and
-    /// an extension's own top-level code runs before the first command
-    /// dispatch, so an extension can get there first and be adopted. No
-    /// identity check fixes that — a JavaScript object cannot prove its
-    /// provenance to JavaScript, and every test a liar would have to pass, a
-    /// liar can fake. What this function does is refuse the *answers* such an
-    /// object gives: a record that is not an object, or whose `ok` is absent or
-    /// not a boolean, is `.unavailable`, so the dispatch fails loudly instead
-    /// of being read as a successful call.
+    /// adopts whatever object it finds under the trampoline's global name. For
+    /// a context `ExtensionHost.installRuntime` successfully installs the real
+    /// trampoline into before any extension code runs, that adoption risk is
+    /// closed — see `sharedHelper(in:)` for why a same-named top-level
+    /// assignment made afterwards is a silent no-op rather than a
+    /// replacement. It remains open only for a context where that eager
+    /// install did not happen or failed: there, `sharedHelper(in:)` is first
+    /// reached the old way, lazily, from the first dispatch — after the
+    /// extension's own top-level code has already run — and an extension that
+    /// defined the global first is adopted. No identity check fixes that in
+    /// either case — a JavaScript object cannot prove its provenance to
+    /// JavaScript, and every test a liar would have to pass, a liar can fake.
+    /// What this function does, regardless of which of those two situations
+    /// produced the object, is refuse the *answers* it gives: a record that is
+    /// not an object, or whose `ok` is absent or not a boolean, is
+    /// `.unavailable`, so the dispatch fails loudly instead of being read as a
+    /// successful call.
     ///
     /// An impostor whose `call` **throws** is a different case and reaches
     /// none of this. The exception leaves `callWithArguments:` through
@@ -626,25 +649,71 @@ public enum VSCodeAPI {
     /// up in `Object.keys(globalThis)` and cannot be replaced **once this code
     /// has installed it**.
     ///
-    /// That last clause is the real guarantee, and it is narrower than it
-    /// looks. This function adopts whatever object it finds under the name,
-    /// and extension module code runs before the first command dispatch in an
-    /// environment `extension-runtime.js` is explicit is not a sandbox — so an
-    /// extension that defines the global first is adopted and the
-    /// `defineProperty` below never runs. Nothing here can prevent that: a
-    /// JavaScript object cannot prove its provenance to JavaScript. What is
-    /// bounded instead is what a liar gains, and the answer is nothing outside
-    /// its own context. Two mechanisms, and only the first is a check:
-    /// `outcome(of:in:)` refuses every malformed record an impostor *returns*,
-    /// and an impostor that *throws* instead lands its exception in its own
-    /// host's `pendingException`, where it confuses that extension's own
-    /// activation report and nobody else's. An extension that pre-empts this
-    /// global is lying to its own dispatches and breaking its own commands.
+    /// That last clause is the real guarantee, and it used to be the whole
+    /// story: this function adopts whatever object it finds under the name,
+    /// and if this were the *first* code ever to touch that global — as it
+    /// was before `installTrampoline(in:)` existed, when the only caller was
+    /// `helperFunction(_:in:)` on an extension's first dispatch — an extension
+    /// whose top-level code defined the same name first would be adopted,
+    /// because at that point there is nothing under the name yet for a
+    /// `defineProperty` to lose a race against.
+    ///
+    /// `ExtensionHost.installRuntime` closes that window **for a context it
+    /// successfully installs into**, by calling `installTrampoline(in:)`
+    /// before any extension code runs. Once this function's own
+    /// `defineProperty` below has installed the real trampoline there, the
+    /// property is non-configurable and non-writable, and neither the
+    /// extension's module wrapper nor its own top-level statements carry
+    /// `'use strict'` — so a same-named assignment the extension makes
+    /// afterwards is a silent no-op in sloppy mode, not a replacement. The
+    /// real trampoline is what every later dispatch in that context finds.
+    ///
+    /// What follows is the bound for the narrower case that is left: a
+    /// context where the eager install did not happen at all, or ran and
+    /// failed before caching anything — `installRuntime` does not treat
+    /// either as fatal to activation, see `installTrampoline(in:)`. For such a
+    /// context, this function is first reached the old way, lazily, from the
+    /// first dispatch — after the extension's own module code has already
+    /// run — and extension module code runs in an environment
+    /// `extension-runtime.js` is explicit is not a sandbox, so an extension
+    /// that defines the global first there is adopted exactly as before.
+    /// Nothing here can prevent that: a JavaScript object cannot prove its
+    /// provenance to JavaScript. What is bounded instead is what a liar
+    /// gains, and the answer is nothing outside its own context. Two
+    /// mechanisms, and only the first is a check: `outcome(of:in:)` refuses
+    /// every malformed record an impostor *returns*, and an impostor that
+    /// *throws* instead lands its exception in its own host's
+    /// `pendingException`, where it confuses that extension's own activation
+    /// report and nobody else's. An extension that pre-empts this global is
+    /// lying to its own dispatches and breaking its own commands.
     ///
     /// It is not withdrawn the way `__host` and `__extensionRuntime` are,
     /// because unlike those it is not a line back into the app: it is a pure
     /// JavaScript function holding no host reference, and an extension gains
     /// nothing from it that its own `try`/`catch` does not already give it.
+    ///
+    /// Evaluates and caches the command-dispatch trampoline in `context`,
+    /// ahead of any extension code running.
+    ///
+    /// A public entry point onto `sharedHelper(in:)` for one caller:
+    /// `ExtensionHost.installRuntime`, which calls this before
+    /// `evaluateModule` so the global `sharedHelper(in:)` caches under is
+    /// already the real trampoline by the time the extension's own top-level
+    /// code runs — see `sharedHelper(in:)`'s own doc for exactly what window
+    /// that closes, and for the one it can only ever narrow rather than
+    /// close outright.
+    ///
+    /// Not fatal to activation on failure. `sharedHelper(in:)` already logs
+    /// and answers `nil` if the eager attempt does not succeed, and the lazy
+    /// path through `call(_:thisArg:arguments:)` / `canDispatch(in:)` remains
+    /// the fallback for a context this call did not install into — it simply
+    /// evaluates `helperSource` again, later, the first time something asks
+    /// for it.
+    @discardableResult
+    public static func installTrampoline(in context: JSContext) -> JSValue? {
+        sharedHelper(in: context)
+    }
+
     private static func sharedHelper(in context: JSContext) -> JSValue? {
         if let cached = context.objectForKeyedSubscript(helperGlobalName), cached.isObject {
             return cached
@@ -665,7 +734,11 @@ public enum VSCodeAPI {
     /// with a stand-in for the unnamed case. `JSContext.name` arrives from
     /// Objective-C as an implicitly unwrapped `String!`, so the fallback is
     /// not decoration.
-    private static func name(of context: JSContext) -> String {
+    ///
+    /// Not `private`: `Uri.swift` and the sub-namespace helper below need the
+    /// same fallback for their own log lines, and a second copy of one
+    /// `?? "<unnamed>"` is worse than widening this by one access level.
+    static func name(of context: JSContext) -> String {
         context.name ?? "<unnamed>"
     }
 
@@ -677,14 +750,221 @@ public enum VSCodeAPI {
         }
         return function
     }
+
+    // MARK: - Sub-namespaces
+
+    /// The global `subNamespaceFactory(in:)` caches its factory function
+    /// under, once per context.
+    private static nonisolated let subNamespaceFactoryGlobalName = "__vscodeSubNamespaceFactory"
+
+    /// A `makeStubNamespace(path, table)` factory, evaluated at most once per
+    /// `JSContext` — the same throw-on-unimplemented-member `Proxy` shape
+    /// `extension-runtime.js`'s own (frozen, private) `makeStubNamespace`
+    /// builds for `vscode`, `vscode.commands`, `vscode.workspace` and their
+    /// siblings, made available to Swift for the sub-namespaces *those*
+    /// namespaces contain — `vscode.workspace.fs`, for one, which task 5.4c
+    /// needs and this task does not build.
+    ///
+    /// **Deliberately missing one thing `extension-runtime.js`'s version has:
+    /// recording.** The real `makeStubNamespace` calls `host.recordNotImplemented`
+    /// and `host.recordNegativeProbe` on every miss and every quiet probe, so
+    /// task 5.8's report can say what an extension reached for. `VSCodeAPI` is
+    /// a stateless, caseless enum with no `ExtensionHost` handle and no
+    /// `NotImplementedLedger` reference — and by design: `__host`, the one
+    /// bridge back to a host instance's recording methods, is deleted from
+    /// `globalThis` at the end of `ExtensionHost.installRuntime`, specifically
+    /// so extension code cannot reach it after activation. Reintroducing that
+    /// reach here would mean threading a per-host recording callback through
+    /// this call and through `ExtensionHost.defineVSCodeMember` and through
+    /// whatever adaptor calls `subNamespace(path:members:in:)` next — three
+    /// call sites carrying a parameter whose only reason to exist is a report
+    /// nothing has asked for yet — or standing up a second ledger next to
+    /// `NotImplementedLedger` that nothing reads. Both are exactly the kind of
+    /// unbuilt-plumbing-for-a-future-task this file's neighbours warn against
+    /// elsewhere. The throw is what makes an unimplemented member behave like
+    /// one — an extension's `try`/`catch` around `vscode.workspace.fs.readFile`
+    /// sees the same `NotImplementedError` either way; the recording is purely
+    /// what task 5.8's *report* would say about that extension afterwards, and
+    /// task 5.8 has not been written. When it is, the ledger call belongs at
+    /// each adaptor's own call site — the one place that already has both a
+    /// live `ExtensionHost` and a reason to be there — not threaded down into
+    /// this shared factory.
+    private static nonisolated let subNamespaceFactorySource = """
+    (function () {
+        'use strict';
+        try {
+            var INTEROP_PROBE_KEYS = [
+                'then', 'toJSON', '__esModule', 'default', 'inspect', 'prototype', 'nodeType', '$$typeof'
+            ];
+            var PROBE_KEYS = Object.getOwnPropertyNames(Object.prototype).concat(INTEROP_PROBE_KEYS);
+
+            function probeValue(path, table, key) {
+                switch (key) {
+                case 'toString':
+                case 'toLocaleString':
+                case 'valueOf':
+                case 'inspect':
+                    return function () { return '[VSCodeNamespace ' + path + ']'; };
+                case 'hasOwnProperty':
+                    return function (probed) { return Object.prototype.hasOwnProperty.call(table, probed); };
+                case 'propertyIsEnumerable':
+                    return function (probed) {
+                        var descriptor = Object.getOwnPropertyDescriptor(table, probed);
+                        return descriptor !== undefined && descriptor.enumerable === true;
+                    };
+                case 'isPrototypeOf':
+                    return function () { return false; };
+                default:
+                    return undefined;
+                }
+            }
+
+            function notImplementedError(memberPath) {
+                var error = new Error(
+                    memberPath + ' is not implemented yet. This extension host implements the VS Code ' +
+                    'API one member at a time, and ' + memberPath + ' is not available in this build.'
+                );
+                error.name = 'NotImplementedError';
+                error.memberPath = memberPath;
+                return error;
+            }
+
+            // No `host.recordNotImplemented` / `host.recordNegativeProbe`
+            // calls: see this factory's own doc comment in `VSCodeAPI.swift`
+            // for why that half of `extension-runtime.js`'s `makeStubNamespace`
+            // has no Swift-reachable counterpart here.
+            function makeStubNamespace(path, members) {
+                var table = members || Object.create(null);
+                return new Proxy(Object.create(null), {
+                    get: function (target, key) {
+                        if (typeof key === 'symbol') {
+                            return undefined;
+                        }
+                        if (key in table) {
+                            return table[key];
+                        }
+                        if (PROBE_KEYS.indexOf(key) !== -1) {
+                            return probeValue(path, table, key);
+                        }
+                        throw notImplementedError(path + '.' + key);
+                    },
+                    has: function (target, key) {
+                        return typeof key !== 'symbol' && key in table;
+                    },
+                    set: function (target, key) {
+                        throw new TypeError(
+                            'Cannot assign to ' + path + '.' + String(key) + ': the VS Code API is read-only.'
+                        );
+                    },
+                    deleteProperty: function (target, key) {
+                        throw new TypeError(
+                            'Cannot delete ' + path + '.' + String(key) + ': the VS Code API is read-only.'
+                        );
+                    },
+                    ownKeys: function () {
+                        return Object.keys(table);
+                    },
+                    getOwnPropertyDescriptor: function (target, key) {
+                        if (typeof key === 'symbol' || !(key in table)) {
+                            return undefined;
+                        }
+                        return { value: table[key], enumerable: true, configurable: true, writable: false };
+                    }
+                });
+            }
+
+            try {
+                Object.defineProperty(globalThis, '\(subNamespaceFactoryGlobalName)', {
+                    value: makeStubNamespace,
+                    writable: false,
+                    enumerable: false,
+                    configurable: false
+                });
+            } catch (ignored) {
+                // Caching is an optimisation, exactly as in `helperSource`.
+            }
+            return makeStubNamespace;
+        } catch (error) {
+            return null;
+        }
+    })()
+    """
+
+    private static func subNamespaceFactory(in context: JSContext) -> JSValue? {
+        if let cached = context.objectForKeyedSubscript(subNamespaceFactoryGlobalName), cached.isObject {
+            return cached
+        }
+        guard let created = context.evaluateScript(subNamespaceFactorySource), created.isObject else {
+            logger.error(
+                """
+                Could not install the vscode sub-namespace factory in context \
+                '\(name(of: context), privacy: .public)'; a caller asking for one gets 'nil' instead
+                """)
+            return nil
+        }
+        return created
+    }
+
+    /// Builds a namespace object at `path` whose `members` resolve and whose
+    /// every other member throws a `NotImplementedError` named after `path`
+    /// — the shape `vscode.workspace.fs` (task 5.4c) and later sub-namespaces
+    /// need, without each adaptor writing its own `Proxy`.
+    ///
+    /// `members` becomes the factory's `table`: each key is looked up first
+    /// and, if present, answered directly; a key JavaScriptCore itself reads
+    /// while coercing or iterating (`typeof key === 'symbol'`) answers
+    /// `undefined`, quietly; a key in the shim's own `PROBE_KEYS` — the same
+    /// list `extension-runtime.js` uses for `vscode` itself — answers a quiet
+    /// feature-detection value instead of throwing; everything else throws,
+    /// naming `path + '.' + key` as the `NotImplementedError`'s `memberPath`,
+    /// matching `extension-runtime.js`'s own `makeStubNamespace` contract
+    /// exactly except for the recording half — see
+    /// `subNamespaceFactorySource`'s doc comment for why that half is not
+    /// here.
+    ///
+    /// **`table` is built via `Object.create(null)`, not a plain `{}`.**
+    /// `extension-runtime.js` builds every `table` it ever hands
+    /// `makeStubNamespace` the same way (see its own `namespaceTables`
+    /// construction), and the reason is the factory's own `key in table`
+    /// check: a plain object inherits `Object.prototype`, so `'toString' in
+    /// table` — or `'valueOf'`, `'hasOwnProperty'`, `'constructor'`, any name
+    /// `Object.prototype` itself carries — would already be `true` before a
+    /// single member is ever set, routing straight to the *inherited* builtin
+    /// (`table['toString']`, answering `"[object Object]"`) instead of to the
+    /// `PROBE_KEYS` branch this factory defines those names to reach. A
+    /// prototype-less table is what makes "is this key actually implemented"
+    /// mean only "is it in `members`" — nothing borrowed from `Object`'s own
+    /// prototype chain.
+    ///
+    /// - Parameters:
+    ///   - path: The namespace's own dotted path — `"vscode.workspace.fs"` —
+    ///     used only to name the `NotImplementedError`s it throws and the
+    ///     string a coercion or `inspect` call sees.
+    ///   - members: The members that *are* implemented, keyed by name. Each
+    ///     value is passed to JavaScriptCore as-is, the same as
+    ///     `ExtensionHost.defineVSCodeMember`'s own `implementation` parameter
+    ///     — a `@convention(block)` closure (see `member(_:of:whenTornDown:body:)`),
+    ///     a `JSValue`, or any bridgeable value.
+    /// - Returns: `nil` if the factory itself could not be installed in
+    ///   `context` — `subNamespaceFactory(in:)` has already logged why — or if
+    ///   `context` cannot produce a prototype-less object to hold `members`.
+    public static func subNamespace(path: String, members: [String: Any], in context: JSContext) -> JSValue? {
+        guard let factory = subNamespaceFactory(in: context) else { return nil }
+        guard let table = context.evaluateScript("Object.create(null)"), table.isObject else { return nil }
+        for (name, implementation) in members {
+            table.setObject(implementation, forKeyedSubscript: name as NSString)
+        }
+        return factory.call(withArguments: [path, table])
+    }
 }
 
 extension VSCodeAPI: Loggable {
 
     /// The shared adaptor ceremony's own log destination — the same `Loggable`
-    /// shape `CommandRegistry` and `ExtensionHost` use. It has exactly one
-    /// caller today, `sharedHelper(in:)`, which reports the one failure here
-    /// that no JavaScript caller can be told about.
+    /// shape `CommandRegistry` and `ExtensionHost` use, for every failure here
+    /// that has no JavaScript-facing channel to report through instead:
+    /// `sharedHelper(in:)`, `raise(_:in:)`, `installUriClass(in:)` and
+    /// `subNamespaceFactory(in:)` each write to it.
     public static nonisolated let logger = makeLogger()
 }
 
