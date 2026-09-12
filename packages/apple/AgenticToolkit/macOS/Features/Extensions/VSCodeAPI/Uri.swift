@@ -399,7 +399,7 @@ extension VSCodeAPI {
     /// `Uri.parse` cannot have been reassigned, by extension code or anything
     /// else, between installation and this call — not because this call runs
     /// with no extension code on its stack, since `ExtensionHost.installRuntime`
-    /// hands this exact object out as `vscode.Uri` (`ExtensionHost.swift:950`)
+    /// hands this exact object out as `vscode.Uri` (`ExtensionHost.swift:958-960`)
     /// and extension code can reach it too. What this still does not guard
     /// against, even in the genuinely-frozen case, is that implementation
     /// *throwing on its own* — `strict` is never passed here, so the one
