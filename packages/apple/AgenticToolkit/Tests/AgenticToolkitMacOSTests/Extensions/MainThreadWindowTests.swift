@@ -779,14 +779,21 @@ struct MainThreadWindowTests {
 
     // MARK: - 16. `isCloseAffordance` parsing
 
-    /// Asserts the index positively in both directions: `nil` when no item
-    /// carries `isCloseAffordance`, and `1` when the second item does — a
-    /// bare `nil` assertion on its own would pass just as well for a
-    /// mutation that always answers `nil`, so this pairs it with the
-    /// concrete-index case in the same test, looked up by message rather
-    /// than by position.
+    /// Asserts the indices positively in three directions: empty when no
+    /// item carries `isCloseAffordance`, `[1]` when the second item does,
+    /// and `[0, 2]` when two items do. An empty-array assertion on its own
+    /// would pass just as well for a mutation that always answers empty, so
+    /// this pairs it with both concrete cases in the same test, looked up by
+    /// message rather than by position.
+    ///
+    /// The two-flagged case is what upstream keeps and this seam therefore
+    /// has to: `extHostMessageService.ts` warns about the second one but
+    /// still marks it, and `mainThreadMessageService.ts` keeps **both** out
+    /// of the ordinary button list, letting the last fill the cancel slot.
+    /// A model carrying only the first index cannot express that, and made
+    /// the second render as an ordinary button.
     @Test
-    func closeAffordanceIndexReflectsWhichItemIfAnyIsMarkedCloseAffordance() async throws {
+    func closeAffordanceIndicesReflectWhichItemsIfAnyAreMarkedCloseAffordance() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let presenter = RecordingMessagePresenter()
@@ -798,6 +805,12 @@ struct MainThreadWindowTests {
                 vscode.window.showWarningMessage('no affordance', { title: 'A' }, { title: 'B' });
                 vscode.window.showWarningMessage(
                     'with affordance', { title: 'A' }, { title: 'B', isCloseAffordance: true }
+                );
+                vscode.window.showWarningMessage(
+                    'two affordances',
+                    { title: 'A', isCloseAffordance: true },
+                    { title: 'B' },
+                    { title: 'C', isCloseAffordance: true }
                 ).then(function () {
                     globalThis.__settled = true;
                 });
@@ -815,8 +828,10 @@ struct MainThreadWindowTests {
         _ = try #require(await waitForGlobal(context, "globalThis.__settled"))
 
         let noAffordanceRequest = try #require(presenter.requests.first { $0.message == "no affordance" })
-        #expect(noAffordanceRequest.closeAffordanceIndex == nil)
+        #expect(noAffordanceRequest.closeAffordanceIndices.isEmpty)
         let withAffordanceRequest = try #require(presenter.requests.first { $0.message == "with affordance" })
-        #expect(withAffordanceRequest.closeAffordanceIndex == 1)
+        #expect(withAffordanceRequest.closeAffordanceIndices == [1])
+        let twoAffordancesRequest = try #require(presenter.requests.first { $0.message == "two affordances" })
+        #expect(twoAffordancesRequest.closeAffordanceIndices == [0, 2])
     }
 }
