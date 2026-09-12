@@ -470,6 +470,88 @@ final class FileTreeOutlineViewController: NSViewController {
         isSyncingSelection = false
     }
 
+    /// The URL of whatever is currently selected, or `nil` when nothing is.
+    private var selectedURL: URL? {
+        (outline.item(atRow: outline.selectedRow) as? FileTreeNode)?.url
+    }
+
+    // MARK: - Following the editor's focus
+
+    /// Moves the highlight to a file an editor is showing, expanding whatever
+    /// it takes to get there.
+    ///
+    /// Guarded by `isSyncingSelection` — the same flag that already stops the
+    /// outline echoing a model-driven selection back into the model. This is a
+    /// second source for the same loop, and it closes the same way.
+    func reveal(_ url: URL) {
+        guard selectedURL != url else { return }
+        expandAncestors(of: url)
+        let row = self.row(forPath: url.path)
+        guard row >= 0 else {
+            // Not drawn yet — the parent's children are still loading. Leave a
+            // standing request, which `restoreDisclosure()` already honours.
+            pendingSelectionPath = url.path
+            return
+        }
+        isSyncingSelection = true
+        outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        outline.scrollRowToVisible(row)
+        isSyncingSelection = false
+    }
+
+    /// Clears the highlight — the editor pane the tree is following has
+    /// nothing open.
+    func revealNothing() {
+        isSyncingSelection = true
+        outline.deselectAll(nil)
+        isSyncingSelection = false
+    }
+
+    /// Walks the path from the root down, expanding each ancestor in turn.
+    /// Each expansion can add rows, so the row lookup is redone at every step.
+    private func expandAncestors(of url: URL) {
+        isSyncingExpansion = true
+        defer {
+            isSyncingExpansion = false
+            invalidateRowIndex()
+        }
+        var ancestors: [String] = []
+        var directory = url.deletingLastPathComponent()
+        while directory.pathComponents.count > 1 {
+            ancestors.append(directory.path)
+            directory = directory.deletingLastPathComponent()
+        }
+        for path in ancestors.reversed() {
+            let row = self.row(forPath: path)
+            guard row >= 0, let item = outline.item(atRow: row), !outline.isItemExpanded(item) else { continue }
+            outline.expandItem(item)
+            invalidateRowIndex()
+        }
+    }
+
+    // MARK: - Testing
+
+    /// The URL currently selected, or `nil`. `@testable`-visible only —
+    /// `selectedURL` stays private everywhere else.
+    var selectedURLForTesting: URL? { selectedURL }
+
+    /// Fires only for a selection change the outline reported on its own —
+    /// never for one `reveal(_:)`/`revealNothing()` made on the model's
+    /// behalf. `dropFirst()` swallows the value `@Published` replays to a new
+    /// subscriber, which is not a change at all.
+    var selectionPublisherForTesting: AnyPublisher<FileTreeNode?, Never> {
+        selection.$selectedNode.dropFirst().eraseToAnyPublisher()
+    }
+
+    /// Collapses every row, the way a browser nobody has touched yet looks —
+    /// used to pin that `reveal(_:)` can open collapsed ancestors back up.
+    func collapseAllForTesting() {
+        isSyncingExpansion = true
+        outline.collapseItem(nil, collapseChildren: true)
+        invalidateRowIndex()
+        isSyncingExpansion = false
+    }
+
     // MARK: - Activation
 
     @objc private func rowDoubleClicked(_ sender: Any?) {
