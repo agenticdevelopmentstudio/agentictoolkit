@@ -28,6 +28,11 @@ public final class BreadcrumbPopoverViewController: NSViewController {
 
     private static let columnID = NSUserInterfaceItemIdentifier("breadcrumb.entry")
 
+    /// The size the list wants. Named here rather than on the `NSPopover`,
+    /// because a popover asks its content view controller how big to be — see
+    /// `loadView`.
+    static let contentSize = NSSize(width: 280, height: 320)
+
     public init(directoryURL: URL, onSelect: @escaping (URL) -> Void) {
         self.directoryURL = directoryURL
         self.onSelect = onSelect
@@ -35,6 +40,7 @@ public final class BreadcrumbPopoverViewController: NSViewController {
         self.entries = children
         self.filtered = children
         super.init(nibName: nil, bundle: nil)
+        preferredContentSize = Self.contentSize
     }
 
     @available(*, unavailable)
@@ -45,15 +51,16 @@ public final class BreadcrumbPopoverViewController: NSViewController {
     // MARK: - View tree
 
     public override func loadView() {
-        // A plain `NSView()` keeps `translatesAutoresizingMaskIntoConstraints`
-        // true and its initial frame is `.zero`, which installs an implicit
-        // 0×0 size constraint that fights the popover's own `contentSize` —
-        // every subview collapses to its compression-resistance minimum (the
-        // search field to a couple of points wide) instead of filling the
-        // 280×320 the popover asks for. Turning it off lets the popover's
-        // frame — not a leftover zero frame — govern this view's size.
-        let root = NSView()
-        root.translatesAutoresizingMaskIntoConstraints = false
+        // `NSPopover` sizes an Auto Layout content view to that view's fitting
+        // size and ignores its own `contentSize`, and nothing in here has an
+        // intrinsic width — a search field compresses to a couple of points
+        // and a table view to nothing — so a root with no size of its own
+        // collapses the whole list to a 16×46 sliver. The frame is what gives
+        // it one: `translatesAutoresizingMaskIntoConstraints` stays true, so
+        // the frame becomes the width and height constraints everything else
+        // hangs from, and `preferredContentSize` tells the popover the same
+        // number.
+        let root = NSView(frame: NSRect(origin: .zero, size: Self.contentSize))
 
         searchField.placeholderString = "Filter"
         searchField.delegate = self

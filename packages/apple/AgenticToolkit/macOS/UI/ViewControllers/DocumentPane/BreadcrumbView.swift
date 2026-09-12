@@ -119,7 +119,6 @@ public final class BreadcrumbView: NSView {
         let popover = NSPopover()
         popover.contentViewController = controller
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 280, height: 320)
         controller.onCancel = { [weak popover] in popover?.close() }
         activePopover = popover
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
