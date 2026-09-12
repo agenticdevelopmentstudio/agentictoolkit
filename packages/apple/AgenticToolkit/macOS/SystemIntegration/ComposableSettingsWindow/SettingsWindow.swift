@@ -76,6 +76,15 @@ extension ComposableSettings {
         open override func showWindow() {
             super.showWindow()
             guard activatesOnShow else { return }
+            // Quiet presentation still makes the window key — the sidebar
+            // selection and text fields have to answer, and that is what being
+            // key buys — but it neither activates the app nor draws above
+            // anyone else's windows. That is the whole difference between a
+            // settings window opened to be used and one opened to be driven.
+            guard !QuietWindowPresentation.isEnabled else {
+                window?.makeKeyAndOrderFrontQuietly()
+                return
+            }
             NSApp.activate(ignoringOtherApps: true)
             window?.makeKeyAndOrderFront(nil)
         }

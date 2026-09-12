@@ -59,11 +59,11 @@ public struct SettingsStoreWindowStateStorage: WindowStateStorage {
     }
 
     private func stateSetting(for id: String) -> WindowStateSetting {
-        WindowStateSetting(name: keyPrefix + id)
+        WindowStateSetting(name: WindowStateNamespace.qualify(keyPrefix + id))
     }
 
     private func visibilitySetting(for id: String) -> WindowVisibilitySetting {
-        WindowVisibilitySetting(name: visibilityKeyPrefix + id)
+        WindowVisibilitySetting(name: WindowStateNamespace.qualify(visibilityKeyPrefix + id))
     }
 }
 

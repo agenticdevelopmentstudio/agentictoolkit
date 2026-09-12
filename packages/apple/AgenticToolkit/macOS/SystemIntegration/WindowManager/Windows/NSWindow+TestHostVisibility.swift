@@ -4,6 +4,11 @@ public extension NSWindow {
 
     /// Whether this process is an XCTest host. XCTest links its own framework
     /// into the runner, so the class exists in a test run and nowhere else.
+    ///
+    /// One of the two inputs to `QuietWindowPresentation`, which is what
+    /// callers should ask; this answers "am I a test", not "should I stay out
+    /// of the way", and those stopped being the same question once a Debug
+    /// build could be driven by automation.
     static var isRunningInTests: Bool {
         NSClassFromString("XCTestCase") != nil
     }
@@ -26,21 +31,25 @@ public extension NSWindow {
         level = NSWindow.Level(Int(CGWindowLevelForKey(.desktopWindow)))
     }
 
-    /// `orderFront(nil)`, except in a test host, where the window is sunk
-    /// behind the desktop picture on its way on screen.
+    /// `orderFront(nil)`, except under quiet presentation, where the window is
+    /// sunk behind the desktop picture on its way on screen.
     ///
     /// The level is set *before* the ordering, so the window is never briefly
     /// visible at the normal level.
+    @MainActor
     func orderFrontQuietly() {
-        if Self.isRunningInTests { sinkBehindDesktop() }
+        if QuietWindowPresentation.isEnabled { sinkBehindDesktop() }
         orderFront(nil)
     }
 
     /// `makeKeyAndOrderFront(nil)` with the same treatment. Key status survives
     /// the sinking — a window's level says where it draws, not whether it is
-    /// key — so a test that needs the responder chain still gets one.
+    /// key — so a test that needs the responder chain, and an automated session
+    /// that needs a settings outline to answer a scripted selection, still get
+    /// one.
+    @MainActor
     func makeKeyAndOrderFrontQuietly() {
-        if Self.isRunningInTests { sinkBehindDesktop() }
+        if QuietWindowPresentation.isEnabled { sinkBehindDesktop() }
         makeKeyAndOrderFront(nil)
     }
 }

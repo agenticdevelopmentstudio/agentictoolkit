@@ -41,15 +41,17 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate,
     /// windows with `orderFrontRegardless()`.
     ///
     /// True in a shipping app — that call is the whole reason a menubar
-    /// (LSUIElement) host can show a window at all. False under XCTest, where
-    /// it is pure damage: a suite that exercises window controllers throws
-    /// opaque, fully-drawn windows over whatever the developer is doing, for
-    /// as long as the run lasts. Nothing in the suite asserts front-ordering;
-    /// the tests assert `isVisible`, restored frames and delegate wiring, all
-    /// of which the `makeKeyAndOrderFront` inside `super.showWindow` still
-    /// provides. Settable so a host that genuinely wants the old behavior
-    /// back — including a future test *of* front-ordering — can say so.
-    public static var forcesWindowFront = !NSWindow.isRunningInTests
+    /// (LSUIElement) host can show a window at all. False under quiet
+    /// presentation, where it is pure damage: a suite that exercises window
+    /// controllers, or an automated session driving a Debug build, throws
+    /// opaque, fully-drawn windows over whatever the person at the keyboard is
+    /// doing, for as long as the run lasts. Nothing in the suite asserts
+    /// front-ordering; the tests assert `isVisible`, restored frames and
+    /// delegate wiring, all of which the `makeKeyAndOrderFront` inside
+    /// `super.showWindow` still provides. Settable so a host that genuinely
+    /// wants the old behavior back — including a future test *of*
+    /// front-ordering — can say so.
+    public static var forcesWindowFront = !QuietWindowPresentation.isEnabled
 
     public var windowID: String = ""
 
@@ -560,9 +562,15 @@ public extension SingletonWindowController {
     /// Bring the shared window forward, making it first if it does not exist
     /// yet, and activate the app so the window is actually in front of the
     /// user — what every "Show <Window>" menu item and shortcut wants.
+    ///
+    /// The activation is skipped under quiet presentation. Suppressing the
+    /// *ordering* without suppressing this was the gap: a test host sank its
+    /// windows behind the desktop and then yanked the foreground anyway, so a
+    /// suite still interrupted whoever was working while showing them nothing.
     static func present() {
         ensureCurrent()
         current?.showWindow()
+        guard !QuietWindowPresentation.isEnabled else { return }
         NSApp.activate(ignoringOtherApps: true)
     }
 
