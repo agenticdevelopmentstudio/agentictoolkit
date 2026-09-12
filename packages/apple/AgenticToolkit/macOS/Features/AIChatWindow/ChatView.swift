@@ -99,8 +99,8 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         sendButton.action = #selector(sendTapped)
         sendButton.translatesAutoresizingMaskIntoConstraints = false
         sendButton.accessibilityID("ai-chat.send-button")
-        sendButton.observeTheme { button, palette in
-            button.contentTintColor = palette.nsColor(.accent)
+        sendButton.observeTheme { [weak self] _, palette in
+            self?.applySendButtonTint(palette)
         }
 
         observeTheme { view, palette in
@@ -260,6 +260,16 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         let enabled = isComposerEnabled && viewModel.state != .responding
         inputField.isEnabled = enabled
         sendButton.isEnabled = enabled
+        applySendButtonTint(resolvedThemeScope.palette)
+    }
+
+    /// No tint at all when the composer is off, rather than a dimmer one: AppKit
+    /// draws a template image at the full strength of whatever
+    /// `contentTintColor` names, disabled or not, so an accent-tinted arrow over
+    /// a dead text field reads as a chat you can still send into. Handing the
+    /// tint back to AppKit is what restores the greyed-out look.
+    private func applySendButtonTint(_ palette: SemanticPalette) {
+        sendButton.contentTintColor = sendButton.isEnabled ? palette.nsColor(.accent) : nil
     }
 
     // MARK: - Scroll
