@@ -106,7 +106,7 @@ struct VSCodeAPISubNamespaceTests {
     /// property, so the Swift side reads a *datum* rather than inferring one
     /// from evaluation semantics: `JSContext.evaluateScript` answers a
     /// non-`nil` `undefined` for a script that threw — this repo pins that at
-    /// `MainThreadCommandsTests.swift:610-614` — so a test whose only evidence
+    /// `MainThreadCommandsTests.swift:610-615` — so a test whose only evidence
     /// were the evaluation's own return value could not tell "the script
     /// threw" from "the script answered `undefined`", and a mutation that
     /// turns the first into the second would be invisible to it. Because the
@@ -171,7 +171,7 @@ struct VSCodeAPISubNamespaceTests {
     /// test used to assert `#expect(result.toString() == "undefined")` against
     /// a bare `typeof ns.then`, and `JSContext.evaluateScript` answers a
     /// non-`nil` `undefined` for a script that threw — this repo pins that at
-    /// `MainThreadCommandsTests.swift:610-614` — so that assertion was
+    /// `MainThreadCommandsTests.swift:610-615` — so that assertion was
     /// satisfied by the very throw the test exists to rule out. Because the
     /// flipping assertion expects `true`, it fails on an absent property too,
     /// which is what an `undefined` result would present.
@@ -408,7 +408,7 @@ struct VSCodeAPISubNamespaceTests {
     /// `aThrowingRecordMissDoesNotReplaceTheNotImplementedError` uses, and for
     /// the same reason: `JSContext.evaluateScript` answers a non-`nil`
     /// `undefined` for a script that threw
-    /// (`MainThreadCommandsTests.swift:610-614`), so an assertion that read
+    /// (`MainThreadCommandsTests.swift:610-615`), so an assertion that read
     /// only the evaluation's return value could not tell a throw from an
     /// `undefined` answer. The two flipping assertions expect `true`, so they
     /// fail on an absent property as well, which is what an `undefined`
@@ -495,19 +495,22 @@ struct VSCodeAPISubNamespaceTests {
     /// `subNamespace(path:members:in:)`'s own doc warns callers about, and a
     /// test that leaks a `JSContext` per run has no business being the worked
     /// example the next adaptor tasks copy. The unwrap sits *inside*
-    /// `MainActor.assumeIsolated`, matching every other weak-capture-plus-
-    /// `assumeIsolated` in this tree (`VSCodeAPI.swift:72-77`,
-    /// `ExtensionHost.swift:1148-1150`): unwrapping outside would hand the
-    /// `sending` operation closure a strong, non-`Sendable` `JSContext`
-    /// instead of the weak binding, and `MainActorScriptCommand.swift:39-46`
-    /// records this codebase having already been bitten by Swift 6 region
-    /// analysis on exactly that kind of capture. The `_ =` on
-    /// `VSCodeAPI.raise` is load-bearing too: `MainActor.assumeIsolated` is
-    /// generic over a `Sendable` return, `raise` answers `JSValue?`, and
-    /// `JSValue` has no `Sendable` conformance in this tree — discarding the
-    /// result types the operation as `Void`, which is what every other
-    /// `assumeIsolated` here either does or routes through
-    /// `UncheckedJSValueBox` to avoid.
+    /// `MainActor.assumeIsolated` to match `VSCodeAPI.swift:72-77` and
+    /// `ExtensionHost.swift:1148-1150`, which is a consistency choice and not
+    /// a compiler requirement: `assumeIsolated`'s operation parameter is
+    /// `@MainActor () throws -> T` with no `sending`, and
+    /// `ComposableTabsPaneViewController.swift:243-247` unwraps *outside* and
+    /// hands a non-`Sendable` `NSEvent` in, and ships. Both forms may well
+    /// compile; no compiler has judged either one here.
+    ///
+    /// The `_ =` on `VSCodeAPI.raise` is belt-and-braces rather than
+    /// load-bearing. `raise` is `@discardableResult` (`VSCodeAPI.swift:145`),
+    /// and this closure is multi-statement with a bare `return`, so `T` is
+    /// already `Void` without it — but both of those are non-local facts, and
+    /// the discard says at the call site what the reader would otherwise have
+    /// to go and check. `assumeIsolated` is generic over a `Sendable` return
+    /// and `JSValue` has no `Sendable` conformance in this tree, so a form
+    /// that *did* infer `T == JSValue?` would not compile.
     @Test
     func aThrowingRecordMissDoesNotReplaceTheNotImplementedError() throws {
         let context = try makeContext()
@@ -552,7 +555,7 @@ struct VSCodeAPISubNamespaceTests {
     /// corroborating. The script catches its own throw and reports it as a
     /// property, so the Swift side reads a datum rather than inferring one:
     /// `JSContext.evaluateScript` answers a non-`nil` `undefined` for a script
-    /// that threw (`MainThreadCommandsTests.swift:610-614`), which is exactly
+    /// that threw (`MainThreadCommandsTests.swift:610-615`), which is exactly
     /// the case an assertion on the evaluation's own result could not
     /// distinguish from a real answer. Expecting `true` also fails on an
     /// absent property, which is what an `undefined` result presents.
@@ -574,8 +577,12 @@ struct VSCodeAPISubNamespaceTests {
     /// indistinguishable from a no-op and every assertion about the *answer*
     /// still passes.
     ///
-    /// `#expect(recorder.paths == [...])` below is what covers the second
-    /// case. The recorder appends before it raises, so a matching recording is
+    /// `#expect(recorder.paths == [...])` below covers neither of those two
+    /// directly — it rules out a third possibility they are otherwise
+    /// indistinguishable from: that the block never ran at all. The discarded
+    /// case still passes every assertion here, and nothing build-free can
+    /// close it. The recorder appends before it raises, so a matching
+    /// recording is
     /// the evidence the block ran at all — measured, a recorder that silently
     /// does nothing produces byte-identical values for every other assertion
     /// here. It proves invocation, not propagation: it cannot say whether the
