@@ -55,10 +55,12 @@ import AppKit
 /// the surface's border — a `CALayer` draws its border above its sublayers —
 /// which is what keeps the card's outline unbroken across the top.
 ///
-/// `titleIcon` puts one SF Symbol in front of the name (a person for an
-/// account, say). It is decoration on a name that is already spoken, so it is
-/// left out of the accessibility tree: a card whose address is read out does not
-/// also need to announce that it is a card about a person.
+/// `titleIcon` puts one mark in front of the name — an SF Symbol (a person for
+/// an account, say) or an image of the host's own (a product's logo, which no
+/// symbol stands in for, because the thing it names is recognised by its
+/// colours). It is decoration on a name that is already spoken, so it is left
+/// out of the accessibility tree: a card whose address is read out does not also
+/// need to announce that it is a card about a person.
 ///
 /// `titleIconIsVisible` is how a *stack* of such cards marks one of them — the
 /// account that is logged in, say — without the others' names stepping left to
@@ -67,6 +69,12 @@ import AppKit
 /// take the column away with the symbol, and a list of addresses that start in
 /// two different places is harder to read than one with a blank in front of
 /// most of them.
+///
+/// `titlebarAccessory` hangs one control of the host's off the masthead's right
+/// end, immediately in front of the disclosure triangle — a menu for the thing
+/// this particular card is about, typically. The card places it and measures it
+/// and has no opinion past that, which is why it arrives as a view rather than
+/// as a title and a callback.
 ///
 /// ## The standing is a corner badge, not a masthead item
 ///
@@ -174,6 +182,18 @@ public final class DisclosureCardView: NSView, Themeable {
         }
     }
 
+    /// The mark drawn in front of a card's name.
+    ///
+    /// Two cases because the two are *drawn* differently, not because a host
+    /// might prefer one: a symbol is configured at the title's point size and
+    /// takes the title's colour, while an image is pinned square at that size
+    /// and keeps the colours it shipped with — which is the whole reason a host
+    /// reaches for one.
+    public enum TitleIcon {
+        case symbol(String)
+        case image(NSImage)
+    }
+
     private let titleField = NSTextField(labelWithString: "")
     /// The one symbol in front of the name, when the host gave one.
     private let titleIconView = NSImageView()
@@ -196,6 +216,11 @@ public final class DisclosureCardView: NSView, Themeable {
     private let surface = NSView()
     private let statusIcon = NSImageView()
     private let disclosure = NSButton()
+    /// The host's accessory and the disclosure triangle as one piece, so the
+    /// masthead pins ONE view to its right end whether or not there is an
+    /// accessory — and so the folded card's width floor measures what is
+    /// actually on the line.
+    private let trailingLine = NSStackView()
     private let content = NSStackView()
     /// Everything under the titlebar: the folded card's summary, the subtitle,
     /// and the content itself. Detached entirely when there is nothing in it,
@@ -204,11 +229,11 @@ public final class DisclosureCardView: NSView, Themeable {
 
     /// Accent (an identifier, an address) vs. primary text (a plain heading).
     private let titleIsAccent: Bool
-    /// The SF Symbol drawn in front of the name, if any.
-    private let titleSymbol: String?
-    /// Whether the symbol is painted. False still reserves its width — see the
-    /// type's own documentation for why that is not the same as no symbol.
-    private let titleSymbolIsVisible: Bool
+    /// The mark drawn in front of the name, if any.
+    private let titleIcon: TitleIcon?
+    /// Whether the mark is painted. False still reserves its width — see the
+    /// type's own documentation for why that is not the same as no mark.
+    private let titleIconIsVisible: Bool
     private let summary: [SummaryPart]
     private let status: StatusSymbol?
     private let scaledSize: CGFloat
@@ -250,8 +275,9 @@ public final class DisclosureCardView: NSView, Themeable {
     public init(
         title: String,
         titleIsAccent: Bool,
-        titleIcon: String? = nil,
+        titleIcon: TitleIcon? = nil,
         titleIconIsVisible: Bool = true,
+        titlebarAccessory: NSView? = nil,
         subtitle: String? = nil,
         summary: [SummaryPart] = [],
         status: StatusSymbol? = nil,
@@ -261,8 +287,8 @@ public final class DisclosureCardView: NSView, Themeable {
         onToggle: ((Bool) -> Void)? = nil
     ) {
         self.titleIsAccent = titleIsAccent
-        self.titleSymbol = titleIcon
-        self.titleSymbolIsVisible = titleIconIsVisible
+        self.titleIcon = titleIcon
+        self.titleIconIsVisible = titleIconIsVisible
         self.summary = summary
         self.status = status
         self.scaledSize = scaledSize
@@ -304,6 +330,7 @@ public final class DisclosureCardView: NSView, Themeable {
         configureStatusBadge()
         configureDisclosure(isCollapsed: isCollapsed)
         configureTitleLine()
+        configureTrailingLine(accessory: titlebarAccessory)
         configureTitlebar()
 
         content.orientation = .vertical
@@ -315,7 +342,7 @@ public final class DisclosureCardView: NSView, Themeable {
         // The name at the left edge, the toggle at the right — the one piece
         // every card has, so it lands in the same place on all of them.
         let header = PinnedEndsLine.make(
-            leading: titleLine, trailing: disclosure,
+            leading: titleLine, trailing: trailingLine,
             minimumGap: Self.mastheadGap, alignment: .centerY
         )
 
@@ -427,18 +454,31 @@ public final class DisclosureCardView: NSView, Themeable {
     private func configureTitleLine() {
         titleIconView.translatesAutoresizingMaskIntoConstraints = false
         titleIconView.imageScaling = .scaleProportionallyDown
-        titleIconView.isHidden = titleSymbol == nil
+        titleIconView.isHidden = titleIcon == nil
         // Present and unpainted, not absent: the image is what gives the view
         // its width, so hiding it would close the column the unmarked names are
         // lining up against.
-        titleIconView.alphaValue = titleSymbolIsVisible ? 1 : 0
-        if let titleSymbol {
+        titleIconView.alphaValue = titleIconIsVisible ? 1 : 0
+        switch titleIcon {
+        case .symbol(let name):
             titleIconView.image = NSImage(
-                systemSymbolName: titleSymbol, accessibilityDescription: nil
+                systemSymbolName: name, accessibilityDescription: nil
             )
             titleIconView.symbolConfiguration = NSImage.SymbolConfiguration(
                 pointSize: scaledSize, weight: .regular
             )
+        case .image(let image):
+            // Square at the title's own point size, and scaled to fill it: an
+            // asset arrives at whatever dimensions it happened to be drawn at,
+            // and the column every other card reserves is one width.
+            titleIconView.imageScaling = .scaleProportionallyUpOrDown
+            titleIconView.image = image
+            NSLayoutConstraint.activate([
+                titleIconView.widthAnchor.constraint(equalToConstant: scaledSize),
+                titleIconView.heightAnchor.constraint(equalToConstant: scaledSize)
+            ])
+        case nil:
+            break
         }
         // Decoration on a name that is already spoken: a card whose address is
         // read out does not also need to announce that it is about a person.
@@ -454,6 +494,31 @@ public final class DisclosureCardView: NSView, Themeable {
         titleLine.addArrangedSubview(titleField)
         titleLine.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLine.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    }
+
+    /// The masthead's right end: the host's accessory, when there is one, then
+    /// the disclosure triangle.
+    ///
+    /// Always a stack, the card with no accessory included, so there is one
+    /// description of what hangs off that end and one thing to measure. A card
+    /// that pinned the triangle directly whenever it had nothing to put beside
+    /// it would have two layouts, and a folded width floor that was right for
+    /// one of them.
+    private func configureTrailingLine(accessory: NSView?) {
+        trailingLine.orientation = .horizontal
+        trailingLine.alignment = .centerY
+        trailingLine.spacing = Self.iconGap
+        trailingLine.translatesAutoresizingMaskIntoConstraints = false
+        if let accessory {
+            accessory.translatesAutoresizingMaskIntoConstraints = false
+            accessory.setContentCompressionResistancePriority(.required, for: .horizontal)
+            trailingLine.addArrangedSubview(accessory)
+        }
+        trailingLine.addArrangedSubview(disclosure)
+        // Neither the accessory nor the triangle gives up a point, so the
+        // address is what goes short when the card is too narrow for the line.
+        trailingLine.setContentCompressionResistancePriority(.required, for: .horizontal)
+        trailingLine.setContentHuggingPriority(.required, for: .horizontal)
     }
 
     /// The bar itself: a fill inside the surface, and a rule along its foot.
@@ -599,9 +664,15 @@ public final class DisclosureCardView: NSView, Themeable {
         titleStyle.weight = .semibold
         titleField.font = titleStyle.nsFont(scaledSize: scaledSize)
         titleField.textColor = titleIsAccent ? palette.accentColor : palette.primaryTextColor
-        // The symbol is part of the name, so it takes the name's colour rather
-        // than a tier of its own.
-        titleIconView.contentTintColor = titleField.textColor
+        // A symbol is part of the name, so it takes the name's colour rather
+        // than a tier of its own. An image is not: a logo recoloured to match
+        // the text is no longer the logo, which is what the host passed one
+        // instead of a symbol name to get.
+        if case .image = titleIcon {
+            titleIconView.contentTintColor = nil
+        } else {
+            titleIconView.contentTintColor = titleField.textColor
+        }
 
         subtitleField.font = palette.theme.typography.style(.caption)
             .nsFont(scaledSize: scaledSize * 0.85)
@@ -621,7 +692,7 @@ public final class DisclosureCardView: NSView, Themeable {
         // masthead needs.
         mastheadWidthFloor = summary.isEmpty ? 0 : max(
             ceil(titleLine.fittingSize.width)
-                + Self.mastheadGap + ceil(disclosure.fittingSize.width),
+                + Self.mastheadGap + ceil(trailingLine.fittingSize.width),
             ceil(line.size().width)
         )
         updateContentWidthFloor()

@@ -40,11 +40,17 @@ struct PermissionRowViewTests {
         #expect(row.statusText == "Unknown")
     }
 
-    @Test("a granted row offers to revoke instead of to open settings")
-    func grantedOffersRevoke() async {
-        let row = row(.granted)
+    @Test("a granted row offers the pane, the only place a grant can be taken back")
+    func grantedOffersOpenSettings() async {
+        // A keychain row, the one permission whose ungranted title is not
+        // already "Open Settings": granted, it has to stop offering to read the
+        // item and start offering the place the grant can be taken back.
+        let row = PermissionRowView(
+            permission: .keychain(service: "Claude Code-credentials"),
+            checker: StubChecker(result: .granted),
+            onAction: { _, _ in })
         await row.refresh()
-        #expect(row.actionTitle == "Revoke")
+        #expect(row.actionTitle == "Open Settings")
     }
 
     @Test("a row that is not granted offers to open settings")

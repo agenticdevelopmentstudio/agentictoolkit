@@ -1,4 +1,6 @@
 import ApplicationServices
+import AVFoundation
+import CoreGraphics
 import CoreLocation
 import CoreServices
 import Foundation
@@ -47,6 +49,13 @@ public struct SystemPermissionChecker: PermissionChecking {
         case .location:
             let status = await Self.locationCoordinator.currentStatus
             return Self.locationStatus(status)
+        case .microphone:
+            return Self.captureStatus(AVCaptureDevice.authorizationStatus(for: .audio))
+        case .screenCapture:
+            // A Bool, like Accessibility: the OS reports whether this process
+            // may read the display and has no third answer, so a process that
+            // has never asked reads the same as one that was refused.
+            return CGPreflightScreenCaptureAccess() ? .granted : .denied
         case .keychain(let service):
             // Deliberately does not touch the keychain. See
             // `KeychainPermissionLedger` for why there is nothing to ask, and
@@ -80,6 +89,17 @@ public struct SystemPermissionChecker: PermissionChecking {
             // user's actual answer rather than the pre-prompt status.
             let status = await Self.locationCoordinator.requestAlways()
             return Self.locationStatus(status)
+        case .microphone:
+            // Returns the decision, but the tri-state is read back rather than
+            // derived from the Bool: a `false` is a denial the first time and a
+            // restriction the next, and the row says which.
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            return await status(permission)
+        case .screenCapture:
+            // Asks at most once per answer: macOS remembers a refusal and
+            // returns `false` without putting anything on screen, which is why
+            // the presenter falls back to the pane instead of asking again.
+            return CGRequestScreenCaptureAccess() ? .granted : .denied
         case .keychain(let service):
             // The request *is* the read: macOS grants access to a keychain
             // item by putting up its own dialog the first time a process
@@ -181,6 +201,22 @@ public struct SystemPermissionChecker: PermissionChecking {
         case .authorized, .provisional, .ephemeral:
             return .granted
         case .denied:
+            return .denied
+        case .notDetermined:
+            return .undetermined
+        @unknown default:
+            return .undetermined
+        }
+    }
+
+    /// Maps an `AVAuthorizationStatus` to a tri-state. `notDetermined` (never
+    /// asked) is `undetermined`, not a denial, and `restricted` — barred by a
+    /// profile or by Screen Time — is a denial the user cannot lift themselves.
+    static func captureStatus(_ status: AVAuthorizationStatus) -> PermissionStatus {
+        switch status {
+        case .authorized:
+            return .granted
+        case .denied, .restricted:
             return .denied
         case .notDetermined:
             return .undetermined

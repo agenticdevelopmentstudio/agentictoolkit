@@ -14,8 +14,9 @@ public final class PermissionRowView: NSView {
     ///
     /// Handed to the action rather than re-read when it fires: the two can
     /// disagree — the user revokes the permission in System Settings while the
-    /// panel is open — and re-reading turns a button labelled "Revoke" into a
-    /// live consent prompt. What the user pressed is what should happen.
+    /// panel is open — and re-reading turns a button that offered to open
+    /// System Settings into a live consent prompt. What the user pressed is what
+    /// should happen.
     private var displayedStatus: PermissionStatus = .undetermined
 
     private let titleLabel: NSTextField
@@ -112,13 +113,13 @@ public final class PermissionRowView: NSView {
         statusDot.layer?.backgroundColor = color.cgColor
         statusLabel.stringValue = text
         statusLabel.textColor = color
-        // The button names what is left to do, which is not the same thing in
-        // both directions. Granting can often happen inline, through the
-        // system's own consent prompt; taking a grant back never can — macOS
-        // offers no revoke API — so both titles lead to the one place that can
-        // do either, and only the wording differs.
+        // A granted row offers the pane, whatever its ungranted title would
+        // have been. Granting can often happen inline, through the system's own
+        // consent prompt; taking a grant back never can — macOS offers no revoke
+        // API — so the only thing left to offer is the place the user can do it
+        // themselves, which is what this title names.
         actionButton.title = status == .granted
-            ? Permission.ActionTitle.revoke
+            ? Permission.ActionTitle.openSettings
             : permission.actionTitle
     }
 
@@ -186,10 +187,11 @@ public final class PermissionRowView: NSView {
         // Namespaced by permission: the panel shows one row per permission, so
         // an unqualified name would match several buttons at once and a test
         // could not say which it clicked. Named for the slot rather than for
-        // one of its titles — the same button reads "Revoke" on a granted row,
-        // and an identifier that said "open-settings" there would promise a
-        // behaviour the element no longer has. Which is doubly true now that
-        // the ungranted title is the permission's to choose.
+        // one of its titles — the same button reads "Allow…" on a keychain row
+        // this app has never read, and an identifier that said "open-settings"
+        // there would promise a behaviour the element does not have. Which is
+        // doubly true now that the ungranted title is the permission's to
+        // choose.
         button.setAccessibilityIdentifier("permission.\(permission.identifierToken).action")
         // The row itself carries no identifier. A plain `NSView` is not an
         // accessibility element, so an identifier set on one is never

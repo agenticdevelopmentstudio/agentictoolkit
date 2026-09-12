@@ -10,8 +10,9 @@ public enum PermissionPresenter {
     /// - Parameter shownAs: the status the caller's control was offering to act
     ///   on. Passed in rather than re-read here: a re-read can disagree with
     ///   what the user actually pressed — they revoked the permission in System
-    ///   Settings while the panel was open — and then a button labelled
-    ///   "Revoke" fires a live consent prompt instead. It also spares the
+    ///   Settings while the panel was open — and then a button that offered to
+    ///   open System Settings fires a live consent prompt instead. It also
+    ///   spares the
     ///   Automation row a second synchronous Apple Event round trip per click.
     public static func present(
         _ permission: Permission,
@@ -21,16 +22,17 @@ public enum PermissionPresenter {
         // Already granted: there is nothing left to ask for, and no API to hand
         // a grant back — only the user can, in System Settings. So the one
         // useful thing to do is take them to the very pane the grant flow would
-        // have ended at, which is what the row's "Revoke" title promises.
+        // have ended at, which is what the row's "Open Settings" title promises.
         if status == .granted {
             if let pane = permission.settingsPaneURL {
                 NSWorkspace.shared.open(pane)
             } else {
                 // No pane does not mean nowhere to go. `.keychain` is an ACL on
                 // one keychain item, and Keychain Access is the app that edits
-                // it — the same handoff the pane URL is, to the only place that
-                // can do what the row's "Revoke" promises. A button that leads
-                // nowhere would read as broken rather than as unsupported.
+                // it — the same handoff the pane URL is, to the only place this
+                // grant can be taken back. The row says "Open Settings" and this
+                // *is* the settings for that one item; a button that led nowhere
+                // would read as broken rather than as unsupported.
                 openKeychainAccess()
             }
             return
@@ -52,12 +54,15 @@ public enum PermissionPresenter {
             guard await checker.request(permission) != .granted else { return }
             guard let pane = permission.settingsPaneURL else { return }
             NSWorkspace.shared.open(pane)
-        case .notifications, .location, .keychain:
-            // These three can always be asked — the system owns the dialog and
-            // puts it up whatever else is or isn't running — so an undetermined
-            // answer here really is the user declining to answer, and opening
-            // the pane on top of the dialog they just dismissed would be
-            // redundant, jarring UI. Only a hard denial is a handoff.
+        case .notifications, .location, .microphone, .screenCapture, .keychain:
+            // These can always be asked — the system owns the dialog and puts it
+            // up whatever else is or isn't running — so an undetermined answer
+            // here really is the user declining to answer, and opening the pane
+            // on top of the dialog they just dismissed would be redundant,
+            // jarring UI. Only a hard denial is a handoff. Screen Recording is
+            // the reason that matters beyond tidiness: it is asked once and
+            // answers `.denied` from memory ever after, so the pane is the only
+            // way back and the button has to reach it.
             guard await checker.request(permission) == .denied else { return }
             // …and some permissions have no pane to fall back to. `.keychain` is
             // granted by the dialog the request above already raised, and System

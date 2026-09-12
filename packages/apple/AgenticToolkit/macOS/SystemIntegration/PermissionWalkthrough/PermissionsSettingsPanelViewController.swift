@@ -5,7 +5,8 @@ import AgenticToolkitPermissions
 import AgenticToolkitPermissionsUI
 
 /// System panel: shows the live grant-state of each permission via the reusable
-/// `PermissionsPanelView`, plus a button to reset the first-launch walkthrough.
+/// `PermissionsPanelView`, plus a button that runs the first-launch walkthrough
+/// over those same permissions on demand.
 /// This panel doesn't bind any `UserSetting`s — it's a status/action surface,
 /// not a preferences surface.
 @MainActor
@@ -76,11 +77,10 @@ public final class PermissionsSettingsPanelViewController: ComposableSettings.Se
 
         topics.append(.init(
             title: "Walkthrough",
-            body: "Resetting re-runs the first-launch permission walkthrough the next "
-                + "time the app starts. It changes nothing that has already been "
-                + "granted — it only clears the record that you have been shown the "
-                + "walkthrough, and the record of which keychain items the app has "
-                + "already read."
+            body: "The button under the list shows these same permissions in the window "
+                + "the app puts up on its first launch, and takes you through them one "
+                + "grant at a time. It is there whenever you want it: opening it grants "
+                + "nothing and takes nothing back, and you can close it at any point."
         ))
 
         return ComposableSettings.PanelHelp(topics: topics)
@@ -89,7 +89,6 @@ public final class PermissionsSettingsPanelViewController: ComposableSettings.Se
     public override func viewDidLoad() {
         super.viewDidLoad()
         self.settingsView.addGroup(createPermissionsGroup())
-        self.settingsView.addGroup(createWalkthroughGroup())
     }
 
     public override func viewWillAppear() {
@@ -111,35 +110,32 @@ public final class PermissionsSettingsPanelViewController: ComposableSettings.Se
         self.panel = panel
         group.addSettingSubview(panel)
 
-        return group
-    }
-
-    private func createWalkthroughGroup() -> ComposableSettings.GroupView {
-        let group = ComposableSettings.GroupView(withTitle: "Walkthrough")
-
+        // In this card rather than one of its own: the walkthrough *is* these
+        // permissions, shown a grant at a time, so it belongs under the list it
+        // walks rather than under a second heading repeating the word.
         group.addSettingSubview(ComposableSettings.ButtonView(
             viewModel: ComposableSettings.ButtonViewModel(
-                title: "Reset Permission Walkthrough",
-                wasPressedCallback: { [weak self] in self?.resetWalkthrough() }
+                title: "Start Permissions Walkthrough",
+                wasPressedCallback: { [weak self] in self?.startWalkthrough() }
             ),
-            // One act, not a choice between two: sized to its own title at the
-            // leading edge rather than stretched across the card.
-            fillsWidth: false
+            placement: .centered
         ))
 
         return group
     }
 
-    private func resetWalkthrough() {
-        // This panel's own set, not the walkthrough's default: the keychain
-        // grants to forget are the ones shown here.
-        PermissionWalkthrough.reset(permissions: permissions)
-
-        let alert = NSAlert()
-        alert.messageText = "Permission Walkthrough Reset"
-        alert.informativeText = "The permission walkthrough will run again the next time the app launches."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+    /// Shows the walkthrough because the user asked for it, not because anything
+    /// is missing — which is why this calls `run` and not `runIfNeeded`.
+    ///
+    /// The app's own instance, looked up rather than built: `AppFeature`
+    /// registers itself on init, so a second one would displace the host's in
+    /// the registry and would carry whatever set it was constructed with.
+    /// Building one is the fallback for a host that composed no walkthrough at
+    /// all, and it is given this panel's permissions so the window lists the
+    /// same ones the card does.
+    private func startWalkthrough() {
+        let walkthrough = AppFeatureRegistry.shared.feature(PermissionWalkthrough.self)
+            ?? PermissionWalkthrough(permissions: permissions)
+        walkthrough.run()
     }
 }

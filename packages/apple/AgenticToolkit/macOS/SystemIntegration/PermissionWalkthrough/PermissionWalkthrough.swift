@@ -119,6 +119,23 @@ public final class PermissionWalkthrough: AppFeature {
         }
     }
 
+    /// Runs the walkthrough because the user asked to see it — whatever the
+    /// first-launch flag says, and whatever is already granted.
+    ///
+    /// Both of `runIfNeeded`'s gates exist for onboarding, and both would make a
+    /// button that offers to start the walkthrough do nothing at all: the flag
+    /// is set the first time the alert is dismissed, and the `allGranted`
+    /// short-circuit exists to skip an alert nobody asked for. Pressing the
+    /// button *is* asking for it, so this is the same presentation with neither
+    /// gate — and it still goes through `isPresenting`, because a second press
+    /// while the alert is up must not stack another one inside it.
+    public func run(completion: @escaping () -> Void = {}) {
+        self.completions.append(completion)
+        guard !self.isPresenting else { return }
+        self.isPresenting = true
+        self.presentFromRunLoop()
+    }
+
     /// Shows the alert from a run-loop block rather than from the task that
     /// decided to show it.
     ///
@@ -145,8 +162,8 @@ public final class PermissionWalkthrough: AppFeature {
                 // usually find iTerm2 closed, so the flag was never written and
                 // this app-modal alert came back at every launch with nothing
                 // the user could do to stop it. Onboarding asks once; Settings ▸
-                // Permissions is where the state lives afterwards, and "Reset
-                // Permission Walkthrough" there brings this back.
+                // Permissions is where the state lives afterwards, and "Start
+                // Permissions Walkthrough" there brings this back.
                 Self.markComplete()
                 self.isPresenting = false
                 self.finish()

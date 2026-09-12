@@ -4,8 +4,8 @@ import Foundation
 ///
 /// Extensible by design — add a case here (and its metadata in the extension
 /// below) to support a new permission. The package intentionally models only
-/// what current consumers need; Screen Recording / Full Disk Access are not
-/// modeled yet (YAGNI), but adding them is a localized change.
+/// what current consumers need; Full Disk Access is not modeled yet (YAGNI),
+/// but adding it is a localized change.
 public enum Permission: Sendable, Hashable {
     /// Accessibility (AX) — read window titles and move/raise other apps' windows.
     case accessibility
@@ -18,6 +18,15 @@ public enum Permission: Sendable, Hashable {
     /// Core Location — needed both for physical location itself and for the
     /// Wi-Fi SSID, which macOS gates behind location authorization.
     case location
+    /// Microphone input. macOS raises its own consent dialog the first time this
+    /// app opens an audio device, and the answer afterwards lives in Privacy &
+    /// Security → Microphone.
+    case microphone
+    /// Reading the contents of the display — what taking a screenshot or
+    /// recording the screen needs. There is no second chance at the dialog: a
+    /// refusal is remembered and answered without asking again, so the way back
+    /// is Privacy & Security → Screen Recording.
+    case screenCapture
     /// Reading a keychain item guarded by an ACL, named by its service string
     /// (e.g. `"Claude Code-credentials"`). Unlike the cases above this is not a
     /// TCC permission: the grant is the per-item dialog macOS puts up the first
@@ -35,6 +44,8 @@ extension Permission {
         case .notifications: "Notifications"
         case .automation: "Automation"
         case .location: "Location"
+        case .microphone: "Microphone"
+        case .screenCapture: "Screen Capture"
         case .keychain: "Keychain"
         }
     }
@@ -55,6 +66,8 @@ extension Permission {
                 .filter { !$0.isEmpty }
                 .joined(separator: "-")
         case .location: "location"
+        case .microphone: "microphone"
+        case .screenCapture: "screen-capture"
         case .keychain(let service):
             "keychain-" + service.lowercased()
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -70,6 +83,8 @@ extension Permission {
         case .notifications: "bell.badge"
         case .automation: "gearshape.2"
         case .location: "location"
+        case .microphone: "mic"
+        case .screenCapture: "display"
         case .keychain: "key.fill"
         }
     }
@@ -103,6 +118,10 @@ extension Permission {
             "Needed to find, raise and open windows in \(name(targetBundleID))."
         case .location:
             "Records where you are and which Wi-Fi network you're on, so activity can be grouped by place."
+        case .microphone:
+            "Lets this app record audio from your microphone."
+        case .screenCapture:
+            "Lets this app read what is on your screen, to capture a still of it or record it."
         case .keychain(let service):
             "Lets this app read the \u{201C}\(service)\u{201D} item in your keychain "
                 + "directly, instead of asking another tool for it."
@@ -134,6 +153,10 @@ extension Permission {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
         case .location:
             "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices"
+        case .microphone:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        case .screenCapture:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         case .keychain:
             nil
         }
@@ -158,15 +181,15 @@ extension Permission {
     /// `displayName` and `explanation` — so `all` can be exhaustive by
     /// construction instead of by a comment asking someone to keep it so.
     public enum ActionTitle {
-        /// Not granted, and System Settings owns the grant.
+        /// System Settings owns the grant — whichever direction the user is
+        /// about to move it in. There is no revoke API, so a granted permission
+        /// is taken back in the same pane it was given in, and a second title
+        /// for that would name a destination it does not lead to.
         public static let openSettings = "Open Settings"
         /// Not granted, and this app raises the consent dialog itself.
         public static let allow = "Allow…"
-        /// Already granted. macOS has no revoke API, so this leads to wherever
-        /// the user can take the grant back by hand.
-        public static let revoke = "Revoke"
         /// For a caller measuring how wide the control has to be.
-        public static let all = [openSettings, allow, revoke]
+        public static let all = [openSettings, allow]
     }
 
     /// What the row's button should say while the permission is *not* granted.

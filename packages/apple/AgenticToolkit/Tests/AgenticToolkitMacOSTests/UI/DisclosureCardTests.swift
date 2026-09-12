@@ -171,7 +171,7 @@ final class DisclosureCardTests: XCTestCase {
     private func bare(
         isCollapsed: Bool,
         summary: [DisclosureCardView.SummaryPart] = [],
-        titleIcon: String? = nil,
+        titleIcon: DisclosureCardView.TitleIcon? = nil,
         titleIconIsVisible: Bool = true
     ) -> DisclosureCardView {
         let card = DisclosureCardView(
@@ -243,7 +243,7 @@ final class DisclosureCardTests: XCTestCase {
         // trailing edge. An icon that shifted either would have moved the one
         // mark a stack of cards is scanned by.
         let plain = bare(isCollapsed: false)
-        let iconed = bare(isCollapsed: false, titleIcon: "person.crop.circle")
+        let iconed = bare(isCollapsed: false, titleIcon: .symbol("person.crop.circle"))
         guard let plainBadge = badge(of: plain), let iconedBadge = badge(of: iconed),
               let plainToggle = toggle(of: plain), let iconedToggle = toggle(of: iconed) else {
             return XCTFail("both cards draw a standing and a toggle")
@@ -257,7 +257,7 @@ final class DisclosureCardTests: XCTestCase {
     }
 
     func testTheSymbolStandsInFrontOfTheNameAndIsNotSpokenOverIt() {
-        let card = bare(isCollapsed: false, titleIcon: "person.crop.circle")
+        let card = bare(isCollapsed: false, titleIcon: .symbol("person.crop.circle"))
         guard let name = field("mike@example.com", in: card), let line = name.superview else {
             return XCTFail("a card sets its name on a line of its own")
         }
@@ -297,9 +297,9 @@ final class DisclosureCardTests: XCTestCase {
         // must not step left to fill the gap, or the addresses read down the
         // window as a ragged edge — so an unmarked card still builds the symbol
         // and still holds its width, and only declines to paint it.
-        let marked = bare(isCollapsed: false, titleIcon: "person.crop.circle")
+        let marked = bare(isCollapsed: false, titleIcon: .symbol("person.crop.circle"))
         let unmarked = bare(
-            isCollapsed: false, titleIcon: "person.crop.circle", titleIconIsVisible: false)
+            isCollapsed: false, titleIcon: .symbol("person.crop.circle"), titleIconIsVisible: false)
 
         guard let markedName = field("mike@example.com", in: marked),
               let unmarkedName = field("mike@example.com", in: unmarked),

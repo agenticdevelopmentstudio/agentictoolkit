@@ -9,6 +9,8 @@ struct PermissionMetadataTests {
         .notifications,
         .automation(targetBundleID: "com.googlecode.iterm2"),
         .location,
+        .microphone,
+        .screenCapture,
         .keychain(service: "Claude Code-credentials")
     ]
 
@@ -23,6 +25,8 @@ struct PermissionMetadataTests {
         // for every location query there.
         #expect(Permission.location.displayName == "Location")
         #expect(Permission.keychain(service: "Claude Code-credentials").displayName == "Keychain")
+        #expect(Permission.microphone.displayName == "Microphone")
+        #expect(Permission.screenCapture.displayName == "Screen Capture")
     }
 
     @Test("each keychain service is its own identifier and its own explanation")
@@ -60,6 +64,14 @@ struct PermissionMetadataTests {
         #expect(
             Permission.location.settingsPaneURL?.absoluteString
                 == "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices"
+        )
+        #expect(
+            Permission.microphone.settingsPaneURL?.absoluteString
+                == "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        )
+        #expect(
+            Permission.screenCapture.settingsPaneURL?.absoluteString
+                == "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         )
     }
 
