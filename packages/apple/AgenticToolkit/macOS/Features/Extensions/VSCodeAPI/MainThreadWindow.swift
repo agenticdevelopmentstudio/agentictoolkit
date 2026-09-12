@@ -139,11 +139,14 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// resolves to, and `nil` for the synthesized `"Cancel"`.
     ///
     /// **`internal`, not `private`, deliberately.** `MainThreadWindowTests`
-    /// reaches this through `@testable import AgenticToolkitMacOS`, and the
-    /// mapping is otherwise unreachable from a test: its only other caller is
-    /// `addButtons(for:to:)` below, which is declared `private` and so cannot
-    /// be called from outside this file at all. Tightening this one back to
-    /// `private` compiles here and breaks that suite.
+    /// calls this directly through `@testable import AgenticToolkitMacOS`;
+    /// tightening it to `private` compiles here and breaks that suite.
+    ///
+    /// Going through `presentMessage` instead is not a substitute for that
+    /// direct call: it indexes the plan and returns a single item index
+    /// rather than the plan itself, and it reaches that point only after
+    /// awaiting `presentedResponse(for:)`, which runs
+    /// `beginSheetModal(for:completionHandler:)` or `runModal()`.
     ///
     /// Entries come out in item order, **skipping every index in**
     /// `request.closeAffordanceIndices`, then one more for the "cancel slot":
@@ -182,11 +185,8 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// no button should be given it, which is a plan of one entry or none.
     ///
     /// **`internal`, not `private`, deliberately,** for the same reason as
-    /// `buttonPlan(for:)`: `MainThreadWindowTests` reaches this through
-    /// `@testable import AgenticToolkitMacOS`, and it is otherwise
-    /// unreachable from a test: its only other caller is
-    /// `addButtons(for:to:)` below, which is declared `private` and so cannot
-    /// be called from outside this file at all. Tightening this one back to
+    /// `buttonPlan(for:)`: `MainThreadWindowTests` calls this directly
+    /// through `@testable import AgenticToolkitMacOS`, and tightening it to
     /// `private` compiles here and breaks that suite.
     ///
     /// **Why one entry is the exception.** The cancel slot is always the

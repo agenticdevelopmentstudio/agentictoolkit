@@ -73,10 +73,11 @@ private final class SuspendingMessagePresenter: ExtensionMessagePresenting {
 /// `vscode.window` (task 5.5a): `showInformationMessage`,
 /// `showWarningMessage` and `showErrorMessage`, wired onto a real
 /// `ExtensionHost` and a recording or suspending `ExtensionMessagePresenting`
-/// double — never `NSAlertMessagePresenter`, which this bundle has no UI to
-/// drive and no business exercising: the point of this suite is the argument
-/// parsing, the promise settlement, and the disposal races, all of which sit
-/// in `MainThreadWindow` itself, upstream of AppKit.
+/// double — never `NSAlertMessagePresenter`, which this suite has no business
+/// exercising: its `presentMessage` awaits `beginSheetModal` or `runModal()`,
+/// and the point of this suite is the argument parsing, the promise
+/// settlement, and the disposal races, all of which sit in `MainThreadWindow`
+/// itself, upstream of AppKit.
 @MainActor
 @Suite
 struct MainThreadWindowTests {
@@ -917,10 +918,12 @@ struct MainThreadWindowTests {
     /// - **One-entry plans (`[0]` → `nil`, `[2]` → `nil`):** returning
     ///   `plan.count - 1` unconditionally, the shape this function replaced,
     ///   which answers `0` for both; and loosening the guard to
-    ///   `plan.count > 0`, which answers the same. These are the two
-    ///   one-entry plans `buttonPlan(for:)` actually produces — one item that
-    ///   is flagged, and three items with all three flagged — not invented
-    ///   shapes.
+    ///   `plan.count > 0`, which answers the same. A one-entry plan is what
+    ///   `buttonPlan(for:)` returns whenever **every** item is flagged: no
+    ///   item survives the skip, and the cancel slot takes the last flagged
+    ///   index, so an all-flagged request of `n` items gives `[n - 1]`. `[0]`
+    ///   is one item flagged and `[2]` is three items all flagged; two items
+    ///   all flagged would give `[1]`. Produced shapes, not invented ones.
     /// - **What fills the cancel slot never changes the answer**
     ///   (`[0, 1, 2, nil]` → `3` against `[1, 2, 0]` → `2`): one plan whose
     ///   last entry is the synthesized `nil` slot and one whose last entry is
