@@ -5,42 +5,38 @@
 
 import Foundation
 import JavaScriptCore
+import OSLog
+import AgenticToolkitCore
 
 /// The `vscode.commands` adaptor: `registerCommand`, `executeCommand` and
 /// `getCommands`, each terminating in the app's own `CommandRegistry` rather
 /// than a second, extension-private command table.
 ///
-/// One instance per extension, mirroring `ExtensionHost` itself. That is what
-/// makes Ruling 5's duplicate check ("an id *this adaptor* already owns")
-/// answerable at all: two extensions are two `MainThreadCommands`, so one
-/// extension registering `'x'` twice is a collision this type can see, and two
-/// different extensions each registering `'x'` once is not — that second case
-/// is the registry's replace-and-warn behaviour, unchanged, and deliberately
-/// not this type's decision (see the doc on `handleRegisterCommand`).
+/// **One instance per extension**, mirroring `ExtensionHost` itself. Nothing
+/// enforces it — `defineVSCodeMember` will install these blocks on any number
+/// of hosts — but every ownership question below is answered as if it holds.
+/// That is what makes Ruling 5's duplicate check ("an id *this adaptor*
+/// already owns") answerable at all: two extensions are two
+/// `MainThreadCommands`, so one extension registering `'x'` twice is a
+/// collision this type can see, and two different extensions each registering
+/// `'x'` once is not — that second case is the registry's replace-and-warn
+/// behaviour, unchanged, and deliberately not this type's decision (see the
+/// doc on `handleRegisterCommand`). Install one instance on two hosts and the
+/// two extensions' namespaces are conflated; `ownedCallbacks` is keyed by id
+/// alone and has no way to notice.
 ///
 /// Not `@convention(block)` itself — the three properties below are. This
 /// class exists so those blocks have somewhere to keep the state a bare
-/// closure cannot: the registry they dispatch through, and the ids-to-JSValue
-/// ownership record `dispose()` and Ruling 5 both read.
+/// closure cannot: the registry they dispatch through, and the ownership
+/// record `dispose()` and Ruling 5 both read. The ceremony of *making* those
+/// blocks lives in `VSCodeAPI`, which tasks 5.4–5.7 share, so that what is
+/// left here reads as the `commands` adaptor rather than as four copies of an
+/// incantation.
 ///
 /// `@MainActor` for the same reason `CommandRegistry` and `ExtensionHost` are:
 /// `JSValue` is not `Sendable`, and every block below is called by
 /// JavaScriptCore on the thread that made the call, which for this host is
 /// always the main actor.
-/// Carries a `JSValue?` out of `MainActor.assumeIsolated`, whose generic
-/// return type must be `Sendable` even though nothing here actually crosses
-/// an isolation domain: every block below runs synchronously, on the one
-/// thread JavaScriptCore ever calls it from, which is why `assumeIsolated`
-/// applies in the first place. `JSValue` itself has no `Sendable`
-/// conformance to appeal to — it is a JavaScriptCore class, not a type this
-/// module owns — so this box is the honest way to tell the compiler what the
-/// surrounding design already guarantees, rather than reaching for
-/// `@preconcurrency import JavaScriptCore` and quietly widening that escape
-/// hatch to every use of the framework in this file.
-private struct UncheckedJSValueBox: @unchecked Sendable {
-    let value: JSValue?
-}
-
 @MainActor
 public final class MainThreadCommands {
 
@@ -49,8 +45,21 @@ public final class MainThreadCommands {
     /// row there, not a second table this adaptor keeps to itself.
     private let registry: CommandRegistry
 
-    /// The ids this adaptor itself has registered, and the JS callback each one
-    /// dispatches to.
+    /// One id this adaptor registered: the JS callback it dispatches to, and
+    /// the token naming *that* registration in the registry.
+    ///
+    /// The token is the difference between "unregister this id" and
+    /// "unregister what I registered". Ruling 5 lets an extension register an
+    /// id the app already owned, and `register` replaces in place, so the two
+    /// routinely name different things a moment later; by id alone a stale
+    /// `Disposable` deletes whatever now answers to the id, including one of
+    /// the app's own commands.
+    private struct OwnedCommand {
+        let callback: JSValue
+        let token: CommandRegistration
+    }
+
+    /// The ids this adaptor itself has registered.
     ///
     /// **Not a second command table.** Dispatch always goes through
     /// `registry`; this dictionary is purely the ownership record — the answer
@@ -60,7 +69,7 @@ public final class MainThreadCommands {
     /// answer a different question: whether the id is registered at all,
     /// which is true for the app's own commands too, and Ruling 5 is explicit
     /// that those may be shadowed.
-    private var ownedCallbacks: [String: JSValue] = [:]
+    private var ownedCallbacks: [String: OwnedCommand] = [:]
 
     /// - Parameter registry: The registry extension commands dispatch through.
     ///   Not defaulted: a caller that forgot to pass its app's real registry
@@ -76,20 +85,13 @@ public final class MainThreadCommands {
     /// `ExtensionHost.defineVSCodeMember(namespacePath:name:implementation:)`
     /// as-is.
     ///
-    /// Declared with no formal parameters and read through
-    /// `JSContext.currentArguments()` inside `handleRegisterCommand()` instead
-    /// of as `(String, JSValue, JSValue?) -> JSValue?`: JavaScriptCore fills a
-    /// block's missing trailing parameters with `undefined`, which would make
-    /// an omitted `thisArg` indistinguishable from one explicitly passed as
-    /// `undefined` only by accident of how many parameters happened to be
-    /// declared. Reading the actual argument list once, here and in the two
-    /// members below, is one rule instead of three near-identical ones.
-    public private(set) lazy var registerCommand: Any = {
-        let block: @convention(block) () -> JSValue? = { [weak self] in
-            MainActor.assumeIsolated { UncheckedJSValueBox(value: self?.handleRegisterCommand()) }.value
-        }
-        return block
-    }()
+    /// Raises rather than rejects on a torn-down adaptor, because this member
+    /// returns a `Disposable` and not a `Thenable`: answering `undefined`
+    /// would let the extension push nothing onto `context.subscriptions` and
+    /// believe it had registered a command.
+    public private(set) lazy var registerCommand: Any = VSCodeAPI.member(
+        "vscode.commands.registerCommand", of: self, whenTornDown: .raisedException
+    ) { $0.handleRegisterCommand() }
 
     /// Ruling 6: `registerCommand` raises rather than rejects, because it
     /// returns a `Disposable`, not a `Thenable` — there is nothing for a
@@ -104,19 +106,15 @@ public final class MainThreadCommands {
     /// permissions work, not with an API adaptor.
     private func handleRegisterCommand() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
-        let arguments = (JSContext.currentArguments() as? [JSValue]) ?? []
+        let arguments = VSCodeAPI.currentArguments()
 
         guard let commandValue = arguments.first, commandValue.isString,
               let command = commandValue.toString() else {
-            context.exception = JSValue(
-                newErrorFromMessage: "registerCommand requires a string command id.", in: context)
-            return nil
+            return VSCodeAPI.raise("registerCommand requires a string command id.", in: context)
         }
 
         guard arguments.count > 1 else {
-            context.exception = JSValue(
-                newErrorFromMessage: "registerCommand requires a callback function.", in: context)
-            return nil
+            return VSCodeAPI.raise("registerCommand requires a callback function.", in: context)
         }
         let callback = arguments[1]
         // `callback instanceof Function`, which is `typeof callback ===
@@ -125,15 +123,11 @@ public final class MainThreadCommands {
         // checks does not apply.
         guard let functionConstructor = context.objectForKeyedSubscript("Function"),
               callback.isInstance(of: functionConstructor) else {
-            context.exception = JSValue(
-                newErrorFromMessage: "registerCommand's callback must be a function.", in: context)
-            return nil
+            return VSCodeAPI.raise("registerCommand's callback must be a function.", in: context)
         }
 
         guard ownedCallbacks[command] == nil else {
-            context.exception = JSValue(
-                newErrorFromMessage: "command '\(command)' already exists", in: context)
-            return nil
+            return VSCodeAPI.raise("command '\(command)' already exists", in: context)
         }
 
         // `undefined` and `null` both mean "no `thisArg`" (Ruling 7); anything
@@ -145,22 +139,78 @@ public final class MainThreadCommands {
             return rawThisArg
         }()
 
-        ownedCallbacks[command] = callback
-        registry.register(AppCommand(id: command, title: command, run: { rawArguments in
-            let result: JSValue?
-            if let boundThisArg {
-                result = callback.invokeMethod("call", withArguments: [boundThisArg] + rawArguments)
-            } else {
-                result = callback.call(withArguments: rawArguments)
-            }
-            return result?.toObject()
+        // `title` is the raw id, so this row reads `myext.doTheThing` in the
+        // command palette and has no category. Constraint F puts
+        // `contributes.commands` — where VS Code keeps the human-readable
+        // title and category — out of this task's reach entirely, and
+        // inventing a title from the id here would be a second, worse answer
+        // that the real one would then have to displace. The `contributes`
+        // wiring task is the one that fixes it.
+        let token = registry.register(AppCommand(id: command, title: command, run: { rawArguments in
+            MainThreadCommands.invoke(
+                callback, thisArg: boundThisArg, arguments: rawArguments, commandID: command)
         }))
+        ownedCallbacks[command] = OwnedCommand(callback: callback, token: token)
 
         return makeDisposable(id: command, in: context)
     }
 
-    /// A JS object whose `dispose()` unregisters `id` — and only `id` — from
-    /// this adaptor, and does nothing the second time it is called.
+    /// Calls the extension's callback and answers with something the registry
+    /// can carry: the callback's own `JSValue`, or a `CallbackFailure` if it
+    /// threw.
+    ///
+    /// **The adaptor owns its callbacks' exceptions.** Left to JavaScriptCore,
+    /// a throw here reaches `ExtensionHost`'s `exceptionHandler` and lands in
+    /// its `pendingException`, which the host reads after `callActivate` — so
+    /// a command that throws while an `async activate()` is still in flight
+    /// fails the *extension's activation*, naming a cause that came from
+    /// somewhere else entirely. `VSCodeAPI.call` keeps it out of there;
+    /// everything after that is about telling somebody.
+    ///
+    /// Both callers are told as well as they can be. `executeCommand` rejects
+    /// its promise with the raw exception (see `handleExecuteCommand`), which
+    /// is what a VS Code extension's `await … catch` expects. A dispatch from
+    /// a menu item or the palette arrives through
+    /// `CommandRegistry.execute(id:)`, which returns `Void` and has no caller
+    /// to tell, so for that path the log line *is* the report — which is why
+    /// the logging happens here, on the one path both share, rather than in
+    /// `handleExecuteCommand`.
+    ///
+    /// Deliberately **not** made to throw. `AppCommand.run` is `([Any]) ->
+    /// Any?` and staying that way keeps the registry free of any knowledge
+    /// that JavaScript exists; `CallbackFailure` is private to this file and
+    /// unwrapped by the one member that can do something with it.
+    private static func invoke(
+        _ callback: JSValue,
+        thisArg: JSValue?,
+        arguments: [Any],
+        commandID: String
+    ) -> Any? {
+        switch VSCodeAPI.call(callback, thisArg: thisArg, arguments: arguments) {
+        case .returned(let value):
+            return value
+        case .threw(let exception):
+            logger.error(
+                """
+                Extension command '\(commandID, privacy: .public)' threw: \
+                \(exception.toString() ?? "<unprintable>", privacy: .public)
+                """)
+            return CallbackFailure(reason: exception)
+        }
+    }
+
+    /// What `invoke` hands back when the extension's callback threw.
+    ///
+    /// A private type travelling through `AppCommand.run`'s `Any?`, which is
+    /// the point: the registry stays a registry, and only the one member that
+    /// has a promise to reject ever looks for this.
+    private struct CallbackFailure {
+        let reason: JSValue
+    }
+
+    /// A JS object whose `dispose()` unregisters `id` — and only the
+    /// registration this adaptor made for it — and does nothing the second
+    /// time it is called.
     ///
     /// VS Code's `Disposable` contract is exactly that idempotence, so
     /// `disposed` is captured by the block rather than re-derived from
@@ -183,26 +233,33 @@ public final class MainThreadCommands {
     }
 
     /// Removes `id` from both the ownership record and the registry — the
-    /// half of teardown a single `Disposable` needs — but only if this adaptor
-    /// still owns it. Called from a `Disposable.dispose()` that already fired
-    /// once, or from `dispose()` below tearing down everything at once, this
-    /// guard is what makes either caller's second attempt at the same id a
-    /// no-op instead of unregistering whatever now happens to sit under that
-    /// id.
+    /// half of teardown a single `Disposable` needs.
+    ///
+    /// Two guards, answering two different questions. The dictionary lookup
+    /// asks whether this adaptor still claims the id at all, which makes a
+    /// second `dispose()` a no-op. The token handed to
+    /// `CommandRegistry.unregister(id:token:)` asks whether the registration
+    /// this adaptor made is still the one under that id — because `register`
+    /// replaces in place, an extension that shadowed an app command and was
+    /// then shadowed back would otherwise delete somebody else's command on
+    /// the way out.
     private func unregisterOwned(id: String) {
-        guard ownedCallbacks.removeValue(forKey: id) != nil else { return }
-        registry.unregister(id: id)
+        guard let owned = ownedCallbacks.removeValue(forKey: id) else { return }
+        registry.unregister(id: id, token: owned.token)
     }
 
     // MARK: - vscode.commands.executeCommand
 
     /// `implementation` for `vscode.commands.executeCommand`.
-    public private(set) lazy var executeCommand: Any = {
-        let block: @convention(block) () -> JSValue? = { [weak self] in
-            MainActor.assumeIsolated { UncheckedJSValueBox(value: self?.handleExecuteCommand()) }.value
-        }
-        return block
-    }()
+    ///
+    /// Rejects rather than raises on a torn-down adaptor: this member returns a
+    /// `Thenable`, and Ruling 6's whole argument is that a synchronous failure
+    /// from underneath an `await` reaches a `catch` the extension did not
+    /// write. Answering `undefined` would be the worst version of that — the
+    /// extension's own `.then` would be the thing that threw.
+    public private(set) lazy var executeCommand: Any = VSCodeAPI.member(
+        "vscode.commands.executeCommand", of: self, whenTornDown: .rejectedPromise
+    ) { $0.handleExecuteCommand() }
 
     /// Ruling 6: always a settled promise, never a synchronous throw. VS Code
     /// extensions write `await vscode.commands.executeCommand(...)` inside
@@ -213,44 +270,65 @@ public final class MainThreadCommands {
     /// JavaScript and the app's own command dispatch on the same actor, so the
     /// promise below is already resolved or rejected by the time it is handed
     /// back, and `Thenable` is honoured rather than actually deferring
-    /// anything.
+    /// anything. The one exception is a command whose callback is itself
+    /// `async`: its promise is handed straight back (see
+    /// `VSCodeAPI.settledPromise`), so it settles when the extension's own work
+    /// does.
+    ///
+    /// **Arguments and results cross untouched.** The `JSValue`s the caller
+    /// passed go into `CommandRegistry.execute(id:arguments:)` as themselves,
+    /// and the callback's return `JSValue` comes back the same way. Converting
+    /// either through `toObject()` would be the obvious-looking mistake: it
+    /// copies objects (so a callback's mutations become invisible to its
+    /// caller), flattens class instances to plain dictionaries (so
+    /// `vscode.Uri` and friends lose `fsPath` and every other method the
+    /// moment 5.4–5.7 introduce them), turns functions into `{}`, and turns a
+    /// returned `Promise` into an empty object. An app-side caller that passes
+    /// native Swift values is unaffected —
+    /// `JSValue.call(withArguments:)` bridges those itself.
     private func handleExecuteCommand() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
-        let arguments = (JSContext.currentArguments() as? [JSValue]) ?? []
+        let arguments = VSCodeAPI.currentArguments()
 
         guard let commandValue = arguments.first, commandValue.isString,
               let command = commandValue.toString() else {
-            let reason = JSValue(
-                newErrorFromMessage: "executeCommand requires a string command id.", in: context)
-            return JSValue(newPromiseRejectedWithReason: reason as Any, in: context)
+            return VSCodeAPI.rejectedPromise(
+                message: "executeCommand requires a string command id.", in: context)
         }
-        let rest = arguments.dropFirst().map { $0.toObject() as Any }
+        let rest = Array(arguments.dropFirst()) as [Any]
 
         do {
-            let result = try registry.execute(id: command, arguments: Array(rest))
-            return JSValue(newPromiseResolvedWithResult: result as Any, in: context)
+            let result = try registry.execute(id: command, arguments: rest)
+            if let failure = result as? CallbackFailure {
+                // The extension's own exception, handed back to the extension
+                // unchanged — same `Error` subclass, same `stack`. A
+                // paraphrase would be the app inventing a cause.
+                return VSCodeAPI.rejectedPromise(reason: failure.reason, in: context)
+            }
+            if let jsResult = result as? JSValue {
+                return VSCodeAPI.settledPromise(for: jsResult, in: context)
+            }
+            // An app-registered command answering with a native Swift value:
+            // JavaScriptCore bridges it on the way into the promise.
+            return VSCodeAPI.resolvedPromise(with: result, in: context)
         } catch let error as CommandRegistryError {
             // The registry's own wording — "no command with id 'x'" versus
             // "registered but currently disabled" — is exactly what test 5
             // needs to tell the two rejections apart, so it is passed through
             // rather than paraphrased.
-            let reason = JSValue(newErrorFromMessage: error.description, in: context)
-            return JSValue(newPromiseRejectedWithReason: reason as Any, in: context)
+            return VSCodeAPI.rejectedPromise(message: error.description, in: context)
         } catch {
-            let reason = JSValue(newErrorFromMessage: "\(error)", in: context)
-            return JSValue(newPromiseRejectedWithReason: reason as Any, in: context)
+            return VSCodeAPI.rejectedPromise(message: "\(error)", in: context)
         }
     }
 
     // MARK: - vscode.commands.getCommands
 
-    /// `implementation` for `vscode.commands.getCommands`.
-    public private(set) lazy var getCommands: Any = {
-        let block: @convention(block) () -> JSValue? = { [weak self] in
-            MainActor.assumeIsolated { UncheckedJSValueBox(value: self?.handleGetCommands()) }.value
-        }
-        return block
-    }()
+    /// `implementation` for `vscode.commands.getCommands`. Rejects on a
+    /// torn-down adaptor, for the reason `executeCommand` does.
+    public private(set) lazy var getCommands: Any = VSCodeAPI.member(
+        "vscode.commands.getCommands", of: self, whenTornDown: .rejectedPromise
+    ) { $0.handleGetCommands() }
 
     /// Ruling 8: an absent, `undefined` or `false` argument answers with every
     /// id; `true` drops the ones VS Code treats as internal, a leading `_`.
@@ -263,12 +341,12 @@ public final class MainThreadCommands {
     /// `executeCommand` it only ever resolves, never rejects.
     private func handleGetCommands() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
-        let arguments = (JSContext.currentArguments() as? [JSValue]) ?? []
+        let arguments = VSCodeAPI.currentArguments()
         let filterInternal = arguments.first?.toBool() ?? false
 
         let ids = registry.allCommands.map(\.id)
         let filtered = filterInternal ? ids.filter { !$0.hasPrefix("_") } : ids
-        return JSValue(newPromiseResolvedWithResult: filtered as Any, in: context)
+        return VSCodeAPI.resolvedPromise(with: filtered, in: context)
     }
 
     // MARK: - Teardown
@@ -280,10 +358,24 @@ public final class MainThreadCommands {
     /// not leave rows in the command palette that invoke a `JSValue` on a
     /// `JSContext` that no longer exists, and that has to happen at the known
     /// moment the host is disposed, not whenever ARC gets around to it.
+    ///
+    /// Routed through `unregisterOwned` rather than unregistering ids
+    /// directly, so a full teardown is token-guarded exactly as a single
+    /// `Disposable` is: an id some other registrant has since taken over is
+    /// theirs, and a wholesale teardown is not a licence to take it.
     public func dispose() {
-        for id in ownedCallbacks.keys {
-            registry.unregister(id: id)
+        for id in Array(ownedCallbacks.keys) {
+            unregisterOwned(id: id)
         }
         ownedCallbacks.removeAll()
     }
+}
+
+extension MainThreadCommands: Loggable {
+
+    /// The adaptor's own log destination — the same `Loggable` shape
+    /// `CommandRegistry` and `ExtensionHost` use, so an extension command that
+    /// threw shows up beside the registry's own collision warnings rather than
+    /// in a subsystem of its own.
+    public static nonisolated let logger = makeLogger()
 }

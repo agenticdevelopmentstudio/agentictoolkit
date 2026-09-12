@@ -278,6 +278,7 @@
 		3A9F7E9837216316A434A162 /* PersistedWindowState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AC870990D2D1C5B720CEE15 /* PersistedWindowState.swift */; };
 		3AA5608A715B68B29C10DD7D /* AIProviderMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC959528CF23522D84FE859F /* AIProviderMigration.swift */; };
 		3AA57BEF9E61D0E2C2B3F325 /* TabItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAEA589426DA19C4D308193A /* TabItem.swift */; };
+		3AE0C5D64A94E7702E6BCB21 /* VSCodeAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BAD7FD50D3300898C1ECCAF /* VSCodeAPI.swift */; };
 		3B0C3CF82992A30AB0D92237 /* GitGlobalConfigTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E52E1F22188823DD9C7F9D2 /* GitGlobalConfigTableView.swift */; };
 		3B25357CB5BF1CE9ADEF2894 /* ScriptableProjectTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1123E1D2D4B6AA8398E6B4 /* ScriptableProjectTab.swift */; };
 		3BEC41579291F1833DC49EC6 /* FileTreeManagerInjectedProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF257F89CFF00A2F21772F08 /* FileTreeManagerInjectedProviderTests.swift */; };
@@ -2299,6 +2300,7 @@
 		8B0E71540AA3ACF6A4B46F74 /* LogProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogProvider.swift; sourceTree = "<group>"; };
 		8B323E2C908DA71AE48164BE /* FileBrowserRestorationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserRestorationState.swift; sourceTree = "<group>"; };
 		8B75EC491BA90C48F8362405 /* PluginTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginTransportTests.swift; sourceTree = "<group>"; };
+		8BAD7FD50D3300898C1ECCAF /* VSCodeAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeAPI.swift; sourceTree = "<group>"; };
 		8C41450A42A2BA27B4432260 /* ComposableTabsFocusable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsFocusable.swift; sourceTree = "<group>"; };
 		8C5EBCBE46FB9FF0162C243F /* ComposableTabsPaneViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsPaneViewController.swift; sourceTree = "<group>"; };
 		8C5ED7659A9B0B9B315F084B /* PopupMenuChoiceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopupMenuChoiceView.swift; sourceTree = "<group>"; };
@@ -3569,6 +3571,7 @@
 			isa = PBXGroup;
 			children = (
 				1D78D978AA70E3B2E344F328 /* MainThreadCommands.swift */,
+				8BAD7FD50D3300898C1ECCAF /* VSCodeAPI.swift */,
 			);
 			path = VSCodeAPI;
 			sourceTree = "<group>";
@@ -6713,6 +6716,7 @@
 				AFE2E74AEE003F3FE95F43EE /* UserSettings+Projects.swift in Sources */,
 				60F1C3AA0131480450C02442 /* UserSettings+Recents.swift in Sources */,
 				65A4B1BF9ADD768DC0C66BB9 /* UserSettings+SessionWatcher.swift in Sources */,
+				3AE0C5D64A94E7702E6BCB21 /* VSCodeAPI.swift in Sources */,
 				9F95153742FDE3319D0AE504 /* VerticalStackView.swift in Sources */,
 				1EEFE431083CCF3925C185D3 /* ViewLayout.swift in Sources */,
 				D95E2BA90114CC65AE8BDA0C /* ViewModel.swift in Sources */,
