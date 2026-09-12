@@ -37,6 +37,12 @@ final class FileTreeOutlineViewController: NSViewController {
     /// indicator on a node whose file has unsaved changes open in the editor.
     private let documentStore: TextDocumentStore
 
+    /// Where a file the user picked should be shown. Plain selection cannot
+    /// carry this — it says *what*, never *where* — so the three verbs travel
+    /// as their own request: a plain click or "Open" sends `.current`, and the
+    /// other two context-menu items send the destination they name.
+    var onOpenRequest: ((URL, DocumentDestination) -> Void)?
+
     /// Keeps the `documentStore` subscription below alive; dropped in `deinit`.
     private var documentStoreObservation: TextDocumentStoreObservation?
 
@@ -134,6 +140,10 @@ final class FileTreeOutlineViewController: NSViewController {
         outline.doubleAction = #selector(rowDoubleClicked(_:))
         outline.autoresizesOutlineColumn = false
         outline.accessibilityID("file-browser.tree")
+
+        let contextMenu = NSMenu()
+        contextMenu.delegate = self
+        outline.menu = contextMenu
 
         scrollView.documentView = outline
         scrollView.hasVerticalScroller = true
@@ -471,10 +481,14 @@ final class FileTreeOutlineViewController: NSViewController {
         guard let node = item as? FileTreeNode else { return }
         // A directory has nothing to open, so a double-click means what it
         // means everywhere else: show me what is inside, or stop showing me.
+        // Anything else — a file, or a childless package — is `openIfFile`'s
+        // own case, the same one a plain click already reaches: shown in the
+        // Document pane, never handed off to whatever app claims the
+        // extension.
         if node.children != nil {
             toggle(node)
         } else {
-            NSWorkspace.shared.open(node.url)
+            openIfFile(node)
         }
     }
 
@@ -484,6 +498,46 @@ final class FileTreeOutlineViewController: NSViewController {
         } else {
             outline.expandItem(item)
         }
+    }
+
+    // MARK: - Context menu
+
+    /// The three verbs a file can be opened with, or `nil` for anything that
+    /// is not an openable file — which is what leaves directories, repo roots
+    /// and a path nothing lives at without a menu.
+    func makeContextMenu(for url: URL) -> NSMenu? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else { return nil }
+
+        let menu = NSMenu()
+        for (title, destination) in [
+            ("Open", DocumentDestination.current),
+            ("Open in a New Tab", DocumentDestination.newTab),
+            ("Open to the Side", DocumentDestination.toTheSide)
+        ] {
+            let item = NSMenuItem(title: title, action: #selector(openFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = OpenRequest(url: url, destination: destination)
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// Carries a menu item's `(url, destination)` pair through
+    /// `representedObject`, which only holds `AnyObject`.
+    private final class OpenRequest: NSObject {
+        let url: URL
+        let destination: DocumentDestination
+        init(url: URL, destination: DocumentDestination) {
+            self.url = url
+            self.destination = destination
+        }
+    }
+
+    @objc private func openFromMenu(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? OpenRequest else { return }
+        onOpenRequest?(request.url, request.destination)
     }
 
     // MARK: - Items
@@ -518,6 +572,21 @@ final class FileTreeOutlineViewController: NSViewController {
         default:
             return []
         }
+    }
+}
+
+// MARK: - Context menu delegate
+
+extension FileTreeOutlineViewController: NSMenuDelegate {
+    /// Rebuilds the menu for the row under the cursor — `clickedRow`, never
+    /// `selectedRow` — so right-clicking a file that is not the current
+    /// selection acts on the one the user is actually pointing at.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard outline.clickedRow >= 0,
+              let node = outline.item(atRow: outline.clickedRow) as? FileTreeNode,
+              let built = makeContextMenu(for: node.url) else { return }
+        menu.items = built.items
     }
 }
 
@@ -631,6 +700,17 @@ extension FileTreeOutlineViewController: NSOutlineViewDataSource, NSOutlineViewD
         if let url = node?.url, let root = directories.root(containing: url) {
             selection.selectedRoot = root
         }
+        openIfFile(node)
+    }
+
+    /// A plain click says *what*; showing it is `.current`, the same
+    /// destination "Open" on the context menu sends. `children == nil` is the
+    /// same test `isItemExpandable` and `rowDoubleClicked` already use for
+    /// "this row has nothing to disclose" — a real file, or a childless
+    /// package — so all three agree on what counts as openable.
+    func openIfFile(_ node: FileTreeNode?) {
+        guard let node, node.children == nil else { return }
+        onOpenRequest?(node.url, .current)
     }
 }
 
