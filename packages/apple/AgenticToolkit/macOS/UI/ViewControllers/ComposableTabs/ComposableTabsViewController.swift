@@ -203,11 +203,13 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
             if let pane = child as? ComposableTabsPaneViewController {
                 pane.host = self
                 pane.layoutOverride = layoutOverride
+                pane.stateOwnerNodeID = stateOwnerNodeID
             }
             if let split = child as? ComposableTabsViewController {
                 split.layoutParent = self
                 split.arranger = arranger
                 split.layoutOverride = layoutOverride
+                split.stateOwnerNodeID = stateOwnerNodeID
             }
         }
     }
@@ -283,6 +285,19 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// subtree, which is what makes the constraint hold on restore as well as
     /// on the menus.
     public var layoutOverride: ComposableTabsLayout? {
+        didSet { stampOwnershipOnChildren() }
+    }
+
+    /// The layout node every pane in this subtree should remember its state
+    /// against, when the panes here are not layout nodes themselves — the
+    /// Document pane's tabs, whose editors live only inside its own stored
+    /// layout. `nil` for a window's own tree, where each pane *is* a layout
+    /// node. See `ProjectPaneStateStore.ownerNodeID`.
+    ///
+    /// Assigning stamps the whole subtree, the same way `layoutOverride` does
+    /// and for the same reason: it is a fact about a tree, not about a node,
+    /// and a split that appears later has to inherit it.
+    public var stateOwnerNodeID: UUID? {
         didSet { stampOwnershipOnChildren() }
     }
 
@@ -686,6 +701,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         child.thicknessFraction = nil
         inner.arranger = arranger
         inner.layoutOverride = layoutOverride
+        inner.stateOwnerNodeID = stateOwnerNodeID
 
         layoutChildren[index] = inner
         if isViewLoaded {

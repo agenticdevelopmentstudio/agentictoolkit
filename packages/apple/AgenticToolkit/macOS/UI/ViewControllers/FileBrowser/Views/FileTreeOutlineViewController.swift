@@ -584,25 +584,37 @@ final class FileTreeOutlineViewController: NSViewController {
 
     // MARK: - Context menu
 
-    /// The three verbs a file can be opened with, or `nil` for anything that
-    /// is not an openable file — which is what leaves directories, repo roots
-    /// and a path nothing lives at without a menu.
-    func makeContextMenu(for url: URL) -> NSMenu? {
+    /// The three verbs a file can be opened with, as items belonging to no menu
+    /// yet, or `nil` for anything that is not an openable file — which is what
+    /// leaves directories, repo roots and a path nothing lives at without a menu.
+    ///
+    /// The items are free rather than pre-installed because `menuNeedsUpdate`
+    /// has to fill the menu AppKit already owns: an item that still belongs to
+    /// another menu makes `addItem` throw, and AppKit swallows that as a menu
+    /// that simply never opens.
+    func openMenuItems(for url: URL) -> [NSMenuItem]? {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
               !isDirectory.boolValue else { return nil }
 
-        let menu = NSMenu()
-        for (title, destination) in [
+        return [
             ("Open", DocumentDestination.current),
             ("Open in a New Tab", DocumentDestination.newTab),
             ("Open to the Side", DocumentDestination.toTheSide)
-        ] {
+        ].map { title, destination in
             let item = NSMenuItem(title: title, action: #selector(openFromMenu(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = OpenRequest(url: url, destination: destination)
-            menu.addItem(item)
+            return item
         }
+    }
+
+    /// The same three verbs as a standalone menu, for anywhere that needs a menu
+    /// object rather than items to install.
+    func makeContextMenu(for url: URL) -> NSMenu? {
+        guard let items = openMenuItems(for: url) else { return nil }
+        let menu = NSMenu()
+        for item in items { menu.addItem(item) }
         return menu
     }
 
@@ -667,8 +679,8 @@ extension FileTreeOutlineViewController: NSMenuDelegate {
         menu.removeAllItems()
         guard outline.clickedRow >= 0,
               let node = outline.item(atRow: outline.clickedRow) as? FileTreeNode,
-              let built = makeContextMenu(for: node.url) else { return }
-        menu.items = built.items
+              let items = openMenuItems(for: node.url) else { return }
+        for item in items { menu.addItem(item) }
     }
 }
 
