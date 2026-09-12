@@ -91,6 +91,25 @@ private final class UnusedQuickPickPresenter: ExtensionQuickPickPresenting {
     }
 }
 
+/// An `ExtensionInputBoxPresenting` double for a suite that never calls
+/// `showInputBox`, on `UnusedQuickPickPresenter`'s own reasoning:
+/// `MainThreadWindow.init` does not default its `inputBoxPresenter:`
+/// argument either, so every construction in this file has to name one, and
+/// naming one that traps says these tests exercise no input box.
+///
+/// `MainThreadWindowInputBoxTests` is where an input box is actually
+/// presented, and it has its own recording double.
+@MainActor
+private final class UnusedInputBoxPresenter: ExtensionInputBoxPresenting {
+    func presentInputBox(
+        _ request: ExtensionInputBoxRequest,
+        validate: @escaping (String) async -> ExtensionInputValidation?
+    ) async -> String? {
+        Issue.record("presentInputBox was called by a suite that exercises no input box.")
+        return nil
+    }
+}
+
 /// `vscode.window` (task 5.5a): `showInformationMessage`,
 /// `showWarningMessage` and `showErrorMessage`, wired onto a real
 /// `ExtensionHost` and a recording or suspending `ExtensionMessagePresenting`
@@ -202,6 +221,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -249,6 +269,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -291,6 +312,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -339,6 +361,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -377,6 +400,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -417,6 +441,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -461,6 +486,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose() }
         try install(window, on: host)
@@ -514,6 +540,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -570,6 +597,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -609,6 +637,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -644,6 +673,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -684,6 +714,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -728,6 +759,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -765,6 +797,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -801,6 +834,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
@@ -857,6 +891,7 @@ struct MainThreadWindowTests {
         )
         let window = MainThreadWindow(
             presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            inputBoxPresenter: UnusedInputBoxPresenter(),
             notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)

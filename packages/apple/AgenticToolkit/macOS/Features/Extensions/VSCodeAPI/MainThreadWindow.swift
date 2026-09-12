@@ -208,6 +208,136 @@ public struct ExtensionQuickPickRequest: Sendable, Equatable {
     }
 }
 
+/// How urgently a `vscode.window.showInputBox` validation message wants to be
+/// noticed — `InputBoxValidationSeverity` (`vscode.d.ts:2194-2207`, measured
+/// against commit `3addbda6`): `Info = 1` (`:2198`), `Warning = 2` (`:2202`),
+/// `Error = 3` (`:2206`).
+///
+/// `case information`, not `.info` — matching this file's own
+/// `ExtensionMessageSeverity` spelling rather than the declaration's member
+/// name, for the same reason that type already made: a Swift enum case name
+/// is this codebase's word, not a transcription of upstream's.
+///
+/// **No `.ignore` case.** `Severity.Ignore` exists on upstream's internal
+/// `$validateInput` bridge (`extHostQuickOpen.ts:187-189`) for a validation
+/// result whose `severity` matched none of the three and whose `message` was
+/// also empty — upstream's way of saying "nothing to show." This type has no
+/// member for that because `inputValidation(from:)` below answers `nil` for
+/// that same case instead: a severity is only ever attached to a message that
+/// exists, so "nothing to show" is the absence of an `ExtensionInputValidation`
+/// altogether, not a fourth severity.
+public enum ExtensionInputValidationSeverity: Sendable, Equatable {
+    case information, warning, error
+}
+
+/// One validation result from a `vscode.window.showInputBox` call's
+/// `validateInput`, reduced to what a presenter needs to show a message and
+/// decide whether to keep accepting the current value.
+///
+/// `InputBoxValidationMessage` (`vscode.d.ts:2212-2225`, measured against
+/// commit `3addbda6`). **A presenter must not accept a value whose most
+/// recent validation carried `.error`:** "When using
+/// {@link InputBoxValidationSeverity.Error}, the user will not be able to
+/// accept the input (e.g., by pressing Enter)" (`vscode.d.ts:2221-2223`).
+/// Enforcing that belongs to whatever type builds an `NSTextField` around
+/// this — task 5.5b-iv — not to this type or to `MainThreadWindow`, which
+/// only carries the presenter's answer back to the extension.
+public struct ExtensionInputValidation: Sendable, Equatable {
+    public let message: String
+    public let severity: ExtensionInputValidationSeverity
+
+    /// Spelled out rather than synthesised, for `ExtensionQuickPickItem.init`'s
+    /// reason: a `public` type's memberwise initialiser is `internal`, and
+    /// this one's callers include a test module.
+    public init(message: String, severity: ExtensionInputValidationSeverity) {
+        self.message = message
+        self.severity = severity
+    }
+}
+
+/// One `vscode.window.showInputBox` call, reduced to what a presenter needs
+/// to show a text field and report back the value the user accepted.
+///
+/// `InputBoxOptions` (`vscode.d.ts:2231-2282`, measured against commit
+/// `3addbda6`).
+public struct ExtensionInputBoxRequest: Sendable, Equatable {
+
+    /// `InputBoxOptions.title` (`vscode.d.ts:2236`), or `nil`.
+    public let title: String?
+
+    /// `InputBoxOptions.prompt` (`vscode.d.ts:2254`) — "The text to display
+    /// underneath the input box" — or `nil`.
+    public let prompt: String?
+
+    /// `InputBoxOptions.placeHolder` (`vscode.d.ts:2259`), or `nil`.
+    public let placeHolder: String?
+
+    /// `InputBoxOptions.value` (`vscode.d.ts:2241`): the value to pre-fill.
+    /// **Non-optional, defaulting to `""`** — the declaration's own default
+    /// for "the value to pre-fill" when the option is absent is an empty
+    /// box, not the absence of a box, and every consumer of this field wants
+    /// a `String` to seed a text field with, never an `Optional` to unwrap
+    /// first.
+    public let value: String
+
+    /// `InputBoxOptions.valueSelection` (`vscode.d.ts:2249`): "Defined as
+    /// tuple of two number where the first is the inclusive start index and
+    /// the second the exclusive end index." `nil` means "the whole
+    /// pre-filled value will be selected"; an empty range (`start == end`)
+    /// means "only the cursor will be set" — both the declaration's own
+    /// words, and both left to the presenter to act on, since carrying them
+    /// as anything but this range would force this type to guess what
+    /// `value.count` is going to be by the time a presenter reads it.
+    ///
+    /// A `Range<Int>`, not the declaration's tuple: parsing rejects a pair
+    /// this type could not otherwise represent — reversed, negative, or past
+    /// `value`'s end — rather than trapping when a presenter eventually tried
+    /// to build a `Range` from a raw tuple. See `parseValueSelection(from:valueLength:)`.
+    public let valueSelection: Range<Int>?
+
+    /// `InputBoxOptions.password` (`vscode.d.ts:2264`): "Controls if a
+    /// password input is shown."
+    public let isPassword: Bool
+
+    /// `InputBoxOptions.ignoreFocusOut` (`vscode.d.ts:2270`).
+    public let ignoreFocusOut: Bool
+
+    /// Whether this call carried a `validateInput` function at all.
+    ///
+    /// A separate stored field rather than something a presenter derives
+    /// from the `validate` closure `ExtensionInputBoxPresenting` hands it
+    /// alongside this request — the two are separate parameters precisely so
+    /// a presenter can decide whether to call `validate` at all without
+    /// having to invoke it once to find out, on the same terms upstream's
+    /// own `typeof this._validateInput === 'function'`
+    /// (`extHostQuickOpen.ts:156`) is computed once and threaded through
+    /// rather than re-derived from the function reference each time.
+    public let isValidating: Bool
+
+    /// Spelled out for `ExtensionQuickPickItem.init`'s reason: a `public`
+    /// type's synthesised memberwise initialiser is `internal`, and this
+    /// one's callers include a test module.
+    public init(
+        title: String?,
+        prompt: String?,
+        placeHolder: String?,
+        value: String,
+        valueSelection: Range<Int>?,
+        isPassword: Bool,
+        ignoreFocusOut: Bool,
+        isValidating: Bool
+    ) {
+        self.title = title
+        self.prompt = prompt
+        self.placeHolder = placeHolder
+        self.value = value
+        self.valueSelection = valueSelection
+        self.isPassword = isPassword
+        self.ignoreFocusOut = ignoreFocusOut
+        self.isValidating = isValidating
+    }
+}
+
 /// Where a `vscode.window.showQuickPick` call actually puts a picker on
 /// screen (or, in a test, records what it was asked to show).
 ///
@@ -268,6 +398,51 @@ public protocol ExtensionQuickPickPresenting: AnyObject {
         _ request: ExtensionQuickPickRequest,
         onHighlight: @escaping (Int) -> Void
     ) async -> [Int]?
+}
+
+/// Where a `vscode.window.showInputBox` call actually puts a text field on
+/// screen (or, in a test, records what it was asked to show).
+///
+/// A third presenter rather than a member added to `ExtensionMessagePresenting`
+/// or `ExtensionQuickPickPresenting` — see `ExtensionQuickPickPresenting`'s
+/// own doc for the interface-segregation reasoning that already governs this
+/// adaptor's other seam.
+///
+/// **No type in this module conforms to it.** `ExtensionQuickPickPresenting`'s
+/// own doc already anticipates the panel that will: task 5.5b-iv builds one
+/// conformer serving both this seam and that one.
+///
+/// `@MainActor`, matching every other type in this directory.
+@MainActor
+public protocol ExtensionInputBoxPresenting: AnyObject {
+
+    /// Shows `request` and answers the value the user accepted.
+    ///
+    /// **`nil` means dismissed. An empty string does not** — the user can
+    /// accept an empty value, and that is a different answer from never
+    /// answering at all, on the same terms `ExtensionQuickPickPresenting`
+    /// draws between a dismissal and an accepted empty selection.
+    ///
+    /// - Parameters:
+    ///   - request: What to show.
+    ///   - validate: Runs `request`'s `validateInput`, if it has one, against
+    ///     a candidate value, and answers `nil` for "valid" — following
+    ///     `InputBoxOptions.validateInput`'s own contract: "Return
+    ///     `undefined`, `null`, or the empty string when 'value' is valid"
+    ///     (`vscode.d.ts:2278`, measured against commit `3addbda6`). **A
+    ///     conformer must not accept a value whose most recent call to
+    ///     `validate` answered `.error` severity** —
+    ///     `InputBoxValidationMessage`'s own doc: "the user will not be able
+    ///     to accept the input (e.g., by pressing Enter)" for that severity
+    ///     (`vscode.d.ts:2221-2223`). When `request.isValidating` is `false`,
+    ///     `validate` always answers `nil`, and a conformer has no reason to
+    ///     call it — but it is not made optional, so every conformer handles
+    ///     one shape rather than two.
+    /// - Returns: The accepted value, or `nil` if dismissed.
+    func presentInputBox(
+        _ request: ExtensionInputBoxRequest,
+        validate: @escaping (String) async -> ExtensionInputValidation?
+    ) async -> String?
 }
 
 // MARK: - The AppKit conformer
@@ -498,9 +673,10 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
 /// The `vscode.window` adaptor: `showInformationMessage`,
 /// `showWarningMessage` and `showErrorMessage` (task 5.5a), each terminating
 /// in whatever `ExtensionMessagePresenting` this adaptor was built with
-/// rather than in AppKit directly, and `showQuickPick` (task 5.5b-ii),
-/// terminating in an `ExtensionQuickPickPresenting` instead — a second seam,
-/// for the reason that protocol's own doc gives.
+/// rather than in AppKit directly; `showQuickPick` (task 5.5b-ii), terminating
+/// in an `ExtensionQuickPickPresenting` instead; and `showInputBox` (task
+/// 5.5b-iii), terminating in an `ExtensionInputBoxPresenting` — a third seam,
+/// for the reason `ExtensionQuickPickPresenting`'s own doc gives.
 ///
 /// **One instance per extension**, mirroring `MainThreadCommands` and
 /// `MainThreadWorkspace`. Nothing enforces it, but every ownership question
@@ -508,13 +684,13 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
 ///
 /// **`notImplementedLedger` and `extensionIdentifier` are stored and read by
 /// no member on this type.** They mirror `MainThreadWorkspace.init`'s
-/// shape and exist so `showInputBox` (5.5b-iii) and
-/// `createStatusBarItem` (5.5c) — the next slices of this same seam —
-/// have them already in hand rather than each adding its own constructor
-/// parameter later. Nothing here builds a `VSCodeAPI.subNamespace` the way
-/// `MainThreadWorkspace.fs` does, so nothing here has a miss to record yet.
-/// `showQuickPick`'s ignored cancellation token is deliberately **not**
-/// recorded either: a `NotImplementedAccess` is "One VS Code API member an
+/// shape and exist so `createStatusBarItem` (5.5c) — the next slice of this
+/// same seam — has them already in hand rather than adding its own
+/// constructor parameter later. Nothing here builds a `VSCodeAPI.subNamespace`
+/// the way `MainThreadWorkspace.fs` does, so nothing here has a miss to
+/// record yet. `showQuickPick`'s and `showInputBox`'s ignored cancellation
+/// tokens are deliberately **not** recorded either: a `NotImplementedAccess`
+/// is "One VS Code API member an
 /// extension reached for that this host does not implement yet"
 /// (`NotImplementedLedger.swift:8-9`) whose `memberPath` is "Exactly the
 /// string the thrown JavaScript error names" (`:25-26`), and nothing is
@@ -543,6 +719,12 @@ public final class MainThreadWindow {
     /// than two members on one protocol — see `ExtensionQuickPickPresenting`'s
     /// own doc for why.
     private let quickPickPresenter: ExtensionQuickPickPresenting
+
+    /// Where a `showInputBox` call actually puts a text field on screen (or,
+    /// in a test, records what it was asked to show). A third presenter
+    /// rather than a member on either existing protocol — see
+    /// `ExtensionInputBoxPresenting`'s own doc for why.
+    private let inputBoxPresenter: ExtensionInputBoxPresenting
 
     /// Where a reach for an undefined `window` member is recorded. Stored for
     /// the reason this type's own doc gives — not read by any member on this
@@ -583,6 +765,12 @@ public final class MainThreadWindow {
     ///     nothing" presenter to default to here either. No type in this
     ///     module conforms to `ExtensionQuickPickPresenting` yet, so every
     ///     conformer today is a test double.
+    ///   - inputBoxPresenter: Where a `showInputBox` call is actually
+    ///     presented. Not defaulted, for `presenter:`'s own reason: a text
+    ///     field that silently answered "dismissed" would tell every
+    ///     extension the user refused something they were never shown. No
+    ///     type in this module conforms to `ExtensionInputBoxPresenting` yet
+    ///     either, so every conformer today is a test double.
     ///   - notImplementedLedger: Mirrors `MainThreadWorkspace.init`'s
     ///     parameter of the same name. See this type's own doc for why it is
     ///     unused today.
@@ -591,11 +779,13 @@ public final class MainThreadWindow {
     public init(
         presenter: ExtensionMessagePresenting,
         quickPickPresenter: ExtensionQuickPickPresenting,
+        inputBoxPresenter: ExtensionInputBoxPresenting,
         notImplementedLedger: NotImplementedLedger,
         extensionIdentifier: String
     ) {
         self.presenter = presenter
         self.quickPickPresenter = quickPickPresenter
+        self.inputBoxPresenter = inputBoxPresenter
         self.notImplementedLedger = notImplementedLedger
         self.extensionIdentifier = extensionIdentifier
     }
@@ -1103,6 +1293,380 @@ public final class MainThreadWindow {
         }
     }
 
+    // MARK: - vscode.window.showInputBox
+
+    /// This member's full path, used in its own rejection messages and in the
+    /// torn-down message `VSCodeAPI.member` builds, matching
+    /// `quickPickMemberPath`'s own reason for existing.
+    private static let inputBoxMemberPath = "vscode.window.showInputBox"
+
+    /// `implementation` for `vscode.window.showInputBox`, handed to
+    /// `ExtensionHost.defineVSCodeMember(namespacePath:name:implementation:)`
+    /// as-is.
+    public private(set) lazy var showInputBox: Any = VSCodeAPI.member(
+        MainThreadWindow.inputBoxMemberPath, of: self, whenTornDown: .rejectedPromise
+    ) { $0.handleShowInputBox() }
+
+    /// The `vscode.InputBoxValidationSeverity` enum, as the name→value table
+    /// an installer hands to
+    /// `ExtensionHost.defineVSCodeMember(namespacePath:name:implementation:)`,
+    /// matching `quickPickItemKindMembers`'s own reason for existing.
+    ///
+    /// **Keys are the declaration's own member spellings — `"Info"`, not
+    /// `"information"`.** `ExtensionInputValidationSeverity.information`
+    /// exists for this file's internal use, on `ExtensionMessageSeverity`'s
+    /// own precedent; what an extension writes is
+    /// `vscode.InputBoxValidationSeverity.Info` (`vscode.d.ts:2198`), and this
+    /// table is what makes that expression resolve rather than reach for an
+    /// undefined member. The case-name mismatch between the two is
+    /// deliberate and does not need reconciling — nothing outside this file
+    /// reads `ExtensionInputValidationSeverity` by its case names, and
+    /// nothing outside `extension-runtime.js`'s namespace tables reads this
+    /// one by its keys.
+    ///
+    /// **`"vscode"`, not `"vscode.window"`, is the namespace path an
+    /// installer must use** — `InputBoxValidationSeverity` is a top-level
+    /// `vscode` export exactly as `QuickPickItemKind` is, and
+    /// `quickPickItemKindMembers`'s own doc already gives the measured
+    /// citations for why that resolves.
+    ///
+    /// **Nothing installs it.** Same state as `quickPickItemKindMembers`: no
+    /// type in this module constructs a `MainThreadWindow`'s installer, so no
+    /// member on this adaptor is installed today.
+    public static let inputBoxValidationSeverityMembers: [String: Int] = [
+        "Info": 1, "Warning": 2, "Error": 3
+    ]
+
+    /// Rejects rather than raises on a torn-down adaptor, matching
+    /// `handleShowQuickPick`.
+    ///
+    /// Argument shape, from `vscode.d.ts:11491` (measured against commit
+    /// `3addbda6`): `showInputBox(options?: InputBoxOptions, token?:
+    /// CancellationToken): Thenable<string | undefined>`.
+    /// 1. **argument 0 — the options.** Optional. Absent, `undefined` or
+    ///    `null` means every default; an object is read for the seven
+    ///    `InputBoxOptions` fields this type carries plus `validateInput`;
+    ///    anything else — a string, a number — is a caller error and
+    ///    rejects, on `handleShowQuickPick`'s own terms for its argument 1.
+    /// 2. **argument 1 — the cancellation token. Accepted and ignored**, for
+    ///    `handleShowQuickPick`'s own stated reason: `CancellationToken`
+    ///    appears in no file under `packages/apple/AgenticToolkit`, so
+    ///    nothing here can act on one. Not recorded in `NotImplementedLedger`
+    ///    for the same reason `showQuickPick`'s ignored token is not — a
+    ///    degraded argument is not an absent member.
+    private func handleShowInputBox() -> JSValue? {
+        guard let context = JSContext.current() else { return nil }
+        let arguments = VSCodeAPI.currentArguments()
+        let path = MainThreadWindow.inputBoxMemberPath
+
+        var options = InputBoxCallOptions()
+        if let optionsArgument = arguments.first, !optionsArgument.isUndefined, !optionsArgument.isNull {
+            guard optionsArgument.isObject else {
+                return VSCodeAPI.rejectedPromise(
+                    message: "\(path)'s argument 0 is neither an options object nor undefined.", in: context)
+            }
+            switch MainThreadWindow.inputBoxOptions(from: optionsArgument) {
+            case .parsed(let parsedOptions):
+                options = parsedOptions
+            case .rejected(let message):
+                return VSCodeAPI.rejectedPromise(message: message, in: context)
+            }
+        }
+
+        return presentInputBoxPromise(options: options, in: context)
+    }
+
+    /// Argument 0 of a `showInputBox` call, already read — `InputBoxOptions`
+    /// (`vscode.d.ts:2231`) plus the options object itself, bound as `this`
+    /// when `validateInput` is invoked. See
+    /// `makeValidateClosure(validateInput:optionsObject:in:)` for why that
+    /// binding is this file's fourth divergence from upstream.
+    private struct InputBoxCallOptions {
+        var title: String?
+        var prompt: String?
+        var placeHolder: String?
+        var value = ""
+        var valueSelection: Range<Int>?
+        var isPassword = false
+        var ignoreFocusOut = false
+
+        /// The options object itself. `nil` only when argument 0 was absent,
+        /// `undefined` or `null` — `handleShowInputBox` never constructs an
+        /// `InputBoxCallOptions` from a real object without setting this.
+        var optionsObject: JSValue?
+
+        /// `InputBoxOptions.validateInput` (`vscode.d.ts:2280`), when
+        /// argument 0 carried one that `isObject` — the same test
+        /// `quickPickOptions(from:)` uses for `onDidSelectItem`, and the
+        /// Swift-side stand-in for upstream's own
+        /// `typeof this._validateInput === 'function'`
+        /// (`extHostQuickOpen.ts:156`).
+        var validateInput: JSValue?
+    }
+
+    /// What `inputBoxOptions(from:)` found.
+    private enum InputBoxOptionsParse {
+        case parsed(InputBoxCallOptions)
+        case rejected(message: String)
+    }
+
+    /// Reads `InputBoxOptions` (`vscode.d.ts:2231`) off argument 0.
+    ///
+    /// `title`, `prompt`, `placeHolder` and `value` go through
+    /// `coercedOptionalString(_:)`, `quickPickOptions(from:)`'s own choice for
+    /// decoration that is not worth rejecting a call over; `value` then
+    /// defaults to `""` rather than staying `nil`, matching
+    /// `ExtensionInputBoxRequest.value`'s own non-optional field. `password`
+    /// and `ignoreFocusOut` go through `toBool()`, defaulting `false` exactly
+    /// as `quickPickOptions(from:)`'s own booleans do.
+    ///
+    /// `valueSelection` is validated against the parsed `value`'s length,
+    /// which is why it is read after `value` rather than alongside it — see
+    /// `parseValueSelection(from:valueLength:)`.
+    ///
+    /// Every read here can run an extension's own getter on a `Proxy`, the
+    /// same accepted, read-only risk `quickPickOptions(from:)`'s own doc
+    /// names for its own reads, in turn citing `isOptionsArgument`'s
+    /// (`Uri.swift:352-358`).
+    private static func inputBoxOptions(from value: JSValue) -> InputBoxOptionsParse {
+        var options = InputBoxCallOptions()
+        options.optionsObject = value
+        options.title = coercedOptionalString(value.forProperty("title"))
+        options.prompt = coercedOptionalString(value.forProperty("prompt"))
+        options.placeHolder = coercedOptionalString(value.forProperty("placeHolder"))
+        options.value = coercedOptionalString(value.forProperty("value")) ?? ""
+        options.isPassword = value.forProperty("password")?.toBool() ?? false
+        options.ignoreFocusOut = value.forProperty("ignoreFocusOut")?.toBool() ?? false
+        if let validate = value.forProperty("validateInput"), validate.isObject {
+            options.validateInput = validate
+        }
+        switch parseValueSelection(from: value.forProperty("valueSelection"), valueLength: options.value.count) {
+        case .parsed(let range):
+            options.valueSelection = range
+        case .rejected(let message):
+            return .rejected(message: message)
+        }
+        return .parsed(options)
+    }
+
+    /// What `parseValueSelection(from:valueLength:)` found.
+    private enum ValueSelectionParse {
+        case parsed(Range<Int>?)
+        case rejected(message: String)
+    }
+
+    /// Reads `InputBoxOptions.valueSelection` (`vscode.d.ts:2249`): "Defined
+    /// as tuple of two number where the first is the inclusive start index
+    /// and the second the exclusive end index."
+    ///
+    /// **Divergence from upstream, deliberate: a malformed pair rejects the
+    /// call rather than being forwarded.** `mainThreadQuickOpen.ts:113`
+    /// forwards `options.valueSelection` to the widget completely unexamined
+    /// — `inputOptions.valueSelection = options.valueSelection;` — because
+    /// the widget upstream hands it to can cope with whatever shape arrives.
+    /// This type carries the field as `Range<Int>`, and constructing one from
+    /// a reversed or out-of-bounds pair traps rather than misbehaving, so
+    /// there is no "forward it unexamined" option here — the choice is
+    /// between rejecting and silently discarding the field, and a silently
+    /// discarded field is the same "worse than a rejected call" judgement
+    /// `parseQuickPickItems(from:)` already makes about a malformed item.
+    ///
+    /// Every rejection names `valueSelection`, so a caller can tell which
+    /// option was at fault.
+    ///
+    /// - Parameters:
+    ///   - value: `argument.forProperty("valueSelection")` — absent,
+    ///     `undefined` and `null` all parse to `nil`, matching the
+    ///     declaration's own "When `undefined` the whole pre-filled value
+    ///     will be selected."
+    ///   - valueLength: The already-parsed `value` option's `count`, the
+    ///     bound an `end` past it is rejected against.
+    private static func parseValueSelection(from value: JSValue?, valueLength: Int) -> ValueSelectionParse {
+        guard let value, !value.isUndefined, !value.isNull else {
+            return .parsed(nil)
+        }
+        let base = "\(inputBoxMemberPath)'s options.valueSelection"
+        guard value.isArray else {
+            return .rejected(message: "\(base) is neither a two-element array nor undefined/null.")
+        }
+        let length = Int(value.forProperty("length")?.toInt32() ?? -1)
+        guard length == 2 else {
+            return .rejected(message: "\(base) must have exactly two elements, not \(length).")
+        }
+        guard let startValue = value.atIndex(0), startValue.isNumber,
+              let endValue = value.atIndex(1), endValue.isNumber else {
+            return .rejected(message: "\(base)'s two elements must both be numbers.")
+        }
+        let start = Int(startValue.toInt32())
+        let end = Int(endValue.toInt32())
+        guard start >= 0 else {
+            return .rejected(message: "\(base)'s start (\(start)) must not be negative.")
+        }
+        guard end >= start else {
+            return .rejected(message: "\(base)'s end (\(end)) must not be before its start (\(start)).")
+        }
+        guard end <= valueLength else {
+            return .rejected(
+                message: "\(base)'s end (\(end)) is past the end of value, which is \(valueLength) long.")
+        }
+        return .parsed(start..<end)
+    }
+
+    /// The `validate` closure `ExtensionInputBoxPresenting.presentInputBox`
+    /// is handed for an `options` argument that carried no `validateInput` at
+    /// all: always answers `nil`, following that parameter's own doc — a
+    /// conformer has no reason to call it, but it is not made optional.
+    private static func alwaysValidClosure(_: String) async -> ExtensionInputValidation? {
+        nil
+    }
+
+    /// The `validate` closure to hand `ExtensionInputBoxPresenting.presentInputBox`.
+    ///
+    /// `alwaysValidClosure` when `options.validateInput` is `nil`; otherwise
+    /// `makeValidateClosure(validateInput:optionsObject:in:)`, bound to this
+    /// call's own `validateInput` and options object.
+    private func inputValidateClosure(
+        for options: InputBoxCallOptions,
+        in context: JSContext
+    ) -> (String) async -> ExtensionInputValidation? {
+        guard let validateInput = options.validateInput else {
+            return MainThreadWindow.alwaysValidClosure
+        }
+        return makeValidateClosure(validateInput: validateInput, optionsObject: options.optionsObject, in: context)
+    }
+
+    /// Builds the closure that runs one `validateInput` call against a
+    /// candidate value and normalises whatever comes back, mirroring
+    /// upstream's own bridge (`extHostQuickOpen.ts:166-196`, measured against
+    /// commit `3addbda6`):
+    /// ```
+    /// async $validateInput(input: string): Promise<...> {
+    ///     if (!this._validateInput) { return; }
+    ///     const result = await this._validateInput(input);      // :171
+    ///     if (!result || typeof result === 'string') { return result; }   // :172-174
+    ///     switch (result.severity) { ... }                       // :176-190
+    /// }
+    /// ```
+    ///
+    /// Three steps, each a place this closure can honestly answer `nil`
+    /// ("valid") rather than propagate a failure into the extension:
+    /// 1. **Invoke.** `VSCodeAPI.call(_:thisArg:arguments:)` with a JS string
+    ///    for `value`, built fresh in `context` — the promise's own context.
+    ///    A `.threw` answers `nil`: this file's first stated divergence, "a
+    ///    rejected validation promise answers 'valid' rather than
+    ///    surfacing," extended to a synchronous throw on the same reasoning —
+    ///    smaller harm than blocking every future keystroke on one bad call,
+    ///    and reversible by the extension.
+    /// 2. **Settle.** `validateInput` may itself answer a `Thenable`
+    ///    (`vscode.d.ts:2280-2281`), so the returned value goes through
+    ///    `VSCodeAPI.settlement(of:in:)`; `.rejected` and `.unavailable` both
+    ///    answer `nil`, on the same divergence.
+    /// 3. **Normalise.** `inputValidation(from:)` reduces the fulfilled value
+    ///    to `ExtensionInputValidation?`.
+    ///
+    /// **`this` is bound to `optionsObject`, and that is this file's fourth
+    /// divergence from upstream, not previously listed.** Measured against
+    /// `extHostQuickOpen.ts:171`, upstream calls `this._validateInput(input)`
+    /// — a plain call through the enclosing `ExtHostQuickOpen`-side class's
+    /// own field, so `this` inside the extension's `validateInput` is that
+    /// internal instance, never the `options` object the extension passed to
+    /// `showInputBox`. This host binds `this` to `optionsObject` instead,
+    /// following `highlightHandler(for:itemValues:)`'s own precedent for
+    /// `onDidSelectItem` — which upstream **does** call as
+    /// `options.onDidSelectItem(…)` (`extHostQuickOpen.ts:118`) — for
+    /// consistency across this adaptor's two callback bindings rather than
+    /// giving each its own rule. The cost is narrow: an extension whose
+    /// `validateInput` reads its own `this` (rather than the near-universal
+    /// arrow function or closure-based validator, which ignores it) sees a
+    /// different object than upstream would hand it.
+    ///
+    /// Safe to invoke any number of times, including after `isDisposed`: a
+    /// disposed adaptor answers `nil` before touching `validateInput` at all,
+    /// so a validator call racing teardown neither crashes nor reaches a
+    /// torn-down extension's callback.
+    private func makeValidateClosure(
+        validateInput: JSValue,
+        optionsObject: JSValue?,
+        in context: JSContext
+    ) -> (String) async -> ExtensionInputValidation? {
+        { [weak self] value in
+            guard let self, !self.isDisposed else { return nil }
+            let valueArgument = MainThreadWindow.stringValue(value, in: context)
+            guard case .returned(let returned) = VSCodeAPI.call(
+                validateInput, thisArg: optionsObject, arguments: [valueArgument]
+            ), let returned else {
+                return nil
+            }
+            guard case .fulfilled(let settled) = await VSCodeAPI.settlement(of: returned, in: context) else {
+                return nil
+            }
+            return MainThreadWindow.inputValidation(from: settled)
+        }
+    }
+
+    /// Normalises a settled `validateInput` result into
+    /// `ExtensionInputValidation?`, mirroring `$validateInput`'s own
+    /// normalisation (`extHostQuickOpen.ts:172-190`, measured against commit
+    /// `3addbda6`) with one adjustment: upstream's `default:` arm answers
+    /// `Severity.Ignore` when `result.message` is falsy and `Severity.Error`
+    /// otherwise (`:187-189`); this type has no `.ignore` case (see
+    /// `ExtensionInputValidationSeverity`'s own doc), so an object with no
+    /// usable `message` answers `nil` here regardless of what `severity`
+    /// says, and only an object that does carry a `message` can reach the
+    /// `default: .error` arm below.
+    ///
+    /// - `undefined` or `null` → `nil`, "Return `undefined`, `null`, or the
+    ///   empty string when 'value' is valid" (`vscode.d.ts:2278`).
+    /// - an empty string → `nil`, the same sentence.
+    /// - a non-empty string → `.error`, the declaration's own default:
+    ///   "By setting a string, the InputBox will use a default
+    ///   {@link InputBoxValidationSeverity} of Error" (`vscode.d.ts:13326`,
+    ///   measured against commit `3addbda6`).
+    /// - an array → `nil`. Arrays are objects in JavaScript, and this rule is
+    ///   listed ahead of the object rule below rather than falling into it,
+    ///   since an array has no `message` property of its own to read.
+    /// - an object → its `message`, read the same way `stringOptionalField(_:)`
+    ///   reads item decoration: `nil` for anything that is not a string,
+    ///   which answers `nil` for the whole result, on the reasoning this
+    ///   doc's opening paragraph gives. With a usable `message`, `severity`
+    ///   is read as a number, one-based per `InputBoxValidationSeverity`
+    ///   (`vscode.d.ts:2198-2206`): `1` → `.information`, `2` → `.warning`,
+    ///   `3` → `.error`, anything else — absent, a string, out of range — →
+    ///   `.error`, matching the declaration's own default for a bare string.
+    /// - anything else (a number, a boolean) → `nil`.
+    private static func inputValidation(from value: JSValue) -> ExtensionInputValidation? {
+        if value.isUndefined || value.isNull {
+            return nil
+        }
+        if value.isString {
+            guard let message = value.toString(), !message.isEmpty else { return nil }
+            return ExtensionInputValidation(message: message, severity: .error)
+        }
+        guard value.isObject, !value.isArray else {
+            return nil
+        }
+        guard let messageValue = value.forProperty("message"), messageValue.isString,
+              let message = messageValue.toString() else {
+            return nil
+        }
+        let severity: ExtensionInputValidationSeverity
+        if let severityValue = value.forProperty("severity"), severityValue.isNumber {
+            switch severityValue.toInt32() {
+            case 1:
+                severity = .information
+            case 2:
+                severity = .warning
+            case 3:
+                severity = .error
+            default:
+                severity = .error
+            }
+        } else {
+            severity = .error
+        }
+        return ExtensionInputValidation(message: message, severity: severity)
+    }
+
     // MARK: - The promise bridge
 
     /// Builds a genuinely-pending `Thenable`, presents `request` in a `Task`,
@@ -1295,6 +1859,69 @@ public final class MainThreadWindow {
         }
     }
 
+    /// `presentMessagePromise`'s counterpart for `showInputBox`.
+    ///
+    /// Checked twice for teardown, on `presentMessagePromise`'s own reasoning
+    /// and exact spelling: once before `inputBoxPresenter.presentInputBox` is
+    /// ever awaited, once after it returns.
+    ///
+    /// `validate` is `inputValidateClosure(for:in:)` — `alwaysValidClosure`
+    /// when `options.validateInput` was absent, otherwise a closure bound to
+    /// this call's own `validateInput` and options object. Either way, it
+    /// closes over `context` and `options`, not over `self`, and — being
+    /// `[weak self]` internally for the `validateInput` case — remains safe
+    /// to invoke after this `Task` itself has moved past its own teardown
+    /// checks; `makeValidateClosure`'s own doc gives the disposed-answers-nil
+    /// behavior that keeps a late call from reaching a torn-down extension.
+    ///
+    /// A `nil` answer resolves `undefined`, matching `Thenable<string |
+    /// undefined>` (`vscode.d.ts:11491`) — a dismissal. A string answer,
+    /// **including the empty string**, resolves a JS string built fresh in
+    /// the settled context via `stringValue(_:in:)`: an accepted empty value
+    /// is a real answer, never conflated with dismissal, on this file's own
+    /// stated rule for `ExtensionInputBoxPresenting.presentInputBox`.
+    ///
+    /// No identity to preserve here, unlike `presentMessagePromise` and
+    /// `presentQuickPickPromise`: the contract returns a plain `string`, not
+    /// a caller-supplied object, so there is no original `JSValue` to hand
+    /// back.
+    private func presentInputBoxPromise(options: InputBoxCallOptions, in context: JSContext) -> JSValue? {
+        let path = MainThreadWindow.inputBoxMemberPath
+        let request = ExtensionInputBoxRequest(
+            title: options.title,
+            prompt: options.prompt,
+            placeHolder: options.placeHolder,
+            value: options.value,
+            valueSelection: options.valueSelection,
+            isPassword: options.isPassword,
+            ignoreFocusOut: options.ignoreFocusOut,
+            isValidating: options.validateInput != nil)
+        let validate = inputValidateClosure(for: options, in: context)
+        return JSValue(newPromiseIn: context) { [weak self] resolveValue, rejectValue in
+            // Both executor arguments are `_Null_unspecified`; see
+            // `presentMessagePromise` for why a missing one leaves the
+            // promise pending rather than inventing a settlement.
+            guard let resolveValue, let rejectValue else { return }
+            let settlement = SettlementBox(resolve: resolveValue, reject: rejectValue)
+            Task { @MainActor [weak self] in
+                guard let self, !self.isDisposed else {
+                    MainThreadWindow.rejectTornDown(settlement.reject, path: path)
+                    return
+                }
+                let answer = await self.inputBoxPresenter.presentInputBox(request, validate: validate)
+                guard !self.isDisposed, let resultContext = settlement.resolve.context else {
+                    MainThreadWindow.rejectTornDown(settlement.reject, path: path)
+                    return
+                }
+                guard let answer else {
+                    settlement.resolve.call(withArguments: [MainThreadWindow.undefinedValue(in: resultContext)])
+                    return
+                }
+                settlement.resolve.call(withArguments: [MainThreadWindow.stringValue(answer, in: resultContext)])
+            }
+        }
+    }
+
     /// A JavaScript array holding `values`, for a `canPickMany` resolution.
     ///
     /// `NSNull()` when the bridge cannot build one, matching
@@ -1302,6 +1929,22 @@ public final class MainThreadWindow {
     /// an extension's `await` from hanging forever on a failure it cannot see.
     private static func arrayValue(of values: [JSValue], in context: JSContext) -> Any {
         if let value = JSValue(object: values, in: context) {
+            return value
+        }
+        return NSNull()
+    }
+
+    /// A JavaScript string holding `value`, built fresh in `context`.
+    ///
+    /// `NSNull()` when the bridge cannot build one, matching
+    /// `arrayValue(of:in:)`'s own fallback and for the same reason: settling
+    /// or calling with *something* keeps an extension's `await` from hanging
+    /// forever on a failure it cannot see. Used both to resolve
+    /// `presentInputBoxPromise`'s accepted answer — including the empty
+    /// string — and to build `makeValidateClosure`'s own argument to
+    /// `validateInput`.
+    private static func stringValue(_ value: String, in context: JSContext) -> Any {
+        if let value = JSValue(object: value, in: context) {
             return value
         }
         return NSNull()
@@ -1351,9 +1994,9 @@ extension MainThreadWindow: Loggable {
 
     /// This adaptor's own log destination, matching `MainThreadCommands` and
     /// `MainThreadWorkspace`. Unused by every member on this type so far —
-    /// the four of them report each failure to the extension itself, by
+    /// each of them reports its own failure to the extension itself, by
     /// raising or by rejecting, and there is nothing here yet that fails in a
     /// way only a log line can report — kept for the same reason
-    /// `notImplementedLedger` is: 5.5b-iii/5.5c extend this same class.
+    /// `notImplementedLedger` is: 5.5c extends this same class.
     public static nonisolated let logger = makeLogger()
 }
