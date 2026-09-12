@@ -70,6 +70,27 @@ private final class SuspendingMessagePresenter: ExtensionMessagePresenting {
     }
 }
 
+/// An `ExtensionQuickPickPresenting` double for the suite that never calls
+/// `showQuickPick`. `MainThreadWindow.init` does not default its
+/// `quickPickPresenter:` argument — deliberately, see its own doc — so every
+/// construction in this file has to name one, and naming one that traps says
+/// what this suite means: these tests exercise the three `show*Message`
+/// members, and a picker presented from any of them is a bug this double
+/// turns into a failure rather than a silently-recorded request.
+///
+/// `MainThreadWindowQuickPickTests` is where a quick pick is actually
+/// presented, and it has its own recording double.
+@MainActor
+private final class UnusedQuickPickPresenter: ExtensionQuickPickPresenting {
+    func presentQuickPick(
+        _ request: ExtensionQuickPickRequest,
+        onHighlight: @escaping (Int) -> Void
+    ) async -> [Int]? {
+        Issue.record("presentQuickPick was called by a suite that exercises no quick pick.")
+        return nil
+    }
+}
+
 /// `vscode.window` (task 5.5a): `showInformationMessage`,
 /// `showWarningMessage` and `showErrorMessage`, wired onto a real
 /// `ExtensionHost` and a recording or suspending `ExtensionMessagePresenting`
@@ -180,7 +201,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -226,7 +248,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -267,7 +290,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -314,7 +338,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -351,7 +376,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -390,7 +416,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -433,7 +460,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -485,7 +513,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -540,7 +569,8 @@ struct MainThreadWindowTests {
             ledger: ledger
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -578,7 +608,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -612,7 +643,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -651,7 +683,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -694,7 +727,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -730,7 +764,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -765,7 +800,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
@@ -820,7 +856,8 @@ struct MainThreadWindowTests {
             in: directory
         )
         let window = MainThreadWindow(
-            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+            presenter: presenter, quickPickPresenter: UnusedQuickPickPresenter(),
+            notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
         defer { host.dispose(); window.dispose() }
         try install(window, on: host)
         try await host.activate()
