@@ -23,6 +23,22 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// bubbles and grow/shrink with the window rather than spanning it.
     private static let maxBubbleWidthFraction: CGFloat = 0.75
 
+    /// Whether the composer accepts input at all.
+    ///
+    /// A transcript that is being *watched* rather than talked to (a feed, a
+    /// log, a replay) sets this false: the composer stays in the window, greyed,
+    /// because removing it would make the view a different shape depending on
+    /// what it is showing — and because a chat with nowhere to type reads as
+    /// broken, while a chat with a disabled composer reads as read-only.
+    public var isComposerEnabled = true {
+        didSet { applyComposerEnablement() }
+    }
+
+    /// Called when a transcript row is clicked. Only rows that carry a
+    /// ``ChatMessage/attribution`` are clickable — in a merged transcript a row
+    /// came from somewhere, and going there is the obvious thing to want.
+    public var onRowTap: ((ChatMessage) -> Void)?
+
     public init(viewModel: AIChatViewModel) {
         self.viewModel = viewModel
         super.init(frame: .zero)
@@ -89,7 +105,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
 
         observeTheme { view, palette in
             view.wantsLayer = true
-            view.layer?.backgroundColor = palette.nsColor(.windowBackground).cgColor
+            view.layer?.backgroundColor = palette.nsColor(.chatSurface).cgColor
         }
 
         let inputRow = NSStackView(views: [inputField, sendButton])
@@ -178,6 +194,18 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         transcriptStack.addArrangedSubview(topSpacer)
 
         for message in viewModel.messages {
+            // A message that names its own speaker gets the fuller row: icon,
+            // header line, timestamp underneath. Only a merged transcript
+            // produces those, so an ordinary chat is untouched by this.
+            if message.attribution != nil {
+                let row = ChatTranscriptRowView(
+                    message: message, maxBubbleWidth: maxBubbleWidth, onTap: onRowTap)
+                transcriptStack.addArrangedSubview(row)
+                row.widthAnchor.constraint(
+                    equalTo: transcriptStack.widthAnchor, constant: -32).isActive = true
+                continue
+            }
+
             let bubble = AIChatBubbleView(message: message, maxWidth: maxBubbleWidth)
             bubble.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -219,13 +247,19 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             indicator.startAnimating()
         }
 
-        // Disable input controls while responding so rapid sends can't overlap turns.
-        inputField.isEnabled = !responding
-        sendButton.isEnabled = !responding
+        applyComposerEnablement()
 
         if isAtBottom {
             DispatchQueue.main.async { [weak self] in self?.scrollToBottom() }
         }
+    }
+
+    /// Disabled while a turn is in flight, so rapid sends can't overlap turns —
+    /// and disabled outright when the transcript is read-only.
+    private func applyComposerEnablement() {
+        let enabled = isComposerEnabled && viewModel.state != .responding
+        inputField.isEnabled = enabled
+        sendButton.isEnabled = enabled
     }
 
     // MARK: - Scroll

@@ -16,7 +16,9 @@ import AgenticToolkitCoreMacOS
 /// was. Same reasoning renamed `ChatViewModel` to ``AIChatViewModel``.
 public final class AIChatBubbleView: NSView {
 
-    private static let timeFormatter: DateFormatter = {
+    /// `HH:mm`, shared with ``ChatTranscriptRowView`` so a timestamp reads the
+    /// same whether it trails the text or sits on its own line under it.
+    static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter
@@ -24,6 +26,7 @@ public final class AIChatBubbleView: NSView {
 
     private let message: ChatMessage
     private let maxWidth: CGFloat
+    private let showsInlineTimestamp: Bool
 
     private let textView = NSTextView(frame: .zero)
 
@@ -37,9 +40,23 @@ public final class AIChatBubbleView: NSView {
     private static let hPad: CGFloat = 12
     private static let vPad: CGFloat = 8
 
-    public init(message: ChatMessage, maxWidth: CGFloat) {
+    /// - Parameters:
+    ///   - showsInlineTimestamp: whether the time trails the text inside the
+    ///     bubble. A bubble that sits in a ``ChatTranscriptRowView`` has the
+    ///     time on its own line underneath instead, so it turns this off rather
+    ///     than printing it twice.
+    ///   - isTextSelectable: whether the text takes the mouse. A selectable text
+    ///     view swallows clicks, which is right for a conversation you are
+    ///     reading and wrong for a row whose whole job is to be clicked.
+    public init(
+        message: ChatMessage,
+        maxWidth: CGFloat,
+        showsInlineTimestamp: Bool = true,
+        isTextSelectable: Bool = true
+    ) {
         self.message = message
         self.maxWidth = maxWidth
+        self.showsInlineTimestamp = showsInlineTimestamp
         self.textWidthConstraint = textView.widthAnchor.constraint(equalToConstant: 0)
         self.textHeightConstraint = textView.heightAnchor.constraint(equalToConstant: 0)
 
@@ -51,7 +68,7 @@ public final class AIChatBubbleView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
 
         textView.isEditable = false
-        textView.isSelectable = true
+        textView.isSelectable = isTextSelectable
         textView.drawsBackground = false
         textView.textContainerInset = .zero
         textView.textContainer?.lineFragmentPadding = 0
@@ -74,27 +91,42 @@ public final class AIChatBubbleView: NSView {
         observeTheme { bubble, palette in bubble.apply(palette) }
     }
 
-    /// The bubble's fill and text color for this message's role.
+    /// The bubble's fill, text color, and optional hairline for this role.
     ///
-    /// Roles map onto semantic roles rather than stock system colors: a user
-    /// message is the theme's accent, an error is `danger`, a notice is
-    /// secondary. The fills are the same color at low alpha so a bubble reads as
-    /// a tint of its meaning against whatever surface the theme puts behind it.
-    private func colors(from palette: SemanticPalette) -> (fill: NSColor, text: NSColor) {
+    /// The two conversational roles use the theme's **chat** vocabulary —
+    /// `personaBubble` / `userBubble` and their text and border roles — rather
+    /// than a low-alpha tint of `accent`. Those roles exist precisely so a theme
+    /// can say what a chat looks like in it, every theme derives them when it
+    /// says nothing, and the same tokens drive the web and iOS chats: one
+    /// answer to "what colour is a bubble", in the layer that owns colour.
+    ///
+    /// `error` and `notice` are not conversation, and stay on the general
+    /// semantic roles — there is no chat token for "this went wrong".
+    private func colors(from palette: SemanticPalette)
+    -> (fill: NSColor, text: NSColor, border: NSColor?) {
+        // A hairline only where the theme asked for one: derived borders sit
+        // close enough to the fill that drawing them everywhere reads as fuzz.
+        func border(_ role: ThemeRole) -> NSColor? {
+            palette.declares(role) ? palette.nsColor(role) : nil
+        }
         switch message.role {
         case .user:
-            return (palette.nsColor(.accent).withAlphaComponent(0.15), palette.nsColor(.primaryText))
+            return (palette.nsColor(.userBubble), palette.nsColor(.userText),
+                    border(.userBubbleBorder))
         case .assistant:
-            return (palette.nsColor(.secondaryText).withAlphaComponent(0.08), palette.nsColor(.primaryText))
+            return (palette.nsColor(.personaBubble), palette.nsColor(.personaText),
+                    border(.personaBubbleBorder))
         case .error:
-            return (palette.nsColor(.danger).withAlphaComponent(0.08), palette.nsColor(.danger))
+            return (palette.nsColor(.danger).withAlphaComponent(0.08),
+                    palette.nsColor(.danger), palette.nsColor(.danger))
         case .notice:
-            return (palette.nsColor(.secondaryText).withAlphaComponent(0.10), palette.nsColor(.secondaryText))
+            return (palette.nsColor(.secondaryText).withAlphaComponent(0.10),
+                    palette.nsColor(.secondaryText), nil)
         }
     }
 
     private func attributedText(for palette: SemanticPalette) -> NSAttributedString {
-        let (_, textColor) = colors(from: palette)
+        let textColor = colors(from: palette).text
         let bodyFont = palette.font(.body)
         // The timestamp is deliberately smaller than the body it trails; the
         // theme's caption style is that relationship expressed once.
@@ -104,15 +136,19 @@ public final class AIChatBubbleView: NSView {
             string: message.text,
             attributes: [.font: bodyFont, .foregroundColor: textColor]
         )
+        guard showsInlineTimestamp else { return string }
         string.append(NSAttributedString(
             string: "  " + Self.timeFormatter.string(from: message.timestamp),
-            attributes: [.font: timeFont, .foregroundColor: palette.nsColor(.tertiaryText)]
+            attributes: [.font: timeFont, .foregroundColor: palette.nsColor(.timestampText)]
         ))
         return string
     }
 
     private func apply(_ palette: SemanticPalette) {
-        layer?.backgroundColor = colors(from: palette).fill.cgColor
+        let (fill, _, border) = colors(from: palette)
+        layer?.backgroundColor = fill.cgColor
+        layer?.borderColor = border?.cgColor
+        layer?.borderWidth = border == nil ? 0 : 1
 
         let attributed = attributedText(for: palette)
         let textMaxWidth = maxWidth - Self.hPad * 2
