@@ -499,6 +499,32 @@ struct FileSystemServiceTests {
         #expect(remaining == ["CASECHANGE.txt"])
     }
 
+    @Test("renaming only the case succeeds without overwrite")
+    func renamingOnlyTheCaseSucceedsWithoutOverwrite() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let lower = directory.appendingPathComponent("nooverwrite.txt")
+        let upper = directory.appendingPathComponent("NOOVERWRITE.txt")
+        let payload = Data("a case change takes nothing away".utf8)
+        try payload.write(to: lower)
+
+        // On the default case-insensitive volume `fileExists` answers true for
+        // the upper spelling, so a destination pre-check would refuse this on
+        // `overwrite: false` — refusing a rename whose destination *is* the
+        // source. There is no pre-check, and the move itself succeeds, so
+        // `overwrite` is never consulted.
+        try await FileSystemService().rename(
+            fromPath: lower.path,
+            toPath: upper.path,
+            overwrite: false
+        )
+
+        let survivor = try Data(contentsOf: upper)
+        #expect(survivor == payload)
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        #expect(remaining == ["NOOVERWRITE.txt"])
+    }
+
     @Test("renaming a path onto itself keeps the file")
     func renamingAPathOntoItselfKeepsTheFile() async throws {
         let directory = try makeTemporaryDirectory()

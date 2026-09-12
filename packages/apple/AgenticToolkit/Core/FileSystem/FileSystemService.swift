@@ -526,8 +526,24 @@ public actor FileSystemService {
     /// operation here, as they are one `rename(2)`.
     ///
     /// Throws ``FileSystemServiceError/fileNotFound(path:)`` when nothing is
-    /// at `fromPath`, and ``FileSystemServiceError/fileExists(path:)`` when
-    /// something is at `toPath` and `overwrite` is `false`.
+    /// at `fromPath`, and ``FileSystemServiceError/fileExists(path:)`` when the
+    /// move fails *because a distinct item is already at* `toPath` and
+    /// `overwrite` is `false`.
+    ///
+    /// A `toPath` that resolves to `fromPath` is not a distinct item and is not
+    /// an occupied destination: a case-only rename on a case-insensitive
+    /// volume, `fromPath == toPath`, and `./`- or `..`-spelled aliases all
+    /// succeed whatever `overwrite` says, because the move succeeds outright
+    /// and `overwrite` is never consulted. `FileManager.fileExists` answers
+    /// `true` for `FOO.txt` when only `foo.txt` is on disk — measured on this
+    /// machine — so "something is at `toPath`" is the wrong test and asking it
+    /// would refuse a rename that takes nothing away from anyone.
+    ///
+    /// ``FileSystemServiceError/fileNotFound(path:)`` names `fromPath` in every
+    /// case but one: if the destination is unlinked by someone else between the
+    /// failed move and the removal below, the removal's own `ENOENT` is
+    /// classified against `toPath`. A caller that branches on the path in that
+    /// case should not assume it is the source.
     ///
     /// **The destination is never pre-checked.** The move is attempted first,
     /// and only a move that fails because something is already at `toPath`
@@ -550,8 +566,20 @@ public actor FileSystemService {
     /// leave both items exactly as they were. Removing a hard-linked
     /// destination was likewise measured to leave the source's bytes intact,
     /// because unlinking one of two names only decrements the link count.
+    ///
+    /// **It does have the other window, and it destroys data.** If the removal
+    /// succeeds and the retry then fails, `toPath`'s former contents are gone,
+    /// nothing is put back, `fromPath` is still in place, and the caller gets
+    /// ``FileSystemServiceError/renameFailed(path:destination:underlying:)``.
     /// Foundation offers no atomic replace that spans files and directories
     /// alike, and nothing in this surface's contract promises one.
+    ///
+    /// The removal is reached only when the classifier reads the move's failure
+    /// as ``FileSystemServiceError/fileExists(path:)``. Two independent routes
+    /// give it that, both measured here: the failure is `NSCocoaErrorDomain`
+    /// 516 with an `NSUnderlyingError` of `NSPOSIXErrorDomain` 17 (`EEXIST`),
+    /// and ``distinguished(_:path:)`` consults ``posixCode(in:depth:)`` before
+    /// its `CocoaError` arms, so `EEXIST` is what actually carries it.
     public func rename(fromPath: String, toPath: String, overwrite: Bool) async throws {
         try await perform {
             let manager = FileManager()
