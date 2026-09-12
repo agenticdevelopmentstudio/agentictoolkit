@@ -88,6 +88,10 @@ extension ProjectDatabase {
         try execute("BEGIN IMMEDIATE TRANSACTION")
         do {
             let repoKey = repoID.uuidString
+            // Read before the rows go: what a leaf used to hold is the only way
+            // to tell a pane that merely moved from a pane that was replaced,
+            // and both arrive here as the same node id.
+            let previousContent = try fetchNodeRows(repoID: repoID).compactMapValues(\.contentType)
             try executeBound("DELETE FROM project_state WHERE repo_id = ?") { stmt in
                 bindText(stmt, 1, repoKey)
             }
@@ -131,6 +135,23 @@ extension ProjectDatabase {
                 bindText(stmt, 2, repoKey)
             }
 
+            // A leaf that kept its id but changed its content is a different
+            // pane in the same place, and the sweep above cannot see it — the
+            // node is still there. `ComposableTabLayoutSpec.reconcile(_:)` is
+            // the live case: a leaf naming a view this build no longer allows
+            // is demoted to a placeholder, deliberately keeping the node so the
+            // shape of the user's layout survives. Its state is the old
+            // content's and belongs to nobody now, so it goes with the content
+            // rather than waiting for the node to close — which for a demoted
+            // pane may be never (`design-for-deletion`).
+            let currentContent = Self.leafContentTypes(in: tabs.map(\.root))
+            for (nodeID, wasShowing) in previousContent where currentContent[nodeID] != wasShowing {
+                try executeBound("DELETE FROM pane_state WHERE repo_id = ? AND node_id = ?") { stmt in
+                    bindText(stmt, 1, repoKey)
+                    bindText(stmt, 2, nodeID.uuidString)
+                }
+            }
+
             // The state row is always written so enabled edges survive even
             // when no valid active tab exists.
             let validActive = activeTabID.flatMap { id in tabs.contains(where: { $0.id == id }) ? id : nil }
@@ -147,6 +168,23 @@ extension ProjectDatabase {
             _ = try? execute("ROLLBACK")
             throw error
         }
+    }
+
+    /// What each leaf of `roots` is showing, keyed by node id. Splits are
+    /// absent: a split holds no content and therefore no state.
+    private static func leafContentTypes(in roots: [LayoutNode]) -> [UUID: String] {
+        var found: [UUID: String] = [:]
+        func walk(_ node: LayoutNode) {
+            switch node.kind {
+            case .leaf(let contentType, _):
+                found[node.id] = contentType.rawValue
+            case .split(_, let first, let second):
+                walk(first)
+                walk(second)
+            }
+        }
+        roots.forEach(walk)
+        return found
     }
 
     private func insertNode(_ node: LayoutNode, parentID: UUID?, position: Int, repoID: UUID) throws {
