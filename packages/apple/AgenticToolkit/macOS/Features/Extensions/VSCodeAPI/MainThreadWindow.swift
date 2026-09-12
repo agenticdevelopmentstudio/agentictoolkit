@@ -505,6 +505,12 @@ public final class MainThreadWindow {
         in context: JSContext
     ) -> JSValue? {
         JSValue(newPromiseIn: context) { [weak self] resolveValue, rejectValue in
+            // `valueWithNewPromiseInContext:fromExecutor:` declares both
+            // executor arguments `_Null_unspecified`, so Swift types them
+            // `JSValue?` here. JavaScriptCore always supplies both; with
+            // either missing there is nothing to settle the promise through,
+            // so the only honest answer is to leave it pending.
+            guard let resolveValue, let rejectValue else { return }
             let settlement = SettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
