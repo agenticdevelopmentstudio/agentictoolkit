@@ -85,6 +85,17 @@ public final class ExtensionHost {
     /// gets a private one and never has to think about it.
     public let notImplementedLedger: NotImplementedLedger
 
+    /// The workspace this host's extension sees, or `nil` when no workspace is
+    /// open. `MainThreadWorkspace` (task 5.4c) is the one reader today — its
+    /// caller builds it from this rather than from a second parameter, so a
+    /// host and its `vscode.workspace` adaptor never disagree about which
+    /// workspace they mean.
+    ///
+    /// A narrow protocol, not `ProjectWorkspace` itself: see
+    /// `ExtensionWorkspaceRoots`'s own doc for why this host does not import
+    /// the app's project model to hold one field.
+    public let workspaceRoots: ExtensionWorkspaceRoots?
+
     /// Every `console.*` call the extension makes, alongside the OSLog line it
     /// always produces. A host with no observer still logs; this is for a UI
     /// that wants to show the extension's own output, and for tests, which
@@ -324,10 +335,12 @@ public final class ExtensionHost {
 
     public init(
         loadedExtension: LoadedExtension,
-        notImplementedLedger: NotImplementedLedger = NotImplementedLedger()
+        notImplementedLedger: NotImplementedLedger = NotImplementedLedger(),
+        workspaceRoots: ExtensionWorkspaceRoots? = nil
     ) {
         self.loadedExtension = loadedExtension
         self.notImplementedLedger = notImplementedLedger
+        self.workspaceRoots = workspaceRoots
     }
 
     // MARK: - Activation
@@ -689,11 +702,41 @@ public final class ExtensionHost {
         let origin: String
     }
 
+    /// A `defineVSCodeMember` implementation whose real JavaScriptCore value
+    /// cannot be built until a live `JSContext` exists.
+    ///
+    /// `undefined` is the motivating case. `JSValue(undefinedIn:)` is the only
+    /// way to hand JavaScript a genuine `undefined` — a Swift `nil` boxed in
+    /// `Any` bridges to `NSNull` instead, JavaScript's `null`, exactly as
+    /// `VSCodeAPI.resolvedPromise`'s own doc comment already established for
+    /// the promise case — and building one needs a `JSContext`. Every
+    /// `defineVSCodeMember` caller runs before `activate()`, the convention
+    /// `MainThreadCommands` established and the only order that gets a member
+    /// in place before the extension's own top-level code can read it, which
+    /// means before any context exists. `apply(_:to:)` is the one place a
+    /// queued definition ever meets a live context — immediately, if the
+    /// runtime already exists, or replayed from `installRuntime` otherwise —
+    /// so it is where this box is unwrapped, right before `defineMember`
+    /// bridges the result.
+    ///
+    /// Not part of `defineVSCodeMember`'s own signature: a caller with an
+    /// ordinary bridgeable value (a `String`, a `@convention(block)`) never
+    /// sees this type, and passes `implementation` exactly as before.
+    struct DeferredVSCodeValue {
+        let resolve: @MainActor (JSContext) -> Any
+    }
+
     private func apply(_ definition: VSCodeMemberDefinition, to runtime: JSValue) throws {
         pendingException = nil
+        let implementation: Any
+        if let deferred = definition.implementation as? DeferredVSCodeValue, let context = runtime.context {
+            implementation = deferred.resolve(context)
+        } else {
+            implementation = definition.implementation
+        }
         runtime.invokeMethod(
             "defineMember",
-            withArguments: [definition.namespacePath, definition.name, definition.implementation])
+            withArguments: [definition.namespacePath, definition.name, implementation])
         if let message = pendingException {
             pendingException = nil
             throw ExtensionHostError.vscodeMemberNotDefinable(
