@@ -257,6 +257,11 @@ public final class DisclosureCardView: NSView, Themeable {
     /// The titlebar's own vertical inset. Deliberately half the body's: a strip
     /// reads as a strip by being shallower than what it caps.
     private static let titlebarInset: CGFloat = 6
+    /// The masthead's own horizontal gutter, and the same halving on the other
+    /// axis: the name and its symbol sit nearer the card's border than the
+    /// readings they cap, so the strip reads as a heading rather than as one
+    /// more row of content lining up with the rest.
+    private static let mastheadInset: CGFloat = 7
     /// Between the symbol and the name it introduces — closer than the
     /// masthead's own gap, because the two are one piece.
     private static let iconGap: CGFloat = 6
@@ -268,6 +273,9 @@ public final class DisclosureCardView: NSView, Themeable {
     private static let mastheadGap: CGFloat = 8
 
     private let padX: CGFloat
+    /// The masthead's leading gutter at this text size — tighter than `padX`,
+    /// which the content rows keep through `content.edgeInsets`.
+    private let padMastheadX: CGFloat
     private let padY: CGFloat
     /// The titlebar's vertical inset at this text size.
     private let padTitleY: CGFloat
@@ -294,6 +302,7 @@ public final class DisclosureCardView: NSView, Themeable {
         self.scaledSize = scaledSize
         self.onToggle = onToggle
         self.padX = Self.padXFor(scaledSize: scaledSize)
+        self.padMastheadX = Self.padMastheadXFor(scaledSize: scaledSize)
         self.padY = ceil(Self.verticalInset * scaledSize / CGFloat(NSFont.systemFontSize))
         self.padTitleY = ceil(Self.titlebarInset * scaledSize / CGFloat(NSFont.systemFontSize))
         super.init(frame: .zero)
@@ -336,6 +345,14 @@ public final class DisclosureCardView: NSView, Themeable {
         content.orientation = .vertical
         content.alignment = .width
         content.spacing = 12
+        // The card is pinned at the MASTHEAD's gutter, so the rows put the
+        // difference back here: the readings keep the full gutter the card has
+        // always given them, and only the name moves out to meet the border.
+        // Set before `addContent` can add a row — the full-width helper reads
+        // these insets as it pins each one.
+        content.edgeInsets = NSEdgeInsets(
+            top: 0, left: padX - padMastheadX, bottom: 0, right: 0
+        )
         content.translatesAutoresizingMaskIntoConstraints = false
         content.isHidden = isCollapsed
 
@@ -413,7 +430,7 @@ public final class DisclosureCardView: NSView, Themeable {
             // there is, so a one-line card ends where the bar ends.
             stack.bottomAnchor.constraint(equalTo: bottomAnchor,
                                           constant: -(bodyIsEmpty ? padTitleY : padY)),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padX),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padMastheadX),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padX),
             statusIcon.centerXAnchor.constraint(equalTo: trailingAnchor, constant: -peak),
             statusIcon.centerYAnchor.constraint(equalTo: topAnchor, constant: peak),
@@ -577,6 +594,11 @@ public final class DisclosureCardView: NSView, Themeable {
         ceil(Self.horizontalInset * scaledSize / CGFloat(NSFont.systemFontSize))
     }
 
+    /// The masthead's leading gutter, scaled the same way `padX` is.
+    private static func padMastheadXFor(scaledSize: CGFloat) -> CGFloat {
+        ceil(Self.mastheadInset * scaledSize / CGFloat(NSFont.systemFontSize))
+    }
+
     private static func statusSymbolConfiguration(
         scaledSize: CGFloat
     ) -> NSImage.SymbolConfiguration {
@@ -642,7 +664,11 @@ public final class DisclosureCardView: NSView, Themeable {
         // card draws, and the masthead the folded one draws instead. Both are
         // measured in whichever state the card is in, which is what makes the
         // floor fold-independent.
-        let wanted = max(ceil(content.fittingSize.width), mastheadWidthFloor) + padX * 2
+        // The two gutters, not twice one of them: the card is pinned at the
+        // masthead's on the leading side and at `padX` on the trailing one, and
+        // the content's own insets are already inside its fitting size.
+        let wanted = max(ceil(content.fittingSize.width), mastheadWidthFloor)
+            + padMastheadX + padX
         guard abs(wanted - contentWidthFloor.constant) > 0.5 else { return }
         contentWidthFloor.constant = wanted
     }

@@ -292,6 +292,29 @@ final class DisclosureCardTests: XCTestCase {
         XCTAssertEqual(name.alignmentRect(forFrame: name.frame).minX, 0, accuracy: 0.5)
     }
 
+    func testTheNameSitsNearerTheCardsBorderThanTheReadingsItCaps() {
+        // The masthead is a heading, so it runs at a tighter gutter than the
+        // rows under it — the same halving its vertical inset already takes.
+        // The content keeps the gutter it always had, which is what lets this
+        // move the name alone and leave every reading where it was.
+        let card = DisclosureCardView(
+            title: "mike@example.com", titleIsAccent: true, scaledSize: 13
+        )
+        let row = NSView()
+        row.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        card.addContent(row)
+        host(card, width: 700)
+
+        guard let name = field("mike@example.com", in: card), let line = name.superview else {
+            return XCTFail("a card sets its name on a line of its own")
+        }
+        let titleX = card.convert(line.bounds, from: line).minX
+        let rowX = card.convert(row.bounds, from: row).minX
+
+        XCTAssertLessThan(titleX, rowX, "the name reaches nearer the border than the rows do")
+        XCTAssertGreaterThan(titleX, 0, "and never touches it")
+    }
+
     func testAnUnmarkedCardKeepsTheSymbolsColumnSoTheNamesStayInLine() {
         // A stack of account cards marks the one that is logged in. The others
         // must not step left to fill the gap, or the addresses read down the
