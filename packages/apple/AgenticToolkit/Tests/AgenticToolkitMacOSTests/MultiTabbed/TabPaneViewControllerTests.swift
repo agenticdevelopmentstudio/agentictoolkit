@@ -369,6 +369,40 @@ final class TabPaneViewControllerTests: XCTestCase {
         }
     }
 
+    /// The card moves, not the frame drawn around it: a card standing back
+    /// takes its text with it, so the words are where the card is rather than
+    /// where the card used to be.
+    func testACardStandingBackTakesItsTextWithIt() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+        pane.paneView.frame = NSRect(x: 0, y: 0, width: 260, height: 140)
+        for depth in 1...TabPaneView.maxStackDepth {
+            pane.stackDepth = depth
+            pane.paneView.layoutSubtreeIfNeeded()
+            let step = CGFloat(depth) * TabPaneView.inactiveInset
+            XCTAssertEqual(
+                pane.paneView.cardTextFrame,
+                pane.paneView.bounds.insetBy(dx: step, dy: step),
+                "depth \(depth)")
+        }
+    }
+
+    /// The card in front is the one place the two part company: its paint
+    /// reaches out over the workspace's own line, and its text does not follow
+    /// it out there.
+    func testTheFrontCardsTextStaysInsideTheCardItsPaintReachesOutOf() {
+        let source = StubSource()
+        let pane = makePane(edge: .left, source: source)
+        pane.paneView.frame = NSRect(x: 0, y: 0, width: 260, height: 140)
+        pane.isHighlighted = true
+        pane.paneView.layoutSubtreeIfNeeded()
+        XCTAssertEqual(pane.paneView.cardTextFrame, pane.paneView.bounds)
+        XCTAssertEqual(
+            pane.paneView.cardPaintFrame.maxX,
+            pane.paneView.bounds.maxX + TabPaneView.workspaceOverlap,
+            accuracy: 0.01)
+    }
+
     /// A card off screen lands at its new depth rather than moving to it —
     /// there is nothing to watch, and an animated constraint would still read
     /// its old value to whatever measured the card next.
@@ -388,8 +422,21 @@ final class TabPaneViewControllerTests: XCTestCase {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.titled], backing: .buffered, defer: true)
+        // The bar this card hangs in is layer-backed, so the card is too; an
+        // animated layout is what it is in the app, not a bare constant swap.
+        window.contentView?.wantsLayer = true
         window.contentView?.addSubview(pane.paneView)
         XCTAssertTrue(pane.paneView.animatesDepthChanges)
+
+        pane.paneView.frame = NSRect(x: 0, y: 0, width: 260, height: 140)
+        pane.paneView.layoutSubtreeIfNeeded()
+        pane.stackDepth = TabPaneView.maxStackDepth
+
+        // The card is *moving*, not moved: an animation is attached and still
+        // running, which is the whole of the difference between a deck seen to
+        // turn and one that is suddenly dealt differently. Asserting the
+        // constant alone would pass just as well with no animation at all.
+        XCTAssertFalse(pane.paneView.runningMoveAnimationKeys.isEmpty)
     }
 
     /// Selection and depth arrive from the bar as two separate statements, and

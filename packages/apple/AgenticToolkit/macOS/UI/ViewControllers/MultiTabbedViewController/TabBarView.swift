@@ -193,23 +193,29 @@ final class TabBarView: NSView {
         // Nothing selected: no card is in front, so all of them stand the same
         // single step back.
         let depths = items.indices.map { index in selected.map { abs(index - $0) } ?? 1 }
-        for (index, item) in items.enumerated() {
-            (hostedControllers[item.id] as? TabBarStackedItem)?.stackDepth = depths[index]
+
+        // Z-order first, depths second, and the order is load-bearing: raising
+        // a card re-inserts its view, which cancels whatever animation is
+        // running inside it. Told its depth afterwards, each card animates from
+        // a stack that has already finished rearranging itself.
+        if edge.isVertical {
+            // Raising them deepest-first leaves the card in front last in
+            // `subviews`, which is both the last drawn and the first
+            // hit-tested — so on the strip where two cards overlap, the click
+            // lands on the one the user can see. Ties are ordered by position
+            // for the sake of repeatability; two cards at the same depth sit
+            // either side of the selected one and never overlap each other.
+            let backToFront = items.indices.sorted {
+                depths[$0] == depths[$1] ? $0 > $1 : depths[$0] > depths[$1]
+            }
+            for index in backToFront {
+                guard let view = hostViews[items[index].id] else { continue }
+                stack.addSubview(view, positioned: .above, relativeTo: nil)
+            }
         }
 
-        guard edge.isVertical else { return }
-        // Raising them deepest-first leaves the card in front last in
-        // `subviews`, which is both the last drawn and the first hit-tested —
-        // so on the strip where two cards overlap, the click lands on the one
-        // the user can see. Ties are ordered by position for the sake of
-        // repeatability; two cards at the same depth sit either side of the
-        // selected one and never overlap each other.
-        let backToFront = items.indices.sorted {
-            depths[$0] == depths[$1] ? $0 > $1 : depths[$0] > depths[$1]
-        }
-        for index in backToFront {
-            guard let view = hostViews[items[index].id] else { continue }
-            stack.addSubview(view, positioned: .above, relativeTo: nil)
+        for (index, item) in items.enumerated() {
+            (hostedControllers[item.id] as? TabBarStackedItem)?.stackDepth = depths[index]
         }
     }
 

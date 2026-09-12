@@ -16,8 +16,9 @@ import AppKit
 /// whatever is joined to it, and a waiting card is not that. How far short —
 /// and how much smaller — is `stackDepth`'s doing: on a vertical bar, where the
 /// cards overlap down a column, each one further from the card in front pulls
-/// in another step on every side, so the column reads as a deck turned to the
-/// tab you are in. A change of depth is animated, so the deck is seen to turn.
+/// in another step on every side — the whole card, text included — so the
+/// column reads as a deck turned to the tab you are in. A change of depth is
+/// animated, so the deck is seen to turn.
 ///
 /// `TabBarView` supplies the other half of the attachment: it pads the outer
 /// side of the bar and leaves the workspace side at zero.
@@ -38,10 +39,12 @@ final class TabPaneView: NSView {
     /// only across that one card's mouth.
     static let workspaceOverlap: CGFloat = 1
 
-    /// One step back: how much smaller a card behind is drawn, on every side.
-    /// It is the card's paint that shrinks, never the card: the text stays
-    /// where it was and only the block around it pulls in, so the card in front
-    /// reads as the one standing nearer.
+    /// One step back: how far a card behind is drawn in from where the card in
+    /// front is drawn, on every side.
+    ///
+    /// The whole card moves — its paint and its text together, because a card
+    /// that shrank around stationary words would read as a box closing in on
+    /// them rather than as a card standing further off.
     ///
     /// On a vertical bar the steps accumulate — see `recession`.
     static let inactiveInset: CGFloat = 4
@@ -97,8 +100,8 @@ final class TabPaneView: NSView {
     private let background: TabCardBackgroundView
     private let content = NSStackView()
     private var statusViews: [NSImageView] = []
-    /// The four sides of the painted block, and which of them faces the
-    /// workspace. `applyHighlight` moves them.
+    /// Where the card's paint and text sit inside the slot the bar gave it,
+    /// and which side of that slot faces the workspace. `place` moves them.
     private var cardSides: CardSides?
 
     init(edge: Edge, tabID: UUID) {
@@ -152,9 +155,15 @@ final class TabPaneView: NSView {
     /// would never widen. The stack carries none of those constraints.
     var contentSize: NSSize {
         let fitting = content.fittingSize
+        // Room for the card to stand all the way back and still hold its own
+        // text: the slot the bar hands a card never changes size, so it has to
+        // be the size the deepest card needs. Sized to the front card instead,
+        // the words would be squeezed as the deck turned — or, worse, the bar
+        // would resize itself every time one was clicked.
+        let slack = 2 * deepestRecession
         return NSSize(
-            width: min(Self.maxWidth, max(Self.minWidth, fitting.width)),
-            height: max(Self.minHeight, fitting.height)
+            width: min(Self.maxWidth, max(Self.minWidth, fitting.width + slack)),
+            height: max(Self.minHeight, fitting.height + slack)
         )
     }
 
@@ -171,6 +180,18 @@ final class TabPaneView: NSView {
 
     /// Where the painted block has landed inside the card, once laid out.
     var cardPaintFrame: NSRect { background.frame }
+
+    /// Where the card's text column has landed inside the card, once laid out.
+    /// It travels with the paint; the two part company only over the
+    /// workspace's own line — see `CardSides`.
+    var cardTextFrame: NSRect { content.frame }
+
+    /// What the card's two boxes are in the middle of animating, if anything —
+    /// the evidence that a change of depth is being moved to rather than
+    /// jumped to.
+    var runningMoveAnimationKeys: [String] {
+        [background, content].flatMap { $0.layer?.animationKeys() ?? [] }
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         contextMenuProvider?(event) ?? super.menu(for: event)
@@ -204,6 +225,13 @@ final class TabPaneView: NSView {
         closeButton.widthAnchor.constraint(equalToConstant: 14).isActive = true
         closeButton.heightAnchor.constraint(equalToConstant: 14).isActive = true
 
+        // The two boxes move under an implicit animation, and AppKit only
+        // animates a view that has a layer of its own to move. Layer-backing
+        // spreads down a subtree on its own, but not until the subtree is first
+        // drawn — a card told its depth before then would jump to it — so each
+        // box that moves is given its layer outright.
+        for view in [self, background, content] { view.wantsLayer = true }
+
         background.translatesAutoresizingMaskIntoConstraints = false
         addSubview(background)
         observeTheme { view, _ in view.applyDepth() }
@@ -219,13 +247,9 @@ final class TabPaneView: NSView {
         }
         addSubview(content)
 
-        let sides = CardSides(edge: edge, card: self, background: background)
+        let sides = CardSides(edge: edge, card: self, background: background, content: content)
         cardSides = sides
         NSLayoutConstraint.activate(sides.constraints + [
-            content.topAnchor.constraint(equalTo: topAnchor),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor),
             // `.leading` alignment pins one edge only, so without this the
             // header is as wide as its own text and the close button lands
             // beside the agent name instead of in the card's far corner. The
@@ -278,8 +302,8 @@ final class TabPaneView: NSView {
     /// Whether this is the card the workspace is showing.
     private var isFrontCard: Bool { stackDepth == 0 }
 
-    /// How far this card's paint pulls in from the card — on every side, the
-    /// one facing the workspace included.
+    /// How far this card is drawn in from its full size — on every side, the
+    /// one facing the workspace included, and its text along with it.
     ///
     /// On a vertical bar the steps accumulate: each card further from the one
     /// in front pulls in another `inactiveInset`, up to `maxStackDepth`, so a
@@ -288,9 +312,15 @@ final class TabPaneView: NSView {
     /// behind the front card. A horizontal bar has no such column — its cards
     /// are laid out along their long side — so every card behind takes the same
     /// single step.
-    private var recession: CGFloat {
-        guard stackDepth > 0 else { return 0 }
-        let steps = edge.isVertical ? min(stackDepth, Self.maxStackDepth) : 1
+    private var recession: CGFloat { recession(atDepth: stackDepth) }
+
+    /// As far in as a card on this bar is ever drawn. What the slot has to be
+    /// big enough for — see `contentSize`.
+    private var deepestRecession: CGFloat { recession(atDepth: Self.maxStackDepth) }
+
+    private func recession(atDepth depth: Int) -> CGFloat {
+        guard depth > 0 else { return 0 }
+        let steps = edge.isVertical ? min(depth, Self.maxStackDepth) : 1
         return CGFloat(steps) * Self.inactiveInset
     }
 
@@ -327,24 +357,40 @@ final class TabPaneView: NSView {
         closeButton.contentTintColor = palette.nsColor(isFrontCard ? .secondaryText : .tertiaryText)
     }
 
-    /// Puts the paint where this depth wants it: pulled in by `recession` on
+    /// Puts the card where this depth wants it: pulled in by `recession` on
     /// every side, except that the card in front is let out over the
     /// workspace's own line instead.
     ///
     /// Animated, the whole deck moves at once — every card was told its new
     /// depth in the same turn — so the cards read as one stack rotating rather
     /// than as several blocks each deciding something separately.
+    ///
+    /// The constants are set the same way either way; what the animation adds
+    /// is `allowsImplicitAnimation` and a layout pass taken inside the group,
+    /// which is what turns the resulting change of frame into a move.
+    ///
+    /// Two near misses, both of which leave the card jumping: animating each
+    /// constraint's `constant` through its own animator proxy — a constraint's
+    /// constant is animatable, but nothing then re-lays-out the card as it
+    /// changes — and running the layout pass through the *view's* animator
+    /// proxy, which has no animatable property by that name and simply forwards
+    /// the call.
     private func place(animated: Bool) {
         guard let cardSides else { return }
         let overhang = isFrontCard ? Self.workspaceOverlap : -recession
         guard animated else {
-            cardSides.place(inset: recession, overhang: overhang, animated: false)
+            cardSides.place(inset: recession, overhang: overhang)
             return
         }
+        // Settle whatever layout is still outstanding first: the animation has
+        // to start from where the card is, not from wherever it was last drawn.
+        layoutSubtreeIfNeeded()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.depthAnimationDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            cardSides.place(inset: recession, overhang: overhang, animated: true)
+            context.allowsImplicitAnimation = true
+            cardSides.place(inset: recession, overhang: overhang)
+            layoutSubtreeIfNeeded()
         }
     }
 
@@ -353,66 +399,79 @@ final class TabPaneView: NSView {
     }
 }
 
-// MARK: - Where the paint sits on the card
+// MARK: - Where the card sits inside its slot
 
-/// The four constraints holding the painted block over its card, kept together
-/// because they are only ever moved together: the block is inset from the card
-/// by one number, and the side facing the workspace is then let out over the
-/// workspace's line when this is the card in front.
+/// The four constraints holding one box inside the card's slot, kept together
+/// because they are only ever moved together: the box is inset from the slot by
+/// one number, on every side.
 ///
 /// Each side is stored with the sign that moves it *inward*, which is what lets
-/// `place(inset:overhang:animated:)` take one number rather than four — `top`
-/// and `leading` grow inward on a positive constant, `trailing` and `bottom` on
-/// a negative one. Which side faces the workspace, and which way is out from
-/// it, are the same piece of knowledge and live here together.
+/// `inset(_:)` take one number rather than four — `top` and `leading` move
+/// inward on a positive constant, `trailing` and `bottom` on a negative one.
 @MainActor
-private struct CardSides {
-    private let workspace: NSLayoutConstraint
-    /// Which way is away from the card on the workspace side, as that side's
-    /// constraint has to spell it: a trailing or bottom edge moves out on a
-    /// positive constant, a leading or top edge on a negative one.
-    private let outwardSign: CGFloat
+private struct InsetBox {
+    /// The side facing the workspace, and which way is out from it as that
+    /// side's constraint has to spell it: a trailing or bottom edge moves out
+    /// on a positive constant, a leading or top edge on a negative one. The two
+    /// are one piece of knowledge, so they are stored as one.
+    let workspace: (constraint: NSLayoutConstraint, outwardSign: CGFloat)
     private let sides: [(constraint: NSLayoutConstraint, inward: CGFloat)]
 
-    init(edge: Edge, card: NSView, background: NSView) {
-        let top = background.topAnchor.constraint(equalTo: card.topAnchor)
-        let leading = background.leadingAnchor.constraint(equalTo: card.leadingAnchor)
-        let trailing = background.trailingAnchor.constraint(equalTo: card.trailingAnchor)
-        let bottom = background.bottomAnchor.constraint(equalTo: card.bottomAnchor)
+    init(edge: Edge, slot: NSView, box: NSView) {
+        let top = box.topAnchor.constraint(equalTo: slot.topAnchor)
+        let leading = box.leadingAnchor.constraint(equalTo: slot.leadingAnchor)
+        let trailing = box.trailingAnchor.constraint(equalTo: slot.trailingAnchor)
+        let bottom = box.bottomAnchor.constraint(equalTo: slot.bottomAnchor)
         sides = [(top, 1), (leading, 1), (trailing, -1), (bottom, -1)]
         switch edge {
-        case .top: (workspace, outwardSign) = (bottom, 1)
-        case .bottom: (workspace, outwardSign) = (top, -1)
-        case .left: (workspace, outwardSign) = (trailing, 1)
-        case .right: (workspace, outwardSign) = (leading, -1)
+        case .top: workspace = (bottom, 1)
+        case .bottom: workspace = (top, -1)
+        case .left: workspace = (trailing, 1)
+        case .right: workspace = (leading, -1)
         }
     }
 
     var constraints: [NSLayoutConstraint] { sides.map(\.constraint) }
 
-    /// How far the block stands past the card on the side facing the
-    /// workspace — negative while it stands short of it.
-    var workspaceOverhang: CGFloat { workspace.constant * outwardSign }
-
-    /// Pulls every side in by `inset`, then lets the workspace side out by
-    /// `overhang` — the one side the two numbers can disagree about, because
-    /// the card in front reaches over the workspace's line rather than stopping
-    /// short of it.
-    func place(inset: CGFloat, overhang: CGFloat, animated: Bool) {
-        for side in sides { side.constraint.set(side.inward * inset, animated: animated) }
-        workspace.set(overhang * outwardSign, animated: animated)
+    func inset(_ inset: CGFloat) {
+        for side in sides { side.constraint.constant = side.inward * inset }
     }
 }
 
-private extension NSLayoutConstraint {
-    /// Moves this constraint, either over the enclosing animation context's
-    /// duration or at once.
-    func set(_ value: CGFloat, animated: Bool) {
-        if animated {
-            animator().constant = value
-        } else {
-            constant = value
-        }
+/// The card's two boxes — the block it is painted as, and the column of text
+/// inside that block — moved as one, because they are one card. A card behind
+/// pulls both in by the same number: paint and words travel together, and the
+/// card recedes rather than closing in on its own text.
+///
+/// The one place they part company is the side facing the workspace, where the
+/// card in front lets its paint out over the workspace's own line while its
+/// text stays inside the card.
+@MainActor
+private struct CardSides {
+    private let paint: InsetBox
+    private let text: InsetBox
+
+    init(edge: Edge, card: NSView, background: NSView, content: NSView) {
+        paint = InsetBox(edge: edge, slot: card, box: background)
+        text = InsetBox(edge: edge, slot: card, box: content)
+    }
+
+    var constraints: [NSLayoutConstraint] { paint.constraints + text.constraints }
+
+    /// How far the paint stands past the card on the side facing the
+    /// workspace — negative while it stands short of it.
+    var workspaceOverhang: CGFloat {
+        paint.workspace.constraint.constant * paint.workspace.outwardSign
+    }
+
+    /// Pulls the whole card in by `inset`, then lets the paint's workspace side
+    /// back out by `overhang` — the one side the two numbers can disagree
+    /// about, because the card in front reaches over the workspace's line
+    /// rather than stopping short of it.
+    func place(inset: CGFloat, overhang: CGFloat) {
+        paint.inset(inset)
+        text.inset(inset)
+        paint.workspace.constraint.constant = overhang * paint.workspace.outwardSign
     }
 }
 
