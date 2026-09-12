@@ -4,17 +4,6 @@ import JavaScriptCore
 @testable import AgenticToolkitCore
 @testable import AgenticToolkitMacOS
 
-/// `severity` has no `Equatable` conformance (the brief's shape is `Sendable`
-/// only), so tests compare this name rather than the case itself — the
-/// mismatch a swapped `case` produces is exactly as visible either way.
-private func severityName(_ severity: ExtensionMessageSeverity) -> String {
-    switch severity {
-    case .information: return "information"
-    case .warning: return "warning"
-    case .error: return "error"
-    }
-}
-
 /// A non-suspending `ExtensionMessagePresenting` double: it records every
 /// request and answers immediately, keyed by `request.message` rather than by
 /// call order, so a suite that fires several calls in the same script turn
@@ -59,8 +48,12 @@ private final class SuspendingMessagePresenter: ExtensionMessagePresenting {
         }
     }
 
+    /// Removes the entry once released, not just resumes it — otherwise
+    /// `waitUntilEntered` would count an already-released call as still
+    /// parked, a trap for a future suite that releases and then waits again.
     func release(at index: Int, with result: Int?) {
-        releaseContinuations[index].resume(returning: result)
+        let continuation = releaseContinuations.remove(at: index)
+        continuation.resume(returning: result)
     }
 
     func presentMessage(_ request: ExtensionMessageRequest) async -> Int? {
@@ -143,10 +136,11 @@ struct MainThreadWindowTests {
 
     /// Polls `expression` until it evaluates to something other than
     /// `null`/`undefined`, or gives up after two seconds — the same helper
-    /// `MainThreadWorkspaceTests` and `MainThreadCommandsTests` use, for the
-    /// same reason: a `.then()` reaction is a microtask, never invoked
-    /// synchronously no matter how settled the promise already is by the time
-    /// `evaluateScript` returns.
+    /// `MainThreadWorkspaceTests` uses (400 × 5 ms; measured —
+    /// `MainThreadCommandsTests`' own version loops 200 times, not 400, so it
+    /// is not named here), for the same reason: a `.then()` reaction is a
+    /// microtask, never invoked synchronously no matter how settled the
+    /// promise already is by the time `evaluateScript` returns.
     private func waitForGlobal(_ context: JSContext, _ expression: String) async throws -> JSValue? {
         for _ in 0..<400 {
             if let value = context.evaluateScript(expression), !value.isNull, !value.isUndefined {
@@ -198,7 +192,7 @@ struct MainThreadWindowTests {
         #expect(presenter.requests.count == 1)
         let request = try #require(presenter.requests.first)
         #expect(request.message == "hello world")
-        #expect(severityName(request.severity) == "information")
+        #expect(request.severity == .information)
         #expect(request.itemTitles.isEmpty)
     }
 
@@ -206,10 +200,12 @@ struct MainThreadWindowTests {
 
     /// Two calls, one per member, in one activation. Kills a mutation that
     /// swaps `.warning` and `.error` between the two members, or that gives
-    /// either the same severity as `showInformationMessage`. Comparing
-    /// `severityName` at each recorded request's own index (rather than
-    /// merely asserting "one warning and one error exist somewhere") also
-    /// kills a mutation that reorders which member's request lands where.
+    /// either the same severity as `showInformationMessage`. Looks each
+    /// request up **by message** rather than by `presenter.requests`'
+    /// position — matching `RecordingMessagePresenter`'s own stated contract
+    /// — rather than depending on the FIFO scheduling of the two
+    /// `Task { @MainActor }`s these two calls create in one script turn,
+    /// which is not a guarantee this test should rely on.
     @Test
     func showWarningMessageAndShowErrorMessageCarryDistinguishableSeverities() async throws {
         let directory = try makeTempDirectory()
@@ -238,10 +234,10 @@ struct MainThreadWindowTests {
         _ = try #require(await waitForGlobal(context, "globalThis.__settled"))
 
         #expect(presenter.requests.count == 2)
-        #expect(presenter.requests[0].message == "warn-msg")
-        #expect(severityName(presenter.requests[0].severity) == "warning")
-        #expect(presenter.requests[1].message == "err-msg")
-        #expect(severityName(presenter.requests[1].severity) == "error")
+        let warnRequest = try #require(presenter.requests.first { $0.message == "warn-msg" })
+        #expect(warnRequest.severity == .warning)
+        let errRequest = try #require(presenter.requests.first { $0.message == "err-msg" })
+        #expect(errRequest.severity == .error)
     }
 
     // MARK: - 3. String items reach the presenter as titles in order; index 1 resolves the second item
@@ -505,7 +501,10 @@ struct MainThreadWindowTests {
         let settledB = try #require(await waitForGlobal(context, "globalThis.__settledB"))
         #expect(settledA.toString() == "A1")
         #expect(settledB.toString() == "B2")
-        #expect(presenter.requests.map(\.message) == ["call-a", "call-b"])
+        // By message, not position: `presenter.requests`' insertion order
+        // depends on the same `Task { @MainActor }` FIFO scheduling
+        // `RecordingMessagePresenter`'s doc comment says not to depend on.
+        #expect(Set(presenter.requests.map(\.message)) == Set(["call-a", "call-b"]))
     }
 
     // MARK: - 9. An undefined `window` member still throws and is recorded
@@ -548,5 +547,276 @@ struct MainThreadWindowTests {
         let context = try #require(host.javaScriptContext)
         #expect(context.evaluateScript("globalThis.__err")?.toString() == "NotImplementedError")
         #expect(ledger.accesses.map(\.memberPath) == ["vscode.window.showQuickPick"])
+    }
+
+    // MARK: - 10. `{ title: 'Reload' }` at argument 1 is an item, not options
+
+    /// Kills a revert to the old `!isArray` classification rule: under that
+    /// rule `{ title: 'Reload' }` is an object that is neither a string nor
+    /// an array, so it would be swallowed as options and "Reload" would
+    /// never reach the presenter as a button. VS Code's real rule
+    /// (`isMessageItem`: truthy `title`) makes it the first item instead.
+    /// Two items, in order, both reaching the presenter.
+    @Test
+    func aTitledObjectAtArgumentOneIsTheFirstItemWithTwoItems() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showInformationMessage(
+                    'Reload?', { title: 'Reload' }, { title: 'Later' }
+                ).then(function () {
+                    globalThis.__settled = true;
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__settled"))
+
+        let request = try #require(presenter.requests.first)
+        #expect(request.itemTitles == ["Reload", "Later"])
+        #expect(request.isModal == false)
+    }
+
+    /// The one-item form of the same fix: a lone `{ title: 'Reload' }` at
+    /// argument 1 reaches the presenter as a single item, not as options with
+    /// an empty item list.
+    @Test
+    func aTitledObjectAtArgumentOneIsTheFirstItemWithOneItem() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showInformationMessage('Reload?', { title: 'Reload' }).then(function () {
+                    globalThis.__settled = true;
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__settled"))
+
+        let request = try #require(presenter.requests.first)
+        #expect(request.itemTitles == ["Reload"])
+    }
+
+    // MARK: - 12. An array at argument 1 is options, contributing no `modal`/`detail`
+
+    /// Kills a re-added `isArrayArgument`-style carve-out: under that
+    /// carve-out an array at argument 1 would be rejected as items are
+    /// collected past it (arrays have no string `title`), or would otherwise
+    /// change which arguments are items. VS Code's real rule needs no array
+    /// special-case — an array's own `title` is `undefined`, so it already
+    /// falls out as options, contributing no `modal` and no `detail`, and the
+    /// items are exactly the arguments after it.
+    @Test
+    func anArrayAtArgumentOneIsOptionsContributingNoModalOrDetail() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showInformationMessage('with array', [1, 2, 3], 'Alpha', 'Beta').then(function () {
+                    globalThis.__settled = true;
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__settled"))
+
+        let request = try #require(presenter.requests.first)
+        #expect(request.itemTitles == ["Alpha", "Beta"])
+        #expect(request.isModal == false)
+        #expect(request.detail == nil)
+    }
+
+    // MARK: - 13. A message whose `toString` throws rejects, and no request reaches the presenter
+
+    /// The hostile object is built in JS inside the test script, exactly as
+    /// the reviewer measured the underlying `JSValue.toString()` behaviour.
+    /// Asserts both halves the defect touched: the call rejects (a mutation
+    /// that reverts to unguarded `messageArgument.toString() ?? ""` would
+    /// instead resolve with a blank message), *and* `presenter.requests` is
+    /// empty (a mutation that only added the rejection but still presented
+    /// something beforehand would still fail here).
+    @Test
+    func aMessageWhoseToStringThrowsRejectsAndPresentsNothing() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                var hostile = { toString: function () { throw new Error('boom'); } };
+                vscode.window.showInformationMessage(hostile).then(
+                    function () { globalThis.__settled = { ok: true }; },
+                    function (error) { globalThis.__settled = { ok: false, message: error.message }; }
+                );
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        #expect(presenter.requests.isEmpty)
+    }
+
+    // MARK: - 14. A non-string message with a well-behaved `toString` is coerced and presented
+
+    /// Guards against LB2's fix over-correcting into "reject everything
+    /// non-string": a `toString` that returns normally is honoured, and the
+    /// presenter still sees the call.
+    @Test
+    func aNonStringMessageWithAWellBehavedToStringIsCoercedAndPresented() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                var polite = { toString: function () { return 'polite message'; } };
+                vscode.window.showInformationMessage(polite).then(
+                    function () { globalThis.__settled = { ok: true }; },
+                    function (error) { globalThis.__settled = { ok: false, message: error.message }; }
+                );
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == true)
+        let request = try #require(presenter.requests.first)
+        #expect(request.message == "polite message")
+    }
+
+    // MARK: - 15. A missing argument 0 rejects
+
+    /// Specified in this task's original brief but never actually covered by
+    /// a test until this round.
+    @Test
+    func aMissingMessageArgumentRejects() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showInformationMessage().then(
+                    function () { globalThis.__settled = { ok: true }; },
+                    function (error) { globalThis.__settled = { ok: false, message: error.message }; }
+                );
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        let message = try #require(settled.forProperty("message")?.toString())
+        #expect(message.contains("requires a message argument"))
+        #expect(presenter.requests.isEmpty)
+    }
+
+    // MARK: - 16. `isCloseAffordance` parsing
+
+    /// Asserts the index positively in both directions: `nil` when no item
+    /// carries `isCloseAffordance`, and `1` when the second item does — a
+    /// bare `nil` assertion on its own would pass just as well for a
+    /// mutation that always answers `nil`, so this pairs it with the
+    /// concrete-index case in the same test, looked up by message rather
+    /// than by position.
+    @Test
+    func closeAffordanceIndexReflectsWhichItemIfAnyIsMarkedCloseAffordance() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let presenter = RecordingMessagePresenter()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.window.showWarningMessage('no affordance', { title: 'A' }, { title: 'B' });
+                vscode.window.showWarningMessage(
+                    'with affordance', { title: 'A' }, { title: 'B', isCloseAffordance: true }
+                ).then(function () {
+                    globalThis.__settled = true;
+                });
+            };
+            """,
+            in: directory
+        )
+        let window = MainThreadWindow(
+            presenter: presenter, notImplementedLedger: host.notImplementedLedger, extensionIdentifier: host.identifier)
+        defer { host.dispose(); window.dispose() }
+        try install(window, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__settled"))
+
+        let noAffordanceRequest = try #require(presenter.requests.first { $0.message == "no affordance" })
+        #expect(noAffordanceRequest.closeAffordanceIndex == nil)
+        let withAffordanceRequest = try #require(presenter.requests.first { $0.message == "with affordance" })
+        #expect(withAffordanceRequest.closeAffordanceIndex == 1)
     }
 }
