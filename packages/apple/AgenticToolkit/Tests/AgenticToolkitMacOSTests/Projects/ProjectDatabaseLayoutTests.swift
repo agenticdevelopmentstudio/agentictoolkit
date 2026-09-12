@@ -218,6 +218,50 @@ final class ProjectDatabaseLayoutTests: XCTestCase {
         XCTAssertNil(try database.paneState(repoID: repo.id, nodeID: closed.id, key: "selected"))
     }
 
+    /// A leaf that keeps its id but changes its content is a different pane in
+    /// the same place, and the state the old content wrote means nothing to the
+    /// new one. The node-id sweep cannot see this: the id is still there.
+    ///
+    /// `ComposableTabLayoutSpec.reconcile(_:)` is the live case — it demotes a
+    /// leaf naming a view this build no longer allows to a placeholder, keeping
+    /// the node so the *shape* of the user's layout survives. Without this, the
+    /// demoted leaf carries the old pane's state forever, and hands it back if
+    /// that content ever returns to the leaf.
+    func testSavingTabsDropsTheStateOfALeafWhoseContentChanged() throws {
+        let (database, repo) = try makeRegisteredRepo()
+        let leaf = LayoutNode.leaf(contentType: editor)
+        let tab = TabRecord(title: "Code", root: leaf)
+        try database.saveTabs([tab], activeTabID: tab.id, repoID: repo.id)
+        try database.setPaneState(repoID: repo.id, nodeID: leaf.id, key: "selected", value: "/tmp/a.swift")
+
+        let demoted = TabRecord(id: tab.id, title: "Code",
+                                root: .leaf(id: leaf.id, contentType: .placeholder))
+        try database.saveTabs([demoted], activeTabID: demoted.id, repoID: repo.id)
+
+        XCTAssertNil(try database.paneState(repoID: repo.id, nodeID: leaf.id, key: "selected"))
+    }
+
+    /// The other half of the rule above: a leaf whose content is unchanged keeps
+    /// its state even when everything around it moves. Sizing, labelling and
+    /// re-rooting a pane are not content changes.
+    func testSavingTabsKeepsTheStateOfALeafThatOnlyMoved() throws {
+        let (database, repo) = try makeRegisteredRepo()
+        let leaf = LayoutNode.leaf(contentType: editor)
+        let tab = TabRecord(title: "Code", root: leaf)
+        try database.saveTabs([tab], activeTabID: tab.id, repoID: repo.id)
+        try database.setPaneState(repoID: repo.id, nodeID: leaf.id, key: "selected", value: "/tmp/a.swift")
+
+        let moved = TabRecord(id: tab.id, title: "Code", root: .split(
+            orientation: .horizontal,
+            first: .leaf(contentType: terminal),
+            second: .leaf(id: leaf.id, contentType: editor, paneLabel: "Editor", thicknessFraction: 0.25)
+        ))
+        try database.saveTabs([moved], activeTabID: moved.id, repoID: repo.id)
+
+        XCTAssertEqual(try database.paneState(repoID: repo.id, nodeID: leaf.id, key: "selected"),
+                       "/tmp/a.swift")
+    }
+
     func testPaneStateIsScopedToItsProject() throws {
         let database = try makeDatabase()
         let alpha = try registerRepo(in: database, path: "/tmp/alpha", name: "alpha")
