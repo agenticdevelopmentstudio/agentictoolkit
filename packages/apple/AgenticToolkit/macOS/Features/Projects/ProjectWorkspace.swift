@@ -445,3 +445,18 @@ public final class ProjectWorkspace {
 extension ProjectWorkspace: Loggable {
     public static nonisolated let logger = makeLogger()
 }
+
+/// This project's roots, as `vscode.workspace` needs them.
+///
+/// A fact about what a project is, not a fact about extensions — see
+/// `ExtensionWorkspaceRoots`'s own doc, in `MainThreadWorkspace.swift`, for
+/// why the extension host takes this narrow protocol rather than a
+/// `ProjectWorkspace` itself.
+extension ProjectWorkspace: ExtensionWorkspaceRoots {
+
+    public var workspaceDisplayName: String? { displayName }
+
+    /// Every root this project's file browser shows, primary first —
+    /// `fileBrowserDirectories.all`, the same list every pane already reads.
+    public var workspaceRootURLs: [URL] { fileBrowserDirectories.all }
+}
