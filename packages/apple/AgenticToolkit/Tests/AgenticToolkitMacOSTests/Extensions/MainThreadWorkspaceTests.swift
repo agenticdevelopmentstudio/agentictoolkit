@@ -20,15 +20,83 @@ private final class TestWorkspaceRoots: ExtensionWorkspaceRoots {
     }
 }
 
+/// A `FileSystemServicing` double whose `readFile` suspends until the test
+/// releases it, for the one test that needs to dispose `MainThreadWorkspace`
+/// while an operation is genuinely in flight — a race the real
+/// `FileSystemService` actor gives no way to hold open.
+///
+/// `waitUntilEntered()` lets the test block until `readFile` has actually
+/// been called and is suspended (rather than guessing with a delay), and
+/// `release()` lets it resume. Every other operation just throws: nothing in
+/// this suite calls them, and giving them a real implementation would only
+/// invite a future test to depend on behavior this double does not exist to
+/// provide.
+private actor SuspendingFileSystemService: FileSystemServicing {
+    private struct Unused: Error {}
+
+    private var hasEntered = false
+    private var enteredContinuation: CheckedContinuation<Void, Never>?
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilEntered() async {
+        if hasEntered { return }
+        await withCheckedContinuation { enteredContinuation = $0 }
+    }
+
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
+    func readFile(atPath path: String) async throws -> Data {
+        hasEntered = true
+        enteredContinuation?.resume()
+        enteredContinuation = nil
+        await withCheckedContinuation { releaseContinuation = $0 }
+        return Data("released".utf8)
+    }
+
+    func readDirectory(atPath path: String) async throws -> [FileSystemService.DirectoryEntry] {
+        throw Unused()
+    }
+
+    func stat(atPath path: String) async throws -> FileSystemService.FileStat {
+        throw Unused()
+    }
+
+    func writeFile(atPath path: String, contents: Data, create: Bool, overwrite: Bool) async throws {
+        throw Unused()
+    }
+
+    func createDirectory(atPath path: String) async throws {
+        throw Unused()
+    }
+
+    func delete(atPath path: String, recursive: Bool, useTrash: Bool) async throws {
+        throw Unused()
+    }
+
+    func rename(fromPath: String, toPath: String, overwrite: Bool) async throws {
+        throw Unused()
+    }
+}
+
 /// `vscode.workspace` (task 5.4c): `fs`, `workspaceFolders`, `name` and
-/// `getWorkspaceFolder`, wired onto a real `ExtensionHost` and a real
-/// `FileSystemService` — never doubles, for the same reason
-/// `MainThreadCommandsTests` gives: the point of this suite is the boundary
-/// between JavaScript and Swift (and, here, the real filesystem underneath
-/// it), and a double for any of the three would only ever agree with itself.
-/// `FileSystemService`'s own contract has never compiled or run before this
-/// task — every assertion that reaches it is exercising a written contract,
-/// not a previously-verified one.
+/// `getWorkspaceFolder`, wired onto a real `ExtensionHost` and, with one
+/// exception, a real `FileSystemService` — never doubles, for the same
+/// reason `MainThreadCommandsTests` gives: the point of this suite is the
+/// boundary between JavaScript and Swift (and, here, the real filesystem
+/// underneath it), and a double for any of the three would only ever agree
+/// with itself. `FileSystemService`'s own contract has never compiled or run
+/// before this task — every assertion that reaches it is exercising a
+/// written contract, not a previously-verified one.
+///
+/// The one exception is `SuspendingFileSystemService` below, used by exactly
+/// one test: a genuine in-flight-disposal race needs an operation the test
+/// itself can hold open, and the real actor's private queue offers no such
+/// hook. `MainThreadWorkspace` holds its dependency as the `FileSystemServicing`
+/// protocol precisely so that one substitution is possible without the rest
+/// of this suite giving up the real filesystem.
 @MainActor
 @Suite
 struct MainThreadWorkspaceTests {
@@ -117,7 +185,6 @@ struct MainThreadWorkspaceTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("hello.bin")
         try Data([0, 1, 127, 128, 255]).write(to: fileURL)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -137,6 +204,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -158,7 +230,6 @@ struct MainThreadWorkspaceTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("written.bin")
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -173,6 +244,11 @@ struct MainThreadWorkspaceTests {
             """,
             in: directory
         )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
         try await host.activate()
@@ -186,25 +262,46 @@ struct MainThreadWorkspaceTests {
 
     /// `readDirectory` reaches the service and answers VS Code's own
     /// `[string, FileType][]` shape — two-element arrays, not `{name, type}`
-    /// objects, and `FileType.File` (`1`) for a plain file.
+    /// objects, `FileType.File` (`1`) for a plain file and `FileType.Directory`
+    /// (`2`) for a directory.
+    ///
+    /// Lists a dedicated subdirectory (`listing/`), not the extension's own
+    /// root: `makeHost` writes `dist/web.js` into `directory` itself
+    /// (`ExtensionTestSupport.swift` creates `dist/` there), so listing
+    /// `directory` directly always carries that extra entry alongside
+    /// whatever the test wrote — asserting `length == 1` against it can never
+    /// pass. Asserted as an unordered set of `name` values, not `length` plus
+    /// an index-`0` lookup: `FileSystemService.readDirectory`'s own doc says
+    /// its order is `FileManager`'s, unsorted, so an index-based assertion
+    /// would be asserting an ordering the service's contract explicitly does
+    /// not promise. Kills a mutation that drops an entry, duplicates one, or
+    /// reports the wrong type bit for either child.
     @Test
     func readDirectoryReachesTheServiceAndResolvesWithTheTupleShape() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        try "x".write(to: directory.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
+        let listingURL = directory.appendingPathComponent("listing", isDirectory: true)
+        try FileManager.default.createDirectory(at: listingURL, withIntermediateDirectories: true)
+        try "x".write(to: listingURL.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: listingURL.appendingPathComponent("sub", isDirectory: true), withIntermediateDirectories: true)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
             exports.activate = function () {
                 globalThis.__settled = null;
-                vscode.workspace.fs.readDirectory(vscode.Uri.file('\(directory.path)')).then(
+                vscode.workspace.fs.readDirectory(vscode.Uri.file('\(listingURL.path)')).then(
                     function (entries) { globalThis.__settled = { ok: true, entries: entries }; },
                     function (error) { globalThis.__settled = { ok: false, message: error.message }; }
                 );
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -214,22 +311,61 @@ struct MainThreadWorkspaceTests {
         let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
         #expect(settled.forProperty("ok")?.toBool() == true)
         let entries = try #require(settled.forProperty("entries"))
-        #expect(entries.forProperty("length")?.toInt32() == 1)
-        let first = entries.atIndex(0)
-        #expect(first?.atIndex(0)?.toString() == "a.txt")
-        #expect(first?.atIndex(1)?.toInt32() == 1)
+        let length = entries.forProperty("length")?.toInt32() ?? -1
+        #expect(length == 2)
+        var found: Set<String> = []
+        for index in 0..<max(length, 0) {
+            guard let pair = entries.atIndex(Int(index)),
+                  let name = pair.atIndex(0)?.toString() else { continue }
+            let type = pair.atIndex(1)?.toInt32() ?? -1
+            found.insert("\(name):\(type)")
+        }
+        #expect(found == ["a.txt:1", "sub:2"])
     }
 
     /// `stat` reaches the service and answers `{type, ctime, mtime, size}`,
-    /// with `type` VS Code's own integer bitmask (`1` for a file) and `size`
-    /// the file's real byte count.
+    /// with `type` VS Code's own integer bitmask (`1` for a file), `size` the
+    /// file's real byte count, and `ctime`/`mtime` real milliseconds-since-
+    /// epoch values — not merely `typeof === 'number'`, a check that passes
+    /// equally for `0`, `NaN`, a seconds-valued timestamp a thousand times
+    /// too small, or `ctime` and `mtime` swapped outright.
+    ///
+    /// Each timestamp is bracketed between wall-clock millisecond readings
+    /// taken immediately before and after the filesystem operation that sets
+    /// it, and the two operations are separated by a real delay so the two
+    /// windows do not overlap. The file is created (setting both its birth
+    /// time and its modification time, `ctime`/`mtime` in VS Code's naming —
+    /// see `FileSystemService.FileStat`'s own doc), then, after the delay,
+    /// its content is overwritten **in place** with a plain, non-atomic
+    /// `Data.write(to:)` — not `String.write(atomically: true, ...)`, which
+    /// replaces the file's inode via a temp-file rename and would reset its
+    /// birth time along with it, destroying the very fact this test depends
+    /// on. Only the in-place write moves `mtime` into the later window while
+    /// leaving `ctime` in the earlier one, which is what makes a *swap* of
+    /// the two fields fail this assertion specifically, rather than only the
+    /// bare magnitude checks. Kills a mutation that: drops the `* 1000` in
+    /// `millisecondsSinceEpoch`; returns `0` unconditionally; or swaps
+    /// `ctime`/`mtime` in `statValue`.
     @Test
     func statReachesTheServiceAndResolvesWithTheStatShape() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("sized.txt")
+
+        let beforeCreate = Date().timeIntervalSince1970 * 1000
         try Data(repeating: 0x41, count: 7).write(to: fileURL)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
+        let afterCreate = Date().timeIntervalSince1970 * 1000
+
+        try await Task.sleep(for: .milliseconds(250))
+
+        let beforeModify = Date().timeIntervalSince1970 * 1000
+        try Data(repeating: 0x42, count: 11).write(to: fileURL)
+        let afterModify = Date().timeIntervalSince1970 * 1000
+
+        // The two windows must not overlap, or a swapped ctime/mtime could
+        // still land inside both brackets and this test would not catch it.
+        try #require(afterCreate < beforeModify)
+
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -239,8 +375,7 @@ struct MainThreadWorkspaceTests {
                     function (stat) {
                         globalThis.__settled = {
                             ok: true, type: stat.type, size: stat.size,
-                            ctimeIsNumber: typeof stat.ctime === 'number',
-                            mtimeIsNumber: typeof stat.mtime === 'number'
+                            ctime: stat.ctime, mtime: stat.mtime
                         };
                     },
                     function (error) { globalThis.__settled = { ok: false, message: error.message }; }
@@ -248,6 +383,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -257,9 +397,11 @@ struct MainThreadWorkspaceTests {
         let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
         #expect(settled.forProperty("ok")?.toBool() == true)
         #expect(settled.forProperty("type")?.toInt32() == 1)
-        #expect(settled.forProperty("size")?.toInt32() == 7)
-        #expect(settled.forProperty("ctimeIsNumber")?.toBool() == true)
-        #expect(settled.forProperty("mtimeIsNumber")?.toBool() == true)
+        #expect(settled.forProperty("size")?.toInt32() == 11)
+        let ctime = settled.forProperty("ctime")?.toDouble() ?? -1
+        let mtime = settled.forProperty("mtime")?.toDouble() ?? -1
+        #expect(ctime >= beforeCreate && ctime <= afterCreate)
+        #expect(mtime >= beforeModify && mtime <= afterModify)
     }
 
     /// `delete` reaches the service, and the file is actually gone afterwards.
@@ -269,7 +411,6 @@ struct MainThreadWorkspaceTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("doomed.txt")
         try "gone soon".write(to: fileURL, atomically: true, encoding: .utf8)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -282,6 +423,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -302,7 +448,6 @@ struct MainThreadWorkspaceTests {
         let sourceURL = directory.appendingPathComponent("source.txt")
         let targetURL = directory.appendingPathComponent("target.txt")
         try "payload".write(to: sourceURL, atomically: true, encoding: .utf8)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -317,6 +462,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -336,7 +486,6 @@ struct MainThreadWorkspaceTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let newDirectoryURL = directory.appendingPathComponent("nested/child", isDirectory: true)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -349,6 +498,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -373,7 +527,6 @@ struct MainThreadWorkspaceTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let missingURL = directory.appendingPathComponent("does-not-exist.txt")
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -386,6 +539,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -403,7 +561,6 @@ struct MainThreadWorkspaceTests {
     func readFileOnADirectoryRejectsWithFileIsADirectory() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -416,6 +573,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -435,7 +597,6 @@ struct MainThreadWorkspaceTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("plain.txt")
         try "not a directory".write(to: fileURL, atomically: true, encoding: .utf8)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -448,6 +609,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -470,7 +636,6 @@ struct MainThreadWorkspaceTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("occupied")
         try "already here".write(to: fileURL, atomically: true, encoding: .utf8)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -484,6 +649,11 @@ struct MainThreadWorkspaceTests {
             """,
             in: directory
         )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
         try await host.activate()
@@ -492,6 +662,97 @@ struct MainThreadWorkspaceTests {
         let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
         #expect(settled.forProperty("ok")?.toBool() == false)
         #expect(settled.forProperty("code")?.toString() == "FileExists")
+    }
+
+    /// `stat` on a path nothing exists at rejects with `FileNotFound`, the
+    /// same direct mapping `readFile` gets, reached through a different
+    /// operation: `FileSystemService.stat` (`FileSystemService.swift:359-376`)
+    /// routes `attributesOfItem`'s failure through `distinguished`, so a
+    /// missing path never falls through to the generic `.statFailed` case.
+    /// Kills a mutation that routes `stat`'s failure straight to
+    /// `.statFailed` without consulting `distinguished` first, which would
+    /// surface as `Unavailable` instead of `FileNotFound`.
+    @Test
+    func statOnAMissingPathRejectsWithFileNotFound() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let missingURL = directory.appendingPathComponent("does-not-exist.txt")
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.workspace.fs.stat(vscode.Uri.file('\(missingURL.path)')).then(
+                    function () { globalThis.__settled = { ok: true }; },
+                    function (error) { globalThis.__settled = { ok: false, code: error.code }; }
+                );
+            };
+            """,
+            in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
+        defer { host.dispose(); workspace.dispose() }
+        try install(workspace, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        #expect(settled.forProperty("code")?.toString() == "FileNotFound")
+    }
+
+    /// `readFile` on a file whose permission bits deny reading rejects with
+    /// `NoPermissions` — reached via `chmod`, not a mock, so the assertion
+    /// carries a real `EACCES`/`fileReadNoPermission` through
+    /// `distinguished` rather than assuming the classification exists. The
+    /// pre-check (`resolvedTypeBits`, which only needs the containing
+    /// directory to be traversable) still succeeds against a `0o000` file, so
+    /// this exercises the *second* place a permission denial can surface —
+    /// the read itself, not the stat that precedes it. Restores the original
+    /// mode in `defer` so the temp-directory cleanup that follows does not
+    /// itself fail on an unreadable file. Kills a mutation that drops the
+    /// `case .noPermissions: return "NoPermissions"` arm (falling through to
+    /// the `Unavailable` collapse, or to `nil`).
+    @Test
+    func readFileOnAnUnreadableFileRejectsWithNoPermissions() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("locked.txt")
+        try "secret".write(to: fileURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: fileURL.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+        }
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                vscode.workspace.fs.readFile(vscode.Uri.file('\(fileURL.path)')).then(
+                    function () { globalThis.__settled = { ok: true }; },
+                    function (error) { globalThis.__settled = { ok: false, code: error.code }; }
+                );
+            };
+            """,
+            in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
+        defer { host.dispose(); workspace.dispose() }
+        try install(workspace, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        #expect(settled.forProperty("code")?.toString() == "NoPermissions")
     }
 
     /// `delete` on a non-empty directory without `recursive` rejects with
@@ -508,7 +769,6 @@ struct MainThreadWorkspaceTests {
         try FileManager.default.createDirectory(at: childDirectory, withIntermediateDirectories: true)
         try "x".write(
             to: childDirectory.appendingPathComponent("inner.txt"), atomically: true, encoding: .utf8)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -521,6 +781,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -542,7 +807,6 @@ struct MainThreadWorkspaceTests {
     func workspaceFoldersIsUndefinedWithNoWorkspace() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -551,6 +815,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -572,7 +841,6 @@ struct MainThreadWorkspaceTests {
         let rootURL = directory.appendingPathComponent("root-one", isDirectory: true)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         let roots = TestWorkspaceRoots(displayName: nil, roots: [rootURL])
-        let workspace = MainThreadWorkspace(workspaceRoots: roots)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -589,6 +857,11 @@ struct MainThreadWorkspaceTests {
             """,
             in: directory
         )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: roots,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
         try await host.activate()
@@ -602,6 +875,49 @@ struct MainThreadWorkspaceTests {
         #expect(result.forProperty("index")?.toInt32() == 0)
     }
 
+    /// A workspace root nested several directories deep also answers a
+    /// `fsPath` free of a trailing slash, matching `URL.path` exactly — not
+    /// just a directory one level under the test's temp root. Every
+    /// `appendingPathComponent` step below is built `isDirectory: true`,
+    /// which is what puts a trailing slash in `absoluteString` in the first
+    /// place; a fix that only special-cased a shallow root, or that happened
+    /// to work by accident for one depth, would not survive this. Kills a
+    /// mutation that reintroduces the trailing slash for any root whose path
+    /// has more than one component below the workspace's own temp directory.
+    @Test
+    func workspaceFoldersAnswersANestedRootWithATrailingSlashFreeFsPath() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let nestedRootURL = directory
+            .appendingPathComponent("workspace", isDirectory: true)
+            .appendingPathComponent("nested", isDirectory: true)
+            .appendingPathComponent("root", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedRootURL, withIntermediateDirectories: true)
+        let roots = TestWorkspaceRoots(displayName: nil, roots: [nestedRootURL])
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__fsPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+            };
+            """,
+            in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: roots,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
+        defer { host.dispose(); workspace.dispose() }
+        try install(workspace, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let fsPath = context.evaluateScript("globalThis.__fsPath")?.toString()
+        #expect(fsPath == nestedRootURL.path)
+        #expect(fsPath?.hasSuffix("/") == false)
+    }
+
     // MARK: - name
 
     /// `vscode.workspace.name` answers the display name a real workspace
@@ -611,7 +927,6 @@ struct MainThreadWorkspaceTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let roots = TestWorkspaceRoots(displayName: "My Project", roots: [directory])
-        let workspace = MainThreadWorkspace(workspaceRoots: roots)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -620,6 +935,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: roots,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -638,7 +958,6 @@ struct MainThreadWorkspaceTests {
     func nameIsUndefinedWithNoWorkspace() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -648,6 +967,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -672,7 +996,6 @@ struct MainThreadWorkspaceTests {
         let fileURL = rootURL.appendingPathComponent("inside.txt")
         try "x".write(to: fileURL, atomically: true, encoding: .utf8)
         let roots = TestWorkspaceRoots(displayName: nil, roots: [rootURL])
-        let workspace = MainThreadWorkspace(workspaceRoots: roots)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -683,6 +1006,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: roots,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -721,7 +1049,6 @@ struct MainThreadWorkspaceTests {
         // registered first, so registration order is deliberately the
         // opposite of the expected answer.
         let roots = TestWorkspaceRoots(displayName: nil, roots: [outerURL, innerURL])
-        let workspace = MainThreadWorkspace(workspaceRoots: roots)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -732,6 +1059,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: roots,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -755,7 +1087,6 @@ struct MainThreadWorkspaceTests {
         let outsideURL = directory.appendingPathComponent("elsewhere.txt")
         try "x".write(to: outsideURL, atomically: true, encoding: .utf8)
         let roots = TestWorkspaceRoots(displayName: nil, roots: [rootURL])
-        let workspace = MainThreadWorkspace(workspaceRoots: roots)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -765,6 +1096,11 @@ struct MainThreadWorkspaceTests {
             };
             """,
             in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: roots,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -786,7 +1122,6 @@ struct MainThreadWorkspaceTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let ledger = NotImplementedLedger()
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -802,6 +1137,11 @@ struct MainThreadWorkspaceTests {
             in: directory,
             ledger: ledger
         )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
         try await host.activate()
@@ -809,6 +1149,49 @@ struct MainThreadWorkspaceTests {
         let context = try #require(host.javaScriptContext)
         #expect(context.evaluateScript("globalThis.__err")?.toString() == "NotImplementedError")
         #expect(ledger.accesses.map(\.memberPath) == ["vscode.workspace.openTextDocument"])
+    }
+
+    /// A `vscode.workspace.fs` member this task did not implement (`copy`
+    /// stands in for it, and for `isWritableFileSystem` and everything else
+    /// `subNamespace`'s own stub still owns) still throws
+    /// `NotImplementedError` **and** is recorded in the ledger under
+    /// `vscode.workspace.fs.copy` — the fix for the fix brief's item 3.
+    /// Before that fix, `fs`'s `subNamespace` call passed `recordMiss: nil,
+    /// recordProbe: nil`: the throw still happened (it is unconditional in
+    /// the shim's `get` trap), but nothing under `fs` ever reached the
+    /// ledger. Kills a mutation that reverts either `recordMiss` or
+    /// `recordProbe` back to `nil` in `MainThreadWorkspace.fs`, or that wires
+    /// them to the wrong `extensionIdentifier`.
+    @Test
+    func anUnimplementedFsMemberThrowsAndIsRecordedInTheLedger() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__err = null;
+                try {
+                    vscode.workspace.fs.copy('\\/tmp\\/a.txt', '\\/tmp\\/b.txt');
+                } catch (error) {
+                    globalThis.__err = error.name;
+                }
+            };
+            """,
+            in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
+        defer { host.dispose(); workspace.dispose() }
+        try install(workspace, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.__err")?.toString() == "NotImplementedError")
+        #expect(host.notImplementedLedger.accesses.map(\.memberPath) == ["vscode.workspace.fs.copy"])
     }
 
     // MARK: - Teardown: an in-flight operation rejects rather than crashing
@@ -835,7 +1218,6 @@ struct MainThreadWorkspaceTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("in-flight.txt")
         try "still here".write(to: fileURL, atomically: true, encoding: .utf8)
-        let workspace = MainThreadWorkspace(workspaceRoots: nil)
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
@@ -851,6 +1233,11 @@ struct MainThreadWorkspaceTests {
             """,
             in: directory
         )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier
+        )
         defer { host.dispose() }
         try install(workspace, on: host)
         try await host.activate()
@@ -860,6 +1247,65 @@ struct MainThreadWorkspaceTests {
         // Disposed before the `Task` behind that call has had a single turn
         // on the run loop — no `await` has happened yet on this line.
         workspace.dispose()
+
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        #expect(settled.forProperty("message")?.toString()?.contains("torn down") == true)
+    }
+
+    /// The other half of teardown: disposed **while an operation is
+    /// genuinely suspended mid-`await`**, not merely before its `Task` has
+    /// had a first turn. `SuspendingFileSystemService.readFile` suspends on
+    /// a continuation the test holds; the test waits for the operation to
+    /// actually enter that suspension (`waitUntilEntered()`, not a delay),
+    /// disposes the workspace while it is still suspended there, and only
+    /// then releases it. `operation()` therefore completes successfully
+    /// *after* disposal, and the promise must still reject rather than
+    /// deliver `readFile`'s real result or crash.
+    ///
+    /// This is the fix for the fix brief's item 5, and it exercises exactly
+    /// the guard item 4 rewrote: `runFileSystemOperation`'s post-`await`
+    /// `guard !self.isDisposed, let resultContext = …`. Kills a mutation
+    /// that removes or weakens that `!self.isDisposed` check — without it,
+    /// this test would observe `ok: true` with `readFile`'s real (fabricated)
+    /// contents instead of a "torn down" rejection.
+    @Test
+    func disposingWhileAnOperationIsGenuinelySuspendedRejectsRatherThanDeliveringAResult() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suspending = SuspendingFileSystemService()
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__settled = null;
+                globalThis.run = function () {
+                    vscode.workspace.fs.readFile(vscode.Uri.file('/does/not/matter.txt')).then(
+                        function () { globalThis.__settled = { ok: true }; },
+                        function (error) { globalThis.__settled = { ok: false, message: error.message }; }
+                    );
+                };
+            };
+            """,
+            in: directory
+        )
+        let workspace = MainThreadWorkspace(
+            workspaceRoots: nil,
+            notImplementedLedger: host.notImplementedLedger,
+            extensionIdentifier: host.identifier,
+            fileSystemService: suspending
+        )
+        defer { host.dispose() }
+        try install(workspace, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+        await suspending.waitUntilEntered()
+        // `readFile` is now suspended inside `operation()`, past the
+        // pre-flight guard and before the post-await guard has run.
+        workspace.dispose()
+        await suspending.release()
 
         let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
         #expect(settled.forProperty("ok")?.toBool() == false)
