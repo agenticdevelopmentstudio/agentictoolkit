@@ -79,7 +79,7 @@ enum ProjectWindowTestSupport {
     /// has to police on its own — a tab can never be split down to zero
     /// editors because the spec itself refuses to remove the last one.
     static func makeDocumentLayout(
-        viewID: ComposableTabsViewID = ComposableTabsViewID("document")
+        viewID: ComposableTabsViewID = ComposableTabsViewID("document.editor")
     ) throws -> ComposableTabsLayout {
         let registry = ComposableTabsViewRegistry()
         registry.register(viewID, descriptor: .init(displayName: "Editor")) { context in

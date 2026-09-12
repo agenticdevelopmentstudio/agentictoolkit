@@ -10,7 +10,7 @@ final class DocumentTabsViewControllerTests: XCTestCase {
             project: project,
             workingDirectory: project.directoryURL,
             documentLayout: try ProjectWindowTestSupport.makeDocumentLayout(),
-            documentViewID: ComposableTabsViewID("document"),
+            documentViewID: ComposableTabsViewID("document.editor"),
             paneNodeID: paneNodeID
         )
     }
@@ -126,7 +126,7 @@ final class DocumentTabsViewControllerTests: XCTestCase {
             project: project,
             workingDirectory: project.directoryURL,
             documentLayout: layout,
-            documentViewID: ComposableTabsViewID("document"),
+            documentViewID: ComposableTabsViewID("document.editor"),
             paneNodeID: sharedPaneNodeID
         )
         first.loadViewIfNeeded()
@@ -139,7 +139,7 @@ final class DocumentTabsViewControllerTests: XCTestCase {
             project: project,
             workingDirectory: project.directoryURL,
             documentLayout: layout,
-            documentViewID: ComposableTabsViewID("document"),
+            documentViewID: ComposableTabsViewID("document.editor"),
             paneNodeID: sharedPaneNodeID
         )
         restored.loadViewIfNeeded()
@@ -154,8 +154,8 @@ final class DocumentTabsViewControllerTests: XCTestCase {
     func testTheStoredLayoutMirrorRoundTrips() throws {
         let tree = LayoutNode.split(
             orientation: .horizontal,
-            first: .leaf(contentType: ComposableTabsViewID("document"), thicknessFraction: 0.25),
-            second: .leaf(contentType: ComposableTabsViewID("document"), thicknessFraction: 0.75)
+            first: .leaf(contentType: ComposableTabsViewID("document.editor"), thicknessFraction: 0.25),
+            second: .leaf(contentType: ComposableTabsViewID("document.editor"), thicknessFraction: 0.75)
         )
 
         let data = try JSONEncoder().encode(LayoutNodeCodable(tree))

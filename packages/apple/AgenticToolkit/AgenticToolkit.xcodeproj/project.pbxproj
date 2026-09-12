@@ -272,7 +272,6 @@
 		38019B307616D6D724C972AB /* ToolDefinition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5FFC62731DADB19C5D55C4 /* ToolDefinition.swift */; };
 		3806D43D1BAB94EA6B0B57F3 /* ThemeColorsTopicPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC58C4EE50EF5727B339BD2D /* ThemeColorsTopicPanel.swift */; };
 		380D840AFE226F80DEE42982 /* LogWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 817F82444C74B3C73FA1A61C /* LogWindowController.swift */; };
-		38435EFFA8D432C5762CB767 /* FileBrowserSplitViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39BC909337CA3C3AD131E70E /* FileBrowserSplitViewControllerTests.swift */; };
 		386E5C4E6DA127E9F38558BF /* Edge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7948E48391DD309B84C90430 /* Edge.swift */; };
 		38995CAB02C10C1B10AD206F /* StepperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 918004B1B4E31BFD1A4DE40B /* StepperView.swift */; };
 		38B711D3A87363DAD786864B /* AIPluginManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C86FC37F48D2DC557B60669 /* AIPluginManagerTests.swift */; };
@@ -394,7 +393,6 @@
 		572E856D206A789C0D594FF7 /* LSPJumpToDefinitionDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73AABFF9469CDC91BFC0AB25 /* LSPJumpToDefinitionDelegateTests.swift */; };
 		573B3303298911964F22D8BF /* PaneStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5793B276EDE1C221ED92405F /* PaneStateStore.swift */; };
 		57CCF71133800DA6C6E9F53A /* PluginTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A772B2A0F39CC6E0A4D12FB /* PluginTransport.swift */; };
-		57CEAA87220A9863E9CEAB11 /* FileBrowserSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40A67BFA90ADB6D1531FB53A /* FileBrowserSplitViewController.swift */; };
 		57FB95BDA9DDFFBF7AE4285B /* ExtensionResourcePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50D06189F63A66ACD4BA92D5 /* ExtensionResourcePath.swift */; };
 		58DE534BA56300F760157AB7 /* WorkGroupsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14D79B17B7A4A814634CF92D /* WorkGroupsView.swift */; };
 		58EFA7EA66263265E0EA338A /* ProviderTypeFacet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7FB6082368D23714EF4DFFA /* ProviderTypeFacet.swift */; };
@@ -571,7 +569,6 @@
 		83EE05B5B7E9A3A0A8496A0D /* SessionListViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D713796FE212AB499F815BCD /* SessionListViewTests.swift */; };
 		8415C35AD7A619FD828ADD69 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F025F4833518303ADE9E6D8 /* ChatView.swift */; };
 		84378C118CDBC40E3F450869 /* ContributionRegistrationsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9113AB22E3BABF4F660087D /* ContributionRegistrationsTests.swift */; };
-		843AAA251CDACA9005035528 /* FileViewerViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB81401C0B5A6C5701A84AD4 /* FileViewerViewController.swift */; };
 		84E77E2414BE46DD23E59263 /* AIPluginChatBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935E6D6BD290281F72BFF2AC /* AIPluginChatBackend.swift */; };
 		84F5716884848F129C95372E /* PaneMinimizeGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71942A25CE71F5CEFEDBF694 /* PaneMinimizeGeometryTests.swift */; };
 		851EEE48DC44D5E9A1DBA20A /* LogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5113DB0106DEB9C27CF1F564 /* LogView.swift */; };
@@ -2048,7 +2045,6 @@
 		397A28ABB51ED004474C44A5 /* AIRequestBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRequestBuilder.swift; sourceTree = "<group>"; };
 		398A9B344340B4AD545F6925 /* LLMChatWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMChatWindowController.swift; sourceTree = "<group>"; };
 		39A019F12D97C834D68D9A28 /* ComposableTabLayoutSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabLayoutSpec.swift; sourceTree = "<group>"; };
-		39BC909337CA3C3AD131E70E /* FileBrowserSplitViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserSplitViewControllerTests.swift; sourceTree = "<group>"; };
 		39D2904B79D1C3A8B833FA72 /* AIProviderConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfigStore.swift; sourceTree = "<group>"; };
 		39E42B65AECE7EFEA631F88B /* FileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEditorView.swift; sourceTree = "<group>"; };
 		3AEE901D7CE34AA402DD5961 /* AIModelCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelCatalogTests.swift; sourceTree = "<group>"; };
@@ -2075,7 +2071,6 @@
 		402324FCBC578003C0A2B9E0 /* ThemeUIReExports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeUIReExports.swift; sourceTree = "<group>"; };
 		403CA7FA2F8D1F70D36E7449 /* GitClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitClient.swift; sourceTree = "<group>"; };
 		40813ACE8034AE596D367787 /* SystemWindowSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowSettingsView.swift; sourceTree = "<group>"; };
-		40A67BFA90ADB6D1531FB53A /* FileBrowserSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserSplitViewController.swift; sourceTree = "<group>"; };
 		40BDEC16E69F6327E8B370EC /* UserSettings+Projects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserSettings+Projects.swift"; sourceTree = "<group>"; };
 		40F4762A537388E34AFF8F98 /* ThemeChoiceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeChoiceViewModel.swift; sourceTree = "<group>"; };
 		41110788315894C24F508116 /* SystemWindowSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowSnapshot.swift; sourceTree = "<group>"; };
@@ -2533,7 +2528,6 @@
 		CAF729C4B81A698492FAE06C /* MarkdownReExports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownReExports.swift; sourceTree = "<group>"; };
 		CB01151A6C6EB1B1B8A1679E /* ProjectsSettingsPanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsSettingsPanelViewController.swift; sourceTree = "<group>"; };
 		CB783DDA1E4AB17256866125 /* DividerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DividerView.swift; sourceTree = "<group>"; };
-		CB81401C0B5A6C5701A84AD4 /* FileViewerViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileViewerViewController.swift; sourceTree = "<group>"; };
 		CB8EA4CB9A8A704A74264FFE /* CustomHeuristic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomHeuristic.swift; sourceTree = "<group>"; };
 		CBA8C42F9BB7AEDB993FBCE1 /* ComposableTabsPaneChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsPaneChromeTests.swift; sourceTree = "<group>"; };
 		CC0AA8BC9941D7E782CEFB52 /* OllamaModelPageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaModelPageStore.swift; sourceTree = "<group>"; };
@@ -2956,9 +2950,7 @@
 				091160DCC44A7E8876D86298 /* Settings */,
 				2A41F94CBE8A43600B9E1E76 /* Views */,
 				18DC25BF65F07B100575E0E2 /* FileBrowserSelection.swift */,
-				40A67BFA90ADB6D1531FB53A /* FileBrowserSplitViewController.swift */,
 				BA88DA3490B30D9417464679 /* FileBrowserViewController.swift */,
-				CB81401C0B5A6C5701A84AD4 /* FileViewerViewController.swift */,
 			);
 			path = FileBrowser;
 			sourceTree = "<group>";
@@ -4180,7 +4172,6 @@
 				58C03AD574FD3DA32B4B18C3 /* AgenticFileBrowserTests.swift */,
 				DFD7D805F1818A3D37082F65 /* DirectoryWatchCoordinatorTests.swift */,
 				1B1F0239679848C60E329A25 /* FileBrowserRestorationStateTests.swift */,
-				39BC909337CA3C3AD131E70E /* FileBrowserSplitViewControllerTests.swift */,
 				606752010426F56A4E2B9769 /* FileEditorStateTests.swift */,
 				26F215E76159A3EA4B2AD423 /* FilePreviewLoaderTests.swift */,
 				CF257F89CFF00A2F21772F08 /* FileTreeManagerInjectedProviderTests.swift */,
@@ -6522,7 +6513,6 @@
 				08819CF337A91D3D71507377 /* FileBrowserDirectories.swift in Sources */,
 				AF39A227051CA2BE0B3430AE /* FileBrowserRestorationState.swift in Sources */,
 				A5CD1A859949D8841386DF39 /* FileBrowserSelection.swift in Sources */,
-				57CEAA87220A9863E9CEAB11 /* FileBrowserSplitViewController.swift in Sources */,
 				50131C005F2C2DCED1A2F8A4 /* FileBrowserViewController.swift in Sources */,
 				D5CEBA9410FF2989F7A653F2 /* FileEditorState.swift in Sources */,
 				AD508E884D29BF4F2FA1C421 /* FileEditorView.swift in Sources */,
@@ -6534,7 +6524,6 @@
 				9E6D881D96D7BF87A2D0EF84 /* FileTreeOutlineViewController.swift in Sources */,
 				9A05C9F3A94BE457552214D7 /* FileTypesSettingsPanelViewController.swift in Sources */,
 				D9B386B67255C3A6B3C62BB7 /* FileTypesSettingsView.swift in Sources */,
-				843AAA251CDACA9005035528 /* FileViewerViewController.swift in Sources */,
 				664F8F60BCAC920B2BF060D3 /* FontPickerView.swift in Sources */,
 				9DA37D73639C3DA17E2A79B9 /* FontViewModel.swift in Sources */,
 				097249F96A3BAEDE1E7D11F8 /* FrameCalculator.swift in Sources */,
@@ -7082,7 +7071,6 @@
 				AA530745FD6D0D999EA78E1C /* ExtensionsSettingsPanelTests.swift in Sources */,
 				86C059559735234119EBF2CB /* ExternalThemeChangeObservationTests.swift in Sources */,
 				A66C1C82523C06ADD2917478 /* FileBrowserRestorationStateTests.swift in Sources */,
-				38435EFFA8D432C5762CB767 /* FileBrowserSplitViewControllerTests.swift in Sources */,
 				E1F033A6E64E0391B5B98665 /* FileEditorHighlightProviderTests.swift in Sources */,
 				C45D35028A564F42E9ABE1F0 /* FileEditorStateTests.swift in Sources */,
 				49CF09BF55500C108508339A /* FileEditorTriggerCharacterTests.swift in Sources */,
