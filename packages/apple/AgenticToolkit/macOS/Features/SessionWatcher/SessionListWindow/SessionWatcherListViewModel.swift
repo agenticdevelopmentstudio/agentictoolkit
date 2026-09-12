@@ -10,34 +10,18 @@ import Combine
 import Foundation
 import os
 extension SessionWatcher {
-    /// Groups sessions by their top-level (non-submodule) git project.
-    public struct SessionWatcherGroup: Identifiable {
-        public let id: String           // project group key (project root path, or cwd)
-        public let projectName: String  // display name (last path component of the key)
-        public let sessions: [SessionWatcherSession]
-
-        /// Whether any session in this group is active.
-        public var hasActiveSessions: Bool {
-            sessions.contains { $0.status == .active }
-        }
-
-        /// Whether any session in this group is stale (but not active).
-        public var hasStaleSessions: Bool {
-            !hasActiveSessions && sessions.contains { $0.status == .stale }
-        }
-    }
-
     /// Bridges SQLite session data to AppKit views with real-time update support.
     ///
-    /// Sessions are grouped by their top-level git project and ordered by when they
-    /// started: within a project the oldest session is first, and projects are ordered
-    /// by their earliest session start (so a newly-started project joins at the bottom).
+    /// The window is one flat list of rows, but the order still knows about projects:
+    /// sessions sharing a top-level git project stay adjacent, oldest first, and the
+    /// projects themselves are ordered by their earliest session's start (so a
+    /// newly-started project joins at the bottom rather than reshuffling the list).
     public final class SessionListViewModel: ObservableObject, @unchecked Sendable {
 
         // MARK: - Published Properties
 
-        /// All live sessions grouped by project, ordered by start time.
-        @Published public private(set) var groups: [SessionWatcherGroup] = []
+        /// Every live session, in display order — one flat list, project-adjacent.
+        @Published public private(set) var sessions: [SessionWatcherSession] = []
 
         /// Whether there are zero known projects (true only before any session is ever seen).
         @Published private(set) var isEmpty: Bool = true
@@ -107,7 +91,7 @@ extension SessionWatcher {
 
         // MARK: - Data Loading
 
-        /// Loads active and stale sessions from the source and groups them by project.
+        /// Loads active and stale sessions from the source and orders them for display.
         /// Ended sessions are excluded. Fire-and-forget: the actual work runs in
         /// ``reloadSessions()`` so production call sites stay synchronous.
         public func loadSessions() {
@@ -128,41 +112,39 @@ extension SessionWatcher {
 
             let liveSessions = allSessions.filter { $0.status != .ended && !$0.cwd.isEmpty && $0.cwd != "/" }
 
-            // Group live sessions by their top-level git project.
-            let sessionsByProject = Dictionary(grouping: liveSessions) { $0.projectGroupKey }
-
-            // Within each group, order sessions by when they started (oldest first);
-            // order the groups by their earliest session's start so a newly-started
-            // project joins at the bottom. `startedAt` is a fixed-width UTC timestamp,
-            // so a lexicographic string compare is chronological.
-            let sortedGroups = sessionsByProject
-                .compactMap { key, sessions -> SessionWatcherGroup? in
-                    guard !sessions.isEmpty else { return nil }
-                    let ordered = sessions.sorted { $0.startedAt < $1.startedAt }
-                    return SessionWatcherGroup(
-                        id: key,
-                        projectName: ordered.first?.projectGroupName ?? key,
-                        sessions: ordered
-                    )
-                }
-                .sorted { lhs, rhs in
-                    let lhsStart = lhs.sessions.first?.startedAt ?? ""
-                    let rhsStart = rhs.sessions.first?.startedAt ?? ""
-                    if lhsStart != rhsStart { return lhsStart < rhsStart }
-                    // Deterministic tie-break when two projects' earliest starts match.
-                    return lhs.projectName.localizedCaseInsensitiveCompare(rhs.projectName) == .orderedAscending
-                }
-
+            let ordered = Self.displayOrder(for: liveSessions)
             let count = liveSessions.count
             let activeCount = liveSessions.filter { $0.status == .active }.count
-            let empty = sortedGroups.isEmpty
+            let empty = ordered.isEmpty
 
             await MainActor.run {
-                self.groups = sortedGroups
+                self.sessions = ordered
                 self.isEmpty = empty
                 self.sessionCount = count
                 self.activeSessionCount = activeCount
             }
+        }
+
+        /// The flat display order. Sessions of one project stay together — the window
+        /// no longer draws a card around them, so adjacency is the only thing left
+        /// saying they belong to the same tree — oldest first within a project, and
+        /// the projects ordered by their earliest session's start so a project that
+        /// starts now joins the bottom instead of reshuffling everything above it.
+        ///
+        /// `startedAt` is a fixed-width UTC timestamp, so a lexicographic string
+        /// compare is chronological.
+        static func displayOrder(for sessions: [SessionWatcherSession]) -> [SessionWatcherSession] {
+            let byProject = Dictionary(grouping: sessions) { $0.projectGroupKey }
+            return byProject
+                .map { key, members in (key: key, members: members.sorted { $0.startedAt < $1.startedAt }) }
+                .sorted { lhs, rhs in
+                    let lhsStart = lhs.members.first?.startedAt ?? ""
+                    let rhsStart = rhs.members.first?.startedAt ?? ""
+                    if lhsStart != rhsStart { return lhsStart < rhsStart }
+                    // Deterministic tie-break when two projects' earliest starts match.
+                    return lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending
+                }
+                .flatMap(\.members)
         }
 
         // MARK: - Real-time Updates
@@ -348,8 +330,8 @@ extension SessionWatcher {
             log.append("Log file: \((ActivationTestLog.whippetShared.logPath ?? "(no path)"))")
 
             // Gather unique project names from live sessions
-            let projects: [(name: String, session: SessionWatcherSession)] = groups.flatMap { group in
-                group.sessions.map { ($0.projectName, $0) }
+            let projects: [(name: String, session: SessionWatcherSession)] = sessions.map {
+                ($0.projectName, $0)
             }
 
             guard !projects.isEmpty else {
@@ -431,8 +413,7 @@ extension SessionWatcher {
             }
 
             // Match against all live sessions by project name (case-insensitive substring)
-            let allSessions = groups.flatMap(\.sessions)
-            let matched = allSessions.first { session in
+            let matched = sessions.first { session in
                 let project = session.projectName
                 guard !project.isEmpty, project != "Unknown" else { return false }
                 return title.localizedCaseInsensitiveContains(project)

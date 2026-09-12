@@ -43,10 +43,12 @@ extension SessionWatcher {
         }
 
         private func setupViews() {
-            // Stack view for session groups
+            // One flat list: rows butted together, separated by hairlines rather than
+            // by gaps or cards. The rows carry their own horizontal padding, so the
+            // stack insets only the ends.
             stackView.orientation = .vertical
-            stackView.spacing = 6
-            stackView.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+            stackView.spacing = 0
+            stackView.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
             stackView.translatesAutoresizingMaskIntoConstraints = false
 
             // Scroll view wrapping the stack
@@ -91,11 +93,11 @@ extension SessionWatcher {
         }
 
         private func bindViewModel() {
-            viewModel.$groups
+            viewModel.$sessions
                 .combineLatest(viewModel.$isEmpty)
                 .receive(on: DispatchQueue.main)
-                .sink { [weak self] groups, isEmpty in
-                    self?.updateContent(groups: groups, isEmpty: isEmpty)
+                .sink { [weak self] sessions, isEmpty in
+                    self?.updateContent(sessions: sessions, isEmpty: isEmpty)
                 }
                 .store(in: &cancellables)
 
@@ -108,7 +110,7 @@ extension SessionWatcher {
                 .store(in: &cancellables)
         }
 
-        private func updateContent(groups: [SessionWatcherGroup], isEmpty: Bool) {
+        private func updateContent(sessions: [SessionWatcherSession], isEmpty: Bool) {
             stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
             if isEmpty {
@@ -118,17 +120,23 @@ extension SessionWatcher {
                 scrollView.isHidden = false
                 emptyStateView.isHidden = true
 
-                for group in groups {
-                    let groupView = SessionWatcherGroupCardView(
-                        group: group,
-                        onSessionClick: { [weak self] session in self?.viewModel.handleSessionClick(session) },
-                        summarizingSessionIds: viewModel.summarizingSessionIds,
+                let summariesEnabled = viewModel.summariesEnabled()
+                for (index, session) in sessions.enumerated() {
+                    if index > 0 {
+                        let separator = SessionWatcherListSeparator()
+                        stackView.addArrangedSubview(separator)
+                        separator.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+                    }
+                    let row = SessionWatcherRowAppKitView(
+                        session: session,
+                        onTap: { [weak self] session in self?.viewModel.handleSessionClick(session) },
+                        isSummarizing: viewModel.summarizingSessionIds.contains(session.sessionId),
                         onSummarize: { [weak self] session in self?.viewModel.summarizeSession(session) },
-                        frontmostSessionId: viewModel.frontmostSessionId,
-                        summariesEnabled: viewModel.summariesEnabled()
+                        isFrontmost: session.sessionId == viewModel.frontmostSessionId,
+                        summariesEnabled: summariesEnabled
                     )
-                    stackView.addArrangedSubview(groupView)
-                    groupView.widthAnchor.constraint(equalTo: stackView.widthAnchor, constant: -16).isActive = true
+                    stackView.addArrangedSubview(row)
+                    row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
                 }
             }
             invalidateIntrinsicContentSize()
@@ -225,178 +233,25 @@ extension SessionWatcher {
         }
     }
 
-    // MARK: - SessionWatcherSession Group Card View
+    // MARK: - List Separator
 
-    public final class SessionWatcherGroupCardView: NSView {
-        private let group: SessionWatcherGroup
-        private let onSessionClick: ((SessionWatcherSession) -> Void)?
-        private let summarizingSessionIds: Set<String>
-        private let onSummarize: ((SessionWatcherSession) -> Void)?
-        private let frontmostSessionId: String?
-        private let summariesEnabled: Bool
-
-        // Theme-sensitive subviews
-        private var folderIconView: NSImageView!
-        private var titleLabel: NSTextField!
-        private var countLabel: NSTextField!
-        private var dividerView: NSBox!
-        private var noneLabel: NSTextField?
+    /// The hairline between two rows. The list draws these instead of giving each
+    /// row a border, so a run of rows reads as one list rather than a stack of cards.
+    public final class SessionWatcherListSeparator: NSView {
         private var themeObserver: ThemePaletteObserver?
 
-        public init(
-            group: SessionWatcherGroup,
-            onSessionClick: ((SessionWatcherSession) -> Void)?,
-            summarizingSessionIds: Set<String>,
-            onSummarize: ((SessionWatcherSession) -> Void)?,
-            frontmostSessionId: String?,
-            summariesEnabled: Bool
-        ) {
-            self.group = group
-            self.onSessionClick = onSessionClick
-            self.summarizingSessionIds = summarizingSessionIds
-            self.onSummarize = onSummarize
-            self.frontmostSessionId = frontmostSessionId
-            self.summariesEnabled = summariesEnabled
+        public init() {
             super.init(frame: .zero)
-            accessibilityID("session-panel.group.\(AccessibilityID.slug(group.projectName))")
             wantsLayer = true
-            layer?.cornerRadius = 8
-            setupViews()
-            themeObserver = ThemePaletteObserver(host: self) { [weak self] palette in self?.applyTheme(palette) }
+            translatesAutoresizingMaskIntoConstraints = false
+            heightAnchor.constraint(equalToConstant: 1).isActive = true
+            themeObserver = ThemePaletteObserver(host: self) { [weak self] palette in
+                self?.layer?.backgroundColor = palette.borderColor.withAlphaComponent(0.5).cgColor
+            }
         }
 
         @available(*, unavailable)
         public required init?(coder: NSCoder) { fatalError() }
-
-        private func applyTheme(_ palette: SemanticPalette) {
-            layer?.backgroundColor = palette.surfaceColor.cgColor
-            layer?.borderColor = palette.borderColor.cgColor
-            layer?.borderWidth = 0.5
-            folderIconView.contentTintColor = palette.secondaryTextColor
-            titleLabel.textColor = palette.primaryTextColor
-            titleLabel.font = palette.font(.heading)
-            countLabel.textColor = palette.tertiaryTextColor
-            countLabel.font = palette.font(.caption)
-            noneLabel?.textColor = palette.tertiaryTextColor
-            noneLabel?.font = palette.font(.caption)
-            // NSBox separator color is driven by the system; tint via layer instead
-            dividerView.alphaValue = 0.3
-        }
-
-        private func setupViews() {
-            let stack = NSStackView()
-            stack.orientation = .vertical
-            stack.spacing = 0
-            stack.translatesAutoresizingMaskIntoConstraints = false
-
-            // Header
-            let header = makeSessionHeader()
-            stack.addArrangedSubview(header)
-
-            let divider = makeDivider()
-            dividerView = divider
-            stack.addArrangedSubview(divider)
-
-            // Sessions
-            if group.sessions.isEmpty {
-                let none = NSTextField(labelWithString: "None")
-                noneLabel = none
-                let wrapper = NSView()
-                wrapper.translatesAutoresizingMaskIntoConstraints = false
-                none.translatesAutoresizingMaskIntoConstraints = false
-                wrapper.addSubview(none)
-                NSLayoutConstraint.activate([
-                    none.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 10),
-                    none.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 6),
-                    none.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -6)
-                ])
-                stack.addArrangedSubview(wrapper)
-            } else {
-                // Breathing room between the divider and the first row, and between
-                // rows — the cards each draw a border, so butting them together
-                // reads as one box rather than a list.
-                stack.setCustomSpacing(4, after: divider)
-                for session in group.sessions {
-                    let row = SessionWatcherRowAppKitView(
-                        session: session,
-                        onTap: onSessionClick,
-                        isSummarizing: summarizingSessionIds.contains(session.sessionId),
-                        onSummarize: onSummarize,
-                        isFrontmost: session.sessionId == frontmostSessionId,
-                        summariesEnabled: summariesEnabled
-                    )
-                    row.translatesAutoresizingMaskIntoConstraints = false
-                    stack.addArrangedSubview(row)
-                    row.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 6).isActive = true
-                    row.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -6).isActive = true
-                    stack.setCustomSpacing(4, after: row)
-                }
-            }
-
-            addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.topAnchor.constraint(equalTo: topAnchor),
-                stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-                stack.bottomAnchor.constraint(equalTo: bottomAnchor)
-            ])
-        }
-
-        private func makeSessionHeader() -> NSView {
-            let container = NSView()
-            container.translatesAutoresizingMaskIntoConstraints = false
-
-            // Folder icon — the group is a project (git) directory now.
-            let iconView = NSImageView()
-            iconView.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
-            iconView.symbolConfiguration = .init(pointSize: 13, weight: .regular)
-            iconView.toolTip = group.id  // full project-root path
-            iconView.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(iconView)
-            folderIconView = iconView
-
-            let title = NSTextField(labelWithString: group.projectName)
-            title.lineBreakMode = .byTruncatingTail
-            title.maximumNumberOfLines = 1
-            title.toolTip = group.id
-            title.translatesAutoresizingMaskIntoConstraints = false
-            titleLabel = title
-
-            let suffix = group.sessions.count == 1 ? "" : "s"
-            let count = NSTextField(labelWithString: "\(group.sessions.count) session\(suffix)")
-            count.setContentCompressionResistancePriority(.required, for: .horizontal)
-            count.translatesAutoresizingMaskIntoConstraints = false
-            countLabel = count
-
-            container.addSubview(title)
-            container.addSubview(count)
-
-            NSLayoutConstraint.activate([
-                container.heightAnchor.constraint(greaterThanOrEqualToConstant: 26),
-
-                iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-                iconView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: 16),
-                iconView.heightAnchor.constraint(equalToConstant: 16),
-
-                title.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
-                title.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-
-                count.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
-                count.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                count.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 5)
-            ])
-
-            return container
-        }
-
-        private func makeDivider() -> NSBox {
-            let divider = NSBox()
-            divider.boxType = .separator
-            divider.alphaValue = 0.15
-            divider.translatesAutoresizingMaskIntoConstraints = false
-            return divider
-        }
     }
 
     // MARK: - SessionWatcherSession Row View
@@ -409,7 +264,6 @@ extension SessionWatcher {
         private let isFrontmost: Bool
         private let summariesEnabled: Bool
         private var trackingArea: NSTrackingArea?
-        private var isHovered = false
 
         // Theme-sensitive subviews
         private var projectLabel: NSTextField!
@@ -442,7 +296,6 @@ extension SessionWatcher {
             super.init(frame: .zero)
             accessibilityID("session-panel.row.\(session.sessionId)")
             wantsLayer = true
-            layer?.cornerRadius = 6
             setupViews()
             setupContextMenu()
             themeObserver = ThemePaletteObserver(host: self) { [weak self] palette in self?.applyTheme(palette) }
@@ -451,13 +304,17 @@ extension SessionWatcher {
         @available(*, unavailable)
         public required init?(coder: NSCoder) { fatalError() }
 
+        /// The row's resting background. A list row has no border of its own — the
+        /// hairlines between rows do that job — so the frontmost session is marked by
+        /// an accent wash instead, the one row-level cue left.
+        private func restingBackground(_ palette: SemanticPalette) -> CGColor {
+            isFrontmostSession
+                ? palette.accentColor.withAlphaComponent(0.14).cgColor
+                : NSColor.clear.cgColor
+        }
+
         private func applyTheme(_ palette: SemanticPalette) {
-            // Card background: subtle surface tint (idle). The frontmost session's
-            // row carries the accent on its border — the status dot it used to be
-            // shown by is gone, its job now done by the activity icon.
-            layer?.backgroundColor = palette.surfaceColor.withAlphaComponent(0.5).cgColor
-            layer?.borderColor = (isFrontmostSession ? palette.accentColor : palette.borderColor).cgColor
-            layer?.borderWidth = isFrontmostSession ? 1.0 : 0.5
+            layer?.backgroundColor = restingBackground(palette)
 
             // Header line: the project leads, branch and session name follow dimmer.
             projectLabel.textColor = palette.primaryTextColor
@@ -511,11 +368,12 @@ extension SessionWatcher {
 
         private func setupViews() {
             let hPadding: CGFloat = 8
-            let vPadding: CGFloat = 6
+            let vPadding: CGFloat = 5
 
             // --- App icon: the "go to session" affordance, spanning both text lines.
-            // A button rather than an image view so the icon itself is clickable;
-            // the whole row still is too, via mouseUp.
+            // The icon is the *only* thing in the row that navigates — clicking the
+            // text is not a shortcut for it, so a click meant for the context menu or
+            // for selecting a line can't yank the user into another terminal.
             let iconButton = NSButton()
             iconButton.image = Self.appIcon(forTermProgram: session.termProgram)
             iconButton.imagePosition = .imageOnly
@@ -538,7 +396,11 @@ extension SessionWatcher {
             headerRow.alignment = .centerY
             headerRow.translatesAutoresizingMaskIntoConstraints = false
 
-            let projLabel = NSTextField(labelWithString: session.projectName)
+            // The project *root*'s name, not the cwd's: a session run from inside a
+            // submodule or a linked worktree belongs to the tree above it, and
+            // labelling it "agentictoolkit" or "background-tests" names a directory
+            // the user never thinks of as the project.
+            let projLabel = NSTextField(labelWithString: session.projectGroupName)
             projLabel.lineBreakMode = .byTruncatingTail
             projLabel.maximumNumberOfLines = 1
             projLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
@@ -723,7 +585,7 @@ extension SessionWatcher {
         }
 
         @objc private func showInfoAction() {
-            let title = session.projectName
+            let title = session.projectGroupName
             let body = Self.infoText(for: session)
             // Deferred: running a modal from inside menu tracking leaves the alert's
             // controls unresponsive until tracking unwinds.
@@ -759,32 +621,17 @@ extension SessionWatcher {
             addTrackingArea(trackingArea!)
         }
 
+        // Hover is the only thing the row body reacts to — it says which row a
+        // right-click or a summarize would land on. There is deliberately no
+        // mouseDown/mouseUp handling: pressing a row is not a navigation gesture,
+        // and a press highlight would promise that it is.
         public override func mouseEntered(with event: NSEvent) {
-            isHovered = true
             let palette = resolvedThemeScope.palette
-            layer?.backgroundColor = palette.selectionColor.withAlphaComponent(0.18).cgColor
+            layer?.backgroundColor = palette.selectionColor.withAlphaComponent(0.14).cgColor
         }
 
         public override func mouseExited(with event: NSEvent) {
-            isHovered = false
-            let palette = resolvedThemeScope.palette
-            layer?.backgroundColor = palette.surfaceColor.withAlphaComponent(0.5).cgColor
-        }
-
-        public override func mouseDown(with event: NSEvent) {
-            let palette = resolvedThemeScope.palette
-            layer?.backgroundColor = palette.selectionColor.withAlphaComponent(0.35).cgColor
-        }
-
-        public override func mouseUp(with event: NSEvent) {
-            let palette = resolvedThemeScope.palette
-            layer?.backgroundColor = isHovered
-                ? palette.selectionColor.withAlphaComponent(0.18).cgColor
-                : palette.surfaceColor.withAlphaComponent(0.5).cgColor
-            let location = convert(event.locationInWindow, from: nil)
-            if bounds.contains(location) {
-                onTap?(session)
-            }
+            layer?.backgroundColor = restingBackground(resolvedThemeScope.palette)
         }
 
         // MARK: - Helpers
