@@ -521,6 +521,7 @@
 		772A1FD07A6DB3E5DDC7B107 /* MarkdownSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38E51905C6DBE63117871354 /* MarkdownSchemaTests.swift */; };
 		77B32CD2C73899A4D9F8496B /* GitClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603BF9620F6DE150E8C7443F /* GitClientTests.swift */; };
 		77BE9B7BBBECF84144A0272C /* PaneMinimizeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606C595402F5024CBB9EC090 /* PaneMinimizeGeometry.swift */; };
+		77C1CC1C137034CAA26B2E21 /* VSCodeAPISettlementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40A3B4B19E6B231F1B293A7B /* VSCodeAPISettlementTests.swift */; };
 		77FB00EE51005A668ACCDB2F /* TerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65AD1E929AB88513FB11E84F /* TerminalSession.swift */; };
 		7847162238C29E20CC2564BF /* ActivationTestLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB56D1093442AA257F42961A /* ActivationTestLog.swift */; };
 		78613EBEFD98071BB5D7BB3F /* SnippetFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31D8D0143E7409AB71A1A3B /* SnippetFileTests.swift */; };
@@ -2078,6 +2079,7 @@
 		402324FCBC578003C0A2B9E0 /* ThemeUIReExports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeUIReExports.swift; sourceTree = "<group>"; };
 		403CA7FA2F8D1F70D36E7449 /* GitClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitClient.swift; sourceTree = "<group>"; };
 		40813ACE8034AE596D367787 /* SystemWindowSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowSettingsView.swift; sourceTree = "<group>"; };
+		40A3B4B19E6B231F1B293A7B /* VSCodeAPISettlementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeAPISettlementTests.swift; sourceTree = "<group>"; };
 		40A67BFA90ADB6D1531FB53A /* FileBrowserSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserSplitViewController.swift; sourceTree = "<group>"; };
 		40BDEC16E69F6327E8B370EC /* UserSettings+Projects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserSettings+Projects.swift"; sourceTree = "<group>"; };
 		40F4762A537388E34AFF8F98 /* ThemeChoiceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeChoiceViewModel.swift; sourceTree = "<group>"; };
@@ -4529,6 +4531,7 @@
 				71FC0CFF8A190FE13E818A71 /* ThemeContributionPointTests.swift */,
 				1DB3E22C2C70AC80B898A263 /* UriTests.swift */,
 				36716DA518F69F5E1CD6D80C /* ViewsContributionPointTests.swift */,
+				40A3B4B19E6B231F1B293A7B /* VSCodeAPISettlementTests.swift */,
 				1C54B10AA8156F3E91A1B9C0 /* VSCodeAPISubNamespaceTests.swift */,
 			);
 			path = Extensions;
@@ -7208,6 +7211,7 @@
 				4635DCB7F3A90EBADC0E8A8C /* ThemedSplitViewOrientationTests.swift in Sources */,
 				0AFF0852BB6191797F3F6795 /* TopicListViewControllerTests.swift in Sources */,
 				762E9DF12BA480FB3B8F3E8A /* UriTests.swift in Sources */,
+				77C1CC1C137034CAA26B2E21 /* VSCodeAPISettlementTests.swift in Sources */,
 				6868B2039D5F08AD22E091B4 /* VSCodeAPISubNamespaceTests.swift in Sources */,
 				C0EA5ACD7CA9175BC9747A60 /* ViewsContributionPointTests.swift in Sources */,
 				D9939A0FD1FD9ADD1190A5AA /* WindowDiscoveryMatchingTests.swift in Sources */,
