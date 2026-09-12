@@ -98,7 +98,8 @@ public final class ProjectsCoordinator: AppFeature {
                 commandID: CommandID.openProject,
                 registry: registry,
                 order: 0,
-                key: "o"
+                key: "p",
+                modifiers: [.command, .option]
             ),
             MenuContribution(
                 slot: .file,
