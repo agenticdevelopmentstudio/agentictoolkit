@@ -83,14 +83,24 @@ struct VSCodeAPISubNamespaceTests {
 
     /// A symbol key — the shape JavaScriptCore itself reads while coercing or
     /// iterating a value — answers `undefined` quietly rather than throwing,
-    /// and never reaches `recordMiss`/`recordProbe` either: the Proxy trap's
-    /// `typeof key === 'symbol'` branch returns before either recorder would
-    /// be consulted, the same as it returns before the `NotImplementedError`
-    /// branch. Recorders are supplied here (unlike most tests in this file)
-    /// specifically so "without recording" is an observed empty array, not an
-    /// absence of anything that could have recorded — passing no recorders at
-    /// all would make this assertion pass even if the symbol-key branch had
-    /// been deleted.
+    /// and never reaches `recordMiss` either: the Proxy trap's
+    /// `typeof key === 'symbol'` branch returns before `get`'s `recordMiss`
+    /// call would be reached, the same as it returns before the
+    /// `NotImplementedError` branch. (`recordProbe` is never reachable from
+    /// `get` for any key, symbol or not — it is only ever called from `has`
+    /// and `getOwnPropertyDescriptor` — so `probeRecorder.paths.isEmpty`
+    /// below holds regardless of this branch and is not itself evidence about
+    /// the symbol guard; measured directly under `node`: a `get` of a symbol
+    /// key, a probe key, a real miss, and an implemented member all leave
+    /// `probes` empty.) Recorders are supplied here (unlike most tests in
+    /// this file) so "without recording" is an observed empty array rather
+    /// than an absence of anything that could have recorded — a real
+    /// regression this closes is a *miss* recording being added to the
+    /// symbol path; a deleted symbol branch is instead caught by the
+    /// `#expect(result.toString() == "undefined")` assertion below, since a
+    /// symbol key falling through to the ordinary miss path throws
+    /// `TypeError: Cannot convert a Symbol value to a string` while building
+    /// `path + '.' + key`, not `undefined`.
     @Test
     func aSymbolKeyAnswersUndefinedWithoutRecording() throws {
         let context = try makeContext()
@@ -252,10 +262,17 @@ struct VSCodeAPISubNamespaceTests {
     /// A key that *is* one of the shim's `PROBE_KEYS` — `then`, here — is
     /// never recorded from `has` or `getOwnPropertyDescriptor` either, the
     /// same guard `extension-runtime.js`'s own `recordNegativeProbe` applies
-    /// before its one call site. Without this, `'then' in someNamespace` —
-    /// which every `await`-ing caller's own interop machinery does, not just
-    /// an extension — would write a row for code that never asked about
-    /// `vscode.workspace.fs.then` at all.
+    /// before its one call site. This is not about `await`: measured directly
+    /// under `node`, `await x`, `Promise.resolve(x)`, `Promise.all([x])` and
+    /// `new Promise(r => r(x))` all reach a thenable only through a `get` of
+    /// `then` (`["get:then", "get:then", "get:then", "get:then"]`, not one
+    /// `has`) — promise adoption is already covered by the *other* probe test,
+    /// `aProbeKeyGetNeverRecordsAProbe`, and was already correct before this
+    /// round. What this test guards is an extension doing its own explicit
+    /// feature detection — `'then' in ns`, `'workspaceFolders' in ns` — which
+    /// genuinely does reach `has`. Without this guard, that code would write a
+    /// row for `vscode.workspace.fs.then` even though `then` is interop
+    /// vocabulary, not a real member an extension could ever implement.
     @Test
     func anInOrGetOwnPropertyDescriptorOfAProbeKeyNeverRecordsAProbe() throws {
         let context = try makeContext()
@@ -272,6 +289,117 @@ struct VSCodeAPISubNamespaceTests {
         let descriptorResult = context.evaluateScript("Object.getOwnPropertyDescriptor(ns, 'toString')")
         #expect(descriptorResult == nil || descriptorResult!.isUndefined)
         #expect(recorder.paths.isEmpty)
+    }
+
+    /// A symbol key reaching `has` or `getOwnPropertyDescriptor` — not `get`,
+    /// which already has its own symbol branch and its own test above —
+    /// records nothing, the same guard `recordNegativeProbe` applies to a
+    /// `PROBE_KEYS` name. Kills the mutation that deletes that guard's
+    /// `typeof key === 'symbol'` check: without it, `recordNegativeProbe`
+    /// would try to build `path + '.' + key` with a symbol `key`, which
+    /// throws `TypeError: Cannot convert a Symbol value to a string` —
+    /// measured directly under `node` against the shipped factory with that
+    /// check removed, both `in` and `getOwnPropertyDescriptor` throw instead
+    /// of answering `false`/`undefined`, so this test's assertions that
+    /// neither throws and that nothing is recorded both fail against that
+    /// mutant.
+    @Test
+    func aSymbolKeyThroughInOrGetOwnPropertyDescriptorNeverRecordsAProbe() throws {
+        let context = try makeContext()
+        let recorder = RecordedPaths()
+        let recordProbe: @convention(block) (String) -> Void = { [recorder] path in
+            MainActor.assumeIsolated { recorder.append(path) }
+        }
+        let namespace = try #require(VSCodeAPI.subNamespace(
+            path: "vscode.workspace.fs", members: [:], in: context, recordProbe: recordProbe))
+        context.setObject(namespace, forKeyedSubscript: "ns" as NSString)
+
+        let result = try #require(context.evaluateScript(
+            """
+            (function () {
+                var sym = Symbol('probe');
+                return {
+                    inResult: sym in ns,
+                    gopdResult: Object.getOwnPropertyDescriptor(ns, sym)
+                };
+            })()
+            """
+        ))
+        #expect(result.forProperty("inResult")?.toBool() == false)
+        let gopdResult = result.forProperty("gopdResult")
+        #expect(gopdResult == nil || gopdResult!.isUndefined)
+        #expect(recorder.paths.isEmpty)
+    }
+
+    /// A `recordMiss` block that throws must not replace the
+    /// `NotImplementedError` the extension is entitled to see — the factory
+    /// swallows the throw and raises its own error exactly as if no recorder
+    /// had been supplied. Kills the mutation that deletes the `try`/`catch`
+    /// around the `recordMiss` call: without it, the recorder's own thrown
+    /// error propagates instead, so `error.name` is not `"NotImplementedError"`
+    /// — measured directly under `node` against the shipped factory with that
+    /// `try`/`catch` removed, the thrown error is the recorder's own
+    /// (`Error: recorder blew up`), not a `NotImplementedError`, so this
+    /// test's assertion on `error.name` fails against that mutant.
+    @Test
+    func aThrowingRecordMissDoesNotReplaceTheNotImplementedError() throws {
+        let context = try makeContext()
+        let recordMiss: @convention(block) (String) -> Void = { [context] _ in
+            MainActor.assumeIsolated { VSCodeAPI.raise("recorder blew up", in: context) }
+        }
+        let namespace = try #require(VSCodeAPI.subNamespace(
+            path: "vscode.workspace.fs", members: [:], in: context, recordMiss: recordMiss))
+        context.setObject(namespace, forKeyedSubscript: "ns" as NSString)
+
+        let result = try #require(context.evaluateScript(
+            """
+            (function () {
+                try {
+                    ns.writeFile;
+                    return { threw: false };
+                } catch (error) {
+                    return { threw: true, name: error.name, memberPath: error.memberPath };
+                }
+            })()
+            """
+        ))
+        #expect(result.forProperty("threw")?.toBool() == true)
+        #expect(result.forProperty("name")?.toString() == "NotImplementedError")
+        #expect(result.forProperty("memberPath")?.toString() == "vscode.workspace.fs.writeFile")
+    }
+
+    /// A `recordProbe` block that throws must not turn `has` or
+    /// `getOwnPropertyDescriptor`'s honest `false`/`undefined` answer into an
+    /// uncaught error. Kills the mutation that deletes the `try`/`catch`
+    /// around the `recordProbe` call inside `recordNegativeProbe`: without
+    /// it, the recorder's own thrown error propagates out of `has`/
+    /// `getOwnPropertyDescriptor` instead — measured directly under `node`
+    /// against the shipped factory with that `try`/`catch` removed, both
+    /// `in` and `getOwnPropertyDescriptor` throw instead of answering, so
+    /// this test's assertions that neither throws fail against that mutant.
+    @Test
+    func aThrowingRecordProbeStillAnswersFalseOrUndefined() throws {
+        let context = try makeContext()
+        let recordProbe: @convention(block) (String) -> Void = { [context] _ in
+            MainActor.assumeIsolated { VSCodeAPI.raise("recorder blew up", in: context) }
+        }
+        let namespace = try #require(VSCodeAPI.subNamespace(
+            path: "vscode.workspace.fs", members: [:], in: context, recordProbe: recordProbe))
+        context.setObject(namespace, forKeyedSubscript: "ns" as NSString)
+
+        let result = try #require(context.evaluateScript(
+            """
+            (function () {
+                return {
+                    inResult: 'writeFile' in ns,
+                    gopdResult: Object.getOwnPropertyDescriptor(ns, 'writeFile')
+                };
+            })()
+            """
+        ))
+        #expect(result.forProperty("inResult")?.toBool() == false)
+        let gopdResult = result.forProperty("gopdResult")
+        #expect(gopdResult == nil || gopdResult!.isUndefined)
     }
 }
 

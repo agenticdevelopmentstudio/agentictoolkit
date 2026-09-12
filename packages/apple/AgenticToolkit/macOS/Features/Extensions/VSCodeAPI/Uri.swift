@@ -278,13 +278,16 @@ extension VSCodeAPI {
     /// `uriClassSource` does both before caching either.** `Uri.parse`,
     /// `Uri.file`, `Uri.joinPath` and every prototype accessor and method are
     /// therefore non-writable and non-configurable from the moment extension
-    /// code can first see them: `vscode.Uri.parse = function () { … }`, in
-    /// sloppy-mode extension code, *evaluates to* `'X'` or whatever was
-    /// assigned — a sloppy-mode assignment to a non-writable property answers
-    /// the assigned value, not `undefined` — while `Uri.parse` itself stays
-    /// the original function; the same assignment in strict-mode extension
-    /// code throws `TypeError` instead. In neither case is the property
-    /// touched. What freezing does **not** do is stop code from reshaping the
+    /// code can first see them: `vscode.Uri.parse = function replacement() {
+    /// … }`, in sloppy-mode extension code, *evaluates to* that replacement
+    /// function — measured directly under `node`, a sloppy-mode assignment
+    /// to a non-writable data property evaluates to the assigned value
+    /// itself, whatever type it is (a function here; `'X'` if the assigned
+    /// value were the string `'X'`), never to `undefined` — while
+    /// `Uri.parse` itself stays the original function, confirmed the same
+    /// way. The same assignment in strict-mode extension code throws
+    /// `TypeError` instead. In neither case is the property touched. What
+    /// freezing does **not** do is stop code from reshaping the
     /// class before this function ever installs it, or from replacing what
     /// `uriClassGlobalName` is bound to — the binding itself is
     /// `writable: false, configurable: false`, so there is nothing left to
@@ -384,20 +387,30 @@ extension VSCodeAPI {
     /// `path`.
     ///
     /// Calling `Uri.parse` directly here (not through the `call` guard
-    /// `url(from:in:)` uses) is safe **because `uriClassSource` freezes both
-    /// `Uri` and `Uri.prototype` before caching either**, not because this
-    /// call runs with no extension code on its stack — `ExtensionHost.installRuntime`
-    /// hands this exact object out as `vscode.Uri` (`ExtensionHost.swift:950`),
-    /// so extension code can reach it too. Freezing is what makes the
-    /// property read here provably the implementation this file wrote: once
-    /// `Uri` is frozen, `Uri.parse` cannot have been reassigned, by
-    /// extension code or anything else, between installation and this call.
-    /// What this still does not guard against is that implementation
+    /// `url(from:in:)` uses) is safe **only when `installUriClass(in:)`
+    /// returned the genuinely frozen `Uri` that `uriClassSource` builds** —
+    /// see that function's own doc for the residual this leans on: a context
+    /// where the eager install in `ExtensionHost.installRuntime` did not run
+    /// first can hand this function an extension-supplied `Uri` instead, with
+    /// no way to tell the difference, and freezing guarantees nothing about
+    /// an object that was never the frozen one to begin with. For the
+    /// genuinely frozen case, freezing is what makes the property read here
+    /// provably the implementation this file wrote: once `Uri` is frozen,
+    /// `Uri.parse` cannot have been reassigned, by extension code or anything
+    /// else, between installation and this call — not because this call runs
+    /// with no extension code on its stack, since `ExtensionHost.installRuntime`
+    /// hands this exact object out as `vscode.Uri` (`ExtensionHost.swift:950`)
+    /// and extension code can reach it too. What this still does not guard
+    /// against, even in the genuinely-frozen case, is that implementation
     /// *throwing on its own* — `strict` is never passed here, so the one
-    /// path that can throw is never taken, and nothing else in `Uri.parse`
-    /// raises given a `URL`'s own `absoluteString` — but a future caller that
-    /// does need `strict` here would need the same `call(_:thisArg:arguments:)`
-    /// guard `url(from:in:)` uses, not this direct invocation.
+    /// path that can throw is never taken, and nothing else in the genuinely
+    /// frozen `Uri.parse` raises given a `URL`'s own `absoluteString`. An
+    /// extension-supplied `Uri` from the lazy-adoption window has no such
+    /// obligation and can throw on anything, landing directly in
+    /// `ExtensionHost.pendingException` with no guard — a future caller that
+    /// wants a guard against that would need the same
+    /// `call(_:thisArg:arguments:)` guard `url(from:in:)` uses, not this
+    /// direct invocation.
     public static func uriValue(for url: URL, in context: JSContext) -> JSValue? {
         guard let uriClass = installUriClass(in: context),
               let parseFunction = uriClass.forProperty("parse"), parseFunction.isObject else {
