@@ -433,12 +433,21 @@ public final class ComposableTabsPaneBackgroundView: NSView, Themeable {
         let isActive = highlights
             && isWindowFocused
             && ComposableTabsActivePane.shared.activeNodeID(in: window) == nodeID
-        layer?.borderWidth = isActive ? 2 : 0
-        // The accent, and the only line in the window drawn in it: this
-        // rectangle is the answer to "which pane am I in", and the workspace
-        // around it is deliberately drawn in the panes' own hairline tone so
-        // that this is the one thing standing out from the frame rather than
-        // one highlight among several.
-        layer?.borderColor = isActive ? NSColor(palette.projectActivePaneOutline).cgColor : nil
+        // **Every** pane is outlined, and only the colour says which one is
+        // active. A pane is a window-shaped thing, and a window has edges
+        // whether or not it is the front one; outlining only the active pane
+        // left every other pane as an unbounded field of `windowBackground`,
+        // so two panes side by side read as one pane with a seam down it —
+        // which is exactly what a file tree beside an editor must not look
+        // like. The width is constant so that clicking between panes recolours
+        // a line instead of moving one.
+        layer?.borderWidth = 2
+        // The accent for the active pane — the one line in the window drawn in
+        // it, and the answer to "which pane am I in". Every other pane takes
+        // the hairline tone the rest of the frame is drawn in
+        // (`projectPaneOutline`), so the accent still stands alone rather than
+        // being one highlight among several.
+        layer?.borderColor = NSColor(
+            isActive ? palette.projectActivePaneOutline : palette.projectPaneOutline).cgColor
     }
 }
