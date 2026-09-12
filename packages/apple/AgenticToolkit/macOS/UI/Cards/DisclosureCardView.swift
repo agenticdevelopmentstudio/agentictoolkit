@@ -55,20 +55,24 @@ import AppKit
 /// the surface's border — a `CALayer` draws its border above its sublayers —
 /// which is what keeps the card's outline unbroken across the top.
 ///
-/// `titleIcon` puts one mark in front of the name — an SF Symbol (a person for
-/// an account, say) or an image of the host's own (a product's logo, which no
-/// symbol stands in for, because the thing it names is recognised by its
-/// colours). It is decoration on a name that is already spoken, so it is left
-/// out of the accessibility tree: a card whose address is read out does not also
-/// need to announce that it is a card about a person.
+/// `titleAccessory` hangs one view of the host's off the masthead's LEFT end,
+/// in front of the name — a product's logo, say, or whatever mark tells one
+/// card in a stack from the rest. It arrives as a view rather than as a symbol
+/// name because the mark a host wants there is so often also a control: a logo
+/// that opens the menu for the account it names is one thing to build and one
+/// thing to aim at, where an image the card owned plus a button beside it is
+/// two of each.
 ///
-/// `titleIconIsVisible` is how a *stack* of such cards marks one of them — the
-/// account that is logged in, say — without the others' names stepping left to
-/// fill the gap. The unmarked card still builds the symbol and still holds its
-/// width; it simply does not paint it. Passing `titleIcon: nil` instead would
-/// take the column away with the symbol, and a list of addresses that start in
-/// two different places is harder to read than one with a blank in front of
-/// most of them.
+/// The card places it and measures it and paints nothing of it — no tint, no
+/// configuration, not even its place in the accessibility tree. A host that
+/// passes a view has already decided all of that, and a logo recoloured to
+/// match the text is no longer the logo.
+///
+/// It reserves nothing for a card that passes none, which an earlier
+/// `titleIconIsVisible` did: that existed so a stack could mark ONE card
+/// without the others' names stepping left to fill the gap. A host that marks
+/// every card — one mark, different colours — needs no such column, and a host
+/// that marks only some can hand the unmarked ones a spacer of its own.
 ///
 /// `titlebarAccessory` hangs one control of the host's off the masthead's right
 /// end, immediately in front of the disclosure triangle — a menu for the thing
@@ -182,23 +186,9 @@ public final class DisclosureCardView: NSView, Themeable {
         }
     }
 
-    /// The mark drawn in front of a card's name.
-    ///
-    /// Two cases because the two are *drawn* differently, not because a host
-    /// might prefer one: a symbol is configured at the title's point size and
-    /// takes the title's colour, while an image is pinned square at that size
-    /// and keeps the colours it shipped with — which is the whole reason a host
-    /// reaches for one.
-    public enum TitleIcon {
-        case symbol(String)
-        case image(NSImage)
-    }
-
     private let titleField = NSTextField(labelWithString: "")
-    /// The one symbol in front of the name, when the host gave one.
-    private let titleIconView = NSImageView()
-    /// Icon and name as one piece, so the pair yields together when the line is
-    /// too narrow for them.
+    /// The host's mark and the name as one piece, so the pair yields together
+    /// when the line is too narrow for them.
     private let titleLine = NSStackView()
     /// The strip the title and its toggle are drawn on, and the hairline that
     /// rules it off from the body. Subviews of `surface`, so the card's rounded
@@ -229,11 +219,6 @@ public final class DisclosureCardView: NSView, Themeable {
 
     /// Accent (an identifier, an address) vs. primary text (a plain heading).
     private let titleIsAccent: Bool
-    /// The mark drawn in front of the name, if any.
-    private let titleIcon: TitleIcon?
-    /// Whether the mark is painted. False still reserves its width — see the
-    /// type's own documentation for why that is not the same as no mark.
-    private let titleIconIsVisible: Bool
     private let summary: [SummaryPart]
     private let status: StatusSymbol?
     private let scaledSize: CGFloat
@@ -283,8 +268,7 @@ public final class DisclosureCardView: NSView, Themeable {
     public init(
         title: String,
         titleIsAccent: Bool,
-        titleIcon: TitleIcon? = nil,
-        titleIconIsVisible: Bool = true,
+        titleAccessory: NSView? = nil,
         titlebarAccessory: NSView? = nil,
         subtitle: String? = nil,
         summary: [SummaryPart] = [],
@@ -295,8 +279,6 @@ public final class DisclosureCardView: NSView, Themeable {
         onToggle: ((Bool) -> Void)? = nil
     ) {
         self.titleIsAccent = titleIsAccent
-        self.titleIcon = titleIcon
-        self.titleIconIsVisible = titleIconIsVisible
         self.summary = summary
         self.status = status
         self.scaledSize = scaledSize
@@ -338,7 +320,7 @@ public final class DisclosureCardView: NSView, Themeable {
         configureSummary(isCollapsed: isCollapsed)
         configureStatusBadge()
         configureDisclosure(isCollapsed: isCollapsed)
-        configureTitleLine()
+        configureTitleLine(accessory: titleAccessory)
         configureTrailingLine(accessory: titlebarAccessory)
         configureTitlebar()
 
@@ -460,54 +442,28 @@ public final class DisclosureCardView: NSView, Themeable {
         summaryField.isHidden = summary.isEmpty || !isCollapsed
     }
 
-    /// The symbol and the name as one piece.
+    /// The host's mark and the name as one piece.
     ///
-    /// A stack rather than a third end on the masthead line: the icon and the
+    /// A stack rather than a third end on the masthead line: the mark and the
     /// address are one thing that yields together, and what a masthead pins to
     /// its ends is the name and the toggle — not the name's own punctuation.
     /// The stack takes the field's own priorities, so the pair goes short
-    /// exactly where the address alone used to, and the symbol keeps its width
+    /// exactly where the address alone used to, and the mark keeps its width
     /// while the letters give theirs up.
-    private func configureTitleLine() {
-        titleIconView.translatesAutoresizingMaskIntoConstraints = false
-        titleIconView.imageScaling = .scaleProportionallyDown
-        titleIconView.isHidden = titleIcon == nil
-        // Present and unpainted, not absent: the image is what gives the view
-        // its width, so hiding it would close the column the unmarked names are
-        // lining up against.
-        titleIconView.alphaValue = titleIconIsVisible ? 1 : 0
-        switch titleIcon {
-        case .symbol(let name):
-            titleIconView.image = NSImage(
-                systemSymbolName: name, accessibilityDescription: nil
-            )
-            titleIconView.symbolConfiguration = NSImage.SymbolConfiguration(
-                pointSize: scaledSize, weight: .regular
-            )
-        case .image(let image):
-            // Square at the title's own point size, and scaled to fill it: an
-            // asset arrives at whatever dimensions it happened to be drawn at,
-            // and the column every other card reserves is one width.
-            titleIconView.imageScaling = .scaleProportionallyUpOrDown
-            titleIconView.image = image
-            NSLayoutConstraint.activate([
-                titleIconView.widthAnchor.constraint(equalToConstant: scaledSize),
-                titleIconView.heightAnchor.constraint(equalToConstant: scaledSize)
-            ])
-        case nil:
-            break
-        }
-        // Decoration on a name that is already spoken: a card whose address is
-        // read out does not also need to announce that it is about a person.
-        titleIconView.setAccessibilityElement(false)
-        titleIconView.setContentCompressionResistancePriority(.required, for: .horizontal)
-        titleIconView.setContentHuggingPriority(.required, for: .horizontal)
-
+    ///
+    /// Nothing is done to the accessory but place it and refuse to let it
+    /// shrink — see the type's own documentation for why the card has no
+    /// opinion about how the host's mark looks.
+    private func configureTitleLine(accessory: NSView?) {
         titleLine.orientation = .horizontal
         titleLine.alignment = .centerY
         titleLine.spacing = Self.iconGap
         titleLine.translatesAutoresizingMaskIntoConstraints = false
-        titleLine.addArrangedSubview(titleIconView)
+        if let accessory {
+            accessory.translatesAutoresizingMaskIntoConstraints = false
+            accessory.setContentCompressionResistancePriority(.required, for: .horizontal)
+            titleLine.addArrangedSubview(accessory)
+        }
         titleLine.addArrangedSubview(titleField)
         titleLine.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLine.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -690,15 +646,6 @@ public final class DisclosureCardView: NSView, Themeable {
         titleStyle.weight = .semibold
         titleField.font = titleStyle.nsFont(scaledSize: scaledSize)
         titleField.textColor = titleIsAccent ? palette.accentColor : palette.primaryTextColor
-        // A symbol is part of the name, so it takes the name's colour rather
-        // than a tier of its own. An image is not: a logo recoloured to match
-        // the text is no longer the logo, which is what the host passed one
-        // instead of a symbol name to get.
-        if case .image = titleIcon {
-            titleIconView.contentTintColor = nil
-        } else {
-            titleIconView.contentTintColor = titleField.textColor
-        }
 
         subtitleField.font = palette.theme.typography.style(.caption)
             .nsFont(scaledSize: scaledSize * 0.85)
@@ -710,7 +657,7 @@ public final class DisclosureCardView: NSView, Themeable {
 
         let line = Self.summaryString(summary, palette: palette, scaledSize: scaledSize)
         summaryField.attributedStringValue = line
-        // The title is measured at its full length — symbol and all, which is
+        // The title is measured at its full length — the mark and all, which is
         // why the LINE is measured rather than the field — not at whatever the
         // bar currently affords it, so the address is truncated only by a window
         // that cannot be any wider. Against the summary, not added to it: the

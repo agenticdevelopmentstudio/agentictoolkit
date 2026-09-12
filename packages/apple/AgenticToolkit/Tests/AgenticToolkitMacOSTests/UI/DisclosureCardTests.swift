@@ -171,14 +171,12 @@ final class DisclosureCardTests: XCTestCase {
     private func bare(
         isCollapsed: Bool,
         summary: [DisclosureCardView.SummaryPart] = [],
-        titleIcon: DisclosureCardView.TitleIcon? = nil,
-        titleIconIsVisible: Bool = true
+        titleAccessory: NSView? = nil
     ) -> DisclosureCardView {
         let card = DisclosureCardView(
             title: "mike@example.com",
             titleIsAccent: true,
-            titleIcon: titleIcon,
-            titleIconIsVisible: titleIconIsVisible,
+            titleAccessory: titleAccessory,
             summary: summary,
             status: .init(
                 symbolName: "octagon.fill", colorName: "red", accessibilityLabel: "Spent"
@@ -237,53 +235,61 @@ final class DisclosureCardTests: XCTestCase {
         XCTAssertLessThan(bar.frame.height, card.frame.height - 1)
     }
 
-    func testTheSymbolInFrontOfTheNameMovesNeitherTheBadgeNorTheToggle() {
-        // The icon is nested inside the masthead's leading end, so the badge is
+    /// A mark of the host's own — a view the card is handed and does not own.
+    private func mark() -> NSView {
+        let view = NSImageView()
+        view.image = NSImage(systemSymbolName: "person.crop.circle",
+                             accessibilityDescription: nil)
+        view.setAccessibilityElement(false)
+        return view
+    }
+
+    func testTheHostsMarkInFrontOfTheNameMovesNeitherTheBadgeNorTheToggle() {
+        // The mark is nested inside the masthead's leading end, so the badge is
         // still the card's own subview and the toggle is still pinned to the
-        // trailing edge. An icon that shifted either would have moved the one
-        // mark a stack of cards is scanned by.
+        // trailing edge. A mark that shifted either would have moved the one
+        // thing a stack of cards is scanned by.
         let plain = bare(isCollapsed: false)
-        let iconed = bare(isCollapsed: false, titleIcon: .symbol("person.crop.circle"))
-        guard let plainBadge = badge(of: plain), let iconedBadge = badge(of: iconed),
-              let plainToggle = toggle(of: plain), let iconedToggle = toggle(of: iconed) else {
+        let marked = bare(isCollapsed: false, titleAccessory: mark())
+        guard let plainBadge = badge(of: plain), let markedBadge = badge(of: marked),
+              let plainToggle = toggle(of: plain), let markedToggle = toggle(of: marked) else {
             return XCTFail("both cards draw a standing and a toggle")
         }
 
-        XCTAssertEqual(iconedBadge.frame.origin.x, plainBadge.frame.origin.x, accuracy: 0.5)
-        XCTAssertEqual(iconedBadge.frame.origin.y, plainBadge.frame.origin.y, accuracy: 0.5)
-        XCTAssertEqual(iconed.convert(iconedToggle.bounds, from: iconedToggle).maxX,
+        XCTAssertEqual(markedBadge.frame.origin.x, plainBadge.frame.origin.x, accuracy: 0.5)
+        XCTAssertEqual(markedBadge.frame.origin.y, plainBadge.frame.origin.y, accuracy: 0.5)
+        XCTAssertEqual(marked.convert(markedToggle.bounds, from: markedToggle).maxX,
                        plain.convert(plainToggle.bounds, from: plainToggle).maxX,
                        accuracy: 0.5)
     }
 
-    func testTheSymbolStandsInFrontOfTheNameAndIsNotSpokenOverIt() {
-        let card = bare(isCollapsed: false, titleIcon: .symbol("person.crop.circle"))
+    func testTheHostsMarkStandsInFrontOfTheNameExactlyAsHanded() {
+        let given = mark()
+        let card = bare(isCollapsed: false, titleAccessory: given)
         guard let name = field("mike@example.com", in: card), let line = name.superview else {
             return XCTFail("a card sets its name on a line of its own")
         }
-        guard let symbol = line.subviews.compactMap({ $0 as? NSImageView }).first else {
-            return XCTFail("no symbol on the title line")
-        }
 
-        XCTAssertFalse(symbol.isHidden, "a card given an icon draws it")
-        XCTAssertLessThanOrEqual(symbol.frame.maxX, name.frame.minX + 0.5)
-        // Decoration on a name that is already spoken: a card whose address is
-        // read out does not also need to announce that it is about a person.
-        XCTAssertFalse(symbol.isAccessibilityElement())
+        XCTAssertTrue(line.subviews.contains(given), "the mark goes on the title's own line")
+        XCTAssertFalse(given.isHidden, "a card given a mark draws it")
+        XCTAssertLessThanOrEqual(given.frame.maxX, name.frame.minX + 0.5)
+        // The card paints nothing of the host's mark — not its colours, and not
+        // its place in the accessibility tree. A host that hands over a view
+        // has already decided both.
+        XCTAssertFalse(given.isAccessibilityElement())
     }
 
-    func testACardWithNoSymbolLeavesNoGapWhereOneWouldHaveStood() {
-        // Hidden, not merely imageless: an arranged subview of zero width still
-        // costs the stack its spacing, so every card without an icon would be
-        // indented a few points further than one with — off the icon's own
+    func testACardWithNoMarkLeavesNoGapWhereOneWouldHaveStood() {
+        // Absent, not standing there empty: an arranged subview of zero width
+        // still costs the stack its spacing, so a card with no mark would be
+        // indented a few points further than one with — off the mark's own
         // leading edge, which is the alignment a stack of cards is read by.
         let plain = bare(isCollapsed: false)
         guard let name = field("mike@example.com", in: plain), let line = name.superview else {
             return XCTFail("a card sets its name on a line of its own")
         }
-        let symbol = line.subviews.compactMap { $0 as? NSImageView }.first
 
-        XCTAssertEqual(symbol?.isHidden, true, "the icon view stands hidden, not absent")
+        XCTAssertEqual(line.subviews.count, 1, "the name is the whole of an unmarked title line")
         // Measured on the label's ALIGNMENT rect, not its frame: a text field's
         // frame overhangs its own text by a couple of points on each side, and
         // a stack lays out the alignment rects, so it is the alignment rect
@@ -313,32 +319,6 @@ final class DisclosureCardTests: XCTestCase {
 
         XCTAssertLessThan(titleX, rowX, "the name reaches nearer the border than the rows do")
         XCTAssertGreaterThan(titleX, 0, "and never touches it")
-    }
-
-    func testAnUnmarkedCardKeepsTheSymbolsColumnSoTheNamesStayInLine() {
-        // A stack of account cards marks the one that is logged in. The others
-        // must not step left to fill the gap, or the addresses read down the
-        // window as a ragged edge — so an unmarked card still builds the symbol
-        // and still holds its width, and only declines to paint it.
-        let marked = bare(isCollapsed: false, titleIcon: .symbol("person.crop.circle"))
-        let unmarked = bare(
-            isCollapsed: false, titleIcon: .symbol("person.crop.circle"), titleIconIsVisible: false)
-
-        guard let markedName = field("mike@example.com", in: marked),
-              let unmarkedName = field("mike@example.com", in: unmarked),
-              let unmarkedLine = unmarkedName.superview,
-              let symbol = unmarkedLine.subviews.compactMap({ $0 as? NSImageView }).first
-        else {
-            return XCTFail("both cards set a name on a line of their own, in front of a symbol")
-        }
-
-        // Unpainted, not absent: `isHidden` would take the width away with the
-        // picture, which is the ragged edge this is here to prevent.
-        XCTAssertFalse(symbol.isHidden, "the icon view stands, it is merely not drawn")
-        XCTAssertEqual(symbol.alphaValue, 0, accuracy: 0.001)
-        XCTAssertGreaterThan(symbol.frame.width, 0, "an unpainted symbol still occupies its column")
-        XCTAssertEqual(unmarkedName.frame.minX, markedName.frame.minX, accuracy: 0.5,
-                       "marked or not, the name starts in the same place")
     }
 
     // MARK: - The standing is a corner badge
