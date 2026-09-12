@@ -12,16 +12,19 @@ import JavaScriptCore
 ///
 /// Mirrors `extension-runtime.js`'s own (frozen) `makeStubNamespace` contract,
 /// including recording: `subNamespace(path:members:in:)` takes two optional
-/// trailing `recordMiss`/`recordProbe` blocks, invoked by the underlying
-/// Proxy trap at exactly the point it would otherwise only throw or only
-/// answer a probe value — see `subNamespaceFactorySource`'s own doc comment
-/// in `VSCodeAPI.swift` for where those two blocks come from on a live
-/// `ExtensionHost`. Most tests below call `makeNamespace(members:in:)`, which
-/// passes neither, and that remains a fully valid, unrecorded namespace —
-/// existing call sites are not required to opt in.
-/// `aMissIsRecordedWhenARecorderIsSupplied` and
-/// `aProbeIsRecordedWhenARecorderIsSupplied` below are what exercise the
-/// recording half directly.
+/// trailing `recordMiss`/`recordProbe` blocks. `recordMiss` is invoked from
+/// the throwing branch of `get`; `recordProbe` is invoked from `has` and
+/// `getOwnPropertyDescriptor` for a key that is neither implemented nor one of
+/// the shim's own `PROBE_KEYS` — never from a `get` of a `PROBE_KEYS` name,
+/// which answers its quiet value unrecorded — see `subNamespaceFactorySource`'s
+/// own doc comment in `VSCodeAPI.swift` for where those two blocks come from
+/// on a live `ExtensionHost`, and for why the two recordings sit on those
+/// particular traps. Most tests below call `makeNamespace(members:in:)`,
+/// which passes neither, and that remains a fully valid, unrecorded namespace
+/// — existing call sites are not required to opt in.
+/// `aMissIsRecordedWhenARecorderIsSupplied`, `aProbeKeyGetNeverRecordsAProbe`
+/// and `anInOrGetOwnPropertyDescriptorMissOfANonProbeKeyRecordsAProbe` below
+/// are what exercise the recording half directly.
 ///
 /// A bare `JSContext`, for the same reason `UriTests` uses one:
 /// `subNamespace(path:members:in:)` takes a `JSContext` and nothing else.
@@ -83,16 +86,31 @@ struct VSCodeAPISubNamespaceTests {
     /// and never reaches `recordMiss`/`recordProbe` either: the Proxy trap's
     /// `typeof key === 'symbol'` branch returns before either recorder would
     /// be consulted, the same as it returns before the `NotImplementedError`
-    /// branch. This factory call passes no recorders at all, so there is
-    /// nothing to observe not being called — `aMissIsRecordedWhenARecorderIsSupplied`
-    /// and `aProbeIsRecordedWhenARecorderIsSupplied` are the tests that
-    /// exercise the recorders directly.
+    /// branch. Recorders are supplied here (unlike most tests in this file)
+    /// specifically so "without recording" is an observed empty array, not an
+    /// absence of anything that could have recorded — passing no recorders at
+    /// all would make this assertion pass even if the symbol-key branch had
+    /// been deleted.
     @Test
     func aSymbolKeyAnswersUndefinedWithoutRecording() throws {
         let context = try makeContext()
-        _ = try makeNamespace(members: [:], in: context)
+        let missRecorder = RecordedPaths()
+        let probeRecorder = RecordedPaths()
+        let recordMiss: @convention(block) (String) -> Void = { [missRecorder] path in
+            MainActor.assumeIsolated { missRecorder.append(path) }
+        }
+        let recordProbe: @convention(block) (String) -> Void = { [probeRecorder] path in
+            MainActor.assumeIsolated { probeRecorder.append(path) }
+        }
+        let namespace = try #require(VSCodeAPI.subNamespace(
+            path: "vscode.workspace.fs", members: [:], in: context,
+            recordMiss: recordMiss, recordProbe: recordProbe))
+        context.setObject(namespace, forKeyedSubscript: "ns" as NSString)
+
         let result = try #require(context.evaluateScript("typeof ns[Symbol.iterator]"))
         #expect(result.toString() == "undefined")
+        #expect(missRecorder.paths.isEmpty)
+        #expect(probeRecorder.paths.isEmpty)
     }
 
     /// A key in the shim's `PROBE_KEYS` — `then`, here — answers a quiet
@@ -177,11 +195,15 @@ struct VSCodeAPISubNamespaceTests {
         #expect(recorder.paths == ["vscode.workspace.fs.writeFile"])
     }
 
-    /// `recordProbe`, when supplied, is called with `path + '.' + key` for
-    /// every probe key a caller reaches — feature-detection like `then` or
-    /// `toString` — and the quiet probe value is still returned, unaffected.
+    /// A `get` of a `PROBE_KEYS` name never calls `recordProbe`, no matter how
+    /// it is reached — `typeof ns.then` and `String(ns)` (which reads
+    /// `toString`) are both interop machinery touching the namespace, not an
+    /// extension stating which member it wanted, and recording them is
+    /// exactly the noise `extension-runtime.js`'s own `makeStubNamespace`
+    /// never produces from `get`. The quiet probe *value* is still returned,
+    /// unaffected — only the recording is suppressed.
     @Test
-    func aProbeIsRecordedWhenARecorderIsSupplied() throws {
+    func aProbeKeyGetNeverRecordsAProbe() throws {
         let context = try makeContext()
         let recorder = RecordedPaths()
         let recordProbe: @convention(block) (String) -> Void = { [recorder] path in
@@ -195,7 +217,61 @@ struct VSCodeAPISubNamespaceTests {
         #expect(thenResult.toString() == "undefined")
         let stringResult = try #require(context.evaluateScript("String(ns)"))
         #expect(stringResult.toString() == "[VSCodeNamespace vscode.workspace.fs]")
-        #expect(recorder.paths == ["vscode.workspace.fs.then", "vscode.workspace.fs.toString"])
+        #expect(recorder.paths.isEmpty)
+    }
+
+    /// `'someMember' in ns` and `Object.getOwnPropertyDescriptor(ns, 'someMember')`
+    /// are the other half of the split: a key that is neither implemented nor
+    /// one of the shim's `PROBE_KEYS` calls `recordProbe` with
+    /// `path + '.' + key` from `has` and from `getOwnPropertyDescriptor` —
+    /// mirroring `extension-runtime.js`'s own `recordNegativeProbe`, which is
+    /// called only from those two traps — while still answering `false` /
+    /// `undefined` exactly as it always did. This is the signal task 5.8's
+    /// report is actually built for: an extension that looked for a member by
+    /// name and quietly took its fallback path.
+    @Test
+    func anInOrGetOwnPropertyDescriptorMissOfANonProbeKeyRecordsAProbe() throws {
+        let context = try makeContext()
+        let recorder = RecordedPaths()
+        let recordProbe: @convention(block) (String) -> Void = { [recorder] path in
+            MainActor.assumeIsolated { recorder.append(path) }
+        }
+        let namespace = try #require(VSCodeAPI.subNamespace(
+            path: "vscode.workspace.fs", members: [:], in: context, recordProbe: recordProbe))
+        context.setObject(namespace, forKeyedSubscript: "ns" as NSString)
+
+        let inResult = try #require(context.evaluateScript("'writeFile' in ns"))
+        #expect(inResult.toBool() == false)
+        let descriptorResult = context.evaluateScript("Object.getOwnPropertyDescriptor(ns, 'writeFile')")
+        #expect(descriptorResult == nil || descriptorResult!.isUndefined)
+        #expect(recorder.paths == [
+            "vscode.workspace.fs.writeFile", "vscode.workspace.fs.writeFile"
+        ])
+    }
+
+    /// A key that *is* one of the shim's `PROBE_KEYS` — `then`, here — is
+    /// never recorded from `has` or `getOwnPropertyDescriptor` either, the
+    /// same guard `extension-runtime.js`'s own `recordNegativeProbe` applies
+    /// before its one call site. Without this, `'then' in someNamespace` —
+    /// which every `await`-ing caller's own interop machinery does, not just
+    /// an extension — would write a row for code that never asked about
+    /// `vscode.workspace.fs.then` at all.
+    @Test
+    func anInOrGetOwnPropertyDescriptorOfAProbeKeyNeverRecordsAProbe() throws {
+        let context = try makeContext()
+        let recorder = RecordedPaths()
+        let recordProbe: @convention(block) (String) -> Void = { [recorder] path in
+            MainActor.assumeIsolated { recorder.append(path) }
+        }
+        let namespace = try #require(VSCodeAPI.subNamespace(
+            path: "vscode.workspace.fs", members: [:], in: context, recordProbe: recordProbe))
+        context.setObject(namespace, forKeyedSubscript: "ns" as NSString)
+
+        let inResult = try #require(context.evaluateScript("'then' in ns"))
+        #expect(inResult.toBool() == false)
+        let descriptorResult = context.evaluateScript("Object.getOwnPropertyDescriptor(ns, 'toString')")
+        #expect(descriptorResult == nil || descriptorResult!.isUndefined)
+        #expect(recorder.paths.isEmpty)
     }
 }
 

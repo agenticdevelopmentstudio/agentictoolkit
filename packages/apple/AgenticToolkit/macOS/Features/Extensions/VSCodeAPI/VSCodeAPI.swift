@@ -505,9 +505,11 @@ public enum VSCodeAPI {
     /// adopts whatever object it finds under the trampoline's global name. For
     /// a context `ExtensionHost.installRuntime` successfully installs the real
     /// trampoline into before any extension code runs, that adoption risk is
-    /// closed — see `sharedHelper(in:)` for why a same-named top-level
-    /// assignment made afterwards is a silent no-op rather than a
-    /// replacement. It remains open only for a context where that eager
+    /// closed — see `sharedHelper(in:)` for what a same-named top-level
+    /// assignment made afterwards does instead of replacing it: a silent
+    /// no-op in sloppy-mode extension code, a `TypeError` in strict-mode
+    /// extension code, and in neither case a replacement. It remains open
+    /// only for a context where that eager
     /// install did not happen or failed: there, `sharedHelper(in:)` is first
     /// reached the old way, lazily, from the first dispatch — after the
     /// extension's own top-level code has already run — and an extension that
@@ -804,27 +806,36 @@ public enum VSCodeAPI {
     /// namespaces contain — `vscode.workspace.fs`, for one, which task 5.4c
     /// needs and this task does not build.
     ///
-    /// **Also does the recording `extension-runtime.js`'s version does.** The
-    /// real `makeStubNamespace` calls `host.recordNotImplemented` and
-    /// `host.recordNegativeProbe` on every miss and every quiet probe, so
-    /// task 5.8's report can say what an extension reached for; this factory
-    /// takes the same two calls as optional `@convention(block)` parameters
-    /// (`recordMiss`, `recordProbe`) and invokes whichever is present at
-    /// exactly the point the Proxy trap would otherwise only throw or only
-    /// answer a probe value. `VSCodeAPI` itself is still a stateless,
-    /// caseless enum with no `ExtensionHost` handle and no
-    /// `NotImplementedLedger` reference of its own — that has not changed —
-    /// but the store those two calls need to reach is reachable without one:
-    /// `__extensionRuntime` is retained as `ExtensionHost.runtime` past the
-    /// `__host` deletion at the end of `ExtensionHost.installRuntime` (that
-    /// deletion only removes the *JavaScript-side* global an extension could
-    /// reach; the Swift-side property survives it), so a caller on the Swift
-    /// side that already holds a live `ExtensionHost` — the only kind of
-    /// caller `subNamespace(path:members:in:)` ever has — can build the two
-    /// blocks from its own `recordNotImplemented`/`recordNegativeProbe`
-    /// methods and pass them through, the same shape
-    /// `ExtensionHost.defineVSCodeMember`'s `record`/`probe` blocks already
-    /// use for the top-level namespaces. Passing neither (the default) is
+    /// **Also does the recording `extension-runtime.js`'s version does**, once
+    /// the split described below is accounted for. The real `makeStubNamespace`
+    /// calls its own module-level `host.recordNotImplemented` and
+    /// `recordNegativeProbe` functions — closures over `host`, not methods
+    /// `ExtensionHost` exposes — so task 5.8's report can say what an
+    /// extension reached for; this factory takes the same two calls as
+    /// optional `@convention(block)` parameters (`recordMiss`, `recordProbe`)
+    /// and invokes whichever is present at exactly the points the Proxy traps
+    /// would otherwise only throw, only answer a probe value, or only answer
+    /// `false`/`undefined`. `VSCodeAPI` itself is still a stateless, caseless
+    /// enum with no `ExtensionHost` handle and no `NotImplementedLedger`
+    /// reference of its own — that has not changed — but the store those two
+    /// calls need to reach does not require one either:
+    /// `ExtensionHost.notImplementedLedger` (`public let`) is the one thing an
+    /// adaptor holding a live host can actually reach. **Neither
+    /// `ExtensionHost.recordNotImplemented`/`recordNegativeProbe` (there are no
+    /// such methods — those names are JavaScript-side keys on the `__host`
+    /// table, bound to the `private` `handleNotImplemented`/
+    /// `handleNegativeProbe`) nor `defineVSCodeMember`'s `record`/`probe`
+    /// blocks (local closures built inline inside `installRuntime`, not
+    /// reusable) are reachable from outside `ExtensionHost`.** A caller on the
+    /// Swift side that already holds a live `ExtensionHost` — the only kind
+    /// of caller `subNamespace(path:members:in:)` ever has — builds the two
+    /// blocks directly around `host.notImplementedLedger.record(memberPath:extensionIdentifier:)`
+    /// and `.recordProbe(memberPath:extensionIdentifier:)`, using
+    /// `host.identifier` for the identifier. That reaches the same ledger
+    /// `handleNotImplemented`/`handleNegativeProbe` write to, but bypasses
+    /// their first-reach `OSLog` line — a caller that wants that logging too
+    /// has to reproduce it, because the method that does it is private.
+    /// Passing neither (the default) is
     /// still valid — the miss and the probe branches simply skip the call —
     /// which is what lets `subNamespace(path:members:in:)`'s existing
     /// call sites keep compiling unchanged until an adaptor actually wants
@@ -871,16 +882,56 @@ public enum VSCodeAPI {
 
             // `recordMiss` / `recordProbe` mirror `extension-runtime.js`'s own
             // `makeStubNamespace`'s `host.recordNotImplemented` /
-            // `host.recordNegativeProbe` calls — see this factory's own doc
+            // `recordNegativeProbe` calls — see this factory's own doc
             // comment in `VSCodeAPI.swift` for where the two blocks come
             // from on the Swift side. Both are optional: a caller that passes
             // neither (JavaScriptCore hands an absent `@convention(block)`
             // argument through as `undefined` or `null`, both falsy) gets the
             // old throw-only, probe-only behaviour unchanged.
+            //
+            // The split mirrors the shim exactly, which puts the two
+            // recordings on opposite traps from where a first guess would put
+            // them: `get`'s `PROBE_KEYS` branch records nothing — `toString`,
+            // `then`, `toJSON` and the rest of `PROBE_KEYS` are interpreter and
+            // interop machinery touching the object, not an extension asking
+            // for a member, so recording them would fill the report with
+            // noise nobody asked for. `has` and `getOwnPropertyDescriptor` are
+            // the opposite: a key not in `table` there is an extension stating
+            // in so many words which member it looked for and quietly took
+            // the fallback path for (`'writeFile' in ns`,
+            // `Object.getOwnPropertyDescriptor(ns, 'writeFile')`), which is
+            // exactly what `recordProbe`/task 5.8 want to see. `recordMiss`
+            // stays on `get`'s throwing branch, unchanged — a miss there was
+            // already correct.
             function makeStubNamespace(path, members, recordMiss, recordProbe) {
                 var table = members || Object.create(null);
                 var hasRecordMiss = typeof recordMiss === 'function';
                 var hasRecordProbe = typeof recordProbe === 'function';
+
+                // Same shape as `extension-runtime.js`'s own module-level
+                // `recordNegativeProbe(path, key)`: a symbol key or a key in
+                // `PROBE_KEYS` is never recorded, because `has`/
+                // `getOwnPropertyDescriptor` see those keys too (JSC's own
+                // coercions, and the same interop probes `get` already
+                // ignores), and recording them here would be exactly the
+                // noise the `get` branch above avoids. A recorder that throws
+                // must not turn an honest "no" into an uncaught error — a
+                // caller feature-detecting with `in` has every right to
+                // expect a boolean back, never a throw from bookkeeping it
+                // never asked to see — so the call is swallowed, at the cost
+                // of the one record it would have made; nothing else here
+                // depends on it having happened.
+                function recordNegativeProbe(key) {
+                    if (!hasRecordProbe || typeof key === 'symbol' || PROBE_KEYS.indexOf(key) !== -1) {
+                        return;
+                    }
+                    try {
+                        recordProbe(path + '.' + key);
+                    } catch (ignored) {
+                        // Swallowed — see the comment above this function.
+                    }
+                }
+
                 return new Proxy(Object.create(null), {
                     get: function (target, key) {
                         if (typeof key === 'symbol') {
@@ -890,18 +941,28 @@ public enum VSCodeAPI {
                             return table[key];
                         }
                         if (PROBE_KEYS.indexOf(key) !== -1) {
-                            if (hasRecordProbe) {
-                                recordProbe(path + '.' + key);
-                            }
                             return probeValue(path, table, key);
                         }
                         if (hasRecordMiss) {
-                            recordMiss(path + '.' + key);
+                            try {
+                                recordMiss(path + '.' + key);
+                            } catch (ignored) {
+                                // Swallowed for the same reason as
+                                // `recordNegativeProbe` above: the
+                                // `NotImplementedError` below must reach the
+                                // extension exactly as if no recorder had
+                                // been supplied, not be replaced by whatever
+                                // the recorder threw.
+                            }
                         }
                         throw notImplementedError(path + '.' + key);
                     },
                     has: function (target, key) {
-                        return typeof key !== 'symbol' && key in table;
+                        if (typeof key !== 'symbol' && key in table) {
+                            return true;
+                        }
+                        recordNegativeProbe(key);
+                        return false;
                     },
                     set: function (target, key) {
                         throw new TypeError(
@@ -918,6 +979,7 @@ public enum VSCodeAPI {
                     },
                     getOwnPropertyDescriptor: function (target, key) {
                         if (typeof key === 'symbol' || !(key in table)) {
+                            recordNegativeProbe(key);
                             return undefined;
                         }
                         return { value: table[key], enumerable: true, configurable: true, writable: false };
@@ -970,9 +1032,13 @@ public enum VSCodeAPI {
     /// feature-detection value instead of throwing; everything else throws,
     /// naming `path + '.' + key` as the `NotImplementedError`'s `memberPath`,
     /// matching `extension-runtime.js`'s own `makeStubNamespace` contract —
-    /// including its recording of every miss and every quiet probe, when
-    /// `recordMiss`/`recordProbe` are supplied; see `subNamespaceFactorySource`'s
-    /// doc comment for where those two blocks come from on the caller's side.
+    /// including, when `recordMiss`/`recordProbe` are supplied, its recording
+    /// of every miss (from the throwing branch above) and every quiet probe
+    /// (from `has`/`getOwnPropertyDescriptor`, never from a `PROBE_KEYS` read
+    /// — see `subNamespaceFactorySource`'s doc comment for why the two
+    /// recordings sit on those particular traps and nowhere else); see that
+    /// same doc comment for where the two blocks come from on the caller's
+    /// side.
     ///
     /// **`table` is built via `Object.create(null)`, not a plain `{}`.**
     /// `extension-runtime.js` builds every `table` it ever hands
@@ -999,15 +1065,50 @@ public enum VSCodeAPI {
     ///     a `JSValue`, or any bridgeable value.
     ///   - recordMiss: Called with `path + '.' + key` for every key that is
     ///     neither in `members` nor one of the shim's quiet `PROBE_KEYS`, in
-    ///     place of (not instead of — the throw still happens) the ordinary
-    ///     `NotImplementedError`. Pass a block built from a live
-    ///     `ExtensionHost`'s own `recordNotImplemented` (the same shape
-    ///     `ExtensionHost.defineVSCodeMember`'s `record` block already uses)
-    ///     when the caller wants task 5.8's report to include this
-    ///     sub-namespace's misses. Defaults to `nil`, in which case the
-    ///     factory throws exactly as it always did, unrecorded.
-    ///   - recordProbe: The same, for a key in `PROBE_KEYS` — mirrors
-    ///     `ExtensionHost`'s `recordNegativeProbe`. Defaults to `nil`.
+    ///     addition to (not instead of — the throw still happens) the
+    ///     ordinary `NotImplementedError`. Pass a block built around
+    ///     `host.notImplementedLedger.record(memberPath:extensionIdentifier:)`
+    ///     for a live `ExtensionHost` named `host` — the same store
+    ///     `installRuntime`'s own `record` block writes to, though that
+    ///     block's `handleNotImplemented` also does first-reach `OSLog`ging
+    ///     this one will not do for you — when the caller wants task 5.8's
+    ///     report to include this sub-namespace's misses. Defaults to `nil`,
+    ///     in which case the factory throws exactly as it always did,
+    ///     unrecorded. **A throw from this block is caught inside the JS and
+    ///     discarded**, so a misbehaving recorder cannot replace the
+    ///     `NotImplementedError` the extension is entitled to see with
+    ///     whatever the recorder threw instead; the one record that call
+    ///     would have made is lost, and nothing else is affected.
+    ///   - recordProbe: Called with `path + '.' + key` for a key that is a
+    ///     quiet feature-detection miss — reached only from `has`
+    ///     (`'writeFile' in ns`) and `getOwnPropertyDescriptor`, never from a
+    ///     `get` of a `PROBE_KEYS` name (`String(ns)`, `await ns`, `toJSON`
+    ///     and the rest are interop machinery, not an extension asking for a
+    ///     member, and are never recorded) — mirroring
+    ///     `extension-runtime.js`'s own `recordNegativeProbe`. Pass a block
+    ///     built the same way as `recordMiss`, around
+    ///     `host.notImplementedLedger.recordProbe(memberPath:extensionIdentifier:)`.
+    ///     Defaults to `nil`. A throw from this block is swallowed the same
+    ///     way `recordMiss`'s is, for the same reason: `has` and
+    ///     `getOwnPropertyDescriptor` owe their caller a boolean or a
+    ///     descriptor, never an uncaught error from bookkeeping.
+    ///
+    /// **Both blocks are retained for the context's lifetime, not the call's**
+    /// — the Proxy handler this factory builds closes over them, and the
+    /// namespace object holds the handler, and the `JSContext` holds the
+    /// namespace object for as long as anything reachable from
+    /// `globalThis` does. A block built with a strong reference to the
+    /// `ExtensionHost` that owns the context therefore keeps that host alive
+    /// for the context's lifetime too — the same leak shape
+    /// `sharedHelper(in:)`'s own doc warns a `JSValue` capture into, and
+    /// avoided the same way `installRuntime`'s own `record`/`probe` blocks
+    /// avoid it: capture the host `[weak self]`, not strongly.
+    /// `ExtensionHost` is `@MainActor`, and every Proxy trap this factory
+    /// installs runs synchronously inside JavaScript execution the host
+    /// itself already drives from the main actor — `installRuntime`'s blocks
+    /// wrap their body in `MainActor.assumeIsolated { … }` on exactly that
+    /// basis, and a block passed here should do the same rather than assume
+    /// isolation some other way.
     /// - Returns: `nil` if the factory itself could not be installed in
     ///   `context` — `subNamespaceFactory(in:)` has already logged why — or if
     ///   `context` cannot produce a prototype-less object to hold `members`.
