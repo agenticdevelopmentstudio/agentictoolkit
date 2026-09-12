@@ -5,8 +5,11 @@ import XCTest
 /// The context menu is the only way the three verbs — replace in place, a new
 /// tab, a second editor beside the first — can travel: plain selection can
 /// only say *what* was picked, never *where* it should land. These pin the
-/// menu's contents and that each item sends its own `DocumentDestination`,
-/// plus that a directory (nothing to open) gets no menu at all.
+/// menu's contents and that each item sends its own `DocumentDestination`.
+///
+/// They also pin the half that has nothing to do with opening: a folder and a
+/// repo root have no document, and the menu on them is the two path verbs
+/// rather than nothing at all.
 @MainActor
 final class FileTreeContextMenuTests: XCTestCase {
 
@@ -29,7 +32,7 @@ final class FileTreeContextMenuTests: XCTestCase {
         return (controller, directory)
     }
 
-    func testTheMenuOffersTheThreeVerbs() throws {
+    func testTheMenuOffersTheThreeVerbsThenThePathVerbs() throws {
         let (controller, directory) = try makeOutlineController()
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         controller.loadViewIfNeeded()
@@ -39,7 +42,10 @@ final class FileTreeContextMenuTests: XCTestCase {
 
         let menu = try XCTUnwrap(controller.makeContextMenu(for: fileURL))
 
-        XCTAssertEqual(menu.items.map(\.title), ["Open", "Open in a New Tab", "Open to the Side"])
+        XCTAssertEqual(
+            menu.items.map { $0.isSeparatorItem ? "—" : $0.title },
+            ["Open", "Open in a New Tab", "Open to the Side", "—",
+             "Reveal in Finder", "Copy Path"])
     }
 
     func testEachItemSendsItsOwnDestination() throws {
@@ -53,8 +59,9 @@ final class FileTreeContextMenuTests: XCTestCase {
         var received: [(URL, DocumentDestination)] = []
         controller.onOpenRequest = { received.append(($0, $1)) }
 
-        let menu = try XCTUnwrap(controller.makeContextMenu(for: fileURL))
-        for item in menu.items {
+        // The open verbs only. Performing the whole menu would also perform
+        // "Reveal in Finder", and a test suite must not bring Finder forward.
+        for item in try XCTUnwrap(controller.openMenuItems(for: fileURL)) {
             _ = item.target?.perform(item.action, with: item)
         }
 
@@ -74,28 +81,54 @@ final class FileTreeContextMenuTests: XCTestCase {
         let fileURL = directory.appendingPathComponent("a.swift")
         try "// hello\n".write(to: fileURL, atomically: true, encoding: .utf8)
 
-        let items = try XCTUnwrap(controller.openMenuItems(for: fileURL))
+        let items = try XCTUnwrap(controller.contextMenuItems(for: fileURL))
         XCTAssertTrue(items.allSatisfy { $0.menu == nil })
 
         let live = NSMenu()
         for item in items { live.addItem(item) }
 
-        XCTAssertEqual(live.items.map(\.title), ["Open", "Open in a New Tab", "Open to the Side"])
+        XCTAssertEqual(live.items.count, items.count)
     }
 
-    func testADirectoryHasNoOpenMenu() throws {
+    /// A folder has no document, so the open verbs are absent — but a
+    /// right-click on it used to produce no menu at all, which is the one thing
+    /// a gesture must never do.
+    func testAFolderGetsThePathVerbsAndNoOpenVerbs() throws {
         let (controller, directory) = try makeOutlineController()
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         controller.loadViewIfNeeded()
 
-        XCTAssertNil(controller.makeContextMenu(for: directory))
+        XCTAssertNil(controller.openMenuItems(for: directory))
+
+        let menu = try XCTUnwrap(controller.makeContextMenu(for: directory))
+        XCTAssertEqual(menu.items.map(\.title), ["Reveal in Finder", "Copy Path"])
     }
 
-    func testAMissingFileHasNoOpenMenu() throws {
+    /// A path nothing lives at is the one case that still gets nothing: revealing
+    /// it selects nothing and copying it hands over a string that pastes nowhere.
+    func testAMissingFileHasNoMenu() throws {
         let (controller, directory) = try makeOutlineController()
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         controller.loadViewIfNeeded()
 
-        XCTAssertNil(controller.makeContextMenu(for: directory.appendingPathComponent("nothing-here.swift")))
+        let missing = directory.appendingPathComponent("nothing-here.swift")
+        XCTAssertNil(controller.makeContextMenu(for: missing))
+        XCTAssertNil(controller.pathMenuItems(for: missing))
+    }
+
+    /// The POSIX path, not the URL — what a terminal or an editor will accept.
+    func testCopyPathPutsThePosixPathOnThePasteboard() throws {
+        let (controller, directory) = try makeOutlineController()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        controller.loadViewIfNeeded()
+
+        let fileURL = directory.appendingPathComponent("a.swift")
+        try "// hello\n".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let items = try XCTUnwrap(controller.pathMenuItems(for: fileURL))
+        let copyItem = try XCTUnwrap(items.first { $0.title == "Copy Path" })
+        _ = copyItem.target?.perform(copyItem.action, with: copyItem)
+
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), fileURL.path)
     }
 }
