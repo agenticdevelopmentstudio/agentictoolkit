@@ -40,6 +40,43 @@ struct SubprocessChannelRunTests {
         }
     }
 
+    /// A one-shot capture is not a framed stream, and must not be held to a
+    /// framed stream's rules. `git status --porcelain -z` on a large
+    /// repository produces exactly this shape — megabytes of NUL-separated
+    /// records with no `0x0A` anywhere — which, decoded as `.newlineDelimited`,
+    /// is a single frame over `MessageFramingDecoder.maximumFrameBytes`: the
+    /// whole capture was discarded and the caller was told its output was
+    /// malformed.
+    @Test("captures delimiter-free output larger than the framing cap")
+    func capturesDelimiterFreeOutputLargerThanTheFramingCap() async throws {
+        let byteCount = MessageFramingDecoder.maximumFrameBytes + 1024
+        let configuration = SubprocessChannel.Configuration(
+            executableURL: URL(fileURLWithPath: "/usr/bin/head"),
+            arguments: ["-c", "\(byteCount)", "/dev/zero"]
+        )
+        let result = try await SubprocessChannel.run(configuration, budget: Self.budget)
+        #expect(result.exitStatus == 0)
+        #expect(result.standardOutput.count == byteCount)
+        #expect(result.standardOutput.allSatisfy { $0 == 0 })
+    }
+
+    /// The framing a caller happens to have configured describes how it would
+    /// talk to a *long-lived* peer; a one-shot run has no messages for it to
+    /// describe. Honouring it here would make an ordinary capture fail on the
+    /// framing's own end-of-stream rules — `.contentLength` treats output with
+    /// no header as a malformed one.
+    @Test("ignores the configured framing")
+    func ignoresTheConfiguredFraming() async throws {
+        let configuration = SubprocessChannel.Configuration(
+            executableURL: URL(fileURLWithPath: "/bin/echo"),
+            arguments: ["hello"],
+            framing: .contentLength
+        )
+        let result = try await SubprocessChannel.run(configuration, budget: Self.budget)
+        #expect(String(bytes: result.standardOutput, encoding: .utf8) == "hello\n")
+        #expect(result.exitStatus == 0)
+    }
+
     @Test("runs in the configured working directory")
     func workingDirectory() async throws {
         let directory = FileManager.default.temporaryDirectory

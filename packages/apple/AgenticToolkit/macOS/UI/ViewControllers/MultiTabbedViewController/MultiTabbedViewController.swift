@@ -249,6 +249,16 @@ open class MultiTabbedViewController: NSViewController {
         }
     }
 
+    /// Retitles a `.title` tab, and **deliberately does nothing to a hosted
+    /// one**.
+    ///
+    /// A hosted item's bar content is a view controller the caller supplied;
+    /// there is no text in it to edit, and the only way to honour a title here
+    /// would be to replace that controller with a label — tearing down
+    /// whatever it was showing in order to obey a request that never asked for
+    /// that. A caller that really does want the item replaced says so through
+    /// `setTabItem(id:item:)`, which is about replacing the item and says it
+    /// in its name.
     public func renameTab(id: UUID, title: String) {
         guard let edge = edge(forTabID: id), let state = edgeStates[edge] else { return }
         guard let idx = state.tabs.firstIndex(where: { $0.id == id }) else { return }
@@ -424,16 +434,27 @@ open class MultiTabbedViewController: NSViewController {
             self, activeTabDidChange: id, on: id.flatMap { edge(forTabID: $0) })
     }
 
-    /// Activates the first tab on the first enabled edge, or clears the
-    /// active tab when no enabled edge has tabs.
+    /// Keeps the active *group* wherever an enabled edge still shows it,
+    /// falls back to the first tab on the first enabled edge, and clears the
+    /// active tab when no enabled edge has any.
+    ///
+    /// The group step is the one that matters. Every sibling of a tab stands
+    /// for the same thing — that is what `selectedID(on:)` encodes — so
+    /// turning off the edge the active tab happened to live on changes *where*
+    /// the user's tab is drawn, not which tab they are on. Taking the first
+    /// tab of the first enabled edge instead dropped them onto an unrelated
+    /// checkout, and the pane tree in front of them changed with it.
     private func activateFallbackTab() {
+        let group = activeTab?.groupID
+        let sibling = group.flatMap { group in firstTabOnAnEnabledEdge { $0.groupID == group } }
+        setActiveTab(sibling ?? firstTabOnAnEnabledEdge { _ in true })
+    }
+
+    private func firstTabOnAnEnabledEdge(where matches: (Tab) -> Bool) -> UUID? {
         for edge in Edge.allCases where isEdgeEnabled(edge) {
-            if let first = edgeStates[edge]?.tabs.first {
-                setActiveTab(first.id)
-                return
-            }
+            if let tab = edgeStates[edge]?.tabs.first(where: matches) { return tab.id }
         }
-        setActiveTab(nil)
+        return nil
     }
 
     private func refreshCenterContent() {

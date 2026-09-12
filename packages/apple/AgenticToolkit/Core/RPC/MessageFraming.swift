@@ -2,7 +2,7 @@ import Foundation
 
 /// How a byte stream is split into discrete messages.
 ///
-/// The two cases deliberately differ in what a decoded frame *contains*:
+/// The cases deliberately differ in what a decoded frame *contains*:
 ///
 /// - `.newlineDelimited` treats the newline as a delimiter *within* the
 ///   stream: a decoded frame is the byte-exact slice up to and including its
@@ -13,9 +13,27 @@ import Foundation
 /// - `.contentLength` treats its `Content-Length: <n>\r\n...\r\n\r\n` header
 ///   as a wrapper *around* the payload, not part of it: a decoded frame is
 ///   the body only, with the header consumed and discarded.
+/// - `.unframed` declares that the stream has no message boundaries at all.
+///   There is no delimiter to look for, so a "frame" is simply whatever
+///   chunk of bytes arrived, handed straight on.
 public enum MessageFraming: Sendable {
     case newlineDelimited
     case contentLength
+    /// A byte stream that carries no messages — the child's output *is* the
+    /// payload, and the only thing to do with it is read all of it.
+    ///
+    /// This is the framing for a one-shot capture (`SubprocessChannel.run`),
+    /// and choosing it is not a detail: the other two cases buffer until a
+    /// boundary arrives and refuse a frame that grows past
+    /// `MessageFramingDecoder.maximumFrameBytes`, which is the right guard
+    /// against a peer that never sends a delimiter and exactly the wrong one
+    /// against a child whose whole output legitimately contains no delimiter.
+    /// git's machine-readable status (`GitVerb.status`) is that child: its
+    /// records are NUL-terminated and carry no `0x0A` anywhere, so a large
+    /// repository's status is one 16 MB-plus "frame" and a guard meant for a
+    /// malformed peer throws away a correct answer. Nothing accumulates
+    /// here, so nothing needs capping.
+    case unframed
 
     /// Encodes `message` for this framing.
     ///
@@ -25,8 +43,12 @@ public enum MessageFraming: Sendable {
     ///   into the peer's SSE parse.
     /// - `.contentLength` prepends `Content-Length: \(message.count)\r\n\r\n`
     ///   in ASCII.
+    /// - `.unframed` returns `message` unchanged: there is no envelope to add.
     public func frame(_ message: Data) -> Data {
         switch self {
+        case .unframed:
+            return message
+
         case .newlineDelimited:
             if message.last == 0x0A {
                 return message
@@ -86,7 +108,8 @@ public struct MessageFramingDecoder {
 
     /// The largest buffer this decoder will accumulate before a frame
     /// completes. Guards against a peer that never sends a delimiter (or a
-    /// complete header) growing the buffer without bound.
+    /// complete header) growing the buffer without bound. `.unframed` never
+    /// reaches it: with no boundary to wait for, it accumulates nothing.
     public static let maximumFrameBytes = 16 * 1024 * 1024
 
     private static let headerTerminator = Data([0x0D, 0x0A, 0x0D, 0x0A])
@@ -156,6 +179,13 @@ public struct MessageFramingDecoder {
     /// front of the next good one, which is the desync this decoder is meant
     /// to make impossible.
     public mutating func consume(_ chunk: Data) throws -> [Data] {
+        // Nothing to look for and nothing to wait for: an unframed stream's
+        // bytes are complete the moment they arrive, so they are handed on
+        // without ever entering `buffer`. That is also why the cap below does
+        // not apply — a decoder that buffers nothing cannot grow.
+        if case .unframed = framing {
+            return chunk.isEmpty ? [] : [chunk]
+        }
         buffer.append(chunk)
         if let violation = pendingCapViolation {
             pendingCapViolation = nil
@@ -166,6 +196,11 @@ public struct MessageFramingDecoder {
             return try consumeNewlineDelimited()
         case .contentLength:
             return try consumeContentLength()
+        case .unframed:
+            // Answered above. Spelled out rather than folded into a `default`,
+            // so a case added to `MessageFraming` later fails to compile here
+            // instead of silently decoding as nothing.
+            return []
         }
     }
 
@@ -176,6 +211,9 @@ public struct MessageFramingDecoder {
     ///   one final frame if the buffer is non-empty, and `[]` if it is empty.
     /// - `.contentLength` never returns a frame here: a non-empty buffer at
     ///   end-of-stream is a truncated message, not a frame, so this throws.
+    /// - `.unframed` has nothing held back to return: every chunk was a
+    ///   complete frame when it arrived. A stream that simply ends is how an
+    ///   unframed stream ends, so this neither returns a frame nor throws.
     public mutating func finish() throws -> [Data] {
         if let violation = pendingCapViolation {
             pendingCapViolation = nil
@@ -195,6 +233,9 @@ public struct MessageFramingDecoder {
         }
 
         switch framing {
+        case .unframed:
+            return []
+
         case .newlineDelimited:
             guard !buffer.isEmpty else { return [] }
             let remainder = buffer

@@ -237,11 +237,15 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
                 "No language services for \(repo.name, privacy: .public): no factory wired"
             )
         }
-        let workspace = ProjectWorkspace(repo: repo, database: database, languageServices: languageServices)
+        let workspace = ProjectWorkspace(
+            repo: repo,
+            database: database,
+            languageServices: languageServices,
+            gitClient: gitClient
+        )
         languageServices?.start()
         let projectController = ProjectController(
             workspace: workspace,
-            gitClient: gitClient,
             commandRegistry: commandRegistry
         )
         projectControllers[repo.id] = projectController

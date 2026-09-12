@@ -176,14 +176,18 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// and the responder chain comes apart — and each of those reaches
     /// `persistAllTabs()`, which would write the dying window's tab set over
     /// whatever the project has written since. Nothing of value is lost by
-    /// refusing, with one deliberate exception. Every *structural* change —
-    /// split, close, add, remove, reorder, select, edge toggle — is written
-    /// synchronously as it happens, by `persistTreeToDocument()`. Only two
-    /// writers are debounced: divider thicknesses (300 ms) and the focused
-    /// leaf (250 ms). So releasing a divider drag, or moving focus, within
-    /// that window of closing the window drops that one write. That trade is
-    /// intended: a tab set written over by a dead window is corruption, and a
-    /// divider position is a preference.
+    /// refusing. Every *structural* change — split, close, add, remove,
+    /// reorder, select, edge toggle — is written synchronously as it happens,
+    /// by `persistTreeToDocument()`. Only two writers are debounced: divider
+    /// thicknesses (300 ms) and the focused leaf (250 ms), and
+    /// `windowWillClose` settles both before raising this flag — the
+    /// thicknesses by flushing them, the focus by dropping it. The asymmetry
+    /// is what each one is: a divider is a position the user put there by
+    /// hand and expects to find again, while the focused leaf is a
+    /// first-responder position that the next open re-derives anyway.
+    ///
+    /// The flush is itself conditional, and for the same reason this flag
+    /// exists: see `windowWillClose(_:)`.
     ///
     /// Deliberately one-way, and deliberately not `isReloadingTabs`: that flag
     /// is raised and lowered around one loop precisely so the top-up persist in
@@ -504,7 +508,12 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             id: UUID(), title: title, members: [:], workingDirectory: project.directoryURL)
         for edge in Edge.allCases where tabbed.isEdgeEnabled(edge) {
             let id = UUID()
-            let split = makeSplitController(for: id, workingDirectory: project.directoryURL)
+            // The group's directory, never `project.directoryURL` again: the
+            // group is what decides where its members work — that is why
+            // `topUpTabs(on:)` reads it — and naming the same default twice
+            // is a second source of truth that only has to be edited once to
+            // start disagreeing with the record written three lines below.
+            let split = makeSplitController(for: id, workingDirectory: group.workingDirectory)
             let record = TabRecord(
                 id: id,
                 groupID: group.id,
@@ -883,6 +892,12 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// persist, armed by the layout a close provokes and reaching
     /// `persistAllTabs()` through `onLayoutDidChange`.
     ///
+    /// A thickness persist the *user* armed is a different thing from one the
+    /// tear-down provokes, and only the second is noise. So the first is
+    /// flushed before the flag goes up, while the tree is still the one they
+    /// were looking at — otherwise letting go of a divider and closing the
+    /// window inside 300 ms threw the drag away.
+    ///
     /// It usually went unnoticed because `ProjectWindowManager` drops its last
     /// reference to the controller in the same turn, leaving the work items'
     /// `weak self` nil by the time they run. "Usually deallocated first" is not
@@ -902,6 +917,23 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
     /// callback that writes the emptied tab set over the project's saved tabs.
     public override func windowWillClose(_ notification: Notification) {
         super.windowWillClose(notification)
+        // Before `isClosing`, and before anything is torn down: the tree is
+        // still the one the user was looking at, so a divider they let go of a
+        // moment ago writes what they left on screen.
+        //
+        // Only where there is an arrangement to refine, though. A pending
+        // thickness write is armed by *any* resize — the window's first layout
+        // pass included — so a window closed before its project finished
+        // opening has one pending over a placeholder tab set that was never
+        // saved. Flushing there would write the placeholder as if it were the
+        // user's arrangement; `storedTabs()` is what tells the two apart, and
+        // a debounced divider is an update to a saved layout by definition,
+        // never the first write of one.
+        if project.storedTabs() != nil {
+            for split in splitControllersByTabID.values {
+                split.flushPendingThicknessPersist()
+            }
+        }
         isClosing = true
         cancelPendingTabPersist()
         if let firstResponderObserver {
@@ -1194,7 +1226,7 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             // longer exists on the next launch.
             var focusWasCleared = false
             if let focused = self.focusedLeafByTabID[tabID],
-               !Self.leafIDs(in: node).contains(focused) {
+               !node.leafIDs.contains(focused) {
                 self.focusedLeafByTabID[tabID] = nil
                 focusWasCleared = true
             }
@@ -1240,15 +1272,6 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
             } else {
                 other.rebuild(from: wanted)
             }
-        }
-    }
-
-    private static func leafIDs(in node: LayoutNode) -> Set<UUID> {
-        switch node.kind {
-        case .leaf:
-            return [node.id]
-        case .split(_, let first, let second):
-            return leafIDs(in: first).union(leafIDs(in: second))
         }
     }
 

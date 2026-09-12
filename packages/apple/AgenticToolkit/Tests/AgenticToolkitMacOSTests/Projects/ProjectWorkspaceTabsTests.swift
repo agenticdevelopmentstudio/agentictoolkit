@@ -52,13 +52,53 @@ final class ProjectWorkspaceTabsTests: XCTestCase {
         XCTAssertFalse(project.fileBrowserDirectories === first)
     }
 
-    func testGitStatusProviderComesFromTheResolver() throws {
+    /// One provider per directory, for as long as anything holds it — the same
+    /// rule `fileBrowserDirectories(primary:)` above follows, and for the same
+    /// reason: everything working in one checkout has to be looking at one
+    /// object, whichever of them asked for it first.
+    func testGitStatusProvidersAreCachedPerDirectory() throws {
         let project = try makeProject()
         let worktree = tempRoot.appendingPathComponent("wt")
-        let provider = GitStatusProvider(repoRoot: worktree)
-        project.gitStatusProviderResolver = { directory in directory.path == worktree.path ? provider : nil }
-        XCTAssertTrue(project.gitStatusProvider(forDirectory: worktree) === provider)
-        XCTAssertNil(project.gitStatusProvider(forDirectory: tempRoot))
+        let first = project.gitStatusProvider(forDirectory: worktree)
+        let again = project.gitStatusProvider(forDirectory: worktree)
+        XCTAssertTrue(first === again)
+        XCTAssertEqual(first.repoRoot.path, worktree.resolvingSymlinksInPath().path)
+        XCTAssertFalse(project.gitStatusProvider(forDirectory: tempRoot) === first)
+    }
+
+    /// …and no longer than that. Both caches used to hold their values
+    /// strongly, so a project collected one `FileBrowserDirectories` and one
+    /// `GitStatusProvider` for every directory anything had ever asked about —
+    /// every worktree opened in a tab and closed again, for as long as the
+    /// project stayed open — each still watching a directory with nothing on
+    /// screen to show for it. The holders are the panes and the branch
+    /// controllers; when the last one goes, so does the entry.
+    ///
+    /// The identity assertions inside the scope are the other half: forgetting
+    /// is only safe because it cannot happen while a holder is alive.
+    func testADirectoryNothingHoldsAnyMoreIsForgotten() throws {
+        let project = try makeProject()
+        let worktree = tempRoot.appendingPathComponent("wt")
+
+        weak var firstDirectories: FileBrowserDirectories?
+        weak var firstProvider: GitStatusProvider?
+        do {
+            let directories = project.fileBrowserDirectories(primary: worktree)
+            let provider = project.gitStatusProvider(forDirectory: worktree)
+            firstDirectories = directories
+            firstProvider = provider
+            XCTAssertTrue(project.fileBrowserDirectories(primary: worktree) === directories)
+            XCTAssertTrue(project.gitStatusProvider(forDirectory: worktree) === provider)
+        }
+
+        XCTAssertNil(firstDirectories, "the cache must not be what keeps a closed pane's roots alive")
+        XCTAssertNil(firstProvider, "nor what keeps a closed pane's status provider alive")
+
+        // And the next ask mints a working object rather than handing back the
+        // hole the dead entry left.
+        let reopened = project.fileBrowserDirectories(primary: worktree)
+        XCTAssertEqual(reopened.primary.path, worktree.resolvingSymlinksInPath().path)
+        XCTAssertTrue(project.fileBrowserDirectories(primary: worktree) === reopened)
     }
 
     /// A window showing the main checkout *and* a worktree holds two

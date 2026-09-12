@@ -157,12 +157,74 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
 
         XCTAssertEqual(recorder.entries, ["failing write", "later write"])
         // Pins the `reloadGlobalConfig()` call at the end of the drain, same
-        // as the other two queue-ordering tests, and -- since this is the
-        // one test of the three whose queued operation actually throws --
-        // pins the catch block's `showError` call too: deleting either line
-        // leaves every assertion above still green.
+        // as the other two queue-ordering tests: deleting it leaves every
+        // assertion above still green.
         XCTAssertEqual(panel.reloadCount, 1)
-        XCTAssertNotNil(panel.lastWriteErrorMessage)
+        // Nil, not "the failure is remembered": `lastWriteErrorMessage` is
+        // what the user is being told *now*, and the write behind the failing
+        // one succeeded. A message that outlived it would be re-shown by
+        // every later reload, since that is the value the reload paints. The
+        // catch block's own `showError` is pinned by
+        // `testAFailedWritesMessageSurvivesTheReloadThatFollowsIt`, where
+        // nothing succeeds afterwards to clear it.
+        XCTAssertNil(panel.lastWriteErrorMessage)
+    }
+
+    /// The reload that ends every drain is a `git config --list`, and it
+    /// succeeds whether or not the write before it did -- git has no idea a
+    /// `--replace-all` was rejected. Its success path used to blank the label
+    /// unconditionally, one run loop after the failure was put there: the user
+    /// was told their setting was lost, and then told nothing at all.
+    func testAFailedWritesMessageSurvivesTheReloadThatFollowsIt() async throws {
+        let panel = GitSettingsPanelViewController(client: try clientWithAThrowawayGlobalConfig())
+
+        panel.enqueueWrite { throw WriteRejected() }
+        await Self.drainQueue(panel)
+        await panel.reloadTask?.value
+
+        XCTAssertEqual(panel.configErrorMessage, WriteRejected.message)
+    }
+
+    /// The other half of the same rule: once a write actually succeeds there
+    /// is nothing left standing, so the reload clears the label as before.
+    /// Without this, "never clear the label" would pass the test above.
+    func testASucceedingWriteClearsTheMessageAFailedOneLeftBehind() async throws {
+        let panel = GitSettingsPanelViewController(client: try clientWithAThrowawayGlobalConfig())
+
+        panel.enqueueWrite { throw WriteRejected() }
+        await Self.drainQueue(panel)
+        panel.enqueueWrite {}
+        await Self.drainQueue(panel)
+        await panel.reloadTask?.value
+
+        XCTAssertEqual(panel.configErrorMessage, "")
+        XCTAssertNil(panel.lastWriteErrorMessage)
+    }
+
+    /// A write failure with a message worth asserting on, rather than
+    /// `NSError`'s "operation couldn't be completed" rendering of a bare
+    /// `struct Boom: Error {}`.
+    private struct WriteRejected: LocalizedError {
+        static let message = "could not write user.email"
+        var errorDescription: String? { Self.message }
+    }
+
+    /// A client whose global configuration is a throwaway file instead of the
+    /// developer's own `~/.gitconfig`. `globalConfig()` then succeeds
+    /// identically on every machine, which is what lets a test await the
+    /// reload at the end of a drain rather than only counting it -- and it
+    /// keeps these tests off the real user's config, which they have no
+    /// business reading.
+    private func clientWithAThrowawayGlobalConfig() throws -> GitClient {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("git-settings-panel-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let config = directory.appendingPathComponent("gitconfig")
+        try "[user]\n\temail = tester@example.com\n".write(to: config, atomically: true, encoding: .utf8)
+        return GitClient(configuration: GitClientConfiguration(
+            extraEnvironment: ["GIT_CONFIG_GLOBAL": config.path]
+        ))
     }
 
     /// Fix round 3: calls `performRename` -- the exact method
@@ -195,8 +257,27 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
                 if key == "new.key" { throw SetFailed() }
             }
         )
-        panel.enqueueWrite { recorder.record("later write") }
+        await Self.drainQueue(panel)
 
+        // Pins the rethrow on the restore-succeeded branch. Every recorder
+        // entry is written *before* that `throw` runs, so without this the
+        // line could be deleted -- swallowing the failure entirely -- and the
+        // ordering assertion below would still pass. A rename that failed and
+        // rolled back is still a rename that failed, and the user has to be
+        // told.
+        //
+        // Read here, before anything else is queued: the message says what
+        // the user is being told *now*, so the succeeding write below is
+        // supposed to clear it (`testASucceedingWriteClearsTheMessageAFailedOneLeftBehind`).
+        let message = try XCTUnwrap(panel.lastWriteErrorMessage)
+        XCTAssertTrue(
+            message.contains("previous value was restored"),
+            "expected the restored-after-failure error, got: \(message)"
+        )
+
+        // The queue took a throw and is still draining: an unrelated write
+        // queued afterwards runs.
+        panel.enqueueWrite { recorder.record("later write") }
         await Self.drainQueue(panel)
 
         // "set:old.key=old.value" is the restore call: its presence, in this
@@ -205,16 +286,6 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
         XCTAssertEqual(
             recorder.entries,
             ["unset:old.key", "set:new.key=new.value", "set:old.key=old.value", "later write"]
-        )
-        // Pins the rethrow on the restore-succeeded branch. Every entry above
-        // is recorded *before* that `throw` runs, so without this the line
-        // could be deleted -- swallowing the failure entirely -- and the
-        // assertion above would still pass. A rename that failed and rolled
-        // back is still a rename that failed, and the user has to be told.
-        let message = try XCTUnwrap(panel.lastWriteErrorMessage)
-        XCTAssertTrue(
-            message.contains("previous value was restored"),
-            "expected the restored-after-failure error, got: \(message)"
         )
     }
 
@@ -255,18 +326,22 @@ final class GitSettingsPanelViewControllerTests: XCTestCase {
                 }
             }
         )
-        panel.enqueueWrite { recorder.record("later write") }
+        await Self.drainQueue(panel)
 
+        // Read before anything succeeds behind it, for the reason given in
+        // `testRenameRestoresOldKeyValueWhenSetFails`.
+        let message = try XCTUnwrap(panel.lastWriteErrorMessage)
+        XCTAssertTrue(message.contains("SetFailedMarker"))
+        XCTAssertTrue(message.contains("RestoreFailedMarker"))
+        XCTAssertTrue(message.contains("lost"))
+
+        panel.enqueueWrite { recorder.record("later write") }
         await Self.drainQueue(panel)
 
         XCTAssertEqual(
             recorder.entries,
             ["unset:old.key", "set:new.key=new.value", "set:old.key=old.value", "later write"]
         )
-        let message = try XCTUnwrap(panel.lastWriteErrorMessage)
-        XCTAssertTrue(message.contains("SetFailedMarker"))
-        XCTAssertTrue(message.contains("RestoreFailedMarker"))
-        XCTAssertTrue(message.contains("lost"))
     }
 
     private static func accessibilityIdentifiers(in view: NSView) -> Set<String> {

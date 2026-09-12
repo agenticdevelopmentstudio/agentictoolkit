@@ -6,6 +6,7 @@ public enum GitFileStatus: String, Codable, CaseIterable, Sendable {
     case added = "A"
     case deleted = "D"
     case renamed = "R"
+    case copied = "C"
     case untracked = "?"
     case conflicted = "U"
     case ignored = "!"
@@ -15,11 +16,12 @@ public enum GitFileStatus: String, Codable, CaseIterable, Sendable {
     /// Higher wins when statuses are merged for a directory.
     public var priority: Int {
         switch self {
-        case .conflicted: 6
-        case .modified: 5
-        case .added: 4
-        case .deleted: 3
-        case .renamed: 2
+        case .conflicted: 7
+        case .modified: 6
+        case .added: 5
+        case .deleted: 4
+        case .renamed: 3
+        case .copied: 2
         case .untracked: 1
         case .ignored: 0
         }

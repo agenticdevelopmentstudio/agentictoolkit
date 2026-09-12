@@ -375,7 +375,11 @@ final class ProjectScriptingTests: XCTestCase {
     /// up at all.
     func testATabReportsItsWorkingDirectoryAndBranch() {
         let project = makeProject()
-        let directory = URL(fileURLWithPath: "/tmp/scripting-branch-fixture")
+        // Directory-flavoured, because that is how the store hands it back: a
+        // persisted working directory is reloaded as `isDirectory: true`
+        // rather than stat-ed, so a resolver comparing URLs sees that flavour
+        // whether or not the path happens to exist.
+        let directory = URL(fileURLWithPath: "/tmp/scripting-branch-fixture", isDirectory: true)
         let tabID = UUID()
         project.persistTabs(
             [TabRecord(id: tabID, edge: .top, title: "Tab 1",

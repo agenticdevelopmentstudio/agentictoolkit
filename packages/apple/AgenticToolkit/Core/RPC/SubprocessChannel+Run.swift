@@ -20,21 +20,33 @@ extension SubprocessChannel {
     /// child exits, and returns everything it produced. Throws
     /// `WallClockBudgetExceeded` if the child outlives `budget` seconds, in which
     /// case the child is terminated before the error propagates.
+    ///
+    /// **`configuration.framing` is ignored, deliberately.** A one-shot run has
+    /// no messages: it hands back one `Data` holding the whole of stdout, so
+    /// there is no boundary any framing could mark and nothing a caller could
+    /// do with one. Honouring a framing here would mean subjecting a plain
+    /// capture to a *streaming* protocol's malformed-peer guard — the 16 MB
+    /// `MessageFramingDecoder.maximumFrameBytes` cap, which fires when no
+    /// delimiter has arrived in that many bytes. Output with no `0x0A` in it
+    /// at all is then indistinguishable from a peer that has stopped framing,
+    /// and git's machine-readable status (`GitVerb.status`, whose records are
+    /// NUL-terminated and newline-free) on a large repository is exactly
+    /// that: the capture is discarded and the verb fails on output that was
+    /// never malformed. The run therefore decodes as
+    /// `.unframed`, whose bytes pass straight through.
     public static func run(_ configuration: Configuration, budget: TimeInterval) async throws -> RunResult {
+        var configuration = configuration
+        configuration.framing = .unframed
         let channel = SubprocessChannel(configuration: configuration)
         let started = Date()
         do {
             return try await withWallClockBudget(budget) {
                 try await channel.launch()
                 await channel.closeInput()
-                // `.newlineDelimited` frames already carry their own trailing
-                // `0x0A` (see `MessageFramingDecoder.consumeNewlineDelimited`,
-                // which cuts each frame through and including the delimiter,
-                // and `finish()`, which returns a final unterminated remainder
-                // verbatim). So concatenating frames as they arrive reproduces
-                // the child's raw stdout byte-for-byte; inserting a separator
-                // between frames would double every newline that was already
-                // present in the stream.
+                // `.unframed` hands each chunk over exactly as it was read, so
+                // concatenating them reproduces the child's raw stdout
+                // byte-for-byte. Inserting any separator between them would
+                // corrupt it.
                 var output = Data()
                 do {
                     for try await frame in try await channel.messages() {

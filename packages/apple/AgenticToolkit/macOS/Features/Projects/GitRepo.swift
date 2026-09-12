@@ -38,7 +38,11 @@ public struct GitRepo: Sendable, Identifiable, Equatable {
         self.lastOpened = lastOpened
     }
 
-    public var url: URL { URL(fileURLWithPath: path) }
+    /// `isDirectory: true`, because a repository's path is one and the URL is
+    /// compared for equality against checkout directories built elsewhere —
+    /// left to guess, Foundation would give a repository on an unmounted
+    /// volume a different URL than the same repository once it is back.
+    public var url: URL { URL(fileURLWithPath: path, isDirectory: true) }
 
     /// The default name for a repository at `path` — its directory name.
     public static func defaultName(forPath path: String) -> String {

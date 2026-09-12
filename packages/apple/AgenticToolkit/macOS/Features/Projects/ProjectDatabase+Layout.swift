@@ -39,7 +39,17 @@ extension ProjectDatabase {
                 title: columnText(stmt, 1) ?? "",
                 root: try buildTree(id: rootID, rows: allRows),
                 focusedNodeID: columnText(stmt, 3).flatMap { UUID(uuidString: $0) },
-                workingDirectory: columnText(stmt, 6).flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+                // `isDirectory: true` rather than letting Foundation stat the
+                // path: a tab's working directory is a checkout, and it is
+                // compared for equality against `ProjectCheckout.directory`.
+                // Left to guess, `URL(fileURLWithPath:)` marks an existing
+                // directory with a trailing slash and a missing one without,
+                // so a worktree that is merely *temporarily* gone (an unmounted
+                // volume, a directory being moved) came back as a URL that
+                // could never equal its checkout again even once it returned.
+                workingDirectory: columnText(stmt, 6).flatMap {
+                    $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true)
+                }
             ))
         }
 

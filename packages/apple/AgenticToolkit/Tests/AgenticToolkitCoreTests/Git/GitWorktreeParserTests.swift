@@ -27,7 +27,12 @@ struct GitWorktreeParserTests {
         let trees = GitWorktree.parse(porcelain: sample)
         #expect(trees.count == 4)
         #expect(trees[0].isMain)
-        #expect(trees[0].directory == URL(fileURLWithPath: "/repo"))
+        // Spelled with the flavour, because the parser spells it too. A URL
+        // built without `isDirectory:` asks the filesystem, and `/repo` does
+        // not exist, so Foundation would call it a file and the two would
+        // compare unequal over a trailing slash — which is exactly the
+        // stat-dependent equality the parser stopped relying on.
+        #expect(trees[0].directory == URL(fileURLWithPath: "/repo", isDirectory: true))
         #expect(trees[0].branch == "main")
         #expect(trees[0].head == "1111111111111111111111111111111111111111")
         #expect(trees[1].isMain == false)

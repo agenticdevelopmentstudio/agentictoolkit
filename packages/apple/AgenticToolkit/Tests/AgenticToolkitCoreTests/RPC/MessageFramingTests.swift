@@ -162,6 +162,46 @@ struct MessageFramingTests {
         #expect(MessageFraming.newlineDelimited.frame(message) == message)
     }
 
+    // MARK: - Unframed
+
+    @Test("each chunk arrives as its own frame, byte-exactly and in order")
+    func unframedChunksPassStraightThrough() throws {
+        var decoder = MessageFramingDecoder(framing: .unframed)
+        var frames: [Data] = []
+        frames += try decoder.consume(Data("hel".utf8))
+        frames += try decoder.consume(Data("lo wor".utf8))
+        frames += try decoder.consume(Data("ld".utf8))
+        #expect(frames == [Data("hel".utf8), Data("lo wor".utf8), Data("ld".utf8)])
+        #expect(frames.reduce(Data(), +) == Data("hello world".utf8))
+    }
+
+    @Test("an empty chunk yields no frame")
+    func unframedEmptyChunkYieldsNoFrame() throws {
+        var decoder = MessageFramingDecoder(framing: .unframed)
+        #expect(try decoder.consume(Data()).isEmpty)
+    }
+
+    /// The defect this framing exists for: `git status --porcelain -z` on a
+    /// large repository is megabytes of NUL-separated records containing no
+    /// `0x0A` at all. Decoded as `.newlineDelimited` that is one frame past
+    /// the cap — the whole capture is thrown away and a correct answer is
+    /// reported as a framing error. With no delimiter to wait for there is
+    /// nothing to cap, and it simply decodes.
+    @Test("bytes far past maximumFrameBytes with no delimiter in them decode rather than throw")
+    func unframedDelimiterlessOutputPastTheCapDecodes() throws {
+        var decoder = MessageFramingDecoder(framing: .unframed)
+        let oversized = Data(repeating: 0x00, count: MessageFramingDecoder.maximumFrameBytes + 1)
+        let frames = try decoder.consume(oversized)
+        #expect(frames == [oversized])
+        #expect(try decoder.finish().isEmpty, "nothing was held back, so nothing is owed at the end")
+    }
+
+    @Test("frame(_:) adds no envelope")
+    func unframedFrameAddsNoEnvelope() {
+        let message = Data("no delimiter, no header\u{0}".utf8)
+        #expect(MessageFraming.unframed.frame(message) == message)
+    }
+
     // MARK: - Unbounded-buffer guard
 
     @Test("exceeding maximumFrameBytes throws the specific frameSizeExceeded(limit:) case, for newline framing")

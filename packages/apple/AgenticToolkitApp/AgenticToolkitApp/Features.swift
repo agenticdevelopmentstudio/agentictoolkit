@@ -83,13 +83,23 @@ class Features {
         }
     }
 
+    /// The synchronous half of shutdown: everything that can be done before
+    /// the process is allowed to go.
     func stop() {
         logger.info("Agentic Toolkit terminating")
-        let captured = AppFeatureRegistry.shared.features
-        Task {
-            for feature in captured { await feature.terminate() }
-        }
         AppFeatureRegistry.shared.stopAll()
+    }
+
+    /// The asynchronous half: every feature's pending writes, flushed.
+    ///
+    /// This used to be an un-awaited `Task` inside `stop()`, launched from a
+    /// synchronous `applicationWillTerminate(_:)` — so the process exited
+    /// before any of it ran and no feature's `terminate()` ever happened. It
+    /// is a separate method now because the delegate has to be able to await
+    /// it; `ApplicationShutdownCoordinator` is what holds the quit open while
+    /// it runs.
+    func terminate() async {
+        await AppFeatureRegistry.shared.terminateAll()
         logger.info("Agentic Toolkit shutdown complete")
     }
 }

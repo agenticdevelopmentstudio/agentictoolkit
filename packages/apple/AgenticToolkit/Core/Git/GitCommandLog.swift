@@ -61,23 +61,40 @@ public enum GitCommandLog {
     /// to protect one argument position.
     ///
     /// Today there is exactly one rule. `git config`'s arguments are
-    /// `[<flags>..., <key>, <value>]`: the key names a setting and is worth
+    /// `[<flags>..., <key>, <value>...]`: the key names a setting and is worth
     /// seeing, everything after it is the user's own data (`user.email`, a
-    /// signing key, a URL that may carry a token). So the first non-flag
-    /// argument is kept and every argument after it is redacted — "after the
-    /// key", not "is a value", so an argument that happens to begin with `-`
-    /// cannot slip through as a flag. `--list` and `--unset` forms have nothing
-    /// after their key and are untouched.
+    /// signing key, a URL that may carry a token).
+    ///
+    /// The key is found by asking what a key *is*
+    /// (`GitConfigEntry.isWellFormedKey`), not by taking the first argument
+    /// that does not begin with `-`. Those are not the same question, and the
+    /// difference leaked secrets: an argument beginning with `-` is not a
+    /// well-formed key, so `["--global", "-x.token", "s3cr3t"]` made the old
+    /// scan skip straight past it and call the *secret* the key — logging it
+    /// at `.public`. Anything that is neither a recognisable key nor a flag is
+    /// redacted, so the failure mode of a shape this rule has not met is a
+    /// missing argument in the log rather than a leaked one (`fail-fast`).
+    /// `--list` and `--unset` forms have nothing after their key and are
+    /// untouched.
     ///
     /// Expected additions as verbs arrive: `commit -m <message>` and any remote
     /// URL.
     static func redactedArguments(verb: String, arguments: [String]) -> [String] {
         guard verb == "config" else { return arguments }
-        guard let keyIndex = arguments.firstIndex(where: { !$0.hasPrefix("-") }) else {
-            return arguments
-        }
-        return arguments.enumerated().map { index, argument in
-            index > keyIndex ? "<redacted:\(argument.count)>" : argument
+        // What is tracked is the *position*, not whether a key was recognised.
+        // `git config`'s grammar puts the key at the first non-flag argument,
+        // so that position is spent whether or not what landed there looks
+        // like a key — and an unrecognised key that left the position open
+        // sent the value back through the key test, where
+        // `someone@example.com` is well formed enough to be kept and logged
+        // at `.public`. Passing the position once means the shapes this rule
+        // does not model cost a redacted argument, never a leaked one.
+        var keyPositionSpent = false
+        return arguments.map { argument in
+            if keyPositionSpent { return "<redacted:\(argument.count)>" }
+            if argument.hasPrefix("-") { return argument }
+            keyPositionSpent = true
+            return GitConfigEntry.isWellFormedKey(argument) ? argument : "<redacted:\(argument.count)>"
         }
     }
 }

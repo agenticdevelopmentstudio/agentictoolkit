@@ -79,6 +79,12 @@ final class ComposableTabsWorkingDirectoryTests: XCTestCase {
         project.persistTabs([initialTab], activeTabID: initialTab.id, enabledEdges: [.top])
 
         let windowController = ComposableTabsWindowController(project: project)
+        // Closed before the test returns, and not merely for tidiness: a shown
+        // window keeps laying out, and every layout arms a debounced persist
+        // whose work item outlives this method. `tearDown` deletes the database
+        // underneath it, so the stragglers landed on a file that was gone.
+        // `windowWillClose(_:)` is what settles them.
+        defer { windowController.close() }
         windowController.showWindow(nil)
 
         guard let content = windowController.window?.contentViewController,

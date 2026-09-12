@@ -70,6 +70,39 @@ struct GitStatusParserTests {
         #expect(status.files.count == 2)
     }
 
+    @Test("a copy is recorded under the new path, not dropped")
+    func copyIsRecordedUnderTheNewPath() {
+        // `status.renames = copies` makes `C` records routine. They carry an
+        // origin field exactly as a rename does, and that field was already
+        // consumed — but no status was ever assigned, so a copied file was
+        // parsed and then silently thrown away.
+        let status = GitStatus.parse(porcelain: "C  copy.txt\u{0}original.txt\u{0} M kept.txt\u{0}")
+        #expect(status.files["copy.txt"] == .copied)
+        #expect(status.files["original.txt"] == nil)
+        #expect(status.files["kept.txt"] == .modified)
+    }
+
+    @Test("both-added and both-deleted are conflicts, not an add and a delete")
+    func bothAddedAndBothDeletedAreConflicts() {
+        // Unmerged is a property of the *pair*: `git status` documents seven
+        // of them, and only five contain a `U`. `AA` and `DD` used to fall
+        // through to the add/delete rungs and badge a file in the middle of a
+        // conflict as an ordinary add or delete — taking every ancestor
+        // directory's roll-up with it.
+        let status = GitStatus.parse(porcelain: "AA a/both-added.txt\u{0}DD b/both-deleted.txt\u{0}")
+        #expect(status.files["a/both-added.txt"] == .conflicted)
+        #expect(status.files["b/both-deleted.txt"] == .conflicted)
+        #expect(status.directories["a"] == .conflicted)
+        #expect(status.directories["b"] == .conflicted)
+    }
+
+    @Test("an ordinary add and delete are still an add and a delete")
+    func ordinaryAddAndDeleteAreUnaffected() {
+        let status = GitStatus.parse(porcelain: "A  added.txt\u{0}D  deleted.txt\u{0}")
+        #expect(status.files["added.txt"] == .added)
+        #expect(status.files["deleted.txt"] == .deleted)
+    }
+
     @Test("a non-ASCII path is keyed exactly, with no C-quoting")
     func nonASCIIPathIsKeyedExactly() {
         // Without `-z`, `core.quotePath` would C-quote this as

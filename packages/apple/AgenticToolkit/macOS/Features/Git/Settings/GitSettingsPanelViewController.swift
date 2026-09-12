@@ -38,7 +38,16 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
     private let client: GitClient
     private let configTable = GitGlobalConfigTableView()
     private var executableObserver: UserSettingObserver<String>?
-    private var reloadTask: Task<Void, Never>?
+
+    /// Not `private`: every drain of the write queue ends in a reload, and a
+    /// test that wants to know what the *user* is left looking at has to let
+    /// that reload finish first.
+    var reloadTask: Task<Void, Never>?
+
+    /// What the config table is showing right now, as opposed to what was
+    /// most recently handed to `showError` — the two used to diverge, which
+    /// is the whole point of reading it back.
+    var configErrorMessage: String { configTable.errorLabel.stringValue }
 
     /// Global-configuration writes queued from the table, in the order they
     /// were fired. A rename in `GitGlobalConfigTableView` fires `onRename`,
@@ -71,9 +80,16 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
     /// The most recent error message `processNextWriteIfNeeded`'s catch
     /// block passed to `configTable.showError`, mirrored here (not `private`)
     /// so a test can assert that call happened without reading the table's
-    /// own label. `nil` until the first write fails; never cleared back to
-    /// `nil` afterward (only `configTable`'s own label is cleared, by a
-    /// successful `reloadGlobalConfig`).
+    /// own label. `nil` until a write fails, and back to `nil` the moment a
+    /// write succeeds.
+    ///
+    /// It is also what the message *survives on*. Every drain ends in
+    /// `reloadGlobalConfig`, and that read succeeds even when the write before
+    /// it failed — `git config --list` has no idea a `--replace-all` was
+    /// rejected — so its success path used to blank the label unconditionally,
+    /// one run loop after the failure was shown. The user was told their
+    /// setting was lost for a few milliseconds, by a panel that then redrew
+    /// the unchanged value with no error in sight.
     var lastWriteErrorMessage: String?
 
     public convenience init() {
@@ -308,7 +324,10 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
                 let entries = try await client.globalConfig()
                 guard !Task.isCancelled else { return }
                 self?.configTable.setEntries(entries)
-                self?.configTable.showError("")
+                // A successful read is not evidence the write that preceded it
+                // worked, so it clears the label only when nothing is standing
+                // on it.
+                self?.configTable.showError(self?.lastWriteErrorMessage ?? "")
             } catch {
                 guard !Task.isCancelled else { return }
                 self?.configTable.showError(error.localizedDescription)
@@ -332,6 +351,7 @@ public final class GitSettingsPanelViewController: ComposableSettings.SettingsPa
         Task { [weak self] in
             do {
                 try await operation()
+                self?.lastWriteErrorMessage = nil
             } catch {
                 self?.lastWriteErrorMessage = error.localizedDescription
                 self?.configTable.showError(error.localizedDescription)

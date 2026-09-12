@@ -25,6 +25,9 @@ public final class FileTreeManager: ObservableObject {
     private var pendingGitRefresh: DispatchWorkItem?
     private var pendingIDEDetection: DispatchWorkItem?
     private var cancellables = Set<AnyCancellable>()
+    /// Keeps this manager registered with the shared provider. Releasing it
+    /// unregisters, so the registration cannot outlive the manager.
+    private var gitStatusObservation: GitStatusObservation?
 
     public init(
         repoRootURL: URL,
@@ -47,6 +50,14 @@ public final class FileTreeManager: ObservableObject {
         )
 
         coordinator.ignorePatterns = ignorePatterns
+
+        // One provider serves every pane of a checkout and broadcasts to all
+        // of them, so this manager registers once and is told about every
+        // refresh — including ones some other pane, or the `Refresh Status`
+        // command, asked for.
+        gitStatusObservation = self.gitStatusProvider.observe { [weak self] result in
+            self?.apply(result)
+        }
 
         // Forward coordinator's published properties
         coordinator.$rootNode
@@ -113,17 +124,25 @@ public final class FileTreeManager: ObservableObject {
     }
 
     public func refreshGitStatus() {
-        gitStatusProvider.refresh { [weak self] fileStatuses, dirStatuses in
-            Task { @MainActor in
-                guard let self = self, let root = self.rootNode else { return }
-                self.applyGitStatuses(
-                    node: root,
-                    repoPath: self.repoRootURL.path,
-                    fileStatuses: fileStatuses,
-                    dirStatuses: dirStatuses
-                )
-            }
-        }
+        gitStatusProvider.refresh()
+    }
+
+    /// Applies one broadcast result to the tree.
+    ///
+    /// `unavailable` deliberately changes nothing. An empty status and a
+    /// failed one are indistinguishable once they reach `applyGitStatuses`,
+    /// which assigns `node.gitStatus` unconditionally and draws no badge for
+    /// `nil` — so treating "we could not ask git" as "nothing is modified"
+    /// repaints a whole dirty tree as clean. The last good status is the
+    /// honest answer to "we do not know"; the failure is in the log.
+    private func apply(_ result: GitStatusRefreshResult) {
+        guard case .status(let status) = result, let root = rootNode else { return }
+        applyGitStatuses(
+            node: root,
+            repoPath: repoRootURL.path,
+            fileStatuses: status.files,
+            dirStatuses: status.directories
+        )
     }
 
     private func applyGitStatuses(

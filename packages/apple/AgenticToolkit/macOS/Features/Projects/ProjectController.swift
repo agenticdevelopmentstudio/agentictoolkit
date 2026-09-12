@@ -31,7 +31,12 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// the path that writes, the other on the path that does not.
     public var onTabItemsNeedRefresh: (() -> Void)?
 
-    private let gitClient: GitClient
+    /// The project's client, not a second one of this controller's own: the
+    /// workspace mints the per-directory objects (status providers) that these
+    /// checkouts are read into, and two injected clients for one project is one
+    /// more than can be kept in step (`dry`).
+    private var gitClient: GitClient { workspace.gitClient }
+
     private let commandRegistry: CommandRegistry?
 
     /// The reconcile currently running, if any. `open()` and
@@ -64,9 +69,8 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
     /// it would be a second lifecycle to keep in step with this one.
     private(set) var isClosed = false
 
-    public init(workspace: ProjectWorkspace, gitClient: GitClient, commandRegistry: CommandRegistry?) {
+    public init(workspace: ProjectWorkspace, commandRegistry: CommandRegistry?) {
         self.workspace = workspace
-        self.gitClient = gitClient
         self.commandRegistry = commandRegistry
     }
 
@@ -266,7 +270,11 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
         var next: [ProjectCheckout: BranchController] = [:]
         for checkout in checkouts {
             let existing = branchControllers.first { $0.key.directory == checkout.directory }?.value
-            let controller = existing ?? BranchController(checkout: checkout, gitClient: gitClient)
+            let controller = existing ?? BranchController(
+                checkout: checkout,
+                gitClient: gitClient,
+                statusProvider: workspace.gitStatusProvider(forDirectory: checkout.directory)
+            )
             next[checkout] = controller
             if existing == nil {
                 for command in controller.commands {
@@ -279,9 +287,6 @@ public final class ProjectController: ComposableTabsTabItemDataSource {
             unregisterCommands(of: controller)
         }
         branchControllers = next
-        workspace.gitStatusProviderResolver = { [weak self] directory in
-            self?.branchController(forDirectory: directory)?.statusProvider
-        }
     }
 
     /// `commands` is computed, but every id in it is derived from

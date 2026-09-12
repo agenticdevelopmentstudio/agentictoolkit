@@ -48,6 +48,30 @@ struct GitCommandLogTests {
         #expect(redacted == ["--global", "core.pager", "<redacted:20>", "<redacted:8>"])
     }
 
+    @Test("a dash-leading key does not hand the log the secret that follows it")
+    func aDashLeadingKeyDoesNotLeakItsValue() {
+        // The old scan took the first argument that did not begin with `-` to
+        // be the key. A key beginning with `-` is not a key at all, so that
+        // scan walked past it and landed on the *value* — which was then kept
+        // and logged at `.public`, in clear text.
+        let redacted = GitCommandLog.redactedArguments(
+            verb: "config",
+            arguments: ["--global", "-x.token", "s3cr3t"]
+        )
+        #expect(redacted == ["--global", "-x.token", "<redacted:6>"])
+    }
+
+    @Test("an argument that is neither a flag nor a key is redacted, not kept")
+    func anUnrecognisedArgumentIsRedacted() {
+        // A bare word is not a well-formed config key, so this parser has met
+        // a shape it does not model. The safe reading is that it is data.
+        let redacted = GitCommandLog.redactedArguments(
+            verb: "config",
+            arguments: ["--global", "email", "someone@example.com"]
+        )
+        #expect(redacted == ["--global", "<redacted:5>", "<redacted:19>"])
+    }
+
     @Test("an empty argument list is returned as-is")
     func emptyArguments() {
         #expect(GitCommandLog.redactedArguments(verb: "config", arguments: []).isEmpty)

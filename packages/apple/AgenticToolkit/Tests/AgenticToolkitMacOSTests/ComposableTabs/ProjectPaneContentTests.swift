@@ -332,6 +332,36 @@ final class ProjectPaneContentTests: XCTestCase {
         )
     }
 
+    /// The fourth path, and the one a user reaches without closing anything:
+    /// `rebuild(from:)` re-hosting a tree into a shape with fewer panes.
+    ///
+    /// It runs on every tab but the front one whenever the front tab's
+    /// arrangement shrinks (`mirrorArrangement`), and it reuses panes by node
+    /// id — so a pane the new shape has no slot for was simply left out of the
+    /// new tree and dropped, with nothing ever telling it to let go.
+    func testRebuildingIntoASmallerShapeTearsDownThePanesItLeavesOut() throws {
+        try installTeardownSpyLayout()
+        let kept = makeLeaf(terminal)
+        let dropped = makeLeaf(terminal)
+        let root = ComposableTabsViewController(
+            nodeID: UUID(),
+            axis: .horizontal,
+            first: kept,
+            second: dropped,
+            project: project,
+            workingDirectory: project.directoryURL,
+            isRoot: true
+        )
+        _ = root.view
+        let keptSpy = try XCTUnwrap(spies(in: [kept]).first)
+        let droppedSpy = try XCTUnwrap(spies(in: [dropped]).first)
+
+        root.rebuild(from: .leaf(id: kept.nodeID, contentType: terminal))
+
+        XCTAssertEqual(droppedSpy.teardownCount, 1, "a pane the new shape leaves out must be told it is gone")
+        XCTAssertEqual(keptSpy.teardownCount, 0, "the pane that was re-hosted is still live")
+    }
+
     // MARK: - Helpers
 
     /// The teardown spies behind `panes`, with each pane's view forced to load

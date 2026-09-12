@@ -75,11 +75,11 @@ final class ProjectControllerTests: XCTestCase {
     /// A registered workspace over the throwaway repo. Same database shape as
     /// `ProjectWindowTestSupport.makeProject`, but rooted at a real git
     /// checkout so `worktrees(in:)` has something to list.
-    private func makeWorkspace() throws -> ProjectWorkspace {
+    private func makeWorkspace(gitClient: GitClient = GitClient(configuration: .default)) throws -> ProjectWorkspace {
         let database = try ProjectDatabase(path: repoRoot.appendingPathComponent(".test-project.db").path)
         let repo = GitRepo(path: repoRoot.path, name: "fixture")
         try database.insert(repo)
-        return ProjectWorkspace(repo: repo, database: database)
+        return ProjectWorkspace(repo: repo, database: database, gitClient: gitClient)
     }
 
     private func makeController(
@@ -87,8 +87,7 @@ final class ProjectControllerTests: XCTestCase {
         gitClient: GitClient = GitClient(configuration: .default)
     ) throws -> ProjectController {
         ProjectController(
-            workspace: try makeWorkspace(),
-            gitClient: gitClient,
+            workspace: try makeWorkspace(gitClient: gitClient),
             commandRegistry: registry
         )
     }
@@ -103,7 +102,6 @@ final class ProjectControllerTests: XCTestCase {
         try database.insert(repo)
         return ProjectController(
             workspace: ProjectWorkspace(repo: repo, database: database),
-            gitClient: GitClient(configuration: .default),
             commandRegistry: registry
         )
     }
@@ -134,7 +132,6 @@ final class ProjectControllerTests: XCTestCase {
 
         let second = ProjectController(
             workspace: first.workspace,
-            gitClient: GitClient(configuration: .default),
             commandRegistry: nil
         )
         await second.open()
@@ -272,14 +269,32 @@ final class ProjectControllerTests: XCTestCase {
         XCTAssertTrue(registry.allCommands.filter { $0.id.hasPrefix("branch.action.") }.isEmpty)
     }
 
-    func testTheStatusProviderResolverAnswersPerCheckout() async throws {
+    func testEachCheckoutGetsItsOwnStatusProvider() async throws {
         let controller = try makeController()
         await controller.open()
-        let main = try XCTUnwrap(controller.workspace.gitStatusProvider(forDirectory: repoRoot))
-        let feature = try XCTUnwrap(controller.workspace.gitStatusProvider(forDirectory: worktreeRoot))
+        let main = controller.workspace.gitStatusProvider(forDirectory: repoRoot)
+        let feature = controller.workspace.gitStatusProvider(forDirectory: worktreeRoot)
         XCTAssertEqual(main.repoRoot, repoRoot)
         XCTAssertEqual(feature.repoRoot, worktreeRoot)
-        XCTAssertNil(controller.workspace.gitStatusProvider(forDirectory: URL(fileURLWithPath: "/somewhere/else")))
+        XCTAssertFalse(main === feature)
+    }
+
+    /// The pane and the branch controller must end up on the *same* provider.
+    ///
+    /// This is the regression the per-directory cache exists for. A pane is
+    /// built while the window installs its stored tabs — before `open()`'s `git
+    /// worktree list` has returned, so before any `BranchController` exists —
+    /// and `FileBrowserViewController` keeps whatever provider it was handed at
+    /// init. Asking here *before* `open()` stands in for that pane; asking the
+    /// branch controller afterwards stands in for `Refresh Status`.
+    func testAProviderTakenBeforeTheFirstScanIsTheOneTheBranchControllerShares() async throws {
+        let controller = try makeController()
+        let takenByAPane = controller.workspace.gitStatusProvider(forDirectory: repoRoot)
+
+        await controller.open()
+
+        let branch = try XCTUnwrap(controller.branchController(forDirectory: repoRoot))
+        XCTAssertTrue(branch.statusProvider === takenByAPane)
     }
 
     /// Ruling B′: `branchController(forDirectory:)` resolves symlinks in the

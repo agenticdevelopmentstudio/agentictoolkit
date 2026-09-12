@@ -30,7 +30,11 @@ final class BranchControllerTests: XCTestCase {
 
     private func makeController(branch: String? = "main") -> BranchController {
         let checkout = ProjectCheckout(directory: tempRoot, branch: branch, isMain: true)
-        return BranchController(checkout: checkout, gitClient: GitClient(configuration: .default))
+        return BranchController(
+            checkout: checkout,
+            gitClient: GitClient(configuration: .default),
+            statusProvider: GitStatusProvider(repoRoot: tempRoot)
+        )
     }
 
     func testAVendedPaneShowsThePlaceholdersAndTheCheckout() {
@@ -45,6 +49,24 @@ final class BranchControllerTests: XCTestCase {
         XCTAssertTrue(pane.paneView.summaryLabel.isHidden)
         XCTAssertTrue(pane.dataSource === controller)
         XCTAssertTrue(pane.delegate === controller)
+    }
+
+    /// `refreshTabItems()` re-asks for every tab's item on every checkout scan
+    /// and every branch refresh, so a fresh controller per ask meant a view
+    /// controller built and discarded per tab per edge per scan — with the
+    /// discards still in `panes`, reloaded alongside the live ones. A tab is
+    /// one pane per edge, not one per question about it.
+    func testAskingTwiceForTheSameTabsPaneGivesBackTheSameOne() {
+        let controller = makeController()
+        let tab = UUID()
+
+        let first = controller.makeTabPane(edge: .left, tabID: tab)
+        let second = controller.makeTabPane(edge: .left, tabID: tab)
+
+        XCTAssertTrue(first === second)
+        // A different edge, and a different tab, are genuinely different panes.
+        XCTAssertFalse(first === controller.makeTabPane(edge: .right, tabID: tab))
+        XCTAssertFalse(first === controller.makeTabPane(edge: .left, tabID: UUID()))
     }
 
     func testRefreshReadsTheBranchFromGitAndReloadsPanes() async throws {
@@ -84,7 +106,8 @@ final class BranchControllerTests: XCTestCase {
         let main = makeController()
         let feature = BranchController(
             checkout: ProjectCheckout(directory: otherRoot, branch: "feature", isMain: false),
-            gitClient: GitClient(configuration: .default)
+            gitClient: GitClient(configuration: .default),
+            statusProvider: GitStatusProvider(repoRoot: otherRoot)
         )
 
         let rows = (main.commands + feature.commands).map { "\($0.title)\t\($0.category)" }

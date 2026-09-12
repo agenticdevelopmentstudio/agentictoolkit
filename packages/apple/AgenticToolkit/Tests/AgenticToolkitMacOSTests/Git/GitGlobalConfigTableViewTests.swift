@@ -35,6 +35,30 @@ final class GitGlobalConfigTableViewTests: XCTestCase {
         XCTAssertEqual(removed, "alias.st")
     }
 
+    /// And the row goes with it. A deleted setting that stays on screen, still
+    /// selected under a live minus button, invites the second press that
+    /// unsets a key git no longer has — which fails, and puts an error in
+    /// front of the user for a deletion that worked.
+    func testRemovingTheSelectedEntryTakesItsRowAndTheButtonWithIt() {
+        let view = GitGlobalConfigTableView()
+        view.setEntries([
+            GitConfigEntry(key: "alias.st", value: "status"),
+            GitConfigEntry(key: "user.name", value: "Mike")
+        ])
+        var unsets: [String] = []
+        view.onUnset = { unsets.append($0) }
+        view.tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+
+        view.removeSelectedEntry()
+        // The impatient second press, before the panel's reload lands.
+        view.removeSelectedEntry()
+
+        XCTAssertEqual(unsets, ["alias.st"], "the deleted key must not be unset twice")
+        XCTAssertEqual(view.entries.map(\.key), ["user.name"])
+        XCTAssertEqual(view.tableView.numberOfRows, 1)
+        XCTAssertFalse(view.removeButton.isEnabled, "nothing is selected, so there is nothing to remove")
+    }
+
     func testBeginAddingEntryAppendsAnEmptyRow() {
         let view = GitGlobalConfigTableView()
         view.setEntries([])

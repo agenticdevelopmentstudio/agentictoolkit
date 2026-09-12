@@ -171,6 +171,39 @@ final class ComposableTabsArrangementTests: XCTestCase {
         XCTAssertEqual(Set(reloaded.tabs.flatMap { ids(of: $0.root) }).count, 10)
     }
 
+    /// A reshape that retires a node id must retire the focus that named it.
+    ///
+    /// `project_tabs.focused_node_id` is a foreign key into `layout_nodes` and
+    /// `saveTabs` writes every tab in one transaction, so one tab pointing at a
+    /// node the reshape dropped failed the *whole* write with `FOREIGN KEY
+    /// constraint failed` — which `persistTabs` logs and swallows. Nothing was
+    /// visibly wrong at the time; the project's tabs simply stopped being saved,
+    /// that session and every one after it.
+    func testAFocusTheReshapeRetiresIsClearedRatherThanBreakingEverySave() throws {
+        let project = try makeProject()
+        let retired = LayoutNode.leaf(contentType: .placeholder)
+        let wide = LayoutNode.split(
+            orientation: .horizontal,
+            first: .leaf(contentType: .placeholder),
+            second: retired
+        )
+        // The active tab is the narrow one, so a single leaf is the arrangement
+        // every tab comes back in — and `retired.id` has no slot to land in.
+        let narrow = TabRecord(edge: .top, title: "alpha", root: .leaf(contentType: .placeholder))
+        let split = TabRecord(edge: .top, title: "beta", root: wide, focusedNodeID: retired.id)
+        project.persistTabs([narrow, split], activeTabID: narrow.id, enabledEdges: [.top])
+
+        let reloaded = ProjectWorkspace(repo: project.repo, database: project.database)
+        let initial = reloaded.initialTabs()
+        XCTAssertNil(initial.tabs.first { $0.title == "beta" }?.focusedNodeID)
+
+        reloaded.persistTabs(initial.tabs, activeTabID: initial.activeTabID, enabledEdges: initial.enabledEdges)
+
+        let stored = try XCTUnwrap(reloaded.storedTabs()).tabs
+        XCTAssertNil(stored.first { $0.title == "beta" }?.focusedNodeID)
+        XCTAssertEqual(Set(stored.map { shape(of: $0.root) }).count, 1, "the reshape must have been saved")
+    }
+
     // MARK: - Helpers
 
     private func makeProject() throws -> ProjectWorkspace {

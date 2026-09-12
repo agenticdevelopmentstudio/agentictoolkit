@@ -102,6 +102,33 @@ final class MultiTabbedActiveTabTests: XCTestCase {
         XCTAssertEqual(delegate.reports.last?.edge, .bottom)
     }
 
+    /// And when the fallback *does* have somewhere to go, it goes to the same
+    /// tab — the sibling of the group that was active — not to whatever
+    /// happens to sit first on the first enabled edge.
+    ///
+    /// Turning an edge off is a decision about where tabs are drawn. Landing
+    /// the user on an unrelated group changes the panes in front of them for a
+    /// gesture that said nothing about which checkout they wanted.
+    func testDisablingAnEdgeKeepsTheActiveGroupRatherThanJumpingToAnotherOne() {
+        let (controller, delegate) = makeController()
+        controller.setEdgeEnabled(.bottom, true)
+        let group = UUID()
+        // "Other" is first on the bottom edge, so the old fallback picked it.
+        let other = makeTab("Other")
+        let top = makeTab("Mine", group: group)
+        let bottom = makeTab("Mine", group: group)
+        controller.addTab(other, on: .bottom)
+        controller.addTab(bottom, on: .bottom)
+        controller.addTab(top, on: .top)
+        controller.selectTab(id: top.id, on: .top)
+
+        controller.setEdgeEnabled(.top, false)
+
+        XCTAssertEqual(controller.activeTabID, bottom.id)
+        XCTAssertEqual(delegate.reports.last?.id, bottom.id)
+        XCTAssertEqual(delegate.reports.last?.edge, .bottom)
+    }
+
     /// One thing the user thinks of as "a tab" has a member on each enabled
     /// edge, so selecting any member has to leave every sibling looking
     /// selected too. Exactly one of them is the *active* tab — the one whose

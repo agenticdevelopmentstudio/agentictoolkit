@@ -63,6 +63,41 @@ final class ProjectDatabaseWorkingDirectoryTests: XCTestCase {
         XCTAssertEqual(loaded.tabs.first?.workingDirectory?.path, worktree.path)
     }
 
+    /// A stored working directory is only ever useful if it can be *matched*:
+    /// `ProjectController.branchController(forDirectory:)` compares it to a
+    /// `ProjectCheckout.directory`, and a tab whose match misses falls back to
+    /// a plain title with no branch pane behind it, for good.
+    ///
+    /// `URL(fileURLWithPath:)` decides the trailing slash by looking at the
+    /// disk, so a directory that is absent at load time — an unmounted volume,
+    /// a worktree mid-move — came back as a URL that could not equal the
+    /// checkout even after the directory returned. Both sides must name the
+    /// flavour instead of asking the file system.
+    func testAWorkingDirectoryThatIsNotOnDiskStillEqualsItsCheckout() throws {
+        let database = try makeDatabase()
+        let repo = try registerRepo(in: database)
+        let absent = tempRoot.appendingPathComponent("gone-for-now")
+        let leaf = LayoutNode.leaf(contentType: ComposableTabsViewID("test.editor"), paneLabel: nil)
+        let record = TabRecord(edge: .left, title: "feature", root: leaf, workingDirectory: absent)
+        try database.saveTabs([record], activeTabID: record.id, enabledEdges: [.left], repoID: repo.id)
+
+        let loaded = try database.loadTabs(repoID: repo.id)
+        // Built the way the running app builds it — out of `git worktree list`
+        // — so this compares the two URLs production actually compares.
+        let porcelain = """
+            worktree \(absent.path)
+            HEAD 0000000000000000000000000000000000000000
+            branch refs/heads/feature
+
+            """
+        let checkout = try XCTUnwrap(ProjectCheckout.checkouts(from: GitWorktree.parse(porcelain: porcelain)).first)
+        XCTAssertEqual(
+            loaded.tabs.first?.workingDirectory?.resolvingSymlinksInPath(),
+            checkout.directory,
+            "a tab must find its checkout whether or not the directory is mounted right now"
+        )
+    }
+
     func testAMissingWorkingDirectoryLoadsAsNil() throws {
         let database = try makeDatabase()
         let repo = try registerRepo(in: database)

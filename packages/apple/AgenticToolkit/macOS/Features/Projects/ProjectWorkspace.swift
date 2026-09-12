@@ -35,23 +35,66 @@ public final class ProjectWorkspace {
     /// parameter would spawn `sourcekit-lsp` from every one of those.
     public let languageServices: ProjectLanguageServices?
 
-    private var nextPaneNumber = 1
-    private var fileBrowserDirectoriesByPrimary: [URL: FileBrowserDirectories] = [:]
+    /// The git client every per-directory object this project vends is built
+    /// on, so a host that injects a configured client gets it everywhere
+    /// (`dependency-injection`).
+    public let gitClient: GitClient
 
-    /// Set by the project controller so panes get the status provider of the
-    /// branch that owns their directory instead of building their own.
-    public var gitStatusProviderResolver: ((URL) -> GitStatusProvider?)?
+    /// A `[URL: Object]` whose entries live exactly as long as something else
+    /// holds them.
+    ///
+    /// The project mints one object per directory and hands it out; the panes
+    /// and controllers that asked are what keep it alive. Holding the values
+    /// strongly meant a project accumulated one `FileBrowserDirectories` and
+    /// one `GitStatusProvider` for every directory anything had *ever* asked
+    /// about — every worktree visited, every checkout opened and closed again
+    /// — for as long as the project stayed open, each one still observing a
+    /// directory with nothing left on screen to show for it.
+    ///
+    /// Weak values end an entry with its last holder without weakening the
+    /// invariant the cache exists for: while *anything* is still holding the
+    /// object for a directory, everyone asking about that directory is handed
+    /// that same object.
+    private struct WeakCache<Object: AnyObject> {
+        private struct Box {
+            weak var object: Object?
+        }
+
+        private var boxes: [URL: Box] = [:]
+
+        /// Every value still held somewhere, keyed as it was stored.
+        var liveEntries: [(key: URL, object: Object)] {
+            boxes.compactMap { key, box in box.object.map { (key, $0) } }
+        }
+
+        subscript(key: URL) -> Object? {
+            get { boxes[key]?.object }
+            set {
+                // A dead entry's key goes with it rather than staying behind
+                // as an empty box: nothing here may grow with the number of
+                // directories a long-lived project has visited.
+                boxes = boxes.filter { $0.value.object != nil }
+                boxes[key] = newValue.map(Box.init(object:))
+            }
+        }
+    }
+
+    private var nextPaneNumber = 1
+    private var fileBrowserDirectoriesByPrimary = WeakCache<FileBrowserDirectories>()
+    private var gitStatusProvidersByRoot = WeakCache<GitStatusProvider>()
 
     public init(
         repo: GitRepo,
         database: ProjectDatabase,
         layout: ComposableTabsLayout? = nil,
-        languageServices: ProjectLanguageServices? = nil
+        languageServices: ProjectLanguageServices? = nil,
+        gitClient: GitClient = .shared
     ) {
         self.repo = repo
         self.database = database
         self.layout = layout ?? ComposableTabsLayout.current ?? ComposableTabsLayout.placeholderOnly()
         self.languageServices = languageServices
+        self.gitClient = gitClient
     }
 
     public var id: UUID { repo.id }
@@ -129,9 +172,23 @@ public final class ProjectWorkspace {
         // panes it remembers come back with it.
         let arrangement = ProjectTabReconciler.arrangement(of: repaired, activeTabID: stored.activeTabID)
         let shared = repaired.map { record -> TabRecord in
-            guard let arrangement else { return record }
             var record = record
-            record.root = record.root.reshaped(toMatch: arrangement)
+            if let arrangement {
+                record.root = record.root.reshaped(toMatch: arrangement)
+            }
+            // Both rewrites above can retire a node id: the spec repair drops a
+            // pane the spec no longer allows, and a reshape onto a smaller
+            // arrangement has fewer slots than the tab had ids. The remembered
+            // focus is not rewritten with them, and `project_tabs
+            // .focused_node_id` is a foreign key into `layout_nodes` — so one
+            // stale id made the *entire* `saveTabs` transaction fail with
+            // `FOREIGN KEY constraint failed`, which `persistTabs` logs and
+            // swallows. The symptom was never a missing focus ring: it was this
+            // project's tabs silently never being saved again, for the rest of
+            // the session and every session after it.
+            if let focused = record.focusedNodeID, !record.root.leafIDs.contains(focused) {
+                record.focusedNodeID = nil
+            }
             return record
         }
         return (shared, stored.activeTabID ?? shared[0].id, stored.enabledEdges)
@@ -276,6 +333,12 @@ public final class ProjectWorkspace {
     /// added in one pane was silently dropped the next time another pane saved
     /// (`dry` — one representation of the project's roots). Which root a pane's
     /// footer is aimed at stays per-pane, on `FileBrowserSelection`.
+    ///
+    /// The cache holds it weakly, so the caller owns what it is handed —
+    /// `FileBrowserViewController.directories` is the reference that keeps a
+    /// pane's roots alive. Closing the last pane on a directory therefore
+    /// forgets that directory, which is the point: a project that has been
+    /// open all day has visited far more directories than it is showing.
     public func fileBrowserDirectories(primary: URL) -> FileBrowserDirectories {
         // Resolved, like every other directory identity on this path: the same
         // folder arrives here both as a checkout directory git already
@@ -328,7 +391,7 @@ public final class ProjectWorkspace {
         }
 
         persistProjectDirectories(merged)
-        for (key, directories) in fileBrowserDirectoriesByPrimary where key != primary {
+        for (key, directories) in fileBrowserDirectoriesByPrimary.liveEntries where key != primary {
             directories.replaceAdditional(with: merged)
         }
     }
@@ -345,11 +408,37 @@ public final class ProjectWorkspace {
 
     // MARK: - Git status
 
-    /// The status provider for panes working in `directory`, or `nil` when the
-    /// project controller has not resolved one (a directory outside any known
-    /// worktree, or a project with no resolver wired yet).
-    public func gitStatusProvider(forDirectory directory: URL) -> GitStatusProvider? {
-        gitStatusProviderResolver?(directory.resolvingSymlinksInPath())
+    /// The status provider for everything working in `directory` — one object
+    /// per resolved directory, minted on demand and held weakly for as long as
+    /// its holders live, exactly as `fileBrowserDirectories(primary:)` mints
+    /// its roots. A provider outlives the pane it was first asked for whenever
+    /// the checkout's `BranchController` still holds it, and both of them
+    /// outlive nothing at all.
+    ///
+    /// The project owns these, not the branch controllers, because of *when*
+    /// they are asked for. A pane is built while the window installs its stored
+    /// tabs, which happens before the first `git worktree list` has returned and
+    /// so before any `BranchController` exists; a provider resolved through the
+    /// controllers therefore answered `nil` for every pane the window opened
+    /// with, and `FileBrowserViewController` latches what it is handed at init
+    /// and never asks again — so those panes went on running a private provider
+    /// of their own for the rest of the session, and the `Refresh Status`
+    /// command reached a different object than the one their badges came from.
+    /// Minting here removes the ordering question rather than moving it: the
+    /// pane and the `BranchController` that appears a moment later ask the same
+    /// question of the same cache and get the same live object.
+    public func gitStatusProvider(forDirectory directory: URL) -> GitStatusProvider {
+        // Resolved for the same reason `fileBrowserDirectories(primary:)`
+        // resolves: a checkout directory arrives already resolved from `git
+        // worktree list`, the project's own directory arrives as the user
+        // opened it, and a lexical key would hand one folder two providers.
+        let key = directory.resolvingSymlinksInPath()
+        if let cached = gitStatusProvidersByRoot[key] {
+            return cached
+        }
+        let provider = GitStatusProvider(repoRoot: key, client: gitClient)
+        gitStatusProvidersByRoot[key] = provider
+        return provider
     }
 }
 

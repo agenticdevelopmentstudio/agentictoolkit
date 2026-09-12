@@ -14,6 +14,17 @@ public struct GitStatus: Sendable, Equatable {
 
     public static let empty = GitStatus(files: [:], directories: [:])
 
+    /// The seven `XY` pairs `git status` documents as *unmerged* — a file in
+    /// the middle of a conflict. A conflict is a property of the pair, not of
+    /// either column: testing for a `U` in one of them alone missed `AA`
+    /// (both added) and `DD` (both deleted), which then fell through to the
+    /// add/delete rungs of the ladder below and were badged as an ordinary
+    /// add or delete. The directory roll-up ranks by `GitFileStatus.priority`,
+    /// so every ancestor directory lost the conflict marker too.
+    private static let unmergedPairs: Set<String> = [
+        "DD", "AU", "UD", "UA", "DU", "AA", "UU"
+    ]
+
     /// Parses `git status --porcelain=v1 -z` output into file and directory
     /// status maps. `-z` NUL-delimits every record instead of newline-
     /// terminating it, which keeps `core.quotePath`'s C-quoting off entirely
@@ -91,17 +102,20 @@ public struct GitStatus: Sendable, Equatable {
                   !filePath.isEmpty else { continue }
 
             if isRename || isCopy {
-                if isRename {
-                    fileStatuses[filePath] = .renamed
-                }
+                // A copy is its own status, not nothing. Both shapes key
+                // under the *new* path and both consume an origin field, so
+                // they share this branch — but only a rename used to be
+                // recorded, and a `C` record (which `status.renames=copies`
+                // makes routine) was parsed, consumed, and then dropped.
+                fileStatuses[filePath] = isRename ? .renamed : .copied
                 continue
             }
 
             let status: GitFileStatus?
-            if indexStatus == "?" || workTreeStatus == "?" {
-                status = .untracked
-            } else if indexStatus == "U" || workTreeStatus == "U" {
+            if Self.unmergedPairs.contains(String([indexStatus, workTreeStatus])) {
                 status = .conflicted
+            } else if indexStatus == "?" || workTreeStatus == "?" {
+                status = .untracked
             } else if indexStatus == "!" || workTreeStatus == "!" {
                 status = .ignored
             } else if workTreeStatus == "M" || indexStatus == "M" {

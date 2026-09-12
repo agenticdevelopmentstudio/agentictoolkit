@@ -109,6 +109,18 @@ public final class GitGlobalConfigTableView: NSView {
         tableView.editColumn(0, row: row, with: nil, select: true)
     }
 
+    /// Deletes the selected setting, and takes its row with it.
+    ///
+    /// The row goes now rather than when the panel's reload comes back. Until
+    /// it did, a deleted setting stayed on screen *and* stayed selected with
+    /// the minus button live, so a second press — the ordinary response to a
+    /// button that looks like it did nothing — queued a second unset of a key
+    /// git had already removed, and the user's reward for deleting a setting
+    /// successfully was an error message about it.
+    ///
+    /// Nothing is lost if the unset fails: every write ends in a reload that
+    /// reads git, not this table, so a setting that survived comes straight
+    /// back with the error beside it.
     public func removeSelectedEntry() {
         guard let key = selectedKey else { return }
         if key.isEmpty {
@@ -118,20 +130,23 @@ public final class GitGlobalConfigTableView: NSView {
             updateButtons()
             return
         }
+        entries.removeAll { $0.key == key }
+        tableView.deselectAll(nil)
+        tableView.reloadData()
+        updateButtons()
         onUnset?(key)
     }
 
-    /// A key `git config` will accept: shaped `section.name`, optionally
-    /// `section.subsection.name`. A bare word like `email` is rejected by
-    /// both `--unset` and a plain set, so it is refused here, before either
-    /// ever reaches git -- in particular before the destructive unset half
-    /// of a rename fires. This is a cheap, local first line of defense, not
-    /// the only one: `onRename`'s contract additionally has the panel
-    /// restore the old key/value if the *new* key is well-formed but the
-    /// set still fails for some other reason (a locked config file, a
-    /// permissions error, and so on) -- see that property's doc comment.
+    /// A key `git config` will accept, asked of the model that owns the
+    /// answer. Refusing a malformed key here, before either half of a rename
+    /// reaches git, is a cheap local first line of defense -- in particular it
+    /// fires before the destructive unset half. It is not the only one:
+    /// `onRename`'s contract additionally has the panel restore the old
+    /// key/value if the *new* key is well-formed but the set still fails for
+    /// some other reason (a locked config file, a permissions error, and so
+    /// on) -- see that property's doc comment.
     private static func isWellFormedKey(_ key: String) -> Bool {
-        key.contains(".")
+        GitConfigEntry.isWellFormedKey(key)
     }
 
     /// Applies one edited cell.

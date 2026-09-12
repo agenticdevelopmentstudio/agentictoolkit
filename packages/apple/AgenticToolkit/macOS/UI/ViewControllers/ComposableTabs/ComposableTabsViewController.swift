@@ -517,6 +517,29 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.thicknessPersistDelay, execute: work)
     }
 
+    /// Writes a divider the user has already let go of, instead of waiting out
+    /// the rest of the debounce.
+    ///
+    /// The 300 ms delay is there to collapse a gesture into one write, and the
+    /// gesture is over the moment the host says so. A closing window is the
+    /// case that matters: the pending item is about to be cancelled outright —
+    /// or to run against a controller nothing holds any more — so the divider
+    /// the user just dragged is lost for having been dragged too close to the
+    /// close. Nothing is written unless a persist was actually pending, and
+    /// `persistThicknessesIfChanged()` still drops a write that changes
+    /// nothing, so a caller can flush unconditionally (`idempotency`).
+    ///
+    /// It cannot tell *whose* resize armed the pending item, though — the
+    /// first layout pass arms one too — so the caller owes it the judgement
+    /// that there is a saved arrangement here to refine. See
+    /// `ComposableTabsWindowController.windowWillClose(_:)`.
+    public func flushPendingThicknessPersist() {
+        guard let pending = pendingThicknessPersist else { return }
+        pending.cancel()
+        pendingThicknessPersist = nil
+        persistThicknessesIfChanged()
+    }
+
     private func persistThicknessesIfChanged() {
         captureThicknessFractions()
         let node = snapshotNode()
@@ -754,6 +777,20 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         // that still belongs to another parent, and the old inner splits are
         // about to be discarded anyway.
         detachSubtree()
+
+        // Most of what was just un-parented is re-hosted a few lines below, but
+        // a shape with fewer leaves than this tree has leaves some of them out,
+        // and `detachSubtree()` deliberately says nothing to any of them. A pane
+        // the new shape has no slot for was therefore dropped without ever being
+        // told it was gone — and the mirror takes this branch on a real user
+        // gesture (closing a pane in the front tab reshapes every other tab
+        // down), so each of those tabs quietly leaked a live `/bin/zsh` and a
+        // file-system watcher for the life of the window. `host` is already
+        // `nil` by now, matching the order `remove(_:)` tears down in.
+        let surviving = node.leafIDs
+        for (nodeID, leaf) in reusable where !surviving.contains(nodeID) {
+            leaf.paneWillBeRemoved()
+        }
 
         let newAxis: ComposableTabsAxis
         let children: [any ComposableTabsChild]

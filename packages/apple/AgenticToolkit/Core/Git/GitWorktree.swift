@@ -39,7 +39,11 @@ public struct GitWorktree: Sendable, Equatable, Hashable {
         func flush() {
             guard let path else { return }
             results.append(GitWorktree(
-                directory: URL(fileURLWithPath: path),
+                // A worktree path is a directory by definition, so say so
+                // rather than letting Foundation stat it: the flavour decides
+                // whether the URL carries a trailing slash, and these URLs are
+                // compared for equality against directories built elsewhere.
+                directory: URL(fileURLWithPath: path, isDirectory: true),
                 head: head,
                 branch: branch,
                 isMain: results.isEmpty,

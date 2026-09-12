@@ -8,7 +8,7 @@ extension GitFileStatus {
         case .modified: return .orange
         case .added, .untracked: return .green
         case .deleted: return .red
-        case .renamed: return .blue
+        case .renamed, .copied: return .blue
         case .conflicted: return .purple
         case .ignored: return .gray
         }
@@ -22,7 +22,7 @@ extension GitFileStatus {
         case .modified: return .systemOrange
         case .added, .untracked: return .systemGreen
         case .deleted: return .systemRed
-        case .renamed: return .systemBlue
+        case .renamed, .copied: return .systemBlue
         case .conflicted: return .systemPurple
         case .ignored: return .systemGray
         }

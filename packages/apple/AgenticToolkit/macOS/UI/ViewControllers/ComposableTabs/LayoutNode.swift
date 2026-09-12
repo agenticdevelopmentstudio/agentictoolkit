@@ -62,6 +62,24 @@ public struct LayoutNode: Sendable {
         return copy
     }
 
+    /// Every leaf id in this tree.
+    ///
+    /// A pane is addressed by its leaf id everywhere it is remembered — the
+    /// focused pane of a tab, the rows `ProjectPaneStateStore` writes, the
+    /// live controllers a rebuild reuses — so "is this id still in this tree?"
+    /// gets asked from several places. It is answered here, once (`dry`):
+    /// three private copies of this walk had already appeared, and a tree
+    /// rewrite that one of them learned about and the others did not is
+    /// exactly how a stale id outlives the pane it named.
+    public var leafIDs: Set<UUID> {
+        switch kind {
+        case .leaf:
+            return [id]
+        case .split(_, let first, let second):
+            return first.leafIDs.union(second.leafIDs)
+        }
+    }
+
     // MARK: - Sharing one arrangement
 
     /// This tree rebuilt to `template`'s shape, keeping its own node ids.
