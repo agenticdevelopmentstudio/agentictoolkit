@@ -133,41 +133,79 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
         return buttonItemIndices[buttonIndex]
     }
 
-    /// Adds one button per item, **in order, skipping every index in**
-    /// `request.closeAffordanceIndices`, then one more button in the "cancel
-    /// slot": the **last** flagged item's own title when there is a close
-    /// affordance (answering its own index), otherwise `"Cancel"`
-    /// (answering `nil`). Last wins because upstream's loop assigns
-    /// `cancelButton = button` for each flagged command in turn, so an
-    /// earlier one is overwritten and never rendered at all.
+    /// The position→item mapping `addButtons(for:to:)` renders, split out as a
+    /// pure function of the request so it can be pinned without an `NSAlert`:
+    /// one entry per button, in add order, holding the item index that button
+    /// resolves to, and `nil` for the synthesized `"Cancel"`.
     ///
-    /// This matches `mainThreadMessageService.ts`'s button construction
-    /// exactly, measured against upstream during this fix round — including
-    /// the detail that the close-affordance item is pulled **out of** the
-    /// ordinary button list and put in the cancel slot; it does not render
-    /// in its own item position, so button order and item order diverge
-    /// whenever a close affordance is present. Returns, for each button
-    /// added in order, the item index that button should resolve to (`nil`
-    /// for the synthesized `"Cancel"`) — read back by position after
-    /// `NSAlert` answers, rather than recovered with
+    /// **`internal`, not `private`, deliberately.** `MainThreadWindowTests`
+    /// reaches this through `@testable import AgenticToolkitMacOS`, and the
+    /// mapping is otherwise unreachable from a test — the rendering half needs
+    /// an `NSAlert`, which this bundle has no UI to drive. Tightening it back
+    /// to `private` compiles here and breaks that suite.
+    ///
+    /// Entries come out in item order, **skipping every index in**
+    /// `request.closeAffordanceIndices`, then one more for the "cancel slot":
+    /// the **last** flagged item's index when there is a close affordance,
+    /// otherwise `nil`. Last wins because upstream's loop assigns
+    /// `cancelButton = button` for each flagged command in turn
+    /// (`mainThreadMessageService.ts:120-124`), so an earlier one is
+    /// overwritten and never rendered at all.
+    ///
+    /// This matches **`_showModalMessage`**'s button construction exactly
+    /// (`mainThreadMessageService.ts:110-148`), measured against upstream
+    /// during this fix round — including the detail that the close-affordance
+    /// item is pulled **out of** the ordinary button list and put in the
+    /// cancel slot; it does not render in its own item position, so button
+    /// order and item order diverge whenever a close affordance is present.
+    /// Naming the function matters because the same file builds buttons a
+    /// second way in `_showMessage` (lines 54-108, the non-modal path), where
+    /// every command — flagged or not — becomes a primary action
+    /// (`commands.map(command => toAction(…))`, line 58) and there is no
+    /// cancel button at all. Read against *that* function the claim is false,
+    /// so a later non-modal presenter must not cite this as its precedent.
+    static func buttonPlan(for request: ExtensionMessageRequest) -> [Int?] {
+        var plan: [Int?] = []
+        let closeAffordanceIndices = Set(request.closeAffordanceIndices)
+        for index in request.itemTitles.indices where !closeAffordanceIndices.contains(index) {
+            plan.append(index)
+        }
+        // The cancel slot: the last flagged item's index, or `nil` for the
+        // synthesized `"Cancel"` when no item carries a close affordance.
+        plan.append(request.closeAffordanceIndices.last)
+        return plan
+    }
+
+    /// Adds one button per `buttonPlan(for:)` entry, in plan order — the
+    /// item's own title for an entry naming an item, `"Cancel"` for the `nil`
+    /// entry — and returns that plan unchanged. `presentMessage` reads the
+    /// chosen item back by button position, rather than with
     /// `response - .alertFirstButtonReturn` arithmetic read straight into
     /// `itemTitles`, which no longer holds once a button has been skipped.
+    ///
+    /// **The final button — always the cancel slot — is given Escape
+    /// explicitly.** `NSAlert.h:96`, the doc on `-addButtonWithTitle:`, gives
+    /// Escape only to a button whose *title* is "Cancel", so the
+    /// close-affordance path, where the slot carries the flagged item's own
+    /// title, would otherwise have no Escape at all — and that is the path
+    /// this whole seam exists for. Upstream puts the flagged command in the
+    /// dialog's `cancelButton` argument rather than in `buttons`
+    /// (`mainThreadMessageService.ts:146`). Setting it on the synthesized
+    /// `"Cancel"` too changes no behaviour — AppKit gives that one Escape by
+    /// title anyway — but stating the intent in code is what stops the next
+    /// person renaming the string and silently losing Escape. The button to
+    /// set it on is the one `addButtonWithTitle:` returns (same header,
+    /// `- Returns: The button that was added to the alert.`).
     private static func addButtons(for request: ExtensionMessageRequest, to alert: NSAlert) -> [Int?] {
-        var buttonItemIndices: [Int?] = []
-        let closeAffordanceIndices = Set(request.closeAffordanceIndices)
-        for (index, title) in request.itemTitles.enumerated()
-        where !closeAffordanceIndices.contains(index) {
-            alert.addButton(withTitle: title)
-            buttonItemIndices.append(index)
+        let plan = buttonPlan(for: request)
+        for (position, itemIndex) in plan.enumerated() {
+            let title = itemIndex.map { request.itemTitles[$0] } ?? "Cancel"
+            let button = alert.addButton(withTitle: title)
+            if position == plan.count - 1 {
+                button.keyEquivalent = "\u{1b}"
+            }
         }
-        if let cancelItemIndex = request.closeAffordanceIndices.last {
-            alert.addButton(withTitle: request.itemTitles[cancelItemIndex])
-            buttonItemIndices.append(cancelItemIndex)
-        } else {
-            alert.addButton(withTitle: "Cancel")
-            buttonItemIndices.append(nil)
-        }
-        return buttonItemIndices
+        return plan
     }
 
     /// `.information → .informational`, `.warning → .warning`,

@@ -834,4 +834,65 @@ struct MainThreadWindowTests {
         let twoAffordancesRequest = try #require(presenter.requests.first { $0.message == "two affordances" })
         #expect(twoAffordancesRequest.closeAffordanceIndices == [0, 2])
     }
+
+    // MARK: - 17. `NSAlertMessagePresenter.buttonPlan(for:)` ordering
+
+    /// Pins the position→item mapping the presenter renders, with requests
+    /// built directly — no JS, no host, no presenter, no `NSAlert`. Every row
+    /// is a concrete positive equality on the whole array, so a plan that is
+    /// merely non-empty or merely the right length does not pass.
+    ///
+    /// Which mutation each row-group kills:
+    ///
+    /// - **No affordance (`[]` → `[0, 1, 2, nil]`, and the one-item
+    ///   `[0, nil]`):** deleting the branch that appends the synthesized
+    ///   `"Cancel"` slot — round 1's LB3 defect. Without it these answer
+    ///   `[0, 1, 2]` and `[0]`.
+    /// - **One affordance (`[0]` → `[1, 2, 0]`, `[1]` → `[0, 2, 1]`,
+    ///   `[2]` → `[0, 1, 2]`):** dropping the skip, so the flagged item also
+    ///   renders in its own position — that answers `[0, 1, 2, 0]` and
+    ///   `[0, 1, 2, 1]`. The `[2]` row additionally pins that a flagged *last*
+    ///   item still appears exactly once, in the slot: dropping the cancel
+    ///   append answers `[0, 1]`.
+    /// - **Two affordances (`[0, 2]` → `[1, 2]`) and all three
+    ///   (`[0, 1, 2]` → `[2]`):** `request.closeAffordanceIndices.last` →
+    ///   `.first`, which answers `[1, 0]` and `[0]`; and
+    ///   `where !closeAffordanceIndices.contains(index)` →
+    ///   `where index != request.closeAffordanceIndices.first` (round 1's
+    ///   exact defect moved into the presenter), which answers `[1, 2, 2]`
+    ///   for both. Neither mutation is visible with fewer than two flagged
+    ///   items, which is why both rows are here.
+    /// - **One item, flagged (`[0]` → `[0]`):** the flagged item is the whole
+    ///   plan; a synthesized `"Cancel"` appended regardless would answer
+    ///   `[0, nil]`.
+    ///
+    /// **The zero-items case is deliberately not a row here.**
+    /// `presentMessage` short-circuits on `request.itemTitles.isEmpty` with a
+    /// single "OK" before `buttonPlan(for:)` is ever called, so a row for it
+    /// would pin a scenario that never occurs in production.
+    @Test
+    func buttonPlanOrdersButtonsAndFillsTheCancelSlotFromTheLastCloseAffordance() {
+        func plan(items: [String], closeAffordanceIndices: [Int]) -> [Int?] {
+            NSAlertMessagePresenter.buttonPlan(
+                for: ExtensionMessageRequest(
+                    severity: .warning,
+                    message: "m",
+                    detail: nil,
+                    isModal: true,
+                    itemTitles: items,
+                    closeAffordanceIndices: closeAffordanceIndices
+                )
+            )
+        }
+
+        let abc = ["A", "B", "C"]
+        #expect(plan(items: abc, closeAffordanceIndices: []) == [0, 1, 2, nil])
+        #expect(plan(items: abc, closeAffordanceIndices: [0]) == [1, 2, 0])
+        #expect(plan(items: abc, closeAffordanceIndices: [1]) == [0, 2, 1])
+        #expect(plan(items: abc, closeAffordanceIndices: [2]) == [0, 1, 2])
+        #expect(plan(items: abc, closeAffordanceIndices: [0, 2]) == [1, 2])
+        #expect(plan(items: abc, closeAffordanceIndices: [0, 1, 2]) == [2])
+        #expect(plan(items: ["A"], closeAffordanceIndices: []) == [0, nil])
+        #expect(plan(items: ["A"], closeAffordanceIndices: [0]) == [0])
+    }
 }
