@@ -144,6 +144,17 @@ public final class MainThreadCommands {
             return VSCodeAPI.raise("command '\(command)' already exists", in: context)
         }
 
+        // Refused here rather than discovered at the first dispatch. This
+        // member's whole product is a `Disposable` the extension pushes onto
+        // `context.subscriptions` and then trusts; handing one back for a
+        // command that provably cannot be invoked is the same silent lie
+        // `CallOutcome.unavailable` exists to stop, one step earlier and with
+        // a `try` in the extension that can still see it. Raises for Ruling
+        // 6's reason, the same as every other refusal above.
+        guard VSCodeAPI.canDispatch(in: context) else {
+            return VSCodeAPI.raise(VSCodeAPI.dispatchUnavailableMessage(for: context), in: context)
+        }
+
         // `undefined` and `null` both mean "no `thisArg`" (Ruling 7); anything
         // else, including a JS `false` or `0`, is a real value an extension
         // deliberately bound and must be honoured.
@@ -170,8 +181,8 @@ public final class MainThreadCommands {
     }
 
     /// Calls the extension's callback and answers with something the registry
-    /// can carry: the callback's own `JSValue`, or a `CallbackFailure` if it
-    /// threw.
+    /// can carry: the callback's own `JSValue`, a `CallbackFailure` if it
+    /// threw, or a `DispatchUnavailable` if it was never invoked at all.
     ///
     /// **The adaptor owns its callbacks' exceptions.** Left to JavaScriptCore,
     /// a throw here reaches `ExtensionHost`'s `exceptionHandler` and lands in
@@ -192,18 +203,29 @@ public final class MainThreadCommands {
     ///
     /// **An `async` callback does not throw — it rejects**, and a rejection is
     /// not a return value either path can notice: the call itself succeeded,
-    /// and the failure arrives on a later microtask. So a thenable return
-    /// value gets a rejection handler attached here too
+    /// and the failure arrives on a later microtask. So on the caller-less
+    /// path a thenable return value gets a rejection handler attached here
     /// (`VSCodeAPI.observeRejection`), which is what makes a palette dispatch
     /// of `async () => { throw new Error('disk full') }` produce a log line
     /// instead of complete silence. Attaching it does not consume the
     /// rejection: the value handed back is still the extension's own promise,
-    /// still rejecting, so an `await executeCommand(…)` sees it unchanged.
+    /// still rejecting.
+    ///
+    /// **Only on the caller-less path**, and the asymmetry is the whole point
+    /// of `dispatchHasCaller`. An extension that writes `try { await
+    /// vscode.commands.executeCommand('x') } catch { … }` has handled its own
+    /// failure correctly and completely; logging it at `error` in the host's
+    /// subsystem would report an extension behaving properly as an app fault,
+    /// and at volume. The round-1 ruling this descends from said a palette
+    /// dispatch is logged and swallowed *because there is no caller to tell* —
+    /// so where there is a caller, the caller is told and the log stays quiet.
+    /// The extension owns the rejection; the palette has nobody to own it.
     ///
     /// Deliberately **not** made to throw. `AppCommand.run` is `([Any]) ->
     /// Any?` and staying that way keeps the registry free of any knowledge
-    /// that JavaScript exists; `CallbackFailure` is private to this file and
-    /// unwrapped by the one member that can do something with it.
+    /// that JavaScript exists; `CallbackFailure` and `DispatchUnavailable` are
+    /// private to this file and unwrapped by the one member that can do
+    /// something with them.
     private static func invoke(
         _ callback: JSValue,
         thisArg: JSValue?,
@@ -212,7 +234,7 @@ public final class MainThreadCommands {
     ) -> Any? {
         switch VSCodeAPI.call(callback, thisArg: thisArg, arguments: arguments) {
         case .returned(let value):
-            if let value, let context = value.context {
+            if !dispatchHasCaller, let value, let context = value.context {
                 VSCodeAPI.observeRejection(of: value, in: context) { reason in
                     MainThreadCommands.logger.error(
                         """
@@ -229,7 +251,62 @@ public final class MainThreadCommands {
                 \(exception.toString() ?? "<unprintable>", privacy: .public)
                 """)
             return CallbackFailure(reason: exception)
+        case .unavailable:
+            // The callback was never invoked. `VSCodeAPI` has already logged
+            // why; what matters here is that this must not leave as a value —
+            // `nil` would resolve the extension's promise with `undefined`,
+            // which is precisely what a `void` command that ran successfully
+            // answers.
+            logger.error(
+                """
+                Extension command '\(commandID, privacy: .public)' could not be dispatched: \
+                its context has no usable command dispatch trampoline
+                """)
+            return DispatchUnavailable()
         }
+    }
+
+    /// Whether the dispatch currently running has a caller that will be handed
+    /// its result — an extension's `await vscode.commands.executeCommand(…)` —
+    /// as opposed to a palette or menu-item dispatch through
+    /// `CommandRegistry.execute(id:)`, which returns `Void` and has nobody to
+    /// tell.
+    ///
+    /// **Yes, this is save-and-restore around a call, which is the shape
+    /// `absorbingExceptions` was withdrawn for two rounds ago.** The
+    /// distinction matters enough to write down, because the next reader will
+    /// have that ruling in mind. That one mutated `JSContext.exceptionHandler`
+    /// — *context-wide JavaScriptCore state*, shared with `ExtensionHost` and
+    /// with every other adaptor installed on the context, across a window in
+    /// which arbitrary JavaScript and re-entrant host operations could run, so
+    /// restoring it could undo a `dispose()` and a re-entered host operation
+    /// could lose its own exception into it. This is one `Bool` in this file,
+    /// on the main actor, saved and restored around a *synchronous* call
+    /// (`dispatchingForACaller`), observable by nothing outside this type, and
+    /// owning no resource anyone else depends on. Nesting is correct by
+    /// construction: a command that dispatches another command restores the
+    /// outer value on the way out.
+    ///
+    /// `static`, not an instance property, and that is deliberate twice over.
+    /// The closure `handleRegisterCommand` hands to `CommandRegistry`
+    /// captures no `self` — which is what keeps the adaptor out of the
+    /// registry's retain graph, and what the class doc's teardown paragraph
+    /// depends on — so an instance flag would have to be reached through a
+    /// capture that reintroduces exactly that edge. And the bit describes the
+    /// *dispatch*, not the adaptor: when extension A awaits a command
+    /// registered by extension B, B's adaptor is on a path that genuinely has
+    /// a caller, and a per-adaptor flag would get that backwards.
+    private static var dispatchHasCaller = false
+
+    /// Runs `body` with `dispatchHasCaller` set, restoring whatever it was
+    /// before. The save-and-restore is a nested dispatch's correctness, not
+    /// tidiness: `executeCommand` from inside a command callback is ordinary
+    /// VS Code practice.
+    private static func dispatchingForACaller<Value>(_ body: () throws -> Value) rethrows -> Value {
+        let previous = dispatchHasCaller
+        dispatchHasCaller = true
+        defer { dispatchHasCaller = previous }
+        return try body()
     }
 
     /// What `invoke` hands back when the extension's callback threw.
@@ -240,6 +317,20 @@ public final class MainThreadCommands {
     private struct CallbackFailure {
         let reason: JSValue
     }
+
+    /// What `invoke` hands back when the callback was never invoked at all —
+    /// its context is gone, or the context has no usable dispatch trampoline.
+    ///
+    /// Distinct from `CallbackFailure` because there is no `JSValue` reason to
+    /// carry: the failure happened outside JavaScript, and deliberately holds
+    /// no context of its own so that `handleExecuteCommand` builds the
+    /// rejection in *its own* live `JSContext.current()` rather than in the
+    /// one that just proved unusable.
+    ///
+    /// It must not be `nil`. A `nil` here resolves the extension's promise
+    /// with `undefined`, which is precisely what a successful `void` command
+    /// answers — the silent lie this whole path exists to prevent.
+    private struct DispatchUnavailable {}
 
     /// A JS object whose `dispose()` unregisters exactly the registration
     /// `token` names, and does nothing the second time it is called.
@@ -344,7 +435,21 @@ public final class MainThreadCommands {
         let rest = Array(arguments.dropFirst()) as [Any]
 
         do {
-            let result = try registry.execute(id: command, arguments: rest)
+            // The one place a dispatch provably has a caller: this member is
+            // the extension's own `executeCommand`, and whatever the registry
+            // answers is handed straight back to it as a promise. `invoke`
+            // reads the flag to decide whether a rejection has an owner other
+            // than the log. Synchronous, so the `defer` inside restores the
+            // previous value before anything else can observe it.
+            let result = try Self.dispatchingForACaller {
+                try registry.execute(id: command, arguments: rest)
+            }
+            if result is DispatchUnavailable {
+                // The callback never ran. Rejecting — rather than resolving
+                // with `undefined` — is the whole of ruling 4.
+                return VSCodeAPI.rejectedPromise(
+                    message: VSCodeAPI.dispatchUnavailableMessage(for: context), in: context)
+            }
             if let failure = result as? CallbackFailure {
                 // The extension's own exception, handed back to the extension
                 // unchanged — same `Error` subclass, same `stack`. A

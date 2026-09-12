@@ -429,7 +429,7 @@ struct MainThreadCommandsTests {
         // hands over is the `JSValue` the callback returned — not a bridged
         // Swift `String`. The conversion is the reader's to make, here, rather
         // than something the adaptor does silently on the way past.
-        let result = try #require(registry.execute(id: "ext.dup", arguments: []) as? JSValue)
+        let result = try #require(try registry.execute(id: "ext.dup", arguments: []) as? JSValue)
         #expect(result.toString() == "first")
     }
 
@@ -940,6 +940,66 @@ struct MainThreadCommandsTests {
         #expect(context.evaluateScript("1 + 1")?.toInt32() == 2)
     }
 
+    /// The extension's own path — `executeCommand` — attaches **no** rejection
+    /// observer, because the extension is the caller and owns the failure.
+    ///
+    /// The falsifiable negative for the pair above, and the only one of the
+    /// three that can fail if the caller-aware bit is dropped: delete
+    /// `dispatchHasCaller` and `invoke` observes on both paths, so `then` is
+    /// called here and `__observed` stops being `null`. The other two tests
+    /// pass either way.
+    ///
+    /// The returned thenable is **discarded** deliberately. An `await` would
+    /// call `then` itself — proving nothing about who called it — so the test
+    /// drops the result on the floor, which is also the shape that would make
+    /// an over-eager observer's log line pure noise. Nothing in the adaptor
+    /// may call `then` on that path: `VSCodeAPI.settledPromise` only *reads*
+    /// the property to decide the value is already a promise, and hands the
+    /// extension's own object straight back.
+    @Test
+    func anAwaitedDispatchGetsNoObserverBecauseTheExtensionOwnsTheRejection() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__observed = null;
+                globalThis.__dispatched = null;
+                vscode.commands.registerCommand('ext.rejects', function () {
+                    return {
+                        then: function (onFulfilled, onRejected) {
+                            globalThis.__observed = { calls: 1 };
+                        }
+                    };
+                });
+                globalThis.run = function () {
+                    vscode.commands.executeCommand('ext.rejects');
+                    globalThis.__dispatched = { done: true };
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+
+        // `__dispatched` is the liveness control: without it, a `run` that
+        // threw before reaching `executeCommand` would leave `__observed`
+        // `null` and the assertion below would pass for the wrong reason.
+        let dispatched = try #require(await waitForGlobal(context, "globalThis.__dispatched"))
+        #expect(dispatched.forProperty("done")?.toBool() == true)
+
+        let observed = try #require(context.evaluateScript("globalThis.__observed"))
+        #expect(observed.isNull)
+    }
+
     /// An object passed to `executeCommand` and handed straight back is the
     /// **same** object in JavaScript — `===`, with the mutations the callback
     /// made visible to the caller.
@@ -1189,7 +1249,7 @@ struct MainThreadCommandsTests {
 
         let context = try #require(host.javaScriptContext)
         #expect(registry.command(id: "ext.recycled") != nil)
-        let answer = try #require(registry.execute(id: "ext.recycled", arguments: []) as? JSValue)
+        let answer = try #require(try registry.execute(id: "ext.recycled", arguments: []) as? JSValue)
         #expect(answer.toString() == "second")
         #expect(context.evaluateScript("1 + 1")?.toInt32() == 2)
     }
