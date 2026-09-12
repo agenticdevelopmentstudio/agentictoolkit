@@ -25,12 +25,23 @@ public struct ExtensionMessageRequest: Sendable {
     public let isModal: Bool
     public let itemTitles: [String]
 
-    /// The index into `itemTitles` of the item whose `isCloseAffordance` was
-    /// truthy, or `nil` when none was — VS Code's rule for which item, if
-    /// any, *is* the dismissal rather than one more button next to an
-    /// implicit Cancel. See `NSAlertMessagePresenter.presentMessage(_:)` for
-    /// what a presenter does with this.
-    public let closeAffordanceIndex: Int?
+    /// Every index into `itemTitles` whose item carried a truthy
+    /// `isCloseAffordance`, in item order — empty when none did. VS Code's
+    /// rule for which item, if any, *is* the dismissal rather than one more
+    /// button next to an implicit Cancel.
+    ///
+    /// A list rather than one index, because upstream keeps the flag on
+    /// **every** item that set it. `extHostMessageService.ts` logs
+    /// `Only one message item can have 'isCloseAffordance'` for the second
+    /// and later ones but still pushes `isCloseAffordance: !!isCloseAffordance`
+    /// for each, and `mainThreadMessageService.ts` then routes every flagged
+    /// command to `cancelButton = button` — so each one is kept out of the
+    /// ordinary button list and the **last** overwrites the cancel slot.
+    /// Modelling only the first made a second flagged item render as an
+    /// ordinary button, which upstream never does. See
+    /// `NSAlertMessagePresenter.presentMessage(_:)` for what a presenter does
+    /// with this.
+    public let closeAffordanceIndices: [Int]
 }
 
 /// What `MainThreadWindow` depends on instead of AppKit directly, so the
@@ -122,10 +133,13 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
         return buttonItemIndices[buttonIndex]
     }
 
-    /// Adds one button per item, **in order, skipping**
-    /// `request.closeAffordanceIndex`, then one more button in the "cancel
-    /// slot": that item's own title when there is a close affordance
-    /// (answering its own index), otherwise `"Cancel"` (answering `nil`).
+    /// Adds one button per item, **in order, skipping every index in**
+    /// `request.closeAffordanceIndices`, then one more button in the "cancel
+    /// slot": the **last** flagged item's own title when there is a close
+    /// affordance (answering its own index), otherwise `"Cancel"`
+    /// (answering `nil`). Last wins because upstream's loop assigns
+    /// `cancelButton = button` for each flagged command in turn, so an
+    /// earlier one is overwritten and never rendered at all.
     ///
     /// This matches `mainThreadMessageService.ts`'s button construction
     /// exactly, measured against upstream during this fix round — including
@@ -140,13 +154,15 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// `itemTitles`, which no longer holds once a button has been skipped.
     private static func addButtons(for request: ExtensionMessageRequest, to alert: NSAlert) -> [Int?] {
         var buttonItemIndices: [Int?] = []
-        for (index, title) in request.itemTitles.enumerated() where index != request.closeAffordanceIndex {
+        let closeAffordanceIndices = Set(request.closeAffordanceIndices)
+        for (index, title) in request.itemTitles.enumerated()
+        where !closeAffordanceIndices.contains(index) {
             alert.addButton(withTitle: title)
             buttonItemIndices.append(index)
         }
-        if let closeAffordanceIndex = request.closeAffordanceIndex {
-            alert.addButton(withTitle: request.itemTitles[closeAffordanceIndex])
-            buttonItemIndices.append(closeAffordanceIndex)
+        if let cancelItemIndex = request.closeAffordanceIndices.last {
+            alert.addButton(withTitle: request.itemTitles[cancelItemIndex])
+            buttonItemIndices.append(cancelItemIndex)
         } else {
             alert.addButton(withTitle: "Cancel")
             buttonItemIndices.append(nil)
@@ -347,7 +363,7 @@ public final class MainThreadWindow {
 
         var itemTitles: [String] = []
         var itemValues: [JSValue] = []
-        var closeAffordanceIndex: Int?
+        var closeAffordanceIndices: [Int] = []
         for index in itemsStartIndex..<arguments.count {
             let item = arguments[index]
             if item.isString, let title = item.toString() {
@@ -368,13 +384,15 @@ public final class MainThreadWindow {
                 // `Uri.url(from:in:)`'s own doc names for its
                 // `forProperty("toString")` read (`Uri.swift:352-358`),
                 // bounded to the extension that wrote the getter acting on
-                // its own context. First truthy one wins, matching upstream,
-                // which warns and ignores a second one — this loop has no
-                // logger to warn through, so it simply never overwrites an
-                // index already recorded.
-                if closeAffordanceIndex == nil,
-                   let closeAffordanceValue = item.forProperty("isCloseAffordance"), closeAffordanceValue.toBool() {
-                    closeAffordanceIndex = itemTitles.count - 1
+                // its own context. Every truthy one is recorded, not just the
+                // first: upstream warns about the second and later ones but
+                // keeps the flag on each, and its cancel slot is then
+                // overwritten by the last. This loop has no logger to warn
+                // through, so it records them all and lets the presenter
+                // apply that same last-wins rule.
+                if let closeAffordanceValue = item.forProperty("isCloseAffordance"),
+                   closeAffordanceValue.toBool() {
+                    closeAffordanceIndices.append(itemTitles.count - 1)
                 }
                 continue
             }
@@ -386,7 +404,7 @@ public final class MainThreadWindow {
 
         let request = ExtensionMessageRequest(
             severity: severity, message: message, detail: detail, isModal: isModal, itemTitles: itemTitles,
-            closeAffordanceIndex: closeAffordanceIndex)
+            closeAffordanceIndices: closeAffordanceIndices)
         return presentMessagePromise(memberPath: memberPath, request: request, itemValues: itemValues, in: context)
     }
 
