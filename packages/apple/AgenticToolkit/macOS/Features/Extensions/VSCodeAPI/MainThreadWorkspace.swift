@@ -252,11 +252,21 @@ public final class MainThreadWorkspace {
     /// `fsPath` never carries one, for any root, so an extension comparing
     /// `folder.uri.fsPath` against its own idea of the root -- a config
     /// value, a path it just joined -- sees a spurious mismatch on every real
-    /// workspace. Rebuilding a file `URL` from the standardized path with
+    /// workspace. Rebuilding a file `URL` from `url.path` with
     /// `isDirectory: false` keeps the path characters identical and only
-    /// removes the marker responsible for the trailing slash.
+    /// removes the marker responsible for the trailing slash — `url.path`
+    /// already carries no trailing slash of its own, unlike
+    /// `url.absoluteString`, so nothing further needs to be stripped from it.
+    /// This deliberately does **not** go through `url.standardizedFileURL`:
+    /// that also resolves `..` and, worse, strips a leading `/private`
+    /// whenever the result happens to name something that currently exists
+    /// on disk — a root's `fsPath` would then depend on whether the
+    /// directory was present at the moment this ran, not on the path it was
+    /// given. `handleGetWorkspaceFolder`'s matcher standardizes deliberately,
+    /// for the opposite reason: there, collapsing `/private/var/foo` and
+    /// `/var/foo` onto the same root is exactly what a comparison wants.
     private static func workspaceFolderValue(for url: URL, index: Int, in context: JSContext) -> JSValue? {
-        let filePathURL = URL(fileURLWithPath: url.standardizedFileURL.path, isDirectory: false)
+        let filePathURL = URL(fileURLWithPath: url.path, isDirectory: false)
         guard let uriValue = VSCodeAPI.uriValue(for: filePathURL, in: context),
               let object = JSValue(newObjectIn: context) else {
             return nil
