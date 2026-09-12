@@ -541,23 +541,37 @@ struct MainThreadCommandsTests {
         #expect(filteredIDs == ["ext.visible"])
     }
 
-    // MARK: - Ruling 6 verification: pendingException bookkeeping
+    // MARK: - Ruling 6 verification: a raise leaves the host usable
 
-    /// The host's `pendingException` bookkeeping survives a `registerCommand`
-    /// that raises — where "raises" means the exception genuinely escapes into
-    /// `ExtensionHost`'s own `exceptionHandler`, not into a JavaScript `catch`
-    /// the test wrote for it.
+    /// A `registerCommand` that raises — where "raises" means the exception
+    /// genuinely escapes into `ExtensionHost`'s own `exceptionHandler`, not
+    /// into a JavaScript `catch` the test wrote for it — leaves the host and
+    /// its context perfectly usable afterwards.
     ///
-    /// That distinction is the whole test. An exception an extension catches
-    /// never reaches the host's handler at all, so `pendingException` is never
-    /// written and a test built that way proves that an interaction which
-    /// cannot happen does not happen. Here the duplicate registration is
-    /// triggered from a bare `evaluateScript`, with nothing between it and the
-    /// host: JavaScriptCore reports it to the context's handler, which is the
-    /// one that writes `pendingException`. What Ruling 6 asks is what the host
-    /// does *next*, and the answer must be "nothing stale".
+    /// That distinction is the setup, not the claim. An exception an extension
+    /// catches never reaches the host's handler at all, so a test built that
+    /// way proves that an interaction which cannot happen does not happen.
+    /// Here the duplicate registration is triggered from a bare
+    /// `evaluateScript`, with nothing between it and the host: JavaScriptCore
+    /// reports it to the context's handler, which is the one that writes
+    /// `pendingException`.
+    ///
+    /// What is asserted afterwards is deliberately modest, and the reason is
+    /// worth writing down so nobody re-asserts the stronger thing: this test
+    /// **cannot** detect a stale `pendingException`, because every reader of
+    /// that field clears it first — `ExtensionHost.apply` opens with
+    /// `pendingException = nil` before it invokes `defineMember`. A
+    /// `defineVSCodeMember` throwing `vscodeMemberNotDefinable` with a stale
+    /// message is not a failure mode this call has. The falsifiable claims
+    /// left are the ones that matter for Ruling 6's raise: the raise really
+    /// escaped, the first registration survived, and a member defined after it
+    /// is live. The "does a callback's throw stay out of the host's
+    /// bookkeeping" question is pinned instead by
+    /// `aThrowingCallbackRejectsAndNeverReachesTheHostsBookkeeping` below,
+    /// whose first half puts an exception into the one window where the
+    /// answer is observable at all and shows what the host does with it.
     @Test
-    func pendingExceptionBookkeepingSurvivesARaisedException() async throws {
+    func aRaisedRegisterCommandExceptionLeavesTheHostUsable() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let registry = CommandRegistry()
@@ -601,9 +615,10 @@ struct MainThreadCommandsTests {
         #expect(raised?.isUndefined == true)
         #expect(registry.allCommands.map(\.id) == ["ext.dup"])
 
-        // If that raise had left `pendingException` set, this call would throw
-        // `vscodeMemberNotDefinable` carrying the stale message
-        // ("command 'ext.dup' already exists") instead of succeeding.
+        // A member defined after the raise is live, and reachable through the
+        // closure `activate` captured. Not an assertion about
+        // `pendingException`: `apply` clears it before `defineMember`, so a
+        // stale value could not surface here even if one existed.
         let real: @convention(block) () -> String = { "ok" }
         try host.defineVSCodeMember(
             namespacePath: "vscode.window", name: "showSomethingReal", implementation: real)
@@ -628,8 +643,53 @@ struct MainThreadCommandsTests {
     /// host.activate()` returning normally *is* the assertion that it no
     /// longer does: were the exception still reaching the host's handler, this
     /// line would throw.
+    ///
+    /// That assertion is only worth anything if the read point is live, so
+    /// **part one is a control that demonstrates it rather than assuming it**.
+    /// `pendingException` is `private`, unreachable even under `@testable`,
+    /// and every reader of it clears it first — `apply`, `defineMember`,
+    /// `evaluate` and `callActivate` all open with `pendingException = nil`.
+    /// So there is exactly one span in which a write to it is both possible
+    /// and observable: the one `callActivate` opens, between its own clear and
+    /// the read immediately after `invokeMethod("callActivate", …)` that turns
+    /// a non-`nil` value into `ExtensionHostError.activationThrew`. The
+    /// control puts an exception into precisely that span — an `activate` that
+    /// returns a thenable whose `then` *getter* throws, which the shim reads
+    /// outside its own `try` for exactly this reason — and shows activation
+    /// failing with the getter's message. Part two then runs a command
+    /// callback's throw through the same span and requires activation to
+    /// succeed. Regress `VSCodeAPI.call` to let a callback's throw escape and
+    /// part two fails on `try await host.activate()`.
     @Test
     func aThrowingCallbackRejectsAndNeverReachesTheHostsBookkeeping() async throws {
+        // Part one — the control. An exception raised inside the window the
+        // host reads really does fail activation, so the read point is live.
+        let probeDirectory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: probeDirectory) }
+        let probeHost = try makeHost(
+            source: """
+            var unused = 1;
+            exports.activate = function () {
+                return { get then() { throw new Error('window-probe'); } };
+            };
+            """,
+            in: probeDirectory
+        )
+        defer { probeHost.dispose() }
+        let probeCommands = MainThreadCommands(registry: CommandRegistry())
+        try install(probeCommands, on: probeHost)
+        do {
+            try await probeHost.activate()
+            Issue.record("An exception raised inside callActivate's window must fail activation.")
+        } catch let error as ExtensionHostError {
+            guard case let .activationThrew(_, message) = error else {
+                Issue.record("Expected activationThrew, got \(error)")
+                return
+            }
+            #expect(message.contains("window-probe"), "message was: \(message)")
+        }
+
+        // Part two — the claim. Same window, a command callback's throw.
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let registry = CommandRegistry()
@@ -754,6 +814,132 @@ struct MainThreadCommandsTests {
         #expect(awaited.forProperty("value")?.toInt32() == 42)
     }
 
+    /// An `async` command callback that throws **rejects**, and the rejection
+    /// reaches `await executeCommand(...)` as the extension's own error.
+    ///
+    /// The distinction this pins is the one a synchronous-throw test cannot:
+    /// an `async` function does not throw at all from the adaptor's point of
+    /// view — the call returns a pending promise and succeeds, and the failure
+    /// arrives on a later microtask. So nothing on the `.threw` path runs, and
+    /// the rejection handler the adaptor attaches for the palette's benefit
+    /// must not consume it. This asserts the second half of that: the promise
+    /// handed back still rejects, with the same `Error` subclass and message.
+    @Test
+    func anAsyncCallbacksRejectionReachesTheAwait() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.commands.registerCommand('ext.asyncThrows', async function () {
+                    await Promise.resolve();
+                    var error = new Error('disk full');
+                    error.name = 'AsyncCommandError';
+                    throw error;
+                });
+                globalThis.__asyncSettled = null;
+                globalThis.run = function () {
+                    (async function () {
+                        try {
+                            var value = await vscode.commands.executeCommand('ext.asyncThrows');
+                            globalThis.__asyncSettled = { ok: true, value: String(value) };
+                        } catch (error) {
+                            globalThis.__asyncSettled =
+                                { ok: false, message: error.message, name: error.name };
+                        }
+                    })();
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+
+        let settled = try #require(await waitForGlobal(context, "globalThis.__asyncSettled"))
+        #expect(settled.forProperty("ok")?.toBool() == false)
+        #expect(settled.forProperty("message")?.toString() == "disk full")
+        #expect(settled.forProperty("name")?.toString() == "AsyncCommandError")
+    }
+
+    /// The palette's path — `CommandRegistry.execute(id:)`, which returns
+    /// `Void` — attaches a rejection handler to a thenable result, so an
+    /// `async` callback's rejection is reported rather than dropped in
+    /// silence.
+    ///
+    /// The log line itself is not assertable from here, so this pins the
+    /// machinery that produces it, which is the part a regression would
+    /// delete: the callback returns a hand-rolled thenable that records how
+    /// its `then` was called, and the assertions are that the adaptor called
+    /// it exactly once on this path, passed a real function as the rejection
+    /// arm, and that invoking that arm reaches Swift without throwing back
+    /// into JavaScript. Remove `VSCodeAPI.observeRejection` from `invoke` and
+    /// `then` is never called at all and every assertion below fails.
+    ///
+    /// A hand-rolled thenable rather than a real rejected `Promise` for two
+    /// reasons: a native promise's reactions are microtasks, so nothing would
+    /// have happened by the time `execute(id:)` returns and the test would be
+    /// asserting on a queue rather than on the adaptor; and a real rejected
+    /// promise with no handler attached is exactly the unobservable case this
+    /// is meant to rule out.
+    @Test
+    func aPaletteDispatchObservesAnAsyncCallbacksRejection() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__observed = null;
+                vscode.commands.registerCommand('ext.rejects', function () {
+                    return {
+                        then: function (onFulfilled, onRejected) {
+                            var record = {
+                                calls: globalThis.__observed ? globalThis.__observed.calls + 1 : 1,
+                                rejectionArmIsFunction: typeof onRejected === 'function',
+                                delivered: false
+                            };
+                            globalThis.__observed = record;
+                            if (typeof onRejected === 'function') {
+                                onRejected(new Error('disk full'));
+                                record.delivered = true;
+                            }
+                        }
+                    };
+                });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        // The palette's dispatch: no caller to reject, so the adaptor's own
+        // observer is the only thing that can notice the failure.
+        try registry.execute(id: "ext.rejects")
+
+        let context = try #require(host.javaScriptContext)
+        let observed = try #require(context.evaluateScript("globalThis.__observed"))
+        #expect(observed.isObject)
+        #expect(observed.forProperty("calls")?.toInt32() == 1)
+        #expect(observed.forProperty("rejectionArmIsFunction")?.toBool() == true)
+        // `delivered` is set *after* the rejection arm returns, so it is also
+        // the assertion that calling into Swift and back left JavaScript
+        // running rather than unwinding.
+        #expect(observed.forProperty("delivered")?.toBool() == true)
+        #expect(context.evaluateScript("1 + 1")?.toInt32() == 2)
+    }
+
     /// An object passed to `executeCommand` and handed straight back is the
     /// **same** object in JavaScript — `===`, with the mutations the callback
     /// made visible to the caller.
@@ -810,6 +996,16 @@ struct MainThreadCommandsTests {
     /// undefined)` takes the wrong branch if those are conflated, and
     /// `toObject()` conflated them — both became `nil`, and `nil as Any`
     /// bridges back as `null`.
+    ///
+    /// The third case is the **app**-registered command, and it is a separate
+    /// route to the same mistake rather than a repeat of the first one. An
+    /// `AppCommand` built with the legacy `() -> Void` initializer wraps its
+    /// closure as `{ _ in run(); return nil }`, so every command the app
+    /// already contributes answers `Optional<Any>.none` — and handing that
+    /// straight to `JSValue(newPromiseResolvedWithResult:)` bridges it through
+    /// `NSNull` and reaches the extension as `null`. There is no JavaScript
+    /// callback anywhere on that path to make it `undefined` for free, which
+    /// is exactly why it needs its own case here.
     @Test
     func undefinedAndNullResultsStayDistinct() async throws {
         let directory = try makeTempDirectory()
@@ -830,14 +1026,17 @@ struct MainThreadCommandsTests {
                         if (value === null) { return 'null'; }
                         return 'other:' + String(value);
                     }
-                    vscode.commands.executeCommand('ext.nothing').then(function (value) {
-                        shapes.nothing = describe(value);
-                        if (shapes.nothing && shapes.null) { globalThis.__shapes = shapes; }
-                    });
-                    vscode.commands.executeCommand('ext.null').then(function (value) {
-                        shapes.null = describe(value);
-                        if (shapes.nothing && shapes.null) { globalThis.__shapes = shapes; }
-                    });
+                    function record(key) {
+                        return function (value) {
+                            shapes[key] = describe(value);
+                            if (shapes.nothing && shapes.null && shapes.app) {
+                                globalThis.__shapes = shapes;
+                            }
+                        };
+                    }
+                    vscode.commands.executeCommand('ext.nothing').then(record('nothing'));
+                    vscode.commands.executeCommand('ext.null').then(record('null'));
+                    vscode.commands.executeCommand('app.void').then(record('app'));
                 };
             };
             """,
@@ -845,6 +1044,13 @@ struct MainThreadCommandsTests {
         )
         defer { host.dispose() }
         try install(commands, on: host)
+
+        // Bound to a `let` of the exact closure type first: `AppCommand` has
+        // two `run:` overloads, and a bare trailing `{ }` leaves the compiler
+        // to guess which one this is.
+        let voidRun: () -> Void = { }
+        registry.register(AppCommand(id: "app.void", title: "Void", run: voidRun))
+
         try await host.activate()
 
         let context = try #require(host.javaScriptContext)
@@ -853,6 +1059,7 @@ struct MainThreadCommandsTests {
         let shapes = try #require(await waitForGlobal(context, "globalThis.__shapes"))
         #expect(shapes.forProperty("nothing")?.toString() == "undefined")
         #expect(shapes.forProperty("null")?.toString() == "null")
+        #expect(shapes.forProperty("app")?.toString() == "undefined")
     }
 
     // MARK: - Unregistering removes this adaptor's registration, not the id
@@ -928,6 +1135,63 @@ struct MainThreadCommandsTests {
 
         #expect(registry.command(id: "ext.own") == nil)
         #expect(registry.command(id: "shared.id")?.title == "App owns it now")
+    }
+
+    /// A `Disposable` minted before `dispose()` does not unregister the
+    /// adaptor's **own** later re-registration of the same id.
+    ///
+    /// This is the case a by-id `Disposable` gets wrong even with every other
+    /// guard in place, and it needs no second registrant to reproduce. The
+    /// stale `Disposable` never fired, so its idempotence flag is still
+    /// `false`; `dispose()` emptied `ownedCallbacks`, so the "do I still own
+    /// this id" check passes again the moment the same id is re-registered;
+    /// and the registry genuinely holds a registration under that id, so
+    /// `unregister(id:)` would happily remove it. Only comparing the captured
+    /// `CommandRegistration` against the one the adaptor now holds tells the
+    /// two registrations apart.
+    ///
+    /// Live in practice as soon as an extension is deactivated and
+    /// reactivated, or a host is torn down and rebuilt against the same
+    /// registry — `context.subscriptions` from the first run outlives it by
+    /// exactly one `dispose()` that the extension's own teardown forgot.
+    @Test
+    func aDisposableFromBeforeDisposeDoesNotRemoveTheReRegisteredCommand() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.stale =
+                    vscode.commands.registerCommand('ext.recycled', function () { return 'first'; });
+                globalThis.reregister = function () {
+                    vscode.commands.registerCommand('ext.recycled', function () { return 'second'; });
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        // Teardown, then the same adaptor takes the id again — a second
+        // registration with a new token, which `globalThis.stale` knows
+        // nothing about.
+        commands.dispose()
+        #expect(registry.command(id: "ext.recycled") == nil)
+        host.javaScriptContext?.evaluateScript("globalThis.reregister();")
+        #expect(registry.command(id: "ext.recycled") != nil)
+
+        host.javaScriptContext?.evaluateScript("globalThis.stale.dispose();")
+
+        let context = try #require(host.javaScriptContext)
+        #expect(registry.command(id: "ext.recycled") != nil)
+        let answer = try #require(registry.execute(id: "ext.recycled", arguments: []) as? JSValue)
+        #expect(answer.toString() == "second")
+        #expect(context.evaluateScript("1 + 1")?.toInt32() == 2)
     }
 
     // MARK: - A torn-down adaptor

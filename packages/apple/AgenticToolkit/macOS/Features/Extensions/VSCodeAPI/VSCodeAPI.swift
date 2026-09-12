@@ -5,6 +5,8 @@
 
 import Foundation
 import JavaScriptCore
+import OSLog
+import AgenticToolkitCore
 
 /// The ceremony every `vscode.*` namespace adaptor needs, written once.
 ///
@@ -139,8 +141,21 @@ public enum VSCodeAPI {
     /// An already-resolved promise carrying `value`, which may be any
     /// JavaScriptCore-bridgeable Swift value — a `String`, an array of them, or
     /// a `JSValue`, which bridges to itself.
+    ///
+    /// **`nil` resolves with `undefined`, not `null`.** A Swift `nil` handed to
+    /// JavaScriptCore as `Any` bridges to `NSNull` and arrives in JavaScript as
+    /// `null`, so an extension writing `if (result === undefined)` would take
+    /// the wrong branch for every command that simply returned nothing — and
+    /// every `AppCommand` built with the legacy `() -> Void` initializer
+    /// returns exactly that. "Returned nothing" is `undefined` in JavaScript,
+    /// and a caller that genuinely means `null` says so with
+    /// `JSValue(nullIn:)`.
     public static func resolvedPromise(with value: Any?, in context: JSContext) -> JSValue? {
-        JSValue(newPromiseResolvedWithResult: value as Any, in: context)
+        guard let value else {
+            guard let undefinedValue = JSValue(undefinedIn: context) else { return nil }
+            return JSValue(newPromiseResolvedWithResult: undefinedValue, in: context)
+        }
+        return JSValue(newPromiseResolvedWithResult: value, in: context)
     }
 
     /// An already-rejected promise carrying `reason`, the JavaScript value the
@@ -177,28 +192,24 @@ public enum VSCodeAPI {
     /// `executeCommand` has. Anything else resolves as itself.
     ///
     /// Reading `.then` is a property access on extension-controlled data, so it
-    /// is done inside `absorbingExceptions` — a `Proxy` or a lazily-defined
-    /// property can throw from the *getter*, and an exception raised there
-    /// would otherwise escape into the host's `exceptionHandler` and be
-    /// misattributed to whatever the host was doing at the time. A getter that
-    /// throws rejects the promise with what it threw, which is what
-    /// `Promise.resolve` does with the same object.
+    /// happens inside the JavaScript trampoline (see `thenFunction(of:in:)`) —
+    /// a `Proxy` or a lazily-defined property can throw from the *getter*, and
+    /// an exception raised there would otherwise escape into the host's
+    /// `exceptionHandler` and be misattributed to whatever the host was doing
+    /// at the time. A getter that throws rejects the promise with what it
+    /// threw, which is what `Promise.resolve` does with the same object.
     public static func settledPromise(for value: JSValue?, in context: JSContext) -> JSValue? {
         guard let value else {
-            return resolvedPromise(with: JSValue(undefinedIn: context), in: context)
+            return resolvedPromise(with: nil, in: context)
         }
-        let (isThenable, thrown) = absorbingExceptions(in: context) { self.isThenable(value, in: context) }
-        if let thrown {
-            return rejectedPromise(reason: thrown, in: context)
+        switch thenFunction(of: value, in: context) {
+        case .threw(let reason):
+            return rejectedPromise(reason: reason, in: context)
+        case .thenable:
+            return value
+        case .notThenable:
+            return resolvedPromise(with: value, in: context)
         }
-        return isThenable ? value : resolvedPromise(with: value, in: context)
-    }
-
-    private static func isThenable(_ value: JSValue, in context: JSContext) -> Bool {
-        guard value.isObject, value.hasProperty("then") else { return false }
-        guard let then = value.forProperty("then"),
-              let functionConstructor = context.objectForKeyedSubscript("Function") else { return false }
-        return then.isInstance(of: functionConstructor)
     }
 
     // MARK: - Calling back into the extension
@@ -212,7 +223,9 @@ public enum VSCodeAPI {
     public enum CallOutcome {
 
         /// The callback returned, with this value. `nil` only when the call
-        /// could not be made at all — a `JSValue` whose context is gone.
+        /// could not be made at all — a `JSValue` whose context is gone, or a
+        /// context in which the trampoline could not be installed (see
+        /// `call(_:thisArg:arguments:)`).
         case returned(JSValue?)
 
         /// The callback threw, with this value. Almost always an `Error`, but
@@ -232,17 +245,25 @@ public enum VSCodeAPI {
     /// nothing to do with `activate`. Measured, not deduced: with a custom
     /// handler installed JavaScriptCore calls that handler **instead of**
     /// setting `context.exception`, so reading `context.exception` after the
-    /// call finds nothing and there is nothing to clear. Swapping the handler
-    /// for the duration of the call is what actually keeps the exception out of
-    /// the host's bookkeeping — it nests correctly (a callback that calls back
-    /// into another callback saves and restores in order) and it puts the
-    /// host's own handler back before returning.
+    /// call finds nothing and there is nothing to clear.
+    ///
+    /// **The catch is in JavaScript, not in the handler.** An earlier round
+    /// swapped `context.exceptionHandler` for the duration of the call, and
+    /// that was wrong in two directions: `exceptionHandler` is *context-wide*
+    /// state being used for a *call-scoped* job, so restoring it
+    /// unconditionally undid `ExtensionHost.dispose()`'s deliberate
+    /// `exceptionHandler = nil`, and any host operation re-entered from inside
+    /// a callback lost its own exception into the sink. Going through a JS
+    /// `try`/`catch` instead touches no context-wide state at all, and is
+    /// re-entrant for free: each invocation gets its own JavaScript stack
+    /// frame.
     ///
     /// - Parameters:
     ///   - function: The extension's callback.
-    ///   - thisArg: What to bind as `this`, or `nil` for the default. Passed
-    ///     through `Function.prototype.call`, which is the only way to bind a
-    ///     receiver from this side.
+    ///   - thisArg: What to bind as `this`, or `nil` for the default. `nil`,
+    ///     JS `undefined` and JS `null` are the same answer here (Ruling 7),
+    ///     and `undefined` is the spelling the trampoline's `Reflect.apply`
+    ///     receives for it.
     ///   - arguments: Anything `JSValue.call(withArguments:)` accepts —
     ///     `JSValue`s pass through untouched, native Swift values are bridged
     ///     by JavaScriptCore itself.
@@ -252,46 +273,228 @@ public enum VSCodeAPI {
         arguments: [Any]
     ) -> CallOutcome {
         guard let context = function.context else { return .returned(nil) }
-        let (value, thrown) = absorbingExceptions(in: context) { () -> JSValue? in
-            if let thisArg {
-                return function.invokeMethod("call", withArguments: [thisArg] + arguments)
-            }
-            return function.call(withArguments: arguments)
+        guard let invoke = helperFunction("call", in: context),
+              let undefinedValue = JSValue(undefinedIn: context) else {
+            // Deliberately **not** falling back to calling `function`
+            // directly: an uncaught throw from that call is exactly the thing
+            // this method exists to keep out of the host's bookkeeping, so a
+            // context that cannot host the trampoline gets no call at all.
+            // `sharedHelper(in:)` has already logged why.
+            return .returned(nil)
         }
-        if let thrown {
-            return .threw(thrown)
-        }
-        return .returned(value)
+        let callArguments: [Any] = [function, thisArg ?? undefinedValue] + arguments
+        return outcome(of: invoke.call(withArguments: callArguments))
     }
 
-    /// Runs `body` with `context`'s exception handler replaced by one that
-    /// captures, and puts the original back afterwards.
+    /// Attaches `handler` to `value`'s rejection, if `value` is a thenable,
+    /// **without changing what `value` is**.
     ///
-    /// The sink is a class rather than a captured `var` because the handler is
-    /// an Objective-C block property whose imported signature makes no promise
-    /// about isolation. It never crosses one: JavaScriptCore invokes the
-    /// handler synchronously, inside `body`, on the thread that called it —
-    /// the same argument `UncheckedJSValueBox` makes, for the same reason.
-    private static func absorbingExceptions<T>(
+    /// The failure this closes: a command callback declared `async` does not
+    /// throw, it returns a rejected promise. Nothing in `call` sees that — the
+    /// call itself returned perfectly well — so a palette dispatch of
+    /// `async () => { throw new Error('disk full') }` produced no log, no
+    /// surfacing and no trace of any kind. `CommandRegistry.execute(id:)`
+    /// returns `Void` and has no caller to tell, so the log line *is* the
+    /// report, and something has to be watching the promise for there to be
+    /// one.
+    ///
+    /// **The original value is what the caller keeps.** `then` answers a
+    /// *derived* promise, and handing that one back would be the swallow this
+    /// is supposed to prevent: the derived promise resolves (the handler
+    /// returned normally), so an extension awaiting it would see success where
+    /// its own command failed. The derived promise is discarded here — it is
+    /// settled and handled, so it is not itself an unobserved rejection — and
+    /// `value`, still rejecting, is what `executeCommand` hands to the
+    /// extension.
+    ///
+    /// - Parameters:
+    ///   - value: The value a callback returned. A non-thenable is left alone.
+    ///   - context: The context `value` belongs to.
+    ///   - handler: Called with the rejection reason, on the main actor.
+    /// - Returns: Whether `value` was a thenable and the handler was attached.
+    @discardableResult
+    public static func observeRejection(
+        of value: JSValue,
         in context: JSContext,
-        _ body: () -> T
-    ) -> (T, JSValue?) {
-        let saved = context.exceptionHandler
-        let sink = JSExceptionSink()
-        context.exceptionHandler = { _, exception in sink.exception = exception }
-        let value = body()
-        context.exceptionHandler = saved
-        return (value, sink.exception)
+        _ handler: @escaping @MainActor (JSValue) -> Void
+    ) -> Bool {
+        guard case .thenable(let then) = thenFunction(of: value, in: context),
+              let undefinedValue = JSValue(undefinedIn: context) else {
+            return false
+        }
+        // No formal parameters, for `member`'s reason: the reason is read off
+        // the actual argument list rather than off however many parameters the
+        // block happened to declare.
+        let onRejected: @convention(block) () -> Void = {
+            MainActor.assumeIsolated {
+                guard let reason = currentArguments().first else { return }
+                handler(reason)
+            }
+        }
+        let thenArguments: [Any] = [undefinedValue, onRejected]
+        // Through `call`, not `invokeMethod`: `then` is extension-controlled
+        // and a `Proxy`'s trap can throw from it.
+        _ = call(then, thisArg: value, arguments: thenArguments)
+        return true
+    }
+
+    // MARK: - The JavaScript trampoline
+
+    /// What `thenFunction(of:in:)` found.
+    private enum ThenLookup {
+
+        /// `value` has no callable `then`, so it is a plain value.
+        case notThenable
+
+        /// `value` is a thenable, and this is its `then` function.
+        case thenable(JSValue)
+
+        /// Reading `value.then` threw — an extension-controlled getter.
+        case threw(JSValue)
+    }
+
+    /// Reads `value.then` from inside the trampoline and reports what it found.
+    ///
+    /// The read has to be guarded for the same reason the callback call does:
+    /// `then` on a `Proxy`, or a lazily-defined accessor, is extension code,
+    /// and an exception from it would land in `ExtensionHost.pendingException`
+    /// and be attributed to whatever the host happened to be doing.
+    private static func thenFunction(of value: JSValue, in context: JSContext) -> ThenLookup {
+        guard let lookup = helperFunction("thenOf", in: context) else { return .notThenable }
+        let lookupArguments: [Any] = [value]
+        switch outcome(of: lookup.call(withArguments: lookupArguments)) {
+        case .threw(let reason):
+            return .threw(reason)
+        case .returned(let result):
+            guard let result, !result.isNull, !result.isUndefined else { return .notThenable }
+            return .thenable(result)
+        }
+    }
+
+    /// Unpacks the `{ ok, value, error }` record the trampoline answers with.
+    ///
+    /// A record rather than an out-parameter because that is the only shape a
+    /// JavaScript function can return two things in, and `ok` rather than
+    /// "`error` is absent" because a callback is perfectly entitled to
+    /// `throw undefined`.
+    private static func outcome(of settled: JSValue?) -> CallOutcome {
+        guard let settled, settled.isObject else { return .returned(nil) }
+        guard settled.forProperty("ok")?.toBool() == true else {
+            guard let reason = settled.forProperty("error") else { return .returned(nil) }
+            return .threw(reason)
+        }
+        return .returned(settled.forProperty("value"))
+    }
+
+    /// The global the trampoline is cached under, in the `__` namespace the
+    /// host already reserves for itself.
+    private static nonisolated let helperGlobalName = "__vscodeAPITrampoline"
+
+    /// The trampoline's source, evaluated at most once per `JSContext`.
+    ///
+    /// `Reflect.apply` and `Array.prototype.slice` are captured **now**, into
+    /// the closure, rather than resolved at call time — the same defence
+    /// `extension-runtime.js` makes for its own dynamic calls, and for the same
+    /// reason: an extension that reassigns `Function.prototype.apply` must not
+    /// be able to change what the app believes its callbacks did.
+    ///
+    /// Every risky step is inside a JavaScript `try`, including the caching
+    /// itself, so evaluating this can never be the thing that writes to
+    /// `ExtensionHost.pendingException`. A context hostile enough to break it
+    /// answers `null`, and `call` refuses to invoke anything there.
+    private static nonisolated let helperSource = """
+    (function () {
+        'use strict';
+        try {
+            var apply = Reflect.apply;
+            var slice = Array.prototype.slice;
+            var helper = {
+                call: function (fn, thisArg) {
+                    try {
+                        return { ok: true, value: apply(fn, thisArg, apply(slice, arguments, [2])) };
+                    } catch (error) {
+                        return { ok: false, error: error };
+                    }
+                },
+                thenOf: function (value) {
+                    try {
+                        if (value === null || value === undefined) {
+                            return { ok: true, value: null };
+                        }
+                        var then = value.then;
+                        return { ok: true, value: typeof then === 'function' ? then : null };
+                    } catch (error) {
+                        return { ok: false, error: error };
+                    }
+                }
+            };
+            try {
+                Object.defineProperty(globalThis, '\(helperGlobalName)', {
+                    value: helper,
+                    writable: false,
+                    enumerable: false,
+                    configurable: false
+                });
+            } catch (ignored) {
+                // Caching is an optimisation. The helper works without it.
+            }
+            return helper;
+        } catch (error) {
+            return null;
+        }
+    })()
+    """
+
+    /// The trampoline object for `context`, evaluating it the first time and
+    /// reading it back from the context afterwards.
+    ///
+    /// **The cache lives on the context, not in Swift.** A Swift-side
+    /// `[ObjectIdentifier: JSValue]` would be the obvious spelling and is a
+    /// leak: a `JSValue` retains its `JSContext`, so every context this is ever
+    /// called for would outlive its host forever. Stashed on `globalThis` it
+    /// has exactly the lifetime it should — the context's — and costs a
+    /// property lookup per call.
+    ///
+    /// Non-enumerable, non-writable and non-configurable, so it does not show
+    /// up in `Object.keys(globalThis)` and cannot be swapped for one that lies
+    /// about what a callback did. It is not withdrawn the way `__host` and
+    /// `__extensionRuntime` are, because unlike those it is not a line back
+    /// into the app: it is a pure JavaScript function holding no host
+    /// reference, and an extension gains nothing from it that its own
+    /// `try`/`catch` does not already give it.
+    private static func sharedHelper(in context: JSContext) -> JSValue? {
+        if let cached = context.objectForKeyedSubscript(helperGlobalName), cached.isObject {
+            return cached
+        }
+        guard let created = context.evaluateScript(helperSource), created.isObject else {
+            logger.error(
+                """
+                Could not install the vscode API trampoline in context \
+                '\(context.name ?? "<unnamed>", privacy: .public)'; extension callbacks in it \
+                will not be invoked
+                """)
+            return nil
+        }
+        return created
+    }
+
+    private static func helperFunction(_ name: String, in context: JSContext) -> JSValue? {
+        guard let helper = sharedHelper(in: context),
+              let function = helper.forProperty(name),
+              !function.isUndefined, !function.isNull else {
+            return nil
+        }
+        return function
     }
 }
 
-/// Collects the one exception `VSCodeAPI.absorbingExceptions` is installed to
-/// catch. A reference type so the handler block can write where the caller
-/// reads; `@unchecked Sendable` because the block property's imported type
-/// carries no isolation, and this value provably never leaves the thread that
-/// created it.
-private final class JSExceptionSink: @unchecked Sendable {
-    var exception: JSValue?
+extension VSCodeAPI: Loggable {
+
+    /// The shared adaptor ceremony's own log destination — the same `Loggable`
+    /// shape `CommandRegistry` and `ExtensionHost` use. It has exactly one
+    /// caller today, `sharedHelper(in:)`, which reports the one failure here
+    /// that no JavaScript caller can be told about.
+    public static nonisolated let logger = makeLogger()
 }
 
 /// Carries a `JSValue?` out of `MainActor.assumeIsolated`, whose generic
