@@ -33,6 +33,20 @@ import AgenticToolkitCore
 /// left here reads as the `commands` adaptor rather than as four copies of an
 /// incantation.
 ///
+/// **Whoever owns this adaptor must call `dispose()` when it tears the
+/// extension host down.** There is deliberately no `deinit` net, and nothing
+/// in this framework calls `dispose()` today, because nothing instantiates
+/// `ExtensionHost` in production yet — inventing an owner here would be a
+/// guess at a wiring design that the `ExtensionsCoordinator` task owns. Until
+/// that task wires it, the requirement lives in this paragraph, and what it
+/// costs to miss is concrete: every command this adaptor registered stays in
+/// `CommandRegistry`, so the app's command palette keeps rows that dispatch
+/// into a dead extension, and each of those rows holds the callback `JSValue`
+/// — and through it the whole `JSContext`, the extension's module graph and
+/// everything the extension captured — alive for the rest of the process.
+/// `ExtensionHost.dispose()` cannot do it for you: it does not know this
+/// adaptor exists.
+///
 /// `@MainActor` for the same reason `CommandRegistry` and `ExtensionHost` are:
 /// `JSValue` is not `Sendable`, and every block below is called by
 /// JavaScriptCore on the thread that made the call, which for this host is
@@ -152,7 +166,7 @@ public final class MainThreadCommands {
         }))
         ownedCallbacks[command] = OwnedCommand(callback: callback, token: token)
 
-        return makeDisposable(id: command, in: context)
+        return makeDisposable(id: command, token: token, in: context)
     }
 
     /// Calls the extension's callback and answers with something the registry
@@ -176,6 +190,16 @@ public final class MainThreadCommands {
     /// the logging happens here, on the one path both share, rather than in
     /// `handleExecuteCommand`.
     ///
+    /// **An `async` callback does not throw — it rejects**, and a rejection is
+    /// not a return value either path can notice: the call itself succeeded,
+    /// and the failure arrives on a later microtask. So a thenable return
+    /// value gets a rejection handler attached here too
+    /// (`VSCodeAPI.observeRejection`), which is what makes a palette dispatch
+    /// of `async () => { throw new Error('disk full') }` produce a log line
+    /// instead of complete silence. Attaching it does not consume the
+    /// rejection: the value handed back is still the extension's own promise,
+    /// still rejecting, so an `await executeCommand(…)` sees it unchanged.
+    ///
     /// Deliberately **not** made to throw. `AppCommand.run` is `([Any]) ->
     /// Any?` and staying that way keeps the registry free of any knowledge
     /// that JavaScript exists; `CallbackFailure` is private to this file and
@@ -188,6 +212,15 @@ public final class MainThreadCommands {
     ) -> Any? {
         switch VSCodeAPI.call(callback, thisArg: thisArg, arguments: arguments) {
         case .returned(let value):
+            if let value, let context = value.context {
+                VSCodeAPI.observeRejection(of: value, in: context) { reason in
+                    MainThreadCommands.logger.error(
+                        """
+                        Extension command '\(commandID, privacy: .public)' rejected: \
+                        \(reason.toString() ?? "<unprintable>", privacy: .public)
+                        """)
+                }
+            }
             return value
         case .threw(let exception):
             logger.error(
@@ -208,9 +241,8 @@ public final class MainThreadCommands {
         let reason: JSValue
     }
 
-    /// A JS object whose `dispose()` unregisters `id` — and only the
-    /// registration this adaptor made for it — and does nothing the second
-    /// time it is called.
+    /// A JS object whose `dispose()` unregisters exactly the registration
+    /// `token` names, and does nothing the second time it is called.
     ///
     /// VS Code's `Disposable` contract is exactly that idempotence, so
     /// `disposed` is captured by the block rather than re-derived from
@@ -218,34 +250,48 @@ public final class MainThreadCommands {
     /// extension's later reuse of the same id (after this one unregistered
     /// it) look, to a stale `Disposable` from the first registration, like
     /// something still worth disposing.
-    private func makeDisposable(id: String, in context: JSContext) -> JSValue? {
+    ///
+    /// **`token` is captured for the same reason, and it is not the same
+    /// guard.** `disposed` only knows whether *this* `Disposable` already
+    /// fired; it says nothing about what `id` names now. Reading the token
+    /// out of `ownedCallbacks` at fire time reads whatever registration is
+    /// current, so a `Disposable` minted before a `dispose()` — never fired,
+    /// so still `disposed == false` — would unregister the adaptor's *own*
+    /// fresh registration of the same id made after that teardown. Captured
+    /// here, the token is the one this `Disposable` was minted for, and the
+    /// mismatch is the no-op it should be.
+    private func makeDisposable(id: String, token: CommandRegistration, in context: JSContext) -> JSValue? {
         guard let disposable = JSValue(newObjectIn: context) else { return nil }
         var disposed = false
         let dispose: @convention(block) () -> Void = { [weak self] in
             MainActor.assumeIsolated {
                 guard !disposed else { return }
                 disposed = true
-                self?.unregisterOwned(id: id)
+                self?.unregisterOwned(id: id, token: token)
             }
         }
         disposable.setObject(dispose, forKeyedSubscript: "dispose" as NSString)
         return disposable
     }
 
-    /// Removes `id` from both the ownership record and the registry — the
-    /// half of teardown a single `Disposable` needs.
+    /// Removes the registration `token` names from both the ownership record
+    /// and the registry — the half of teardown a single `Disposable` needs.
     ///
-    /// Two guards, answering two different questions. The dictionary lookup
-    /// asks whether this adaptor still claims the id at all, which makes a
-    /// second `dispose()` a no-op. The token handed to
-    /// `CommandRegistry.unregister(id:token:)` asks whether the registration
-    /// this adaptor made is still the one under that id — because `register`
-    /// replaces in place, an extension that shadowed an app command and was
-    /// then shadowed back would otherwise delete somebody else's command on
-    /// the way out.
-    private func unregisterOwned(id: String) {
-        guard let owned = ownedCallbacks.removeValue(forKey: id) else { return }
-        registry.unregister(id: id, token: owned.token)
+    /// Three guards, answering three different questions. The dictionary
+    /// lookup asks whether this adaptor still claims the id at all, which
+    /// makes a second `dispose()` a no-op. Comparing the stored token with
+    /// `token` asks whether the registration the *caller* is talking about is
+    /// still the one this adaptor holds — the stale-`Disposable`-after-a-
+    /// `dispose()`-and-re-register case. And the token handed to
+    /// `CommandRegistry.unregister(id:token:)` asks whether that registration
+    /// is still the one under the id in the registry at all — because
+    /// `register` replaces in place, an extension that shadowed an app
+    /// command and was then shadowed back would otherwise delete somebody
+    /// else's command on the way out.
+    private func unregisterOwned(id: String, token: CommandRegistration) {
+        guard let owned = ownedCallbacks[id], owned.token == token else { return }
+        ownedCallbacks.removeValue(forKey: id)
+        registry.unregister(id: id, token: token)
     }
 
     // MARK: - vscode.commands.executeCommand
@@ -309,7 +355,12 @@ public final class MainThreadCommands {
                 return VSCodeAPI.settledPromise(for: jsResult, in: context)
             }
             // An app-registered command answering with a native Swift value:
-            // JavaScriptCore bridges it on the way into the promise.
+            // JavaScriptCore bridges it on the way into the promise. A `nil`
+            // here — which is what every `AppCommand` built with the legacy
+            // `() -> Void` initializer returns — resolves with `undefined`
+            // rather than `null`; `VSCodeAPI.resolvedPromise` owns that rule,
+            // because getting it wrong sends an extension's
+            // `result === undefined` down the wrong branch.
             return VSCodeAPI.resolvedPromise(with: result, in: context)
         } catch let error as CommandRegistryError {
             // The registry's own wording — "no command with id 'x'" versus
@@ -364,8 +415,8 @@ public final class MainThreadCommands {
     /// `Disposable` is: an id some other registrant has since taken over is
     /// theirs, and a wholesale teardown is not a licence to take it.
     public func dispose() {
-        for id in Array(ownedCallbacks.keys) {
-            unregisterOwned(id: id)
+        for (id, owned) in Array(ownedCallbacks) {
+            unregisterOwned(id: id, token: owned.token)
         }
         ownedCallbacks.removeAll()
     }
