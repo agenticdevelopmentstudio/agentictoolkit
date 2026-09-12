@@ -13,12 +13,29 @@ import os
 /// Values are JSON-encoded and stored as a UTF-8 String in the Keychain.
 /// `String`-typed values take a fast path that stores the raw string (no JSON quoting)
 /// to keep keychain entries human-readable for cases like API keys.
+///
+/// Reads are memoized. Every `get` is a synchronous XPC round-trip to `securityd`,
+/// and a *miss* is the expensive case: `KeychainHelper.get` tries the access-group
+/// query, then the legacy no-group query, then both variants of every retired
+/// service. Callers resolve settings in bulk — `AIProviderConfigStore.configValues`
+/// builds a fresh `UserSetting` per field and `UserSetting.init` reads storage in its
+/// initializer — so resolving a handful of AI configurations costs dozens of
+/// round-trips on the main thread. Repeat that per daemon reconnect and the app sits
+/// pinned above 100% CPU inside `SecItemCopyMatching`. This provider owns every write
+/// to the keys it serves, so the memo is maintained exactly rather than expired on a
+/// timer.
 @MainActor
 public final class KeychainSecureSettingsStorageProvider: SecureSettingsStorageProvider {
 
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let changeSubject = PassthroughSubject<String, Never>()
+
+    /// Memoized raw keychain strings, by key name. The value is itself optional so an
+    /// *absence* is cached too — an unset secret is both the common case and the
+    /// costliest read. Only `set` and `remove` below reach the keys this provider
+    /// serves, so every entry stays exact.
+    private var cache: [String: String?] = [:]
 
     public var changes: AnyPublisher<String, Never> {
         changeSubject.eraseToAnyPublisher()
@@ -54,7 +71,7 @@ public final class KeychainSecureSettingsStorageProvider: SecureSettingsStorageP
     // MARK: - SettingsStorageProvider
 
     public func get<Value: Codable & Sendable>(_ key: any StorableSetting<Value>) -> Value {
-        guard let stored = KeychainHelper.get(forKey: key.name) else {
+        guard let stored = storedString(forKey: key.name) else {
             return key.defaultValue
         }
         // Fast path: bare string passes through without JSON quoting.
@@ -85,19 +102,42 @@ public final class KeychainSecureSettingsStorageProvider: SecureSettingsStorageP
             return
         }
         guard KeychainHelper.set(stringToStore, forKey: key.name) else {
+            // A failed write must not leave a stale memo standing: forget the key so
+            // the next read goes back to the keychain for the truth.
+            cache.removeValue(forKey: key.name)
             // KeychainHelper already logs the OSStatus.
             return
         }
+        // Memoize what was just written. Every live `UserSetting` re-reads on the
+        // change emitted below — this is the read that would otherwise go straight
+        // back to securityd for a value we already hold.
+        cache[key.name] = stringToStore
         changeSubject.send(key.name)
     }
 
     public func remove<Value: Codable & Sendable>(_ key: any StorableSetting<Value>) {
-        guard KeychainHelper.delete(forKey: key.name) else { return }
+        guard KeychainHelper.delete(forKey: key.name) else {
+            cache.removeValue(forKey: key.name)
+            return
+        }
+        // `updateValue`, not `cache[name] = nil`: the subscript form would erase the
+        // entry rather than record the absence, sending the next read back to securityd.
+        cache.updateValue(nil, forKey: key.name)
         changeSubject.send(key.name)
     }
 
     public func contains<Value: Codable & Sendable>(_ key: any StorableSetting<Value>) -> Bool {
         KeychainHelper.exists(forKey: key.name)
+    }
+
+    /// The memoized raw keychain string for a key, reading through on the first ask.
+    private func storedString(forKey name: String) -> String? {
+        if let memoized = cache[name] {
+            return memoized
+        }
+        let stored = KeychainHelper.get(forKey: name)
+        cache.updateValue(stored, forKey: name)
+        return stored
     }
 }
 

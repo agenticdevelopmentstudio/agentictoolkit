@@ -123,6 +123,60 @@ final class KeychainSecureStorageProviderTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
+    // MARK: - Read memoization
+    //
+    // `get` is a synchronous XPC round-trip to securityd, and bulk resolves (every AI
+    // configuration's every field, re-run on each daemon reconnect) made it hot enough
+    // to pin a core. These cases pin the memo's exact shape by mutating the keychain
+    // BEHIND the provider — the one thing a correct memo is allowed to miss — so a
+    // future "just read through" regression fails here instead of in Activity Monitor.
+
+    func testRepeatReadsAreServedFromTheMemoNotTheKeychain() {
+        store.set("first", for: UserSettings.displayName)
+        XCTAssertEqual(store.get(UserSettings.displayName), "first")
+
+        // Delete behind the provider's back. A read-through would now return the
+        // default; the memo must still answer "first".
+        KeychainHelper.delete(forKey: "test.displayName")
+        XCTAssertEqual(store.get(UserSettings.displayName), "first")
+    }
+
+    func testAnAbsentKeyIsMemoizedToo() {
+        // The costliest read: a miss walks the access-group query, the legacy
+        // no-group query, and every retired service. Caching the absence is the
+        // whole point, since an unconfigured secret is the common case.
+        XCTAssertEqual(store.get(UserSettings.displayName), "Anonymous")
+
+        KeychainHelper.set("written-behind-the-provider", forKey: "test.displayName")
+        XCTAssertEqual(store.get(UserSettings.displayName), "Anonymous")
+    }
+
+    func testSetRefreshesTheMemo() {
+        // Seed the "absent" memo first, so the set has a stale entry to correct.
+        XCTAssertEqual(store.get(UserSettings.displayName), "Anonymous")
+
+        store.set("fresh", for: UserSettings.displayName)
+        XCTAssertEqual(store.get(UserSettings.displayName), "fresh")
+    }
+
+    func testRemoveRefreshesTheMemo() {
+        store.set("doomed", for: UserSettings.displayName)
+        XCTAssertEqual(store.get(UserSettings.displayName), "doomed")
+
+        store.remove(UserSettings.displayName)
+        XCTAssertEqual(store.get(UserSettings.displayName), "Anonymous")
+    }
+
+    func testMemoizedValuesAreScopedToTheProviderInstance() {
+        store.set("owned", for: UserSettings.displayName)
+        XCTAssertEqual(store.get(UserSettings.displayName), "owned")
+
+        // A second provider on the same service starts with an empty memo and so
+        // reads the keychain — the memo is per-instance state, not a global.
+        let other = KeychainSecureSettingsStorageProvider(service: serviceID)
+        XCTAssertEqual(other.get(UserSettings.displayName), "owned")
+    }
+
     // MARK: - isSecure flag
 
     func testProviderReportsSecure() {
