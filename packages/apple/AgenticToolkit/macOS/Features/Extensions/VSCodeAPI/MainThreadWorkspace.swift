@@ -62,7 +62,10 @@ public protocol ExtensionWorkspaceRoots: AnyObject {
 /// keeps. Nothing in this task asked for live updates, and the shim's
 /// `defineMember` has no notion of one: `table[name] = value` is a plain
 /// assignment, not a JavaScript accessor property, so there is nowhere to
-/// route a later change even if this type tried to notice one.
+/// route a later change even if this type tried to notice one. The only way
+/// a later root shows up is a new `MainThreadWorkspace` built for a freshly
+/// (re-)activated host — there is no in-place refresh path, and none is
+/// planned.
 ///
 /// **`undefined`, not `null`, for an absent `name` or `workspaceFolders`.**
 /// `JSValue(undefinedIn:)` is the only way to build a genuine `undefined`, and
@@ -104,7 +107,27 @@ public final class MainThreadWorkspace {
     /// not sharing an instance — it wraps `FileManager`, which is itself
     /// already process-wide — so nothing is silently dropped the way an
     /// unshared `CommandRegistry` would drop the app's own command palette.
-    private let fileSystemService: FileSystemService
+    ///
+    /// Typed as ``FileSystemServicing``, not the concrete actor: the only
+    /// reason is a test's need to substitute a double whose operations
+    /// suspend under the test's own control, so it can exercise
+    /// `runFileSystemOperation`'s in-flight teardown path. Nothing here
+    /// depends on the concrete type; the default argument still constructs
+    /// one.
+    private let fileSystemService: FileSystemServicing
+
+    /// Where a reach for an undefined `fs` member is recorded — the same
+    /// ledger `ExtensionHost` holds, so a report reading the ledger sees
+    /// `vscode.workspace.fs` misses beside every other namespace's. Required,
+    /// not defaulted: a caller that forgot to pass the host's real ledger
+    /// would otherwise silently lose every `fs` miss, the same failure mode
+    /// this parameter exists to close.
+    private let notImplementedLedger: NotImplementedLedger
+
+    /// The extension this adaptor belongs to, recorded alongside every `fs`
+    /// miss and probe so the ledger can tell one extension's reach from
+    /// another's. Matches `ExtensionHost.identifier`.
+    private let extensionIdentifier: String
 
     /// Set by `dispose()`. Checked before every `fs` promise settles, so an
     /// operation that outlives its host answers with a rejection instead of
@@ -145,10 +168,24 @@ public final class MainThreadWorkspace {
     ///     none. Not defaulted: a caller that forgot to pass the host's real
     ///     workspace would otherwise silently get "no workspace" for every
     ///     extension.
+    ///   - notImplementedLedger: Where a reach for an undefined `fs` member is
+    ///     recorded. Not defaulted, on the same grounds as `workspaceRoots`:
+    ///     mirrors `ExtensionHost.notImplementedLedger`, and a caller
+    ///     constructs this adaptor from a host's own ledger so the two never
+    ///     disagree about where a miss goes.
+    ///   - extensionIdentifier: The extension this adaptor belongs to, carried
+    ///     alongside every ledger entry. Mirrors `ExtensionHost.identifier`.
     ///   - fileSystemService: Where `fs` operations run. Defaults to a private
     ///     instance — see the property's own doc for why that is safe here.
-    public init(workspaceRoots: ExtensionWorkspaceRoots?, fileSystemService: FileSystemService = FileSystemService()) {
+    public init(
+        workspaceRoots: ExtensionWorkspaceRoots?,
+        notImplementedLedger: NotImplementedLedger,
+        extensionIdentifier: String,
+        fileSystemService: FileSystemServicing = FileSystemService()
+    ) {
         self.workspaceRoots = workspaceRoots
+        self.notImplementedLedger = notImplementedLedger
+        self.extensionIdentifier = extensionIdentifier
         self.fileSystemService = fileSystemService
     }
 
@@ -204,13 +241,28 @@ public final class MainThreadWorkspace {
     /// `VSCodeAPI.uriValue(for:in:)`, the same call `vscode.Uri` itself uses —
     /// not a plain string, so `instanceof vscode.Uri` and `.fsPath` both work
     /// on it.
+    ///
+    /// `url` is stripped of any trailing-slash "directory" marking before it
+    /// reaches `VSCodeAPI.uriValue`. `VSCodeAPI.uriValue(for:in:)` builds the
+    /// `vscode.Uri` from `url.absoluteString`, and a `URL` built or
+    /// standardized with `isDirectory: true` -- which is exactly what a
+    /// workspace root's `URL` is, since it names an existing directory --
+    /// keeps a trailing `/` in `absoluteString` all the way through to
+    /// `Uri.parse` and out the other side as `.fsPath`. Real VS Code's
+    /// `fsPath` never carries one, for any root, so an extension comparing
+    /// `folder.uri.fsPath` against its own idea of the root -- a config
+    /// value, a path it just joined -- sees a spurious mismatch on every real
+    /// workspace. Rebuilding a file `URL` from the standardized path with
+    /// `isDirectory: false` keeps the path characters identical and only
+    /// removes the marker responsible for the trailing slash.
     private static func workspaceFolderValue(for url: URL, index: Int, in context: JSContext) -> JSValue? {
-        guard let uriValue = VSCodeAPI.uriValue(for: url, in: context),
+        let filePathURL = URL(fileURLWithPath: url.standardizedFileURL.path, isDirectory: false)
+        guard let uriValue = VSCodeAPI.uriValue(for: filePathURL, in: context),
               let object = JSValue(newObjectIn: context) else {
             return nil
         }
         object.setObject(uriValue, forKeyedSubscript: "uri" as NSString)
-        object.setObject(url.lastPathComponent, forKeyedSubscript: "name" as NSString)
+        object.setObject(filePathURL.lastPathComponent, forKeyedSubscript: "name" as NSString)
         object.setObject(index, forKeyedSubscript: "index" as NSString)
         return object
     }
@@ -260,8 +312,31 @@ public final class MainThreadWorkspace {
     /// `VSCodeAPI.subNamespace`. A `ExtensionHost.DeferredVSCodeValue` like
     /// `name` and `workspaceFolders`, because `subNamespace` itself needs a
     /// live `JSContext`.
+    ///
+    /// `recordMiss`/`recordProbe` are real closures bound to
+    /// `notImplementedLedger` and `extensionIdentifier`, not `nil`. A fresh
+    /// `subNamespace` call does not get miss-recording "for free" — the
+    /// stub's `get` trap throws `NotImplementedError` unconditionally
+    /// whether or not a recorder was supplied; only the *recording* of that
+    /// reach is conditional on `recordMiss`/`recordProbe` being real
+    /// functions. Passing `nil` for both, as this call used to, therefore
+    /// left every reach under `vscode.workspace.fs` invisible to the ledger
+    /// while still throwing correctly — the throw and the recording are two
+    /// independent things, and only wiring these closures turns both on.
     public private(set) lazy var fs: Any = ExtensionHost.DeferredVSCodeValue { [weak self] context in
         guard let self else { return MainThreadWorkspace.undefinedValue(in: context) }
+        let ledger = self.notImplementedLedger
+        let identifier = self.extensionIdentifier
+        let recordMiss: @convention(block) (String) -> Void = { memberPath in
+            MainActor.assumeIsolated {
+                ledger.record(memberPath: memberPath, extensionIdentifier: identifier)
+            }
+        }
+        let recordProbe: @convention(block) (String) -> Void = { memberPath in
+            MainActor.assumeIsolated {
+                ledger.recordProbe(memberPath: memberPath, extensionIdentifier: identifier)
+            }
+        }
         let members: [String: Any] = [
             "readFile": VSCodeAPI.member(
                 "vscode.workspace.fs.readFile", of: self, whenTornDown: .rejectedPromise
@@ -286,7 +361,8 @@ public final class MainThreadWorkspace {
             ) { $0.handleCreateDirectory() }
         ]
         guard let namespaceValue = VSCodeAPI.subNamespace(
-            path: "vscode.workspace.fs", members: members, in: context, recordMiss: nil, recordProbe: nil
+            path: "vscode.workspace.fs", members: members, in: context,
+            recordMiss: recordMiss, recordProbe: recordProbe
         ) else {
             return MainThreadWorkspace.undefinedValue(in: context)
         }
@@ -473,18 +549,16 @@ public final class MainThreadWorkspace {
                 }
                 do {
                     let result = try await operation()
-                    guard let self, !self.isDisposed, let resultContext = settlement.resolve.context else {
+                    guard !self.isDisposed, let resultContext = settlement.resolve.context else {
                         MainThreadWorkspace.rejectTornDown(settlement.reject, path: path)
                         return
                     }
-                    _ = self
                     settlement.resolve.call(withArguments: [resolveWith(result, resultContext)])
                 } catch {
-                    guard let self, !self.isDisposed, let errorContext = settlement.reject.context else {
+                    guard !self.isDisposed, let errorContext = settlement.reject.context else {
                         MainThreadWorkspace.rejectTornDown(settlement.reject, path: path)
                         return
                     }
-                    _ = self
                     settlement.reject.call(
                         withArguments: [MainThreadWorkspace.rejectionValue(for: error, in: errorContext)])
                 }
