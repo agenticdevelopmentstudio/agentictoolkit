@@ -44,6 +44,11 @@ extension ComposableSettings {
             // looking to change it.
             self.viewController?.sidebarTitle = nil
             self.viewController?.showsSidebarSearch = true
+            // Alphabetical, always: the panels in a settings window are unrelated
+            // destinations, and the only thing a reader hunting for one of them
+            // knows is its name. Whatever order the host happened to register
+            // them in is an order only the host can see.
+            self.viewController?.sortsPanelsByTitle = true
         }
 
         public var settingPanels: [any ComposableSettingsPanel] {

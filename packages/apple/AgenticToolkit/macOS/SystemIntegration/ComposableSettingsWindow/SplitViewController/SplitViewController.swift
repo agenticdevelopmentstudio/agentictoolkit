@@ -8,7 +8,7 @@ extension ComposableSettings {
     /// calling `addPanel(_:)`. Sidebar is a `PanelListViewController`; the
     /// detail pane hosts the currently selected `any ComposableSettingsPanel`.
     @MainActor
-    open class SplitViewController: ThemedSplitViewController {
+    open class SplitViewController: ThemedSplitViewController, NSSearchFieldDelegate {
 
         public private(set) var panels: [any ComposableSettingsPanel] = []
 
@@ -61,6 +61,17 @@ extension ComposableSettings {
         /// nested split's sidebar is a table of contents for one panel, and a
         /// second search field inside the first one's results is a maze.
         public var showsSidebarSearch: Bool = false
+
+        /// Whether the sidebar shows the panels in alphabetical order rather than
+        /// the order they were handed over.
+        ///
+        /// Off by default and switched on only for the window's root split, for
+        /// the same reason `showsSidebarSearch` is: a nested split's sidebar is
+        /// one panel's table of contents, written in the order its author meant
+        /// it to be read, while the root window's list is a set of unrelated
+        /// destinations that a reader looking for one of them can only look up
+        /// by name.
+        public var sortsPanelsByTitle: Bool = false
 
         /// Fired whenever the selection or the trail behind it changes, so a
         /// toolbar can revalidate its back/forward arrows and retitle itself.
@@ -157,11 +168,41 @@ extension ComposableSettings {
             field.sendsSearchStringImmediately = true
             field.target = self
             field.action = #selector(searchQueryChanged(_:))
+            // For the arrow keys below — the field's own editing delegate, so
+            // Up and Down can mean the list while everything else still means
+            // the text.
+            field.delegate = self
             return field
         }()
 
         @objc private func searchQueryChanged(_ sender: NSSearchField) {
             listViewController.searchQuery = sender.stringValue
+        }
+
+        /// Up and Down typed into the search field move the sidebar selection
+        /// instead of the insertion point, so narrowing the list and picking from
+        /// it are one gesture: the field keeps the focus and the query keeps
+        /// filtering while the detail pane follows the highlight.
+        ///
+        /// Answered here rather than in a `keyDown` override because AppKit has
+        /// already turned the key into the reader's intent by this point — and
+        /// returning false for every other command leaves the rest of text
+        /// editing exactly as it was.
+        public func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.moveDown(_:)):
+                moveSelection(by: 1)
+                return true
+            case #selector(NSResponder.moveUp(_:)):
+                moveSelection(by: -1)
+                return true
+            default:
+                return false
+            }
         }
 
         public init(listViewController: PanelListViewController = PanelListViewController()) {
@@ -342,11 +383,11 @@ extension ComposableSettings {
         // MARK: - Panel management
 
         public func setPanels(_ panels: [any ComposableSettingsPanel]) {
-            self.panels = panels
+            self.panels = ordered(panels)
             // The trail is a list of positions in `panels`; a different list makes
             // every one of them point somewhere else.
             history.reset()
-            listViewController.setPanels(panels)
+            listViewController.setPanels(self.panels)
             updateSidebarLayout()
             restoreSelectionAfterRebuild()
             notifyNavigationChange()
@@ -355,9 +396,18 @@ extension ComposableSettings {
         public func addPanel(_ panel: any ComposableSettingsPanel) {
             // Appending leaves every existing position where it was, so the trail
             // still points at the panels it was recorded for.
-            panels.append(panel)
+            panels = ordered(panels + [panel])
             listViewController.setPanels(panels)
             updateSidebarLayout()
+            // Sorted, the new panel can land ABOVE the one on screen, and the
+            // sidebar's row ids are positions in `panels` — so every row below it
+            // is renumbered and the old ids name their neighbours. That is the
+            // case `removePanel` handles, for the same reason; an append cannot
+            // cause it, which is why this is the sorted path only.
+            if sortsPanelsByTitle {
+                history.reset()
+                restoreSelectionAfterRebuild()
+            }
             // The arrows' reach changed even though the selection did not: a
             // toolbar that isn't told keeps its forward arrow disabled past the
             // panel that would now answer it.
@@ -412,6 +462,38 @@ extension ComposableSettings {
             listViewController.selectPanel(at: index)
         }
 
+        /// The panels in the order the sidebar should show them: as handed over,
+        /// unless `sortsPanelsByTitle` asks for alphabetical.
+        ///
+        /// Alphabetical *within each section*, and the sections keep the order
+        /// they were written in, because `PanelListViewController` makes one
+        /// sidebar section per *run* of panels sharing a section title. A flat
+        /// title sort would interleave two sections into a stripe of one-row
+        /// sections, each repeating its own heading. With no panel declaring a
+        /// section — every caller today — there is one run and the result is one
+        /// alphabetised list.
+        ///
+        /// `localizedStandardCompare` rather than `<`: these are names a person
+        /// reads, so they sort the way the Finder sorts them — case- and
+        /// diacritic-insensitive, and "Window 2" before "Window 10".
+        private func ordered(
+            _ panels: [any ComposableSettingsPanel]
+        ) -> [any ComposableSettingsPanel] {
+            guard sortsPanelsByTitle else { return panels }
+            var rank: [String: Int] = [:]
+            for panel in panels {
+                let section = panel.descriptor.section ?? ""
+                if rank[section] == nil { rank[section] = rank.count }
+            }
+            return panels.sorted { lhs, rhs in
+                let left = rank[lhs.descriptor.section ?? ""] ?? 0
+                let right = rank[rhs.descriptor.section ?? ""] ?? 0
+                guard left == right else { return left < right }
+                return lhs.descriptor.title
+                    .localizedStandardCompare(rhs.descriptor.title) == .orderedAscending
+            }
+        }
+
         public func clear() {
             panels.removeAll()
             history.reset()
@@ -429,6 +511,38 @@ extension ComposableSettings {
             guard panels.indices.contains(index) else { return }
             history.record(index)
             navigate(to: index)
+        }
+
+        /// Moves the selection `offset` rows down (or up, negative) the sidebar as
+        /// the reader currently sees it, leaving the search field's text — and its
+        /// focus — alone.
+        ///
+        /// Not `selectPanel(at:)`, which goes through `navigate(to:)` and empties
+        /// the search field: the query is the very thing the reader is steering by
+        /// when they press Down, so clearing it would throw away the list they are
+        /// moving through and jump the highlight somewhere else.
+        ///
+        /// Steps through the *visible* rows, so Down never stops on a row the
+        /// filter has hidden. With nothing selected yet, Down lands on the first
+        /// visible row and Up on the last; at either end it stops rather than
+        /// wrapping, which is what a list does everywhere else.
+        public func moveSelection(by offset: Int) {
+            guard offset != 0 else { return }
+            let visible = listViewController.visiblePanelIndices()
+            guard !visible.isEmpty else { return }
+            let target: Int
+            if let current = currentPanel,
+               let index = panels.firstIndex(where: { $0 === current }),
+               let row = visible.firstIndex(of: index) {
+                guard visible.indices.contains(row + offset) else { return }
+                target = visible[row + offset]
+            } else {
+                target = offset > 0 ? visible[0] : visible[visible.count - 1]
+            }
+            history.record(target)
+            listViewController.selectPanel(at: target)
+            show(panels[target])
+            notifyNavigationChange()
         }
 
         /// Steps back to the previously shown panel. No-op at the start of the trail.

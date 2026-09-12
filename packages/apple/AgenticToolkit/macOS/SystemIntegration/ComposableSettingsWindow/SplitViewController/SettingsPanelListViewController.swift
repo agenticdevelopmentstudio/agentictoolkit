@@ -62,7 +62,18 @@ extension ComposableSettings {
         /// because clearing the search on the caller's behalf when it was not
         /// needed throws away a filter the user is still reading by.
         public func isPanelVisible(at index: Int) -> Bool {
-            visiblePanels().contains { $0.index == index }
+            visiblePanelIndices().contains(index)
+        }
+
+        /// The positions of the rows the current query admits, top to bottom.
+        ///
+        /// Public because stepping the selection with the arrow keys has to step
+        /// through the rows the reader can actually see. Walking `panels` instead
+        /// would stop on rows the filter has hidden, where `selectPanel(at:)` is
+        /// a silent no-op — a Down press that appears to do nothing, once per
+        /// filtered-out panel.
+        public func visiblePanelIndices() -> [Int] {
+            visiblePanels().map(\.index)
         }
 
         // MARK: - Internals
