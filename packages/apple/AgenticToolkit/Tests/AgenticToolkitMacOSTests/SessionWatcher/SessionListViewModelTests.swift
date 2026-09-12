@@ -78,10 +78,10 @@ final class SessionListViewModelTests: XCTestCase {
         return viewModel
     }
 
-    func testGroupsLiveSessionsByProjectRoot() async {
+    func testKeepsSessionsOfOneProjectRootAdjacent() async {
         // Two sessions share a project root (one runs in a submodule subdir); a
-        // third is a different project. They collapse into two groups keyed by
-        // project root, regardless of terminal app.
+        // third is a different project. The list is flat, but the two that share a
+        // root stay adjacent, regardless of terminal app.
         let source = FakeSessionListSource([
             makeSession("alpha", term: "iTerm.app", cwd: "/Users/me/top",
                         startedAt: "2026-01-01T00:00:01Z", projectRoot: "/Users/me/top"),
@@ -94,13 +94,12 @@ final class SessionListViewModelTests: XCTestCase {
         let viewModel = makeViewModel(source)
         await viewModel.reloadSessions()
 
-        XCTAssertEqual(viewModel.groups.count, 2)
         XCTAssertEqual(viewModel.sessionCount, 3)
         XCTAssertEqual(viewModel.activeSessionCount, 3)
-        // Grouped by project root, named by its last path component.
-        XCTAssertEqual(viewModel.groups.map(\.id), ["/Users/me/top", "/Users/me/other"])
-        XCTAssertEqual(viewModel.groups.map(\.projectName), ["top", "other"])
-        XCTAssertEqual(viewModel.groups[0].sessions.map(\.sessionId), ["alpha", "bravo"])
+        XCTAssertEqual(viewModel.sessions.map(\.sessionId), ["alpha", "bravo", "charlie"])
+        // The row's project segment is the project root's name, not the cwd's — the
+        // submodule session reads "top", not "sub".
+        XCTAssertEqual(viewModel.sessions.map(\.projectGroupName), ["top", "top", "other"])
     }
 
     func testFallsBackToCwdWhenProjectRootEmpty() async {
@@ -113,14 +112,14 @@ final class SessionListViewModelTests: XCTestCase {
         let viewModel = makeViewModel(source)
         await viewModel.reloadSessions()
 
-        XCTAssertEqual(viewModel.groups.count, 1)
-        XCTAssertEqual(viewModel.groups[0].id, "/Users/me/projA")
-        XCTAssertEqual(viewModel.groups[0].projectName, "projA")
+        XCTAssertEqual(viewModel.sessions.count, 1)
+        XCTAssertEqual(viewModel.sessions[0].projectGroupKey, "/Users/me/projA")
+        XCTAssertEqual(viewModel.sessions[0].projectGroupName, "projA")
     }
 
-    func testSortsByStartTimeWithinAndAcrossGroups() async {
-        // Sessions arrive out of order; within a group they sort oldest-first, and
-        // groups order by their earliest session's start (so the project whose
+    func testSortsByStartTimeWithinAndAcrossProjects() async {
+        // Sessions arrive out of order; within a project they sort oldest-first, and
+        // the projects order by their earliest session's start (so the project whose
         // first session started earliest comes first).
         let source = FakeSessionListSource([
             makeSession("a-late", cwd: "/p/a", startedAt: "2026-01-01T00:00:05Z", projectRoot: "/p/a"),
@@ -131,10 +130,9 @@ final class SessionListViewModelTests: XCTestCase {
         let viewModel = makeViewModel(source)
         await viewModel.reloadSessions()
 
-        // Group A's earliest (00:00:01) precedes group B's (00:00:02).
-        XCTAssertEqual(viewModel.groups.map(\.id), ["/p/a", "/p/b"])
-        // Within group A, oldest first.
-        XCTAssertEqual(viewModel.groups[0].sessions.map(\.sessionId), ["a-early", "a-late"])
+        // Project A's earliest (00:00:01) precedes project B's (00:00:02), and
+        // A's own two sessions stay together, oldest first.
+        XCTAssertEqual(viewModel.sessions.map(\.sessionId), ["a-early", "a-late", "b-mid"])
     }
 
     func testExcludesEndedEmptyAndRootCwdSessions() async {
