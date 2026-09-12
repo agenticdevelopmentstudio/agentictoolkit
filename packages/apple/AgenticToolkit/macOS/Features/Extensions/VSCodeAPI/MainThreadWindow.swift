@@ -140,9 +140,10 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     ///
     /// **`internal`, not `private`, deliberately.** `MainThreadWindowTests`
     /// reaches this through `@testable import AgenticToolkitMacOS`, and the
-    /// mapping is otherwise unreachable from a test — the rendering half needs
-    /// an `NSAlert`, which this bundle has no UI to drive. Tightening it back
-    /// to `private` compiles here and breaks that suite.
+    /// mapping is otherwise unreachable from a test: its only other caller is
+    /// `addButtons(for:to:)` below, which is declared `private` and so cannot
+    /// be called from outside this file at all. Tightening this one back to
+    /// `private` compiles here and breaks that suite.
     ///
     /// Entries come out in item order, **skipping every index in**
     /// `request.closeAffordanceIndices`, then one more for the "cancel slot":
@@ -183,9 +184,10 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// **`internal`, not `private`, deliberately,** for the same reason as
     /// `buttonPlan(for:)`: `MainThreadWindowTests` reaches this through
     /// `@testable import AgenticToolkitMacOS`, and it is otherwise
-    /// unreachable from a test — its caller is the rendering half, which
-    /// needs an `NSAlert` this bundle has no UI to drive. Tightening it back
-    /// to `private` compiles here and breaks that suite.
+    /// unreachable from a test: its only other caller is
+    /// `addButtons(for:to:)` below, which is declared `private` and so cannot
+    /// be called from outside this file at all. Tightening this one back to
+    /// `private` compiles here and breaks that suite.
     ///
     /// **Why one entry is the exception.** The cancel slot is always the
     /// plan's last entry, so with two or more entries it is never the *first*
