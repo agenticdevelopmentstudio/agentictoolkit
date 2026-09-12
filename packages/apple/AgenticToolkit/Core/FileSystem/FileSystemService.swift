@@ -277,10 +277,19 @@ public actor FileSystemService {
     /// `path` (a dangling link included) and
     /// ``FileSystemServiceError/fileIsADirectory(path:)`` when it resolves to
     /// a directory.
+    ///
+    /// A pre-check that cannot read `path`'s attributes for a reason other
+    /// than absence does not answer "absent": it throws what that failure
+    /// classifies to, or ``FileSystemServiceError/readFailed(path:underlying:)``
+    /// carrying it.
     public func readFile(atPath path: String) async throws -> Data {
         try await perform {
             let manager = FileManager()
-            guard let resolved = Self.resolvedTypeBits(atPath: path, using: manager) else {
+            let failed: (Error) -> FileSystemServiceError = {
+                FileSystemServiceError.readFailed(path: path, underlying: $0)
+            }
+            let bits = try Self.resolvedTypeBits(atPath: path, using: manager, onFailure: failed)
+            guard let resolved = bits else {
                 throw FileSystemServiceError.fileNotFound(path: path)
             }
             guard !resolved.contains(.directory) else {
@@ -303,11 +312,17 @@ public actor FileSystemService {
     /// A child whose own type could not be read is reported as
     /// ``FileType/unknown`` rather than aborting the listing — that is what
     /// VS Code's `Unknown = 0` exists for. A failure to read the directory
-    /// itself still throws.
+    /// itself still throws, and a pre-check that cannot read `path`'s
+    /// attributes for a reason other than absence throws rather than
+    /// reporting absence.
     public func readDirectory(atPath path: String) async throws -> [DirectoryEntry] {
         try await perform {
             let manager = FileManager()
-            guard let resolved = Self.resolvedTypeBits(atPath: path, using: manager) else {
+            let failed: (Error) -> FileSystemServiceError = {
+                FileSystemServiceError.readDirectoryFailed(path: path, underlying: $0)
+            }
+            let bits = try Self.resolvedTypeBits(atPath: path, using: manager, onFailure: failed)
+            guard let resolved = bits else {
                 throw FileSystemServiceError.fileNotFound(path: path)
             }
             guard resolved.contains(.directory) else {
@@ -387,11 +402,21 @@ public actor FileSystemService {
     ) async throws {
         try await perform {
             let manager = FileManager()
-            if Self.linkExists(atPath: path, using: manager) {
+            let failed: (Error) -> FileSystemServiceError = {
+                FileSystemServiceError.writeFailed(path: path, underlying: $0)
+            }
+            let existing = try Self.linkAttributes(
+                atPath: path,
+                reportedAs: path,
+                using: manager,
+                onFailure: failed
+            )
+            if existing != nil {
                 guard overwrite else {
                     throw FileSystemServiceError.fileExists(path: path)
                 }
-                if Self.resolvedTypeBits(atPath: path, using: manager)?.contains(.directory) == true {
+                let bits = try Self.resolvedTypeBits(atPath: path, using: manager, onFailure: failed)
+                if bits?.contains(.directory) == true {
                     throw FileSystemServiceError.fileIsADirectory(path: path)
                 }
             } else {
@@ -416,8 +441,11 @@ public actor FileSystemService {
     public func createDirectory(atPath path: String) async throws {
         try await perform {
             let manager = FileManager()
-            if let existing = Self.resolvedTypeBits(atPath: path, using: manager),
-               !existing.contains(.directory) {
+            let failed: (Error) -> FileSystemServiceError = {
+                FileSystemServiceError.createDirectoryFailed(path: path, underlying: $0)
+            }
+            let bits = try Self.resolvedTypeBits(atPath: path, using: manager, onFailure: failed)
+            if let existing = bits, !existing.contains(.directory) {
                 throw FileSystemServiceError.fileExists(path: path)
             }
             do {
@@ -440,7 +468,14 @@ public actor FileSystemService {
     ///
     /// `recursive: false` against a directory with entries in it throws
     /// ``FileSystemServiceError/directoryNotEmpty(path:)`` and deletes
-    /// nothing. `useTrash: true` moves the item to the user's Trash through
+    /// nothing. That emptiness check is the only thing that honours the flag —
+    /// `FileManager.removeItem(at:)` recurses unconditionally — so a failure
+    /// to *list* the directory throws too, classified where it can be and
+    /// ``FileSystemServiceError/deleteFailed(path:underlying:)`` otherwise.
+    /// Reading an unreadable directory as an empty one would turn a
+    /// non-recursive delete into a recursive one.
+    ///
+    /// `useTrash: true` moves the item to the user's Trash through
     /// `FileManager.trashItem(at:resultingItemURL:)`, which is declared in
     /// Foundation's `NSFileManager.h` and available from macOS 10.8, so
     /// honouring the flag needs nothing from a higher tier. The resulting
@@ -449,12 +484,26 @@ public actor FileSystemService {
     public func delete(atPath path: String, recursive: Bool, useTrash: Bool) async throws {
         try await perform {
             let manager = FileManager()
-            guard let attributes = try? manager.attributesOfItem(atPath: path) else {
+            let failed: (Error) -> FileSystemServiceError = {
+                FileSystemServiceError.deleteFailed(path: path, underlying: $0)
+            }
+            let found = try Self.linkAttributes(
+                atPath: path,
+                reportedAs: path,
+                using: manager,
+                onFailure: failed
+            )
+            guard let attributes = found else {
                 throw FileSystemServiceError.fileNotFound(path: path)
             }
             let bits = Self.typeBits(for: attributes[.type] as? FileAttributeType)
             if bits.contains(.directory), !recursive {
-                let children = (try? manager.contentsOfDirectory(atPath: path)) ?? []
+                let children: [String]
+                do {
+                    children = try manager.contentsOfDirectory(atPath: path)
+                } catch {
+                    throw Self.distinguished(error, path: path) ?? failed(error)
+                }
                 guard children.isEmpty else {
                     throw FileSystemServiceError.directoryNotEmpty(path: path)
                 }
@@ -484,21 +533,61 @@ public actor FileSystemService {
     /// steps and not atomic: a failure of the move leaves `toPath` empty.
     /// Foundation offers no atomic replace that spans files and directories
     /// alike, and nothing in this surface's contract promises one.
+    ///
+    /// **The removal is skipped when `toPath` names the same item as
+    /// `fromPath`.** On the default macOS volume, which is case-insensitive,
+    /// `toPath` `FOO.txt` finds `foo.txt` — the source — and removing it would
+    /// destroy the file the rename was asked to keep. The same is true of
+    /// `fromPath == toPath`. Identity is decided by
+    /// ``sameItem(_:_:)``'s device-and-file-number pair rather than by
+    /// comparing the two strings, which `foo.txt` against `./foo.txt` defeats,
+    /// or by folding their case, which assumes a volume this tier cannot see.
+    /// The move itself still runs: it is what applies a case-only rename.
+    ///
+    /// Where identity cannot be established — either identity attribute
+    /// missing from either item — the removal is refused rather than risked,
+    /// and the operation throws ``FileSystemServiceError/fileExists(path:)``.
+    /// The cost is that an overwrite that would have succeeded fails instead;
+    /// the alternative is destroying a file on a guess.
     public func rename(fromPath: String, toPath: String, overwrite: Bool) async throws {
         try await perform {
             let manager = FileManager()
-            guard Self.linkExists(atPath: fromPath, using: manager) else {
+            let failed: (Error) -> FileSystemServiceError = {
+                FileSystemServiceError.renameFailed(
+                    path: fromPath,
+                    destination: toPath,
+                    underlying: $0
+                )
+            }
+            let source = try Self.linkAttributes(
+                atPath: fromPath,
+                reportedAs: fromPath,
+                using: manager,
+                onFailure: failed
+            )
+            guard let sourceAttributes = source else {
                 throw FileSystemServiceError.fileNotFound(path: fromPath)
             }
-            if Self.linkExists(atPath: toPath, using: manager) {
+            let destination = try Self.linkAttributes(
+                atPath: toPath,
+                reportedAs: toPath,
+                using: manager,
+                onFailure: failed
+            )
+            if let destinationAttributes = destination {
                 guard overwrite else {
                     throw FileSystemServiceError.fileExists(path: toPath)
                 }
-                do {
-                    try manager.removeItem(at: URL(fileURLWithPath: toPath))
-                } catch {
-                    throw Self.distinguished(error, path: toPath)
-                        ?? FileSystemServiceError.deleteFailed(path: toPath, underlying: error)
+                guard let same = Self.sameItem(sourceAttributes, destinationAttributes) else {
+                    throw FileSystemServiceError.fileExists(path: toPath)
+                }
+                if !same {
+                    do {
+                        try manager.removeItem(at: URL(fileURLWithPath: toPath))
+                    } catch {
+                        throw Self.distinguished(error, path: toPath)
+                            ?? FileSystemServiceError.deleteFailed(path: toPath, underlying: error)
+                    }
                 }
             }
             do {
@@ -574,7 +663,7 @@ public actor FileSystemService {
     ) -> FileType {
         var bits = typeBits(for: attributes[.type] as? FileAttributeType)
         if bits.contains(.symbolicLink) {
-            bits.formUnion(resolvedTypeBits(atPath: path, using: manager) ?? .unknown)
+            bits.formUnion(resolvedTypeBitsIfReadable(atPath: path, using: manager) ?? .unknown)
         }
         return bits
     }
@@ -590,9 +679,75 @@ public actor FileSystemService {
         return typeBits(ofLinkAttributes: attributes, atPath: path, using: manager)
     }
 
+    /// The attributes of the item at `path`, or `nil` when nothing is there.
+    ///
+    /// This is how every operation's pre-check asks "is something here, and
+    /// what is it". It answers `nil` for absence *only*: any other failure to
+    /// read the attributes — a permission denial on `path` or on a parent
+    /// directory being the one that matters — is thrown, classified by
+    /// ``distinguished(_:path:)`` where it recognises it and as `onFailure`'s
+    /// operation-shaped case where it does not. Collapsing those into `nil`
+    /// would report a denial as
+    /// ``FileSystemServiceError/fileNotFound(path:)``, which is a wrong answer
+    /// rather than a missing one, and the pre-check runs early enough to
+    /// decide the whole operation's outcome.
+    ///
+    /// Terminal symbolic links are not followed, so a dangling link answers
+    /// its own attributes and counts as present. `reportedAs` is the path the
+    /// thrown error names, which is the caller's path even when `path` is a
+    /// resolved one.
+    private static func linkAttributes(
+        atPath path: String,
+        reportedAs reportedPath: String,
+        using manager: FileManager,
+        onFailure: (Error) -> FileSystemServiceError
+    ) throws -> [FileAttributeKey: Any]? {
+        do {
+            return try manager.attributesOfItem(atPath: path)
+        } catch {
+            let classified = distinguished(error, path: reportedPath)
+            if case .some(.fileNotFound) = classified {
+                return nil
+            }
+            throw classified ?? onFailure(error)
+        }
+    }
+
     /// The type bits of what `path` ultimately refers to, following every
     /// symbolic link on the way, or `nil` when that resolves to nothing.
-    private static func resolvedTypeBits(atPath path: String, using manager: FileManager) -> FileType? {
+    ///
+    /// Throws on the same terms as ``linkAttributes(atPath:reportedAs:using:onFailure:)``:
+    /// an unreadable target is not an absent one.
+    private static func resolvedTypeBits(
+        atPath path: String,
+        using manager: FileManager,
+        onFailure: (Error) -> FileSystemServiceError
+    ) throws -> FileType? {
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        let attributes = try linkAttributes(
+            atPath: resolved,
+            reportedAs: path,
+            using: manager,
+            onFailure: onFailure
+        )
+        guard let attributes else {
+            return nil
+        }
+        return typeBits(for: attributes[.type] as? FileAttributeType)
+    }
+
+    /// The resolved target's type bits, best effort: `nil` when nothing is
+    /// there *or* when its attributes could not be read.
+    ///
+    /// Only for the two places that report an unreadable item as
+    /// ``FileType/unknown`` rather than failing — a listing's children, and
+    /// the target bit a `stat` unions in beside ``FileType/symbolicLink``. An
+    /// operation's own pre-check uses the throwing
+    /// ``resolvedTypeBits(atPath:using:onFailure:)`` instead.
+    private static func resolvedTypeBitsIfReadable(
+        atPath path: String,
+        using manager: FileManager
+    ) -> FileType? {
         let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         guard let attributes = try? manager.attributesOfItem(atPath: resolved) else {
             return nil
@@ -600,10 +755,34 @@ public actor FileSystemService {
         return typeBits(for: attributes[.type] as? FileAttributeType)
     }
 
-    /// Whether anything is at `path`, judged at the link rather than through
-    /// it, so a dangling symbolic link counts as present.
-    private static func linkExists(atPath path: String, using manager: FileManager) -> Bool {
-        (try? manager.attributesOfItem(atPath: path)) != nil
+    /// Whether two attribute dictionaries describe the same file, or `nil`
+    /// when that cannot be told.
+    ///
+    /// The test is the pair `FileAttributeKey.systemNumber` and
+    /// `.systemFileNumber` — what `stat(2)` calls `st_dev` and `st_ino`, which
+    /// together are the filesystem's own answer to "is this the same file".
+    /// The two alternatives both fail: comparing the path strings is defeated
+    /// by `foo.txt` against `./foo.txt`, and folding their case bakes in an
+    /// assumption about the volume that is true of the default macOS install
+    /// and false of a case-sensitive one.
+    ///
+    /// `nil` when either key is missing from either dictionary. Both are
+    /// listed in `NSFileManager.h` among the attributes
+    /// `attributesOfItem(atPath:)` reports, but nothing there promises they
+    /// are always present, so the caller decides what an unproven answer
+    /// costs rather than this function guessing.
+    private static func sameItem(
+        _ first: [FileAttributeKey: Any],
+        _ second: [FileAttributeKey: Any]
+    ) -> Bool? {
+        guard let firstFile = (first[.systemFileNumber] as? NSNumber)?.uint64Value,
+              let firstSystem = (first[.systemNumber] as? NSNumber)?.uint64Value,
+              let secondFile = (second[.systemFileNumber] as? NSNumber)?.uint64Value,
+              let secondSystem = (second[.systemNumber] as? NSNumber)?.uint64Value
+        else {
+            return nil
+        }
+        return firstFile == secondFile && firstSystem == secondSystem
     }
 
     // MARK: - Error classification
