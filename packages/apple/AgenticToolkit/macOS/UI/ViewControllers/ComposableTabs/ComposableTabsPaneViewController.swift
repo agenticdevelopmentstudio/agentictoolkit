@@ -58,6 +58,16 @@ public final class ComposableTabsPaneViewController: PaneViewController {
     /// Set by the enclosing split when it is itself overridden.
     public var layoutOverride: ComposableTabsLayout?
 
+    /// Set by the enclosing split when this pane is nested inside another
+    /// pane's content, naming the layout node whose lifetime this pane's
+    /// remembered state shares — see `ProjectPaneStateStore.ownerNodeID`.
+    ///
+    /// The chrome's own store is retargeted here rather than at `init`,
+    /// because a pane is built before the tree that knows who owns it.
+    public var stateOwnerNodeID: UUID? {
+        didSet { (stateStore as? ProjectPaneStateStore)?.ownerNodeID = stateOwnerNodeID }
+    }
+
     public init(
         nodeID: UUID,
         paneNumber: Int,
@@ -95,7 +105,8 @@ public final class ComposableTabsPaneViewController: PaneViewController {
             nodeID: nodeID,
             project: project,
             workingDirectory: workingDirectory,
-            paneNumber: paneNumber
+            paneNumber: paneNumber,
+            ownerNodeID: stateOwnerNodeID
         )
     }
 

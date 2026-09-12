@@ -84,7 +84,7 @@ enum ProjectWindowTestSupport {
         let registry = ComposableTabsViewRegistry()
         registry.register(viewID, descriptor: .init(displayName: "Editor")) { context in
             DocumentEditorViewController(
-                store: ProjectPaneStateStore(project: context.project, nodeID: context.nodeID),
+                store: context.makeStateStore(prefix: "document."),
                 documentStore: TextDocumentStore(),
                 saveScheduler: TextDocumentSaveScheduler(write: { _ in }),
                 languageServices: nil,

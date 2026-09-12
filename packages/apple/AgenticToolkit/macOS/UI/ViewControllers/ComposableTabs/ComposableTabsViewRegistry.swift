@@ -39,6 +39,21 @@ public struct ComposableTabsViewContext {
     public let workingDirectory: URL
     /// 1-based, allocated per project, and what the placeholder shows.
     public let paneNumber: Int
+    /// The layout node this pane's remembered state belongs to, for a pane
+    /// that is not a layout node itself — see `ProjectPaneStateStore.ownerNodeID`.
+    /// `nil` for every pane a window lays out directly.
+    public let ownerNodeID: UUID?
+
+    /// The store this pane's content should remember things in.
+    ///
+    /// Content asks for this rather than building a `ProjectPaneStateStore`
+    /// itself, so where a nested pane's rows live stays one decision in one
+    /// place instead of a key every factory has to spell the same way.
+    public func makeStateStore(prefix: String) -> ProjectPaneStateStore {
+        let store = ProjectPaneStateStore(project: project, nodeID: nodeID, prefix: prefix)
+        store.ownerNodeID = ownerNodeID
+        return store
+    }
 }
 
 /// The per-view facts a split needs before the view has any content to measure,
@@ -185,7 +200,8 @@ public final class ComposableTabsViewRegistry {
         nodeID: UUID,
         project: ProjectWorkspace,
         workingDirectory: URL,
-        paneNumber: Int
+        paneNumber: Int,
+        ownerNodeID: UUID? = nil
     ) -> NSViewController {
         guard let entry = entries[viewID] else {
             Self.logger.error(
@@ -198,7 +214,8 @@ public final class ComposableTabsViewRegistry {
             nodeID: nodeID,
             project: project,
             workingDirectory: workingDirectory,
-            paneNumber: paneNumber
+            paneNumber: paneNumber,
+            ownerNodeID: ownerNodeID
         ))
     }
 }

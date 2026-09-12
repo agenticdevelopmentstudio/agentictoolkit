@@ -43,6 +43,27 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
     /// its identity alive for a later allocation to collide with.
     private let wiredEditors = NSHashTable<DocumentEditorViewController>.weakObjects()
 
+    /// The pane the first responder was last seen in.
+    ///
+    /// "Which editor is focused" cannot be answered by asking the window at
+    /// the moment the question is put: the click that puts it — a file picked
+    /// in the tree — has already moved the first responder into the tree. So
+    /// focus is recorded when it arrives and read back afterwards. Weak, so a
+    /// closed pane is not kept alive by being remembered.
+    private weak var lastFocusedPane: ComposableTabsPaneViewController?
+
+    /// AppKit posts no notification when the first responder moves, and
+    /// `NSWindow.firstResponder` is the only place the move is visible. One
+    /// observer for the whole container, rather than every pane watching every
+    /// event.
+    private var focusObservation: NSKeyValueObservation?
+
+    /// The file last handed to `onFocusedDocumentChange`, so moving the caret
+    /// around inside one editor does not re-announce what the tree already
+    /// highlights. Doubly optional: "nothing reported yet" and "reported as
+    /// empty" are different answers.
+    private var lastReportedDocument: URL??
+
     /// Fires with the file the focused editor is showing, so the tree can move
     /// its highlight to follow.
     public var onFocusedDocumentChange: ((URL?) -> Void)?
@@ -80,6 +101,46 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
         installRestoredTabs()
     }
 
+    public override func viewDidAppear() {
+        super.viewDidAppear()
+        observeFirstResponder(in: view.window)
+    }
+
+    public override func viewDidDisappear() {
+        super.viewDidDisappear()
+        focusObservation = nil
+    }
+
+    // MARK: - Focus
+
+    private func observeFirstResponder(in window: NSWindow?) {
+        guard let window else {
+            focusObservation = nil
+            return
+        }
+        focusObservation = window.observe(\.firstResponder) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.firstResponderDidMove() }
+        }
+    }
+
+    /// Records the editor focus arrived in. Focus *leaving* — for the tree, or
+    /// for another pane of the window entirely — is deliberately not recorded:
+    /// the answer has to outlive the click that asks for it.
+    private func firstResponderDidMove() {
+        guard let tabID = selectedTabID(on: .top), let root = splitsByTabID[tabID] else { return }
+        guard let pane = panes(in: root).first(where: { $0.containsFirstResponder }) else { return }
+        lastFocusedPane = pane
+        reportFocusedDocument()
+    }
+
+    /// Hands the focused editor's file out, once per change.
+    private func reportFocusedDocument() {
+        let url = focusedEditor?.fileURL
+        guard lastReportedDocument != .some(url) else { return }
+        lastReportedDocument = .some(url)
+        onFocusedDocumentChange?(url)
+    }
+
     // MARK: - Building tabs
 
     /// A tab is always created with exactly one editor pane in it. Zero panes
@@ -91,11 +152,16 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
             workingDirectory: documentWorkingDirectory,
             isRoot: true
         )
-        // Both stamp the whole subtree through their `didSet`, and both must be
-        // set before the panes' views load — the registry decides what the pane
-        // builds, and it only gets one chance.
+        // All three stamp the whole subtree through their `didSet`, and all
+        // three must be set before the panes' views load — the registry decides
+        // what the pane builds, and it only gets one chance.
         root.layoutOverride = documentLayout
         root.arranger = ProportionalArranger()
+        // These editors are not layout nodes: they exist only inside this
+        // pane's own stored layout, so what they remember has to be filed
+        // against the node the window *does* know, or the next `saveTabs`
+        // sweeps it and every editor comes back empty.
+        root.stateOwnerNodeID = paneNodeID
         root.onLayoutDidChange = { [weak self] _ in self?.persistTabs() }
         return root
     }
@@ -128,7 +194,7 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
             editor.onTitleChange = { [weak self] in
                 previousTitleHandler?()
                 self?.retitle(tabID)
-                self?.onFocusedDocumentChange?(self?.focusedEditor?.fileURL)
+                self?.reportFocusedDocument()
             }
             // Same chaining concern as `onTitleChange` above: the editor may
             // already have an owner for this handler, and overwriting it
@@ -167,13 +233,28 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
               let root = splitsByTabID[tabID],
               let focused = focusedPane(in: root) else { return }
 
+        let before = Set(editors(in: root).map(ObjectIdentifier.init))
         (focused.host as? ComposableTabsViewController)?.split(
             focused, adding: documentViewID, direction: .right
         )
         wireTitles(in: root, tabID: tabID)
 
-        let added = editors(in: root).last
+        // The pane the split just made, never the rightmost one: the split
+        // lands beside the *focused* pane, so opening twice without moving the
+        // focus would hand the second file to the pane the first one filled.
+        let added = editors(in: root).first { !before.contains(ObjectIdentifier($0)) }
+        // The new editor is the one the user just asked for, so it becomes the
+        // focused one — *before* it is filled. Both the tab's title and the
+        // tree's highlight name whatever the focused editor holds, and filling
+        // it first announces the new file while the old pane still counts as
+        // focused, leaving the tab named after the file beside it. Keyboard
+        // focus itself is left where the window put it — the editor's text view
+        // is CodeEditSourceEditor's, not ours to hand the first responder to.
+        if let addedPane = panes(in: root).first(where: { $0.contentViewController === added }) {
+            lastFocusedPane = addedPane
+        }
         added?.fileURL = url
+        reportFocusedDocument()
         persistTabs()
     }
 
@@ -221,7 +302,12 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
 
     private func focusedPane(in root: ComposableTabsViewController) -> ComposableTabsPaneViewController? {
         let all = panes(in: root)
-        return all.first(where: { $0.containsFirstResponder }) ?? all.first
+        if let holding = all.first(where: { $0.containsFirstResponder }) { return holding }
+        // Focus has moved on since the user last chose an editor — into the
+        // tree, or into another pane of the window. What they chose still
+        // stands; see `lastFocusedPane`.
+        if let remembered = lastFocusedPane, all.contains(where: { $0 === remembered }) { return remembered }
+        return all.first
     }
 
     /// Every leaf pane under `controller`, forcing each one's view to load on
@@ -252,7 +338,7 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
     public func persistTabs() {
         let records = tabs(on: .top).compactMap { tab -> StoredTab? in
             guard let root = splitsByTabID[tab.id] else { return nil }
-            return StoredTab(title: tab.title, root: LayoutNodeCodable(root.snapshotNode()))
+            return StoredTab(root: LayoutNodeCodable(root.snapshotNode()))
         }
         let stored = StoredTabs(
             tabs: records,
@@ -279,7 +365,12 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
             return
         }
         for record in stored.tabs {
-            addTab(root: makeTabRoot(from: record.root.node), title: record.title)
+            // Titled from the restored editors rather than from the record:
+            // `retitle` walks the panes, which loads them, which is what asks
+            // each editor for the file it remembers. Until that happens there
+            // is nothing to name the tab after.
+            let tabID = addTab(root: makeTabRoot(from: record.root.node), title: "Untitled")
+            retitle(tabID)
         }
         let all = tabs(on: .top)
         if stored.selectedIndex >= 0, stored.selectedIndex < all.count {
@@ -316,7 +407,7 @@ extension DocumentTabsViewController: MultiTabbedViewControllerDelegate {
         activeTabDidChange tabID: UUID?,
         on edge: Edge?
     ) {
-        onFocusedDocumentChange?(focusedEditor?.fileURL)
+        reportFocusedDocument()
     }
 }
 
@@ -407,8 +498,14 @@ private final class Box<Value: Codable>: Codable {
     }
 }
 
+/// A tab is stored as its layout alone. The title is deliberately not written
+/// down: it is the focused editor's file name, the editors already remember
+/// their own files, and a second copy of one fact is a copy that goes stale —
+/// the editor records a new file the moment it is opened, while the tab list is
+/// only rewritten when the arrangement changes. `installRestoredTabs` derives
+/// the title back from the restored editors. (Tab lists written before this
+/// still carry a `title`; `JSONDecoder` ignores it.)
 struct StoredTab: Codable {
-    let title: String
     let root: LayoutNodeCodable
 }
 
