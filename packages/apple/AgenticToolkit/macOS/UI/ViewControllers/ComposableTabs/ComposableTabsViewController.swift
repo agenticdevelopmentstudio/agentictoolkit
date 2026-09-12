@@ -229,7 +229,20 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
 
     /// Matches the arranged tree back onto the live one by node id. A node the
     /// arranger did not describe keeps whatever fraction it had.
+    ///
+    /// A split holding exactly one child is arranged the same way it is
+    /// snapshotted: `snapshotNode()` skips the wrapper and hands the arranger
+    /// that child's own subtree directly, so `node` here describes the child,
+    /// not this split. Matching that unwrap is what lets a tab's root — which
+    /// always holds its whole tree under one wrapping split — apply an
+    /// arrangement at all; without it every id compares a wrapper against the
+    /// thing it wraps and nothing below the wrapper is ever reached.
     private func applyFractions(from node: LayoutNode) {
+        if layoutChildren.count == 1, let onlyChild = layoutChildren.first {
+            onlyChild.thicknessFraction = node.thicknessFraction.map { CGFloat($0) }
+            (onlyChild as? ComposableTabsViewController)?.applyFractions(from: node)
+            return
+        }
         guard case .split(_, let first, let second) = node.kind else { return }
         for (child, arranged) in zip(layoutChildren, [first, second]) {
             guard child.nodeID == arranged.id else { continue }
