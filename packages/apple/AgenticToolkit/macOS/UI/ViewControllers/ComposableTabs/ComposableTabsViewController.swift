@@ -200,10 +200,14 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// installed — or picked up a new one — has to pass it on the same way.
     private func stampOwnershipOnChildren() {
         for child in layoutChildren {
-            (child as? ComposableTabsPaneViewController)?.host = self
+            if let pane = child as? ComposableTabsPaneViewController {
+                pane.host = self
+                pane.layoutOverride = layoutOverride
+            }
             if let split = child as? ComposableTabsViewController {
                 split.layoutParent = self
                 split.arranger = arranger
+                split.layoutOverride = layoutOverride
             }
         }
     }
@@ -258,10 +262,21 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         fatalError("init(coder:) is not supported")
     }
 
-    /// The layout governing this tree — the project's, or the placeholder-only
-    /// fallback if the project has gone away.
+    /// A layout this subtree uses instead of the project's.
+    ///
+    /// The Document pane's tabs may hold editors and nothing else, and the
+    /// File Browser beside it lives in the same project — so the restriction
+    /// cannot be expressed at project level. Assigning here stamps the whole
+    /// subtree, which is what makes the constraint hold on restore as well as
+    /// on the menus.
+    public var layoutOverride: ComposableTabsLayout? {
+        didSet { stampOwnershipOnChildren() }
+    }
+
+    /// The layout governing this tree — this subtree's own, the project's, or
+    /// the placeholder-only fallback if the project has gone away.
     var layout: ComposableTabsLayout {
-        project?.layout ?? ComposableTabsLayout.placeholderOnly()
+        layoutOverride ?? project?.layout ?? ComposableTabsLayout.placeholderOnly()
     }
 
     /// Panes are separated by a gap the user sets, not by AppKit's seam — see
@@ -656,6 +671,8 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         // size; the two panes inside it start out sharing that slot evenly.
         inner.thicknessFraction = child.thicknessFraction
         child.thicknessFraction = nil
+        inner.arranger = arranger
+        inner.layoutOverride = layoutOverride
 
         layoutChildren[index] = inner
         if isViewLoaded {
