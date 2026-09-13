@@ -440,6 +440,7 @@ struct MainThreadWindowQuickPickTests {
         #expect(settled.forProperty("ok")?.toBool() == true)
 
         let request = try #require(presenter.requests.first)
+        #expect(request.items.map(\.label) == ["a", "b"])
         #expect(request.items.allSatisfy { !$0.isSeparator })
     }
 
@@ -514,6 +515,10 @@ struct MainThreadWindowQuickPickTests {
         let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
         #expect(settled.forProperty("ok")?.toBool() == false)
         #expect(settled.forProperty("message")?.toString() == "items blew up")
+        // No positive assertion is available here: `requests` is the
+        // recorder's only observable, and the items promise's rejection is
+        // what settles the call — there is never an array to build a
+        // request from.
         #expect(presenter.requests.isEmpty)
     }
 
@@ -521,7 +526,10 @@ struct MainThreadWindowQuickPickTests {
 
     /// Kills a mutation that treats a non-array argument 0 as an empty item
     /// list and presents an empty picker: an extension that passed a number
-    /// by mistake would then see a dismissal rather than an error.
+    /// by mistake would then see a dismissal rather than an error. Covers
+    /// both the bare non-array value and a promise that fulfils with one,
+    /// since `VSCodeAPI.settlement` answers a non-thenable with itself and a
+    /// mutation could plausibly special-case only the synchronous form.
     @Test
     func aNonArrayItemsArgumentRejectsAndPresentsNothing() async throws {
         let directory = try makeTempDirectory()
@@ -532,7 +540,11 @@ struct MainThreadWindowQuickPickTests {
             var vscode = require('vscode');
             exports.activate = function () {
                 globalThis.__settled = null;
-                vscode.window.showQuickPick(42).then(function () {
+                var calls = [
+                    vscode.window.showQuickPick(42),
+                    vscode.window.showQuickPick(Promise.resolve(42))
+                ];
+                Promise.all(calls).then(function () {
                     globalThis.__settled = { ok: true };
                 }, function (error) {
                     globalThis.__settled = { ok: false, message: error.message };
@@ -550,6 +562,9 @@ struct MainThreadWindowQuickPickTests {
         let message = try #require(settled.forProperty("message")?.toString())
         #expect(message.contains("vscode.window.showQuickPick"))
         #expect(message.contains("neither an array nor a promise of one"))
+        // No positive assertion is available here: `requests` is the
+        // recorder's only observable, and both calls reject while parsing
+        // argument 0 — before either would produce a request to record.
         #expect(presenter.requests.isEmpty)
     }
 
@@ -608,6 +623,9 @@ struct MainThreadWindowQuickPickTests {
         let labelMessage = try #require(settled.forProperty("label")?.toString())
         #expect(labelMessage.contains("items[0]"))
         #expect(labelMessage.contains("neither a string nor an object with a string 'label'"))
+        // No positive assertion is available here: `requests` is the
+        // recorder's only observable, and both calls reject while parsing an
+        // element, before either finishes building a request.
         #expect(presenter.requests.isEmpty)
     }
 
@@ -642,6 +660,9 @@ struct MainThreadWindowQuickPickTests {
         let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
         #expect(settled.forProperty("ok")?.toBool() == false)
         #expect(try #require(settled.forProperty("message")?.toString()).contains("requires an items argument"))
+        // No positive assertion is available here: `requests` is the
+        // recorder's only observable, and there is no argument 0 at all to
+        // read, so nothing about a request is ever built.
         #expect(presenter.requests.isEmpty)
     }
 
@@ -678,6 +699,9 @@ struct MainThreadWindowQuickPickTests {
         #expect(settled.forProperty("ok")?.toBool() == false)
         let message = try #require(settled.forProperty("message")?.toString())
         #expect(message.contains("argument 1 is neither an options object nor undefined"))
+        // No positive assertion is available here: `requests` is the
+        // recorder's only observable, and argument 1 is rejected before
+        // argument 0's items are ever turned into a request.
         #expect(presenter.requests.isEmpty)
     }
 
@@ -685,12 +709,14 @@ struct MainThreadWindowQuickPickTests {
 
     /// Three calls: no argument 1, an explicit `undefined`, and an explicit
     /// `null`. Kills a mutation that tests only `arguments.count` (the
-    /// explicit `undefined` would then take the object path and reject) and
-    /// one that omits the `isNull` check (`null` is an object to
-    /// `JSValue.isObject`, so every field read would answer nothing and the
-    /// request would still be built — but a mutation that *rejects* `null`
-    /// is what this catches). Every request arrives with the documented
-    /// defaults.
+    /// explicit `undefined` would then take the object path and reject) and a
+    /// mutation that drops `!arguments[1].isNull` from the guard at
+    /// `MainThreadWindow.swift:1076`: with that check gone, `null` reaches
+    /// `arguments[1].isObject` at `:1077`, which is `false` for `null` —
+    /// `JSValueIsObject` does not follow `typeof null === 'object'` — so the
+    /// third call would reject instead of building its request, and this
+    /// test's `ok == true` assertion catches that. Every request arrives with
+    /// the documented defaults.
     @Test
     func absentUndefinedAndNullOptionsAllMeanEveryDefault() async throws {
         let directory = try makeTempDirectory()
@@ -1014,12 +1040,16 @@ struct MainThreadWindowQuickPickTests {
 
     // MARK: - 19. A throwing `onDidSelectItem` does not derail the picker
 
-    /// Kills a mutation that calls the callback directly instead of through
-    /// `VSCodeAPI.call(_:thisArg:arguments:)`, or that treats a `.threw`
-    /// outcome as a failure to reject on: the throw would escape into the
-    /// host's pending-exception bookkeeping, or the picker the user is still
-    /// looking at would be torn down over the extension's own bug. The
-    /// selection still resolves, and both highlights still happen.
+    /// Kills a mutation that treats a `.threw` outcome from `onDidSelectItem`
+    /// as grounds to reject the picker's promise, instead of swallowing it
+    /// the way `VSCodeAPI.call`'s `.threw` case requires: the picker the user
+    /// is still looking at would be torn down over the extension's own bug.
+    /// The selection still resolves, and both highlights still happen. A
+    /// mutation that calls the callback directly instead of through
+    /// `VSCodeAPI.call(_:thisArg:arguments:)` is test 18's, above — its
+    /// `thisOk` assertion already fails on that mutant, since a direct
+    /// `JSValue.call(withArguments:)` binds `this` to `undefined`, not to
+    /// `options`.
     @Test
     func aThrowingOnDidSelectItemIsIgnoredAndTheSelectionStillResolves() async throws {
         let directory = try makeTempDirectory()
@@ -1192,16 +1222,22 @@ struct MainThreadWindowQuickPickTests {
         #expect(settled.forProperty("ok")?.toBool() == false)
         #expect(settled.forProperty("threw")?.toBool() == false)
         #expect(try #require(settled.forProperty("message")?.toString()).contains("torn down"))
+        // No positive assertion is available here: `requests` is the
+        // recorder's only observable, and this window was already disposed
+        // before the call was even made, so no presenter is ever reached.
         #expect(presenter.requests.isEmpty)
     }
 
     // MARK: - 23. The `QuickPickItemKind` table
 
     /// The two values the declaration gives: `Separator = -1`
-    /// (`vscode.d.ts:1886`) and `Default = 0` (`vscode.d.ts:1890`). Kills a
-    /// mutation to either number, or to a member name — no other test here
-    /// reads the table's values, because the separator parse deliberately
-    /// spells its own `-1` rather than depending on this table.
+    /// (`vscode.d.ts:1886`) and `Default = 0` (`vscode.d.ts:1890`). Test 4,
+    /// above, already reads `Separator` through this table and kills a
+    /// mutation to its number or its name. `isSeparatorItem` spells its own
+    /// `-1` rather than depending on the table (see that function's own
+    /// doc), so no item here ever parses as a separator through `Default`'s
+    /// value — this test alone kills a mutation to `Default`'s number (to
+    /// anything but `-1`) or to `Default`'s member name.
     @Test
     func quickPickItemKindMembersCarriesSeparatorMinusOneAndDefaultZero() {
         #expect(MainThreadWindow.quickPickItemKindMembers == ["Separator": -1, "Default": 0])

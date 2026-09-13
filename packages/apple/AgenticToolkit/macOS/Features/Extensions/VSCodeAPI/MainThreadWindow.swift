@@ -51,8 +51,8 @@ public struct ExtensionMessageRequest: Sendable {
 /// beside the one consumer that needs it, in the same file, rather than
 /// anticipating a tier split before a second conformer exists.
 ///
-/// `@MainActor`, matching every other type in this directory: nothing here is
-/// ever read off the main actor.
+/// `@MainActor`, matching every protocol and class in this directory:
+/// nothing here is ever read off the main actor.
 @MainActor
 public protocol ExtensionMessagePresenting: AnyObject {
 
@@ -359,7 +359,7 @@ public struct ExtensionInputBoxRequest: Sendable, Equatable {
 /// `showInputBox`'s, and a panel written now against one of the two is how it
 /// ends up unable to serve the other.
 ///
-/// `@MainActor`, matching every other type in this directory.
+/// `@MainActor`, matching every protocol and class in this directory.
 @MainActor
 public protocol ExtensionQuickPickPresenting: AnyObject {
 
@@ -412,7 +412,7 @@ public protocol ExtensionQuickPickPresenting: AnyObject {
 /// own doc already anticipates the panel that will: task 5.5b-iv builds one
 /// conformer serving both this seam and that one.
 ///
-/// `@MainActor`, matching every other type in this directory.
+/// `@MainActor`, matching every protocol and class in this directory.
 @MainActor
 public protocol ExtensionInputBoxPresenting: AnyObject {
 
@@ -1056,10 +1056,9 @@ public final class MainThreadWindow {
     ///    `QuickPickOptions` fields plus `onDidSelectItem`; anything else — a
     ///    string, a number — is a caller error and rejects.
     /// 3. **argument 2 — the cancellation token. Accepted and ignored.**
-    ///    `CancellationToken` appears in no file under
-    ///    `packages/apple/AgenticToolkit` (measured with `grep -r` while
-    ///    writing this), so there is nothing here for a token to cancel
-    ///    through. The cost is concrete and worth stating: an extension that
+    ///    This host implements no `CancellationToken` type, so there is
+    ///    nothing here for a token to cancel through. The cost is concrete
+    ///    and worth stating: an extension that
     ///    passes one expecting to close the picker programmatically will find
     ///    that it does not. It is not recorded in `NotImplementedLedger` —
     ///    see this type's own doc for why.
@@ -1167,7 +1166,7 @@ public final class MainThreadWindow {
     }
 
     /// Reads a settled argument 0 into `ExtensionQuickPickItem`s, mirroring
-    /// the item loop in `extHostQuickOpen.ts:91-115`.
+    /// the item loop in `extHostQuickOpen.ts:90-113`.
     ///
     /// - A string element is its own `label`, every other field defaulted
     ///   (`extHostQuickOpen.ts:92-93`).
@@ -1349,11 +1348,11 @@ public final class MainThreadWindow {
     ///    anything else — a string, a number — is a caller error and
     ///    rejects, on `handleShowQuickPick`'s own terms for its argument 1.
     /// 2. **argument 1 — the cancellation token. Accepted and ignored**, for
-    ///    `handleShowQuickPick`'s own stated reason: `CancellationToken`
-    ///    appears in no file under `packages/apple/AgenticToolkit`, so
-    ///    nothing here can act on one. Not recorded in `NotImplementedLedger`
-    ///    for the same reason `showQuickPick`'s ignored token is not — a
-    ///    degraded argument is not an absent member.
+    ///    `handleShowQuickPick`'s own stated reason: this host implements no
+    ///    `CancellationToken` type, so nothing here can act on one. Not
+    ///    recorded in `NotImplementedLedger` for the same reason
+    ///    `showQuickPick`'s ignored token is not — a degraded argument is not
+    ///    an absent member.
     private func handleShowInputBox() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
         let arguments = VSCodeAPI.currentArguments()
@@ -1732,7 +1731,7 @@ public final class MainThreadWindow {
     /// **Divergence from upstream, deliberate: the picker is not shown before
     /// the items arrive.** Upstream races the widget against the items
     /// promise (`Promise.race([widgetClosedPromise, itemsPromise])`,
-    /// `extHostQuickOpen.ts:81-83`) so the user sees an empty picker
+    /// `extHostQuickOpen.ts:82`) so the user sees an empty picker
     /// immediately and can dismiss it while the items are still loading. Here
     /// the presenter is called once, with the finished request. The cost is
     /// real: an extension whose items promise is slow shows nothing at all in
@@ -1800,12 +1799,11 @@ public final class MainThreadWindow {
                     // items promise always rejects the call.** Upstream tests
                     // `isCancellationError(err)` first and answers `undefined`
                     // for that one case (`extHostQuickOpen.ts:134-137`). This
-                    // host has no cancellation vocabulary at all —
-                    // `CancellationToken` appears in no file under
-                    // `packages/apple/AgenticToolkit` — so there is no error
-                    // it could recognise as a cancellation, and a
-                    // name-matching test would be a guess about what an
-                    // extension's error object looks like.
+                    // host implements no `CancellationToken` type and no
+                    // cancellation vocabulary at all, so there is no error it
+                    // could recognise as a cancellation, and a name-matching
+                    // test would be a guess about what an extension's error
+                    // object looks like.
                     settlement.reject.call(withArguments: [reason])
                     return
                 case .unavailable:
@@ -1995,8 +1993,8 @@ extension MainThreadWindow: Loggable {
     /// This adaptor's own log destination, matching `MainThreadCommands` and
     /// `MainThreadWorkspace`. Unused by every member on this type so far —
     /// each of them reports its own failure to the extension itself, by
-    /// raising or by rejecting, and there is nothing here yet that fails in a
-    /// way only a log line can report — kept for the same reason
+    /// rejecting the promise it returned, and there is nothing here yet that
+    /// fails in a way only a log line can report — kept for the same reason
     /// `notImplementedLedger` is: 5.5c extends this same class.
     public static nonisolated let logger = makeLogger()
 }

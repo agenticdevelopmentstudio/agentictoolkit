@@ -654,7 +654,11 @@ public enum VSCodeAPI {
     /// (`JSManagedValue.h:49`, `JSValue.mm:77-81`). It reads the context from
     /// `JSContext.current()`, which JavaScriptCore fills in for the duration
     /// of a block call — the same source `tornDown(path:response:)` reads it
-    /// from, and the same one `currentArguments()` reads the arguments from.
+    /// from. `currentArguments()` is a separate "Callback Accessor"
+    /// (`JSContext.h`'s own section heading for both `+currentContext` and
+    /// `+currentArguments`, two distinct class methods, not one accessor read
+    /// twice) that JavaScriptCore populates from that same callback-time
+    /// call.
     ///
     /// `nil` when there is no argument and no context to mint one in, which
     /// the caller answers `.unavailable` rather than with a fabricated
