@@ -341,6 +341,58 @@ extension ProjectDatabase {
         }
     }
 
+    /// Deletes the rows `nodeID` holds on behalf of nested panes that are gone.
+    ///
+    /// `saveTabs`'s sweep collects a closed pane's state by `node_id`, which is
+    /// every pane that *is* a layout node. A pane nested inside another pane's
+    /// content — an editor in the Document pane's tabs — is not: it files its
+    /// rows under the enclosing layout node and spells its own id into the key
+    /// (`ProjectPaneStateStore.storageKey(for:)`), so the sweep sees a row
+    /// belonging to a node that is very much alive and keeps it forever. Closing
+    /// a split left its editor's remembered document and chrome behind, and a
+    /// project worked in for a while accumulated one such row per pane ever
+    /// opened.
+    ///
+    /// So the owner collects its own: `liveIDs` is every node id still in the
+    /// owner's stored trees, and a key naming a UUID outside that set describes
+    /// a pane that no longer exists. Keys with no UUID in them are the owner's
+    /// own (`document.tabs`, and its chrome's unowned `chrome.*`) and are never
+    /// touched — a UUID cannot be mistaken for a key component, because it is
+    /// the only thing here that parses as one.
+    public func pruneNestedPaneState(
+        repoID: UUID,
+        nodeID: UUID,
+        keeping liveIDs: Set<UUID>
+    ) throws {
+        var doomed: [String] = []
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = "SELECT key FROM pane_state WHERE repo_id = ? AND node_id = ?"
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw ProjectDatabaseError.prepareFailed(lastErrorMessage)
+        }
+        bindText(stmt, 1, repoID.uuidString)
+        bindText(stmt, 2, nodeID.uuidString)
+        // Read to exhaustion before deleting anything: deleting from a table
+        // being stepped is exactly the shape SQLite leaves undefined.
+        try forEachRow(stmt) {
+            guard let key = self.columnText(stmt, 0) else { return }
+            let named = key.split(separator: ".").compactMap { UUID(uuidString: String($0)) }
+            if named.contains(where: { !liveIDs.contains($0) }) {
+                doomed.append(key)
+            }
+        }
+        for key in doomed {
+            try executeBound(
+                "DELETE FROM pane_state WHERE repo_id = ? AND node_id = ? AND key = ?"
+            ) { stmt in
+                bindText(stmt, 1, repoID.uuidString)
+                bindText(stmt, 2, nodeID.uuidString)
+                bindText(stmt, 3, key)
+            }
+        }
+    }
+
     // MARK: - Project directories
 
     /// The extra directories this project's file browser shows, in display

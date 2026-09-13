@@ -80,6 +80,22 @@ public struct LayoutNode: Sendable {
         }
     }
 
+    /// Every id in this tree, splits included.
+    ///
+    /// `leafIDs` answers "which panes are these"; this answers "which ids does
+    /// this tree still spend", which is the question a sweep over rows keyed by
+    /// node id has to ask. A split's id counts: it is a node a caller can key
+    /// something to, and a sweep that mistook it for dead would delete the state
+    /// of something still on screen.
+    public var allIDs: Set<UUID> {
+        switch kind {
+        case .leaf:
+            return [id]
+        case .split(_, let first, let second):
+            return first.allIDs.union(second.allIDs).union([id])
+        }
+    }
+
     // MARK: - Sharing one arrangement
 
     /// This tree rebuilt to `template`'s shape, keeping its own node ids.

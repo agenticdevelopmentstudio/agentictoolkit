@@ -43,14 +43,23 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
     /// its identity alive for a later allocation to collide with.
     private let wiredEditors = NSHashTable<DocumentEditorViewController>.weakObjects()
 
-    /// The pane the first responder was last seen in.
+    /// The pane the first responder was last seen in, per tab.
     ///
     /// "Which editor is focused" cannot be answered by asking the window at
     /// the moment the question is put: the click that puts it — a file picked
     /// in the tree — has already moved the first responder into the tree. So
-    /// focus is recorded when it arrives and read back afterwards. Weak, so a
-    /// closed pane is not kept alive by being remembered.
-    private weak var lastFocusedPane: ComposableTabsPaneViewController?
+    /// focus is recorded when it arrives and read back afterwards.
+    ///
+    /// One record per tab, not one for the container: each tab has its own
+    /// editors and its own idea of which of them the user was last working in,
+    /// and a single slot meant clicking into tab two's editor threw away tab
+    /// one's answer — so coming back to tab one opened files into its first
+    /// pane however carefully the user had picked another.
+    ///
+    /// Weak values, so a closed pane is not kept alive by being remembered and
+    /// the entry goes with it.
+    private let lastFocusedPanes =
+        NSMapTable<NSUUID, ComposableTabsPaneViewController>.strongToWeakObjects()
 
     /// AppKit posts no notification when the first responder moves, and
     /// `NSWindow.firstResponder` is the only place the move is visible. One
@@ -129,8 +138,27 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
     private func firstResponderDidMove() {
         guard let tabID = selectedTabID(on: .top), let root = splitsByTabID[tabID] else { return }
         guard let pane = panes(in: root).first(where: { $0.containsFirstResponder }) else { return }
-        lastFocusedPane = pane
+        rememberFocus(pane, inTab: tabID)
         reportFocusedDocument()
+    }
+
+    private func rememberFocus(_ pane: ComposableTabsPaneViewController, inTab tabID: UUID) {
+        lastFocusedPanes.setObject(pane, forKey: tabID as NSUUID)
+    }
+
+    private func rememberedFocus(inTab tabID: UUID) -> ComposableTabsPaneViewController? {
+        lastFocusedPanes.object(forKey: tabID as NSUUID)
+    }
+
+    /// Makes the pane holding `editor` the one its tab remembers as focused.
+    ///
+    /// No-op for an editor that is not in the tab on screen: only a visible pane
+    /// can have been the one the user acted in.
+    private func rememberFocus(of editor: DocumentEditorViewController) {
+        guard let tabID = selectedTabID(on: .top), let root = splitsByTabID[tabID],
+              let pane = panes(in: root).first(where: { $0.contentViewController === editor })
+        else { return }
+        rememberFocus(pane, inTab: tabID)
     }
 
     /// Hands the focused editor's file out, once per change.
@@ -218,9 +246,18 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
             // already have an owner for this handler, and overwriting it
             // outright would silently drop them.
             let previousOpenHandler = editor.onOpenRequest
-            editor.onOpenRequest = { [weak self] url in
+            editor.onOpenRequest = { [weak self, weak editor] url in
                 previousOpenHandler?(url)
-                self?.onOpenRequest?(url)
+                guard let self else { return }
+                // Recorded *before* the request goes out. It leaves here for the
+                // session — choosing in a breadcrumb is the same event as
+                // clicking in the tree — and comes back as
+                // `openInSelectedPane(_:)`, by which point the one fact only
+                // this end ever knew is gone: which editor asked. Clicking a
+                // breadcrumb moves no first responder, so without this the file
+                // landed in whichever editor the user had last typed in.
+                if let editor { self.rememberFocus(of: editor) }
+                self.onOpenRequest?(url)
             }
         }
     }
@@ -269,7 +306,7 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
         // focus itself is left where the window put it — the editor's text view
         // is CodeEditSourceEditor's, not ours to hand the first responder to.
         if let addedPane = panes(in: root).first(where: { $0.contentViewController === added }) {
-            lastFocusedPane = addedPane
+            rememberFocus(addedPane, inTab: tabID)
         }
         added?.fileURL = url
         reportFocusedDocument()
@@ -331,11 +368,19 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
 
     private func focusedPane(in root: ComposableTabsViewController) -> ComposableTabsPaneViewController? {
         let all = panes(in: root)
+        // The record first, the window second. `firstResponderDidMove()` writes
+        // the record from the same first responder this would read, so the two
+        // agree whenever focus is in a pane — and where they don't, the record is
+        // the more informed of the two: it also carries the pane the user acted
+        // in through a click that moved no first responder at all, which is every
+        // click on a breadcrumb or a control in the chrome. Asking the window
+        // first handed those files to whichever editor was last typed in.
+        if let tabID = tabID(of: root), let remembered = rememberedFocus(inTab: tabID),
+           all.contains(where: { $0 === remembered }) {
+            return remembered
+        }
+        // Focus that arrived before this container had a window to observe.
         if let holding = all.first(where: { $0.containsFirstResponder }) { return holding }
-        // Focus has moved on since the user last chose an editor — into the
-        // tree, or into another pane of the window. What they chose still
-        // stands; see `lastFocusedPane`.
-        if let remembered = lastFocusedPane, all.contains(where: { $0 === remembered }) { return remembered }
         return all.first
     }
 
@@ -365,10 +410,8 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
     /// stores nothing itself, and the project's own tab tables belong to the
     /// window, not to a pane inside it.
     public func persistTabs() {
-        let records = tabs(on: .top).compactMap { tab -> StoredTab? in
-            guard let root = splitsByTabID[tab.id] else { return nil }
-            return StoredTab(root: LayoutNodeCodable(root.snapshotNode()))
-        }
+        let snapshots = tabs(on: .top).compactMap { splitsByTabID[$0.id]?.snapshotNode() }
+        let records = snapshots.map { StoredTab(root: LayoutNodeCodable($0)) }
         let stored = StoredTabs(
             tabs: records,
             selectedIndex: tabs(on: .top).firstIndex { $0.id == selectedTabID(on: .top) } ?? 0
@@ -376,6 +419,18 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
         guard let data = try? JSONEncoder().encode(stored),
               let json = String(data: data, encoding: .utf8) else { return }
         project.setPaneState(nodeID: paneNodeID, key: Self.tabsStateKey, value: json)
+
+        // The editors in these tabs are not layout nodes, so the project's own
+        // sweep cannot collect what they remembered: their rows are filed under
+        // this pane's node id with their own id in the key, and this pane is
+        // still here. This is the list only this controller has — every id its
+        // tabs still spend, written down at the same moment the trees holding
+        // them are — so the collecting is this controller's too.
+        var liveIDs: Set<UUID> = [paneNodeID]
+        for snapshot in snapshots {
+            liveIDs.formUnion(snapshot.allIDs)
+        }
+        project.pruneNestedPaneState(nodeID: paneNodeID, keeping: liveIDs)
     }
 
     private func readStoredTabs() -> StoredTabs {
@@ -391,6 +446,13 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
         let stored = readStoredTabs()
         guard !stored.tabs.isEmpty else {
             addTab(root: makeTabRoot(), title: "Untitled")
+            // Written down at once, because this tab's layout node ids are the
+            // keys its editors file everything under. Left unpersisted, the next
+            // launch found no tab list, invented a second tab with fresh ids, and
+            // every `document.<uuid>.*` row the first launch wrote — the file each
+            // editor had open above all — was orphaned where no sweep can reach
+            // it. One empty tab is a layout like any other.
+            persistTabs()
             return
         }
         for record in stored.tabs {
@@ -427,12 +489,23 @@ extension DocumentTabsViewController: MultiTabbedViewControllerDelegate {
     /// editor pane's — see `onLastPaneCloseRequest` in `makeTabRoot`.
     func closeTab(_ tabID: UUID) {
         guard tabs(on: .top).count > 1 else {
-            splitsByTabID[tabID].flatMap { focusedEditor(in: $0) }?.clearDocument()
+            // Every editor in the tab, not only the focused one: what the user
+            // clicked closes the *tab*, and `retitle` renames it "Untitled" the
+            // moment the focused editor empties — a tab named after nothing while
+            // three of its four panes still show files is a tab lying about what
+            // is in it. The arrangement stays: the panes are the user's, and the
+            // floor is about the documents.
+            splitsByTabID[tabID].map(editors(in:))?.forEach { $0.clearDocument() }
             retitle(tabID)
             persistTabs()
             return
         }
-        splitsByTabID.removeValue(forKey: tabID)
+        // `removeTab(id:)` drops the whole tree without going through
+        // `ComposableTabsViewController.remove(_:)`, so nothing else tells these
+        // panes they are gone — the arrange overlay's local key-down monitor
+        // would outlive the tab and `PaneContentTeardown` would never run.
+        splitsByTabID.removeValue(forKey: tabID)?.tearDownPanes()
+        lastFocusedPanes.removeObject(forKey: tabID as NSUUID)
         removeTab(id: tabID)
         persistTabs()
     }

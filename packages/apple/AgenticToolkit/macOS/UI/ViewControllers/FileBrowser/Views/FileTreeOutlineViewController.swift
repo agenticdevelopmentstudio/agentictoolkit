@@ -346,6 +346,13 @@ final class FileTreeOutlineViewController: NSViewController {
         invalidateRowIndex()
 
         guard let wanted = pendingSelectionPath else { return }
+        // Restoring what was open is not enough to reach what was selected: a
+        // reveal's ancestors are expanded without being recorded as disclosed,
+        // so the pass above would not touch them. Walking them again here is
+        // what takes the descent its next step now that this level's children
+        // are drawn — without it, a file more than one unread level down was
+        // never reached and the request simply stood.
+        expandAncestors(of: URL(fileURLWithPath: wanted))
         for row in 0..<outline.numberOfRows {
             guard let node = outline.item(atRow: row) as? FileTreeNode, node.url.path == wanted else { continue }
             pendingSelectionPath = nil
@@ -489,7 +496,8 @@ final class FileTreeOutlineViewController: NSViewController {
         let row = self.row(forPath: url.path)
         guard row >= 0 else {
             // Not drawn yet — the parent's children are still loading. Leave a
-            // standing request, which `restoreDisclosure()` already honours.
+            // standing request, which `restoreDisclosure()` walks one level
+            // further down every time a directory's contents land.
             pendingSelectionPath = url.path
             return
         }
@@ -497,6 +505,11 @@ final class FileTreeOutlineViewController: NSViewController {
         outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         outline.scrollRowToVisible(row)
         isSyncingSelection = false
+        // Arrived, so nothing is waiting to be restored any more — and the
+        // request has to go before the model is written, because while it
+        // stands the selection sink persists nothing.
+        pendingSelectionPath = nil
+        adoptRevealedSelection(outline.item(atRow: row) as? FileTreeNode)
     }
 
     /// Clears the highlight — the editor pane the tree is following has
@@ -505,6 +518,24 @@ final class FileTreeOutlineViewController: NSViewController {
         isSyncingSelection = true
         outline.deselectAll(nil)
         isSyncingSelection = false
+        adoptRevealedSelection(nil)
+    }
+
+    /// Records what a reveal put the highlight on.
+    ///
+    /// The highlight is not the selection. `isSyncingSelection` keeps the
+    /// outline's own report from being written back — that is what stops a
+    /// reveal being sent straight back to the editor it came from — and it left
+    /// `selection` naming whatever was clicked last: the footer named one file
+    /// while the tree highlighted another, the persisted selection was the
+    /// stale one, and `selectedRoot` still pointed at the repo the old file was
+    /// in. So the model is told directly, in the same terms a click would use,
+    /// and only `outlineViewSelectionDidChange` ever opens anything.
+    private func adoptRevealedSelection(_ node: FileTreeNode?) {
+        selection.selectedNode = node
+        if let url = node?.url, let root = directories.root(containing: url) {
+            selection.selectedRoot = root
+        }
     }
 
     /// Walks the path from the root down, expanding each ancestor in turn.
@@ -522,6 +553,11 @@ final class FileTreeOutlineViewController: NSViewController {
             directory = directory.deletingLastPathComponent()
         }
         for path in ancestors.reversed() {
+            // A path with no row is either above every root — the components
+            // between `/` and a repo root are ancestors of the file too — or a
+            // level whose parent has only just been told to read its contents.
+            // Neither is an error, and the second is why one pass is not
+            // enough: `restoreDisclosure()` runs this again when they arrive.
             let row = self.row(forPath: path)
             guard row >= 0, let item = outline.item(atRow: row), !outline.isItemExpanded(item) else { continue }
             outline.expandItem(item)
@@ -535,13 +571,10 @@ final class FileTreeOutlineViewController: NSViewController {
     /// `selectedURL` stays private everywhere else.
     var selectedURLForTesting: URL? { selectedURL }
 
-    /// Fires only for a selection change the outline reported on its own —
-    /// never for one `reveal(_:)`/`revealNothing()` made on the model's
-    /// behalf. `dropFirst()` swallows the value `@Published` replays to a new
-    /// subscriber, which is not a change at all.
-    var selectionPublisherForTesting: AnyPublisher<FileTreeNode?, Never> {
-        selection.$selectedNode.dropFirst().eraseToAnyPublisher()
-    }
+    /// What the shared selection model names, as against what the outline
+    /// highlights (`selectedURLForTesting`). A reveal has to move both: the
+    /// footer, the persisted selection and `selectedRoot` all read the model.
+    var selectedNodeInModelForTesting: FileTreeNode? { selection.selectedNode }
 
     /// Collapses every row, the way a browser nobody has touched yet looks —
     /// used to pin that `reveal(_:)` can open collapsed ancestors back up.
@@ -845,6 +878,13 @@ extension FileTreeOutlineViewController: NSOutlineViewDataSource, NSOutlineViewD
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard !isSyncingSelection else { return }
+        // The user has answered, so whatever was still being restored is over.
+        // The standing request suppresses persistence while it lasts — a
+        // half-finished restore is not the user's answer — and a path that can
+        // never be drawn, deleted since the last launch or now outside every
+        // root, held that suppression for the life of the pane: every file
+        // chosen after it was highlighted and then forgotten at quit.
+        pendingSelectionPath = nil
         let item = outline.item(atRow: outline.selectedRow)
 
         if let manager = item as? FileTreeManager {
@@ -863,12 +903,18 @@ extension FileTreeOutlineViewController: NSOutlineViewDataSource, NSOutlineViewD
     }
 
     /// A plain click says *what*; showing it is `.current`, the same
-    /// destination "Open" on the context menu sends. `children == nil` is the
-    /// same test `isItemExpandable` and `rowDoubleClicked` already use for
-    /// "this row has nothing to disclose" — a real file, or a childless
-    /// package — so all three agree on what counts as openable.
+    /// destination "Open" on the context menu sends.
+    ///
+    /// Asked of the node itself rather than of its children. `children == nil`
+    /// reads as "nothing to disclose", which is true of a file and of a package
+    /// — but also of a directory that *was* read and turned out empty, which
+    /// `FileTreeNode` deliberately leaves at `nil` so no triangle opens onto
+    /// nothing. Clicking an empty folder therefore sent it to the Document pane
+    /// as a document. A package still goes: the tree shows it as one item, so a
+    /// click on it is a request to show something, and the editor's own
+    /// placeholder is the honest answer.
     func openIfFile(_ node: FileTreeNode?) {
-        guard let node, node.children == nil else { return }
+        guard let node, !node.isDirectory || node.isPackage else { return }
         onOpenRequest?(node.url, .current)
     }
 }

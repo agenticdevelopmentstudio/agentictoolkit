@@ -243,7 +243,18 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// would tear down and re-adopt every pane to change two numbers.
     public func applyArrangement() {
         guard !(arranger is InheritedSlotArranger) else { return }
-        let arranged = arranger.arrange(snapshotNode(), along: axis)
+        let node = snapshotNode()
+        // The axis the arranger is told about is the tree's, which is not always
+        // this controller's own: a split holding one child reports *that child*
+        // from `snapshotNode()`, and its own axis is then a number nothing laid
+        // out — `make(from:)` has none to take from a leaf node and picks one. So
+        // a tab split downward from a single pane would hand the arranger a
+        // vertical tree and call it horizontal, and the same tree read back from
+        // disk — where `buildSplit` takes the axis from the node — would arrange
+        // differently from the one on screen.
+        var arrangementAxis = axis
+        if case .split(let orientation, _, _) = node.kind { arrangementAxis = orientation }
+        let arranged = arranger.arrange(node, along: arrangementAxis)
         applyFractions(from: arranged)
         if isViewLoaded {
             hasAppliedPreferredThicknesses = false
@@ -1069,6 +1080,20 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         return current
     }
 
+    /// Tells every pane in this tree that it is being discarded.
+    ///
+    /// `MultiTabbedViewController.removeTab(id:)` drops a whole split tree
+    /// without going through `remove(_:)`, which is the framework's only other
+    /// call site for `paneWillBeRemoved()` — so a container that discards a tree
+    /// whole calls this instead of relying on deallocation. A pane's content may
+    /// own a shell or an FSEvents stream, and "released whenever the last
+    /// reference happens to drop" is not a life cycle for a child process; the
+    /// arrange overlay's local key-down monitor is the other thing that would
+    /// otherwise outlive the tab.
+    public func tearDownPanes() {
+        for leaf in allLeaves() { leaf.paneWillBeRemoved() }
+    }
+
     /// Number of leaf panes in this subtree.
     public func leafCount() -> Int {
         layoutChildren.reduce(0) { total, child in
@@ -1309,6 +1334,14 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         case .split:
             return buildSplit(node, project: project, workingDirectory: workingDirectory, isRoot: isRoot)
         case .leaf:
+            // A fresh id and an arbitrary axis, both for the same reason: this
+            // wrapper is not in the stored tree. It exists so a tab always has a
+            // split at its root, and `snapshotNode()` reports the single child
+            // rather than the wrapper — so the wrapper's id is never persisted
+            // (a stored id reused here would collide with the node it came from)
+            // and its axis is never laid out. `applyArrangement()` is the one
+            // place that could have read it, and it takes the axis off the
+            // snapshot precisely because this one means nothing.
             return ComposableTabsViewController(
                 nodeID: UUID(),
                 axis: .horizontal,

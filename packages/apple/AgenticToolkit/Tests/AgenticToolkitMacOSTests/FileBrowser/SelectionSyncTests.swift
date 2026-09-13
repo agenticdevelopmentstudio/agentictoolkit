@@ -1,13 +1,12 @@
-import Combine
 import XCTest
 @testable import AgenticToolkitLanguage
 @testable import AgenticToolkitMacOS
 
 /// `reveal(_:)` is the tree following the editor, not the editor following the
 /// tree — `FileTreeOpenOnSelectionTests` already covers that direction. This
-/// pins the return trip: an editor gaining focus moves the highlight without
-/// echoing a selection change back out, through the same `isSyncingSelection`
-/// guard that already protects a model-driven restore.
+/// pins the return trip: an editor gaining focus moves both the highlight and
+/// the selection model, and sends nothing back out to be opened again — the
+/// `isSyncingSelection` guard stops the round trip, not the record.
 @MainActor
 final class SelectionSyncTests: XCTestCase {
 
@@ -90,16 +89,26 @@ final class SelectionSyncTests: XCTestCase {
         }
     }
 
-    func testRevealingAFileSelectsItWithoutReemittingASelectionChange() throws {
+    func testRevealingAFileSelectsItWithoutSendingItBackToBeOpened() throws {
         let (controller, fileURL) = try makeControllerWithNestedFile()
-        var selectionChanges = 0
-        let observer = controller.selectionPublisherForTesting.sink { _ in selectionChanges += 1 }
-        defer { observer.cancel() }
+        var openRequests: [URL] = []
+        controller.onOpenRequest = { url, _ in openRequests.append(url) }
 
         controller.reveal(fileURL)
 
         XCTAssertEqual(controller.selectedURLForTesting, fileURL)
-        XCTAssertEqual(selectionChanges, 0, "a reveal came from an editor; it must not be echoed back")
+        XCTAssertEqual(openRequests, [], "a reveal came from an editor; it must not be sent back to one")
+    }
+
+    /// The highlight alone is not the selection: the pane footer, the persisted
+    /// selection and `selectedRoot` all read the model, so a tree following the
+    /// focused editor has to move that too.
+    func testRevealingAFileRecordsItInTheSelectionModel() throws {
+        let (controller, fileURL) = try makeControllerWithNestedFile()
+
+        controller.reveal(fileURL)
+
+        XCTAssertEqual(controller.selectedNodeInModelForTesting?.url, fileURL)
     }
 
     func testRevealingExpandsCollapsedAncestors() throws {
@@ -128,5 +137,6 @@ final class SelectionSyncTests: XCTestCase {
         controller.revealNothing()
 
         XCTAssertNil(controller.selectedURLForTesting, "an empty editor highlights nothing")
+        XCTAssertNil(controller.selectedNodeInModelForTesting, "and it names nothing either")
     }
 }

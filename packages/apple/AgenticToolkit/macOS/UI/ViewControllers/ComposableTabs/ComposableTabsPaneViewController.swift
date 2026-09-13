@@ -106,7 +106,11 @@ public final class ComposableTabsPaneViewController: PaneViewController {
             project: project,
             workingDirectory: workingDirectory,
             paneNumber: paneNumber,
-            ownerNodeID: stateOwnerNodeID
+            ownerNodeID: stateOwnerNodeID,
+            // `host` is stamped by the enclosing split at its own `init`, before
+            // any pane's view loads, so the walk to the root is already possible
+            // the first time this runs — see `stampOwnershipOnChildren()`.
+            treeID: (host as? ComposableTabsViewController)?.rootSplit()?.nodeID
         )
     }
 
@@ -218,9 +222,14 @@ public final class ComposableTabsPaneViewController: PaneViewController {
 
     /// What this pane is called, as the registry names it. The same string the
     /// Add popup offers, so a pane and the choice that made it match.
+    ///
+    /// Resolved against the same layout `makeContentViewController()` vends the
+    /// content from: a pane nested inside another pane's tree — a Document
+    /// editor — is registered only in the override, and asking the project's
+    /// registry about it answers `.unknown`.
     var paneName: String {
-        let registry = (project?.layout ?? ComposableTabsLayout.placeholderOnly()).registry
-        return registry.descriptor(for: viewID).displayName
+        let layout = layoutOverride ?? project?.layout ?? ComposableTabsLayout.placeholderOnly()
+        return layout.registry.descriptor(for: viewID).displayName
     }
 
     private func updateArrangeOverlay() {

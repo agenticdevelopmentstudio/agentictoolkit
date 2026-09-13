@@ -42,17 +42,25 @@ public final class ProportionalArranger: PaneArranger {
 
     public func arrange(_ node: LayoutNode, along axis: ComposableTabsAxis) -> LayoutNode {
         guard case .split(let orientation, let first, let second) = node.kind else { return node }
-        guard orientation == axis else { return node }
+
+        // Walked whichever way this split runs. A split *across* the arrangement
+        // axis is the user's own doing — an editor split downward inside a row of
+        // editors — so its two halves keep the sizes they were given; but the
+        // halves themselves are still visited, because a split along the axis
+        // nested under a cross-axis one is as much a row of editors as any other.
+        // Returning here instead left every pane below the first cross-axis split
+        // arranged by nothing at all, so a fourth editor added to such a tab took
+        // half of whichever divider the user had last dragged.
+        var arrangedFirst = arrange(first, along: axis)
+        var arrangedSecond = arrange(second, along: axis)
 
         let firstCount = Double(Self.leafCount(first))
         let secondCount = Double(Self.leafCount(second))
         let total = firstCount + secondCount
-        guard total > 0 else { return node }
-
-        var arrangedFirst = arrange(first, along: axis)
-        var arrangedSecond = arrange(second, along: axis)
-        arrangedFirst.thicknessFraction = firstCount / total
-        arrangedSecond.thicknessFraction = secondCount / total
+        if orientation == axis, total > 0 {
+            arrangedFirst.thicknessFraction = firstCount / total
+            arrangedSecond.thicknessFraction = secondCount / total
+        }
 
         return LayoutNode.split(
             id: node.id,

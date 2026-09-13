@@ -262,6 +262,20 @@ public final class ProjectWorkspace {
             """)
     }
 
+    /// Collects the pane state `nodeID` holds for nested panes no longer in
+    /// `liveIDs` — see `ProjectDatabase.pruneNestedPaneState`.
+    ///
+    /// Logged and dropped like its siblings: a sweep that fails leaves rows
+    /// nobody reads, which costs bytes and nothing else, and is not worth
+    /// failing a save the user asked for.
+    public func pruneNestedPaneState(nodeID: UUID, keeping liveIDs: Set<UUID>) {
+        do {
+            try database.pruneNestedPaneState(repoID: repo.id, nodeID: nodeID, keeping: liveIDs)
+        } catch {
+            logPaneStateFailure("prune", nodeID: nodeID, key: "*", error: error)
+        }
+    }
+
     /// A list of strings, stored as JSON in one pane-state value.
     ///
     /// JSON rather than a separator, because the lists panes remember are file

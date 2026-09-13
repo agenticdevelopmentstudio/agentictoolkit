@@ -1200,20 +1200,12 @@ public final class ComposableTabsWindowController: WindowController<NSViewContro
         }
     }
 
-    /// Tells every pane under `split` that it is being discarded.
-    ///
-    /// `MultiTabbedViewController.removeTab(id:)` drops a whole split tree
-    /// without going through `ComposableTabsViewController.remove(_:)`, which
-    /// is the framework's only other call site for `paneWillBeRemoved()`. A
-    /// pane's content may own a shell or an FSEvents stream, and "released
-    /// whenever the last reference happens to drop" is not a life cycle for a
-    /// child process — so the three paths that discard a tree whole,
-    /// `removeAllTabs()`, `didRequestCloseTab` and `windowWillClose(_:)`, go
-    /// through here.
+    /// The three paths here that discard a tree whole — `removeAllTabs()`,
+    /// `didRequestCloseTab` and `windowWillClose(_:)` — go through the tree's
+    /// own `tearDownPanes()`, which is where the reason lives. Kept as a name
+    /// of its own because those three read better for it.
     private func tearDown(split: ComposableTabsViewController) {
-        for leaf in split.allLeaves() {
-            leaf.paneWillBeRemoved()
-        }
+        split.tearDownPanes()
     }
 
     private func wireLayoutCallback(on split: ComposableTabsViewController, tabID: UUID) {

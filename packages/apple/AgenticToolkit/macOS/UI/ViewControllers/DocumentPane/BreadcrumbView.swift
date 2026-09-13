@@ -112,13 +112,22 @@ public final class BreadcrumbView: NSView {
     }
 
     private func presentPopover(for directory: URL, relativeTo anchor: NSView) {
-        let controller = BreadcrumbPopoverViewController(directoryURL: directory) { [weak self] chosen in
-            self?.activePopover?.close()
+        // One at a time. `.transient` closes a popover when the user clicks
+        // outside it, and clicking a second crumb is not that click — the
+        // button's action is delivered first — so two strips of siblings stood
+        // open at once, each listing a different directory.
+        activePopover?.close()
+
+        let popover = NSPopover()
+        let controller = BreadcrumbPopoverViewController(directoryURL: directory) { [weak self, weak popover] chosen in
+            // This popover, not whichever one the field names by the time the
+            // choice arrives.
+            popover?.close()
             self?.onSelect?(chosen)
         }
-        let popover = NSPopover()
         popover.contentViewController = controller
         popover.behavior = .transient
+        popover.delegate = self
         controller.onCancel = { [weak popover] in popover?.close() }
         activePopover = popover
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
@@ -161,5 +170,23 @@ public final class BreadcrumbView: NSView {
         let clamped = max(1, min(count, components.count))
         let path = "/" + components[1..<clamped].joined(separator: "/")
         return URL(fileURLWithPath: path)
+    }
+}
+
+extension BreadcrumbView: NSPopoverDelegate {
+
+    /// Forgets a popover only when it is the one the field names.
+    ///
+    /// A `.transient` popover dismissed by a click outside it left
+    /// `activePopover` pointing at a closed popover, so the strip believed one
+    /// was up until the next crumb was clicked. Clearing unconditionally would
+    /// be the opposite mistake: the popover being replaced reports its close
+    /// after its replacement is already recorded, and nilling then would leave
+    /// the live one unreachable.
+    public func popoverDidClose(_ notification: Notification) {
+        guard let closed = notification.object as? NSPopover, closed === activePopover else {
+            return
+        }
+        activePopover = nil
     }
 }

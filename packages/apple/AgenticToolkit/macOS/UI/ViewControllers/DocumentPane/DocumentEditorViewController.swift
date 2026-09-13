@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 import AgenticDeveloperToolkitUI
@@ -33,6 +34,22 @@ public final class DocumentEditorViewController: NSViewController {
     /// Fires when the displayed file changes, so the tab bar can retitle.
     public var onTitleChange: (() -> Void)?
 
+    /// The rows the options popover is showing, if one is open.
+    ///
+    /// Weak, and deliberately not an array: the popover owns its views and takes
+    /// them with it when it closes, so these go nil on their own rather than
+    /// keeping a dismissed popover's checkboxes alive to be written to.
+    private weak var lineNumbersRow: WindowConfigToggle?
+    private weak var overviewRow: WindowConfigToggle?
+    private weak var invisiblesRow: WindowConfigToggle?
+    private weak var resetRow: NSButton?
+
+    /// Watches both scopes at once. `EditorOptionsOverride.publish()` fires for
+    /// a pane-local edit, for `reset()`, and for a change to the app-wide
+    /// setting — and it mutates its stored value *before* sending, so reading
+    /// the resolved values from here gives the new ones.
+    private var optionsObserver: AnyCancellable?
+
     /// Asked to show a file the editor itself resolved — a go-to-definition
     /// target in another file, or a file chosen from the breadcrumb's
     /// popover. Routed out rather than handled here, because the browser's
@@ -60,6 +77,9 @@ public final class DocumentEditorViewController: NSViewController {
         self.breadcrumb = BreadcrumbView(rootURL: rootURL)
         super.init(nibName: nil, bundle: nil)
         breadcrumb.onSelect = { [weak self] url in self?.onOpenRequest?(url) }
+        optionsObserver = options.objectWillChange.sink { [weak self] _ in
+            self?.refreshOptionRows()
+        }
         restoreStoredDocument()
     }
 
@@ -81,12 +101,25 @@ public final class DocumentEditorViewController: NSViewController {
     }
 
     private func show(_ url: URL?, persist: Bool) {
-        selection.selectedNode = url.map { FileTreeNode(url: $0, isDirectory: false) }
+        // Asked rather than asserted. Every caller here hands over a bare URL —
+        // a restored path, a breadcrumb choice, a go-to-definition target, the
+        // tree's own open request — and a directory is among the things they can
+        // legitimately name: a package is a directory the tree shows as one
+        // item, and so is a folder chosen from a breadcrumb's popover. Told it
+        // was a file, `FileEditorView.openableNode` let it through and the
+        // editor read a directory off disk.
+        selection.selectedNode = url.map {
+            FileTreeNode(url: $0, isDirectory: Self.isDirectory($0))
+        }
         breadcrumb.fileURL = url
         if persist {
             store.setPaneStateValue(url?.path, forKey: Self.fileURLKey)
         }
         onTitleChange?()
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     }
 
     /// Empties the editor without taking the pane with it — what the close box
@@ -153,17 +186,17 @@ extension DocumentEditorViewController: PaneOptionsProviding {
             title: "Show line numbers",
             isOn: options.showLineNumbers,
             onChange: { [weak self] value in self?.options.setShowLineNumbers(value) }
-        )
+        ).checkboxAccessibilityID("document.options.line-numbers")
         let overview = WindowConfigToggle(
             title: "Show overview",
             isOn: options.showOverview,
             onChange: { [weak self] value in self?.options.setShowOverview(value) }
-        )
+        ).checkboxAccessibilityID("document.options.overview")
         let invisibles = WindowConfigToggle(
             title: "Show invisibles",
             isOn: options.showInvisibles,
             onChange: { [weak self] value in self?.options.setShowInvisibles(value) }
-        )
+        ).checkboxAccessibilityID("document.options.invisibles")
 
         let reset = NSButton(title: "Reset to Defaults", target: self, action: #selector(resetOptions))
         reset.bezelStyle = .rounded
@@ -171,7 +204,26 @@ extension DocumentEditorViewController: PaneOptionsProviding {
         reset.accessibilityID("document.options.reset")
         reset.setAccessibilityLabel("Reset Editor Options to Defaults")
 
+        lineNumbersRow = lineNumbers
+        overviewRow = overview
+        invisiblesRow = invisibles
+        resetRow = reset
+
         return [lineNumbers, overview, invisibles, reset]
+    }
+
+    /// Puts the resolved values back into an open popover's rows.
+    ///
+    /// Without this the popover was a photograph: `Reset to Defaults` cleared
+    /// the override, the three checkboxes went on showing the values it had
+    /// cleared, and its own button stayed enabled — so the pane and the popover
+    /// disagreed until it was closed and reopened. The app-wide setting moving
+    /// while a popover is open is the same problem arriving from the other side.
+    private func refreshOptionRows() {
+        lineNumbersRow?.isOn = options.showLineNumbers
+        overviewRow?.isOn = options.showOverview
+        invisiblesRow?.isOn = options.showInvisibles
+        resetRow?.isEnabled = options.isOverridden
     }
 
     @objc private func resetOptions() {

@@ -44,6 +44,19 @@ public struct ComposableTabsViewContext {
     /// `nil` for every pane a window lays out directly.
     public let ownerNodeID: UUID?
 
+    /// The root of the layout tree this pane sits in — the tab's own root split.
+    ///
+    /// Unique per tab, and stable for that tab's life: a window mints each tab's
+    /// arrangement through `LayoutNode.inFreshIDs()`, so no two tabs of one
+    /// project share it. Content that has to find *another pane of the same tab*
+    /// — a file tree and the editor it opens files into — pairs on this rather
+    /// than on `project`, which every tab of the window holds the same instance
+    /// of.
+    ///
+    /// Falls back to `nodeID` when the pane has no tree above it to ask, which
+    /// makes a lone pane pair with nothing instead of with the wrong thing.
+    public let treeID: UUID
+
     /// The store this pane's content should remember things in.
     ///
     /// Content asks for this rather than building a `ProjectPaneStateStore`
@@ -201,7 +214,8 @@ public final class ComposableTabsViewRegistry {
         project: ProjectWorkspace,
         workingDirectory: URL,
         paneNumber: Int,
-        ownerNodeID: UUID? = nil
+        ownerNodeID: UUID? = nil,
+        treeID: UUID? = nil
     ) -> NSViewController {
         guard let entry = entries[viewID] else {
             Self.logger.error(
@@ -215,7 +229,11 @@ public final class ComposableTabsViewRegistry {
             project: project,
             workingDirectory: workingDirectory,
             paneNumber: paneNumber,
-            ownerNodeID: ownerNodeID
+            ownerNodeID: ownerNodeID,
+            // A pane with no tree above it is its own tree, so the identity
+            // degrades to "pairs with nothing" rather than to a shared default
+            // every such pane would collide on.
+            treeID: treeID ?? nodeID
         ))
     }
 }
