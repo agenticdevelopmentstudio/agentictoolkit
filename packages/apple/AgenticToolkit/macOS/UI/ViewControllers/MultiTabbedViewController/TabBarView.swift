@@ -429,11 +429,20 @@ private final class TabButton: NSView {
     let id: UUID
 
     var title: String {
-        didSet { titleLabel.stringValue = title }
+        didSet {
+            titleLabel.stringValue = title
+            setAccessibilityTitle(title)
+        }
     }
 
     var isHighlighted: Bool = false {
-        didSet { updateAppearance() }
+        didSet {
+            updateAppearance()
+            // The selected tab is the one fact about a tab bar that cannot be
+            // read off a title, and it is how a driven check knows its press
+            // landed rather than merely returned.
+            setAccessibilityValue(isHighlighted)
+        }
     }
 
     var onSelect: ((UUID) -> Void)?
@@ -459,6 +468,22 @@ private final class TabButton: NSView {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
+
+        // A tab is a button, and not only for a screen reader: selecting one is
+        // the gesture that has to be driven to see whether anything moves that
+        // should not. Only the close button was addressable before, so the tree
+        // offered a way to destroy a tab and no way to choose one.
+        //
+        // Becoming an element means AppKit stops hoisting this view's subviews
+        // into the tree in its place, so the close button is republished as this
+        // element's one child — see `accessibilityChildren()` below.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityTitle(title)
+        // `isHighlighted`'s didSet cannot fire for its own initial value, so an
+        // unselected tab would report no value rather than `false`.
+        setAccessibilityValue(isHighlighted)
+        accessibilityID("tab-bar.select.\(id.uuidString)")
 
         closeButton.bezelStyle = .inline
         closeButton.isBordered = false
@@ -508,6 +533,20 @@ private final class TabButton: NSView {
             return
         }
         onSelect?(id)
+    }
+
+    /// `AXPress` selects the tab, the same call `mouseDown` makes — so a driven
+    /// press and a click are the same event as far as anything downstream knows.
+    override func accessibilityPerformPress() -> Bool {
+        onSelect?(id)
+        return true
+    }
+
+    /// The close button, which would otherwise vanish from the tree the moment
+    /// this view became an element of its own. `tab-bar.close.<id>` is an
+    /// address other code already uses; becoming addressable must not cost it.
+    override func accessibilityChildren() -> [Any]? {
+        [closeButton]
     }
 
     @objc private func closeAction(_ sender: NSButton) {

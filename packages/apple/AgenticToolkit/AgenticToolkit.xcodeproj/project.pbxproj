@@ -311,6 +311,7 @@
 		3CC93775A0519CD6A75E67E2 /* KeychainSecureSettingsStorageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F852968686967ACD65E1B5 /* KeychainSecureSettingsStorageProvider.swift */; };
 		3D29A9146A804ADED4BD3E3E /* SnippetStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEDC7BF08073469743F6E024 /* SnippetStoreTests.swift */; };
 		3D38B1E9199B53A685D7BECA /* TextEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426B8225A1D8E3C1C86F547B /* TextEditView.swift */; };
+		3D41FB03541654DA37FD5002 /* TabBarAccessibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 367A41F2C28066DD3996A753 /* TabBarAccessibilityTests.swift */; };
 		3D5B00395BC8BD7111699DA9 /* MarkdownNoteStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4368290C759EB450171D51 /* MarkdownNoteStorageTests.swift */; };
 		3D6D242273D6BEDD8B16AE6B /* ThemeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00B9D963DAE74394A2EFB02D /* ThemeEnvironment.swift */; };
 		3D888ED3B2394DB186243C7F /* MarkdownTaxonomyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6CE4270FD855B12EA44D5C /* MarkdownTaxonomyTests.swift */; };
@@ -2215,6 +2216,7 @@
 		35AF907BFE7399ADC30F5975 /* EditorOptionsOverride.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorOptionsOverride.swift; sourceTree = "<group>"; };
 		35F6E8E07AAF01ED95F11BDC /* AppStorageLocationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStorageLocationTests.swift; sourceTree = "<group>"; };
 		36716DA518F69F5E1CD6D80C /* ViewsContributionPointTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsContributionPointTests.swift; sourceTree = "<group>"; };
+		367A41F2C28066DD3996A753 /* TabBarAccessibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarAccessibilityTests.swift; sourceTree = "<group>"; };
 		36891551371F0B380FD52A1D /* ThemedTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemedTerminalView.swift; sourceTree = "<group>"; };
 		368B098E9316C0BC6A1C425B /* AIChatViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatViewModelTests.swift; sourceTree = "<group>"; };
 		36B79F54E44FA17A32F10648 /* NotesListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesListViewController.swift; sourceTree = "<group>"; };
@@ -4022,6 +4024,7 @@
 			children = (
 				F06A26884C3D24D8045E627D /* MultiTabbedActiveTabTests.swift */,
 				E3049C1C30EAC6D3BEFCBFF9 /* MultiTabbedHostedItemTests.swift */,
+				367A41F2C28066DD3996A753 /* TabBarAccessibilityTests.swift */,
 				467191B455A10940C4090212 /* TabBarStartInsetTests.swift */,
 				2863B495031BCB53966A224C /* TabCardStackTests.swift */,
 				944BB6AD2BBDC051ACB3D867 /* TabPaneViewControllerTests.swift */,
@@ -7784,6 +7787,7 @@
 				14BC4E01EF0E54BD7BC654B0 /* SystemWindowContextManagerTests.swift in Sources */,
 				F0619763C8A2EC2168010B87 /* SystemWindowMatcherTests.swift in Sources */,
 				6CB386464D1A769B4DC084E5 /* SystemWindowShortcutNamesTests.swift in Sources */,
+				3D41FB03541654DA37FD5002 /* TabBarAccessibilityTests.swift in Sources */,
 				4E535AB7A7F5E3AD74367036 /* TabBarStartInsetTests.swift in Sources */,
 				F7B88FFA10A2AA015336A050 /* TabCardStackTests.swift in Sources */,
 				89BD930B805681630C39038F /* TabPaneViewControllerTests.swift in Sources */,
