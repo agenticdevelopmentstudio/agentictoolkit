@@ -710,13 +710,19 @@ struct MainThreadWindowQuickPickTests {
     /// Three calls: no argument 1, an explicit `undefined`, and an explicit
     /// `null`. Kills a mutation that tests only `arguments.count` (the
     /// explicit `undefined` would then take the object path and reject) and a
-    /// mutation that drops `!arguments[1].isNull` from the guard at
-    /// `MainThreadWindow.swift:1076`: with that check gone, `null` reaches
-    /// `arguments[1].isObject` at `:1077`, which is `false` for `null` —
-    /// `JSValueIsObject` does not follow `typeof null === 'object'` — so the
-    /// third call would reject instead of building its request, and this
-    /// test's `ok == true` assertion catches that. Every request arrives with
-    /// the documented defaults.
+    /// mutation that drops `!arguments[1].isNull` from
+    /// `handleShowQuickPick`'s options guard — `if arguments.count > 1,
+    /// !arguments[1].isUndefined, !arguments[1].isNull` in
+    /// `MainThreadWindow.swift`: with that check gone, `null` reaches the
+    /// `guard arguments[1].isObject` on the line below it, which is `false`
+    /// for `null` — `JSValueIsObject` does not follow
+    /// `typeof null === 'object'` — so the third call would reject instead of
+    /// building its request, and this test's `ok == true` assertion catches
+    /// that. Every request arrives with the documented defaults.
+    ///
+    /// Quoted rather than cited by line: the pair of numbers this doc first
+    /// carried was measured before the same commit shortened a comment above
+    /// the guard, and was stale in the commit that introduced it.
     @Test
     func absentUndefinedAndNullOptionsAllMeanEveryDefault() async throws {
         let directory = try makeTempDirectory()
