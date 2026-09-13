@@ -37,6 +37,10 @@ export function useMasterDetailLevel<TItem, TInput>({
   busy,
   onPrefetch,
   onNew,
+  showNew = true,
+  checkable,
+  checkedIds,
+  onToggleChecked,
   itemNoun,
   overviewHelp,
 }: {
@@ -70,6 +74,23 @@ export function useMasterDetailLevel<TItem, TInput>({
    *  create (`form.actions.onCreate`). When set, the `+` never tints gold (there is no in-pane
    *  create-in-progress). Panes that create inline omit it. */
   onNew?: () => void;
+  /** Show the header "+" at all. `false` when the SURFACE owns creation — a pane that publishes a
+   *  button bar of its own (integrations' Add/Remove/Select/…) would otherwise offer two creators
+   *  in the same field of view, one of them unlabelled. It suppresses only the affordance:
+   *  `form.actions.onCreate` is untouched and is what the surface's own button calls, so the inline
+   *  create path is identical either way and nothing about the editor has to know which drove it. */
+  showNew?: boolean;
+  /** Draw a tick box on every row. The SURFACE owns this: the rail knows how to draw a tick and
+   *  nothing else, and what a set of ticked rows is FOR — remove these four, test these four,
+   *  export these four — is a question only the pane publishing the button bar can answer. */
+  checkable?: boolean;
+  /** Which rows are ticked. Held by the surface (`useBatchSelect`), read by the rail.
+   *
+   *  A TICK IS NOT A SELECTION. `selectedId` is still `form.selectedId` while this is non-empty,
+   *  so ticking four rows does not open four editors and does not close the one that is open —
+   *  clicking a row still selects it, and the tick box is a separate hit target on the same row. */
+  checkedIds?: ReadonlySet<string>;
+  onToggleChecked?: (id: string) => void;
   /** Singular noun for one row, for the frontier's select nudge ("Select a persona …").
    *  Defaults to the noun inside a "New …" `newLabel` ("New Persona" → "persona"). */
   itemNoun?: string;
@@ -106,11 +127,16 @@ export function useMasterDetailLevel<TItem, TInput>({
     emptyLabel: emptyLabel ?? (items === null ? "Loading…" : "Nothing here yet."),
     busy,
     onPrefetch,
+    checkable,
+    checkedIds,
+    onToggleChecked,
     // The New affordance is a right-justified `+`. Default: inline create (gold while creating). An
     // `onNew` override opens a popup instead — there is no in-pane create, so it never tints gold.
-    onNew: onNew ?? form.actions.onCreate,
-    newLabel: newButtonLabel,
-    newActive: onNew ? false : form.creating,
+    // `showNew: false` omits the three together: a level with a label but no handler would draw a
+    // dead `+`, and one with a handler but no label draws a live one with nothing to say.
+    onNew: showNew ? (onNew ?? form.actions.onCreate) : undefined,
+    newLabel: showNew ? newButtonLabel : undefined,
+    newActive: showNew && !onNew ? form.creating : undefined,
     // While the inline editor is open the pane body IS the detail. CREATE is the
     // critical case: nothing is selected yet, so without this the automatic
     // frontier detail (the select nudge) covers the open form.

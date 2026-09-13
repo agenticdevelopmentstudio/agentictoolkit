@@ -121,6 +121,13 @@ function plainFields(o: object): string {
   const plain: Record<string, string | number | boolean> = {};
   for (const [k, v] of Object.entries(o)) {
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") plain[k] = v;
+    // A Set IS a plain value — it is a bag of scalars, allocated once per change rather than once
+    // per render, so keying on its CONTENTS costs nothing and is nothing like keying on a node.
+    // `checkedIds` is the one in use and it is why this arm exists: a tick changed the set and no
+    // plain field beside it moved, so the level stayed registered as it was — the rail drew the
+    // row unticked, and, far worse, kept the previous `onToggleChecked`, whose closure held the
+    // set as it was BEFORE the first tick. Every tick after the first started from empty.
+    else if (v instanceof Set) plain[k] = Array.from(v as Set<unknown>).map(String).sort().join(",");
   }
   return JSON.stringify(plain);
 }

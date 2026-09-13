@@ -32,8 +32,8 @@ import {
  * leaf editor's unsaved-work guard flows into the one HTD's exit gate (so Back / breadcrumb-up /
  * re-click prompts Discard/Stay instead of silently discarding). Mirrors the hub's
  * WorkspaceChromeProvider semantics (local registry + composite guard + depth-merged stack + the
- * breadcrumb bar), trimmed to the standalone case: no editor toolbar slot, and no shell
- * workspace/feature levels above the feature's own. It owns the rails and the exit gate only — the
+ * breadcrumb bar), trimmed to the standalone case: no shell workspace/feature levels above the
+ * feature's own. It owns the rails and the exit gate only — the
  * page's own controls (search, filters, its primary action) go through the HOME bar instead
  * (`HomeBarPortal`/`HomeBarHost`, `./home-bar`), hosted above this component by `SiteHomeShell`
  * on a feature site, or by the hub's `WorkspaceShellInner` inside the hub shell.
@@ -141,9 +141,17 @@ export function StandaloneRailHost({
   const { reportMissing, missingAlert } = useHostMissingAlert(popStack, guards.size > 0);
   const { setDetailTitle, detailTitle } = useHostDetailTitle();
 
-  // `toolbarSlot` stays null: an editor's action bar keeps rendering inside its own pane here, as
-  // it always has. The page-level strip is the home bar, which this host does not own — see the
-  // component doc above.
+  // The editor toolbar slot: a real DOM node this host mounts in the HTD's top strip, so a pane's
+  // action bar spans the full width above the rails instead of sitting inside its own detail. It
+  // is STATE, not a ref — a ref's `.current` lands during commit without re-rendering, so the
+  // context would publish `null` on the mount that matters and the pane's `ToolbarPortal` would
+  // fall back to rendering inline forever. Panes that portal nothing are unaffected: the strip
+  // collapses while the slot is empty (see `data-adh-toolbar-slot`).
+  //
+  // This is still NOT the home bar (`HomeBarPortal`/`HomeBarHost`, `./home-bar`), which belongs to
+  // the page and can be on screen at the same time — see `RailHostRegistry.toolbarSlot`.
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
+
   const host = useMemo<RailHostRegistry>(
     () => ({
       registerLevels,
@@ -153,7 +161,7 @@ export function StandaloneRailHost({
       reportMissing,
       reportBusy,
       setDetailTitle,
-      toolbarSlot: null,
+      toolbarSlot,
     }),
     [
       registerLevels,
@@ -163,6 +171,7 @@ export function StandaloneRailHost({
       reportMissing,
       reportBusy,
       setDetailTitle,
+      toolbarSlot,
     ],
   );
 
@@ -195,6 +204,13 @@ export function StandaloneRailHost({
         rootLabel={mergedLevels[0]?.title || undefined}
         detailTitle={detailTitle}
         exitGuard={exitGuard}
+        toolbar={
+          <div
+            data-adh-toolbar-slot=""
+            ref={setToolbarSlot}
+            className="flex w-full min-w-0 items-center gap-2"
+          />
+        }
       >
         {children}
       </HierarchicalDetailView>
