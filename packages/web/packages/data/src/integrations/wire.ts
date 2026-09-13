@@ -38,6 +38,18 @@ export interface ProviderCatalogEntryRow {
     required: boolean;
     placeholder?: string;
   }[];
+  /**
+   * A saved config for this provider can be VERIFIED — the Test button means something.
+   *
+   * Derived server-side from the same condition the test route dispatches on, and read here
+   * rather than re-derived, which is the whole point of it being on the wire: the console used to
+   * decide this itself from `authMethod === 'github_app'`, which is half the real condition and
+   * the half that left Vercel — testable all along — without a button.
+   *
+   * Optional only for the window where a client is talking to a backend that predates the field;
+   * treat a missing value as "no Test button", which is what those clients already did.
+   */
+  testable?: boolean;
 }
 
 /**
@@ -310,4 +322,75 @@ export interface SyncSettingsBodyType {
 export interface SyncSettingsResultRow {
   ok: boolean;
   syncSettings: Record<string, unknown>;
+}
+
+/**
+ * What a credential test came back with (POST …/provider-configs/{configId}/test, and
+ * POST /providers/{providerId}/test-credentials).
+ *
+ * `ok: false` IS AN ANSWER, NOT AN ERROR. A provider that refuses a key answers 200 carrying
+ * its own words, because the client's real use for this is "Test selected" over several
+ * integrations at once: N results have to render uniformly, and one bad key must not turn the
+ * other three into thrown failures. A thrown AuthHttpError from these calls means the REQUEST
+ * was wrong — an unknown provider, a field the provider does not declare, a provider with no
+ * way to be tested at all.
+ */
+export interface IntegrationTestResultRow {
+  /** Whether the provider accepted the credentials. */
+  ok: boolean;
+  /** One line, ready to show — the provider's own refusal when `ok` is false. */
+  summary: string;
+  /** Supporting detail: the accounts reached, the stated non-secret fields, partial successes. */
+  notes: string[];
+  /**
+   * GitHub App, saved config only. Testing a GitHub App IS adopting its installations — the
+   * only proof an app id and private key are real is to mint a JWT and enumerate what the app
+   * can see, and that enumeration is what creates the connections and warms the repository
+   * cache. So this field is the connect that just happened, reported: a caller holding a
+   * connection list should refresh it whenever this is present.
+   */
+  adopted?: AdoptInstallationsResultRow;
+}
+
+/**
+ * Body for POST /integrations/providers/{providerId}/test-credentials — a DRAFT credential,
+ * tested before it is saved. Writes nothing.
+ */
+export interface TestCredentialsBodyType {
+  /** The ecosystem the draft is being typed into (the caller must manage it). */
+  ecosystemId: string;
+  /** OAuth client id, or a GitHub App id. */
+  clientId?: string;
+  /** The secret being tried — a client secret, private key, or API token. */
+  clientSecret?: string;
+  /** The provider's declared config fields, as on create/update. */
+  fields?: Record<string, string>;
+  /**
+   * The saved config being edited, whose stored secret is used when `clientSecret` is blank.
+   *
+   * SECRETS ARE WRITE-ONLY, so an edit dialog's secret box is empty on screen even though a
+   * credential is stored. Without this the probe would present nothing and report a failure
+   * that says nothing about the integration being edited.
+   */
+  providerConfigId?: string;
+}
+
+/** Body for POST …/provider-configs/{configId}/transfer. */
+export interface TransferProviderConfigBodyType {
+  /** Destination ecosystem — a uuid, an rdid or a slug, like every other id here. */
+  targetEcosystemId: string;
+}
+
+/** What a transfer moved. */
+export interface TransferProviderConfigResultRow {
+  /** The config as it now stands — new ecosystem, and a new `integration` rdid. */
+  config: MaskedProviderConfigRow;
+  /**
+   * LIVE connections now in the destination — not how many rows moved. A disconnected
+   * connection travels with the config but is not a working account, so counting it would
+   * overstate what the operator now has.
+   */
+  connections: number;
+  /** Cached repository lists that followed those connections. */
+  repositoryCaches: number;
 }

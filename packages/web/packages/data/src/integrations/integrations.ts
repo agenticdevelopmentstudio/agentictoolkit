@@ -26,6 +26,7 @@ import type {
   ConnectRequestBody,
   CreateProviderConfigBody,
   DeliverabilityWebhookRow,
+  IntegrationTestResultRow,
   LinkTokenBodyType,
   MaskedProviderConfigRow,
   ProviderCatalogEntryRow,
@@ -35,6 +36,9 @@ import type {
   SafeConnectionRow,
   SyncSettingsBodyType,
   SyncSettingsResultRow,
+  TestCredentialsBodyType,
+  TransferProviderConfigBodyType,
+  TransferProviderConfigResultRow,
 } from "./wire";
 
 /** A provider catalog entry (from GET /integrations/providers). */
@@ -70,6 +74,18 @@ export type ConnectRequest = ConnectRequestBody;
 export type AuthUrlResult = AuthUrlResultRow;
 export type AdoptInstallationsBody = AdoptInstallationsBodyType;
 export type AdoptInstallationsResult = AdoptInstallationsResultRow;
+
+/** What a credential test came back with. `ok: false` is an answer, not a thrown error. */
+export type IntegrationTestResult = IntegrationTestResultRow;
+
+/** Body for testing a draft credential that has not been saved yet. */
+export type TestCredentialsBody = TestCredentialsBodyType;
+
+/** Body for moving one integration to another ecosystem. */
+export type TransferProviderConfigBody = TransferProviderConfigBodyType;
+
+/** `{ config, connections, repositoryCaches }` — what a transfer moved. */
+export type TransferProviderConfigResult = TransferProviderConfigResultRow;
 
 /** Body for register-instance (self-hosted OAuth, e.g. Mastodon). */
 export type RegisterInstanceBody = RegisterInstanceBodyType;
@@ -310,6 +326,65 @@ export const integrationsApi = {
   /** Delete a provider config addressed by its id/rdid. */
   async deleteProviderConfigById(ecosystemId: string, configId: string): Promise<void> {
     await authedRequest(configByIdPath(ecosystemId, configId), { method: "DELETE" });
+  },
+
+  /**
+   * Ask the provider whether a SAVED integration still works.
+   *
+   * FOR A GITHUB APP THIS ALSO CONNECTS. The only proof an app id and private key are real is
+   * to mint a JWT and enumerate the installations the app can see, and that enumeration is
+   * exactly what creates the connection rows and warms the repository cache — so pressing Test
+   * is also what makes an org appear in the repository picker. The result says so on
+   * `adopted`, and a caller holding a connection list must refresh it when that is present.
+   *
+   * A refused credential RESOLVES with `ok: false`; only a malformed request throws.
+   */
+  async testProviderConfig(
+    ecosystemId: string,
+    configId: string,
+  ): Promise<IntegrationTestResult> {
+    return authedJson<IntegrationTestResult>(
+      `${configByIdPath(ecosystemId, configId)}/test`,
+      { method: "POST" },
+    );
+  },
+
+  /**
+   * Ask the provider whether a credential that has NOT been saved works — the Test button in
+   * an Add-integration dialog, where there is no row to address yet. Writes nothing: no
+   * config, no connection, no cache, which is the whole difference from
+   * {@link testProviderConfig}.
+   *
+   * Pass `providerConfigId` with a blank `clientSecret` to test a stored secret from an edit
+   * dialog; see {@link TestCredentialsBody.providerConfigId} for why that is needed.
+   */
+  async testProviderCredentials(
+    providerId: string,
+    body: TestCredentialsBody,
+  ): Promise<IntegrationTestResult> {
+    return authedJson<IntegrationTestResult>(
+      `${BASE}/providers/${enc(providerId)}/test-credentials`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  /**
+   * Move one integration to another ecosystem — the operator's own workspace to an
+   * organization they also own, or the other way.
+   *
+   * The credential, the connections it minted and their cached repository lists all travel
+   * together, and the integration's `integration` rdid is RE-MINTED at the destination, so the
+   * address it answered to before stops resolving. The caller must manage BOTH ends.
+   */
+  async transferProviderConfig(
+    ecosystemId: string,
+    configId: string,
+    body: TransferProviderConfigBody,
+  ): Promise<TransferProviderConfigResult> {
+    return authedJson<TransferProviderConfigResult>(
+      `${configByIdPath(ecosystemId, configId)}/transfer`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
   },
 
   /**

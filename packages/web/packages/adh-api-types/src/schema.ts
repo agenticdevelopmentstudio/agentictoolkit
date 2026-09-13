@@ -5526,6 +5526,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/integrations/providers/{providerId}/test-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                providerId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test credentials that have NOT been saved
+         * @description The Test button in an Add-integration dialog, where there is no row to address yet. WRITES NOTHING — no config, no connection, no cache — which is the whole difference between this and POST …/provider-configs/{configId}/test, where testing a GitHub App deliberately adopts as it verifies.
+         *
+         *     Send the draft in whichever shape the provider takes: `clientId`/`clientSecret` for an OAuth or GitHub-App provider, `fields` for one with declared config fields. A field the provider does not declare is a 400, exactly as it would be on save.
+         *
+         *     SECRETS ARE WRITE-ONLY, so the secret box of an EDIT dialog is blank on screen even though a credential is stored. Pass `providerConfigId` and a blank secret to test the stored one: without it the probe would present an empty secret and report a failure that says nothing about the integration being edited.
+         *
+         *     A refused credential is 200 with `ok: false`. See IntegrationTestResult.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    providerId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description The ecosystem the draft is being typed into (the caller must manage it) */
+                        ecosystemId: string;
+                        /** @description OAuth client id, or a GitHub App id */
+                        clientId?: string;
+                        /** @description The secret being tried — a client secret, private key, or API token */
+                        clientSecret?: string;
+                        /** @description The provider's declared config fields, as on create/update */
+                        fields?: {
+                            [key: string]: string;
+                        };
+                        /** @description The saved config being edited. Its stored secret is used when the submitted one is blank. See above for why this cannot simply be omitted. */
+                        providerConfigId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description What the provider said */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IntegrationTestResult"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/integrations/connect": {
         parameters: {
             query?: never;
@@ -6446,6 +6548,212 @@ export interface paths {
                 };
                 /** @description Problem Details (RFC 9457) */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/ecosystems/{ecosystemId}/provider-configs/{configId}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ecosystemId: string;
+                configId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test a saved integration against its provider
+         * @description One answer, for every provider that can be asked. No body.
+         *
+         *     FOR A GITHUB APP THE TEST IS THE ADOPT. The only way to prove an app id and private key are real is to mint a JWT and enumerate the installations the app can see, and that enumeration is exactly what creates the connection rows and warms the repository cache. So pressing Test on a saved GitHub integration is also what makes its orgs appear in the repository picker — deliberate, and reported back under `adopted`.
+         *
+         *     Every other provider is probed READ-ONLY against the validation endpoint its template declares; a provider whose template declares none is a 400 naming that fact rather than a green tick it did not earn.
+         *
+         *     A refused credential is 200 with `ok: false`. 404 when the config is absent or not owned by the ecosystem.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    ecosystemId: string;
+                    configId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description What the provider said */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IntegrationTestResult"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/ecosystems/{ecosystemId}/provider-configs/{configId}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ecosystemId: string;
+                configId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move an integration to another ecosystem
+         * @description Moves the credential, the connections it minted, and their cached repository lists together, in one transaction — an operator taking their own integration from a personal workspace into an organization they also own, or the other way. Leaving the connections behind would hand the destination a credential it can see no accounts through.
+         *
+         *     THE CALLER MUST MANAGE BOTH ENDS: the source is authorized as on every other route here, and the destination is authorized before anything moves (404/403 from whichever end the caller does not manage). The generic ecosystem-move surface cannot do this — its CRUD policy excludes credential tables on purpose.
+         *
+         *     The `integration` rdid embeds the owning ecosystem, so it is re-minted at the destination and the old address stops resolving. 400 when the config is already in the destination; 404 when it is absent or not owned by the source; 409 when the destination already holds an integration of that name.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    ecosystemId: string;
+                    configId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Destination ecosystem — a uuid, an rdid or a slug, like any other here */
+                        targetEcosystemId: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description What moved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IntegrationTransferResult"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Problem Details (RFC 9457) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -70263,6 +70571,8 @@ export interface components {
                 label: string;
                 url: string;
             }[];
+            /** @description Whether a saved config for this provider can be verified — a GitHub App, or a provider declaring a validation endpoint. DERIVED, not stored: it is the condition POST …/provider-configs/{configId}/test dispatches on, so a client can draw the Test button without keeping its own list of which providers have one. */
+            testable: boolean;
         };
         IntegrationGlobalConfig: {
             providerId: string;
@@ -70433,6 +70743,50 @@ export interface components {
             deduped: boolean;
             /** @description Failure message when status is error */
             error?: string;
+        };
+        IntegrationTestResult: {
+            /** @description Whether the provider accepted the credentials. false is an answer. */
+            ok: boolean;
+            /** @description One line, ready to show an operator — the provider's own refusal when ok is false. */
+            summary: string;
+            /** @description Supporting detail: the accounts reached, the stated non-secret fields the answer was about, anything that succeeded partially. */
+            notes: string[];
+            /** @description GitHub App, saved config only. Testing a GitHub App IS adopting its installations — the only proof an app id and private key are real is to mint a JWT and enumerate what the app can see, and that enumeration is what creates the connections and warms the repository cache. So this field is the connect that just happened, reported. */
+            adopted?: {
+                connected: {
+                    installationId: string;
+                    /** @description The account the app is installed on — the org whose repositories it reaches. */
+                    accountLogin: string;
+                    /** @description `Organization` or `User`. */
+                    targetType: string;
+                    /** @description The connection holding it — set when this call made one, AND when a previous call already had. Adoption is idempotent, so a second call over the same installations reports them connected rather than connecting them again. */
+                    connectionId?: string;
+                    /** @description Why it was not connected. Absent on success. */
+                    skipped?: string;
+                    /** @description The connection stands, and the prefetch that rides along behind it — caching what this installation was granted — did not finish. NOT a skip: everything that needs a connection works, and only the repository picker opening instantly does not. It is reported because this call is what the Test button runs, and a picker that will open empty should say so now rather than at the moment somebody needs it. */
+                    warning?: string;
+                }[];
+                skipped: {
+                    installationId: string;
+                    /** @description The account the app is installed on — the org whose repositories it reaches. */
+                    accountLogin: string;
+                    /** @description `Organization` or `User`. */
+                    targetType: string;
+                    /** @description The connection holding it — set when this call made one, AND when a previous call already had. Adoption is idempotent, so a second call over the same installations reports them connected rather than connecting them again. */
+                    connectionId?: string;
+                    /** @description Why it was not connected. Absent on success. */
+                    skipped?: string;
+                    /** @description The connection stands, and the prefetch that rides along behind it — caching what this installation was granted — did not finish. NOT a skip: everything that needs a connection works, and only the repository picker opening instantly does not. It is reported because this call is what the Test button runs, and a picker that will open empty should say so now rather than at the moment somebody needs it. */
+                    warning?: string;
+                }[];
+            };
+        };
+        IntegrationTransferResult: {
+            config: components["schemas"]["IntegrationProviderConfig"];
+            /** @description LIVE connections now in the destination — not how many rows moved. A soft-deleted connection travels with the config (its ecosystem column is what RLS reads) but is not a working account, so counting it would overstate what the operator now has. */
+            connections: number;
+            /** @description Cached repository lists that followed those connections. */
+            repositoryCaches: number;
         };
         PublicInvitationRequest: {
             name: string;
