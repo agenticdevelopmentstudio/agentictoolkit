@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import AgenticToolkitCore
 @testable import AgenticToolkitLanguage
 @testable import AgenticToolkitMacOS
 
@@ -85,6 +86,58 @@ final class DocumentEditorViewControllerTests: XCTestCase {
         let rows = makeController().makePaneOptionRows()
         XCTAssertEqual(rows.filter { $0 is WindowConfigToggle }.count, 3)
         XCTAssertEqual(rows.filter { ($0 as? NSButton)?.title == "Reset to Defaults" }.count, 1)
+    }
+
+    /// Two editors side by side, each with its own gear: flipping one pane's
+    /// "Show line numbers" leaves the other following the app-wide setting.
+    /// The gear is a *pane* control — that is the whole reason an editor holds
+    /// an `EditorOptionsOverride` of its own rather than writing the global.
+    ///
+    /// Driven through the row the gear actually shows, by clicking its
+    /// checkbox, because the claim is about the control and not about the model
+    /// underneath it. `performClick` flips the state and sends the action, which
+    /// is exactly what a mouse does.
+    func testOnePanesGearDoesNotTouchAnotherPanes() throws {
+        let first = makeController()
+        let second = makeController()
+        let global = UserSettings.editorShowLineNumbers.value
+
+        try click(lineNumbersRowOf: first)
+
+        XCTAssertEqual(first.options.showLineNumbers, !global, "the pane that was asked changed")
+        XCTAssertTrue(first.options.isOverridden)
+        XCTAssertEqual(second.options.showLineNumbers, global, "and only that pane")
+        XCTAssertFalse(second.options.isOverridden)
+    }
+
+    /// Reset is the same control with the same reach: it hands *this* pane back
+    /// to the app-wide setting and says nothing about any other pane — nor
+    /// about the global itself, which a pane must never write.
+    func testOnePanesResetDoesNotTouchAnotherPanesOrTheGlobal() throws {
+        let first = makeController()
+        let second = makeController()
+        let global = UserSettings.editorShowLineNumbers.value
+        try click(lineNumbersRowOf: first)
+        try click(lineNumbersRowOf: second)
+        XCTAssertTrue(second.options.isOverridden)
+
+        let reset = try XCTUnwrap(first.makePaneOptionRows().compactMap { $0 as? NSButton }.first)
+        reset.performClick(nil)
+
+        XCTAssertFalse(first.options.isOverridden, "the pane that was asked follows the app again")
+        XCTAssertTrue(second.options.isOverridden, "and only that pane")
+        XCTAssertEqual(second.options.showLineNumbers, !global)
+        XCTAssertEqual(UserSettings.editorShowLineNumbers.value, global,
+                       "a pane control never writes the app-wide setting")
+    }
+
+    /// The first toggle the gear shows is "Show line numbers"; clicking its
+    /// checkbox is what a mouse in that popover does.
+    private func click(lineNumbersRowOf controller: DocumentEditorViewController) throws {
+        let row = try XCTUnwrap(
+            controller.makePaneOptionRows().compactMap { $0 as? WindowConfigToggle }.first)
+        let checkbox = try XCTUnwrap(row.subviews.compactMap { $0 as? NSButton }.first)
+        checkbox.performClick(nil)
     }
 
     func testTheResetButtonIsDisabledUntilSomethingIsOverridden() throws {
