@@ -214,12 +214,17 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// A nested split also inherits `arranger` here: an arranger governs a
     /// whole tree, not one node, so a split that appeared after the root's was
     /// installed — or picked up a new one — has to pass it on the same way.
+    ///
+    /// A pane inherits `clampsToContainer` too, and not only a nested split: a
+    /// clamped tree gives up its items' width demands, and a pane's chrome is
+    /// the other thing in that tree that has any.
     private func stampOwnershipOnChildren() {
         for child in layoutChildren {
             if let pane = child as? ComposableTabsPaneViewController {
                 pane.host = self
                 pane.layoutOverride = layoutOverride
                 pane.stateOwnerNodeID = stateOwnerNodeID
+                pane.clampsToContainer = clampsToContainer
             }
             if let split = child as? ComposableTabsViewController {
                 split.layoutParent = self
@@ -331,7 +336,19 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// them. Here the panes divide the width the container has, however little
     /// that is, which is what `ProportionalArranger` already assumes.
     ///
-    /// Stamped down the subtree like the two above, and for the same reason.
+    /// Three demands make that up, and a tree has to give up all three or the
+    /// floor simply moves: each item's declared `minimumThickness`, each item's
+    /// width-holding constraint at its `holdingPriority` — optional, so it
+    /// never conflicts and nothing is ever logged, but `fittingSize` honours it
+    /// and AppKit's minimum divider position is the greater of the two — and
+    /// each pane's chrome, whose intrinsic widths reach here through the pane's
+    /// own required chain. Any one left standing is a floor the enclosing pane
+    /// never asked for, and a drag of that pane's divider that cannot shrink it
+    /// slides the whole nested split instead: the pane moves and a pane two
+    /// away resizes.
+    ///
+    /// Stamped down the subtree like the two above, and for the same reason —
+    /// onto panes as well as nested splits, since the chrome is theirs.
     public var clampsToContainer: Bool = false {
         didSet { stampOwnershipOnChildren() }
     }
@@ -1173,11 +1190,7 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         if let fraction = descriptor?.preferredThicknessFraction {
             item.preferredThicknessFraction = fraction
         }
-        // A pane that asked for a share of the window keeps the width it gets;
-        // a higher holding priority makes AppKit take a window resize out of
-        // its neighbours instead of spreading it around. A sidebar that grew
-        // with the window would be a third of a wide display.
-        item.holdingPriority = descriptor?.resolvedHoldingPriority ?? .defaultLow
+        item.holdingPriority = holdingPriority(of: viewController, registry: registry)
         return item
     }
 
@@ -1199,10 +1212,43 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
         item.maximumThickness = NSSplitViewItem.unspecifiedDimension
         item.minimumThickness = minimumThickness(
             of: item.viewController, registry: registry)
-        let descriptor = (item.viewController as? ComposableTabsPaneViewController)
-            .map { registry.descriptor(for: $0.viewID) }
-        item.holdingPriority = descriptor?.resolvedHoldingPriority ?? .defaultLow
+        item.holdingPriority = holdingPriority(of: item.viewController, registry: registry)
     }
+
+    /// How hard an item in *this* split holds the width it has.
+    ///
+    /// A pane that asked for a share of the window keeps the width it gets; a
+    /// higher holding priority makes AppKit take a window resize out of its
+    /// neighbours instead of spreading it around. A sidebar that grew with the
+    /// window would be a third of a wide display.
+    ///
+    /// A clamped tree's items hold nothing, and that is not the same statement
+    /// as their `unspecifiedDimension` minimum — it is the other half of it.
+    /// AppKit's minimum divider position is the greater of the item's declared
+    /// minimum and the hosted view's `fittingSize.width`, and `fittingSize`
+    /// honours each item's own width-holding constraint at exactly this
+    /// priority. Those constraints are optional, so they never conflict and
+    /// nothing is logged; the enclosing pane simply acquires a floor its
+    /// content never asked for — one that does not move as the pane grows,
+    /// which is what makes it a floor — and a drag of that pane's right divider
+    /// that cannot shrink it is satisfied by sliding the whole nested split
+    /// left instead. The pane moves and a pane two away resizes.
+    ///
+    /// The same wrapper shape as `minimumThickness(of:registry:)`, so the two
+    /// call sites that set this cannot disagree either (`dry`).
+    private func holdingPriority(
+        of viewController: NSViewController,
+        registry: ComposableTabsViewRegistry
+    ) -> NSLayoutConstraint.Priority {
+        guard !clampsToContainer else { return Self.clampedHoldingPriority }
+        let descriptor = (viewController as? ComposableTabsPaneViewController)
+            .map { registry.descriptor(for: $0.viewID) }
+        return descriptor?.resolvedHoldingPriority ?? .defaultLow
+    }
+
+    /// The lowest priority a layout constraint may carry. A clamped item's
+    /// width is the container's to decide, so it asks for none of its own.
+    static let clampedHoldingPriority = NSLayoutConstraint.Priority(rawValue: 1)
 
     /// What an item in *this* split may be shrunk to.
     ///

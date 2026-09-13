@@ -99,6 +99,47 @@ final class PaneViewControllerTests: XCTestCase {
         XCTAssertEqual(pane.view.accessibilityIdentifier(), "pane")
     }
 
+    // MARK: - Clamped to the container
+
+    /// A pane whose split divides the width its container has passes that on to
+    /// its chrome. The title bar's intrinsic widths reach the enclosing split
+    /// through a required chain and land there as a floor — one per pane, so a
+    /// tab holding four editors widens the pane the tab lives in.
+    ///
+    /// The gear is the ordering hazard: `installGear()` runs in `viewDidLoad`,
+    /// after the flag was set, so a bar that only relaxed what it held at the
+    /// time would let the gear back in.
+    func testAClampedPanesChromeAsksForNoWidthOfItsOwn() {
+        let pane = TestPane(content: RichContent())
+        pane.clampsToContainer = true
+        pane.loadViewIfNeeded()
+
+        let yielding = NSLayoutConstraint.Priority(rawValue: 1)
+        XCTAssertEqual(
+            pane.titleBar.contentCompressionResistancePriority(for: .horizontal), yielding)
+        XCTAssertEqual(
+            pane.titleBar.controls.closeButton
+                .contentCompressionResistancePriority(for: .horizontal),
+            yielding,
+            "the dots are the demand a narrow pane cannot satisfy")
+        XCTAssertEqual(
+            pane.titleBar.gearView?.contentCompressionResistancePriority(for: .horizontal),
+            yielding,
+            "the gear is installed after the flag is set")
+    }
+
+    /// The default, and why it is the default: a window's own pane asks the
+    /// window for the width its chrome needs, because the window can grow.
+    func testAnUnclampedPanesChromeKeepsItsWidthDemands() {
+        let (pane, _) = loadedPane(content: RichContent())
+
+        XCTAssertFalse(pane.clampsToContainer)
+        XCTAssertGreaterThan(
+            pane.titleBar.controls.closeButton
+                .contentCompressionResistancePriority(for: .horizontal),
+            NSLayoutConstraint.Priority(rawValue: 1))
+    }
+
     // MARK: - Title
 
     func testTitleComesFromTheContentAndFollowsItsChanges() {

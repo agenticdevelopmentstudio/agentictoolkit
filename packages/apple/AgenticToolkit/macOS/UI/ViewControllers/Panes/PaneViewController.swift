@@ -33,6 +33,26 @@ open class PaneViewController: NSViewController {
 
     public let titleBar = PaneTitleBarView()
 
+    /// Whether this pane's width is its container's to decide rather than its
+    /// own — set by the split holding it, for a tree living inside one pane of
+    /// a bigger tree.
+    ///
+    /// All it means here is that the chrome stops asking for width. A title
+    /// bar's contents reach the enclosing split through a required chain, so
+    /// they land there as a floor under the *enclosing* pane — one per pane in
+    /// the tab, which is how opening a fourth editor widened a Document pane
+    /// the user had sized. The split gives up its own half of that through
+    /// `minimumThickness` and `holdingPriority`; this is the other half.
+    ///
+    /// One way, like the split's own flag: a pane does not stop being clamped,
+    /// and the bar cannot un-yield.
+    public var clampsToContainer = false {
+        didSet {
+            guard clampsToContainer else { return }
+            titleBar.yieldWidthToContainer()
+        }
+    }
+
     /// The content this pane wraps, held as a child so AppKit keeps it alive,
     /// routes appearance callbacks to it, and puts it in the responder chain.
     public private(set) var contentViewController: NSViewController?
