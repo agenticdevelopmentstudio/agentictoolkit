@@ -138,6 +138,84 @@ final class ComposableTabsPaneHostTests: XCTestCase {
                        "and the refusal is said out loud, or the button reads as dead")
     }
 
+    /// And the button is greyed as well as the click refused, so the user is
+    /// told before they press rather than after.
+    func testTheLastPaneInATabIsToldItCannotClose() throws {
+        let onlyID = UUID()
+        let root = try makeTree(.leaf(id: onlyID, contentType: alpha))
+
+        XCTAssertFalse(root.canClose(try leaf(onlyID, in: root)))
+    }
+
+    /// A container with somewhere else for the request to go says so, and the
+    /// last pane's close comes back to life — the Document pane, whose last
+    /// editor is specified to empty rather than vanish.
+    func testAFloorMakesTheLastPanesCloseLiveAgain() throws {
+        let onlyID = UUID()
+        let root = try makeTree(.leaf(id: onlyID, contentType: alpha))
+        root.onLastPaneCloseRequest = { _ in }
+
+        XCTAssertTrue(root.canClose(try leaf(onlyID, in: root)))
+    }
+
+    func testTheLastPanesCloseGoesToTheFloorRatherThanRemovingIt() throws {
+        let refusals = recordingRefusals()
+        let onlyID = UUID()
+        let root = try makeTree(.leaf(id: onlyID, contentType: alpha))
+        var handed: [UUID] = []
+        root.onLastPaneCloseRequest = { handed.append($0.nodeID) }
+
+        root.paneDidRequestClose(try leaf(onlyID, in: root))
+
+        XCTAssertEqual(handed, [onlyID], "the floor is asked, with the pane that asked")
+        XCTAssertEqual(root.allLeaves().map(\.nodeID), [onlyID], "and the pane stays")
+        XCTAssertEqual(refusals.count, 0, "a request that was answered is not a refusal")
+    }
+
+    /// The floor is for the *last* pane, not for every pane the spec vetoes. A
+    /// tree that still has two panes and refuses one of them anyway — a spec
+    /// minimum, say — is a real refusal, and handing it to the floor would
+    /// close a whole tab because one of its panes is pinned.
+    func testAFloorDoesNotSwallowARefusalThatIsNotTheLastPane() throws {
+        let refusals = recordingRefusals()
+        let registry = ComposableTabsViewRegistry()
+        registry.register(alpha, descriptor: .init(displayName: "Alpha", minimumThickness: 150)) { _ in
+            NSViewController()
+        }
+        registry.register(beta, descriptor: .init(displayName: "Beta", minimumThickness: 150)) { _ in
+            NSViewController()
+        }
+        ComposableTabsLayout.install(try ComposableTabsLayout(
+            registry: registry,
+            spec: .split(
+                axis: .horizontal,
+                children: [.pane(alpha), .pane(beta)],
+                // Alpha is required, so the spec vetoes closing it while the
+                // tab still holds two panes.
+                allows: [.init(alpha, min: 1, max: 1, preferredAxis: .horizontal),
+                         .unbounded(beta)]
+            )
+        ))
+        let root = ComposableTabsViewController.make(
+            from: .split(
+                orientation: .horizontal,
+                first: .leaf(id: leftID, contentType: alpha),
+                second: .leaf(id: rightID, contentType: beta)
+            ),
+            project: project, workingDirectory: project.directoryURL, isRoot: true)
+        root.loadViewIfNeeded()
+        for pane in root.allLeaves() { pane.loadViewIfNeeded() }
+        var handed = 0
+        root.onLastPaneCloseRequest = { _ in handed += 1 }
+
+        root.paneDidRequestClose(try leaf(leftID, in: root))
+
+        XCTAssertEqual(handed, 0, "two panes left: this is the spec refusing, not the floor")
+        XCTAssertEqual(refusals.count, 1)
+        XCTAssertFalse(root.canClose(try leaf(leftID, in: root)),
+                       "and the button stays grey, so it agrees with the click")
+    }
+
     // MARK: - Which edges are offered
 
     func testASideBySidePaneIsOfferedTheHorizontalEdges() throws {

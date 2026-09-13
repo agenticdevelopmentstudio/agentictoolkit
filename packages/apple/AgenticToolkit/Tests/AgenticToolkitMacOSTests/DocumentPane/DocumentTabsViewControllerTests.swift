@@ -219,6 +219,71 @@ final class DocumentTabsViewControllerTests: XCTestCase {
         XCTAssertEqual(controller.tabs(on: .top).count, 1)
     }
 
+    /// The spec: "all the tabs and panes are closable until there is only one
+    /// left if it's the last pane in the last tab, clicking the close box
+    /// removes the document from display but does not remove the tab". So the
+    /// close box on that pane is live — a grey one says "this pane is
+    /// protected", which is not what the spec promised.
+    func testTheLastEditorPanesCloseBoxStaysLive() throws {
+        let controller = try makeController()
+        controller.loadViewIfNeeded()
+        let pane = try XCTUnwrap(controller.panes(inTabAt: 0).first)
+
+        XCTAssertEqual(pane.host?.canClose(pane), true)
+    }
+
+    func testClosingTheLastEditorPaneEmptiesItAndKeepsTheTab() throws {
+        let controller = try makeController()
+        controller.loadViewIfNeeded()
+        controller.openInSelectedPane(URL(fileURLWithPath: "/tmp/example/Readme.md"))
+        let pane = try XCTUnwrap(controller.panes(inTabAt: 0).first)
+
+        pane.host?.paneDidRequestClose(pane)
+
+        XCTAssertEqual(controller.tabs(on: .top).count, 1)
+        XCTAssertEqual(controller.panes(inTabAt: 0).count, 1, "the pane stays")
+        XCTAssertNil(controller.focusedEditor?.fileURL, "the document goes")
+        XCTAssertEqual(controller.tabs(on: .top).first?.title, "Untitled")
+    }
+
+    /// The same close box on a tab that is not the last one closes the tab,
+    /// because a tab with no panes is not a state this container has.
+    func testClosingTheOnlyPaneOfASecondTabClosesThatTab() throws {
+        let controller = try makeController()
+        controller.loadViewIfNeeded()
+        controller.openInNewTab(URL(fileURLWithPath: "/tmp/example/Second.swift"))
+        let pane = try XCTUnwrap(controller.panes(inTabAt: 1).first)
+
+        pane.host?.paneDidRequestClose(pane)
+
+        XCTAssertEqual(controller.tabs(on: .top).count, 1)
+        XCTAssertEqual(
+            controller.editors(inTabAt: 0).first?.fileURL?.lastPathComponent, nil,
+            "the surviving tab is the untouched first one"
+        )
+    }
+
+    /// And the ordinary case is untouched: two panes, close one, the other
+    /// takes the space. Nothing routes to the floor while there is a sibling.
+    func testClosingOneOfTwoEditorPanesRemovesOnlyThatPane() throws {
+        let controller = try makeController()
+        controller.loadViewIfNeeded()
+        controller.openInSelectedPane(URL(fileURLWithPath: "/tmp/example/A.swift"))
+        controller.openToTheSide(URL(fileURLWithPath: "/tmp/example/B.swift"))
+        let panes = controller.panes(inTabAt: 0)
+        XCTAssertEqual(panes.count, 2)
+        let second = try XCTUnwrap(panes.last)
+
+        second.host?.paneDidRequestClose(second)
+
+        XCTAssertEqual(controller.tabs(on: .top).count, 1)
+        XCTAssertEqual(controller.editors(inTabAt: 0).count, 1)
+        XCTAssertEqual(
+            controller.editors(inTabAt: 0).first?.fileURL?.lastPathComponent, "A.swift",
+            "the one that was asked to close is the one that went"
+        )
+    }
+
     func testTabsAndDocumentsSurviveASaveRestoreCycle() throws {
         let project = ProjectWindowTestSupport.makeProject(label: "DocumentTabsViewControllerTests")
         let layout = try ProjectWindowTestSupport.makeDocumentLayout()

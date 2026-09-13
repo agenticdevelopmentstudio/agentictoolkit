@@ -48,9 +48,19 @@ extension ComposableTabsViewController: PaneHost {
         // have not been refreshed since the tree changed, or the first guard
         // below, which is a wiring fact no button can predict. Arrange mode's
         // `confirmAndRemove()` beeps at exactly this refusal too.
-        guard layoutChildren.contains(where: { $0.viewController === leaf }),
-              (rootSplit() ?? self).canRemoveLeaf(leaf) else {
+        let root = rootSplit() ?? self
+        guard layoutChildren.contains(where: { $0.viewController === leaf }) else {
             RefusalFeedback.announce()
+            return
+        }
+        if !root.canRemoveLeaf(leaf) {
+            // The floor, handed to whoever declared they have one. A container
+            // with no answer still beeps, which is what every other one wants.
+            guard let handler = root.onLastPaneCloseRequest, root.leafCount() == 1 else {
+                RefusalFeedback.announce()
+                return
+            }
+            handler(leaf)
             return
         }
         // The pane is about to stop existing; a zoom pointing at it would leave
@@ -69,7 +79,12 @@ extension ComposableTabsViewController: PaneHost {
     /// button back without anything else having to notice.
     public func canClose(_ pane: PaneViewController) -> Bool {
         guard let leaf = pane as? ComposableTabsPaneViewController else { return true }
-        return (rootSplit() ?? self).canRemoveLeaf(leaf)
+        let root = rootSplit() ?? self
+        if root.canRemoveLeaf(leaf) { return true }
+        // A refusal `paneDidRequestClose` will not actually make. The two have to
+        // agree — a grey button that would have worked is as much a lie as a live
+        // one that beeps — so both ask the same two questions in the same order.
+        return root.onLastPaneCloseRequest != nil && root.leafCount() == 1
     }
 
     // MARK: - Minimizing

@@ -166,7 +166,22 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
         // sweeps it and every editor comes back empty.
         root.stateOwnerNodeID = paneNodeID
         root.onLayoutDidChange = { [weak self] _ in self?.persistTabs() }
+        // The pane's own close box and the tab's close box are the same close
+        // box as far as the spec is concerned — "clicking the close box removes
+        // the document from display but does not remove the tab" — so they route
+        // to the same floor rather than to two implementations of it (`dry`).
+        root.onLastPaneCloseRequest = { [weak self, weak root] _ in
+            guard let self, let root, let tabID = self.tabID(of: root) else { return }
+            self.closeTab(tabID)
+        }
         return root
+    }
+
+    /// Which tab a root belongs to, by identity. `makeTabRoot` runs before the
+    /// `Tab` that will hold it exists, so the id cannot be captured at the point
+    /// the hook is installed.
+    private func tabID(of root: ComposableTabsViewController) -> UUID? {
+        splitsByTabID.first { $0.value === root }?.key
     }
 
     @discardableResult
@@ -272,6 +287,17 @@ public final class DocumentTabsViewController: MultiTabbedViewController {
         let all = tabs(on: .top)
         guard index >= 0, index < all.count, let root = splitsByTabID[all[index].id] else { return [] }
         return editors(in: root)
+    }
+
+    /// The chrome-bearing panes of a tab, in tree order.
+    ///
+    /// `editors(inTabAt:)` answers about the documents; this answers about the
+    /// things with close boxes on them, which is what a test of the close box
+    /// has to hold.
+    public func panes(inTabAt index: Int) -> [ComposableTabsPaneViewController] {
+        let all = tabs(on: .top)
+        guard index >= 0, index < all.count, let root = splitsByTabID[all[index].id] else { return [] }
+        return panes(in: root)
     }
 
     public func paneFractions(inTabAt index: Int) -> [CGFloat] {
@@ -394,7 +420,13 @@ extension DocumentTabsViewController: MultiTabbedViewControllerDelegate {
         didRequestCloseTab tabID: UUID,
         on edge: Edge
     ) {
-        guard tabs(on: edge).count > 1 else {
+        closeTab(tabID)
+    }
+
+    /// The floor itself, reached from the tab's close box and from the last
+    /// editor pane's — see `onLastPaneCloseRequest` in `makeTabRoot`.
+    func closeTab(_ tabID: UUID) {
+        guard tabs(on: .top).count > 1 else {
             splitsByTabID[tabID].flatMap { focusedEditor(in: $0) }?.clearDocument()
             retitle(tabID)
             persistTabs()

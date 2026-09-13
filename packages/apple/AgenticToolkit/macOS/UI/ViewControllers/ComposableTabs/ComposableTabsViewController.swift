@@ -152,6 +152,22 @@ public final class ComposableTabsViewController: ThemedSplitViewController {
     /// the project's tab list.
     public var onLayoutDidChange: ((LayoutNode) -> Void)?
 
+    /// What to do when the one pane a tab is required to keep asks to close.
+    ///
+    /// A tab cannot go to zero panes, so `canRemoveLeaf` refuses and the close
+    /// button greys out. That is the right answer for a window's own tree, where
+    /// the last pane *is* the tab. It is the wrong answer for a container that
+    /// has somewhere else for the request to go — the Document pane, whose last
+    /// editor is specified to empty rather than disappear — and a greyed button
+    /// there reads as "this pane is protected" when the truth is "this pane is
+    /// the floor, and the floor still does something".
+    ///
+    /// Installed on the *root* of a tab, like `onLayoutDidChange`, and read
+    /// through `rootSplit()`. Setting it makes the last pane's close button live
+    /// again; leaving it nil is what every other container wants and costs
+    /// nothing.
+    public var onLastPaneCloseRequest: ((ComposableTabsPaneViewController) -> Void)?
+
     /// How this tree divides its space when panes come and go. Defaults to
     /// today's behaviour, so no existing host's layout moves.
     public var arranger: PaneArranger = InheritedSlotArranger() {
