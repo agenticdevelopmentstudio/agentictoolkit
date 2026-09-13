@@ -88,8 +88,7 @@ const SAVED_ROW: MaskedProviderConfig = {
 
 function renderModal({
   providers = PROVIDERS as ProviderCatalogEntry[] | null,
-  initialFilter,
-}: { providers?: ProviderCatalogEntry[] | null; initialFilter?: string } = {}) {
+}: { providers?: ProviderCatalogEntry[] | null } = {}) {
   const onOpenChange = vi.fn();
   const onAdded = vi.fn();
   render(
@@ -99,7 +98,6 @@ function renderModal({
       ecosystemId="eco-1"
       providers={providers}
       onAdded={onAdded}
-      initialFilter={initialFilter}
     />,
   );
   return { onOpenChange, onAdded };
@@ -160,13 +158,12 @@ describe("the picker", () => {
     ]);
   });
 
-  it("starts on initialFilter, and the operator can clear it", () => {
-    // Shipr's Connections passes "Code" so the picker opens on the forges. It is a starting
-    // VALUE in a visible box, not a hidden restriction — `providerIds` is the restriction.
-    renderModal({ initialFilter: "SMS" });
-    expect((screen.getByLabelText("Filter services") as HTMLInputElement).value).toBe("SMS");
-    expect(screen.getAllByRole("option")).toHaveLength(1);
-    fireEvent.change(screen.getByLabelText("Filter services"), { target: { value: "" } });
+  it("opens on the whole catalog, with nothing typed in the filter", () => {
+    // There is no seeded filter any more. Shipr's Connections used to pass "Code" so the picker
+    // opened on the forges; a host that wants fewer services passes `providerIds`, which is a
+    // restriction rather than a word in a box the operator has to notice and clear.
+    renderModal();
+    expect((screen.getByLabelText("Filter services") as HTMLInputElement).value).toBe("");
     expect(screen.getAllByRole("option")).toHaveLength(3);
   });
 

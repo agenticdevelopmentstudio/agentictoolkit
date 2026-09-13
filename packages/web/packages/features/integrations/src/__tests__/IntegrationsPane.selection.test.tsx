@@ -17,10 +17,35 @@ vi.mock("@agentic-toolkit/data/integrations", () => ({
 // The saved-instance detail is stubbed: this file is about WHICH row the pane resolves, not about
 // the credential form's own fields. The stub reports the config it was handed so the assertion can
 // name the row rather than settling for "something rendered".
+//
+// All THREE of the module's exports the pane reaches for, because the pane composes the submit
+// and test hooks itself now — the button bar's Save and Test are their state, and a bar rendered
+// from inside the detail could not be published above the list.
 vi.mock("../IntegrationDetailView", () => ({
-  IntegrationDetailView: ({ config }: { config: { name: string } }) => (
+  IntegrationDetailBody: ({ config }: { config: { name: string } }) => (
     <div data-testid="detail">{config.name}</div>
   ),
+  IntegrationTestReport: () => null,
+  useIntegrationSubmit: () => ({
+    run: async () => {},
+    busy: false,
+    added: false,
+    error: null,
+    canSubmit: false,
+    blockedReason: null,
+    touched: false,
+    dirty: false,
+    label: "Save",
+    busyLabel: "Saving…",
+  }),
+  useIntegrationTest: () => ({
+    available: false,
+    blockedReason: null,
+    run: async () => {},
+    busy: false,
+    result: null,
+    error: null,
+  }),
 }));
 vi.mock("../AddIntegrationModal", () => ({ AddIntegrationModal: () => null }));
 
@@ -65,10 +90,10 @@ describe("IntegrationsPane selection without a URL leaf", () => {
     );
 
     await userEvent.click(await screen.findByRole("button", { name: /Stripe live/ }));
-    // The detail, and the pane's own destructive control that lives beside it — both are inside
-    // the single `cfg && provider && form.draft` branch that was unreachable here.
+    // The detail, and the Save the bar grows when a row is open — both are inside the single
+    // `cfg && provider && form.draft` branch that was unreachable here.
     expect(await screen.findByTestId("detail")).toHaveTextContent("Stripe live");
-    expect(screen.getByRole("button", { name: /remove integration/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
   // The other direction, so the fix cannot be "ignore the leaf": a host that DOES cede the

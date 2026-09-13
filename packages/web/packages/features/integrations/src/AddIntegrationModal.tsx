@@ -14,7 +14,11 @@ import { Alert } from "@agenticdevelopertoolkit/ui/components/alert";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import type { MaskedProviderConfig, ProviderCatalogEntry } from "@agentic-toolkit/data/integrations";
 import { intBlank, type IntegrationInput } from "./IntegrationDetail";
-import { IntegrationDetailBody, useIntegrationSubmit } from "./IntegrationDetailView";
+import {
+  IntegrationDetailBody,
+  useIntegrationSubmit,
+  useIntegrationTest,
+} from "./IntegrationDetailView";
 import { clearDraft, listDrafts, loadDraft, saveDraft } from "./integration-draft-store";
 
 /**
@@ -70,7 +74,8 @@ export function AddIntegrationModal({
   ecosystemId,
   providers,
   onAdded,
-  initialFilter = "",
+  onAdopted,
+  dialogSurfaceClassName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -78,17 +83,15 @@ export function AddIntegrationModal({
   /** The provider catalog from `integrationsApi.listProviders` (null while loading). */
   providers: ProviderCatalogEntry[] | null;
   onAdded: (row: MaskedProviderConfig) => void;
-  /**
-   * What the filter box starts on each time this opens — the host narrowing the picker to the
-   * kind of service its screen is about. Shipr's Connections passes `"Code"`, so opening it
-   * lands on the forges rather than on the whole alphabet with a git provider somewhere in it.
-   *
-   * A starting VALUE rather than a hidden restriction: it is in the box, visible, and the
-   * operator can clear it. `providerIds` is the restriction, and it is a different prop.
-   */
-  initialFilter?: string;
+  /** The newly created integration's installation download landed — see `prefetchInstallations`.
+   *  Separate from {@link onAdded}, which fires the instant the config row is written and so is
+   *  always too early to re-read an account list with. */
+  onAdopted?: () => void;
+  /** The host dialog surface's class, forwarded because these dialogs render into a PORTAL and
+   *  so inherit nothing from it — see {@link IntegrationsPane}'s prop of the same name. */
+  dialogSurfaceClassName?: string;
 }): ReactElement {
-  const [filter, setFilter] = useState(initialFilter);
+  const [filter, setFilter] = useState("");
   /** The row Enter and OK would open. `null` means "whatever is first" — see `highlighted`. */
   const [highlightId, setHighlightId] = useState<string | null>(null);
   /** The provider whose own dialog is open over this one, if any. */
@@ -112,7 +115,7 @@ export function AddIntegrationModal({
     setSession({ open, ecosystemId });
     setConfiguringId(null);
     setHighlightId(null);
-    setFilter(initialFilter);
+    setFilter("");
     setDraft(intBlank(""));
     setDraftedIds(open ? listDrafts(ecosystemId).map((d) => d.providerId) : []);
   }
@@ -203,7 +206,7 @@ export function AddIntegrationModal({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           initialFocus={filterRef}
-          className="flex h-[32rem] max-h-[85vh] w-[calc(100%-2rem)] max-w-xl flex-col overflow-hidden"
+          className={`flex h-[32rem] max-h-[85vh] w-[calc(100%-2rem)] max-w-xl flex-col overflow-hidden ${dialogSurfaceClassName ?? ""}`}
         >
           <DialogHeader>
             <DialogTitle>Add integration</DialogTitle>
@@ -310,11 +313,13 @@ export function AddIntegrationModal({
           service rather than carrying the last one's error and busy flag. */}
       {configuring && (
         <ConfigureProviderDialog
+          dialogSurfaceClassName={dialogSurfaceClassName}
           provider={configuring}
           ecosystemId={ecosystemId}
           draft={draft}
           onChange={handleChange}
           onSaved={handleSaved}
+          onAdopted={onAdopted}
           onCancel={() => setConfiguringId(null)}
         />
       )}
@@ -341,14 +346,22 @@ export function ConfigureProviderDialog({
   draft,
   onChange,
   onSaved,
+  onAdopted,
   onCancel,
+  dialogSurfaceClassName,
 }: {
   provider: ProviderCatalogEntry;
   ecosystemId: string;
   draft: IntegrationInput;
   onChange: (next: IntegrationInput) => void;
   onSaved: (row: MaskedProviderConfig) => void;
+  /** The save's own installation download landed — fired long after {@link onSaved}, and the
+   *  only moment at which re-reading an account list returns the account just added. */
+  onAdopted?: () => void;
   onCancel: () => void;
+  /** The host dialog surface's class, forwarded because these dialogs render into a PORTAL and
+   *  so inherit nothing from it — see {@link IntegrationsPane}'s prop of the same name. */
+  dialogSurfaceClassName?: string;
 }): ReactElement {
   const submit = useIntegrationSubmit({
     provider,
@@ -358,11 +371,26 @@ export function ConfigureProviderDialog({
     draft,
     onChange,
     onSaved,
+    onAdopted,
+  });
+  // Test stays in the BODY here, beside the fields it is about — a modal's actions are OK and
+  // Cancel and nothing else. Composed at this level only because the body takes the state rather
+  // than owning it now; nothing about where the button draws has changed.
+  const test = useIntegrationTest({
+    provider,
+    ecosystemId,
+    mode: "add",
+    config: null,
+    draft,
+    dirty: submit.dirty,
+    onAdopted,
   });
 
   return (
     <Dialog open onOpenChange={(next) => !next && onCancel()}>
-      <DialogContent className="flex max-h-[85vh] w-[calc(100%-2rem)] max-w-lg flex-col overflow-hidden">
+      <DialogContent
+        className={`flex max-h-[85vh] w-[calc(100%-2rem)] max-w-lg flex-col overflow-hidden ${dialogSurfaceClassName ?? ""}`}
+      >
         <DialogHeader>
           <DialogTitle>{provider.displayName}</DialogTitle>
           {/* The catalog's own copy, which is also what the picker row showed — so the dialog
@@ -387,7 +415,9 @@ export function ConfigureProviderDialog({
               draft={draft}
               onChange={onChange}
               submit={submit}
+              test={test}
               hideSubmit
+              hideProviderInfo
             />
           </div>
           <DialogFooter>

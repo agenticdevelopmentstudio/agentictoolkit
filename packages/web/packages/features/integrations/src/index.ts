@@ -24,6 +24,30 @@ export {
   type IntegrationDestinationsResult,
 } from "./destinations";
 
+// Where a set of integrations could be MOVED to — the same destination list, minus the ecosystem
+// they are already in. Exported for a host that wants the count before the pane is on screen;
+// the pane's own Transfer button reads it itself from `workspaceSlug`.
+export {
+  useTransferTargets,
+  type TransferTarget,
+  type TransferTargetsResult,
+} from "./destinations";
+
+// The export/import file format, exported so a host — or a migration script — can read and write
+// the same document the bar's Export produces. It carries NO SECRETS: the API has never echoed
+// one back, so an imported integration always needs its credential typed in.
+export {
+  EXPORT_KIND,
+  EXPORT_VERSION,
+  buildExport,
+  exportFilename,
+  parseExport,
+  serializeExport,
+  splitImport,
+  type ExportedIntegration,
+  type IntegrationsExport,
+} from "./integrationPortability";
+
 // The provider redirect landing. `oauthCallbackUrl()` is ORIGIN-RELATIVE, so every site that
 // starts an OAuth connect must mount this at its own `/integrations/oauth-callback` — the
 // provider returns to the origin the connect began on, not to a shared one.

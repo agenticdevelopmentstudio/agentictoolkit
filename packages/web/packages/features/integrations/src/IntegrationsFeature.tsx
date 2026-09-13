@@ -149,6 +149,7 @@ export function IntegrationsFeature({
           <ErrorText error={error} className="px-6 pt-4" />
           <Body
             destinations={destinations}
+            workspaceSlug={workspace.slug}
             selected={selected}
             configId={configId}
             onSelectConfig={(id) =>
@@ -164,11 +165,15 @@ export function IntegrationsFeature({
 /** The region below the destinations list — the pane, or the reason there isn't one. */
 function Body({
   destinations,
+  workspaceSlug,
   selected,
   configId,
   onSelectConfig,
 }: {
   destinations: IntegrationDestination[] | null;
+  /** Threaded down rather than re-resolved: every destination on this rail belongs to this one
+   *  workspace, and it is what the pane's Transfer reads its own list of destinations from. */
+  workspaceSlug: string;
   selected: IntegrationDestination | null;
   configId: string | undefined;
   onSelectConfig: (configId: string | null) => void;
@@ -219,6 +224,10 @@ function Body({
       // one while its own fetch is in flight.
       key={selected.id}
       ecosystemId={selected.ecosystemId}
+      // The bar's Transfer destinations are this same workspace's destination list, so the slug
+      // is all it needs — and the pane reads it through `useTransferTargets`, which resolves the
+      // row from the cached workspaces list rather than taking one as a prop.
+      workspaceSlug={workspaceSlug}
       leaf={{ leafId: configId ?? null, onSelect: onSelectConfig }}
     />
   );

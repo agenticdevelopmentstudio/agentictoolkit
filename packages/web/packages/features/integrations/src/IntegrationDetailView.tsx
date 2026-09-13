@@ -10,6 +10,7 @@ import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import {
   integrationsApi,
   type DeliverabilityWebhook,
+  type IntegrationTestResult,
   type MaskedProviderConfig,
   type ProviderAuthMethod,
   type ProviderCatalogEntry,
@@ -59,6 +60,18 @@ export type IntegrationDetailViewProps = {
    * clear the just-typed secret) would silently discard unsaved edits to the config fields.
    */
   onRotated?: (row: MaskedProviderConfig) => void;
+  /**
+   * The provider's accounts were enumerated and recorded — by Test, or by the download a save
+   * fires behind itself. Distinct from {@link onSaved}, which is about THIS config's fields:
+   * an adopt writes no field here and instead creates the CONNECTION rows every downstream
+   * account and repository list is derived from.
+   *
+   * Separate for that reason, and fired LATE for the same one. A save reports `onSaved` the
+   * instant the config lands and fires the adopt behind itself; a host that re-read its account
+   * list on `onSaved` was therefore reading it before the accounts existed. This is the signal
+   * that says they do.
+   */
+  onAdopted?: () => void;
 };
 
 /** The one save-blocking rule `intValidate` doesn't cover (it validates provider fields, not the
@@ -260,53 +273,8 @@ function FieldsForMethod({
 
 
 /**
- * Ask GitHub which accounts this app is installed on, and take the ones it can have.
- *
- * ONE CALL, TWO CALLERS, and the only difference between them is who is listening. It signs a JWT
- * with the saved app id and private key, lists the installations, and records each one — which is
- * what makes the repository picker open on a populated list instead of on an empty box.
- *
- * It is also, unavoidably, the credentials test: an installation list cannot be fetched without a
- * JWT GitHub accepts, so a wrong app id or an unimportable private key fails exactly here.
- */
-async function adoptInstallations(
-  providerId: string,
-  ecosystemId: string,
-  providerConfigId: string,
-): Promise<string> {
-  const { connected, skipped } = await integrationsApi.adoptInstallations(providerId, {
-    ecosystemId,
-    providerConfigId,
-  });
-  const name = (r: { accountLogin: string; installationId: string }) =>
-    r.accountLogin || `installation ${r.installationId}`;
-  // A skip carrying a connectionId is one this ecosystem ALREADY holds — re-testing a working
-  // integration is a no-op, not a failure. One without is a refusal, and has to be voiced.
-  const held = skipped.filter((s) => s.connectionId);
-  const blocked = skipped.filter((s) => !s.connectionId);
-  const said: string[] = [];
-  if (connected.length > 0) said.push(`Connected ${connected.map(name).join(", ")}.`);
-  if (held.length > 0) said.push(`${held.map(name).join(", ")} was already connected.`);
-  for (const b of blocked) said.push(`${name(b)}: ${b.skipped}`);
-  // A `warning` is NOT a skip and is never counted as one — the connection stands, and only
-  // the repository download behind it did not finish. It is said out loud anyway, because
-  // this is the Test button: the next thing that happens is somebody opening a picker, and
-  // finding out there why it is empty is finding out too late. It rides on a connected row
-  // or on a held one, so both are read for it.
-  for (const w of [...connected, ...held]) {
-    if (w.warning) said.push(`${name(w)} is connected, but its repository list could not be downloaded: ${w.warning}`);
-  }
-  if (said.length > 0) return said.join(" ");
-  // Credentials GitHub accepted, and nothing installed anywhere. A true answer with its own fix,
-  // so it is a result rather than an error.
-  return (
-    "These credentials work, but the app isn't installed on any account yet. Install it on " +
-    "GitHub — on your own account or an organization — then test again."
-  );
-}
-
-/**
- * The same call, fired by a SAVE, with nobody listening.
+ * The download a SAVE fires behind itself, with nobody listening to the answer — but somebody
+ * waiting to be told it arrived.
  *
  * Saving saves. It does not test, it does not report, and it does not wait — but the moment a
  * GitHub App's credentials land there is exactly one useful thing to do with them, and doing it
@@ -315,36 +283,65 @@ async function adoptInstallations(
  * there when someone asks for them; it did not, and they find out when they press Test, or when
  * the picker tells them why it has nothing to show.
  *
- * NOT AWAITED, and that is the point — a save that blocked on a round-trip to github.com would be
- * a test with the reporting removed, which is the worse half of both.
+ * STILL NOT AWAITED BY THE SAVE, and that is the point — a save that blocked on a round trip to
+ * github.com would be a test with the reporting removed, which is the worse half of both.
+ *
+ * `onAdopted` IS THE WHOLE OF THE FIX FOR A FOUR-ACCOUNT SETUP THAT SHOWED TWO. This call is what
+ * CREATES the connection rows a repository picker is a list of, and the save used to fire it into
+ * the dark and then, in the very next statement, tell the host to re-read those rows. The re-read
+ * therefore raced a request that was still in flight to github.com, and lost: the connection for
+ * the integration just saved did not exist yet, so the account it reaches was missing from every
+ * org menu until some later, unrelated read happened to pick it up. Add four accounts briskly and
+ * the picker shows two, which is exactly what was reported.
+ *
+ * So the completion is a SIGNAL now, not a discarded promise. It fires when the adopt has actually
+ * resolved — the first moment a re-read can return the new account — and it fires on the failure
+ * path too: a failed adopt can still have recorded some installations before it gave up, and a
+ * host re-reading a list it already holds is cheap, while a host that never re-reads is the bug.
+ *
+ * It reports NOTHING in words, which is why it calls the adopt endpoint raw rather than the test
+ * one: the sentence describing what came back is the backend's to write, and it writes it for the
+ * caller that is going to show it. Building a second copy here — for a string this function then
+ * throws away — is how the console came to have its own opinion about what a good test result
+ * reads like, and the two drifted.
  */
 function prefetchInstallations(
   provider: ProviderCatalogEntry,
   ecosystemId: string,
   providerConfigId: string,
+  onAdopted?: () => void,
 ): void {
   if (provider.authMethod !== "github_app") return;
-  void adoptInstallations(provider.providerId, ecosystemId, providerConfigId).catch(() => {
-    // Deliberately empty. Test is where this question gets asked out loud.
-  });
+  void integrationsApi
+    .adoptInstallations(provider.providerId, { ecosystemId, providerConfigId })
+    .catch(() => {
+      // Deliberately swallowed. Test is where this question gets asked out loud.
+    })
+    .finally(() => onAdopted?.());
 }
 
-/** The Test half — the same download as the save's, with its mouth open. */
+/** The Test half — the same question the save asks silently, with its mouth open. */
 export interface IntegrationTest {
-  /** Whether there is anything here to test. */
+  /** Whether there is anything here to test — see {@link useIntegrationTest}. */
   available: boolean;
   /** Why the button is disabled, or null. */
   blockedReason: string | null;
-  /** Never throws — a failure lands on `error`. */
+  /** Never throws — a refusal lands on `result.ok`, a broken request on `error`. */
   run: () => Promise<void>;
   busy: boolean;
-  /** What GitHub answered, when it answered. */
-  result: string | null;
+  /**
+   * What the provider answered, verbatim from the backend.
+   *
+   * `ok: false` IS A RESULT, not an error: a provider that refuses a key has answered the
+   * question, and the sentence explaining why is the provider's own. `error` is for the other
+   * thing — a request that could not be made at all.
+   */
+  result: IntegrationTestResult | null;
   error: string | null;
 }
 
 /**
- * Reach the provider with the credentials as they are STORED, and say what came back.
+ * Reach the provider with these credentials, and say what came back.
  *
  * Separate from `useIntegrationSubmit` because it is a separate responsibility: that one writes
  * fields, this one asks a question of a third party. One button doing both would mean neither
@@ -352,48 +349,127 @@ export interface IntegrationTest {
  * organization without re-saving a form nothing had changed in, and no way to save a half-typed
  * key without being told off by github.com.
  *
- * It tests what is SAVED, not what is typed, which is why an edited form disables it: testing a
- * key the backend has never seen would report on credentials that do not exist, and nothing on
- * screen would say which of the two the answer was about.
+ * TWO ENDPOINTS, PICKED BY WHAT THERE IS TO TEST, and the difference between them is whether
+ * anything is written:
+ *
+ * - a SAVED config tests what is STORED (`testProviderConfig`), which is why an edited form
+ *   disables the button: testing a key the backend has never seen would report on credentials
+ *   that do not exist, and nothing on screen would say which of the two the answer was about.
+ *   For a GitHub App that call is also the adopt, so `result.adopted` fires {@link onAdopted}.
+ * - a DRAFT tests what is TYPED (`testProviderCredentials`), and writes nothing at all — no
+ *   config, no connection, no cache. That is what makes a Test button legitimate in the Add
+ *   dialog, where there is no row to address yet: the old objection to one there was that it
+ *   would have to lie about what it tested, and a probe that tests the draft does not.
+ *
+ * WHETHER THE BUTTON EXISTS IS THE CATALOG'S ANSWER, not this file's. `provider.testable` is
+ * derived server-side from the same condition the test route dispatches on. It used to be
+ * re-derived here as `authMethod === "github_app"` — half the real condition, and the half that
+ * left Vercel, which has declared a validation endpoint all along, with no button at all.
  */
 export function useIntegrationTest({
   provider,
   ecosystemId,
-  config,
+  mode,
+  config = null,
+  draft,
   dirty,
+  onAdopted,
 }: {
   provider: ProviderCatalogEntry;
   ecosystemId: string;
-  config: MaskedProviderConfig | null;
+  /** 'add' probes the draft and writes nothing; 'saved' tests the stored credential. */
+  mode: "add" | "saved";
+  config?: MaskedProviderConfig | null;
+  draft: IntegrationInput;
+  /** The draft differs from what is stored — meaningless, and ignored, in 'add' mode. */
   dirty: boolean;
+  /**
+   * The provider's accounts were enumerated and recorded, so anything derived from the
+   * CONNECTION list is now stale.
+   *
+   * Test is not a read-only probe for every provider, however much the word suggests one: for a
+   * GitHub App the call it makes is the same one that records installations, so pressing it is
+   * frequently the moment an account becomes reachable for the first time. Nothing used to be
+   * told. An operator pressed Test, read "Connected acme.", opened the repository picker, and
+   * found no acme — because the only list that names accounts had been read before that row
+   * existed, and nothing asked again. The backend says so on `result.adopted`, and this fires
+   * exactly when it does.
+   */
+  onAdopted?: () => void;
 }): IntegrationTest {
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<IntegrationTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const configId = config?.id ?? null;
+  const testsStored = mode === "saved" && configId !== null;
+
+  // In 'add' there is nothing stored to fall back on, so the draft has to carry a credential
+  // itself. Same shape as the write bodies: a secret, or one of the declared config fields.
+  const draftHasCredential =
+    draft.clientSecret.trim() !== "" ||
+    Object.values(draft.fields).some((v) => v.trim() !== "");
 
   const run = async () => {
-    if (!configId || busy) return;
+    if (busy) return;
     setBusy(true);
     setResult(null);
     setError(null);
     try {
-      setResult(await adoptInstallations(provider.providerId, ecosystemId, configId));
+      const answer = testsStored
+        ? await integrationsApi.testProviderConfig(ecosystemId, configId!)
+        : await integrationsApi.testProviderCredentials(provider.providerId, {
+            ecosystemId,
+            clientId: draft.clientId.trim() || undefined,
+            clientSecret: draft.clientSecret || undefined,
+            fields: Object.keys(draft.fields).length > 0 ? draft.fields : undefined,
+            // Editing a saved config with the secret box left empty: the stored secret is what
+            // is under test, and write-only secrets mean the browser cannot present it itself.
+            providerConfigId: configId ?? undefined,
+          });
+      setResult(answer);
+      // AFTER the await, so the host re-reads a list that already holds whatever this adopted.
+      if (answer.adopted) onAdopted?.();
     } catch (e) {
-      setError(errMsg(e, "GitHub could not be reached with these credentials."));
+      setError(errMsg(e, `${provider.displayName} could not be reached with these credentials.`));
     } finally {
       setBusy(false);
     }
   };
 
   return {
-    available: provider.authMethod === "github_app" && configId !== null,
-    blockedReason: dirty ? "Save your changes before testing them." : null,
+    available: Boolean(provider.testable) && (testsStored || mode === "add"),
+    blockedReason: testsStored
+      ? dirty
+        ? "Save your changes before testing them."
+        : null
+      : draftHasCredential
+        ? null
+        : "Enter a credential to test.",
     run,
     busy,
     result,
     error,
   };
+}
+
+/**
+ * What the provider said, rendered the same way wherever it is shown.
+ *
+ * One component because there are three places that show it — the config card, the Add dialog,
+ * and the bulk "Test selected" report — and a refusal that reads as a neutral status line in one
+ * of them and as a failure in another is the operator's cue to trust the wrong one.
+ */
+export function IntegrationTestReport({ result }: { result: IntegrationTestResult }) {
+  return (
+    <div className="flex flex-col gap-1" role="status">
+      <p className={`text-sm ${result.ok ? "text-apt-green" : "text-apt-red"}`}>{result.summary}</p>
+      {result.notes.map((note) => (
+        <p key={note} className="text-xs text-apt-text-muted">
+          {note}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -434,6 +510,7 @@ export function useIntegrationSubmit({
   draft,
   onChange,
   onSaved,
+  onAdopted,
 }: {
   provider: ProviderCatalogEntry;
   ecosystemId: string;
@@ -442,6 +519,8 @@ export function useIntegrationSubmit({
   draft: IntegrationInput;
   onChange: (next: IntegrationInput) => void;
   onSaved?: (row: MaskedProviderConfig) => void;
+  /** The save's own installation download finished — see `prefetchInstallations`. */
+  onAdopted?: () => void;
 }): IntegrationSubmit {
   const [busy, setBusy] = useState(false);
   const [added, setAdded] = useState(false);
@@ -486,7 +565,7 @@ export function useIntegrationSubmit({
           ecosystemId,
           intToCreateBody(draft, provider),
         );
-        prefetchInstallations(provider, ecosystemId, row.id);
+        prefetchInstallations(provider, ecosystemId, row.id, onAdopted);
         setAdded(true);
         // Clear the form but stay open so another instance can be added.
         onChange({ ...intBlank(provider.providerId), name: "" });
@@ -498,7 +577,7 @@ export function useIntegrationSubmit({
           ...intToBody(draft, provider),
         });
         setBaseline(intToInput(row, provider));
-        prefetchInstallations(provider, ecosystemId, row.id);
+        prefetchInstallations(provider, ecosystemId, row.id, onAdopted);
         onSaved?.(row);
       }
     } catch (e) {
@@ -530,15 +609,39 @@ export function useIntegrationSubmit({
 export type IntegrationDetailBodyProps = Omit<IntegrationDetailViewProps, "onSaved"> & {
   /** The lifted submit state — `useIntegrationSubmit`'s return. */
   submit: IntegrationSubmit;
+  /** The lifted test state — `useIntegrationTest`'s return. Lifted for the same reason `submit`
+   *  is: the button is not always drawn here (the pane's button bar draws it), and two copies of
+   *  "what did the provider just say" would answer differently. */
+  test: IntegrationTest;
   /**
    * The HOST is drawing the submit button, so this body must not draw a second one.
    *
-   * Set by the per-provider Add dialog, whose OK lives in its footer. The error line and the
+   * Set by the per-provider Add dialog, whose OK lives in its footer, and by the integrations
+   * pane, whose Save lives in the button bar above the list. The error line and the
    * blocked-reason line stay here either way: both are about the FIELDS, and an explanation of
    * why a button is grey belongs beside the field that greyed it, not orphaned under a footer
    * two scroll regions away.
    */
   hideSubmit?: boolean;
+  /**
+   * The HOST is drawing the Test button. Same rule as {@link hideSubmit}, and the same exception:
+   * what the provider ANSWERED still renders here, beside the credentials it is about.
+   *
+   * The Add dialog does NOT set this — a modal's actions are OK and Cancel and nothing else, so
+   * its Test stays in the body. The pane does, because its bar tests the SELECTION, which may be
+   * four rows and not this one.
+   */
+  hideTest?: boolean;
+  /**
+   * Drop the provider blurb cards — the "what service is this" header and the "what this does"
+   * footer — because the surrounding surface has already said both.
+   *
+   * The Add dialog is that surface: its title bar carries the provider's name and its
+   * description line carries the blurb, so repeating them an inch lower is how a dialog that
+   * should be four fields tall becomes a page. This was folded into `hideSubmit` until a second
+   * host wanted the cards WITH its own Save button, which is two facts wearing one name.
+   */
+  hideProviderInfo?: boolean;
 };
 
 /** The cards, with no opinion about where the submit button goes. */
@@ -551,17 +654,11 @@ export function IntegrationDetailBody({
   onChange,
   onRotated,
   submit,
+  test,
   hideSubmit = false,
+  hideTest = false,
+  hideProviderInfo = false,
 }: IntegrationDetailBodyProps) {
-  // Not lifted the way `submit` is, because Test has no second home: the Add dialog's footer
-  // draws OK and Cancel, and a button that reaches credentials the operator has not saved yet
-  // would have nothing to reach. It lives beside Save, in the card that owns the fields it tests.
-  const test = useIntegrationTest({
-    provider,
-    ecosystemId,
-    config: config ?? null,
-    dirty: submit.dirty,
-  });
   const showConnections = mode === "saved" && CONNECTION_METHODS.includes(provider.authMethod);
   // Synced-row browsing (reddit / google-calendar today) belongs to a SAVED instance — there is
   // nothing to browse while adding one. Empty for every other provider, which renders no section.
@@ -575,11 +672,9 @@ export function IntegrationDetailBody({
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Card 1 — provider info. NOT drawn when the host is drawing the submit button, because
-          that host is the per-provider Add dialog: its title bar already carries the provider's
-          name and its description line already carries this copy, and repeating both an inch
-          lower is how a dialog that should be four fields tall becomes a page. */}
-      {!hideSubmit && (
+      {/* Card 1 — provider info. See `hideProviderInfo`: the Add dialog's own title bar and
+          description line already say all of this. */}
+      {!hideProviderInfo && (
         <Card>
           <CardHeader>
             <CardTitle>{provider.displayName}</CardTitle>
@@ -637,7 +732,7 @@ export function IntegrationDetailBody({
           />
 
           <div className="flex flex-col gap-2">
-            {(!hideSubmit || test.available) && (
+            {(!hideSubmit || (!hideTest && test.available)) && (
               <div className="flex flex-wrap items-center gap-2">
                 {!hideSubmit && (
                   <Button
@@ -649,10 +744,12 @@ export function IntegrationDetailBody({
                     {submit.busy ? submit.busyLabel : submit.label}
                   </Button>
                 )}
-                {/* Save writes the fields; Test asks GitHub about them. Two buttons because they
-                    are two questions, and an operator who has installed the app on a new
-                    organization needs to ask the second one without re-answering the first. */}
-                {test.available && (
+                {/* Save writes the fields; Test asks the provider about them. Two buttons because
+                    they are two questions, and an operator who has installed the app on a new
+                    organization needs to ask the second one without re-answering the first.
+                    Drawn for every provider the catalog says can be tested — which is how Vercel
+                    got one without this file learning a second list of provider ids. */}
+                {!hideTest && test.available && (
                   <Button
                     type="button"
                     variant="secondary"
@@ -672,12 +769,8 @@ export function IntegrationDetailBody({
                 different questions, and merging them is what made a save look like it had
                 reached GitHub when it had not. */}
             <ErrorText error={test.error} />
-            {test.result && !test.error && (
-              <p className="text-sm text-apt-text" role="status">
-                {test.result}
-              </p>
-            )}
-            {test.available && test.blockedReason && (
+            {test.result && !test.error && <IntegrationTestReport result={test.result} />}
+            {!hideTest && test.available && test.blockedReason && (
               <p className="text-sm text-apt-text-muted" role="status">
                 {test.blockedReason}
               </p>
@@ -709,7 +802,7 @@ export function IntegrationDetailBody({
       {/* Card 3 — what this does. Suppressed alongside Card 1 for the Add dialog: the picker the
           operator just came through said what each service does, in its own words, and a dialog
           that re-answers a question already answered is a dialog they have to scroll past. */}
-      {!hideSubmit && (
+      {!hideProviderInfo && (
         <Card>
           <CardHeader>
             <CardTitle>What this does</CardTitle>
@@ -745,6 +838,17 @@ export function IntegrationDetailBody({
  *  saved-instance detail mounts; the Add dialog composes the hook and the body itself, so that
  *  its OK can sit in the footer where Enter and Escape can reach it. */
 export function IntegrationDetailView(props: IntegrationDetailViewProps) {
+  // `props` carries `onAdopted`, so both halves get it: the submit hook fires it when the save's
+  // own background download lands, and the test hook when the probe adopted something.
   const submit = useIntegrationSubmit(props);
-  return <IntegrationDetailBody {...props} submit={submit} />;
+  const test = useIntegrationTest({
+    provider: props.provider,
+    ecosystemId: props.ecosystemId,
+    mode: props.mode,
+    config: props.config ?? null,
+    draft: props.draft,
+    dirty: submit.dirty,
+    onAdopted: props.onAdopted,
+  });
+  return <IntegrationDetailBody {...props} submit={submit} test={test} />;
 }

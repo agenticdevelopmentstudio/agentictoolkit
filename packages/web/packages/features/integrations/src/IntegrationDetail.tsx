@@ -389,7 +389,7 @@ export function ApiKeyFields({ provider, draft, onChange, config }: IntegrationF
  * operator pastes a PEM into a field that visibly refuses newlines and then cannot tell
  * whether it saved.
  */
-interface CredentialShape {
+export interface CredentialShape {
   /** One line under the heading, given the provider's display name. */
   blurb: (displayName: string) => string;
   idLabel: string;
@@ -438,7 +438,11 @@ const GITHUB_APP_CREDENTIALS: CredentialShape = {
   advanced: false,
 };
 
-function credentialShape(authMethod: ProviderAuthMethod | undefined): CredentialShape {
+/** Which credential pair a non-configField provider asks for. Exported because the EXPORT
+ *  needs the secret's NAME without drawing its field: a document saying "this one needs a
+ *  Private key" and one saying "this one needs a Client secret" are the difference between
+ *  an operator who can finish the import and one who is guessing. */
+export function credentialShape(authMethod: ProviderAuthMethod | undefined): CredentialShape {
   return authMethod === "github_app" ? GITHUB_APP_CREDENTIALS : OAUTH_CREDENTIALS;
 }
 

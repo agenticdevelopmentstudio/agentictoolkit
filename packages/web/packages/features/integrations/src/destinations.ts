@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { useResourceList, type Workspace } from "@agentic-toolkit/data";
+import { useResourceList, workspacesApi, type Workspace } from "@agentic-toolkit/data";
 import { api as personasApi, type Persona } from "@agentic-toolkit/data/personas";
 import {
   ecosystemsApi,
@@ -121,17 +121,41 @@ export function resolveDestination(
  * waiting would hold the whole list on the one read the user is least likely to be waiting for.
  */
 export function useIntegrationDestinations(workspace: Workspace): IntegrationDestinationsResult {
-  const slug = workspace.slug;
+  return useDestinationRows(workspace.slug, workspace);
+}
 
+/**
+ * The three reads, for a slug whose workspace row may not have arrived yet.
+ *
+ * `workspace` is null ONLY while a slug-only caller is still resolving it — see
+ * {@link useTransferTargets}. The rows are withheld for as long as it is, because the first row
+ * is the workspace's own and a list that names it wrongly for a frame is worse than one that
+ * appears a frame later.
+ *
+ * `slug` is undefined when the caller has no workspace at all. The loaders then return a promise
+ * that never settles, which is `useResourceList`'s own idiom for a list held in Loading until its
+ * scope arrives: an empty array would be a claim that the workspace has no personas, and the
+ * hooks cannot simply not be called.
+ */
+function useDestinationRows(
+  slug: string | undefined,
+  workspace: Pick<Workspace, "kind" | "name"> | null,
+): IntegrationDestinationsResult {
   // Slug-bearing cache keys: `useResourceList`'s cache is tenant-scoped, and one tenant has
   // several workspaces — a shared key would seed an org's first paint with the personal
   // workspace's rows. The `integrations::` prefix keeps them distinct from any other feature
   // caching the same endpoints.
-  const loadPersonas = useCallback(() => personasApi.personas.list({ workspace: slug }), [slug]);
-  const loadProducts = useCallback(() => ecosystemsApi.listForWorkspace(slug), [slug]);
+  const loadPersonas = useCallback(
+    () => (slug ? personasApi.personas.list({ workspace: slug }) : never<Persona>()),
+    [slug],
+  );
+  const loadProducts = useCallback(
+    () => (slug ? ecosystemsApi.listForWorkspace(slug) : never<Ecosystem>()),
+    [slug],
+  );
 
-  const personas = useResourceList<Persona>(`integrations::personas::${slug}`, loadPersonas);
-  const products = useResourceList<Ecosystem>(`integrations::products::${slug}`, loadProducts);
+  const personas = useResourceList<Persona>(`integrations::personas::${slug ?? ""}`, loadPersonas);
+  const products = useResourceList<Ecosystem>(`integrations::products::${slug ?? ""}`, loadProducts);
 
   const {
     ecosystemId: workspaceEcosystemId,
@@ -147,7 +171,7 @@ export function useIntegrationDestinations(workspace: Workspace): IntegrationDes
     (productRows !== null || products.error !== null);
 
   const destinations = useMemo<IntegrationDestination[] | null>(() => {
-    if (!settled) return null;
+    if (!settled || !workspace) return null;
     const rows: IntegrationDestination[] = [
       {
         id: WORKSPACE_DESTINATION_ID,
@@ -198,8 +222,7 @@ export function useIntegrationDestinations(workspace: Workspace): IntegrationDes
     settled,
     personaRows,
     productRows,
-    workspace.kind,
-    workspace.name,
+    workspace,
     workspacePending,
     workspaceEcosystemId,
     workspaceManageable,
@@ -212,4 +235,68 @@ export function useIntegrationDestinations(workspace: Workspace): IntegrationDes
       products.error ??
       (workspaceFailed ? "Couldn't resolve this workspace's own integrations." : null),
   };
+}
+
+/** A promise that never settles — see {@link useDestinationRows}. */
+function never<T>(): Promise<T[]> {
+  return new Promise<T[]>(() => {});
+}
+
+/** A place an integration can be MOVED to. A destination that has resolved to a real ecosystem,
+ *  which is the only kind a transfer can name: the backend's transfer takes a target ecosystem
+ *  id, so a persona with no realm is not a target, it is a row with nowhere to put anything. */
+export interface TransferTarget {
+  ecosystemId: string;
+  label: string;
+  sublabel: string;
+  kind: DestinationKind;
+}
+
+/** What {@link useTransferTargets} returns. `targets` is null until the list is known — an empty
+ *  array is the different, definitive answer "there is nowhere else to put this". */
+export interface TransferTargetsResult {
+  targets: TransferTarget[] | null;
+  error: string | null;
+}
+
+/**
+ * Where the integrations in this pane could be transferred TO — the same workspace/persona/product
+ * list the integrations root shows, minus the ecosystem they are already in.
+ *
+ * A SLUG is all this takes, which is the whole reason it exists next to
+ * {@link useIntegrationDestinations}: the pane is mounted inside shipr's connections dialog, which
+ * holds `client.workspace` and has never had the resolved `Workspace` row. The row is looked up
+ * from the workspaces list instead — the same `useResourceList("workspaces")` entry the shell's
+ * own chooser reads, so this costs a cache hit rather than a request.
+ *
+ * An undefined slug answers `targets: null` forever, and the pane draws no Transfer button. That
+ * is a host that has not said which workspace it is in, not a workspace with nowhere to transfer
+ * to, and the two must not render the same.
+ */
+export function useTransferTargets(
+  workspaceSlug: string | undefined,
+  excludeEcosystemId: string | null | undefined,
+): TransferTargetsResult {
+  const workspaces = useResourceList<Workspace>("workspaces", workspacesApi.list);
+  const row = workspaceSlug
+    ? ((workspaces.items ?? []).find((w) => w.slug === workspaceSlug) ?? null)
+    : null;
+  const { destinations, error } = useDestinationRows(workspaceSlug, row);
+
+  const targets = useMemo<TransferTarget[] | null>(() => {
+    if (!destinations) return null;
+    return destinations
+      .filter(
+        (d): d is IntegrationDestination & { ecosystemId: string } =>
+          typeof d.ecosystemId === "string" && d.ecosystemId !== excludeEcosystemId,
+      )
+      .map((d) => ({
+        ecosystemId: d.ecosystemId,
+        label: d.label,
+        sublabel: d.sublabel,
+        kind: d.kind,
+      }));
+  }, [destinations, excludeEcosystemId]);
+
+  return { targets, error: error ?? workspaces.error };
 }

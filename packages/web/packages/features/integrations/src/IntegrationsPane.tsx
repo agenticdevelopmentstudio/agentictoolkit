@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -19,8 +19,9 @@ import {
   UserRound,
 } from "lucide-react";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
-import { TopicSelectHint } from "@agenticdevelopertoolkit/ui/blocks";
+import { BatchSelectButton, ButtonBar, TopicSelectHint, useBatchSelect } from "@agenticdevelopertoolkit/ui/blocks";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { useDualModeSelection } from "@agenticdevelopertoolkit/ui/hooks/useDualModeSelection";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
@@ -33,6 +34,7 @@ import { isForbidden, useResourceItemQuery, useResourceList } from "@agentic-too
 import { useRecordAffordance } from "@agentic-toolkit/resource";
 import { useMasterDetailForm } from "@agentic-toolkit/resource";
 import { useMasterDetailLevel } from "@agentic-toolkit/resource";
+import { ToolbarPortal } from "@agentic-toolkit/resource";
 import type { TopicLeaf } from "@agentic-toolkit/resource";
 import {
   intBlank,
@@ -43,7 +45,16 @@ import {
   intValidate,
   type IntegrationInput,
 } from "./IntegrationDetail";
-import { IntegrationDetailView } from "./IntegrationDetailView";
+import {
+  IntegrationDetailBody,
+  IntegrationTestReport,
+  useIntegrationSubmit,
+  useIntegrationTest,
+  type IntegrationSubmit,
+  type IntegrationTest,
+} from "./IntegrationDetailView";
+import { useIntegrationBulkActions } from "./integrationBulkActions";
+import { useTransferTargets } from "./destinations";
 import { AddIntegrationModal } from "./AddIntegrationModal";
 
 // The stand-ins for a list whose read FAILED. Module scope so each is one identity for the whole
@@ -98,21 +109,31 @@ export function mergeFetchedRow(
   return list;
 }
 
+/** What the button bar's Save and Test drive when a row is open — see {@link SelectedIntegration}. */
+interface IntegrationEditor {
+  submit: IntegrationSubmit;
+  test: IntegrationTest;
+}
+
 /**
  * Integrations settings pane — the ecosystem's provider-config INSTANCES as a master/detail.
  * Each row is one saved integration instance (`listProviderConfigs`), addressed by `addressOf`
  * (deep links are `…/integrations/<rdid-or-uuid>`); multiple instances of the same service are allowed,
  * so the row shows the instance NAME with the provider's category subtitle. Selecting a row
- * renders the shared `IntegrationDetailView` in `mode="saved"` (which owns its own Save and, for
- * OAuth-family providers, its connected-accounts manager). "Add integration" opens the two-pane
- * `AddIntegrationModal` over the stack; the created instance is selected so its detail opens when
- * the modal is closed. Removing an instance deletes its stored config + secret.
+ * renders the shared `IntegrationDetailBody` in `mode="saved"` (which owns its connected-accounts
+ * manager and its synced-data section).
+ *
+ * THE PANE OWNS A BUTTON BAR, published into the rail host's toolbar slot above the list:
+ * Add · Remove · Select · Export · Import · Test · Transfer, and Save at the far end. Every verb
+ * but Add and Import acts on a SET of rows — the ticked ones in Select mode, the open one
+ * otherwise — which is why the same button reads sensibly with one row or four.
  */
 export function IntegrationsPane({
   ecosystemId,
   providerIds,
   levelTitle = "Integrations",
-  addFilter,
+  workspaceSlug,
+  dialogSurfaceClassName,
   leaf,
   onChanged,
 }: {
@@ -133,16 +154,27 @@ export function IntegrationsPane({
    *  Billing, names the wrong thing three times. */
   levelTitle?: string;
   /**
-   * What the Add-integration picker's filter box starts on — passed straight through. Shipr's
-   * Connections passes `"Code"`, so the picker opens on the forges instead of on the alphabet.
+   * The workspace these integrations are being administered from, as a SLUG — which is what
+   * decides whether the bar offers Transfer at all, and what the list of destinations is read
+   * from (`useTransferTargets`).
    *
-   * Distinct from `providerIds`, which is a restriction: this is a starting value the operator
-   * can see in the box and clear.
+   * Omitted by a host that has no workspace in hand. Transfer is then absent rather than empty:
+   * a disabled button with nothing behind it says "there is nowhere to move this", which is a
+   * claim about the account, and this is a fact about the HOST.
    */
-  addFilter?: string;
+  workspaceSlug?: string;
+  /**
+   * The class a HOST's dialog surface carries, forwarded to the dialogs this pane opens.
+   *
+   * It exists because those dialogs render into a portal on `document.body`, so anything the host
+   * set on its own dialog — shipr sets the shared button floor, `--adh-button-min-*` — cannot
+   * inherit into them. A confirm opened from inside a host's dialog would otherwise be the one
+   * surface in the flow with different buttons. Omitted by a host that styles nothing.
+   */
+  dialogSurfaceClassName?: string;
   /** Accepted for the ScopedPane prop shape; the breadcrumb + level title name the pane now. */
   title?: ReactNode;
-  /** Accepted for the ScopedPane prop shape; there is no button bar to host a "?" popover now. */
+  /** Accepted for the ScopedPane prop shape; the bar has no "?" popover. */
   help?: ReactNode;
   /** Deep-linkable instance selection (`…/integrations/<rdid-or-uuid>`). */
   leaf?: TopicLeaf;
@@ -160,11 +192,18 @@ export function IntegrationsPane({
    * Fired on the SUCCESS path only, never on a rejected write, and never on a rotation that
    * failed — a host uses this to re-read a fact, and re-reading after a failure would just paint
    * the same stale answer with more confidence.
+   *
+   * ALSO FIRED WHEN AN INSTALLATION ADOPT LANDS, which is not a write to a provider config at all
+   * and is here anyway, because it is the same question with a different subject: something about
+   * this ecosystem's integrations is now true that was not true a moment ago, re-read it. Shipr is
+   * the host that needs it — the adopt is what creates the connection rows its repository picker
+   * is a list of, and pressing Test told nobody. A second seam for it would have exactly one
+   * subscriber doing exactly what this one already does.
    */
   onChanged?: () => void;
 }) {
-  // Creating is a MODAL over the stack (HTD `must-create-in-modal`): the `+` opens it, and on
-  // add the new instance is selected so its REAL detail opens once the modal is dismissed.
+  // Creating is a MODAL over the stack (HTD `must-create-in-modal`): the bar's Add opens it, and
+  // on add the new instance is selected so its REAL detail opens once the modal is dismissed.
   const [modalOpen, setModalOpen] = useState(false);
 
   // Cached by ecosystem, so coming back to Integrations paints the rows it already had and
@@ -324,11 +363,12 @@ export function IntegrationsPane({
   }, [visibleConfigRows, providerRows, visibleFetchedCfg]);
 
   // The master/detail machine drives selection (URL-keyed via `leaf`), the selected instance's
-  // draft (seeded from `intToInput` on address change), the pane-exit unsaved-work guard, and the
-  // delete flow. The saved-instance detail (`IntegrationDetailView`) owns its own Save button, so
-  // this pane does NOT render a master-detail Save button bar — the guard's `update` is only the
-  // background exit-save path; `create` is unused (creating is the modal). Delete is a
-  // destructive control in the detail wired to `form.actions.onDelete` + the shared AlertModal.
+  // draft (seeded from `intToInput` on address change) and the pane-exit unsaved-work guard.
+  //
+  // It has NO `remove`/`confirmDelete` any more, and that is the point: deletion is the bar's
+  // Remove, which takes a SET of rows and has to behave identically whether that set is one row
+  // or four. Two delete paths meant two confirmations with two wordings, one of which could only
+  // ever delete the open row. `create` is unused (creating is the modal).
   const form = useMasterDetailForm<MaskedProviderConfig, IntegrationInput>({
     items: rows,
     getId: addressOf,
@@ -357,14 +397,6 @@ export function IntegrationsPane({
         name: input.name.trim(),
         ...intToBody(input, providerById.get(input.providerId)),
       }),
-    // `await`ed rather than returned so `onChanged` fires only once the delete actually resolved —
-    // a rejected delete leaves the row (and any host state derived from it) exactly as it was.
-    remove: async (r) => {
-      await integrationsApi.deleteProviderConfigById(ecosystemId ?? "", r.id);
-      onChanged?.();
-    },
-    confirmDelete: (r) =>
-      `Remove the "${r.name}" integration? This permanently deletes its stored configuration and secret.`,
     refresh: refreshConfigs,
     createLabel: "Add integration",
   });
@@ -378,6 +410,254 @@ export function IntegrationsPane({
     const first = providerById.get(r.providerId)?.serviceTypes?.[0];
     return (first && SERVICE_TYPE_ICONS[first]) || <Plug />;
   };
+
+  // ——— the bar ———————————————————————————————————————————————————————————————————————————
+
+  // Select mode. The reset key is a PRIMITIVE and deliberately not `rows`: a tick set must survive
+  // a background revalidation of the very list it points into, and must NOT survive the pane being
+  // repointed at another ecosystem or narrowed to another provider, where the ticked addresses
+  // name rows that are no longer on screen.
+  const batch = useBatchSelect({ resetKey: `${ecosystemId ?? ""}|${providerFilterKey ?? ""}` });
+  const toggleChecked = useCallback(
+    (id: string) => {
+      const next = new Set(batch.selectedIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      batch.setSelectedIds(next);
+    },
+    [batch],
+  );
+
+  const bulk = useIntegrationBulkActions({
+    ecosystemId: ecosystemId ?? "",
+    providerById,
+    existing: configRows ?? NO_CONFIGS,
+    refresh: refreshConfigs,
+    onChanged,
+  });
+
+  /**
+   * WHAT THE BAR ACTS ON. Ticked rows in Select mode; the open row otherwise.
+   *
+   * One rule for both, rather than a bulk bar and a single bar that happen to share buttons: the
+   * operator who ticks one row and the operator who opens it mean the same thing by "Remove", and
+   * a Remove that silently meant the open row while four were ticked is the accident this avoids.
+   */
+  const targetRows = useMemo<MaskedProviderConfig[]>(() => {
+    if (batch.active) return (rows ?? []).filter((r) => batch.selectedIds.has(addressOf(r)));
+    return cfg ? [cfg] : [];
+  }, [batch.active, batch.selectedIds, rows, cfg]);
+
+  // Only rows the catalog says can be tested — see `provider.testable`, which the backend derives
+  // from the same condition its test route dispatches on. Testing the others would spend a
+  // round-trip to be told the provider has no validation endpoint.
+  const testableRows = useMemo(
+    () => targetRows.filter((r) => providerById.get(r.providerId)?.testable),
+    [targetRows, providerById],
+  );
+
+  const { targets: transferTargets } = useTransferTargets(workspaceSlug, ecosystemId);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferTo, setTransferTo] = useState("");
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const importInput = useRef<HTMLInputElement>(null);
+
+  const barBusy = bulk.busy !== null;
+
+  const confirmRemove = async () => {
+    const removed = new Set(targetRows.map(addressOf));
+    setRemoveOpen(false);
+    await bulk.remove(targetRows);
+    // The open row may be one of the ones that just went. Nothing else clears the selection, and
+    // a `selectedId` naming a deleted address falls through to the by-id read, which answers null
+    // and leaves the pane on its select nudge with the rail still highlighting a ghost.
+    if (selectedId && removed.has(selectedId)) setSelectedId(null);
+    batch.clear();
+  };
+
+  const confirmTransfer = async () => {
+    const target = transferTo;
+    setTransferOpen(false);
+    await bulk.transfer(targetRows, target);
+    // A transferred config answers to a NEW rdid in another ecosystem, so its address here is
+    // gone in exactly the way a deleted one is.
+    setSelectedId(null);
+    batch.clear();
+  };
+
+  /**
+   * The bar, rendered into the rail host's toolbar slot — or in place, on a host that offers no
+   * slot (`ToolbarPortal` falls back to its children).
+   *
+   * A RENDER PROP because exactly one of these may be live at a time: two portals into the same
+   * node stack two toolbars. The `editor` is non-null only while a row is open, and it comes from
+   * {@link SelectedIntegration} — the keyed component that owns the submit/test hooks — because
+   * those hooks cannot be called here: they need a resolved provider and draft, and
+   * `useIntegrationSubmit` captures its baseline once per mount.
+   */
+  const renderBar = (editor: IntegrationEditor | null) => (
+    <ToolbarPortal>
+      <ButtonBar ariaLabel="Integration actions">
+        <Button size="sm" variant="ghost" onClick={() => setModalOpen(true)}>
+          Add
+        </Button>
+        <div className="mx-1 h-5 w-px bg-apt-border" aria-hidden />
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={targetRows.length === 0 || barBusy}
+          onClick={() => setRemoveOpen(true)}
+        >
+          Remove
+        </Button>
+        <BatchSelectButton batch={batch} />
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={targetRows.length === 0 || barBusy}
+          onClick={() => void bulk.exportRows(targetRows)}
+        >
+          Export
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={barBusy || !ecosystemId}
+          onClick={() => importInput.current?.click()}
+        >
+          Import
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          // With one row open and no ticks, Test is the EDITOR's test: it knows about an unsaved
+          // edit ("Save your changes before testing them."), and its answer belongs in the card
+          // beside the credentials it is about. A ticked set has no such card, so it takes the
+          // bulk path and reports in the pane.
+          disabled={
+            editor && !batch.active
+              ? !editor.test.available || editor.test.blockedReason !== null || editor.test.busy
+              : testableRows.length === 0 || barBusy
+          }
+          title={(editor && !batch.active ? editor.test.blockedReason : null) ?? undefined}
+          onClick={() =>
+            void (editor && !batch.active ? editor.test.run() : bulk.test(testableRows))
+          }
+        >
+          Test
+        </Button>
+        {workspaceSlug && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={targetRows.length === 0 || barBusy || (transferTargets?.length ?? 0) === 0}
+            onClick={() => {
+              setTransferTo(transferTargets?.[0]?.ecosystemId ?? "");
+              setTransferOpen(true);
+            }}
+          >
+            Transfer
+          </Button>
+        )}
+        <div className="flex-1" />
+        {editor && (
+          <Button
+            size="sm"
+            disabled={!editor.submit.canSubmit || editor.submit.busy}
+            onClick={() => void editor.submit.run()}
+          >
+            {editor.submit.busy ? editor.submit.busyLabel : editor.submit.label}
+          </Button>
+        )}
+      </ButtonBar>
+    </ToolbarPortal>
+  );
+
+  /**
+   * What the bulk verbs had to say, INLINE in the pane rather than in a dialog.
+   *
+   * This pane is mounted inside shipr's Connections dialog, and a second Dialog over a Dialog is
+   * a stack this does not need to take on for a report nobody has to acknowledge. It is also the
+   * right shape: a test of four integrations is four answers to read side by side, not four
+   * modals to dismiss in turn.
+   */
+  const reports =
+    bulk.error || bulk.testRows || bulk.importReport || bulk.transferReport ? (
+      <div className="flex flex-col gap-3 rounded-lg border border-apt-border p-4">
+        <ErrorText error={bulk.error} />
+        {bulk.transferReport && <p className="text-sm text-apt-green">{bulk.transferReport}</p>}
+        {bulk.testRows?.map((row) => (
+          <div key={row.id} className="flex flex-col gap-1">
+            <p className="text-sm font-medium text-apt-text">{row.name}</p>
+            {row.result ? (
+              <IntegrationTestReport result={row.result} />
+            ) : (
+              <p className="text-sm text-apt-red">{row.error}</p>
+            )}
+          </div>
+        ))}
+        {bulk.importReport && (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-apt-text">
+              {bulk.importReport.created.length === 0
+                ? "Nothing new was imported."
+                : `Imported ${bulk.importReport.created.join(", ")}.`}
+            </p>
+            {/* The list the operator asked to be shown at the end of an import. Duplicates are
+                skipped, not merged — see `splitImport` — so this is the whole account of what
+                the file contained and this ecosystem already had. */}
+            {bulk.importReport.duplicates.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-apt-text-muted">Already here, skipped</p>
+                <ul className="text-xs text-apt-text-muted">
+                  {bulk.importReport.duplicates.map((e) => (
+                    <li key={`${e.providerId} ${e.name}`}>{e.name}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {bulk.importReport.unknownProviders.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-apt-text-muted">
+                  No such provider in this console
+                </p>
+                <ul className="text-xs text-apt-text-muted">
+                  {bulk.importReport.unknownProviders.map((e) => (
+                    <li key={`${e.providerId} ${e.name}`}>
+                      {e.name} ({e.providerId})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {bulk.importReport.failed.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-apt-red">Couldn&rsquo;t be created</p>
+                <ul className="text-xs text-apt-red">
+                  {bulk.importReport.failed.map((f) => (
+                    <li key={f.name}>
+                      {f.name}: {f.error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {/* An import carries no secrets — the API has never echoed one back — so every row it
+                created needs its credential typed in before it will do anything. */}
+            {bulk.importReport.created.length > 0 && (
+              <p className="text-xs text-apt-text-muted">
+                Imported integrations carry no credentials. Open each one and enter its secret.
+              </p>
+            )}
+          </div>
+        )}
+        <div>
+          <Button size="sm" variant="ghost" onClick={bulk.dismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    ) : null;
 
   useMasterDetailLevel({
     id: "integrations-list",
@@ -402,7 +682,12 @@ export function IntegrationsPane({
     // The spinner before "Integrations" — the only thing that says a revalidation is running behind
     // rows the cache already put on screen. Either read repaints these rows, so either one counts.
     busy: configsFetching || catalogFetching,
-    onNew: () => setModalOpen(true),
+    // The rail's `+` is GONE: the bar above it has a labelled Add, and two creators in one field
+    // of view — one of them a bare glyph — is one more than anybody can name.
+    showNew: false,
+    checkable: batch.active,
+    checkedIds: batch.selectedIds,
+    onToggleChecked: toggleChecked,
   });
 
   return (
@@ -423,21 +708,23 @@ export function IntegrationsPane({
                 })}
               </div>
             )}
-            <IntegrationDetailView
+            <SelectedIntegration
+              // Per ROW, because `useIntegrationSubmit` captures its baseline once per mount:
+              // without this, switching rows would compare the new row's draft against the old
+              // row's stored values and Save would be enabled (or greyed) on the wrong evidence.
               key={addressOf(cfg)}
               provider={provider}
               ecosystemId={ecosystemId ?? ""}
-              mode="saved"
               config={cfg}
               draft={form.draft}
               onChange={form.onChange}
-              // IntegrationDetailView owns Save and hands back the saved row directly, bypassing
-              // the master-detail `form` — so its built-in re-hydrate-draft-from-saved-entity
-              // never runs. Without this, a freshly-saved secret leaves `form.draft`'s secret
-              // field holding the just-typed value while a re-derived baseline reads it blank
-              // (secrets are never echoed back), so `intDiffers` stays true forever and the
-              // pane-exit guard false-prompts "unsaved changes" on the next navigation. Reset the
-              // draft here so it matches what the toolkit's own save() does.
+              // The detail owns Save and hands back the saved row directly, bypassing the
+              // master-detail `form` — so its built-in re-hydrate-draft-from-saved-entity never
+              // runs. Without this, a freshly-saved secret leaves `form.draft`'s secret field
+              // holding the just-typed value while a re-derived baseline reads it blank (secrets
+              // are never echoed back), so `intDiffers` stays true forever and the pane-exit
+              // guard false-prompts "unsaved changes" on the next navigation. Reset the draft
+              // here so it matches what the toolkit's own save() does.
               onSaved={(row) => {
                 void refreshConfigs();
                 form.onChange(intToInput(row, provider));
@@ -450,18 +737,13 @@ export function IntegrationsPane({
                 void refreshConfigs();
                 onChanged?.();
               }}
+              // Test, or the download a save fires behind itself, has finished enumerating the
+              // provider's accounts. No config row moved, so the list is not re-read — but the
+              // host's account-derived state did, and this is the only thing that says so.
+              onAdopted={() => onChanged?.()}
+              renderBar={renderBar}
+              reports={reports}
             />
-            <div className="flex flex-col gap-2 border-t border-apt-border pt-6">
-              <div>
-                <Button variant="destructive" onClick={() => form.actions.onDelete()}>
-                  Remove integration
-                </Button>
-              </div>
-              <p className="text-xs text-apt-text-muted">
-                Deletes this integration and its stored credentials. Connected accounts are
-                removed separately, via Disconnect.
-              </p>
-            </div>
           </div>
         ) : // `selectedId`, not `leaf?.leafId` — see the dual-mode hook above. With a row selected
         // and only the CATALOG still loading, the leaf-only test fell through to the select nudge
@@ -474,19 +756,44 @@ export function IntegrationsPane({
         ) : configRows === null ? (
           <EmptyState title="Loading…" />
         ) : (
-          // Nothing selected and the list loaded: the almost-empty centered select-nudge, not a
-          // dashed EmptyState — matches the workspace/feature rail's TopicSelectHint so an
-          // unselected leaf reads the same everywhere.
-          <TopicSelectHint title="Select an integration to configure, or add one." />
+          // Nothing selected and the list loaded. The bar is published from HERE in that case —
+          // it is the pane's, not the editor's, and Select/Export/Import/Test have to work with
+          // no row open at all.
+          <div className="flex min-h-0 flex-1 flex-col gap-6">
+            {renderBar(null)}
+            {reports}
+            <TopicSelectHint title="Select an integration to configure, or add one." />
+          </div>
         )}
       </div>
 
+      {/* The import file picker. A bare native input rather than a control, because there is no
+          styled file input in the shared package and this one is never seen: the bar's Import
+          button clicks it. `value` is cleared on every change so that re-picking THE SAME file
+          fires `change` again — a fixed export re-imported is the ordinary second attempt. */}
+      <input
+        ref={importInput}
+        type="file"
+        accept="application/json,.json"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void bulk.importFile(file);
+        }}
+      />
+
       <AddIntegrationModal
+        dialogSurfaceClassName={dialogSurfaceClassName}
         open={modalOpen}
         onOpenChange={setModalOpen}
         ecosystemId={ecosystemId ?? ""}
         providers={offerableProviders}
-        initialFilter={addFilter}
+        // The add's own background installation download has landed. `onAdded` already fired
+        // — minutes earlier in forge time — and the host re-read its connection list then,
+        // before this integration had a connection to find. THIS is the second read, and it
+        // is the one that returns the new account.
+        onAdopted={() => onChanged?.()}
         // Do NOT close the modal here — it stays open so the user can add another; it closes via
         // its own ✕/Escape. Selecting the new address means the created instance's detail is
         // showing once they DO close it.
@@ -502,19 +809,140 @@ export function IntegrationsPane({
         }}
       />
 
-      {/* Delete confirm — the shared AlertModal, driven by the master-detail form's delete flow. */}
+      {/* Remove confirm — the one deletion path, for one row or four. */}
       <AlertModal
-        open={form.actions.deletePrompt != null}
+        contentClassName={dialogSurfaceClassName}
+        open={removeOpen}
         tone="error"
         title="Confirm deletion"
-        description={form.actions.deletePrompt ?? undefined}
+        description={
+          targetRows.length === 1
+            ? `Remove the "${targetRows[0]!.name}" integration? This permanently deletes its stored configuration and secret.`
+            : `Remove ${targetRows.length} integrations? This permanently deletes their stored configurations and secrets.`
+        }
         confirmLabel="Delete"
         confirmVariant="destructive"
+        destructive
         cancelLabel="Cancel"
-        busy={form.actions.deleting}
-        onConfirm={() => form.actions.onConfirmDelete?.()}
-        onCancel={() => form.actions.onCancelDelete?.()}
+        busy={bulk.busy === "remove"}
+        onConfirm={() => void confirmRemove()}
+        onCancel={() => setRemoveOpen(false)}
+      />
+
+      {/* Transfer confirm. The destination chooser is in the BODY, and the actions stay Transfer
+          and Cancel — a transfer with nowhere named is not a thing to confirm, and a chooser
+          parked in the button bar for a verb used twice a year is clutter on every other day. */}
+      <AlertModal
+        contentClassName={dialogSurfaceClassName}
+        open={transferOpen}
+        title="Transfer integrations"
+        description={
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-apt-text">
+              {targetRows.length === 1
+                ? `Move "${targetRows[0]?.name ?? ""}" — with its connected accounts — to:`
+                : `Move ${targetRows.length} integrations — with their connected accounts — to:`}
+            </p>
+            <Select
+              id="int-transfer-target"
+              value={transferTo}
+              onChange={(e) => setTransferTo(e.target.value)}
+            >
+              {(transferTargets ?? []).map((t) => (
+                <option key={t.ecosystemId} value={t.ecosystemId}>
+                  {t.label} — {t.sublabel}
+                </option>
+              ))}
+            </Select>
+          </div>
+        }
+        confirmLabel="Transfer"
+        cancelLabel="Cancel"
+        busy={bulk.busy === "transfer"}
+        onConfirm={() => void confirmTransfer()}
+        onCancel={() => setTransferOpen(false)}
       />
     </div>
+  );
+}
+
+/**
+ * THE OPEN ROW — its two hooks, its button bar, and its cards.
+ *
+ * A component rather than three calls in the pane, for one reason that is not style:
+ * `useIntegrationSubmit` captures the stored baseline ONCE per mount, so the thing that composes
+ * it has to be remounted per row (`key={addressOf(cfg)}` above). It also needs a resolved
+ * provider and a non-null draft, neither of which the pane has on every render — and hooks
+ * cannot be called conditionally.
+ *
+ * It renders the bar as well as the body because the bar's Save and Test are ITS state, and
+ * because exactly one `ToolbarPortal` may be live: the pane renders the other one, in the branch
+ * where no row is open.
+ */
+function SelectedIntegration({
+  provider,
+  ecosystemId,
+  config,
+  draft,
+  onChange,
+  onSaved,
+  onRotated,
+  onAdopted,
+  renderBar,
+  reports,
+}: {
+  provider: ProviderCatalogEntry;
+  ecosystemId: string;
+  config: MaskedProviderConfig;
+  draft: IntegrationInput;
+  onChange: (next: IntegrationInput) => void;
+  onSaved: (row: MaskedProviderConfig) => void;
+  onRotated: () => void;
+  onAdopted: () => void;
+  renderBar: (editor: IntegrationEditor) => ReactNode;
+  reports: ReactNode;
+}) {
+  const submit = useIntegrationSubmit({
+    provider,
+    ecosystemId,
+    mode: "saved",
+    config,
+    draft,
+    onChange,
+    onSaved,
+    onAdopted,
+  });
+  const test = useIntegrationTest({
+    provider,
+    ecosystemId,
+    mode: "saved",
+    config,
+    draft,
+    dirty: submit.dirty,
+    onAdopted,
+  });
+
+  return (
+    <>
+      {renderBar({ submit, test })}
+      {reports}
+      <IntegrationDetailBody
+        provider={provider}
+        ecosystemId={ecosystemId}
+        mode="saved"
+        config={config}
+        draft={draft}
+        onChange={onChange}
+        onRotated={onRotated}
+        onAdopted={onAdopted}
+        submit={submit}
+        test={test}
+        // Both buttons are in the bar above the list now. What stays here either way is what the
+        // provider ANSWERED and why a button is grey — both are about these fields, and an
+        // explanation orphaned from the field that caused it explains nothing.
+        hideSubmit
+        hideTest
+      />
+    </>
   );
 }

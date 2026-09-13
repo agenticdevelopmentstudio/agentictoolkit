@@ -53,12 +53,16 @@ const {
   createProviderConfig,
   adoptInstallations,
   listConnections,
+  testProviderConfig,
+  testProviderCredentials,
 } = vi.hoisted(() => ({
   getInstallUrl: vi.fn(),
   updateProviderConfig: vi.fn(),
   createProviderConfig: vi.fn(),
   adoptInstallations: vi.fn(),
   listConnections: vi.fn(),
+  testProviderConfig: vi.fn(),
+  testProviderCredentials: vi.fn(),
 }));
 vi.mock("@agentic-toolkit/data/integrations", () => ({
   integrationsApi: {
@@ -67,6 +71,8 @@ vi.mock("@agentic-toolkit/data/integrations", () => ({
     createProviderConfig,
     adoptInstallations,
     listConnections,
+    testProviderConfig,
+    testProviderCredentials,
   },
   oauthCallbackUrl: () => "https://app.example.test/integrations/oauth-callback",
 }));
@@ -84,9 +90,15 @@ beforeEach(() => {
   createProviderConfig.mockReset();
   adoptInstallations.mockReset();
   listConnections.mockReset();
+  testProviderConfig.mockReset();
+  testProviderCredentials.mockReset();
   // The default for the tests that are about the FORM: nothing installed, nothing connected.
   // Each connect test states its own.
   adoptInstallations.mockResolvedValue({ connected: [], skipped: [] });
+  // The prose is the BACKEND's now — these two answer with what it answered, and the assertions
+  // below are about which call was made and how its answer is drawn, never about the wording.
+  testProviderConfig.mockResolvedValue({ ok: true, summary: "Tested.", notes: [] });
+  testProviderCredentials.mockResolvedValue({ ok: true, summary: "Tested.", notes: [] });
   listConnections.mockResolvedValue([]);
   sessionStorage.clear();
 });
@@ -108,6 +120,9 @@ const GITHUB_APP: ProviderCatalogEntry = {
   serviceTypes: ["code"],
   capabilities: ["read", "write"],
   defaultPollIntervalMs: 3_600_000,
+  // Published by the catalog, never re-derived here. It is the ONLY thing that decides whether a
+  // Test button is drawn — see `useIntegrationTest` — so a fixture that omits it draws none.
+  testable: true,
 };
 
 const SAVED: MaskedProviderConfig = {
@@ -124,9 +139,11 @@ const SAVED: MaskedProviderConfig = {
 function SavedForm({
   provider = GITHUB_APP,
   config = SAVED,
+  onAdopted,
 }: {
   provider?: ProviderCatalogEntry;
   config?: MaskedProviderConfig;
+  onAdopted?: () => void;
 }) {
   const [draft, setDraft] = useState<IntegrationInput>(() => intToInput(config, provider));
   return (
@@ -138,6 +155,7 @@ function SavedForm({
       draft={draft}
       onChange={setDraft}
       onSaved={(row) => setDraft(intToInput(row, provider))}
+      onAdopted={onAdopted}
     />
   );
 }
@@ -303,131 +321,138 @@ describe("saving the app, and the download that rides along", () => {
     expect(updateProviderConfig).not.toHaveBeenCalled();
   });
 
-  it("offers no Test button on a form with nothing saved yet", () => {
+  it("tests the DRAFT on a form with nothing saved yet, and writes nothing", async () => {
     render(<AddForm />);
     fillTheApp();
-    // Test asks about STORED credentials. Before the first save there are none, so the button
-    // would either lie about what it tested or fail on a config id that does not exist.
-    expect(screen.queryByRole("button", { name: "Test" })).toBeNull();
+
+    // There used to be no button here at all, on the argument that Test asks about STORED
+    // credentials and before the first save there are none. The argument was about the CALL, not
+    // about the question: `test-credentials` probes what is typed and writes no config, no
+    // connection and no cache — so the answer is about exactly the key on the screen, which is
+    // the one thing the operator wants to know before committing it.
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    await waitFor(() =>
+      expect(testProviderCredentials).toHaveBeenCalledWith("github-app", {
+        ecosystemId: "eco-1",
+        clientId: "123456",
+        clientSecret: "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----",
+        fields: undefined,
+        providerConfigId: undefined,
+      }),
+    );
+    // A probe, not a save: nothing was created by pressing it.
+    expect(createProviderConfig).not.toHaveBeenCalled();
+    expect(adoptInstallations).not.toHaveBeenCalled();
+  });
+
+  it("will not probe a draft with no credential in it", () => {
+    render(<AddForm />);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "ADH deploys" } });
+
+    const test = screen.getByRole("button", { name: "Test" }) as HTMLButtonElement;
+    expect(test.disabled).toBe(true);
+    expect(screen.getByText("Enter a credential to test.")).toBeTruthy();
+    fireEvent.click(test);
+    expect(testProviderCredentials).not.toHaveBeenCalled();
   });
 });
 
 describe("the Test button", () => {
-  it("downloads the installations and names them", async () => {
-    adoptInstallations.mockResolvedValue({
-      connected: [
-        { installationId: "99", accountLogin: "acme", targetType: "Organization" },
-        { installationId: "100", accountLogin: "someone", targetType: "User" },
-      ],
-      skipped: [],
+  it("asks the backend about the STORED credentials and shows what it said", async () => {
+    testProviderConfig.mockResolvedValue({
+      ok: true,
+      summary: "2 accounts reachable.",
+      notes: ["Connected acme.", "someone was already connected."],
     });
 
     render(<SavedForm />);
-    // Nothing has reached GitHub yet: opening an integration is not a question anyone asked.
+    // Nothing has reached the backend yet: opening an integration is not a question anyone asked.
+    expect(testProviderConfig).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText("2 accounts reachable.")).toBeTruthy();
+    // Every supporting line is shown too. They are the part that names the accounts, and an
+    // operator who reads only the summary cannot tell WHICH four of five came back.
+    expect(screen.getByText("Connected acme.")).toBeTruthy();
+    expect(screen.getByText("someone was already connected.")).toBeTruthy();
+    expect(testProviderConfig).toHaveBeenCalledWith("eco-1", "cfg-1");
+  });
+
+  it("says nothing of its own about what came back", async () => {
+    // THE SENTENCE IS THE BACKEND'S, and this is the assertion that keeps it there. The console
+    // used to assemble it from the adopt's connected/skipped rows — a second copy of a rule the
+    // server already had, which then had to be kept in step with it by hand and was not.
+    testProviderConfig.mockResolvedValue({
+      ok: true,
+      summary: "The app isn't installed on any account yet.",
+      notes: [],
+    });
+
+    render(<SavedForm />);
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText("The app isn't installed on any account yet.")).toBeTruthy();
     expect(adoptInstallations).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Test" }));
-
-    expect(await screen.findByText(/Connected acme, someone\./)).toBeTruthy();
-    expect(adoptInstallations).toHaveBeenCalledWith("github-app", {
-      ecosystemId: "eco-1",
-      providerConfigId: "cfg-1",
-    });
   });
 
-  it("says what was already connected rather than reporting it as new", async () => {
-    adoptInstallations.mockResolvedValue({
-      connected: [],
-      // A skip that carries a connectionId is one THIS ecosystem already holds — re-testing a
-      // working integration has to read as a no-op, not as a failure to connect.
-      skipped: [
-        {
-          installationId: "99",
-          accountLogin: "acme",
-          targetType: "Organization",
-          connectionId: "conn-1",
-          skipped: "already connected",
-        },
-      ],
+  it("draws a refusal as a refusal, not as a neutral status line", async () => {
+    // `ok: false` resolves rather than throwing, so that "Test selected" over four integrations
+    // renders four results instead of one exception. That makes it easy to draw a rejected key
+    // in the same grey as a successful one, which is the failure this guards.
+    testProviderConfig.mockResolvedValue({
+      ok: false,
+      summary: "GitHub refused these credentials: 401 Bad credentials",
+      notes: [],
     });
 
     render(<SavedForm />);
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
 
-    expect(await screen.findByText(/acme was already connected\./)).toBeTruthy();
+    const said = await screen.findByText("GitHub refused these credentials: 401 Bad credentials");
+    expect(said.className).toContain("text-apt-red");
   });
 
-  it("distinguishes credentials that work from an app installed nowhere", async () => {
-    // Valid credentials, no installations. GitHub answered, so this is not an error — it is a
-    // true answer with its own fix, and stating it as a failure would send the operator back to
-    // a private key that was never the problem.
-    adoptInstallations.mockResolvedValue({ connected: [], skipped: [] });
-
-    render(<SavedForm />);
-    fireEvent.click(screen.getByRole("button", { name: "Test" }));
-
-    expect(await screen.findByText(/isn't installed on any account yet/)).toBeTruthy();
-  });
-
-  it("carries GitHub's own words when the key is refused", async () => {
-    adoptInstallations.mockRejectedValue(new Error("401 A JSON web token could not be decoded"));
-
-    render(<SavedForm />);
-    fireEvent.click(screen.getByRole("button", { name: "Test" }));
-
-    expect(await screen.findByText(/401 A JSON web token could not be decoded/)).toBeTruthy();
-  });
-
-  it("says a connection stands even when its repository list did not come down", async () => {
-    // The connection was made. Only the download behind it failed, so this is a warning on a
-    // CONNECTED installation and not a skip — reporting it as a skip would send an operator to
-    // fix an integration that is fine, and would make the connected count wrong.
-    adoptInstallations.mockResolvedValue({
-      connected: [
-        {
-          installationId: "99",
-          accountLogin: "acme",
-          targetType: "Organization",
-          connectionId: "conn-1",
-          warning: "GitHub refused to list the installation repositories: 503",
-        },
-      ],
-      skipped: [],
+  it("tells the host to re-read its accounts when the test adopted some", async () => {
+    // Test is not a read-only probe for a GitHub App: the call it makes is the one that CREATES
+    // the connection rows. Four integrations added briskly showed two in the repository picker
+    // because nothing said so. `adopted` is the backend saying it happened.
+    testProviderConfig.mockResolvedValue({
+      ok: true,
+      summary: "1 account reachable.",
+      notes: ["Connected acme."],
+      adopted: { connected: [{ installationId: "99", accountLogin: "acme", targetType: "Organization" }], skipped: [] },
     });
+    const adopted = vi.fn();
 
-    render(<SavedForm />);
+    render(<SavedForm onAdopted={adopted} />);
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
 
-    expect(await screen.findByText(/Connected acme\./)).toBeTruthy();
-    // Said out loud HERE, because the next thing that happens is somebody opening the picker,
-    // and finding out there why it is empty is finding out too late.
-    expect(
-      screen.getByText(/acme is connected, but its repository list could not be downloaded: GitHub refused to list the installation repositories: 503/),
-    ).toBeTruthy();
+    await waitFor(() => expect(adopted).toHaveBeenCalled());
   });
 
-  it("says the same about one that was already connected", async () => {
-    // Re-testing a working integration is exactly when a stale list is most likely, so the
-    // warning has to survive the already-connected path too.
-    adoptInstallations.mockResolvedValue({
-      connected: [],
-      skipped: [
-        {
-          installationId: "99",
-          accountLogin: "acme",
-          targetType: "Organization",
-          connectionId: "conn-1",
-          skipped: "already connected",
-          warning: "GitHub refused to list the installation repositories: 503",
-        },
-      ],
-    });
+  it("stays quiet when there was nothing to adopt", async () => {
+    // A provider whose test is a plain credential probe — Vercel's, say — writes nothing, so a
+    // host that re-read its connection list on every Test would be re-reading it for nothing.
+    testProviderConfig.mockResolvedValue({ ok: true, summary: "Vercel accepted these.", notes: [] });
+    const adopted = vi.fn();
+
+    render(<SavedForm onAdopted={adopted} />);
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText("Vercel accepted these.")).toBeTruthy();
+    expect(adopted).not.toHaveBeenCalled();
+  });
+
+  it("reports a request that could not be made at all as an error", async () => {
+    // The other half of the shape: a refused CREDENTIAL is a result, a broken REQUEST is not.
+    testProviderConfig.mockRejectedValue(new Error("integration not found"));
 
     render(<SavedForm />);
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
 
-    expect(await screen.findByText(/acme was already connected\./)).toBeTruthy();
-    expect(screen.getByText(/its repository list could not be downloaded/)).toBeTruthy();
+    expect(await screen.findByText(/integration not found/)).toBeTruthy();
   });
 
   it("will not test a key the backend has never seen", async () => {
@@ -437,12 +462,21 @@ describe("the Test button", () => {
     });
 
     // Testing what is typed rather than what is stored would report on credentials that do not
-    // exist yet, and nothing on screen would say which of the two the answer was about.
+    // exist yet, and nothing on screen would say which of the two the answer was about. (The Add
+    // dialog CAN test a draft — but it probes, and there is no stored key there to confuse it with.)
     const test = screen.getByRole("button", { name: "Test" }) as HTMLButtonElement;
     expect(test.disabled).toBe(true);
     expect(screen.getByText("Save your changes before testing them.")).toBeTruthy();
     fireEvent.click(test);
-    expect(adoptInstallations).not.toHaveBeenCalled();
+    expect(testProviderConfig).not.toHaveBeenCalled();
+  });
+
+  it("draws no Test button for a provider the catalog cannot test", () => {
+    // The console keeps no list of which providers have a test. It used to — spelled
+    // `authMethod === "github_app"` — and that list was wrong about Vercel, which has declared a
+    // validation endpoint all along and simply had no button.
+    render(<SavedForm provider={{ ...GITHUB_APP, testable: false }} />);
+    expect(screen.queryByRole("button", { name: "Test" })).toBeNull();
   });
 });
 
