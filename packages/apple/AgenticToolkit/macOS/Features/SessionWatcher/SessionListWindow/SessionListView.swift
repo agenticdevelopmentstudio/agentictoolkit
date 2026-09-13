@@ -278,6 +278,31 @@ extension SessionWatcher {
 
         private let isFrontmostSession: Bool
 
+        /// Horizontal compression-resistance priorities for the row's text, in the
+        /// order they give way: the agent's last output and the AI summary first
+        /// (both are arbitrarily long prose), then the session name, then the
+        /// branch, and the project name last — it is the segment that identifies
+        /// the row, so it survives longest.
+        ///
+        /// Every one of them sits **below** `.fittingSizeCompression` (50), and that
+        /// is the whole point. A label's compression resistance is not only about
+        /// what gives way inside a fixed width; it is also a vote in
+        /// `fittingSize`, which is what AppKit uses to derive a window's minimum
+        /// content width. `lineBreakMode = .byTruncatingTail` says *how* to draw a
+        /// squeezed label, never that it is willing to be squeezed — so a label at
+        /// any priority above 50 demands its full intrinsic width there, and a
+        /// single long `last_output` line dragged the Sessions window out to forty
+        /// thousand points wide. Below 50 these labels abstain from the fitting
+        /// width, the window's minimum comes from its own `minSize`, and the
+        /// truncation order above still holds at every real width.
+        private enum TextPriority {
+            static let project = NSLayoutConstraint.Priority(rawValue: 49)
+            static let branch = NSLayoutConstraint.Priority(rawValue: 40)
+            static let sessionName = NSLayoutConstraint.Priority(rawValue: 30)
+            static let output = NSLayoutConstraint.Priority(rawValue: 20)
+            static let summary = NSLayoutConstraint.Priority(rawValue: 10)
+        }
+
         public init(
             session: SessionWatcherSession,
             onTap: ((SessionWatcherSession) -> Void)?,
@@ -403,7 +428,7 @@ extension SessionWatcher {
             let projLabel = NSTextField(labelWithString: session.projectGroupName)
             projLabel.lineBreakMode = .byTruncatingTail
             projLabel.maximumNumberOfLines = 1
-            projLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            projLabel.setContentCompressionResistancePriority(TextPriority.project, for: .horizontal)
             headerRow.addArrangedSubview(projLabel)
             projectLabel = projLabel
 
@@ -422,7 +447,7 @@ extension SessionWatcher {
                 // In a narrow window the session name gives way first, then the
                 // branch; the project name is the segment that must survive.
                 lbl.setContentCompressionResistancePriority(
-                    index == 0 ? .init(rawValue: 240) : .defaultLow,
+                    index == 0 ? TextPriority.branch : TextPriority.sessionName,
                     for: .horizontal
                 )
                 headerRow.addArrangedSubview(lbl)
@@ -446,6 +471,7 @@ extension SessionWatcher {
             let outputLbl = NSTextField(labelWithString: Self.outputText(for: session))
             outputLbl.lineBreakMode = .byTruncatingTail
             outputLbl.maximumNumberOfLines = 1
+            outputLbl.setContentCompressionResistancePriority(TextPriority.output, for: .horizontal)
             outputLbl.translatesAutoresizingMaskIntoConstraints = false
             addSubview(outputLbl)
             outputLabel = outputLbl
@@ -461,6 +487,7 @@ extension SessionWatcher {
                 let summaryLbl = NSTextField(wrappingLabelWithString: summaryText())
                 summaryLbl.maximumNumberOfLines = 2
                 summaryLbl.lineBreakMode = .byTruncatingTail
+                summaryLbl.setContentCompressionResistancePriority(TextPriority.summary, for: .horizontal)
                 summaryLbl.translatesAutoresizingMaskIntoConstraints = false
                 addSubview(summaryLbl)
                 summaryLabel = summaryLbl
