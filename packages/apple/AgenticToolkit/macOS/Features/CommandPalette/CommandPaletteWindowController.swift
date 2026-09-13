@@ -124,7 +124,7 @@ public final class CommandPaletteWindowController: NSWindowController {
         // back to whichever window of this app held it last — which, now that
         // resigning key closes the palette, would shut it again the instant it
         // opened.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         paletteController.focusSearchField()

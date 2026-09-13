@@ -545,8 +545,7 @@ public extension SingletonWindowController {
     static func present() {
         ensureCurrent()
         current?.showWindow()
-        guard !QuietWindowPresentation.isEnabled else { return }
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
     }
 
     /// True while the shared window exists and is on screen. Never creates it.

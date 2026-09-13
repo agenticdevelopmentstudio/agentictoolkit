@@ -69,6 +69,6 @@ public final class SystemWindowReconcileWindowController: SingleWindowController
         super.showWindow()
         // Bring the app forward so the prompt takes focus from a menu-bar
         // accessory host.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
     }
 }

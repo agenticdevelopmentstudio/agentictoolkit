@@ -59,7 +59,7 @@ public final class ProjectChooserWindow: NSWindowController, NSWindowDelegate {
     public func runModal() -> GitRepo? {
         guard let window else { return nil }
         // A menu bar app is often not the active app when this is asked for.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
         window.makeKeyAndOrderFront(nil)
         NSApp.runModal(for: window)
         window.orderOut(nil)

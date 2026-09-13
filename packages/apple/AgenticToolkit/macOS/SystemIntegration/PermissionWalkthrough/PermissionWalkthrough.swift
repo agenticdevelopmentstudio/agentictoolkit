@@ -221,7 +221,7 @@ public final class PermissionWalkthrough: AppFeature {
         // by. Without this the modal session can begin behind whatever app is
         // frontmost, and the user meets an app that has stopped answering its
         // status item with nothing on screen to say why.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
         alert.runModal()
     }
 

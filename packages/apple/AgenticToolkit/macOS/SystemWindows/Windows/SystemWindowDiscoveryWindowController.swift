@@ -41,7 +41,7 @@ public final class SystemWindowDiscoveryWindowController: SingleWindowController
         super.showWindow()
         // Bring the app forward so the window takes focus from a menu-bar
         // accessory host.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
         // Let the window settle before the explorer enumerates windows, so the
         // discovery window itself isn't captured in the snapshot.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

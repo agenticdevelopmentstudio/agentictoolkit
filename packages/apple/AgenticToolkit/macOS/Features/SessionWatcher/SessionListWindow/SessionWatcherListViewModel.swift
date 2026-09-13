@@ -398,7 +398,7 @@ extension SessionWatcher {
                 log.append("=== Results: \(passCount) passed, \(failCount) failed ===")
 
                 DispatchQueue.main.async {
-                    NSApp.activate(ignoringOtherApps: true)
+                    NSApp.activateUnlessQuiet()
                     let logPath = ActivationTestLog.whippetShared.logPath ?? "(no path)"
                     self.lastActionError =
                         "Test: \(passCount) passed, \(failCount) failed — see \(logPath)"

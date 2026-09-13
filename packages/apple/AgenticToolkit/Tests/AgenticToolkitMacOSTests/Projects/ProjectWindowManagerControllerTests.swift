@@ -110,6 +110,47 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         XCTAssertNil(manager.projectController(for: repo.id))
     }
 
+    /// A project window is the app's workspace, and the user asking for one
+    /// means putting it in front of them — `makeKeyAndOrderFront` is
+    /// window-scoped, so in a menubar host it leaves the menu bar and the next
+    /// keystroke with whatever application was already active.
+    ///
+    /// Asked of the seam rather than of `NSApp`: the call declines under quiet
+    /// presentation, which a test host always is, so watching `NSApp.isActive`
+    /// would only ever confirm the branch that was never in doubt.
+    func testOpeningAProjectAsksForTheForeground() async throws {
+        let database = try ProjectDatabase(path: repoRoot.appendingPathComponent(".test-project.db").path)
+        let repo = GitRepo(path: repoRoot.path, name: "fixture")
+        try database.insert(repo)
+        let coordinator = try ProjectsCoordinator(database: database, scanner: nil, commandRegistry: CommandRegistry())
+        let manager = ProjectWindowManager()
+        manager.attach(to: coordinator)
+        manager.gitClient = GitClient(configuration: .default)
+        var activations = 0
+        manager.activateApp = { activations += 1 }
+
+        manager.openProject(repo)
+        XCTAssertEqual(activations, 1, "a new project window comes to the front")
+
+        // `open()` runs in a task the manager starts; let it land before the
+        // second open, so the already-open branch is reached with the window
+        // fully built rather than mid-scan.
+        let controller = try XCTUnwrap(manager.projectController(for: repo.id))
+        let deadline = Date().addingTimeInterval(5)
+        while controller.workspace.storedTabs() == nil, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        // The second open finds the window already there and returns early —
+        // which is exactly where the ask used to be missing, so re-opening an
+        // open project raised it behind the frontmost app and read as nothing
+        // having happened.
+        manager.openProject(repo)
+        XCTAssertEqual(activations, 2, "so does a project that is already open")
+
+        manager.closeProject(repoID: repo.id)
+    }
+
     /// A window regaining key status re-scans worktrees, so a checkout added
     /// or removed in a terminal while the window sat in the background shows
     /// up without a relaunch.

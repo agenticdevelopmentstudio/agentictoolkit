@@ -40,6 +40,6 @@ public final class SystemWindowSettingsWindowController: SingleWindowController 
         super.showWindow()
         // Bring the app forward so the settings window takes focus from a
         // menu-bar accessory host.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
     }
 }

@@ -61,7 +61,7 @@ extension ComposableSettings {
         }
 
         public func showWindow() {
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activateUnlessQuiet()
             settingsWindow.showWindow()
         }
 

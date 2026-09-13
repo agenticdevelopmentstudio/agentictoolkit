@@ -64,7 +64,7 @@ public final class SystemWindowContextPickerPanel: NSPanel {
 
         // Bring the app temporarily to the foreground so the panel can receive
         // key events even when the host runs as a menu-bar accessory.
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
     }
 
     public override var canBecomeKey: Bool { true }

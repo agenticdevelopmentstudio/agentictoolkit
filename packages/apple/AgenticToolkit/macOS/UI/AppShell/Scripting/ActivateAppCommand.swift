@@ -6,7 +6,7 @@ import AppKit
 @objc(ActivateAppCommand)
 public final class ActivateAppCommand: MainActorScriptCommand, @unchecked Sendable {
     public override func performMain() -> Any? {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateUnlessQuiet()
         return nil
     }
 }

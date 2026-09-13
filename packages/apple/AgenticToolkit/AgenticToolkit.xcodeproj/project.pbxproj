@@ -474,6 +474,7 @@
 		643E9AC1ACA4DC63E0391D56 /* SessionWatcherClickAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 795C17464A3E6EFE9B6E6EF9 /* SessionWatcherClickAction.swift */; };
 		648501CD6BD93DC814CBB89D /* WindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86A0358BA20B02FF69A28CFF /* WindowController.swift */; };
 		65440185D4A0757885DF2F10 /* NSColor+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 690A3F776886927C6C0E93A0 /* NSColor+Hex.swift */; };
+		65A15545C534DFC3FEBCFA3D /* NSApplication+QuietActivation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65803E4A6DF9DF962896D1A5 /* NSApplication+QuietActivation.swift */; };
 		65A4B1BF9ADD768DC0C66BB9 /* UserSettings+SessionWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83891226E4E59687EFD31663 /* UserSettings+SessionWatcher.swift */; };
 		65BC4AFED3A51A4BF9767AFD /* CaptionedSliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53642ACF172CFEC27284CADD /* CaptionedSliderView.swift */; };
 		664F8F60BCAC920B2BF060D3 /* FontPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A6CCA7870DBDB74A35168A /* FontPickerView.swift */; };
@@ -2383,6 +2384,7 @@
 		64A98A60FFB1917014F3BD5A /* TerminalSessionWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionWindowController.swift; sourceTree = "<group>"; };
 		64CFB7C3F73E90A169AB0F8F /* JSONCPreprocessorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONCPreprocessorTests.swift; sourceTree = "<group>"; };
 		64D9D12E6D1FA5ED6AB1483D /* HTDVLayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVLayoutEngine.swift; sourceTree = "<group>"; };
+		65803E4A6DF9DF962896D1A5 /* NSApplication+QuietActivation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSApplication+QuietActivation.swift"; sourceTree = "<group>"; };
 		65AD1E929AB88513FB11E84F /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
 		65E84C2ED0A1658E6689EA0B /* InMemorySettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemorySettingsStoreTests.swift; sourceTree = "<group>"; };
 		662B67B704A33E2846E02889 /* TerminalSessionGitBranchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionGitBranchTests.swift; sourceTree = "<group>"; };
@@ -5359,6 +5361,7 @@
 			isa = PBXGroup;
 			children = (
 				6A3B699FF6B9A6EB0F71697F /* DebugLaunchSwitch.swift */,
+				65803E4A6DF9DF962896D1A5 /* NSApplication+QuietActivation.swift */,
 				5908B865EDE4348E6FDC3A12 /* QuietWindowPresentation.swift */,
 			);
 			path = DebugAutomation;
@@ -7157,6 +7160,7 @@
 				C7F03C965556F0C669394526 /* MultiChoiceFilterButton.swift in Sources */,
 				96541B499E4F6C8328CEC8C7 /* MultiTabbedViewController.swift in Sources */,
 				24B34FACDE15F9F3180FB988 /* MultiTabbedViewControllerDelegate.swift in Sources */,
+				65A15545C534DFC3FEBCFA3D /* NSApplication+QuietActivation.swift in Sources */,
 				65440185D4A0757885DF2F10 /* NSColor+Hex.swift in Sources */,
 				B93F66A6AD3191463E8DD9F3 /* NSStackView+FullWidth.swift in Sources */,
 				F963FBEF37B1FAD6EDEAD089 /* NSWindow+TestHostVisibility.swift in Sources */,

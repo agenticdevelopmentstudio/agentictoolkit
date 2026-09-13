@@ -109,6 +109,15 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
     /// merely losing focus.
     public var onProjectClosed: (@MainActor (ProjectWorkspace) -> Void)?
 
+    /// How this manager brings the app forward when a project window opens.
+    ///
+    /// A seam, not a setting: `activateUnlessQuiet()` already declines under
+    /// XCTest, so the *suppressed* branch is the only one a test could observe
+    /// by watching `NSApp` — and the claim worth pinning is the other one.
+    /// Injecting the call lets a test assert that opening a project asks for
+    /// the foreground at all, which is the behaviour that was missing.
+    var activateApp: () -> Void = { NSApp.activateUnlessQuiet() }
+
     public init() {}
 
     /// Wires the manager to the registry it opens projects from and registers
@@ -230,6 +239,10 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
             existing.project.update(repo: repo)
             existing.showWindow(nil)
             existing.window?.makeKeyAndOrderFront(nil)
+            // Asking for a project that is already open is still the user
+            // asking for it, and a window raised behind the app that is
+            // actually frontmost reads as nothing having happened.
+            activateApp()
             return
         }
         guard let database = coordinator?.database else {
@@ -305,6 +318,13 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         // worth reordering two calls whose relative order is otherwise
         // arbitrary.
         controller.window?.makeKeyAndOrderFront(nil)
+        // `makeKeyAndOrderFront` is window-scoped and app activation is not:
+        // in a menubar host the window lands above the other application's
+        // windows while the menu bar and the keyboard stay with that
+        // application, so the window has to be clicked before it can be used.
+        // Declined under quiet presentation, which is the whole point of the
+        // helper — an automated session opens project windows constantly.
+        activateApp()
         observeClose(of: controller, repoID: repo.id, recordsOpenState: true)
         observeBecameKey(of: controller, repoID: repo.id)
         // The window is on screen with whatever tabs were stored; the checkout
