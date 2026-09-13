@@ -47,6 +47,7 @@ const POSTMARK: ProviderCatalogEntry = {
   serviceTypes: ["email"],
   capabilities: ["write"],
   defaultPollIntervalMs: 0,
+  testable: false,
   configFields: [{ key: "serverToken", label: "Server token", secret: true, required: true }],
 };
 

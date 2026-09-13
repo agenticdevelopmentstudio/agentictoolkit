@@ -6,14 +6,16 @@
 // no-op / null when there is no `window`) and never throws — storage can be unavailable
 // (private mode, disabled, quota) or hold malformed JSON (a stale shape from a previous
 // version), and none of that should break the caller.
-import type { IntegrationInput } from "./IntegrationDetail";
+import { intBlank, type IntegrationInput } from "./IntegrationDetail";
 
 const KEY_PREFIX = "adh.int-draft.";
 
 interface DraftWrapper {
   v: 1;
   providerId: string;
-  draft: IntegrationInput;
+  /** PARTIAL on the way back in. It is written whole, but what `localStorage` hands back is
+   *  whatever survived — see {@link completeDraft}. */
+  draft: Partial<IntegrationInput>;
 }
 
 function keyFor(ecosystemId: string, providerId: string): string {
@@ -74,6 +76,41 @@ export function saveDraft(
   }
 }
 
+/** A `Record<string, string>` of only the entries that really are strings. */
+function stringMap(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * EVERY FIELD `IntegrationInput` DECLARES, whatever the stored object happened to carry.
+ *
+ * `loadDraft` has always promised a complete `IntegrationInput` and its readers take the promise
+ * literally: the Add dialog SUBSTITUTES the loaded draft for `intBlank` rather than merging onto
+ * it, and `useIntegrationTest` reads `draft.fields` and `draft.clientSecret` during render. But
+ * the guard below only ever checked that `draft` was an object — so a wrapper written by an older
+ * shape, truncated by a quota failure, or edited by hand reached the dialog missing `fields`, and
+ * Add white-screened for that provider on `Cannot read properties of undefined`, thrown from
+ * render. Clearing it took devtools, because the dialog that clears the draft is the one
+ * crashing. Merging onto the blank makes the promise true instead of assumed.
+ */
+function completeDraft(providerId: string, stored: Partial<IntegrationInput>): IntegrationInput {
+  return {
+    ...intBlank(providerId),
+    ...stored,
+    // The provider is the KEY this was filed under, never whatever the payload claims.
+    providerId,
+    // Secrets were never stored — re-inflate them as blank.
+    clientSecret: "",
+    endpoints: stringMap(stored.endpoints),
+    fields: stringMap(stored.fields),
+  };
+}
+
 /** Load a saved draft, or null if none / malformed. */
 export function loadDraft(ecosystemId: string, providerId: string): IntegrationInput | null {
   if (typeof window === "undefined") return null;
@@ -82,9 +119,7 @@ export function loadDraft(ecosystemId: string, providerId: string): IntegrationI
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (!isWrapper(parsed)) return null;
-    // Secrets were never stored — re-inflate them as blank so the returned value is a
-    // complete IntegrationInput regardless of what (if anything) the stored draft had.
-    return { ...parsed.draft, clientSecret: "" };
+    return completeDraft(providerId, parsed.draft);
   } catch {
     return null;
   }

@@ -50,6 +50,7 @@ function provider(providerId: string): ProviderCatalogEntry {
     description: "",
     links: [],
     authMethod: "oauth",
+    testable: false,
     serviceTypes: [],
     capabilities: ["read"],
     defaultPollIntervalMs: 0,

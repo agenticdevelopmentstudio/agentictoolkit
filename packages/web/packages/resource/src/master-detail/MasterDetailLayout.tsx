@@ -128,6 +128,7 @@ export function ButtonBar({
   title,
   trailing,
   help,
+  hoist = true,
 }: {
   actions: MasterDetailActions;
   /** Hide the leading "New …" button — e.g. single-record Settings panes where
@@ -143,6 +144,19 @@ export function ButtonBar({
   trailing?: ReactNode;
   /** Help text for the right-justified "?" — describes the pane's contents. */
   help?: ReactNode;
+  /**
+   * Send the bar to the host's full-width toolbar slot. Default, and right for a bar that acts
+   * on THE PANE.
+   *
+   * Pass `false` for a master/detail nested inside another pane's detail. There is one slot, and
+   * a nested bar hoisted into it lands beside the outer pane's own bar — two toolbars stacked in
+   * the page header, the inner one naming buttons that act on a list scrolled somewhere below,
+   * and no way to tell from looking which Delete deletes what. That was invisible while the
+   * standalone host published no slot at all (`ToolbarPortal` fell back to rendering inline, so
+   * BOTH bars stayed where they were declared); the moment the slot became real it was the first
+   * thing on screen.
+   */
+  hoist?: boolean;
 }) {
   const {
     onCreate,
@@ -168,7 +182,12 @@ export function ButtonBar({
     <div
       role="toolbar"
       aria-label="Editing actions"
-      className="relative flex min-h-[2.75rem] items-center gap-1 border-y border-apt-border bg-apt-bg px-6 py-2"
+      // `w-full min-w-0` because this is no longer always a block child of the pane. Portalled
+      // into the host's toolbar slot it is a FLEX ITEM, and a flex item sizes to its content: the
+      // recessed strip stopped short of the window, its `border-y` ended mid-air, and the
+      // absolutely-centred `title` — centred on the BAR — sat left of the page it names. Full
+      // width is what it always had inline, so this asks for it rather than inheriting it.
+      className="relative flex min-h-[2.75rem] w-full min-w-0 items-center gap-1 border-y border-apt-border bg-apt-bg px-6 py-2"
     >
       {showCreate && (
         <>
@@ -228,11 +247,14 @@ export function ButtonBar({
       )}
     </div>
   );
-  // Inside a workspace shell, the bar hoists to the full-width button bar across the top
-  // (a portal); standalone (legacy routes / tests) it renders inline above the panes.
+  // The bar hoists to the host's full-width strip above the rails whenever there is a host to
+  // hoist into — the hub's workspace chrome and, since the toolbar slot became real there, the
+  // standalone rail host too. With no host at all (a legacy route, a test that stubs the registry)
+  // `ToolbarPortal` falls back to rendering inline, which is also what `hoist={false}` asks for
+  // deliberately — see the prop.
   return (
     <>
-      <ToolbarPortal>{bar}</ToolbarPortal>
+      {hoist ? <ToolbarPortal>{bar}</ToolbarPortal> : bar}
       {/* Shared confirm modal for delete — replaces the old native confirm(). */}
       <AlertModal
         open={deletePrompt != null}
@@ -268,6 +290,7 @@ export function MasterDetailLayout({
   title,
   trailing,
   help,
+  nested = false,
   children,
 }: {
   items: MasterDetailItem[];
@@ -283,6 +306,9 @@ export function MasterDetailLayout({
   trailing?: ReactNode;
   /** Optional "?" help; shown on the far right of the title row. */
   help?: ReactNode;
+  /** This layout sits INSIDE another pane's detail, so its bar stays with its own list rather
+   *  than hoisting into the host's one toolbar slot — see {@link ButtonBar}'s `hoist`. */
+  nested?: boolean;
   children: ReactNode;
 }) {
   if (actions) {
@@ -294,7 +320,13 @@ export function MasterDetailLayout({
       // in FeatureTabs) so the bar's BOTTOM edge lands on the nav divider, with
       // the topic|details beginning right below it.
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <ButtonBar actions={actions} title={title} trailing={trailing} help={help} />
+        <ButtonBar
+          actions={actions}
+          title={title}
+          trailing={trailing}
+          help={help}
+          hoist={!nested}
+        />
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)]">
           <aside className="overflow-y-auto border-b border-apt-border px-6 py-4 md:border-r md:border-b-0">
             <ItemList

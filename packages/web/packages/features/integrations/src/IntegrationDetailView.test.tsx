@@ -30,6 +30,7 @@ const PROVIDER: ProviderCatalogEntry = {
   serviceTypes: [],
   capabilities: ["write"],
   defaultPollIntervalMs: 0,
+  testable: false,
   configFields: [{ key: "token", label: "Token", secret: false, required: true }],
 };
 

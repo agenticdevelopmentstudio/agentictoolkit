@@ -84,6 +84,7 @@ beforeEach(() => {
     canManage: true,
     isError: false,
     isPending: false,
+    isFetching: false,
   });
   listConfigs.mockResolvedValue([]);
   listProviders.mockResolvedValue([]);
@@ -261,7 +262,12 @@ describe("the pane below a destination", () => {
     // `isPending` is the third state, and it is NOT "no ecosystem": answering it as one would
     // flash the no-ecosystem copy on every cold load of the first destination.
     const ws = workspaceFor("individual", "Mike Fullerton");
-    defaultEcosystem.mockReturnValue({ canManage: false, isError: false, isPending: true });
+    defaultEcosystem.mockReturnValue({
+      canManage: false,
+      isError: false,
+      isPending: true,
+      isFetching: false,
+    });
     render(
       <Harness>
         <IntegrationsFeature basePath="/home" workspace={ws} destinationId="workspace" />
@@ -277,7 +283,12 @@ describe("the pane below a destination", () => {
 
   it("says the workspace has no ecosystem once the read settles empty", async () => {
     const ws = workspaceFor("individual", "Mike Fullerton");
-    defaultEcosystem.mockReturnValue({ canManage: false, isError: false, isPending: false });
+    defaultEcosystem.mockReturnValue({
+      canManage: false,
+      isError: false,
+      isPending: false,
+      isFetching: false,
+    });
     render(
       <Harness>
         <IntegrationsFeature basePath="/home" workspace={ws} destinationId="workspace" />

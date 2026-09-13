@@ -169,7 +169,9 @@ function Rail({ levels }: { levels: TopicLevel[] }) {
 }
 
 /** A minimal rail HOST: registers pane-published levels/guards the way the hub's shell does, so the
- *  published master list is drivable. toolbarSlot is null, so the pane's ButtonBar renders inline. */
+ *  published master list is drivable. toolbarSlot is null — this stub's choice, not production's,
+ *  where `StandaloneRailHost` publishes a real node — so the pane's ButtonBar renders inline and
+ *  the queries below can find its buttons without a portal target to mount. */
 function Harness({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Map<string, RegisteredLevels>>(new Map());
   const registry: RailHostRegistry = useMemo(

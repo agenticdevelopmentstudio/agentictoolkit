@@ -46,10 +46,15 @@ export interface ProviderCatalogEntryRow {
    * decide this itself from `authMethod === 'github_app'`, which is half the real condition and
    * the half that left Vercel — testable all along — without a button.
    *
-   * Optional only for the window where a client is talking to a backend that predates the field;
-   * treat a missing value as "no Test button", which is what those clients already did.
+   * REQUIRED, because the spec says so: `IntegrationProvider.testable` is a non-optional
+   * `boolean` in `adh-api-types`' generated schema, and this interface is a hand-written mirror
+   * of exactly that object. Declaring it optional here described a backend that does not exist —
+   * the field shipped with the route that reads it — and bought nothing, because every caller
+   * then read it through a truthiness test that treated `undefined` and `false` identically. What
+   * it cost is the opposite of safety: a catalog entry assembled without it typechecked, so a
+   * fixture that forgot the field silently meant "not testable" instead of failing to compile.
    */
-  testable?: boolean;
+  testable: boolean;
 }
 
 /**
@@ -281,10 +286,17 @@ export interface AdoptedInstallationRow {
    * The connection stands, and the prefetch that rides along behind it — caching what this
    * installation was granted — did not finish.
    *
-   * NOT a skip, and a caller that renders it as one is wrong: everything that needs a
-   * connection works, and only the repository picker opening instantly does not. It rides on
-   * a `connected` row, or on a `skipped` row that carries a `connectionId` (one this
-   * ecosystem already held).
+   * NOT a skip: everything that needs a connection works, and only the repository picker
+   * opening instantly does not. It rides on a `connected` row, or on a `skipped` row that
+   * carries a `connectionId` (one this ecosystem already held).
+   *
+   * NOTHING IN THE CONSOLE READS IT, and that is deliberate rather than an oversight. The
+   * sentence an operator sees about a failed warm is written by the backend's own test
+   * narrator, which reads this field there; the console's copy of that narrator was deleted
+   * precisely so there was one. The field stays declared because the response really carries
+   * it — this interface is a mirror of the payload, not of what today's callers happen to
+   * destructure — and a reader chasing it should go to the backend's provider-test summary,
+   * not look for the console code this comment used to describe.
    */
   warning?: string;
 }

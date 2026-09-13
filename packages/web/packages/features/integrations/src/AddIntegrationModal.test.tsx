@@ -49,6 +49,9 @@ function mkProvider(over: Partial<ProviderCatalogEntry>): ProviderCatalogEntry {
     serviceTypes: over.serviceTypes ?? [],
     capabilities: over.capabilities ?? ["write"],
     defaultPollIntervalMs: over.defaultPollIntervalMs ?? 0,
+    // False unless a case asks for it — which is what the catalog said about these providers
+    // before the field was required, when it was simply absent.
+    testable: over.testable ?? false,
     configFields: over.configFields,
   };
 }

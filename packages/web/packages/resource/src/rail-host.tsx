@@ -127,7 +127,12 @@ function plainFields(o: object): string {
     // plain field beside it moved, so the level stayed registered as it was — the rail drew the
     // row unticked, and, far worse, kept the previous `onToggleChecked`, whose closure held the
     // set as it was BEFORE the first tick. Every tick after the first started from empty.
-    else if (v instanceof Set) plain[k] = Array.from(v as Set<unknown>).map(String).sort().join(",");
+    // JSON again, and for the same reason the outer call is JSON: a `join(",")` is the `k=v`
+    // forgery this function exists to avoid, one level down. `{"a,b"}` and `{"a","b"}` join to
+    // the identical string, so a checked id containing a comma made two different selections
+    // read as one and the tick that moved between them changed nothing.
+    else if (v instanceof Set)
+      plain[k] = JSON.stringify(Array.from(v as Set<unknown>).map(String).sort());
   }
   return JSON.stringify(plain);
 }

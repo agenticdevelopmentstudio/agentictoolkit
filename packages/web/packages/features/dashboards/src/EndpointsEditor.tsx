@@ -73,6 +73,12 @@ export function EndpointsEditor({
       </div>
 
       <MasterDetailLayout
+        // NESTED: this whole editor is rendered inside a SITE's detail, whose own Save/Cancel bar
+        // is already the pane's. Its endpoint bar therefore stays here, above the endpoint list it
+        // acts on, instead of hoisting into the host's single toolbar slot and stacking under the
+        // site's — "New endpoint" and a Delete in the page header, for a list two scroll regions
+        // down.
+        nested
         items={(endpoints ?? []).map((e) => ({
           id: e.id,
           label: e.url || "(no url)",

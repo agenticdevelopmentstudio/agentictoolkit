@@ -208,7 +208,9 @@ describe("the ecosystem credentials form for a GitHub App", () => {
       <SavedForm
         provider={{
           ...GITHUB_APP,
-          configFields: [{ key: "installationId", label: "Installation ID", secret: false }],
+          configFields: [
+            { key: "installationId", label: "Installation ID", secret: false, required: false },
+          ],
         }}
       />,
     );

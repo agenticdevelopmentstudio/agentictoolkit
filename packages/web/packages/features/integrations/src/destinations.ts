@@ -288,7 +288,14 @@ export function useTransferTargets(
     return destinations
       .filter(
         (d): d is IntegrationDestination & { ecosystemId: string } =>
-          typeof d.ecosystemId === "string" && d.ecosystemId !== excludeEcosystemId,
+          typeof d.ecosystemId === "string" &&
+          d.ecosystemId !== excludeEcosystemId &&
+          // `manageable` is false only when the resolution DEFINITIVELY said this caller may see
+          // the destination and not administer it — a plain organization member's own workspace
+          // row. A transfer into it is a write, so offering it is a menu entry whose only
+          // possible outcome is a 403 reported as "couldn't be transferred", with nothing in the
+          // sentence saying the destination was never available in the first place.
+          d.manageable,
       )
       .map((d) => ({
         ecosystemId: d.ecosystemId,

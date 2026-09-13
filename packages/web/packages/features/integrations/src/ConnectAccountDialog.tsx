@@ -51,6 +51,7 @@ export function ConnectAccountDialog({
   open,
   onOpenChange,
   onConnected,
+  dialogSurfaceClassName,
 }: {
   provider: ProviderCatalogEntry;
   ecosystemId: string;
@@ -61,6 +62,9 @@ export function ConnectAccountDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConnected: () => void;
+  /** The host dialog's surface class. Passed rather than inherited: this dialog portals to
+   *  `document.body`, so nothing the surface that opened it sets reaches it. */
+  dialogSurfaceClassName?: string;
 }) {
   const { authMethod, providerId, displayName } = provider;
   const serviceType = provider.serviceTypes[0] ?? "";
@@ -423,7 +427,7 @@ export function ConnectAccountDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent>
+      <DialogContent className={dialogSurfaceClassName}>
         <DialogHeader>
           <DialogTitle>Connect {displayName}</DialogTitle>
           <DialogDescription>Link a {displayName} account to this ecosystem.</DialogDescription>

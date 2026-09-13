@@ -370,6 +370,7 @@ export function ProviderConnections({
   ecosystemId,
   providerConfig,
   onConnectionsChanged,
+  dialogSurfaceClassName,
 }: {
   provider: ProviderCatalogEntry;
   ecosystemId: string;
@@ -381,6 +382,10 @@ export function ProviderConnections({
    *  master-list union — which lists a provider as long as it has ≥1 connection —
    *  reflects the change and the provider doesn't vanish/linger after connecting. */
   onConnectionsChanged?: () => void;
+  /** The host dialog's surface class, for the two dialogs opened from here. A portalled dialog
+   *  inherits nothing from the one that opened it, so the class is passed, never inherited —
+   *  see `IntegrationDetailBodyProps.dialogSurfaceClassName`. */
+  dialogSurfaceClassName?: string;
 }) {
   const providerId = provider.providerId;
   const syncSettingsDef = SYNC_SETTINGS_BY_PROVIDER[providerId];
@@ -551,6 +556,7 @@ export function ProviderConnections({
           void refresh();
           onConnectionsChanged?.();
         }}
+        dialogSurfaceClassName={dialogSurfaceClassName}
       />
 
       <AlertModal
@@ -566,6 +572,7 @@ export function ProviderConnections({
               }? This removes the connection and tombstones the data it synced.`
             : undefined
         }
+        contentClassName={dialogSurfaceClassName}
         confirmLabel="Disconnect"
         confirmVariant="destructive"
         cancelLabel="Cancel"

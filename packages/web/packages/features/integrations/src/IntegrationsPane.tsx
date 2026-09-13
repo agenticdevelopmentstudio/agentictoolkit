@@ -22,6 +22,14 @@ import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 import { BatchSelectButton, ButtonBar, TopicSelectHint, useBatchSelect } from "@agenticdevelopertoolkit/ui/blocks";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Select } from "@agenticdevelopertoolkit/ui/components/select";
+import { Label } from "@agenticdevelopertoolkit/ui/components/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@agenticdevelopertoolkit/ui/components/dialog";
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { useDualModeSelection } from "@agenticdevelopertoolkit/ui/hooks/useDualModeSelection";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
@@ -256,12 +264,21 @@ export function IntegrationsPane({
   // A Set hoisted through useMemo because both memos below depend on it: a fresh Set per render
   // would defeat `rows`'s memo, and `rows` is the `items` IDENTITY that useMasterDetailForm and
   // useMasterDetailLevel compare against — a new array each pass re-runs their item effects.
-  // `providerIds` is a caller-owned array, so memoize on its joined text rather than its identity;
-  // a host writing the array inline (which the billing site does) would otherwise pass a new one
-  // every render.
-  const providerFilterKey = providerIds ? providerIds.join(",") : null;
+  // `providerIds` is a caller-owned array, so memoize on its SERIALIZED form rather than its
+  // identity; a host writing the array inline (which the billing site does) would otherwise pass a
+  // new one every render.
+  //
+  // JSON rather than `join(",")`, because a join is not reversible and `split` proved it twice
+  // over: `[]` joined to `""` and split back to `[""]` — a filter matching the one provider id
+  // that cannot exist, i.e. a pane showing nothing and offering nothing, for a host that asked
+  // for nothing. (A provider id containing a comma would divide in two the same way.) The round
+  // trip has to be exact, because what comes out of it IS the filter.
+  const providerFilterKey = providerIds ? JSON.stringify([...providerIds]) : null;
   const providerFilter = useMemo(
-    () => (providerFilterKey === null ? null : new Set(providerFilterKey.split(","))),
+    () =>
+      providerFilterKey === null
+        ? null
+        : new Set<string>(JSON.parse(providerFilterKey) as string[]),
     [providerFilterKey],
   );
 
@@ -456,7 +473,13 @@ export function IntegrationsPane({
     [targetRows, providerById],
   );
 
-  const { targets: transferTargets } = useTransferTargets(workspaceSlug, ecosystemId);
+  // BOTH halves of the answer. Dropping `error` was the whole defect: a failed read leaves
+  // `targets` null forever, which is indistinguishable from a read still in flight, so Transfer
+  // greyed itself permanently and said nothing at all.
+  const { targets: transferTargets, error: transferTargetsError } = useTransferTargets(
+    workspaceSlug,
+    ecosystemId,
+  );
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState("");
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -464,25 +487,71 @@ export function IntegrationsPane({
 
   const barBusy = bulk.busy !== null;
 
+  /**
+   * Why the bulk Test is grey, in the operator's terms. Never reached while a row is open and
+   * nothing is ticked — that arm is the EDITOR's test and has its own sentence.
+   */
+  const bulkTestBlockedReason =
+    targetRows.length === 0
+      ? "Select an integration to test."
+      : testableRows.length === 0
+        ? targetRows.length === 1
+          ? "This provider has no test."
+          : "None of the selected integrations has a test."
+        : null;
+
+  /**
+   * Why Transfer is grey, when the reason is not the selection.
+   *
+   * `(targets?.length ?? 0) === 0` read all three of these as the same thing and printed none of
+   * them: a list still loading, a list whose read FAILED, and a workspace that genuinely has
+   * nowhere else to put an integration are three different answers, and only the last one is
+   * about the account.
+   */
+  const transferBlockedReason = transferTargetsError
+    ? transferTargetsError
+    : transferTargets === null
+      ? "Still reading where these could go."
+      : transferTargets.length === 0
+        ? "There is nowhere else in this workspace to move these to."
+        : null;
+
+  /**
+   * Does this row answer to that address?
+   *
+   * A row has TWO — its rdid and its uuid — and every by-id integrations route accepts either, so
+   * a URL can legitimately carry the one `addressOf` did not pick. Comparing `addressOf(row)`
+   * against the raw route param therefore misses exactly the deep link that named the row by its
+   * uuid, and the pane is left selected on an address the server has just deleted.
+   */
+  const answersTo = (r: MaskedProviderConfig, address: string): boolean =>
+    address === r.id || address === r.rdid;
+
+  /**
+   * These rows have LEFT this ecosystem — deleted, or transferred away.
+   *
+   * Only the ones that actually went, which is the whole point. A batch settles per row, so a
+   * partly refused Remove leaves rows that are still here and still ticked; unticking the whole
+   * selection tells the operator their Remove succeeded, and clearing the open row throws away
+   * whatever they had typed into a row nobody deleted (`useMasterDetailForm` holds the draft in
+   * plain state, and its re-hydrate effect sets it back to null).
+   */
+  const forget = (gone: readonly MaskedProviderConfig[]) => {
+    if (gone.length === 0) return;
+    if (selectedId && gone.some((r) => answersTo(r, selectedId))) setSelectedId(null);
+    const goneIds = new Set(gone.map(addressOf));
+    batch.setSelectedIds(new Set([...batch.selectedIds].filter((id) => !goneIds.has(id))));
+  };
+
   const confirmRemove = async () => {
-    const removed = new Set(targetRows.map(addressOf));
     setRemoveOpen(false);
-    await bulk.remove(targetRows);
-    // The open row may be one of the ones that just went. Nothing else clears the selection, and
-    // a `selectedId` naming a deleted address falls through to the by-id read, which answers null
-    // and leaves the pane on its select nudge with the rail still highlighting a ghost.
-    if (selectedId && removed.has(selectedId)) setSelectedId(null);
-    batch.clear();
+    forget(await bulk.remove(targetRows));
   };
 
   const confirmTransfer = async () => {
     const target = transferTo;
     setTransferOpen(false);
-    await bulk.transfer(targetRows, target);
-    // A transferred config answers to a NEW rdid in another ecosystem, so its address here is
-    // gone in exactly the way a deleted one is.
-    setSelectedId(null);
-    batch.clear();
+    forget(await bulk.transfer(targetRows, target));
   };
 
   /**
@@ -537,11 +606,17 @@ export function IntegrationsPane({
           disabled={
             editor && !batch.active
               ? !editor.test.available || editor.test.blockedReason !== null || editor.test.busy
-              : testableRows.length === 0 || barBusy
+              : bulkTestBlockedReason !== null || barBusy
           }
-          title={(editor && !batch.active ? editor.test.blockedReason : null) ?? undefined}
+          title={
+            (editor && !batch.active ? editor.test.blockedReason : bulkTestBlockedReason) ??
+            undefined
+          }
           onClick={() =>
-            void (editor && !batch.active ? editor.test.run() : bulk.test(testableRows))
+            // The WHOLE target set, not the testable part of it: the hook skips the rest and
+            // reports them by name. Filtering here is what made a four-row batch come back with
+            // two answers and no account of the other two.
+            void (editor && !batch.active ? editor.test.run() : bulk.test(targetRows))
           }
         >
           Test
@@ -550,7 +625,8 @@ export function IntegrationsPane({
           <Button
             size="sm"
             variant="ghost"
-            disabled={targetRows.length === 0 || barBusy || (transferTargets?.length ?? 0) === 0}
+            disabled={targetRows.length === 0 || barBusy || transferBlockedReason !== null}
+            title={transferBlockedReason ?? undefined}
             onClick={() => {
               setTransferTo(transferTargets?.[0]?.ecosystemId ?? "");
               setTransferOpen(true);
@@ -589,7 +665,11 @@ export function IntegrationsPane({
         {bulk.testRows?.map((row) => (
           <div key={row.id} className="flex flex-col gap-1">
             <p className="text-sm font-medium text-apt-text">{row.name}</p>
-            {row.result ? (
+            {row.skipped ? (
+              // Not red. Nothing failed — this provider has no validation endpoint, and the row
+              // is here so a batch of four that tested two says which two.
+              <p className="text-sm text-apt-text-muted">This provider has no test.</p>
+            ) : row.result ? (
               <IntegrationTestReport result={row.result} />
             ) : (
               <p className="text-sm text-apt-red">{row.error}</p>
@@ -642,12 +722,23 @@ export function IntegrationsPane({
                 </ul>
               </div>
             )}
-            {/* An import carries no secrets — the API has never echoed one back — so every row it
-                created needs its credential typed in before it will do anything. */}
-            {bulk.importReport.created.length > 0 && (
-              <p className="text-xs text-apt-text-muted">
-                Imported integrations carry no credentials. Open each one and enter its secret.
-              </p>
+            {/* An import carries no secrets — the API has never echoed one back — so a row it
+                created needs its credential typed in before it will do anything. WHICH rows and
+                WHICH credentials, from the document's own `needsSecrets`: a provider configured
+                without a client secret owes nothing and must not be listed as owing one. */}
+            {bulk.importReport.needsSecrets.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-apt-text-muted">
+                  Open these and enter their credentials
+                </p>
+                <ul className="text-xs text-apt-text-muted">
+                  {bulk.importReport.needsSecrets.map((n) => (
+                    <li key={n.name}>
+                      {n.name}: {n.labels.join(", ")}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         )}
@@ -694,6 +785,9 @@ export function IntegrationsPane({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ErrorText error={loadError} className="px-6 pt-4" />
       <ErrorText error={catalogError} className="px-6 pt-4" />
+      {/* Only on a host that offers Transfer at all — elsewhere this read answers about a
+          workspace nothing on screen is going to ask about. */}
+      {workspaceSlug && <ErrorText error={transferTargetsError} className="px-6 pt-4" />}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
         {cfg && provider && form.draft ? (
           <div className="flex flex-col gap-6">
@@ -743,26 +837,50 @@ export function IntegrationsPane({
               onAdopted={() => onChanged?.()}
               renderBar={renderBar}
               reports={reports}
+              dialogSurfaceClassName={dialogSurfaceClassName}
             />
           </div>
-        ) : // `selectedId`, not `leaf?.leafId` — see the dual-mode hook above. With a row selected
-        // and only the CATALOG still loading, the leaf-only test fell through to the select nudge
-        // on an internal-selection host, telling the operator to select the thing they had just
-        // selected.
-        selectedId && (configRows === null || providerRows === null) ? (
-          <EmptyState title="Loading…" />
-        ) : loadError ? (
-          <EmptyState title="Couldn't load integrations." />
-        ) : configRows === null ? (
-          <EmptyState title="Loading…" />
         ) : (
-          // Nothing selected and the list loaded. The bar is published from HERE in that case —
-          // it is the pane's, not the editor's, and Select/Export/Import/Test have to work with
-          // no row open at all.
+          // NO ROW OPEN — loading, failed, or simply nothing picked. The bar is published from
+          // here in every one of those states, because it is the PANE's bar and not the editor's:
+          // Add and Import are exactly what an operator wants in front of an empty list and a
+          // failed one, and the toolbar slot collapses when it is left empty
+          // (`has-[[data-adh-toolbar-slot]:empty]:hidden`), so those were the states with no
+          // action bar at all — including the first paint of every single visit.
+          //
+          // One `ToolbarPortal` is live at a time and this is the other one: the branch above
+          // renders the editor's, through `SelectedIntegration`.
           <div className="flex min-h-0 flex-1 flex-col gap-6">
             {renderBar(null)}
             {reports}
-            <TopicSelectHint title="Select an integration to configure, or add one." />
+            {/* `selectedId`, not `leaf?.leafId` — see the dual-mode hook above. With a row
+                selected and only the CATALOG still loading, the leaf-only test fell through to
+                the select nudge on an internal-selection host, telling the operator to select the
+                thing they had just selected. */}
+            {selectedId && (configRows === null || providerRows === null) ? (
+              <EmptyState title="Loading…" />
+            ) : loadError ? (
+              <EmptyState
+                title="Couldn't load integrations."
+                // The read is retried from HERE, because there is nowhere else: the rail level
+                // shows the same failure with no control on it, and a reload of the page is a
+                // heavier answer than re-asking one endpoint.
+                action={
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={configsFetching}
+                    onClick={() => void refreshConfigs()}
+                  >
+                    {configsFetching ? "Trying…" : "Try again"}
+                  </Button>
+                }
+              />
+            ) : configRows === null ? (
+              <EmptyState title="Loading…" />
+            ) : (
+              <TopicSelectHint title="Select an integration to configure, or add one." />
+            )}
           </div>
         )}
       </div>
@@ -829,20 +947,32 @@ export function IntegrationsPane({
         onCancel={() => setRemoveOpen(false)}
       />
 
-      {/* Transfer confirm. The destination chooser is in the BODY, and the actions stay Transfer
-          and Cancel — a transfer with nowhere named is not a thing to confirm, and a chooser
-          parked in the button bar for a verb used twice a year is clutter on every other day. */}
-      <AlertModal
-        contentClassName={dialogSurfaceClassName}
-        open={transferOpen}
-        title="Transfer integrations"
-        description={
-          <div className="flex flex-col gap-3">
-            <p className="text-sm text-apt-text">
+      {/*
+        Transfer confirm — a Dialog, not an `AlertModal`.
+
+        It asks a QUESTION with a field in it, and `AlertModal` has no body slot: the chooser was
+        passed as `description`, which Base UI renders as a `<p>`. A `<select>` inside a paragraph
+        is legal, but the surrounding `<div>` and `<p>` are not — `<p>` may not nest, so the parser
+        closes the outer one and re-parents everything after it, which is the same hazard
+        `ConfirmDialog` documents in shipr's `toolbar/dialogs.tsx`. The chooser also had no label
+        a screen reader could reach; `description` is read as the dialog's description, not as a
+        name for the control inside it.
+
+        `MoveDialog` is the shape: header, a labelled field in the body, actions on the bottom
+        edge. Transfer and Cancel because a transfer with no destination named is not a thing to
+        confirm — and because that is what was asked for.
+      */}
+      <Dialog open={transferOpen} onOpenChange={(next) => !next && setTransferOpen(false)}>
+        <DialogContent className={dialogSurfaceClassName}>
+          <DialogHeader>
+            <DialogTitle>Transfer integrations</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="int-transfer-target">
               {targetRows.length === 1
-                ? `Move "${targetRows[0]?.name ?? ""}" — with its connected accounts — to:`
-                : `Move ${targetRows.length} integrations — with their connected accounts — to:`}
-            </p>
+                ? `Move "${targetRows[0]?.name ?? ""}" — with its connected accounts — to`
+                : `Move ${targetRows.length} integrations — with their connected accounts — to`}
+            </Label>
             <Select
               id="int-transfer-target"
               value={transferTo}
@@ -855,13 +985,19 @@ export function IntegrationsPane({
               ))}
             </Select>
           </div>
-        }
-        confirmLabel="Transfer"
-        cancelLabel="Cancel"
-        busy={bulk.busy === "transfer"}
-        onConfirm={() => void confirmTransfer()}
-        onCancel={() => setTransferOpen(false)}
-      />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setTransferOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={bulk.busy === "transfer" || !transferTo}
+              onClick={() => void confirmTransfer()}
+            >
+              {bulk.busy === "transfer" ? "Transferring…" : "Transfer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -890,6 +1026,7 @@ function SelectedIntegration({
   onAdopted,
   renderBar,
   reports,
+  dialogSurfaceClassName,
 }: {
   provider: ProviderCatalogEntry;
   ecosystemId: string;
@@ -901,6 +1038,8 @@ function SelectedIntegration({
   onAdopted: () => void;
   renderBar: (editor: IntegrationEditor) => ReactNode;
   reports: ReactNode;
+  /** Handed down to the connect / disconnect dialogs the body opens. */
+  dialogSurfaceClassName?: string;
 }) {
   const submit = useIntegrationSubmit({
     provider,

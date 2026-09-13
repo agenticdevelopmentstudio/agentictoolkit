@@ -463,8 +463,13 @@ export function IntegrationTestReport({ result }: { result: IntegrationTestResul
   return (
     <div className="flex flex-col gap-1" role="status">
       <p className={`text-sm ${result.ok ? "text-apt-green" : "text-apt-red"}`}>{result.summary}</p>
-      {result.notes.map((note) => (
-        <p key={note} className="text-xs text-apt-text-muted">
+      {/* Keyed by POSITION, because the note is backend prose and two of them can read the
+          same — "no repositories found" once per empty org, say. React drops the duplicate key's
+          sibling and warns, so the report silently showed fewer notes than the provider sent.
+          The list is re-rendered whole on every answer and never reordered, so the index is a
+          stable identity here in the way it is not in an editable list. */}
+      {result.notes.map((note, i) => (
+        <p key={i} className="text-xs text-apt-text-muted">
           {note}
         </p>
       ))}
@@ -642,6 +647,18 @@ export type IntegrationDetailBodyProps = Omit<IntegrationDetailViewProps, "onSav
    * host wanted the cards WITH its own Save button, which is two facts wearing one name.
    */
   hideProviderInfo?: boolean;
+  /**
+   * The shipr dialog surface, for the dialogs this body opens BELOW it — connect an account, and
+   * the disconnect confirmation.
+   *
+   * Dialogs portal to `document.body`, so the custom properties the host dialog sets (the shared
+   * button floor among them) do not inherit into a dialog opened from inside it. The host's own
+   * `dialogSurfaceClassName` therefore has to be handed down explicitly, and it stopped here:
+   * every dialog the pane opens itself carried the floor and the two `ProviderConnections` opens
+   * did not, which is the one place in the console where two dialogs with different button sizes
+   * are reachable a click apart.
+   */
+  dialogSurfaceClassName?: string;
 };
 
 /** The cards, with no opinion about where the submit button goes. */
@@ -658,6 +675,7 @@ export function IntegrationDetailBody({
   hideSubmit = false,
   hideTest = false,
   hideProviderInfo = false,
+  dialogSurfaceClassName,
 }: IntegrationDetailBodyProps) {
   const showConnections = mode === "saved" && CONNECTION_METHODS.includes(provider.authMethod);
   // Synced-row browsing (reddit / google-calendar today) belongs to a SAVED instance — there is
@@ -770,7 +788,12 @@ export function IntegrationDetailBody({
                 reached GitHub when it had not. */}
             <ErrorText error={test.error} />
             {test.result && !test.error && <IntegrationTestReport result={test.result} />}
-            {!hideTest && test.available && test.blockedReason && (
+            {/* NOT gated on `hideTest`, exactly as the submit line below is not gated on
+                `hideSubmit`: this sentence explains why the Test button is grey, and the host
+                drawing that button in its own bar is the case where the button is furthest from
+                the field that greyed it. Gating it left the pane's bar with a dead Test and
+                nothing anywhere saying why. */}
+            {test.available && test.blockedReason && (
               <p className="text-sm text-apt-text-muted" role="status">
                 {test.blockedReason}
               </p>
@@ -818,6 +841,7 @@ export function IntegrationDetailBody({
           provider={provider}
           ecosystemId={ecosystemId}
           providerConfig={config ?? null}
+          dialogSurfaceClassName={dialogSurfaceClassName}
         />
       )}
 
