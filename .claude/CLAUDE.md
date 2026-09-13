@@ -51,7 +51,7 @@ open packages/apple/AgenticToolkit.xcworkspace
 ## Architecture
 
 Cross-platform repo with per-platform directories under `packages/`:
-- `packages/apple/AgenticToolkit/` — four framework targets (`AgenticToolkitCore`, `AgenticToolkitCoreUI`, `AgenticToolkitCoreMacOS`, `AgenticToolkitMacOS`) + matching test bundles. SPM packages: `SwiftTerm`, `CodeEditSourceEditor`, `CodeEditLanguages`. macOS 14+.
+- `packages/apple/AgenticToolkit/` — four framework targets (`AgenticToolkitCore`, `AgenticToolkitCoreUI`, `AgenticToolkitCoreMacOS`, `AgenticToolkitMacOS`) + matching test bundles. SPM packages: `SwiftTerm`, `CodeEditSourceEditor`, `CodeEditLanguages`. macOS 14+. Two further multi-platform (macOS + iOS) targets live beside them: `AgenticToolkitHTDV` (native Hierarchical Topic Detail View, forms, markdown hooks — Foundation/AppKit/UIKit only, see `docs/htdv.md`) and `AgenticToolkitHub` (shared hub feature layer; depends on HTDV only). Neither may import `AgenticToolkitCore`.
 - `packages/apple/AgenticToolkitApp/` — host app (`AgenticToolkitApp.app`). Cross-project links + embeds all four toolkit frameworks. macOS 26+.
 - `packages/apple/AIPlugins/` — `AIPluginsShared.framework` + five `.aiplugin` bundles (`ClaudeAPI`, `ClaudeLocal`, `Google`, `OpenAI`, `OpenAICompatible`). Each plugin links (without embedding) the four toolkit frameworks so it shares one loaded image with the host at runtime. Each plugin's post-build script installs its `.bundle` into `~/.agenticplugins/`. macOS 26+.
 - `packages/windows/` — TBD
