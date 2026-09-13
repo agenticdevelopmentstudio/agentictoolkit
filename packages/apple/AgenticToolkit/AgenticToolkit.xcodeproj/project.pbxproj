@@ -240,7 +240,6 @@
 		278CA7A2D60F12C6B857BE9D /* Badge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6E8EA3F66DE979A9977004 /* Badge.swift */; };
 		2798A43C990BDE7D22D1FFE4 /* AgenticToolkitCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF857DF2BB3D2BE006BBA101 /* AgenticToolkitCore.framework */; };
 		279B8CFAF1FA7A8BE387F526 /* NotesSplitViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB33E0B488A72854EAA5272 /* NotesSplitViewControllerTests.swift */; };
-		27AD5FE1F41EBD7F73D958EB /* PaneOptionsSheetViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52F61EA8166CB865D47D005 /* PaneOptionsSheetViewController.swift */; };
 		282C238B07C73C6080DEF653 /* XcodeHeuristic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234428AD995F284FF4451931 /* XcodeHeuristic.swift */; };
 		286FF3676149675CCF311ADB /* StoredSettingsStorageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 922457ED5DA5D1D965AB21F5 /* StoredSettingsStorageProvider.swift */; };
 		28734A7439578C74B72DF174 /* HubModulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B63A7672A8B7D30684626C37 /* HubModulesTests.swift */; };
@@ -706,7 +705,6 @@
 		A014AF7FEA5FF7D75ADF7FC1 /* ConnectivityTriggerSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F9FF57A343BC690CE7EE0C /* ConnectivityTriggerSource.swift */; };
 		A04C641D01BE2D44A9AE5856 /* TerminalSessionRowCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140B7E5133EF9E3212A9A543 /* TerminalSessionRowCellView.swift */; };
 		A0BDC34CB8F3F733FE5C63A7 /* NotesFolderListViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BDC7DD73089D6621690A75 /* NotesFolderListViewControllerTests.swift */; };
-		A0BEADA084EE06216C75E0E6 /* SingleWindowControllerRefitSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90D88AC28BC23DCD8CB4FD2 /* SingleWindowControllerRefitSeamTests.swift */; };
 		A0DC397F246D1AC1953E84EB /* HTDVModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75045910C87AC7E5A13907F2 /* HTDVModelTests.swift */; };
 		A110D72A83C87D315C47F704 /* MockChatSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211A3E3EDFCDC7EDA2F4601C /* MockChatSessionTests.swift */; };
 		A14295124F9E66E8A5533E6A /* ScriptingRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C71C9CB4C83289BC8FB988 /* ScriptingRouter.swift */; };
@@ -797,6 +795,7 @@
 		B603C69C4E1A61D03BBE5A57 /* MockScreenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFCFE99C5DF2E3BA41DA561E /* MockScreenProvider.swift */; };
 		B6B2D8F61C25776A5B6B23EA /* TopicListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D6391E1372A83A76D72944F /* TopicListViewController.swift */; };
 		B6DD01A409C6D8DEF9125041 /* ButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBFE6A254091C292617E372F /* ButtonView.swift */; };
+		B805FF747A44A6325223EB2D /* WindowRegistryVisibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74478068B66DC72DF466A367 /* WindowRegistryVisibilityTests.swift */; };
 		B81CD9F51A8DAC3E6F2FAAF1 /* AIPluginKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FD467D736FA5B431DD30B091 /* AIPluginKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B8CBB1B2C75116C7BC712A16 /* CommandPaletteViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCA7037E8B1F1B555E281A65 /* CommandPaletteViewController.swift */; };
 		B9021F2DBCE142396A9F0A39 /* SystemWindowContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 092DDF4AA6EF01E9761B5F2C /* SystemWindowContext.swift */; };
@@ -2412,6 +2411,7 @@
 		73F0119CDB478A40922A5E3A /* ProjectCheckoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCheckoutTests.swift; sourceTree = "<group>"; };
 		74058B27121A2773814462AA /* HeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderView.swift; sourceTree = "<group>"; };
 		744440285E8490608CB81FFC /* HubWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubWorkspace.swift; sourceTree = "<group>"; };
+		74478068B66DC72DF466A367 /* WindowRegistryVisibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowRegistryVisibilityTests.swift; sourceTree = "<group>"; };
 		74925FD9DA16DA1C1650F4CE /* MCPChipsBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPChipsBarView.swift; sourceTree = "<group>"; };
 		74C92B38CFF2B10315FC31EF /* HTDVControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVControllerTests.swift; sourceTree = "<group>"; };
 		75045910C87AC7E5A13907F2 /* HTDVModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVModelTests.swift; sourceTree = "<group>"; };
@@ -2623,7 +2623,6 @@
 		B8748B4F811CCE16DBD2435B /* VSCodeThemeImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeThemeImporter.swift; sourceTree = "<group>"; };
 		B8C6F25D5AEDC37D45C4D7D3 /* ActivateAppCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivateAppCommand.swift; sourceTree = "<group>"; };
 		B8FF3ED94AA2D04452043174 /* ProjectController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectController.swift; sourceTree = "<group>"; };
-		B90D88AC28BC23DCD8CB4FD2 /* SingleWindowControllerRefitSeamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleWindowControllerRefitSeamTests.swift; sourceTree = "<group>"; };
 		B96CF5B3737039A880292A4F /* AIProviderConfigSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfigSyncTests.swift; sourceTree = "<group>"; };
 		B97C55C1933FDB066F01BA7C /* ThemeTerminalTopicPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeTerminalTopicPanel.swift; sourceTree = "<group>"; };
 		B9D78EBD9C75F8215D809DC3 /* ThemePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePickerView.swift; sourceTree = "<group>"; };
@@ -2731,7 +2730,6 @@
 		D3D70220CA98CB27CF718848 /* NotImplementedLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotImplementedLedger.swift; sourceTree = "<group>"; };
 		D41A6C44F445E6C29D2525E2 /* MCPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPClient.swift; sourceTree = "<group>"; };
 		D447CD2BD719884D001C737F /* ExtensionManifestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionManifestTests.swift; sourceTree = "<group>"; };
-		D52F61EA8166CB865D47D005 /* PaneOptionsSheetViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneOptionsSheetViewController.swift; sourceTree = "<group>"; };
 		D566499EB2CFCAF2E14B55B8 /* LanguageServerStatusModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageServerStatusModelTests.swift; sourceTree = "<group>"; };
 		D58EB30775CD325FD1525437 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		D5B0001BBF3E59C64E36B8F2 /* ProjectControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectControllerTests.swift; sourceTree = "<group>"; };
@@ -4613,11 +4611,11 @@
 				8D21F8F899C4B44436BA0F07 /* ScreenMatcherTests.swift */,
 				55B2BFD87715070A9558E7B2 /* SingletonWindowControllerTests.swift */,
 				C739791754B51B423D9CDB07 /* SingleWindowControllerMoveRefitTests.swift */,
-				B90D88AC28BC23DCD8CB4FD2 /* SingleWindowControllerRefitSeamTests.swift */,
 				5053D246C0FFEFF52911D3B9 /* SingleWindowControllerTests.swift */,
 				8F32D28A8E0199C82E8216B0 /* WindowManagerRecentsTests.swift */,
 				0E574D92FE93D15A12138FEB /* WindowManagerSimulatedRelaunchTests.swift */,
 				626FECFD2A90654F819760B3 /* WindowManagerTerminationTests.swift */,
+				74478068B66DC72DF466A367 /* WindowRegistryVisibilityTests.swift */,
 				60ED4E2918E0D24446D00C6E /* WindowScreenshotTests.swift */,
 				D9FED81E6FA52B0393AD09BD /* WindowStateNamespaceTests.swift */,
 			);
@@ -5300,7 +5298,6 @@
 			children = (
 				274BFC7290E8324BACDE5E7D /* PaneCapabilities.swift */,
 				3FFE4D22F091B65284C53A0E /* PaneHost.swift */,
-				D52F61EA8166CB865D47D005 /* PaneOptionsSheetViewController.swift */,
 				CDBF90178A19FFA9BEEF106F /* PaneSpacingOverride.swift */,
 				5793B276EDE1C221ED92405F /* PaneStateStore.swift */,
 				80F57FD1E7E2D5E107DBD6D5 /* PaneViewController.swift */,
@@ -7092,7 +7089,6 @@
 				F076A8A28F0FCB6767756117 /* PaneCommands.swift in Sources */,
 				C80CCF58DDE66086BD256214 /* PaneHost.swift in Sources */,
 				77BE9B7BBBECF84144A0272C /* PaneMinimizeGeometry.swift in Sources */,
-				27AD5FE1F41EBD7F73D958EB /* PaneOptionsSheetViewController.swift in Sources */,
 				2125F6B2452D2F4219527E71 /* PaneSpacing.swift in Sources */,
 				8A9BC6986EB1A4E20059936C /* PaneSpacingOverride.swift in Sources */,
 				573B3303298911964F22D8BF /* PaneStateStore.swift in Sources */,
@@ -7678,7 +7674,6 @@
 				15AF44EC957517246EF1186A /* SettingsSearchIndexTests.swift in Sources */,
 				51A658B855BF4E5349B6940F /* SingleConfigurationChatConfigProviderTests.swift in Sources */,
 				7B8B9A6164DDB230C9EF1139 /* SingleWindowControllerMoveRefitTests.swift in Sources */,
-				A0BEADA084EE06216C75E0E6 /* SingleWindowControllerRefitSeamTests.swift in Sources */,
 				697B4C220C6BF3D7B33BB1F7 /* SingleWindowControllerTests.swift in Sources */,
 				90A6D74C03D2CD5EF5CE9B26 /* SingletonWindowControllerTests.swift in Sources */,
 				BE23794732928232D0D54DD7 /* SpacingTests.swift in Sources */,
@@ -7701,6 +7696,7 @@
 				D151BBED553E914325BF6AD7 /* WindowManagerRecentsTests.swift in Sources */,
 				A40602C3E4F3794E607D81EC /* WindowManagerSimulatedRelaunchTests.swift in Sources */,
 				D640C72B5480939363AA8FD5 /* WindowManagerTerminationTests.swift in Sources */,
+				B805FF747A44A6325223EB2D /* WindowRegistryVisibilityTests.swift in Sources */,
 				8A68588E3DD68288450ED32A /* WindowScreenshotTests.swift in Sources */,
 				83789255CEE06E0A36D3D800 /* WindowStateNamespaceTests.swift in Sources */,
 			);

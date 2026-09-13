@@ -2,12 +2,11 @@ import AppKit
 import XCTest
 @testable import AgenticToolkitMacOS
 
-/// A content-hugging window is sized for the screen it is on: its fit is
-/// clamped to the room between its top-left anchor and that screen's edges.
-/// Moving it changes that room, so the fit has to be recomputed — otherwise a
-/// window dragged toward an edge (or onto a smaller display) keeps a size that
-/// no longer fits, and one dragged into room it didn't have keeps a clamp that
-/// no longer applies.
+/// A content-hugging window is sized and placed for the screen it is on: it
+/// holds whichever edge it is nearest, and stops growing only when there is no
+/// screen left to move into. Moving it changes which edge that is and how much
+/// room lies beyond it, so the fit has to be recomputed — otherwise a window
+/// dragged toward an edge keeps a placement that no longer suits where it is.
 @MainActor
 final class SingleWindowControllerMoveRefitTests: XCTestCase {
 
@@ -37,12 +36,6 @@ final class SingleWindowControllerMoveRefitTests: XCTestCase {
         window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
     }
 
-    /// How far past the right edge the "no longer fits" position hangs. Small
-    /// on purpose: the fit is computed against whichever screen holds most of
-    /// the window, and this machine may well have a display to the right, so
-    /// the window has to stay overwhelmingly on the one it is being tested on.
-    private let overhang: CGFloat = 40
-
     /// Parks the window `roomToTheRight` points from the visible area's right
     /// edge, high enough that vertical room is never the binding constraint.
     private func park(_ window: NSWindow, in visible: NSRect, roomToTheRight: CGFloat) {
@@ -66,16 +59,11 @@ final class SingleWindowControllerMoveRefitTests: XCTestCase {
         )
         controller.contentSizeProvider = { NSSize(width: 320, height: 200) }
         XCTAssertTrue(controller.wantsRefitAfterMove)
-
-        controller.suppressContentRefit()
-        XCTAssertFalse(
-            controller.wantsRefitAfterMove,
-            "a window frozen behind an open config popover stays frozen through a move"
-        )
-        controller.resumeContentRefit()
-        XCTAssertTrue(controller.wantsRefitAfterMove)
     }
 
+    /// The content wants the same size before and after; what changed is the
+    /// room on the side the window is now nearest. The window keeps the size
+    /// and gives up the position, which is the whole of the new rule.
     func testTheFitIsRecomputedAfterAMoveEvenThoughTheContentDidNotChange() throws {
         let (controller, window, visible) = try makeShownController()
 
@@ -86,14 +74,28 @@ final class SingleWindowControllerMoveRefitTests: XCTestCase {
         controller.performContentRefit()
         XCTAssertEqual(window.frame.size, wanted, "fits outright when there is room")
 
-        // Move it so the content no longer fits between the anchor and the
-        // edge. The content still wants the same size; the screen no longer
-        // has it.
-        let room = wanted.width - overhang
+        // Move it so its right edge hangs off the screen. It is now nearest the
+        // right edge, so that is the edge it holds.
+        let room = wanted.width - 40
         park(window, in: visible, roomToTheRight: room)
         controller.performContentRefit()
-        XCTAssertEqual(window.frame.width, room, "the fit is clamped to the room the new position has")
-        XCTAssertEqual(window.frame.minX, visible.maxX - room, "the anchor the user chose is kept")
+        XCTAssertEqual(window.frame.width, wanted.width, "the size the content asked for is kept")
+        XCTAssertEqual(window.frame.maxX, visible.maxX, "the window moved in to make room for it")
+    }
+
+    /// A window with no screen left to move into is the one case where the size
+    /// gives way: it is capped at the visible width rather than overhanging.
+    func testAWindowWiderThanTheScreenIsCappedRatherThanMoved() throws {
+        let controller = HuggingWC(id: "test.move.cap.\(UUID().uuidString)")
+        controller.showWindow()
+        let window = try XCTUnwrap(controller.window)
+        let visible = try XCTUnwrap(window.screen ?? NSScreen.main).visibleFrame
+        controller.contentSizeProvider = { NSSize(width: visible.width * 2, height: 200) }
+
+        controller.performContentRefit()
+
+        XCTAssertEqual(window.frame.width, visible.width, "growth stops at the screen")
+        XCTAssertEqual(window.frame.minX, visible.minX)
     }
 
     func testAMoveNotificationDrivesTheRefitOnItsOwn() throws {
@@ -104,7 +106,7 @@ final class SingleWindowControllerMoveRefitTests: XCTestCase {
 
         // Exactly what a drag toward the right edge does: origin changes, size
         // doesn't. `windowDidMove` schedules the settle; nothing else runs.
-        let room = wanted.width - overhang
+        let room = wanted.width - 40
         window.setFrame(
             NSRect(origin: NSPoint(x: visible.maxX - room, y: window.frame.minY),
                    size: window.frame.size),
@@ -112,9 +114,10 @@ final class SingleWindowControllerMoveRefitTests: XCTestCase {
         )
 
         let deadline = Date().addingTimeInterval(3)
-        while Date() < deadline, window.frame.width > room {
+        while Date() < deadline, window.frame.maxX > visible.maxX {
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
         }
-        XCTAssertEqual(window.frame.width, room, "the move alone re-fit the window")
+        XCTAssertEqual(window.frame.maxX, visible.maxX, "the move alone pulled the window back on screen")
+        XCTAssertEqual(window.frame.width, wanted.width, "without giving up the size the content asked for")
     }
 }

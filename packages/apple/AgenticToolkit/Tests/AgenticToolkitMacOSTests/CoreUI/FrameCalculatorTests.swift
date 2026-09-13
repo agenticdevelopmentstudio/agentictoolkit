@@ -370,87 +370,264 @@ final class FrameCalculatorTests: XCTestCase {
         XCTAssertEqual(frame.size, NSSize(width: 800, height: 600))
     }
 
-    // MARK: - Content-hugging growth (top-left fixed, grows down + right)
+    // MARK: - Content-hugging growth (anchored to the edge it is nearest)
+    //
+    // `visible` is a *visible* frame throughout: its `maxY` is the bottom of
+    // the menu bar, not the top of the display, so "would go under the menu
+    // bar" and "would go off the top" are the same line here.
 
     private let hugMinSize = NSSize(width: 200, height: 100)
+    private let hugVisible = NSRect(x: 0, y: 0, width: 1600, height: 1000)
 
-    func testContentHuggingGrowsDownAndRight() {
-        let visible = NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        let current = NSRect(x: 250, y: 800 - 260, width: 500, height: 260)
-        for policy in [WindowSpec.OverflowPolicy.scrollContent, .moveToDisclose] {
-            let grown = FrameCalculator.contentHuggingFrame(
-                currentFrame: current,
-                desiredFrameSize: NSSize(width: 560, height: 420),
-                screenVisibleFrame: visible,
-                policy: policy,
-                minSize: hugMinSize
-            )
-            XCTAssertEqual(grown.minX, 250, "left edge stays fixed (\(policy))")
-            XCTAssertEqual(grown.maxY, 800, "top edge stays fixed (\(policy))")
-            XCTAssertEqual(grown.size, NSSize(width: 560, height: 420))
-        }
+    /// Offsets read the way a user sees them: `top` down from the visible
+    /// area's top edge, `left` right from its left edge.
+    private func hugFrame(left: CGFloat, top: CGFloat, size: NSSize) -> NSRect {
+        FrameCalculator.frame(
+            topLeftOffset: CGPoint(x: left, y: top),
+            size: size,
+            screenVisibleFrame: hugVisible)
     }
 
-    func testContentHuggingScrollContentStopsAtScreenEdge() {
-        let visible = NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        // Anchored 300pt from the right edge and 200pt above the bottom.
-        let current = NSRect(x: 1620, y: 200 - 150, width: 200, height: 150)
-        let grown = FrameCalculator.contentHuggingFrame(
-            currentFrame: current,
-            desiredFrameSize: NSSize(width: 800, height: 600),
-            screenVisibleFrame: visible,
-            policy: .scrollContent,
-            minSize: hugMinSize
-        )
-        XCTAssertEqual(grown.minX, 1620, "window must not move")
-        XCTAssertEqual(grown.maxY, 200, "window must not move")
-        XCTAssertEqual(grown.width, 300, "growth stops at the right edge")
-        XCTAssertEqual(grown.height, 200, "growth stops at the bottom edge")
+    /// One step of a fit, anchors chosen fresh — what a resize that is not part
+    /// of a running gesture does.
+    private func hugged(_ current: NSRect, to desired: NSSize) -> NSRect {
+        hugged(current, to: desired, holding: nil).frame
     }
 
-    func testContentHuggingScrollContentKeepsMinSizeWhenNoRoom() {
-        let visible = NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        // Anchor so close to the corner that even minSize overhangs.
-        let current = NSRect(x: 1820, y: 50 - 40, width: 90, height: 40)
-        let grown = FrameCalculator.contentHuggingFrame(
+    /// One step of a fit that may be continuing a gesture: `holding` is what the
+    /// previous step returned, and the anchors come back out for the next one.
+    private func hugged(
+        _ current: NSRect, to desired: NSSize, holding anchors: FrameAnchors?
+    ) -> (frame: NSRect, anchors: FrameAnchors) {
+        FrameCalculator.contentHuggingFrame(
             currentFrame: current,
-            desiredFrameSize: NSSize(width: 800, height: 600),
-            screenVisibleFrame: visible,
-            policy: .scrollContent,
-            minSize: hugMinSize
-        )
-        XCTAssertEqual(grown.size, hugMinSize, "never collapse below minSize")
-        XCTAssertEqual(grown.minX, 1820)
-        XCTAssertEqual(grown.maxY, 50)
+            desiredFrameSize: desired,
+            screenVisibleFrame: hugVisible,
+            minSize: hugMinSize,
+            anchors: anchors)
     }
 
-    func testContentHuggingMoveToDiscloseMovesMinimally() {
-        let visible = NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        // Same anchor as the scroll test: desired 800×600 overflows by 500
-        // right and 400 down.
-        let current = NSRect(x: 1620, y: 200 - 150, width: 200, height: 150)
-        let grown = FrameCalculator.contentHuggingFrame(
-            currentFrame: current,
-            desiredFrameSize: NSSize(width: 800, height: 600),
-            screenVisibleFrame: visible,
-            policy: .moveToDisclose,
-            minSize: hugMinSize
-        )
-        XCTAssertEqual(grown.size, NSSize(width: 800, height: 600), "size is kept")
-        XCTAssertEqual(grown.minX, 1920 - 800, "moved left just enough to disclose")
-        XCTAssertEqual(grown.minY, 0, "moved up just enough to disclose")
+    /// A window nowhere near an edge has no edge to hold, so it grows the way
+    /// reading does: down and to the right, from the corner it already had.
+    func testContentHuggingGrowsDownAndRightWhenNowhereNearAnEdge() {
+        let current = hugFrame(left: 400, top: 300, size: NSSize(width: 500, height: 300))
+        let grown = hugged(current, to: NSSize(width: 560, height: 420))
+
+        XCTAssertEqual(grown.minX, 400, "the left edge it grew from stays put")
+        XCTAssertEqual(grown.maxY, current.maxY, "the top edge it grew from stays put")
+        XCTAssertEqual(grown.size, NSSize(width: 560, height: 420))
     }
 
-    func testContentHuggingMoveToDiscloseDoesNotMoveWhenItFits() {
-        let visible = NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        let current = NSRect(x: 250, y: 800 - 260, width: 500, height: 260)
-        let grown = FrameCalculator.contentHuggingFrame(
-            currentFrame: current,
-            desiredFrameSize: NSSize(width: 500, height: 260),
-            screenVisibleFrame: visible,
-            policy: .moveToDisclose,
-            minSize: hugMinSize
-        )
-        XCTAssertEqual(grown, current)
+    /// "If the window is close to the bottom of the screen and it is resized
+    /// smaller, move it down to preserve the distance to the bottom."
+    func testAWindowNearTheBottomKeepsItsDistanceWhenItShrinks() {
+        // 40pt of daylight under it, 560 above: the bottom is the near edge.
+        let current = hugFrame(left: 300, top: 560, size: NSSize(width: 500, height: 400))
+        XCTAssertEqual(current.minY, 40)
+
+        let shrunk = hugged(current, to: NSSize(width: 500, height: 300))
+
+        XCTAssertEqual(shrunk.height, 300)
+        XCTAssertEqual(shrunk.minY, 40, "the gap under it is what it holds, so its bottom does not move")
+    }
+
+    /// "If the window grows vertically and that would put its bottom off the
+    /// screen, move it up as it grows."
+    func testAWindowNearTheBottomMovesUpAsItGrows() {
+        let current = hugFrame(left: 300, top: 560, size: NSSize(width: 500, height: 400))
+        let grown = hugged(current, to: NSSize(width: 500, height: 600))
+
+        XCTAssertEqual(grown.height, 600, "it got the height it asked for")
+        XCTAssertEqual(grown.minY, 40, "by rising, not by hanging off the bottom")
+    }
+
+    /// "...until it would start going off the top or go under the menu bar." At
+    /// that point there is nowhere left to move, so the growth stops instead.
+    func testGrowthStopsAtTheTopOnceThereIsNowhereLeftToMove() {
+        let current = hugFrame(left: 300, top: 560, size: NSSize(width: 500, height: 400))
+        let grown = hugged(current, to: NSSize(width: 500, height: 1400))
+
+        XCTAssertEqual(grown.height, hugVisible.height, "the height is capped at the screen")
+        XCTAssertEqual(grown.maxY, hugVisible.maxY, "and it stops flush with the menu bar")
+        XCTAssertEqual(grown.minY, hugVisible.minY)
+    }
+
+    /// "If the window is close to the top of the screen, don't move it
+    /// vertically — only resize it, until it reaches the bottom of the screen."
+    func testAWindowNearTheTopGrowsDownwardWithoutMoving() {
+        let current = hugFrame(left: 300, top: 40, size: NSSize(width: 500, height: 300))
+        let grown = hugged(current, to: NSSize(width: 500, height: 600))
+
+        XCTAssertEqual(grown.maxY, current.maxY, "its top does not move")
+        XCTAssertEqual(grown.height, 600)
+
+        // Exactly reaching the bottom is still not a reason to move.
+        let flush = hugged(current, to: NSSize(width: 500, height: 960))
+        XCTAssertEqual(flush.maxY, current.maxY)
+        XCTAssertEqual(flush.minY, hugVisible.minY, "flush with the bottom, having not moved")
+    }
+
+    /// "...if it reaches the bottom of the screen, start moving the window up
+    /// until it would go off the screen at the top."
+    func testAWindowNearTheTopMovesUpOnlyOnceItHasReachedTheBottom() {
+        let current = hugFrame(left: 300, top: 40, size: NSSize(width: 500, height: 300))
+        let grown = hugged(current, to: NSSize(width: 500, height: 1000))
+
+        XCTAssertEqual(grown.height, 1000)
+        XCTAssertEqual(grown.maxY, hugVisible.maxY, "it gave up its 40pt of headroom to fit")
+    }
+
+    /// The same rule, turned on its side: a window near the right edge holds
+    /// its distance to the right edge, shrinking and growing against it.
+    func testTheSameRuleHoldsAgainstTheRightEdge() {
+        // 40pt of daylight to its right, 1060 to its left.
+        let current = hugFrame(left: 1060, top: 40, size: NSSize(width: 500, height: 300))
+        XCTAssertEqual(current.maxX, 1560)
+
+        let shrunk = hugged(current, to: NSSize(width: 400, height: 300))
+        XCTAssertEqual(shrunk.width, 400)
+        XCTAssertEqual(shrunk.maxX, 1560, "shrinking walks it back toward the right edge")
+
+        let grown = hugged(current, to: NSSize(width: 700, height: 300))
+        XCTAssertEqual(grown.width, 700)
+        XCTAssertEqual(grown.maxX, 1560, "growing pushes it left rather than off the screen")
+
+        let overgrown = hugged(current, to: NSSize(width: 2000, height: 300))
+        XCTAssertEqual(overgrown.width, hugVisible.width, "the width is capped at the screen")
+        XCTAssertEqual(overgrown.minX, hugVisible.minX)
+    }
+
+    /// A window near the left edge is the mirror: it holds its left margin and
+    /// grows right, and only moves once it has run out of screen.
+    func testAWindowNearTheLeftEdgeGrowsRightwardWithoutMoving() {
+        let current = hugFrame(left: 40, top: 40, size: NSSize(width: 500, height: 300))
+
+        let grown = hugged(current, to: NSSize(width: 1000, height: 300))
+        XCTAssertEqual(grown.minX, 40, "its left edge does not move")
+        XCTAssertEqual(grown.width, 1000)
+
+        let pushed = hugged(current, to: NSSize(width: 1600, height: 300))
+        XCTAssertEqual(pushed.width, 1600)
+        XCTAssertEqual(pushed.minX, hugVisible.minX, "it gave up its 40pt margin to fit")
+    }
+
+    /// `minSize` is a promise, and a screen too small to keep it is not a
+    /// reason to break it: the window overhangs rather than collapsing.
+    func testAWindowKeepsItsMinimumOnAScreenTooSmallForIt() {
+        let tiny = NSRect(x: 0, y: 0, width: 150, height: 60)
+        let fitted = FrameCalculator.contentHuggingFrame(
+            currentFrame: tiny,
+            desiredFrameSize: NSSize(width: 10, height: 10),
+            screenVisibleFrame: tiny,
+            minSize: hugMinSize).frame
+
+        XCTAssertEqual(fitted.size, hugMinSize, "never collapse below minSize")
+        XCTAssertEqual(fitted.minX, tiny.minX, "flush with the left, overhanging the right")
+        XCTAssertEqual(fitted.maxY, tiny.maxY, "flush with the top, overhanging the bottom")
+    }
+
+    /// A window tucked into a corner holds that corner on the way out and on
+    /// the way back, so a slider dragged up and down leaves it where it was
+    /// even without an anchor being carried between the steps.
+    func testGrowingAndShrinkingBackLeavesTheWindowWhereItWas() {
+        // Tucked into the bottom-right corner, where both axes move.
+        let current = hugFrame(left: 1060, top: 560, size: NSSize(width: 500, height: 400))
+
+        let grown = hugged(current, to: NSSize(width: 700, height: 600))
+        let back = hugged(grown, to: NSSize(width: 500, height: 400))
+
+        XCTAssertEqual(back, current)
+    }
+
+    // MARK: - Holding the anchor across a gesture
+
+    /// The case a corner-tucked window hides. A window that starts equidistant
+    /// keeps its *start* edge and grows in place — and having grown, it is no
+    /// longer equidistant: the end edge is now the nearer one, so a step that
+    /// re-reads the anchor shrinks it back toward the end instead and leaves
+    /// the window 100pt right of where it started. Nothing about either reading
+    /// is wrong; a stateless nearest-edge rule simply cannot be reversible
+    /// under both, which is why the anchor is held for the gesture.
+    func testAWindowInTheMiddleComesBackToWhereItStarted() {
+        // 400 of daylight on the left, 400 on the right: a dead tie.
+        let current = hugFrame(left: 600, top: 300, size: NSSize(width: 400, height: 300))
+        XCTAssertEqual(current.minX - hugVisible.minX, hugVisible.maxX - current.maxX,
+                       "a dead tie: 600pt of daylight either side")
+
+        let out = hugged(current, to: NSSize(width: 600, height: 300), holding: nil)
+        XCTAssertEqual(out.frame.minX, current.minX, "the tie keeps the start edge")
+
+        let back = hugged(out.frame, to: NSSize(width: 400, height: 300), holding: out.anchors)
+        XCTAssertEqual(back.frame, current, "the move out is the move back")
+    }
+
+    /// What the held anchor is protecting against, stated as the bug: the same
+    /// two steps with the anchor re-read each time walk the window away.
+    func testRereadingTheAnchorEachStepWalksTheWindow() {
+        let current = hugFrame(left: 600, top: 300, size: NSSize(width: 400, height: 300))
+
+        let out = hugged(current, to: NSSize(width: 600, height: 300))
+        let back = hugged(out, to: NSSize(width: 400, height: 300))
+
+        XCTAssertEqual(back.minX, 800, "200pt to the right of where it started")
+        XCTAssertNotEqual(back, current)
+    }
+
+    /// An end anchor is held even when the window has drifted into territory
+    /// where the start edge would now read as nearer — that is the whole point
+    /// of carrying it.
+    func testAHeldEndAnchorOutranksWhereTheWindowNowSits() {
+        let current = hugFrame(left: 1060, top: 300, size: NSSize(width: 500, height: 300))
+        let held = FrameAnchors(horizontal: .end, vertical: .start)
+
+        let shrunk = hugged(current, to: NSSize(width: 200, height: 300), holding: held)
+
+        XCTAssertEqual(shrunk.frame.maxX, current.maxX, "the right edge is what it holds")
+        XCTAssertEqual(shrunk.anchors, held, "and it hands the same anchors on")
+    }
+
+    /// A fresh fit reports the anchors it chose, per axis, so the caller has
+    /// something to hand back.
+    func testAFitReportsTheAnchorsItChose() {
+        // Near the right edge, near the top: end horizontally, start vertically.
+        let current = hugFrame(left: 1060, top: 20, size: NSSize(width: 500, height: 300))
+
+        let fit = hugged(current, to: NSSize(width: 520, height: 320), holding: nil)
+
+        XCTAssertEqual(fit.anchors, FrameAnchors(horizontal: .end, vertical: .start))
+    }
+
+    // MARK: - One rule for how long an axis may be
+
+    /// `minSize` beats the screen everywhere, not just in the content-hugging
+    /// path. Restoring from proportions, re-placing on a new screen and
+    /// validating a frame used to clamp to the screen and collapse the window
+    /// below its own minimum — the same window came back a different size
+    /// depending on which path it arrived through.
+    func testEveryPathKeepsAMinimumLargerThanTheScreen() {
+        let tiny = NSRect(x: 0, y: 0, width: 150, height: 60)
+        let floor = NSSize(width: 200, height: 100)
+
+        let absolute = FrameCalculator.absoluteFrame(
+            proportionalX: 0.5, proportionalY: 0.5,
+            width: 10, height: 10,
+            screenVisibleFrame: tiny, minSize: floor)
+        XCTAssertEqual(absolute.size, floor)
+
+        let relative = FrameCalculator.frame(
+            relativePosition: CGPoint(x: 0.5, y: 0.5),
+            size: NSSize(width: 10, height: 10),
+            screenVisibleFrame: tiny, minSize: floor)
+        XCTAssertEqual(relative.size, floor)
+
+        let validated = FrameCalculator.validateFrame(
+            NSRect(x: 0, y: 0, width: 10, height: 10),
+            screenVisibleFrame: tiny, minSize: floor)
+        XCTAssertEqual(validated.size, floor)
+
+        let hugging = FrameCalculator.contentHuggingFrame(
+            currentFrame: tiny, desiredFrameSize: NSSize(width: 10, height: 10),
+            screenVisibleFrame: tiny, minSize: floor).frame
+        XCTAssertEqual(hugging.size, floor)
     }
 }

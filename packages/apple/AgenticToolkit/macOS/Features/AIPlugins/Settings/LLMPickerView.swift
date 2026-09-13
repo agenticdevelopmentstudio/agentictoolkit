@@ -131,7 +131,7 @@ public final class LLMPickerView: NSView, SettingsViewProtocol {
     /// instead of at the trailing edge.
     ///
     /// Deliberately *not* required: a host may pin its controls to a width of its
-    /// own — `WindowConfigPopover` uses the stack width minus its 32pt insets — and
+    /// own — `OptionsDialogViewController` uses the stack width minus its 40pt insets — and
     /// two required width constraints on the same view is an unsatisfiable pair
     /// AppKit resolves by dropping one arbitrarily. At 999 the host always wins and
     /// nothing is logged; with no host constraint this still takes effect.

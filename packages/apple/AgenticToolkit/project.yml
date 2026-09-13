@@ -529,9 +529,9 @@ targets:
       - target: AgenticToolkitCore
         embed: true
         codeSign: true
-      # The refit-seam tests name `ContentRefittingWindowController`, which
-      # lives a layer down in the developer toolkit alongside the popover that
-      # drives it. Embedded and signed like the four above: a test bundle
+      # The pane-chrome tests import `AgenticDeveloperToolkitUI` directly —
+      # the gear, the options dialog and its body live a layer down in the
+      # developer toolkit. Embedded and signed like the four above: a test bundle
       # loads its frameworks out of its own Frameworks directory, and the UI
       # framework links the base one, so both have to be there or the bundle
       # fails to load with a dyld error naming a framework the tests never

@@ -7,9 +7,6 @@ public struct WindowSpec: Codable, Sendable, Equatable {
     public let defaultPosition: WindowPosition
     public let behavior: Behavior
     public let toolbarButtons: ToolbarButtons
-    /// What a content-hugging window does when its content wants more room
-    /// than the screen has (see `SingleWindowController.fitWindow(toContentSize:)`).
-    public let overflowPolicy: OverflowPolicy
 
     public init(
         defaultSize: NSSize,
@@ -17,13 +14,11 @@ public struct WindowSpec: Codable, Sendable, Equatable {
         defaultPosition: WindowPosition,
         persistsFrame: Bool? = nil,
         behavior: Behavior = .default,
-        toolbarButtons: ToolbarButtons = .all,
-        overflowPolicy: OverflowPolicy = .scrollContent
+        toolbarButtons: ToolbarButtons = .all
     ) {
         self.defaultSize = defaultSize
         self.minSize = minSize
         self.defaultPosition = defaultPosition
-        self.overflowPolicy = overflowPolicy
         // `persistsFrame` is a `Behavior` flag now (default on). The legacy
         // `persistsFrame:` parameter is a convenience: when provided, it
         // overrides the `.persistsFrame` bit in `behavior`. Without it,
@@ -51,17 +46,6 @@ public struct WindowSpec: Codable, Sendable, Equatable {
 }
 
 extension WindowSpec {
-
-    /// How a content-hugging window handles content that wants to grow the
-    /// window past the screen edge. Growth is always anchored at the
-    /// window's top-left corner, extending down and to the right.
-    public enum OverflowPolicy: String, Codable, Sendable {
-        /// Stop growing at the screen edge; the content scrolls inside.
-        case scrollContent
-        /// Keep the desired size (clamped to the screen) and move the window
-        /// the minimum distance needed to be fully on screen.
-        case moveToDisclose
-    }
 
     /// Per-window switches that opt windows into (or out of) toolkit-wide
     /// systems like recents tracking, launch-time reopen, and state
