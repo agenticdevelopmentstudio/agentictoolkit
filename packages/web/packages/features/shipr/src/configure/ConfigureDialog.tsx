@@ -39,6 +39,7 @@ import type {
   RepoItem,
 } from '../types';
 import type { ShiprClient } from '../client';
+import { SHIPR_DIALOG_SURFACE } from '../dialogSurface';
 
 /**
  * Configuration: the repositories this console knows about, and what each one is made of.
@@ -196,7 +197,7 @@ export function ConfigureDialog(props: ConfigureDialogProps): React.ReactElement
           `max-w-7xl` and not `5xl`: there are THREE columns now — organizations, their
           repositories, and the settings for one — and at the old width the third was narrow
           enough to wrap `owner/name-deployment` mid-slug in the field that sets it. */}
-      <DialogContent className="flex h-[80vh] max-w-7xl flex-col gap-4">
+      <DialogContent className={`flex h-[80vh] max-w-7xl flex-col gap-4 ${SHIPR_DIALOG_SURFACE}`}>
         <DialogHeader>
           <DialogTitle>Configure</DialogTitle>
         </DialogHeader>
@@ -555,7 +556,7 @@ function ConfigureBody({
               label="Export"
               icon={<Download />}
               state={{ enabled: items.length > 0, reason: 'Nothing is registered yet.' }}
-              onClick={() => downloadDocument(buildDocument({ groups, items }))}
+              onClick={() => void downloadDocument(buildDocument({ groups, items }))}
               onRefused={setRefused}
             />
           </div>
@@ -707,6 +708,7 @@ function ConfigureBody({
           `tone="info"` and not `"error"`: nothing went wrong, the operator asked for
           something this workspace does not let them have. */}
       <AlertModal
+        contentClassName={SHIPR_DIALOG_SURFACE}
         open={refused !== null}
         tone="info"
         title="Not available"

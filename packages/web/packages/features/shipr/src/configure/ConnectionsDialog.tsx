@@ -16,6 +16,7 @@ import {
 import { EmptyState } from '@agenticdevelopertoolkit/ui/components/empty-state';
 
 import type { ShiprClient } from '../client';
+import { SHIPR_DIALOG_SURFACE } from '../dialogSurface';
 
 /**
  * The forge credentials every run goes out over — {@link IntegrationsPane}, scoped to this
@@ -59,16 +60,19 @@ import type { ShiprClient } from '../client';
  */
 const PROVIDERS = ['github-app', 'vercel'] as const;
 
-/**
- * The picker opens on the forges rather than on the alphabet.
+/*
+ * THERE IS NO STARTING FILTER, and there used to be one.
  *
- * `'Code'` is a provider SUBTITLE, which is what the catalog uses for the coarse "what kind of
- * service is this" bucket — `github-app` is `Code`, `vercel` is `Deployment`. Typed into the
- * filter box, visible, and clearable: an operator who wants to see everything this dialog offers
- * deletes four characters. The narrowing that is NOT the operator's to undo is `PROVIDERS`
- * above, and it is a different mechanism for that reason.
+ * The picker opened on `'Code'` — a provider SUBTITLE, which is the catalog's coarse "what kind
+ * of service is this" bucket, and which `github-app` carries and `vercel` does not. So the box
+ * opened pre-narrowed to ONE of the two forges this dialog offers, and the other was hidden
+ * behind four characters an operator had to notice and delete. A filter that hides half of a
+ * two-item list is not a shortcut.
+ *
+ * The narrowing that IS wanted here is `PROVIDERS` above, and it is a different mechanism for
+ * exactly that reason: it is not the operator's to undo, it needs no typing, and it cannot hide
+ * a row from the person who opened the dialog to find it.
  */
-const ADD_FILTER = 'Code';
 
 /**
  * THE ONE PIECE OF CONSOLE STATE THAT IS IN THE URL, and the reason is that this dialog is
@@ -189,7 +193,7 @@ export function ConnectionsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="flex h-[80vh] max-w-5xl flex-col gap-4">
+      <DialogContent className={`flex h-[80vh] max-w-5xl flex-col gap-4 ${SHIPR_DIALOG_SURFACE}`}>
         <DialogHeader>
           <DialogTitle>Integrations</DialogTitle>
         </DialogHeader>
@@ -260,8 +264,15 @@ function ConnectionsBody({
       <IntegrationsPane
         ecosystemId={ecosystemId}
         providerIds={PROVIDERS}
-        addFilter={ADD_FILTER}
         levelTitle="Integrations"
+        // What the bar's Transfer reads its destination list from. `client.workspace` is the
+        // slug, which is all `useTransferTargets` takes — this dialog has never held the
+        // resolved workspace row, and now does not need to.
+        workspaceSlug={client.workspace}
+        // The same floor this dialog sets, carried into the confirms and the picker
+        // the pane PORTALS — a portal is outside this subtree, so the custom
+        // properties cannot reach them by inheritance.
+        dialogSurfaceClassName={SHIPR_DIALOG_SURFACE}
         onChanged={onChanged}
       />
     </StandaloneRailHost>

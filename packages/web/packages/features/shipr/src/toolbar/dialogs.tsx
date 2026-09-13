@@ -27,6 +27,7 @@ import {
   type ForgeConnection,
   type Group,
 } from '../types';
+import { SHIPR_DIALOG_SURFACE } from '../dialogSurface';
 
 /**
  * The small forms the console opens.
@@ -99,7 +100,7 @@ export function NameDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent>
+      <DialogContent className={SHIPR_DIALOG_SURFACE}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
@@ -175,6 +176,7 @@ export function ConfirmDialog({
   return (
     <AlertModal
       open={open}
+      contentClassName={SHIPR_DIALOG_SURFACE}
       title={title}
       description={
         <>
@@ -262,7 +264,7 @@ export function MoveDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent>
+      <DialogContent className={SHIPR_DIALOG_SURFACE}>
         <DialogHeader>
           <DialogTitle>Move {movingLabel}</DialogTitle>
         </DialogHeader>
@@ -372,7 +374,7 @@ export function DeployDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent>
+      <DialogContent className={SHIPR_DIALOG_SURFACE}>
         <DialogHeader>
           <DialogTitle>Deploy {targetLabel}</DialogTitle>
         </DialogHeader>

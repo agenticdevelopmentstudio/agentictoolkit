@@ -52,6 +52,7 @@ import type {
   RegisterRequest,
   RepoPatch,
 } from './types';
+import { SHIPR_DIALOG_SURFACE } from './dialogSurface';
 
 /**
  * The whole console: folders, and what has been done to what is in them.
@@ -1188,6 +1189,7 @@ function Console({
       />
 
       <AlertModal
+        contentClassName={SHIPR_DIALOG_SURFACE}
         open={Boolean(alert)}
         tone="error"
         title="shipr hit a problem"

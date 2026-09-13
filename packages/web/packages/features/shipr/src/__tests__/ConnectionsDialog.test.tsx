@@ -5,6 +5,8 @@ import * as React from 'react';
 
 import { useStackLevel } from '@agentic-toolkit/resource';
 
+import { SHIPR_DIALOG_SURFACE } from '../dialogSurface';
+
 /**
  * The Connections dialog — the forge accounts every run goes out over, opened from
  * Integrations on the far right of the toolbar.
@@ -42,23 +44,25 @@ vi.mock('@agentic-toolkit/data/ecosystems', () => ({
 // its own would keep passing through exactly the divergence that breaks the return leg.
 /** What the dialog handed the pane on its last render — the narrowing props are the dialog's
  *  own decisions, and the stub is the only place they are observable. */
-const paneProps: { providerIds?: readonly string[]; addFilter?: string } = {};
+const paneProps: { providerIds?: readonly string[]; workspaceSlug?: string } & {
+  [k: string]: unknown;
+} = {};
 
 vi.mock('@agentic-toolkit/integrations', async (importOriginal) => ({
   CONNECTIONS_HASH: (
     await importOriginal<typeof import('@agentic-toolkit/integrations')>()
   ).CONNECTIONS_HASH,
-  IntegrationsPane: ({
-    levelTitle,
-    providerIds,
-    addFilter,
-  }: {
+  IntegrationsPane: (props: {
     levelTitle?: string;
     providerIds?: readonly string[];
-    addFilter?: string;
+    workspaceSlug?: string;
   }) => {
+    const { levelTitle, providerIds, workspaceSlug } = props;
+    // The WHOLE prop object, so `'addFilter' in paneProps` can be asked below. Recording only
+    // the props this stub names would answer "absent" for a prop the dialog still passes.
+    Object.assign(paneProps, props);
     paneProps.providerIds = providerIds;
-    paneProps.addFilter = addFilter;
+    paneProps.workspaceSlug = workspaceSlug;
     useStackLevel({
       id: 'integrations-list',
       title: levelTitle ?? 'Integrations',
@@ -115,7 +119,7 @@ describe('the Connections dialog frame', () => {
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
   });
 
-  it('offers only the forges it actually has, and opens the picker on them', async () => {
+  it('offers only the forges it actually has, and pre-narrows nothing', async () => {
     draw();
     await screen.findByRole('button', { name: 'Add integration' });
     // `'railway'` was in this list and named NOTHING: the catalog has no railway entry, and
@@ -124,10 +128,19 @@ describe('the Connections dialog frame', () => {
     // forge this console has none of. Railway credentials reach a deploy through the
     // environment, not through an integration.
     expect(paneProps.providerIds).toEqual(['github-app', 'vercel']);
-    // And the picker opens on the forges rather than the alphabet. `'Code'` is the catalog
-    // subtitle `github-app` carries; it goes in the filter box, where the operator can see it
-    // and clear it, which is what makes it different from the restriction above.
-    expect(paneProps.addFilter).toBe('Code');
+    // And NO starting filter — the prop is gone from the pane entirely. It used to be
+    // `'Code'`, the catalog subtitle `github-app` carries and `vercel` does not, so the picker
+    // for a two-forge dialog opened showing one of them with the other behind four characters
+    // the operator had to notice and delete.
+    expect('addFilter' in paneProps).toBe(false);
+    // The workspace the bar's Transfer reads its destinations from. Without it the pane draws
+    // no Transfer button at all, which is the right answer for a host that has no workspace and
+    // the wrong one for this dialog, which has had the slug all along.
+    expect(paneProps.workspaceSlug).toBe(PROPS.client.workspace);
+    // And this dialog's own button floor. The pane's confirms and its picker render into a
+    // PORTAL, so nothing this surface sets reaches them by inheritance — without the prop
+    // they would be the one step in the flow with smaller buttons.
+    expect(paneProps.dialogSurfaceClassName).toBe(SHIPR_DIALOG_SURFACE);
   });
 
   it('does not draw the pane while it is closed', () => {

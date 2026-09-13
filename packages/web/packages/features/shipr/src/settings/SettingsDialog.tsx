@@ -16,6 +16,7 @@ import {
   type RepoSettingsPatch,
   type SettingsTarget,
 } from './SettingsForm';
+import { SHIPR_DIALOG_SURFACE } from '../dialogSurface';
 
 /**
  * Settings — a modal, because configuration is not the answer to "how is this repository
@@ -51,7 +52,7 @@ export function SettingsDialog({
 }: SettingsDialogProps): React.ReactElement {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent>
+      <DialogContent className={SHIPR_DIALOG_SURFACE}>
         <DialogHeader>
           <DialogTitle>{settingsTitle(target)}</DialogTitle>
         </DialogHeader>

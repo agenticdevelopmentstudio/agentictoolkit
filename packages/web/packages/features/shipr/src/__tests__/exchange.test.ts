@@ -411,7 +411,7 @@ describe('applying a plan', () => {
 });
 
 describe('the download', () => {
-  it('hands over the document as a file, and lets go of the blob', () => {
+  it('hands over the document as a file, and lets go of the blob', async () => {
     const created = vi.fn(() => 'blob:x');
     const revoked = vi.fn();
     vi.stubGlobal('URL', { ...URL, createObjectURL: created, revokeObjectURL: revoked });
@@ -419,7 +419,7 @@ describe('the download', () => {
     vi.useFakeTimers();
 
     const doc = buildDocument({ groups: [], items: [repo() as ExportableRepo] }) as ShiprDocument;
-    downloadDocument(doc);
+    await downloadDocument(doc);
 
     expect(click).toHaveBeenCalled();
     // And nothing is left in the DOM to be clicked again.

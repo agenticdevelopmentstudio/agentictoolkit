@@ -20,6 +20,7 @@ import { readTextFile } from './files';
 import { planImport, type ImportPlan, type PlanRow, type RowState } from './plan';
 import { useSubmit } from '../toolbar/dialogs';
 import type { ForgeConnection, Group, RepoItem } from '../types';
+import { SHIPR_DIALOG_SURFACE } from '../dialogSurface';
 
 /**
  * Reading a `shipr-config-export.json` back in.
@@ -139,7 +140,7 @@ export function ImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col gap-4">
+      <DialogContent className={`flex max-h-[80vh] max-w-2xl flex-col gap-4 ${SHIPR_DIALOG_SURFACE}`}>
         <DialogHeader>
           <DialogTitle>Import configuration</DialogTitle>
           <DialogDescription>
