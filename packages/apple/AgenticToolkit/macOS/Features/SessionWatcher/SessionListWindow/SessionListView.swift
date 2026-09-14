@@ -15,6 +15,15 @@ extension SessionWatcher {
         private let emptyStateView = SessionWatcherEmptyStateView()
         private var errorBanner: SessionWatcherErrorBanner?
 
+        /// The rows currently in the stack, by session id, with the order they are
+        /// in — together these say whether an incoming snapshot is the same list
+        /// with newer content (update in place) or a different list (rebuild).
+        private var rows: [String: SessionWatcherRowAppKitView] = [:]
+        private var displayedSessionIds: [String] = []
+        /// Whether the rows in the stack were built with a summary line, which
+        /// decides whether they can be reused when the setting changes.
+        private var displayedSummariesEnabled = false
+
         public init(viewModel: SessionListViewModel) {
             self.viewModel = viewModel
             super.init(frame: .zero)
@@ -111,32 +120,17 @@ extension SessionWatcher {
         }
 
         private func updateContent(sessions: [SessionWatcherSession], isEmpty: Bool) {
-            stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            let summariesEnabled = viewModel.summariesEnabled()
 
             if isEmpty {
+                rebuildRows(sessions: [], summariesEnabled: summariesEnabled)
                 scrollView.isHidden = true
                 emptyStateView.isHidden = false
             } else {
                 scrollView.isHidden = false
                 emptyStateView.isHidden = true
-
-                let summariesEnabled = viewModel.summariesEnabled()
-                for (index, session) in sessions.enumerated() {
-                    if index > 0 {
-                        let separator = SessionWatcherListSeparator()
-                        stackView.addArrangedSubview(separator)
-                        separator.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
-                    }
-                    let row = SessionWatcherRowAppKitView(
-                        session: session,
-                        onTap: { [weak self] session in self?.viewModel.handleSessionClick(session) },
-                        isSummarizing: viewModel.summarizingSessionIds.contains(session.sessionId),
-                        onSummarize: { [weak self] session in self?.viewModel.summarizeSession(session) },
-                        isFrontmost: session.sessionId == viewModel.frontmostSessionId,
-                        summariesEnabled: summariesEnabled
-                    )
-                    stackView.addArrangedSubview(row)
-                    row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+                if !refreshRowsInPlace(sessions: sessions, summariesEnabled: summariesEnabled) {
+                    rebuildRows(sessions: sessions, summariesEnabled: summariesEnabled)
                 }
             }
             invalidateIntrinsicContentSize()
@@ -149,6 +143,68 @@ extension SessionWatcher {
                     name: Self.contentSizeDidChangeNotification,
                     object: self
                 )
+            }
+        }
+
+        /// The common case: the same sessions, in the same order, with newer
+        /// content. Returns false when the list's *shape* changed and the caller
+        /// has to rebuild.
+        ///
+        /// This is why the window stopped churning. The source polls the daemon
+        /// every three seconds and publishes whenever any field of any session
+        /// differs — and a live session's `last_output` differs almost every time.
+        /// Rebuilding the stack on each of those tore down every row and built a
+        /// new one, which reset the scroll position, dropped whatever row the
+        /// pointer was over, and restarted each working session's spinner from zero
+        /// because layer animations do not survive leaving the window. None of that
+        /// was a content change; it was the same eighteen rows, reprinted.
+        private func refreshRowsInPlace(
+            sessions: [SessionWatcherSession],
+            summariesEnabled: Bool
+        ) -> Bool {
+            guard summariesEnabled == displayedSummariesEnabled,
+                  sessions.map(\.sessionId) == displayedSessionIds
+            else { return false }
+            let frontmostId = viewModel.frontmostSessionId
+            let summarizing = viewModel.summarizingSessionIds
+            for session in sessions {
+                guard let row = rows[session.sessionId],
+                      row.update(
+                          session: session,
+                          isSummarizing: summarizing.contains(session.sessionId),
+                          isFrontmost: session.sessionId == frontmostId,
+                          summariesEnabled: summariesEnabled
+                      )
+                else { return false }
+            }
+            return true
+        }
+
+        /// Throws the whole list away and builds it again — for a genuine change of
+        /// membership, order, or row shape, which is what a rebuild is actually for.
+        private func rebuildRows(sessions: [SessionWatcherSession], summariesEnabled: Bool) {
+            stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            rows.removeAll(keepingCapacity: true)
+            displayedSessionIds = sessions.map(\.sessionId)
+            displayedSummariesEnabled = summariesEnabled
+
+            for (index, session) in sessions.enumerated() {
+                if index > 0 {
+                    let separator = SessionWatcherListSeparator()
+                    stackView.addArrangedSubview(separator)
+                    separator.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+                }
+                let row = SessionWatcherRowAppKitView(
+                    session: session,
+                    onTap: { [weak self] session in self?.viewModel.handleSessionClick(session) },
+                    isSummarizing: viewModel.summarizingSessionIds.contains(session.sessionId),
+                    onSummarize: { [weak self] session in self?.viewModel.summarizeSession(session) },
+                    isFrontmost: session.sessionId == viewModel.frontmostSessionId,
+                    summariesEnabled: summariesEnabled
+                )
+                stackView.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+                rows[session.sessionId] = row
             }
         }
 
@@ -257,13 +313,17 @@ extension SessionWatcher {
     // MARK: - SessionWatcherSession Row View
 
     public final class SessionWatcherRowAppKitView: NSView {
-        private let session: SessionWatcherSession
+        private var session: SessionWatcherSession
         private let onTap: ((SessionWatcherSession) -> Void)?
-        private let isSummarizing: Bool
+        private var isSummarizing: Bool
         private let onSummarize: ((SessionWatcherSession) -> Void)?
-        private let isFrontmost: Bool
+        private var isFrontmost: Bool
         private let summariesEnabled: Bool
         private var trackingArea: NSTrackingArea?
+
+        /// Which session this row is showing — the identity `update(...)` is keyed
+        /// on, so the list can match a row to its session across a refresh.
+        public var sessionId: String { session.sessionId }
 
         // Theme-sensitive subviews
         private var projectLabel: NSTextField!
@@ -275,8 +335,6 @@ extension SessionWatcher {
         private var outputLabel: NSTextField!
         private var summaryLabel: NSTextField?
         private var themeObserver: ThemePaletteObserver?
-
-        private let isFrontmostSession: Bool
 
         /// Horizontal compression-resistance priorities for the row's text, in the
         /// order they give way: the agent's last output and the AI summary first
@@ -317,7 +375,6 @@ extension SessionWatcher {
             self.onSummarize = onSummarize
             self.isFrontmost = isFrontmost
             self.summariesEnabled = summariesEnabled
-            self.isFrontmostSession = isFrontmost
             super.init(frame: .zero)
             accessibilityID("session-panel.row.\(session.sessionId)")
             wantsLayer = true
@@ -329,11 +386,59 @@ extension SessionWatcher {
         @available(*, unavailable)
         public required init?(coder: NSCoder) { fatalError() }
 
+        /// Moves this row to a newer snapshot of the same session in place, and
+        /// reports whether it could. `false` means the change is structural and the
+        /// caller must build a fresh row: the header's "»"-separated segments exist
+        /// only for the fields that are non-empty, so a branch or a session name
+        /// that appeared or vanished changes how many labels the row has, and
+        /// `summariesEnabled` decides whether line 3 exists at all.
+        ///
+        /// Everything that actually moves poll to poll — what the agent last said,
+        /// its activity, its summary, whether it is the frontmost session — is a
+        /// string or a colour on a label that is already there.
+        public func update(
+            session newSession: SessionWatcherSession,
+            isSummarizing newIsSummarizing: Bool,
+            isFrontmost newIsFrontmost: Bool,
+            summariesEnabled newSummariesEnabled: Bool
+        ) -> Bool {
+            guard newSession.sessionId == session.sessionId,
+                  newSummariesEnabled == summariesEnabled,
+                  Self.headerSegments(for: newSession) == Self.headerSegments(for: session)
+            else { return false }
+
+            session = newSession
+            isSummarizing = newIsSummarizing
+            isFrontmost = newIsFrontmost
+
+            projectLabel.stringValue = newSession.projectGroupName
+            for (lbl, text) in zip(subtitleLabels, Self.headerSegments(for: newSession)) {
+                lbl.stringValue = text
+            }
+            activityIcon.update(activity: newSession.activity, isSummarizing: newIsSummarizing)
+            outputLabel.stringValue = Self.outputText(for: newSession)
+            summaryLabel?.stringValue = summaryText()
+            toolTip = Self.infoText(for: newSession)
+            // Summarize is the one item whose enablement tracks live state.
+            menu?.items.first { $0.action == #selector(summarizeAction) }?.isEnabled = !newIsSummarizing
+            // Text colour depends on whether these fields are empty, and the resting
+            // background on `isFrontmost` — both of which just changed.
+            applyTheme(resolvedThemeScope.palette)
+            return true
+        }
+
+        /// The header's optional segments, in order — branch then session name,
+        /// each present only when non-empty. The row is built around this list and
+        /// `update(...)` refuses any change to its shape.
+        private static func headerSegments(for session: SessionWatcherSession) -> [String] {
+            [session.gitBranch, session.sessionName].filter { !$0.isEmpty }
+        }
+
         /// The row's resting background. A list row has no border of its own — the
         /// hairlines between rows do that job — so the frontmost session is marked by
         /// an accent wash instead, the one row-level cue left.
         private func restingBackground(_ palette: SemanticPalette) -> CGColor {
-            isFrontmostSession
+            isFrontmost
                 ? palette.accentColor.withAlphaComponent(0.14).cgColor
                 : NSColor.clear.cgColor
         }

@@ -18,8 +18,8 @@ extension SessionWatcher {
     /// The animations are CoreAnimation rather than SF Symbol effects because
     /// `.rotate` needs macOS 15 and this framework ships to macOS 14.
     public final class SessionWatcherActivityIconView: NSImageView {
-        private let activity: SessionWatcherActivity
-        private let isSummarizing: Bool
+        private var activity: SessionWatcherActivity
+        private var isSummarizing: Bool
 
         /// Side of the glyph's box. Small enough to sit inside a two-line row
         /// without pushing its height around.
@@ -48,6 +48,27 @@ extension SessionWatcher {
 
         @available(*, unavailable)
         public required init?(coder: NSCoder) { fatalError() }
+
+        /// Moves an existing glyph to a new state instead of replacing the view.
+        ///
+        /// A session's activity changes on every poll, and rebuilding the icon
+        /// restarted its animation from zero each time — the "working" arrows
+        /// visibly stuttered rather than spinning. Returning early when nothing
+        /// changed is what keeps them spinning: `startAnimation()` is a no-op for
+        /// an animation that is already installed, but the removal below is not.
+        public func update(activity: SessionWatcherActivity, isSummarizing: Bool) {
+            guard self.activity != activity || self.isSummarizing != isSummarizing else { return }
+            self.activity = activity
+            self.isSummarizing = isSummarizing
+            accessibilityID("session-panel.activity.\(isSummarizing ? "summarizing" : activity.rawValue)")
+            image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)
+            toolTip = accessibilityLabel
+            // The state that was animating may not be the state that is, so the old
+            // animation goes before the new one is chosen.
+            layer?.removeAnimation(forKey: Self.rotationKey)
+            layer?.removeAnimation(forKey: Self.pulseKey)
+            if window != nil { startAnimation() }
+        }
 
         private var symbolName: String {
             if isSummarizing { return "sparkles" }
