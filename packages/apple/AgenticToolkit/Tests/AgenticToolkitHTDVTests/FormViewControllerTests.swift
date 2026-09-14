@@ -654,5 +654,80 @@ final class FormViewControllerTests: XCTestCase {
         XCTAssertEqual(recorder.recorded, ["actionA"])
         XCTAssertEqual(formViewController.extraButton(for: "actionA")?.isEnabled, true)
     }
+
+    // MARK: Accessibility identifiers (WP2)
+
+    /// A set of identifiers nobody checks is how they rot. Covers every field kind `makeConfigurableSpec`
+    /// builds (text, secure text, number, date, textArea, json, markdown) plus save/revert/delete/extra
+    /// and one field's validation-error label, and pins both the literal strings and their uniqueness.
+    func testFormAssignsUniqueAccessibilityIdentifiers() {
+        let formViewController = makeConfigurableVC(
+            extra: [FormAction(id: "duplicate", title: "Duplicate") { _ in }],
+            delete: FormDeleteAction(title: "Delete") {}
+        )
+
+        var identifiers: [String] = []
+        func expect(
+            _ actual: String?, _ expected: String, file: StaticString = #filePath, line: UInt = #line
+        ) {
+            XCTAssertEqual(actual, expected, file: file, line: line)
+            if let actual { identifiers.append(actual) }
+        }
+
+        expect(formViewController.control(for: "name")?.accessibilityIdentifier(), "htdv.form.field.name")
+        expect(formViewController.control(for: "password")?.accessibilityIdentifier(), "htdv.form.field.password")
+        expect(formViewController.control(for: "limit")?.accessibilityIdentifier(), "htdv.form.field.limit")
+        expect(formViewController.control(for: "notes")?.accessibilityIdentifier(), "htdv.form.field.notes")
+
+        guard let summaryScroll = formViewController.control(for: "summary") as? NSScrollView,
+              let summaryTextView = summaryScroll.documentView as? NSTextView else {
+            return XCTFail("expected the summary field's NSTextView")
+        }
+        expect(summaryTextView.accessibilityIdentifier(), "htdv.form.field.summary")
+
+        guard let configScroll = formViewController.control(for: "config") as? NSScrollView,
+              let configTextView = configScroll.documentView as? NSTextView else {
+            return XCTFail("expected the config field's NSTextView")
+        }
+        expect(configTextView.accessibilityIdentifier(), "htdv.form.field.config")
+
+        expect(formViewController.datePicker(for: "due")?.accessibilityIdentifier(), "htdv.form.field.due")
+        expect(formViewController.dateSetButton(for: "due")?.accessibilityIdentifier(), "htdv.form.field.due.set")
+        expect(
+            formViewController.dateClearButton(for: "due")?.accessibilityIdentifier(), "htdv.form.field.due.clear"
+        )
+
+        expect(formViewController.errorLabelView(for: "name")?.accessibilityIdentifier(), "htdv.form.error.name")
+        expect(formViewController.errorLabelView(for: "due")?.accessibilityIdentifier(), "htdv.form.error.due")
+
+        expect(formViewController.saveButton.accessibilityIdentifier(), "htdv.form.save")
+        expect(formViewController.revertButton.accessibilityIdentifier(), "htdv.form.revert")
+        expect(formViewController.deleteButton.accessibilityIdentifier(), "htdv.form.delete")
+        expect(
+            formViewController.extraButton(for: "duplicate")?.accessibilityIdentifier(),
+            "htdv.form.action.duplicate"
+        )
+
+        XCTAssertEqual(identifiers.count, Set(identifiers).count, "identifiers must be unique: \(identifiers)")
+    }
+
+    /// `makeConfigurableSpec` above never touches toggle/select/stringSet/readOnly — `makeSpec` does.
+    /// Covers those plus the markdown field's container, which is the one field identifier placed on a
+    /// container rather than a native control: pins that it is also marked a real accessibility element
+    /// with a group role, not just given an identifier nothing can actually land on.
+    func testFormAssignsAccessibilityIdentifiersForToggleSelectStringSetReadOnlyAndMarkdownFields() {
+        let formViewController = makeVC()
+        XCTAssertEqual(
+            formViewController.control(for: "enabled")?.accessibilityIdentifier(), "htdv.form.field.enabled"
+        )
+        XCTAssertEqual(formViewController.control(for: "kind")?.accessibilityIdentifier(), "htdv.form.field.kind")
+        XCTAssertEqual(formViewController.control(for: "tags")?.accessibilityIdentifier(), "htdv.form.field.tags")
+        XCTAssertEqual(formViewController.control(for: "id")?.accessibilityIdentifier(), "htdv.form.field.id")
+
+        let notesView = formViewController.control(for: "notes")
+        XCTAssertEqual(notesView?.accessibilityIdentifier(), "htdv.form.field.notes")
+        XCTAssertEqual(notesView?.isAccessibilityElement(), true)
+        XCTAssertEqual(notesView?.accessibilityRole(), .group)
+    }
 }
 #endif

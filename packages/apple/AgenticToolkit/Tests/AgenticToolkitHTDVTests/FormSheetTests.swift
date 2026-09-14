@@ -187,6 +187,13 @@ final class FormSheetTests: XCTestCase {
         XCTAssertEqual(sheet.title, "New persona")
     }
 
+    func testCancelButtonHasAccessibilityIdentifier() {
+        let form = makeForm()
+        let sheet = FormSheetController(title: "New thing", form: form) { _ in }
+        _ = sheet.view
+        XCTAssertEqual(sheet.cancelButton.accessibilityIdentifier(), "htdv.form.cancel")
+    }
+
     /// `isConfirmingDiscard` is set synchronously before `cancel()` spawns its `Task`, so a second
     /// `cancel()` made before the first's confirmation resolves must see the guard already up and
     /// return immediately rather than prompting a second time.

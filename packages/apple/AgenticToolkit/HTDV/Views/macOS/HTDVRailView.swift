@@ -40,6 +40,7 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
         createButton.target = self
         createButton.action = #selector(createTapped)
         createButton.isHidden = true
+        createButton.setAccessibilityIdentifier("htdv.rail.\(levelIndex).create")
         let header = NSStackView(views: [titleLabel, NSView(), createButton])
         header.orientation = .horizontal
         header.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 4, right: 6)
@@ -55,6 +56,7 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
         tableView.dataSource = self
         tableView.delegate = self
         tableView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        tableView.setAccessibilityIdentifier("htdv.rail.\(levelIndex)")
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
@@ -62,6 +64,7 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
         emptyLabel.alignment = .center
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.isHidden = true
+        emptyLabel.setAccessibilityIdentifier("htdv.rail.\(levelIndex).empty")
         errorView.isHidden = true
         loadingView.isHidden = true
 
@@ -151,6 +154,9 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
             tableView.makeView(withIdentifier: HTDVRailCellView.identifier, owner: nil) as? HTDVRailCellView
         ) ?? HTDVRailCellView(frame: .zero)
         cell.apply(HTDVCellContent(item: items[row]))
+        // Reassigned on every reuse, not just creation: `items[row].id` can differ from whatever this
+        // recycled cell was last showing.
+        cell.setAccessibilityIdentifier("htdv.rail.\(levelIndex).row.\(items[row].id)")
         return cell
     }
 

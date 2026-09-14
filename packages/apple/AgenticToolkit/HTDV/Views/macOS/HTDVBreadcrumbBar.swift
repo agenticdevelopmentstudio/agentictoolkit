@@ -38,6 +38,7 @@ public final class HTDVBreadcrumbBar: NSView {
             button.bezelStyle = .accessoryBarAction
             button.isBordered = false
             button.tag = index
+            button.setAccessibilityIdentifier("htdv.breadcrumb.\(index)")
             button.font = index == titles.count - 1
                 ? .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
                 : .systemFont(ofSize: NSFont.smallSystemFontSize)

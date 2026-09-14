@@ -11,9 +11,11 @@ public final class HTDVErrorView: NSView {
         super.init(frame: frameRect)
         messageLabel.alignment = .center
         messageLabel.textColor = .secondaryLabelColor
+        messageLabel.setAccessibilityIdentifier("htdv.error.message")
         retryButton.bezelStyle = .rounded
         retryButton.target = self
         retryButton.action = #selector(retryTapped)
+        retryButton.setAccessibilityIdentifier("htdv.error.retry")
         let stack = NSStackView(views: [messageLabel, retryButton])
         stack.orientation = .vertical
         stack.alignment = .centerX
@@ -42,6 +44,7 @@ public final class HTDVLoadingView: NSView {
         super.init(frame: frameRect)
         spinner.style = .spinning
         spinner.controlSize = .small
+        spinner.setAccessibilityIdentifier("htdv.loading")
         spinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(spinner)
         NSLayoutConstraint.activate([

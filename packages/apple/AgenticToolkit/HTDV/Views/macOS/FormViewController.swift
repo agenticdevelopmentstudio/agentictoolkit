@@ -93,6 +93,9 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         guard let label = fieldErrorLabels[key], !label.isHidden else { return nil }
         return label.stringValue
     }
+    /// Unlike `errorLabel(for:)`, returns the label view itself regardless of visibility — for tests
+    /// that need to check the accessibility identifier rather than the currently-shown message.
+    func errorLabelView(for key: String) -> NSTextField? { fieldErrorLabels[key] }
     func extraButton(for id: String) -> NSButton? { extraButtons[id] }
     /// `controls[key]` holds the whole date ROW (see `buildDateRow(for:)`), so tests and the sync path
     /// reach the picker itself through here.
@@ -154,6 +157,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         error.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         error.textColor = .systemRed
         error.isHidden = true
+        error.setAccessibilityIdentifier("htdv.form.error.\(field.key)")
         fieldErrorLabels[field.key] = error
         let stack = NSStackView(views: [label, control, error])
         stack.orientation = .vertical
@@ -172,6 +176,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             text.target = self
             text.action = #selector(textFieldChanged(_:))
             text.delegate = self
+            text.setAccessibilityIdentifier("htdv.form.field.\(textField.key)")
             return text
         case .number(let numberField):
             let text = NSTextField()
@@ -179,6 +184,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             text.target = self
             text.action = #selector(textFieldChanged(_:))
             text.delegate = self
+            text.setAccessibilityIdentifier("htdv.form.field.\(numberField.key)")
             return text
         case .stringSet(let stringSetField):
             let text = NSTextField()
@@ -187,6 +193,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             text.target = self
             text.action = #selector(textFieldChanged(_:))
             text.delegate = self
+            text.setAccessibilityIdentifier("htdv.form.field.\(stringSetField.key)")
             return text
         case .textArea(let textAreaField):
             return buildTextView(key: textAreaField.key, minLines: textAreaField.minLines, monospaced: false)
@@ -197,10 +204,12 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             toggle.identifier = NSUserInterfaceItemIdentifier(toggleField.key)
             toggle.target = self
             toggle.action = #selector(toggleChanged(_:))
+            toggle.setAccessibilityIdentifier("htdv.form.field.\(toggleField.key)")
             return toggle
         case .select(let selectField):
             let popup = NSPopUpButton()
             popup.identifier = NSUserInterfaceItemIdentifier(selectField.key)
+            popup.setAccessibilityIdentifier("htdv.form.field.\(selectField.key)")
             popup.addItem(withTitle: "—")
             popup.lastItem?.representedObject = ""
             for option in selectField.options {
@@ -219,6 +228,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             text.lineBreakMode = .byWordWrapping
             text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             text.identifier = NSUserInterfaceItemIdentifier(readOnlyField.key)
+            text.setAccessibilityIdentifier("htdv.form.field.\(readOnlyField.key)")
             if readOnlyField.isMonospaced {
                 text.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             }
@@ -231,6 +241,13 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             }
             addChild(editor)
             editor.view.heightAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+            // `editor.view` is an opaque container from whatever `MarkdownEditing` conformer the host
+            // supplies (`HubModules.markdownEditing`, typically) — this framework has no visibility into
+            // its internal accessibility tree, so the container itself is made the addressable element
+            // for the field, per the "container needs a role too" rule.
+            editor.view.setAccessibilityIdentifier("htdv.form.field.\(key)")
+            editor.view.setAccessibilityElement(true)
+            editor.view.setAccessibilityRole(.group)
             return editor.view
         }
     }
@@ -245,16 +262,23 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         picker.datePickerElements = [.yearMonthDay]
         picker.target = self
         picker.action = #selector(dateChanged(_:))
+        picker.setAccessibilityIdentifier("htdv.form.field.\(field.key)")
         datePickers[field.key] = picker
 
+        // Not in the brief's literal list (only the row's overall field identifier is named there),
+        // but these are the two real controls that stand in for the picker when the model holds no
+        // date — see `applyDateRow`. Namespaced under the field's own identifier so both stay
+        // discoverable from it.
         let setButton = NSButton(title: "Set date", target: self, action: #selector(setDateTapped(_:)))
         setButton.bezelStyle = .rounded
         setButton.identifier = NSUserInterfaceItemIdentifier(field.key)
+        setButton.setAccessibilityIdentifier("htdv.form.field.\(field.key).set")
         dateSetButtons[field.key] = setButton
 
         let clearButton = NSButton(title: "Clear", target: self, action: #selector(clearDateTapped(_:)))
         clearButton.bezelStyle = .rounded
         clearButton.identifier = NSUserInterfaceItemIdentifier(field.key)
+        clearButton.setAccessibilityIdentifier("htdv.form.field.\(field.key).clear")
         dateClearButtons[field.key] = clearButton
 
         let row = NSStackView(views: [picker, setButton, clearButton, NSView()])
@@ -275,6 +299,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         textView.autoresizingMask = [.width]
         textView.isVerticallyResizable = true
         textView.textContainer?.widthTracksTextView = true
+        textView.setAccessibilityIdentifier("htdv.form.field.\(key)")
         textViewKeys[ObjectIdentifier(textView)] = key
         let scroll = NSScrollView()
         scroll.documentView = textView
@@ -297,14 +322,20 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         saveButton.keyEquivalent = "\r"
         saveButton.target = self
         saveButton.action = #selector(saveTapped)
+        saveButton.setAccessibilityIdentifier("htdv.form.save")
+        // Not named by the brief (which only calls out save/cancel), but revert and delete are real
+        // footer controls too, so they get the same "<feature>.<element>" shape rather than being left
+        // unaddressable.
         revertButton.bezelStyle = .rounded
         revertButton.target = self
         revertButton.action = #selector(revertTapped)
+        revertButton.setAccessibilityIdentifier("htdv.form.revert")
         deleteButton.bezelStyle = .rounded
         deleteButton.hasDestructiveAction = true
         deleteButton.target = self
         deleteButton.action = #selector(deleteTapped)
         deleteButton.isHidden = state.spec.actions.delete == nil
+        deleteButton.setAccessibilityIdentifier("htdv.form.delete")
         if let delete = state.spec.actions.delete { deleteButton.title = delete.title }
         if let save = state.spec.actions.save { saveButton.title = save.title }
         saveButton.isHidden = state.spec.actions.save == nil
@@ -316,6 +347,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             button.bezelStyle = .rounded
             button.identifier = NSUserInterfaceItemIdentifier(action.id)
             button.hasDestructiveAction = action.isDestructive
+            button.setAccessibilityIdentifier("htdv.form.action.\(action.id)")
             extraButtons[action.id] = button
             views.append(button)
         }

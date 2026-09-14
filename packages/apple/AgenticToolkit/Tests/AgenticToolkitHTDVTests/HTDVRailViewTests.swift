@@ -434,6 +434,65 @@ final class HTDVRailViewTests: XCTestCase {
         XCTAssertEqual(source.calls, [], "merely building the host's view must not fetch anything")
         XCTAssertTrue(viewController.controller.levels.isEmpty)
     }
+
+    // MARK: Accessibility identifiers (WP2)
+
+    /// A set of identifiers nobody checks is how they rot. Builds one rail with a create action and two
+    /// items (one disclosing, one not, so the row identifiers differ from the label), applies it, and
+    /// pins every literal string this WP assigns plus their uniqueness within the rail.
+    func testRailAssignsUniqueAccessibilityIdentifiers() {
+        let rail = HTDVRailView(levelIndex: 2)
+        rail.frame = NSRect(x: 0, y: 0, width: 240, height: 400)
+        rail.apply(level: level(), selectedID: nil)
+
+        XCTAssertEqual(rail.tableView.accessibilityIdentifier(), "htdv.rail.2")
+        XCTAssertEqual(rail.createButton.accessibilityIdentifier(), "htdv.rail.2.create")
+        XCTAssertEqual(rail.emptyLabel.accessibilityIdentifier(), "htdv.rail.2.empty")
+        XCTAssertEqual(rail.errorView.messageLabel.accessibilityIdentifier(), "htdv.error.message")
+        XCTAssertEqual(rail.errorView.retryButton.accessibilityIdentifier(), "htdv.error.retry")
+        XCTAssertEqual(rail.loadingView.spinner.accessibilityIdentifier(), "htdv.loading")
+
+        var rowIdentifiers: [String] = []
+        for row in 0..<rail.rowCount {
+            guard let cell = rail.tableView(rail.tableView, viewFor: nil, row: row) as? HTDVRailCellView else {
+                XCTFail("expected a cell view for row \(row)")
+                continue
+            }
+            let identifier = cell.accessibilityIdentifier()
+            XCTAssertFalse(identifier.isEmpty, "row \(row) has no accessibility identifier")
+            rowIdentifiers.append(identifier)
+        }
+        XCTAssertEqual(rowIdentifiers, ["htdv.rail.2.row.a", "htdv.rail.2.row.b"])
+
+        let fixedIdentifiers = [
+            rail.tableView.accessibilityIdentifier(),
+            rail.createButton.accessibilityIdentifier(),
+            rail.emptyLabel.accessibilityIdentifier()
+        ]
+        let allIdentifiers = fixedIdentifiers + rowIdentifiers
+        XCTAssertEqual(
+            allIdentifiers.count, Set(allIdentifiers).count, "identifiers must be unique: \(allIdentifiers)"
+        )
+    }
+
+    /// Two rails at different levels must not collide on their level-scoped identifiers, even built
+    /// from the same stub items.
+    func testRailIdentifiersAreScopedByLevelIndex() {
+        let railA = HTDVRailView(levelIndex: 0)
+        let railB = HTDVRailView(levelIndex: 1)
+        XCTAssertNotEqual(railA.tableView.accessibilityIdentifier(), railB.tableView.accessibilityIdentifier())
+        XCTAssertNotEqual(railA.createButton.accessibilityIdentifier(), railB.createButton.accessibilityIdentifier())
+        XCTAssertNotEqual(railA.emptyLabel.accessibilityIdentifier(), railB.emptyLabel.accessibilityIdentifier())
+    }
+
+    func testBreadcrumbBarAssignsAccessibilityIdentifiers() {
+        let bar = HTDVBreadcrumbBar()
+        bar.apply(titles: ["Root", "Personas", "Ada"])
+        XCTAssertEqual(
+            bar.buttons.map { $0.accessibilityIdentifier() },
+            ["htdv.breadcrumb.0", "htdv.breadcrumb.1", "htdv.breadcrumb.2"]
+        )
+    }
 }
 
 /// A detail pane that reports unsaved changes, used to prove `HTDVViewController` genuinely

@@ -5,6 +5,7 @@ import AppKit
 @MainActor
 public final class FormSheetController: NSViewController {
     public let form: FormViewController
+    let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private var onFinish: (@MainActor (Bool) -> Void)?
     private let sheetTitle: String
     /// Guards against a second `cancel()` opening a second discard prompt while the first
@@ -33,8 +34,10 @@ public final class FormSheetController: NSViewController {
 
         let titleLabel = NSTextField(labelWithString: sheetTitle)
         titleLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
-        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
+        cancelButton.target = self
+        cancelButton.action = #selector(cancelTapped)
         cancelButton.keyEquivalent = "\u{1B}"
+        cancelButton.setAccessibilityIdentifier("htdv.form.cancel")
         let header = NSStackView(views: [titleLabel, NSView(), cancelButton])
         header.orientation = .horizontal
         header.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 0, right: 20)
