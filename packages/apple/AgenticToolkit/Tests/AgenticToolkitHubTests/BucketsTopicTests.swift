@@ -127,6 +127,13 @@ final class BucketsTopicTests: XCTestCase {
     func testTableNameAndCount() {
         XCTAssertEqual(BucketsTopic.tableName(from: "Contact Notes"), "contact_notes")
         XCTAssertEqual(BucketsTopic.tableName(from: "  Órders-2 "), "rders_2")
+        // Empty input has no characters to collapse, so it maps to the empty string.
+        XCTAssertEqual(BucketsTopic.tableName(from: ""), "")
+        // Already snake_case input round-trips unchanged (idempotent).
+        XCTAssertEqual(BucketsTopic.tableName(from: "contact_notes"), "contact_notes")
+        // A run of consecutive separators (spaces, "!") and surrounding whitespace collapses to a
+        // single underscore, with no leading or trailing underscore.
+        XCTAssertEqual(BucketsTopic.tableName(from: "  Contact   Notes!  "), "contact_notes")
         XCTAssertEqual(BucketsTopic.tableCount(0), "0 tables")
         XCTAssertEqual(BucketsTopic.tableCount(1), "1 table")
         XCTAssertEqual(BucketsTopic.tableCount(3), "3 tables")
