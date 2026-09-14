@@ -76,7 +76,10 @@
         "packages/apple/AgenticToolkit/PermissionsUI/"
       ],
       "depends_on": [
-        "apple-permissions"
+        "apple-permissions",
+        "apple-core",
+        "apple-coreui",
+        "apple-coremacos"
       ],
       "shared": true,
       "holds": "AgenticToolkitPermissionsUI. The permission-request surfaces."

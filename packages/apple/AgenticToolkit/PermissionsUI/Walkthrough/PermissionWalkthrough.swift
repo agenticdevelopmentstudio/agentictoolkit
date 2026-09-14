@@ -2,7 +2,6 @@ import AppKit
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
 import AgenticToolkitPermissions
-import AgenticToolkitPermissionsUI
 
 /// Walks the user through granting the permissions the app needs on first
 /// launch, in a standard modal alert hosting the reusable
@@ -22,8 +21,15 @@ import AgenticToolkitPermissionsUI
 /// It asks *once*. Done retires it whatever the user granted, and what is still
 /// missing lives in Settings ▸ Permissions, which shows the same panel without
 /// blocking anything.
+///
+/// Deliberately **not** an `AppFeature`. A host constructs one and calls
+/// `runIfNeeded` — it has no feature lifecycle, no menu contributions and no
+/// scripting keys, so the base class only ever supplied `init()`. Declaring it
+/// would pin the walkthrough to the app-shell tier (`AgenticToolkitMacOS`) and
+/// force every app that wants a permissions alert to link SwiftTerm, CodeEdit
+/// and the rest of that tier's dependency set to get one.
 @MainActor
-public final class PermissionWalkthrough: AppFeature {
+public final class PermissionWalkthrough {
 
     /// The terminal whose Automation grant the walkthrough surfaces. Injectable so
     /// hosts that drive a different terminal can override it.
@@ -79,7 +85,7 @@ public final class PermissionWalkthrough: AppFeature {
         .automation(targetBundleID: defaultAutomationTarget)
     ]
 
-    public override init() {
+    public init() {
         self.permissions = Self.defaultPermissions
         self.checker = SystemPermissionChecker()
     }
@@ -90,7 +96,6 @@ public final class PermissionWalkthrough: AppFeature {
     public init(permissions: [AgenticToolkitPermissions.Permission]) {
         self.permissions = permissions
         self.checker = SystemPermissionChecker()
-        super.init()
     }
 
     /// Runs the walkthrough if it hasn't been completed and something is still

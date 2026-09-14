@@ -196,12 +196,14 @@ targets:
           # for despite generateEmptyDirectories: false, causing spurious
           # TEMP_ UUID churn in project.pbxproj on every regeneration.
           - "UI/Settings"
+          - "Scripting"
     dependencies:
       - target: AgenticToolkitCore
       - target: AgenticToolkitCoreUI
       - target: AgenticToolkitCoreMacOS
       - target: AgenticToolkitPermissions
       - target: AgenticToolkitPermissionsUI
+      - target: AgenticToolkitScripting
       - target: AIPluginKit
       - target: AgenticToolkitLanguage
       - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
@@ -231,8 +233,21 @@ targets:
       - PermissionsUI
     dependencies:
       - target: AgenticToolkitPermissions
+      - target: AgenticToolkitCore
+      - target: AgenticToolkitCoreMacOS
     # AppKit settings panel (toolkit convention: AppKit, not SwiftUI). No
     # ComposableSettings dependency — hosts wrap PermissionsPanelView themselves.
+
+  AgenticToolkitScripting:
+    type: framework
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - macOS/Scripting
+    # AppKit + Foundation only: the NSScriptCommand main-actor base and the
+    # AppleScript runner, so an app can be scriptable without linking the
+    # whole of AgenticToolkitMacOS.
 
   AgenticToolkitDatabase:
     type: framework
@@ -609,6 +624,7 @@ aggregateTargets:
       - AgenticToolkitCoreMacOS
       - AgenticToolkitPermissions
       - AgenticToolkitPermissionsUI
+      - AgenticToolkitScripting
       - AgenticToolkitMacOS
       - AgenticToolkitDatabase
       - AgenticToolkitLanguage
@@ -642,6 +658,7 @@ aggregateTargets:
       - AgenticToolkitCoreUI
       - AgenticToolkitPermissions
       - AgenticToolkitPermissionsUI
+      - AgenticToolkitScripting
       - AgenticToolkitMacOS
       - AIPluginKitTests
       - AgenticToolkitCoreMacOSTests
