@@ -18,7 +18,11 @@ public final class AccessListsTopic: EcosystemTopicProvider {
         "The built-in \"everyone\" list applies to every principal and can't be renamed."
     public static let everyoneDeleteBlocked = "The \"everyone\" list is built in and can't be deleted."
     public static let grantHint = "Grants narrow downward: bucket ≥ type ≥ row."
-    public static let grantCreateValues: [String: FormValue] = ["target": .string("row"), "read": .bool(true)]
+    public static let grantCreateValues: [String: FormValue] = [
+        "target": .string("row"),
+        "read": .bool(true),
+        "hint": .string(AccessListsTopic.grantHint)
+    ]
 
     public let entry: EcosystemTopicEntry = AccessListsTopic.entry
     private let dataSource: BucketAccessDataSource

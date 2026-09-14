@@ -275,7 +275,10 @@ final class AccessListsTopicTests: XCTestCase {
         }
         XCTAssertEqual(target.options.map(\.value), ["bucket_type", "row"])
         XCTAssertEqual(type.options.map(\.title), ["Avatars"])
-        XCTAssertEqual(AccessListsTopic.grantCreateValues, ["target": .string("row"), "read": .bool(true)])
+        XCTAssertEqual(
+            AccessListsTopic.grantCreateValues,
+            ["target": .string("row"), "read": .bool(true), "hint": .string(AccessListsTopic.grantHint)]
+        )
 
         let state = FormState(spec: spec, values: AccessListsTopic.grantCreateValues)
         state.set(.string("bucket_type"), for: "target")
@@ -302,6 +305,17 @@ final class AccessListsTopicTests: XCTestCase {
         XCTAssertEqual(
             access.grantUpserts.last?.body, AccessGrantUpsert(targetType: .row, targetId: "row-9", crud: "R,U")
         )
+    }
+
+    /// The "Add grant" sheet is built from `grantSpec`'s bare spec plus `grantCreateValues` supplied
+    /// separately at the `FormSheet.present` call site (see `grantsLevel`). This constructs the form
+    /// state the same way production does, to prove the hint actually reaches it (not just that the
+    /// constant holds the right text).
+    func testGrantCreateValuesSuppliesHintToFormState() async throws {
+        let existing = access.grants["g-editors"] ?? []
+        let spec = topic.grantSpec(group: editors, tables: buckets.tables, existing: existing)
+        let state = FormState(spec: spec, values: AccessListsTopic.grantCreateValues)
+        XCTAssertEqual(state.value(for: "hint"), .string(AccessListsTopic.grantHint))
     }
 
     func testGrantDetailToggleAndRemove() async throws {
