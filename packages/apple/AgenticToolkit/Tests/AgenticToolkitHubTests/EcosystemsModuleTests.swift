@@ -371,4 +371,33 @@ final class EcosystemsModuleTests: XCTestCase {
             XCTAssertEqual(error, .offline)
         }
     }
+
+    // Drives the save action directly, bypassing FormState/FormValidator, so an uppercase slug
+    // actually reaches the action's own `.lowercased()` instead of being rejected upstream by
+    // FormValidator's lowercase-anchored pattern check.
+    func testCreateActionLowercasesSlug() async throws {
+        let source = FakeEcosystemsDataSource(ecosystems: [])
+        let spec = EcosystemCreateForm(dataSource: source, parent: nil).spec()
+        try await spec.actions.save!.perform([
+            "name": .string("Shop"),
+            "slug": .string("SHOP"),
+            "description": .string("Storefront")
+        ])
+        XCTAssertEqual(source.creates.count, 1)
+        XCTAssertEqual(source.creates[0].input.id, "org.acme.shop")
+        XCTAssertEqual(source.creates[0].input.slug, "shop")
+    }
+
+    func testSettingsSaveActionLowercasesSlug() async throws {
+        let source = FakeEcosystemsDataSource(ecosystems: [.fixture()])
+        let spec = EcosystemSettingsTopic(dataSource: source).spec(for: .fixture())
+        try await spec.actions.save!.perform([
+            "name": .string("Shop"),
+            "slug": .string("SHOP"),
+            "description": .string("Storefront")
+        ])
+        XCTAssertEqual(source.updates.count, 1)
+        XCTAssertEqual(source.updates[0].id, "org.acme.shop")
+        XCTAssertEqual(source.updates[0].input.slug, "shop")
+    }
 }
