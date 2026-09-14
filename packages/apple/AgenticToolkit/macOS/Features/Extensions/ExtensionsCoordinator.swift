@@ -46,6 +46,19 @@ public final class ExtensionsCoordinator: AppFeature {
     /// installed. The other four points do not depend on the window layout.
     public let viewsPoint: ViewsContributionPoint?
 
+    /// Where an extension's reach for an unimplemented API member is
+    /// recorded, held here rather than on any one `ExtensionHost` so the
+    /// settings panel can read it long after the host that wrote a row was
+    /// torn down. The panel reads it back through `accesses(for:)`, so a
+    /// row outlives the host that wrote it.
+    ///
+    /// `ExtensionHost.init` defaults to a ledger of its own, so a host built
+    /// for this coordinator's extensions has to be handed *this* one by
+    /// name. A host built without it records into a ledger nothing reads,
+    /// and the rows never reach the panel — with nothing to say they were
+    /// written at all.
+    public let notImplementedLedger: NotImplementedLedger
+
     public init(
         searchPaths: [URL],
         themeStore: ThemeStore,
@@ -61,6 +74,7 @@ public final class ExtensionsCoordinator: AppFeature {
         self.languagePoint = LanguageContributionPoint()
         self.configurationPoint = ConfigurationContributionPoint()
         self.viewsPoint = viewRegistry.map { ViewsContributionPoint(registry: $0) }
+        self.notImplementedLedger = NotImplementedLedger()
 
         super.init()
 
