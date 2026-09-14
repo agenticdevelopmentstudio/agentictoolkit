@@ -84,7 +84,7 @@ final class DocumentEditorViewControllerTests: XCTestCase {
 
     func testTheGearOffersThreeTogglesAndAReset() {
         let rows = makeController().makePaneOptionRows()
-        XCTAssertEqual(rows.filter { $0 is WindowConfigToggle }.count, 3)
+        XCTAssertEqual(rows.filter { $0 is WindowOptionsToggle }.count, 3)
         XCTAssertEqual(rows.filter { ($0 as? NSButton)?.title == "Reset to Defaults" }.count, 1)
     }
 
@@ -132,10 +132,10 @@ final class DocumentEditorViewControllerTests: XCTestCase {
     }
 
     /// The first toggle the gear shows is "Show line numbers"; clicking its
-    /// checkbox is what a mouse in that popover does.
+    /// checkbox is what a mouse in that dialog does.
     private func click(lineNumbersRowOf controller: DocumentEditorViewController) throws {
         let row = try XCTUnwrap(
-            controller.makePaneOptionRows().compactMap { $0 as? WindowConfigToggle }.first)
+            controller.makePaneOptionRows().compactMap { $0 as? WindowOptionsToggle }.first)
         let checkbox = try XCTUnwrap(row.subviews.compactMap { $0 as? NSButton }.first)
         checkbox.performClick(nil)
     }

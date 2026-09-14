@@ -36,12 +36,12 @@ public final class DocumentEditorViewController: NSViewController {
 
     /// The rows the options popover is showing, if one is open.
     ///
-    /// Weak, and deliberately not an array: the popover owns its views and takes
-    /// them with it when it closes, so these go nil on their own rather than
-    /// keeping a dismissed popover's checkboxes alive to be written to.
-    private weak var lineNumbersRow: WindowConfigToggle?
-    private weak var overviewRow: WindowConfigToggle?
-    private weak var invisiblesRow: WindowConfigToggle?
+    /// Weak, and deliberately not an array: the options dialog owns its views and
+    /// takes them with it when it closes, so these go nil on their own rather
+    /// than keeping a dismissed dialog's checkboxes alive to be written to.
+    private weak var lineNumbersRow: WindowOptionsToggle?
+    private weak var overviewRow: WindowOptionsToggle?
+    private weak var invisiblesRow: WindowOptionsToggle?
     private weak var resetRow: NSButton?
 
     /// Watches both scopes at once. `EditorOptionsOverride.publish()` fires for
@@ -182,17 +182,17 @@ extension DocumentEditorViewController: PaneTitleProviding {
 extension DocumentEditorViewController: PaneOptionsProviding {
 
     public func makePaneOptionRows() -> [NSView] {
-        let lineNumbers = WindowConfigToggle(
+        let lineNumbers = WindowOptionsToggle(
             title: "Show line numbers",
             isOn: options.showLineNumbers,
             onChange: { [weak self] value in self?.options.setShowLineNumbers(value) }
         ).checkboxAccessibilityID("document.options.line-numbers")
-        let overview = WindowConfigToggle(
+        let overview = WindowOptionsToggle(
             title: "Show overview",
             isOn: options.showOverview,
             onChange: { [weak self] value in self?.options.setShowOverview(value) }
         ).checkboxAccessibilityID("document.options.overview")
-        let invisibles = WindowConfigToggle(
+        let invisibles = WindowOptionsToggle(
             title: "Show invisibles",
             isOn: options.showInvisibles,
             onChange: { [weak self] value in self?.options.setShowInvisibles(value) }
@@ -212,13 +212,13 @@ extension DocumentEditorViewController: PaneOptionsProviding {
         return [lineNumbers, overview, invisibles, reset]
     }
 
-    /// Puts the resolved values back into an open popover's rows.
+    /// Puts the resolved values back into an open dialog's rows.
     ///
-    /// Without this the popover was a photograph: `Reset to Defaults` cleared
+    /// Without this the dialog was a photograph: `Reset to Defaults` cleared
     /// the override, the three checkboxes went on showing the values it had
-    /// cleared, and its own button stayed enabled — so the pane and the popover
+    /// cleared, and its own button stayed enabled — so the pane and the dialog
     /// disagreed until it was closed and reopened. The app-wide setting moving
-    /// while a popover is open is the same problem arriving from the other side.
+    /// while the dialog is open is the same problem arriving from the other side.
     private func refreshOptionRows() {
         lineNumbersRow?.isOn = options.showLineNumbers
         overviewRow?.isOn = options.showOverview
