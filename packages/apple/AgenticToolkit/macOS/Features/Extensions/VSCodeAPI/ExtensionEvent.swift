@@ -107,12 +107,16 @@ private struct UncheckedMainActorWork: @unchecked Sendable {
 ///    with (3), a window whose every event was dropped for want of a listener
 ///    produces nothing.
 ///
-/// Note that (1) is armed unconditionally while (3) drops conditionally: the
-/// window is opened by `DebounceEmitter.fire` before `PauseableEmitter.fire`
-/// ever consults the listener count, so a zero-listener `fire` still opens a
-/// window. `fire(_:)` below reproduces that order exactly, and it is what
-/// makes a listener added *during* an open window receive the events fired
-/// after it joined.
+/// Note that (1) is unconditional while (3) is conditional: a zero-listener
+/// `fire` still opens a window, it just never queues anything into it.
+/// Upstream gets both from one statement order — `DebounceEmitter.fire`
+/// opens the window before `PauseableEmitter.fire` ever consults the
+/// listener count — but `fire(_:)` below does **not** reproduce that order;
+/// see its own doc for why. It reproduces both *outcomes* instead, by
+/// guarding each separately. Neither outcome is what makes a listener added
+/// *during* an open window receive the events fired after it joined — that
+/// follows from `registrations` being read fresh on every `fire`, whatever
+/// order the queueing and the window-opening happen in.
 ///
 /// ## Isolation
 ///
@@ -214,23 +218,62 @@ public final class ExtensionEventEmitter<Payload> {
     // MARK: - Firing
 
     /// `DebounceEmitter.fire` (`event.ts:1605-1614`) and
-    /// `PauseableEmitter.fire` (`event.ts:1584-1591`) in one method, in
-    /// upstream's order: open the window first, *then* decide whether the
-    /// event is worth queueing.
+    /// `PauseableEmitter.fire` (`event.ts:1584-1591`) in one method — but
+    /// **not** in upstream's statement order. Upstream opens the window
+    /// (arms `setTimeout`) before deciding whether the event is worth
+    /// queueing, and that is safe there only because a JavaScript
+    /// `setTimeout` callback can never run synchronously within the call
+    /// that scheduled it — not even at a 0 ms delay. `super.fire(event)`
+    /// (`event.ts:1613`) has therefore always finished pushing to
+    /// `_eventQueue` before `resume()` (`event.ts:1610`) can possibly run.
+    ///
+    /// `ExtensionEventWindowScheduling` makes no such promise: it is a seam,
+    /// and a conformer is free to call `onClose` synchronously, inline,
+    /// before `openWindow` returns (`vscode.lm.onDidChangeChatModels`'s
+    /// `ChatModelsImmediateWindow` in `MainThreadLanguageModels.swift` does
+    /// exactly this, deliberately, so the member never has to poll or sleep
+    /// for a real timer to close). Opening the window first would then run
+    /// `closeWindow()` against a still-empty queue — the payload not yet
+    /// appended — so nothing is delivered on this call, and the payload sits
+    /// in `queue` until the *next* `fire`, one signal late. Queueing first
+    /// closes that gap: whatever `openWindow` does with `onClose`, the
+    /// payload this call contributed is already in `queue` by the time it
+    /// runs.
+    ///
+    /// The two behaviours upstream's order also produces are kept, just by a
+    /// second means: the window still opens unconditionally, whether or not
+    /// anyone is listening
+    /// (`ExtensionEventTests.anEventFiredWithNoListenersIsNotDeliveredToALaterSubscriber`,
+    /// `ExtensionEventTests.swift:217`, commit `8b0a5ed4`, asserts
+    /// `openCount == 1` on exactly such a fire), and a zero-listener payload
+    /// is still dropped rather than queued
+    /// (`event.ts:1585`'s `if (this._size)`). Reversing the two statements
+    /// changes neither: `ExtensionEventTimerWindow`'s real
+    /// `DispatchQueue.main.asyncAfter` and the test-only
+    /// `ManualExtensionEventWindow` both only *record* `onClose` when
+    /// `openWindow` is called — neither ever invokes it before `fire`
+    /// returns — so for both of them the order between "append to queue"
+    /// and "call `openWindow`" is unobservable, and every existing
+    /// `ExtensionEventTests.swift` and `MainThreadDiagnosticsTests.swift`
+    /// case (which use only those two conformers) holds unchanged under this
+    /// reorder.
     public func fire(_ payload: Payload) {
+        // event.ts:1585's `if (this._size)` — dropped, not queued, when
+        // nobody is listening. Queued *before* the window is opened (see
+        // above): a conformer that closes its window synchronously must
+        // find this call's payload already present.
+        if !registrations.isEmpty {
+            queue.append(payload)
+        }
         // event.ts:1606-1612 — armed only when no window is open. A later
-        // fire inside the window does not extend it.
+        // fire inside the window does not extend it. Opened unconditionally,
+        // regardless of whether the guard above just queued anything.
         if !windowIsOpen {
             windowIsOpen = true
             window.openWindow(closingAfter: delay) { [weak self] in
                 self?.closeWindow()
             }
         }
-        // event.ts:1585's `if (this._size)` — dropped, not queued, when
-        // nobody is listening. Note this runs *after* the window opened,
-        // exactly as upstream's `super.fire(event)` does.
-        guard !registrations.isEmpty else { return }
-        queue.append(payload)
     }
 
     /// `PauseableEmitter.resume`'s merge branch (`event.ts:1563-1574`).
