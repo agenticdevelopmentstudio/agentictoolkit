@@ -138,6 +138,14 @@ final class SessionListViewTests: XCTestCase {
         )
     }
 
+    /// Agents report in tables; the row showed every pipe and dash of the rule.
+    func testOutputLineShowsATableAsItsCells() {
+        XCTAssertEqual(
+            Row.plainText(fromMarkdown: "Wrote:\n\n| File | What |\n|---|---|\n| `a.md` | the **notes** |\n\nDone."),
+            "Wrote: File What a.md the notes Done."
+        )
+    }
+
     /// A single-line label only ever showed a multi-line message's first line.
     func testOutputLineJoinsPlainLines() {
         XCTAssertEqual(Row.plainText(fromMarkdown: "line one\nline two\n\n  line three  "),
