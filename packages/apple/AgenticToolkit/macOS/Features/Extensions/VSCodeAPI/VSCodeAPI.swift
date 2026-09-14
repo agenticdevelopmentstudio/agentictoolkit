@@ -1069,6 +1069,43 @@ public enum VSCodeAPI {
         return function
     }
 
+    // MARK: - Disposables
+
+    /// A JS object whose `dispose()` calls `onDispose` exactly once, no
+    /// matter how many times `dispose()` itself is called.
+    ///
+    /// VS Code's `Disposable` contract is exactly that idempotence, so a
+    /// local `disposed` is captured by the returned block rather than left
+    /// for `onDispose` to re-derive from whatever it closes over: re-deriving
+    /// it there would make a *second*, unrelated registration that happens to
+    /// look the same afterward (the same id reused, the same slot refilled)
+    /// look, to this now-stale `Disposable`, like something still worth
+    /// disposing. `onDispose` itself is where a caller distinguishes "nothing
+    /// to undo any more" from "undo my specific registration" — see
+    /// `MainThreadCommands.makeDisposable(id:token:in:)`'s own doc for a
+    /// case where the two genuinely differ.
+    ///
+    /// Callers are always `@MainActor`; `onDispose` is `@MainActor` rather
+    /// than `@Sendable` so this helper puts no isolation burden on them
+    /// beyond what `dispose`'s own `MainActor.assumeIsolated` already
+    /// assumes.
+    public static func disposable(
+        in context: JSContext,
+        onDispose: @escaping @MainActor () -> Void
+    ) -> JSValue? {
+        guard let disposable = JSValue(newObjectIn: context) else { return nil }
+        var disposed = false
+        let dispose: @convention(block) () -> Void = {
+            MainActor.assumeIsolated {
+                guard !disposed else { return }
+                disposed = true
+                onDispose()
+            }
+        }
+        disposable.setObject(dispose, forKeyedSubscript: "dispose" as NSString)
+        return disposable
+    }
+
     // MARK: - Sub-namespaces
 
     /// The global `subNamespaceFactory(in:)` caches its factory function
