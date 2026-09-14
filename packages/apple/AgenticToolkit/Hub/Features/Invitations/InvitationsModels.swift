@@ -1,13 +1,6 @@
 import Foundation
 
-/// Named `Hub`-prefixed to avoid colliding with the identically-named,
-/// independently-defined TypeScript wire types in `web-adh-ui`
-/// (`packages/web/packages/adh-ui/src/lib/invitations-types.ts`), which
-/// `abstractr`'s duplicate-name check flags across the whole export index
-/// regardless of language. These describe the same backend JSON contract but
-/// are a different platform's own DTOs — there is nothing here to "build on
-/// or extend" across languages, so the disambiguating prefix is the fix.
-public struct HubInvitationRequest: Codable, Hashable, Sendable, Identifiable {
+public struct InvitationRequest: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var pendingUserId: String?
     public var name: String
@@ -29,7 +22,7 @@ public struct HubInvitationRequest: Codable, Hashable, Sendable, Identifiable {
     public var contact: String { HubText.nonBlank(email) ?? HubText.nonBlank(phone) ?? "—" }
 }
 
-public struct HubPendingUser: Codable, Hashable, Sendable, Identifiable {
+public struct PendingUser: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var userNumber: Int
     public var name: String
@@ -58,7 +51,7 @@ public struct HubPendingUser: Codable, Hashable, Sendable, Identifiable {
     public var contact: String { HubText.nonBlank(email) ?? HubText.nonBlank(phone) ?? "—" }
 }
 
-public struct HubInvite: Codable, Hashable, Sendable, Identifiable {
+public struct Invite: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var channel: String
@@ -109,7 +102,7 @@ public struct InvitationSend: Codable, Hashable, Sendable {
     }
 }
 
-public struct HubAdminNote: Codable, Hashable, Sendable, Identifiable {
+public struct AdminNote: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var content: String
     public var createdBy: String
@@ -140,7 +133,7 @@ public struct AdminNoteInput: Codable, Hashable, Sendable {
     public init(id: String? = nil, content: String) { self.id = id; self.content = content }
 }
 
-public struct HubHistoryEntry: Codable, Hashable, Sendable, Identifiable {
+public struct HistoryEntry: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var actorLabel: String?
     public var actorId: String?
@@ -163,17 +156,17 @@ public enum AdminNoteSubject: String, Sendable {
 }
 
 public protocol InvitationsDataSource: AnyObject, Sendable {
-    func requests(ecosystemID: String) async throws -> [HubInvitationRequest]
+    func requests(ecosystemID: String) async throws -> [InvitationRequest]
     func deleteRequest(ecosystemID: String, id: String) async throws
-    func pendingUsers(ecosystemID: String) async throws -> [HubPendingUser]
+    func pendingUsers(ecosystemID: String) async throws -> [PendingUser]
     func addPendingUsers(ecosystemID: String, _ users: [DraftUser]) async throws
     func deletePendingUser(ecosystemID: String, id: String) async throws
-    func invites(ecosystemID: String) async throws -> [HubInvite]
+    func invites(ecosystemID: String) async throws -> [Invite]
     func sendInvitation(ecosystemID: String, _ send: InvitationSend) async throws
     func deleteInvite(ecosystemID: String, id: String) async throws
-    func notes(ecosystemID: String, subject: AdminNoteSubject, subjectID: String) async throws -> [HubAdminNote]
+    func notes(ecosystemID: String, subject: AdminNoteSubject, subjectID: String) async throws -> [AdminNote]
     func saveNotes(
         ecosystemID: String, subject: AdminNoteSubject, subjectID: String, _ notes: [AdminNoteInput]
     ) async throws
-    func history(ecosystemID: String, subject: AdminNoteSubject, subjectID: String) async throws -> [HubHistoryEntry]
+    func history(ecosystemID: String, subject: AdminNoteSubject, subjectID: String) async throws -> [HistoryEntry]
 }

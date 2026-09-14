@@ -24,12 +24,12 @@ public struct AdminNotesRail {
         self.subjectID = subjectID
     }
 
-    public static func historyText(_ entries: [HubHistoryEntry]) -> String {
+    public static func historyText(_ entries: [HistoryEntry]) -> String {
         entries.isEmpty ? "No history." : entries.map(\.line).joined(separator: "\n")
     }
 
     public func child(path: [HTDVItem]) async throws -> HTDVChild {
-        let notes: [HubAdminNote]
+        let notes: [AdminNote]
         do {
             notes = try await dataSource.notes(ecosystemID: ecosystemID, subject: subject, subjectID: subjectID)
         } catch { throw HubError.wrap(error) }
@@ -78,7 +78,7 @@ public struct AdminNotesRail {
         )
     }
 
-    private func noteDetail(_ note: HubAdminNote) -> HTDVDetail {
+    private func noteDetail(_ note: AdminNote) -> HTDVDetail {
         let dataSource = self.dataSource
         let ecosystemID = self.ecosystemID
         let subject = self.subject

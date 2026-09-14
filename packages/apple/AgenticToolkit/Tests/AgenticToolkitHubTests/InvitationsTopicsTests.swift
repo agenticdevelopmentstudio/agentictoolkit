@@ -3,11 +3,11 @@ import XCTest
 @testable import AgenticToolkitHub
 
 final class FakeInvitationsDataSource: InvitationsDataSource, @unchecked Sendable {
-    var requests: [HubInvitationRequest]
-    var pending: [HubPendingUser]
-    var invites: [HubInvite]
-    var notes: [String: [HubAdminNote]] = [:]          // "<subject>:<subjectID>" → notes
-    var history: [String: [HubHistoryEntry]] = [:]
+    var requests: [InvitationRequest]
+    var pending: [PendingUser]
+    var invites: [Invite]
+    var notes: [String: [AdminNote]] = [:]          // "<subject>:<subjectID>" → notes
+    var history: [String: [HistoryEntry]] = [:]
     var deletedRequests: [String] = []
     var deletedPending: [String] = []
     var deletedInvites: [String] = []
@@ -16,24 +16,24 @@ final class FakeInvitationsDataSource: InvitationsDataSource, @unchecked Sendabl
     var noteSaves: [(key: String, notes: [AdminNoteInput])] = []
     var failure: Error?
 
-    init(requests: [HubInvitationRequest] = [], pending: [HubPendingUser] = [], invites: [HubInvite] = []) {
+    init(requests: [InvitationRequest] = [], pending: [PendingUser] = [], invites: [Invite] = []) {
         self.requests = requests; self.pending = pending; self.invites = invites
     }
 
     private func key(_ subject: AdminNoteSubject, _ id: String) -> String { "\(subject.rawValue):\(id)" }
     private func check() throws { if let failure { throw failure } }
 
-    func requests(ecosystemID: String) async throws -> [HubInvitationRequest] { try check(); return requests }
+    func requests(ecosystemID: String) async throws -> [InvitationRequest] { try check(); return requests }
     func deleteRequest(ecosystemID: String, id: String) async throws {
         try check(); deletedRequests.append(id); requests.removeAll { $0.id == id }
     }
-    func pendingUsers(ecosystemID: String) async throws -> [HubPendingUser] { try check(); return pending }
+    func pendingUsers(ecosystemID: String) async throws -> [PendingUser] { try check(); return pending }
     func addPendingUsers(ecosystemID: String, _ users: [DraftUser]) async throws { try check(); added.append(users) }
     func deletePendingUser(ecosystemID: String, id: String) async throws { try check(); deletedPending.append(id) }
-    func invites(ecosystemID: String) async throws -> [HubInvite] { try check(); return invites }
+    func invites(ecosystemID: String) async throws -> [Invite] { try check(); return invites }
     func sendInvitation(ecosystemID: String, _ send: InvitationSend) async throws { try check(); sends.append(send) }
     func deleteInvite(ecosystemID: String, id: String) async throws { try check(); deletedInvites.append(id) }
-    func notes(ecosystemID: String, subject: AdminNoteSubject, subjectID: String) async throws -> [HubAdminNote] {
+    func notes(ecosystemID: String, subject: AdminNoteSubject, subjectID: String) async throws -> [AdminNote] {
         try check(); return notes[key(subject, subjectID)] ?? []
     }
     func saveNotes(
@@ -42,35 +42,35 @@ final class FakeInvitationsDataSource: InvitationsDataSource, @unchecked Sendabl
         try check()
         noteSaves.append((key(subject, subjectID), notes))
         self.notes[key(subject, subjectID)] = notes.enumerated().map { index, input in
-            HubAdminNote(
+            AdminNote(
                 id: input.id ?? "n-new-\(index)", content: input.content, createdBy: "me@acme.test",
                 subjectTable: subject.rawValue, subjectId: subjectID,
                 createdAt: "2026-09-03T00:00:00.000Z", updatedAt: "2026-09-03T00:00:00.000Z"
             )
         }
     }
-    func history(ecosystemID: String, subject: AdminNoteSubject, subjectID: String) async throws -> [HubHistoryEntry] {
+    func history(ecosystemID: String, subject: AdminNoteSubject, subjectID: String) async throws -> [HistoryEntry] {
         try check(); return history[key(subject, subjectID)] ?? []
     }
 }
 
-extension HubInvitationRequest {
+extension InvitationRequest {
     static func fixture(
         id: String = "req-1", name: String = "Sam Lee", email: String? = "sam@example.com", phone: String? = nil
-    ) -> HubInvitationRequest {
-        HubInvitationRequest(
+    ) -> InvitationRequest {
+        InvitationRequest(
             id: id, pendingUserId: nil, name: name, email: email, phone: phone, source: "landing-page",
             note: "Please let me in", createdAt: "2026-09-01T10:00:00.000Z", userNumber: 42
         )
     }
 }
 
-extension HubPendingUser {
+extension PendingUser {
     static func fixture(
         id: String = "pu-1", name: String = "Ada Park", email: String? = "ada@example.com",
         phone: String? = "+15555550123"
-    ) -> HubPendingUser {
-        HubPendingUser(
+    ) -> PendingUser {
+        PendingUser(
             id: id, userNumber: 7, name: name, email: email, phone: phone, invitedCount: 1, requestCount: 2,
             lastRequestAt: "2026-09-02T00:00:00.000Z", lastInviteSentAt: nil,
             firstRequestedAt: "2026-08-30T00:00:00.000Z", lastSource: "referral", lastNote: "Met at the meetup",
@@ -79,9 +79,9 @@ extension HubPendingUser {
     }
 }
 
-extension HubInvite {
-    static func fixture(id: String = "inv-1", name: String = "Ada Park") -> HubInvite {
-        HubInvite(
+extension Invite {
+    static func fixture(id: String = "inv-1", name: String = "Ada Park") -> Invite {
+        Invite(
             id: id, name: name, channel: "email", destination: "ada@example.com", sentBy: "owner@acme.test",
             sentAt: "2026-09-03T00:00:00.000Z", status: "sent"
         )
@@ -146,10 +146,10 @@ final class InvitationsTopicsTests: XCTestCase {
 
     func testHistoryRendersOneLinePerEntry() async throws {
         data.history["invitation_requests:req-1"] = [
-            HubHistoryEntry(
+            HistoryEntry(
                 id: "h1", actorLabel: "Owner", actorId: "u1", action: "approved", createdAt: "2026-09-02T00:00:00.000Z"
             ),
-            HubHistoryEntry(
+            HistoryEntry(
                 id: "h2", actorLabel: nil, actorId: nil, action: "created", createdAt: "2026-09-01T00:00:00.000Z"
             )
         ]
@@ -164,7 +164,7 @@ final class InvitationsTopicsTests: XCTestCase {
 
     func testNotesLevelListsAndCreates() async throws {
         data.notes["invitation_requests:req-1"] = [
-            HubAdminNote(
+            AdminNote(
                 id: "n1", content: "First line\nMore", createdBy: "owner@acme.test",
                 subjectTable: "invitation_requests", subjectId: "req-1",
                 createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-02T00:00:00.000Z"
@@ -203,12 +203,12 @@ final class InvitationsTopicsTests: XCTestCase {
 
     func testNoteDetailEditsAndDeletes() async throws {
         data.notes["pending_users:pu-1"] = [
-            HubAdminNote(
+            AdminNote(
                 id: "n1", content: "Keep", createdBy: "a@acme.test",
                 subjectTable: "pending_users", subjectId: "pu-1",
                 createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z"
             ),
-            HubAdminNote(
+            AdminNote(
                 id: "n2", content: "Edit me", createdBy: "b@acme.test",
                 subjectTable: "pending_users", subjectId: "pu-1",
                 createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z"

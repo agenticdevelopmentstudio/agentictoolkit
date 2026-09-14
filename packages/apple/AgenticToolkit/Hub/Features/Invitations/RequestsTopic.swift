@@ -14,7 +14,7 @@ public final class RequestsTopic: EcosystemTopicProvider {
     public init(dataSource: any InvitationsDataSource) { self.dataSource = dataSource }
 
     public func child(for ecosystem: Ecosystem, path: [HTDVItem], rail: any EcosystemRail) async throws -> HTDVChild {
-        let requests: [HubInvitationRequest]
+        let requests: [InvitationRequest]
         do { requests = try await dataSource.requests(ecosystemID: ecosystem.id) } catch { throw HubError.wrap(error) }
         guard let requestID = RailPath.id(at: 0, in: path) else {
             let items = requests.map {
@@ -48,8 +48,8 @@ public final class RequestsTopic: EcosystemTopicProvider {
         }
     }
 
-    private func detail(for request: HubInvitationRequest, in ecosystem: Ecosystem) async throws -> HTDVDetail {
-        let history: [HubHistoryEntry]
+    private func detail(for request: InvitationRequest, in ecosystem: Ecosystem) async throws -> HTDVDetail {
+        let history: [HistoryEntry]
         do {
             history = try await dataSource.history(
                 ecosystemID: ecosystem.id, subject: .invitationRequests, subjectID: request.id

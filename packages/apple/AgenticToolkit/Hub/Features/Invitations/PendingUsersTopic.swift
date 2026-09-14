@@ -15,7 +15,7 @@ public final class PendingUsersTopic: EcosystemTopicProvider {
     public init(dataSource: any InvitationsDataSource) { self.dataSource = dataSource }
 
     public func child(for ecosystem: Ecosystem, path: [HTDVItem], rail: any EcosystemRail) async throws -> HTDVChild {
-        let users: [HubPendingUser]
+        let users: [PendingUser]
         do { users = try await dataSource.pendingUsers(ecosystemID: ecosystem.id) } catch { throw HubError.wrap(error) }
         guard let userID = RailPath.id(at: 0, in: path) else {
             let items = users.map {
@@ -99,8 +99,8 @@ public final class PendingUsersTopic: EcosystemTopicProvider {
         )
     }
 
-    private func detail(for user: HubPendingUser, in ecosystem: Ecosystem) async throws -> HTDVDetail {
-        let history: [HubHistoryEntry]
+    private func detail(for user: PendingUser, in ecosystem: Ecosystem) async throws -> HTDVDetail {
+        let history: [HistoryEntry]
         do {
             history = try await dataSource.history(
                 ecosystemID: ecosystem.id, subject: .pendingUsers, subjectID: user.id
@@ -151,7 +151,7 @@ public final class PendingUsersTopic: EcosystemTopicProvider {
         )
     }
 
-    private func inviteDetail(for user: HubPendingUser, in ecosystem: Ecosystem) -> HTDVDetail {
+    private func inviteDetail(for user: PendingUser, in ecosystem: Ecosystem) -> HTDVDetail {
         let dataSource = self.dataSource
         let hasEmail = HubText.nonBlank(user.email) != nil
         let hasPhone = HubText.nonBlank(user.phone) != nil
