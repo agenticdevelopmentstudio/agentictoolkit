@@ -1,4 +1,5 @@
 import Foundation
+import AgenticToolkitCore
 
 /// What the command palette shows, what is highlighted, and what Return runs.
 ///
@@ -163,7 +164,7 @@ public final class CommandPaletteModel {
     /// `static` and instance-free so the ranking rule can be tested directly
     /// against a literal array, with no registry and no window.
     public static func matches(for query: String, in commands: [AppCommand]) -> [AppCommand] {
-        let needle = folded(query.trimmingCharacters(in: .whitespacesAndNewlines))
+        let needle = TextFolding.folded(query.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !needle.isEmpty else { return commands }
 
         let ranked = commands.compactMap { command -> (rank: Int, command: AppCommand)? in
@@ -193,27 +194,18 @@ public final class CommandPaletteModel {
     /// user meant, a title that merely contains it is a near miss, and a
     /// category match is the broadest of the three.
     private static func rank(of command: AppCommand, for needle: String) -> Int? {
-        let title = folded(command.title)
-        let category = folded(command.category)
+        let title = TextFolding.folded(command.title)
+        let category = TextFolding.folded(command.category)
         if title.hasPrefix(needle) { return 0 }
         if title.contains(needle) { return 1 }
         if category.hasPrefix(needle) { return 2 }
         // "terminal new" finds New Terminal Session: the category and the title
         // are one phrase as far as the reader is concerned, so they are matched
         // as one too.
-        if category.contains(needle) || folded("\(command.category) \(command.title)").contains(needle) {
+        if category.contains(needle) || TextFolding.folded("\(command.category) \(command.title)").contains(needle) {
             return 3
         }
         return nil
-    }
-
-    /// Case- and diacritic-insensitively normalised, so "reveal" finds "Réveal"
-    /// and capitalisation never decides a match. `locale: nil` keeps the folding
-    /// the same everywhere — command ids and titles are not localised, and a
-    /// Turkish locale's dotless-i rule would otherwise make the palette answer
-    /// differently on one machine than another.
-    private static func folded(_ string: String) -> String {
-        string.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 
     private func applyQuery() {

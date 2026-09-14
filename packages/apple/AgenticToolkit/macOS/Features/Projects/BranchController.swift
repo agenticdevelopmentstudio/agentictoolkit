@@ -173,7 +173,14 @@ public final class BranchController: TabPaneDataSource, TabPaneDelegate {
     public func tabPane(_ pane: TabPaneViewController, contextMenuFor event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
         for command in commands {
-            let target = ClosureMenuItemTarget(action: command.run, isEnabled: command.isEnabled)
+            // `AppCommand.run` is `([Any]) -> Any?`; a menu item has no arguments
+            // to deliver and nothing to resolve with, so it passes none and
+            // discards the answer — the same adaptation `AppCommand`'s
+            // `() -> Void` initializer makes for every other call site.
+            let target = ClosureMenuItemTarget(
+                action: { _ = command.run([]) },
+                isEnabled: command.isEnabled
+            )
             let item = NSMenuItem(
                 title: command.title,
                 action: #selector(ClosureMenuItemTarget.performMenuAction(_:)),

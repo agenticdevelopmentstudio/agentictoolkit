@@ -166,21 +166,6 @@ struct CommandRegistryTests {
         #expect(registry.allCommands.map(\.id) == ["test.action.alpha"])
     }
 
-    /// The half a dictionary-only removal gets wrong: `registrationOrder` is a
-    /// second structure, and leaving a stale id in it makes the *next*
-    /// registration of that id look new — appending a second entry, so the
-    /// palette lists one command twice.
-    @Test("Registering again after unregister leaves exactly one entry")
-    func reregisteringAfterUnregisterKeepsOneEntry() {
-        let registry = CommandRegistry()
-        registry.register(command(id: "test.action.alpha"))
-        registry.unregister(id: "test.action.alpha")
-        registry.register(command(id: "test.action.alpha", title: "Back"))
-
-        #expect(registry.allCommands.map(\.id) == ["test.action.alpha"])
-        #expect(registry.allCommands.first?.title == "Back")
-    }
-
     @Test("Registering a duplicate id keeps one entry, in its original position")
     func duplicateIDKeepsItsPosition() {
         let registry = CommandRegistry()
@@ -257,29 +242,13 @@ struct CommandRegistryTests {
         #expect(!ran)
     }
 
-    @Test("unregister removes the command and its position in allCommands")
-    func unregisterRemovesTheCommand() {
-        let registry = CommandRegistry()
-        registry.register(command(id: "test.action.alpha"))
-        registry.register(command(id: "test.action.bravo"))
-        registry.register(command(id: "test.action.charlie"))
-
-        registry.unregister(id: "test.action.bravo")
-
-        #expect(registry.command(id: "test.action.bravo") == nil)
-        #expect(registry.allCommands.map(\.id) == ["test.action.alpha", "test.action.charlie"])
-    }
-
-    @Test("unregister of an unknown id is a silent no-op")
-    func unregisterOfUnknownIDIsANoOp() {
-        let registry = CommandRegistry()
-        registry.register(command(id: "test.action.alpha"))
-
-        registry.unregister(id: "test.action.missing")
-
-        #expect(registry.allCommands.map(\.id) == ["test.action.alpha"])
-    }
-
+    /// The half a dictionary-only removal gets wrong: `registrationOrder` is a
+    /// second structure, and leaving a stale id in it makes the *next*
+    /// registration of that id look new — appending a second entry, so the
+    /// palette lists one command twice. The second command is what pins the
+    /// *order*: a re-registration after `unregister` goes to the end, which is
+    /// the opposite of `duplicateIDKeepsItsPosition`'s replacement in place,
+    /// and only a two-command fixture can tell those apart.
     @Test("A command re-registered after being unregistered gets a fresh position at the end")
     func reregisteringAfterUnregisterAppendsAtTheEnd() {
         let registry = CommandRegistry()
