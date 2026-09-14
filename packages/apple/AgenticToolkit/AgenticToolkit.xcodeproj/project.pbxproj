@@ -1050,6 +1050,7 @@
 		E7E388320870DF2F9875017B /* AccessListsTopicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 088692B0AFDA23205E680105 /* AccessListsTopicTests.swift */; };
 		E8214376DEFF51DB34CE6AC0 /* SyncID.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED6D92BE5D6C405930E5386 /* SyncID.swift */; };
 		E83AD2A7DA8D7435D157602A /* PermissionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09C1D47037BB4EDCAD1B5026 /* PermissionPresenter.swift */; };
+		E8635919F9DA6D002BF4EB80 /* NSWindow+FitWidth.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F1577CDCB5AAF25B24F230 /* NSWindow+FitWidth.swift */; };
 		E917C415CCDAF5F4CEA9E32B /* LaunchAtLoginManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 956F50EE328345009C16B24F /* LaunchAtLoginManager.swift */; };
 		E91D8F1917D077F9E3057CF0 /* ComposableTabsClosePersistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D39641986D609698360C2E4A /* ComposableTabsClosePersistTests.swift */; };
 		E934D50910EE1F0B2E92FE4A /* ClosureMenuItemTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45BDEB8085D50F4871406DB8 /* ClosureMenuItemTarget.swift */; };
@@ -1062,6 +1063,7 @@
 		EB238A639010CCA00599646E /* ShortcutsSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9CCB269D15E0F9F6CF57382 /* ShortcutsSettingsTab.swift */; };
 		EB2D6F0692A7B0687112CACB /* ThemeUIReExports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402324FCBC578003C0A2B9E0 /* ThemeUIReExports.swift */; };
 		EB5C9C4C5E35B4240F0DC0AD /* AgenticToolkitSyncGRDB.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2811A57B61C48C21BD8A4995 /* AgenticToolkitSyncGRDB.framework */; };
+		EBD537FE6BF95A76AC879B23 /* NSWindowFitWidthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BBA4688BC9F1C5415C1D4D4 /* NSWindowFitWidthTests.swift */; };
 		EC221B6D012B46F1E7117C14 /* PluginTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B75EC491BA90C48F8362405 /* PluginTransportTests.swift */; };
 		EC8019B4198DE72AC5C44E4C /* AgenticFileBrowserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C03AD574FD3DA32B4B18C3 /* AgenticFileBrowserTests.swift */; };
 		EC83FFCF1C7278859701B770 /* LSPCompletionSnippetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A031E2659A5156AD183687C7 /* LSPCompletionSnippetTests.swift */; };
@@ -2547,6 +2549,7 @@
 		6AA6899F021A7D58B7F1C731 /* AIProviderConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfiguration.swift; sourceTree = "<group>"; };
 		6B46DC6CFD362EDAE2EDEE01 /* GitFileStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitFileStatus.swift; sourceTree = "<group>"; };
 		6BB0D0EE367682A79B4BF411 /* ComposableSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableSettings.swift; sourceTree = "<group>"; };
+		6BBA4688BC9F1C5415C1D4D4 /* NSWindowFitWidthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSWindowFitWidthTests.swift; sourceTree = "<group>"; };
 		6C768913C2E67B08FB03FB83 /* LocalModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelCatalog.swift; sourceTree = "<group>"; };
 		6CBC256AD954EA9FBF3877BF /* ApiTokensRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApiTokensRail.swift; sourceTree = "<group>"; };
 		6EA98FE84B8447FA9DB6F211 /* SettingsPanelDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelDescriptor.swift; sourceTree = "<group>"; };
@@ -3054,6 +3057,7 @@
 		F6B528FFEF943F3EC4358C98 /* MessagingTopic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagingTopic.swift; sourceTree = "<group>"; };
 		F6C773416942F117D48F26C8 /* PaneContainerClampTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneContainerClampTests.swift; sourceTree = "<group>"; };
 		F6D611E2D7695026FE058E44 /* WindowStateStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowStateStorage.swift; sourceTree = "<group>"; };
+		F6F1577CDCB5AAF25B24F230 /* NSWindow+FitWidth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSWindow+FitWidth.swift"; sourceTree = "<group>"; };
 		F709F299F1389F0EFB6F18F7 /* ThemeTypographyTopicPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeTypographyTopicPanel.swift; sourceTree = "<group>"; };
 		F722FAE0F1511699F96EA994 /* ContributedSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContributedSettings.swift; sourceTree = "<group>"; };
 		F74CEE085DE3B4173571FF22 /* StorageTokensTopic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageTokensTopic.swift; sourceTree = "<group>"; };
@@ -3575,6 +3579,7 @@
 			children = (
 				003E282AAC0D27ACE18306C7 /* NSWindow+Center.swift */,
 				B6F3B2DDE9E4F4930EF59CDC /* NSWindow+FitHeight.swift */,
+				F6F1577CDCB5AAF25B24F230 /* NSWindow+FitWidth.swift */,
 				5F83BBD3D83F2AB14DFF0FD2 /* Placeholder.swift */,
 			);
 			path = CoreUI;
@@ -3848,6 +3853,7 @@
 		2E6565413AFB4C7BC978F857 /* AgenticToolkitCoreUITests */ = {
 			isa = PBXGroup;
 			children = (
+				6BBA4688BC9F1C5415C1D4D4 /* NSWindowFitWidthTests.swift */,
 				49DA107C1349C84D6E1DF632 /* PlaceholderTests.swift */,
 			);
 			name = AgenticToolkitCoreUITests;
@@ -7802,6 +7808,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EBD537FE6BF95A76AC879B23 /* NSWindowFitWidthTests.swift in Sources */,
 				B4AEC769B96C6C251421E268 /* PlaceholderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -8304,6 +8311,7 @@
 			files = (
 				0F858BBC2B7F68DCE5DED594 /* NSWindow+Center.swift in Sources */,
 				699D0BDBD0FF23DBFF85FD1C /* NSWindow+FitHeight.swift in Sources */,
+				E8635919F9DA6D002BF4EB80 /* NSWindow+FitWidth.swift in Sources */,
 				1074B44470516E280C4288D6 /* Placeholder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
