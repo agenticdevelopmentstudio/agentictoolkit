@@ -122,6 +122,12 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate {
         )
         newWindow.title = windowTitle
         newWindow.isReleasedWhenClosed = false
+        // Every window starts in the theme, not only the HUDs. `ThemeManager`
+        // repaints window backgrounds when the theme *changes*, so a window created
+        // afterwards kept AppKit's grey until then — the Sessions and About windows
+        // were grey all the way through, and a window whose content paints its own
+        // backdrop still had a grey title bar above it.
+        newWindow.backgroundColor = ThemePaletteObserver.currentPalette.windowBackgroundColor
         // Default accessibility id derived from the windowID. Subclasses
         // can overwrite this in `configureWindow(_:)` if a different
         // namespace is preferred.
@@ -496,10 +502,7 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate {
     private func applyHUDChrome(_ config: HUDConfiguration, to window: NSWindow) {
         window.isMovableByWindowBackground = true
         window.hasShadow = true
-        // Only the initial color: `ThemeManager` repaints every titled window
-        // on a theme change, so a per-window observer here would be a second
-        // mechanism doing the same job.
-        window.backgroundColor = ThemePaletteObserver.currentPalette.windowBackgroundColor
+        // The initial background colour is set in `loadWindow` for every window.
         window.isOpaque = false
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         window.level = config.floating ? .floating : .normal

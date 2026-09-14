@@ -51,13 +51,19 @@ extension SessionWatcher {
             return NSSize(width: NSView.noIntrinsicMetric, height: contentHeight)
         }
 
+        /// The narrowest the list can be with every row's breadcrumb shown whole.
+        /// Hosts keep their window at least this wide; zero when there are no rows.
+        public var minimumContentWidth: CGFloat {
+            rows.values.map(\.minimumWidth).max() ?? 0
+        }
+
         private func setupViews() {
-            // One flat list: rows butted together, separated by hairlines rather than
-            // by gaps or cards. The rows carry their own horizontal padding, so the
-            // stack insets only the ends.
+            // One flat list: rows separated by hairlines rather than by cards. The
+            // rows carry their own padding, which is the space either side of each
+            // hairline, so the stack itself adds none.
             stackView.orientation = .vertical
             stackView.spacing = 0
-            stackView.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
+            stackView.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
             stackView.translatesAutoresizingMaskIntoConstraints = false
 
             // Scroll view wrapping the stack
@@ -291,8 +297,9 @@ extension SessionWatcher {
 
     // MARK: - List Separator
 
-    /// The hairline between two rows. The list draws these instead of giving each
-    /// row a border, so a run of rows reads as one list rather than a stack of cards.
+    /// A themed hairline: between two rows, above a row's summary, and under the
+    /// Sessions window's header. The list draws these instead of giving each row a
+    /// border, so a run of rows reads as one list rather than a stack of cards.
     public final class SessionWatcherListSeparator: NSView {
         private var themeObserver: ThemePaletteObserver?
 
@@ -302,12 +309,52 @@ extension SessionWatcher {
             translatesAutoresizingMaskIntoConstraints = false
             heightAnchor.constraint(equalToConstant: 1).isActive = true
             themeObserver = ThemePaletteObserver(host: self) { [weak self] palette in
-                self?.layer?.backgroundColor = palette.borderColor.withAlphaComponent(0.5).cgColor
+                self?.layer?.backgroundColor = palette.dividerColor.cgColor
             }
         }
 
         @available(*, unavailable)
         public required init?(coder: NSCoder) { fatalError() }
+    }
+
+    // MARK: - App Icon Button
+
+    /// A row's app icon, which opens the session in its terminal. The pointing hand
+    /// over it is the cue that it is a link and the rest of the row is not.
+    ///
+    /// Both mechanisms are needed: a cursor rect is only honoured while the window
+    /// is key, and the Sessions window usually floats unfocused beside the terminal
+    /// the user is typing into — so hovering also sets the cursor directly.
+    public final class SessionWatcherAppIconButton: NSButton {
+        private var hoverArea: NSTrackingArea?
+
+        public override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .pointingHand)
+        }
+
+        public override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let hoverArea { removeTrackingArea(hoverArea) }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways],
+                owner: self, userInfo: nil
+            )
+            addTrackingArea(area)
+            hoverArea = area
+        }
+
+        public override func mouseEntered(with event: NSEvent) {
+            NSCursor.pointingHand.set()
+        }
+
+        public override func mouseMoved(with event: NSEvent) {
+            NSCursor.pointingHand.set()
+        }
+
+        public override func mouseExited(with event: NSEvent) {
+            NSCursor.arrow.set()
+        }
     }
 
     // MARK: - SessionWatcherSession Row View
@@ -326,15 +373,48 @@ extension SessionWatcher {
         public var sessionId: String { session.sessionId }
 
         // Theme-sensitive subviews
-        private var projectLabel: NSTextField!
+        private var headerRow: NSStackView!
+        private var headerSpacer: NSView!
+        private(set) var projectLabel: NSTextField!
         /// The "»" glyphs between the header's three segments.
         private var separatorLabels: [NSTextField] = []
-        /// Git branch and session name — the header's dimmer segments.
-        private var subtitleLabels: [NSTextField] = []
+        /// The git branch, when the session has one.
+        private(set) var branchLabel: NSTextField?
+        /// The Claude session's name, when it has one.
+        private(set) var sessionNameLabel: NSTextField?
         private var activityIcon: SessionWatcherActivityIconView!
+        /// The inset "terminal" the agent's last output is printed into.
+        private var terminalView: NSView!
         private var outputLabel: NSTextField!
+        private var outputHeight: NSLayoutConstraint!
         private var summaryLabel: NSTextField?
+        private var summaryHeight: NSLayoutConstraint?
         private var themeObserver: ThemePaletteObserver?
+
+        /// The row's spacing, in one place so `minimumWidth` measures exactly the
+        /// layout `setupViews` builds.
+        enum Metrics {
+            static let horizontalPadding: CGFloat = 14
+            static let verticalPadding: CGFloat = 12
+            /// Twice the old 22pt, so the "go to session" target is easy to hit.
+            static let iconSide: CGFloat = 44
+            static let iconToText: CGFloat = 12
+            static let headerSpacing: CGFloat = 6
+            /// The least room left between the breadcrumb and the activity icon.
+            static let headerToActivity: CGFloat = 12
+            static let headerToOutput: CGFloat = 8
+            static let terminalInsetX: CGFloat = 10
+            static let terminalInsetY: CGFloat = 7
+            static let outputLines = 4
+            static let dividerGap: CGFloat = 10
+            static let summaryLines = 2
+        }
+
+        /// Claude's brand orange, which marks the Claude session's own name.
+        static let claudeOrange = NSColor(srgbRed: 222 / 255, green: 115 / 255, blue: 86 / 255, alpha: 1)
+
+        /// The terminal prompt the last output is printed after.
+        static let outputPrompt = "> "
 
         /// Horizontal compression-resistance priorities for the row's text, in the
         /// order they give way: the agent's last output and the AI summary first
@@ -391,7 +471,7 @@ extension SessionWatcher {
         /// caller must build a fresh row: the header's "»"-separated segments exist
         /// only for the fields that are non-empty, so a branch or a session name
         /// that appeared or vanished changes how many labels the row has, and
-        /// `summariesEnabled` decides whether line 3 exists at all.
+        /// `summariesEnabled` decides whether the summary exists at all.
         ///
         /// Everything that actually moves poll to poll — what the agent last said,
         /// its activity, its summary, whether it is the frontmost session — is a
@@ -412,19 +492,37 @@ extension SessionWatcher {
             isFrontmost = newIsFrontmost
 
             projectLabel.stringValue = newSession.projectGroupName
-            for (lbl, text) in zip(subtitleLabels, Self.headerSegments(for: newSession)) {
-                lbl.stringValue = text
-            }
+            branchLabel?.stringValue = newSession.gitBranch
+            sessionNameLabel?.stringValue = newSession.sessionName
             activityIcon.update(activity: newSession.activity, isSummarizing: newIsSummarizing)
-            outputLabel.stringValue = Self.outputText(for: newSession)
             summaryLabel?.stringValue = summaryText()
             toolTip = Self.infoText(for: newSession)
             // Summarize is the one item whose enablement tracks live state.
             menu?.items.first { $0.action == #selector(summarizeAction) }?.isEnabled = !newIsSummarizing
-            // Text colour depends on whether these fields are empty, and the resting
-            // background on `isFrontmost` — both of which just changed.
+            // The output is an attributed string built from the palette, text colour
+            // depends on whether these fields are empty, and the resting background
+            // on `isFrontmost` — all of which just changed.
             applyTheme(resolvedThemeScope.palette)
             return true
+        }
+
+        /// The narrowest this row can be and still show its whole breadcrumb —
+        /// project, branch and session name untruncated, with the activity icon
+        /// after them. The Sessions window keeps itself at least this wide.
+        ///
+        /// Measured from the labels' own text widths rather than `fittingSize`: the
+        /// labels deliberately abstain from the fitting width (see `TextPriority`),
+        /// so a fitting size would squeeze them to nothing.
+        public var minimumWidth: CGFloat {
+            let segments = headerRow.arrangedSubviews.filter { $0 !== headerSpacer }
+            let segmentsWidth = segments.reduce(CGFloat(0)) { total, view in
+                total + ceil(max(view.intrinsicContentSize.width, view.fittingSize.width))
+            }
+            // The spacer is an arranged subview too, so spacing sits on both its sides.
+            let spacing = Metrics.headerSpacing * CGFloat(headerRow.arrangedSubviews.count - 1)
+            return Metrics.horizontalPadding + Metrics.iconSide + Metrics.iconToText
+                + segmentsWidth + spacing + Metrics.headerToActivity
+                + Metrics.horizontalPadding
         }
 
         /// The header's optional segments, in order — branch then session name,
@@ -446,31 +544,70 @@ extension SessionWatcher {
         private func applyTheme(_ palette: SemanticPalette) {
             layer?.backgroundColor = restingBackground(palette)
 
-            // Header line: the project leads, branch and session name follow dimmer.
+            // Header line: every segment at one size, told apart by colour — the
+            // project in the text colour, the branch in the theme's highlight, the
+            // Claude session's name in Claude's orange.
+            let headerFont = palette.font(.body)
             projectLabel.textColor = palette.primaryTextColor
-            projectLabel.font = palette.font(.body)
-            for lbl in subtitleLabels {
-                lbl.textColor = palette.secondaryTextColor
-                lbl.font = palette.font(.caption)
-            }
+            projectLabel.font = headerFont
+            branchLabel?.textColor = palette.accentColor
+            branchLabel?.font = headerFont
+            sessionNameLabel?.textColor = Self.claudeOrange
+            sessionNameLabel?.font = headerFont
             for lbl in separatorLabels {
                 lbl.textColor = palette.tertiaryTextColor
-                lbl.font = palette.font(.caption)
+                lbl.font = headerFont
             }
 
             activityIcon.applyTheme(palette)
 
-            // Second line: the agent's last word.
-            outputLabel.textColor = session.lastOutput.isEmpty
-                ? palette.tertiaryTextColor
-                : palette.secondaryTextColor
-            outputLabel.font = palette.font(.caption)
+            // The agent's last output, printed into a terminal after a prompt.
+            terminalView.layer?.backgroundColor = palette.surfaceColor.cgColor
+            terminalView.layer?.borderColor = palette.borderColor.cgColor
+            let codeFont = palette.font(.code)
+            outputLabel.attributedStringValue = Self.terminalText(
+                Self.outputText(for: session),
+                font: codeFont,
+                promptColor: palette.accentColor,
+                textColor: session.lastOutput.isEmpty ? palette.tertiaryTextColor : palette.secondaryTextColor
+            )
+            outputHeight.constant = Self.height(ofLines: Metrics.outputLines, in: codeFont)
 
-            // Summary line (only present when the summaries feature is on).
+            // Summary (only present when the summaries feature is on).
+            let summaryFont = palette.font(.caption)
             summaryLabel?.textColor = session.summary.isEmpty
                 ? palette.tertiaryTextColor
                 : palette.secondaryTextColor
-            summaryLabel?.font = palette.font(.caption)
+            summaryLabel?.font = summaryFont
+            summaryHeight?.constant = Self.height(ofLines: Metrics.summaryLines, in: summaryFont)
+        }
+
+        /// `text` after a terminal prompt, wrapped with a hanging indent so every
+        /// continuation line lines up under the text rather than under the prompt.
+        static func terminalText(
+            _ text: String,
+            font: NSFont,
+            promptColor: NSColor,
+            textColor: NSColor
+        ) -> NSAttributedString {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byWordWrapping
+            paragraph.headIndent = ceil((outputPrompt as NSString).size(withAttributes: [.font: font]).width)
+            let result = NSMutableAttributedString(
+                string: outputPrompt,
+                attributes: [.font: font, .foregroundColor: promptColor, .paragraphStyle: paragraph]
+            )
+            result.append(NSAttributedString(
+                string: text,
+                attributes: [.font: font, .foregroundColor: textColor, .paragraphStyle: paragraph]
+            ))
+            return result
+        }
+
+        /// The height `lines` lines of `font` set, so a block is exactly that many
+        /// lines tall whatever it holds and every row in the list lines up.
+        static func height(ofLines lines: Int, in font: NSFont) -> CGFloat {
+            ceil(NSLayoutManager().defaultLineHeight(for: font) * CGFloat(lines))
         }
 
         /// App icon for the terminal a session runs in, from its `TERM_PROGRAM`.
@@ -497,14 +634,14 @@ extension SessionWatcher {
         }
 
         private func setupViews() {
-            let hPadding: CGFloat = 8
-            let vPadding: CGFloat = 5
+            typealias Layout = Metrics
 
-            // --- App icon: the "go to session" affordance, spanning both text lines.
+            // --- App icon: the "go to session" affordance, heading the row.
             // The icon is the *only* thing in the row that navigates — clicking the
             // text is not a shortcut for it, so a click meant for the context menu or
-            // for selecting a line can't yank the user into another terminal.
-            let iconButton = NSButton()
+            // for selecting a line can't yank the user into another terminal. The
+            // pointing-hand cursor over it is what says so.
+            let iconButton = SessionWatcherAppIconButton()
             iconButton.image = Self.appIcon(forTermProgram: session.termProgram)
             iconButton.imagePosition = .imageOnly
             iconButton.imageScaling = .scaleProportionallyUpOrDown
@@ -520,11 +657,12 @@ extension SessionWatcher {
             addSubview(iconButton)
 
             // --- Line 1: project » branch » session name, then the activity icon ---
-            let headerRow = NSStackView()
-            headerRow.orientation = .horizontal
-            headerRow.spacing = 4
-            headerRow.alignment = .centerY
-            headerRow.translatesAutoresizingMaskIntoConstraints = false
+            let header = NSStackView()
+            header.orientation = .horizontal
+            header.spacing = Layout.headerSpacing
+            header.alignment = .centerY
+            header.translatesAutoresizingMaskIntoConstraints = false
+            headerRow = header
 
             // The project *root*'s name, not the cwd's: a session run from inside a
             // submodule or a linked worktree belongs to the tree above it, and
@@ -534,7 +672,7 @@ extension SessionWatcher {
             projLabel.lineBreakMode = .byTruncatingTail
             projLabel.maximumNumberOfLines = 1
             projLabel.setContentCompressionResistancePriority(TextPriority.project, for: .horizontal)
-            headerRow.addArrangedSubview(projLabel)
+            header.addArrangedSubview(projLabel)
             projectLabel = projLabel
 
             // Branch and session name are both optional — a session outside a git
@@ -543,96 +681,131 @@ extension SessionWatcher {
             for (index, text) in [session.gitBranch, session.sessionName].enumerated() where !text.isEmpty {
                 let sep = NSTextField(labelWithString: "»")
                 sep.setContentCompressionResistancePriority(.required, for: .horizontal)
-                headerRow.addArrangedSubview(sep)
+                header.addArrangedSubview(sep)
                 separatorLabels.append(sep)
 
                 let lbl = NSTextField(labelWithString: text)
                 lbl.lineBreakMode = .byTruncatingTail
                 lbl.maximumNumberOfLines = 1
-                // In a narrow window the session name gives way first, then the
-                // branch; the project name is the segment that must survive.
+                // The window keeps itself wide enough for the whole breadcrumb
+                // (`minimumWidth`); while it catches up, the session name gives way
+                // first, then the branch, and the project name survives.
                 lbl.setContentCompressionResistancePriority(
                     index == 0 ? TextPriority.branch : TextPriority.sessionName,
                     for: .horizontal
                 )
-                headerRow.addArrangedSubview(lbl)
-                subtitleLabels.append(lbl)
+                header.addArrangedSubview(lbl)
+                if index == 0 { branchLabel = lbl } else { sessionNameLabel = lbl }
             }
 
             let spacer = NSView()
             spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-            headerRow.addArrangedSubview(spacer)
+            header.addArrangedSubview(spacer)
+            headerSpacer = spacer
 
             let activity = SessionWatcherActivityIconView(
                 activity: session.activity,
                 isSummarizing: isSummarizing
             )
-            headerRow.addArrangedSubview(activity)
+            header.addArrangedSubview(activity)
             activityIcon = activity
 
-            addSubview(headerRow)
+            addSubview(header)
 
-            // --- Line 2: the agent's last output, one line ---
-            let outputLbl = NSTextField(labelWithString: Self.outputText(for: session))
-            outputLbl.lineBreakMode = .byTruncatingTail
-            outputLbl.maximumNumberOfLines = 1
+            // --- The agent's last output: four lines in an inset terminal, after a
+            // prompt. Always four lines tall, so the rows line up down the list.
+            let terminal = NSView()
+            terminal.wantsLayer = true
+            terminal.layer?.cornerRadius = 6
+            terminal.layer?.borderWidth = 1
+            terminal.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(terminal)
+            terminalView = terminal
+
+            let outputLbl = NSTextField(wrappingLabelWithString: "")
+            outputLbl.maximumNumberOfLines = Layout.outputLines
+            outputLbl.cell?.truncatesLastVisibleLine = true
             outputLbl.setContentCompressionResistancePriority(TextPriority.output, for: .horizontal)
+            outputLbl.setContentCompressionResistancePriority(.init(rawValue: 1), for: .vertical)
+            outputLbl.setContentHuggingPriority(.init(rawValue: 1), for: .vertical)
             outputLbl.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(outputLbl)
+            terminal.addSubview(outputLbl)
             outputLabel = outputLbl
+            outputHeight = outputLbl.heightAnchor.constraint(equalToConstant: 0)
 
             // The ids and paths the old detail lines showed now live in the tooltip
-            // (and in the context menu's Show Info), keeping the row two lines tall.
+            // (and in the context menu's Show Info), keeping the row compact.
             toolTip = Self.infoText(for: session)
 
-            var lastAnchor = outputLbl.bottomAnchor
+            let textLeading = iconButton.trailingAnchor
+            var lastAnchor = terminal.bottomAnchor
 
-            // --- Line 3: the AI summary, only when the feature is on ---
+            // --- The AI summary under a divider, two lines, only when the feature is on ---
             if summariesEnabled {
+                let divider = SessionWatcherListSeparator()
+                addSubview(divider)
+
                 let summaryLbl = NSTextField(wrappingLabelWithString: summaryText())
-                summaryLbl.maximumNumberOfLines = 2
-                summaryLbl.lineBreakMode = .byTruncatingTail
+                summaryLbl.maximumNumberOfLines = Layout.summaryLines
+                summaryLbl.cell?.truncatesLastVisibleLine = true
                 summaryLbl.setContentCompressionResistancePriority(TextPriority.summary, for: .horizontal)
+                summaryLbl.setContentCompressionResistancePriority(.init(rawValue: 1), for: .vertical)
+                summaryLbl.setContentHuggingPriority(.init(rawValue: 1), for: .vertical)
                 summaryLbl.translatesAutoresizingMaskIntoConstraints = false
                 addSubview(summaryLbl)
                 summaryLabel = summaryLbl
+                let height = summaryLbl.heightAnchor.constraint(equalToConstant: 0)
+                summaryHeight = height
                 NSLayoutConstraint.activate([
-                    summaryLbl.topAnchor.constraint(equalTo: outputLbl.bottomAnchor, constant: 3),
-                    summaryLbl.leadingAnchor.constraint(equalTo: leadingAnchor, constant: hPadding),
-                    summaryLbl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -hPadding)
+                    divider.topAnchor.constraint(equalTo: terminal.bottomAnchor, constant: Layout.dividerGap),
+                    divider.leadingAnchor.constraint(equalTo: textLeading, constant: Layout.iconToText),
+                    divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalPadding),
+
+                    summaryLbl.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: Layout.dividerGap),
+                    summaryLbl.leadingAnchor.constraint(equalTo: textLeading, constant: Layout.iconToText),
+                    summaryLbl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalPadding),
+                    height
                 ])
                 lastAnchor = summaryLbl.bottomAnchor
             }
 
             NSLayoutConstraint.activate([
-                iconButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: hPadding),
-                // Centred on the seam between the two text lines, so it reads as
-                // belonging to both of them.
-                iconButton.centerYAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 1),
-                iconButton.widthAnchor.constraint(equalToConstant: 22),
-                iconButton.heightAnchor.constraint(equalToConstant: 22),
+                iconButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalPadding),
+                iconButton.topAnchor.constraint(equalTo: topAnchor, constant: Layout.verticalPadding),
+                iconButton.widthAnchor.constraint(equalToConstant: Layout.iconSide),
+                iconButton.heightAnchor.constraint(equalToConstant: Layout.iconSide),
 
-                headerRow.topAnchor.constraint(equalTo: topAnchor, constant: vPadding),
-                headerRow.leadingAnchor.constraint(equalTo: iconButton.trailingAnchor, constant: 6),
-                headerRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -hPadding),
+                header.topAnchor.constraint(equalTo: topAnchor, constant: Layout.verticalPadding),
+                header.leadingAnchor.constraint(equalTo: textLeading, constant: Layout.iconToText),
+                header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalPadding),
 
-                outputLbl.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: 1),
-                outputLbl.leadingAnchor.constraint(equalTo: iconButton.trailingAnchor, constant: 6),
-                outputLbl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -hPadding),
+                terminal.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Layout.headerToOutput),
+                terminal.leadingAnchor.constraint(equalTo: textLeading, constant: Layout.iconToText),
+                terminal.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalPadding),
 
-                bottomAnchor.constraint(equalTo: lastAnchor, constant: vPadding)
+                outputLbl.topAnchor.constraint(equalTo: terminal.topAnchor, constant: Layout.terminalInsetY),
+                outputLbl.leadingAnchor.constraint(equalTo: terminal.leadingAnchor, constant: Layout.terminalInsetX),
+                outputLbl.trailingAnchor.constraint(equalTo: terminal.trailingAnchor, constant: -Layout.terminalInsetX),
+                outputLbl.bottomAnchor.constraint(equalTo: terminal.bottomAnchor, constant: -Layout.terminalInsetY),
+                outputHeight,
+
+                // Whichever is taller — the icon or the text column — sets the row.
+                bottomAnchor.constraint(
+                    greaterThanOrEqualTo: iconButton.bottomAnchor, constant: Layout.verticalPadding
+                ),
+                bottomAnchor.constraint(equalTo: lastAnchor, constant: Layout.verticalPadding)
             ])
         }
 
-        /// Line 2's text: what the agent last said, or a placeholder for a session
-        /// that hasn't said anything yet.
+        /// The terminal's text: what the agent last said, or a placeholder for a
+        /// session that hasn't said anything yet.
         ///
-        /// The agent writes markdown, and a one-line label showed its syntax
-        /// verbatim — `**Shipped.**`, backticked hashes, list dashes — so the line
-        /// read as noise. The markdown is parsed to its text, one space between
-        /// blocks (the parser itself drops block boundaries, which glued a heading to
-        /// the paragraph under it), and whitespace collapsed so a multi-line message
-        /// fills the single line. Show Info keeps the raw text.
+        /// The agent writes markdown, and the label showed its syntax verbatim —
+        /// `**Shipped.**`, backticked hashes, list dashes — so the output read as
+        /// noise. The markdown is parsed to its text, one space between blocks (the
+        /// parser itself drops block boundaries, which glued a heading to the
+        /// paragraph under it), and whitespace collapsed so blank lines and list
+        /// breaks don't spend the terminal's four lines. Show Info keeps the raw text.
         static func outputText(for session: SessionWatcherSession) -> String {
             guard !session.lastOutput.isEmpty else { return "No output yet." }
             return plainText(fromMarkdown: session.lastOutput)
@@ -667,7 +840,7 @@ extension SessionWatcher {
             text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         }
 
-        /// Line 3's text. This used to read "thinking..." for every session without a
+        /// The summary's text. This used to read "thinking..." for every session without a
         /// summary, which conflated three different states: summarized, waiting on the
         /// summarizer, and nothing to summarize in the first place.
         private func summaryText() -> String {
@@ -680,7 +853,7 @@ extension SessionWatcher {
             return "Summarizing..."
         }
 
-        /// Everything the two-line row can't show — ids, paths, model, timing. Used
+        /// Everything the row can't show — ids, paths, model, timing. Used
         /// as the row's tooltip and as the body of the context menu's Show Info.
         private static func infoText(for session: SessionWatcherSession) -> String {
             var fields: [(String, String)] = [

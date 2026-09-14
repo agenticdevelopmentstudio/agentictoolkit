@@ -160,4 +160,95 @@ final class SessionListViewTests: XCTestCase {
         let session = makeSession("quiet", cwd: "/Users/me/p", projectRoot: "/Users/me/p")
         XCTAssertEqual(Row.outputText(for: session), "No output yet.")
     }
+
+    // MARK: - Terminal block
+
+    /// The output reads like a terminal: a "> " prompt in its own colour, then the text.
+    func testTerminalTextLeadsWithAPrompt() {
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let text = Row.terminalText("all green", font: font, promptColor: .systemBlue, textColor: .systemGray)
+
+        XCTAssertEqual(text.string, "> all green")
+        XCTAssertEqual(text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, .systemBlue)
+        XCTAssertEqual(text.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor, .systemGray)
+    }
+
+    /// Wrapped lines hang under the text, not under the prompt, so the prompt stands
+    /// alone in the left margin the way a shell's does.
+    func testTerminalTextHangsWrappedLinesUnderTheText() throws {
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let text = Row.terminalText("x", font: font, promptColor: .systemBlue, textColor: .systemGray)
+        let style = try XCTUnwrap(text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        let promptWidth = ("> " as NSString).size(withAttributes: [.font: font]).width
+
+        XCTAssertEqual(style.firstLineHeadIndent, 0)
+        XCTAssertEqual(style.headIndent, ceil(promptWidth))
+    }
+
+    /// The output and summary are sized in whole lines of their font, which is what
+    /// keeps every row the same height whatever its text.
+    func testHeightOfLinesIsWholeLinesOfTheFont() {
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let one = NSLayoutManager().defaultLineHeight(for: font)
+
+        XCTAssertEqual(Row.height(ofLines: 4, in: font), ceil(one * 4))
+        XCTAssertGreaterThan(Row.height(ofLines: 4, in: font), Row.height(ofLines: 2, in: font))
+    }
+
+    // MARK: - Breadcrumb width
+
+    private func makeRow(branch: String = "", name: String = "") -> Row {
+        let session = SessionWatcher.SessionWatcherSession(
+            sessionId: "row",
+            cwd: "/Users/me/stenographer",
+            gitBranch: branch,
+            termProgram: "iTerm.app",
+            projectRoot: "/Users/me/stenographer",
+            sessionName: name
+        )
+        return Row(
+            session: session, onTap: nil, isSummarizing: false,
+            onSummarize: nil, isFrontmost: false, summariesEnabled: false
+        )
+    }
+
+    /// The window is kept at least this wide, so it has to grow with every segment of
+    /// the breadcrumb — a longer branch or session name needs a wider window.
+    func testMinimumWidthGrowsWithTheBreadcrumb() {
+        let bare = makeRow().minimumWidth
+        let branched = makeRow(branch: "session-window").minimumWidth
+        let named = makeRow(branch: "session-window", name: "rearrange the session window").minimumWidth
+
+        XCTAssertGreaterThan(bare, 0)
+        XCTAssertGreaterThan(branched, bare)
+        XCTAssertGreaterThan(named, branched)
+    }
+
+    /// At its minimum width the row lays the breadcrumb out whole: no segment is
+    /// narrower than its text.
+    func testBreadcrumbFitsAtTheMinimumWidth() {
+        let row = makeRow(branch: "session-window", name: "rearrange the session window")
+        row.frame = NSRect(x: 0, y: 0, width: row.minimumWidth, height: 200)
+        row.layoutSubtreeIfNeeded()
+
+        for label in [row.projectLabel, row.branchLabel, row.sessionNameLabel].compactMap({ $0 }) {
+            XCTAssertGreaterThanOrEqual(ceil(label.frame.width) + 0.5, ceil(label.intrinsicContentSize.width),
+                                        "\(label.stringValue) was truncated at the row's minimum width")
+        }
+    }
+
+    /// Every breadcrumb segment is the same size, whatever its colour.
+    func testBreadcrumbSegmentsShareOneFont() {
+        let row = makeRow(branch: "session-window", name: "tidy")
+        let fonts = [row.projectLabel, row.branchLabel, row.sessionNameLabel].compactMap { $0?.font?.pointSize }
+
+        XCTAssertEqual(fonts.count, 3)
+        XCTAssertEqual(Set(fonts).count, 1)
+    }
+
+    /// With no rows there is no breadcrumb to keep whole, so the list asks for no
+    /// width and the host's own floor applies.
+    func testListMinimumContentWidthIsZeroWithoutRows() {
+        XCTAssertEqual(makeView(FakeViewSource([])).minimumContentWidth, 0)
+    }
 }
