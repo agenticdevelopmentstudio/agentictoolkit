@@ -65,19 +65,24 @@ struct ExtensionPickerWindowControllerTests {
 
     // MARK: - Tests
 
-    /// Does NOT kill the F1 mutation (moving the `preferredContentSize` read
-    /// back above `let hostedView = content.view` in
-    /// `ExtensionPickerWindowController.init`). `ExtensionQuickPickViewController`
-    /// sets `preferredContentSize = NSSize(width: 560, height: 400)` in its
-    /// own `init` (`ExtensionQuickPickViewController.swift:71`), so the value
-    /// is already present no matter how early the window controller reads
-    /// it — reverting F1 would still leave this panel 560x400. This is a
-    /// positive control that the sizing path (content size -> panel content
-    /// rect -> window frame) works at all, not a mutation-killer.
+    /// Kills any change to the quick pick's spelled window size. The 560x400
+    /// is written once, at `ExtensionQuickPickViewController.swift:71`
+    /// (`preferredContentSize = NSSize(width: 560, height: 400)`), and this
+    /// is the only test in the suite that reads it back: nothing else under
+    /// `Tests/AgenticToolkitMacOSTests/Extensions/` asserts either number, so
+    /// editing that line to any other size fails here and nowhere else.
+    ///
+    /// It does NOT kill the F1 mutation (moving the `preferredContentSize`
+    /// read back above `let hostedView = content.view` in
+    /// `ExtensionPickerWindowController.init`) — that value is set in the
+    /// view controller's own `init`, so it is already present no matter how
+    /// early the window controller reads it, and reverting F1 would still
+    /// leave this panel 560x400. `inputBoxWindowSizedToComputedPreferredContentSize`
+    /// below is the test that kills F1.
     @Test(
         """
         quick pick window is 560x400 from ExtensionQuickPickViewController's own preferredContentSize \
-        (does not kill the F1 mutation — that value is set in init, not loadView)
+        (kills a change to that spelled size; F1 is killed by the input box test below)
         """
     )
     func quickPickWindowSizedToFixedPreferredContentSize() {

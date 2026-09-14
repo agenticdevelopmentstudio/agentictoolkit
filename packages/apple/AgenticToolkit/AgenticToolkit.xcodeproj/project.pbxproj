@@ -240,6 +240,7 @@
 		21B7BD73591C1B03AD65DCE5 /* LanguageServerDocumentSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C336BD90D299D4BEBE356FF /* LanguageServerDocumentSyncTests.swift */; };
 		22020F12C8920B4952BF315F /* ExtensionManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5352122E8234CFD370AC6545 /* ExtensionManifest.swift */; };
 		220A22CD447935610FE1745D /* ComposableTabsAddPaneViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A415A4602A9DA05E4A6F175 /* ComposableTabsAddPaneViewController.swift */; };
+		220C5B5637F056CA3853B768 /* HostLanguageVocabulary.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC29204CD2079C0872781402 /* HostLanguageVocabulary.swift */; };
 		222D84EA5B4C2490AAD3C856 /* HTDVController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C8EA09F59EA16290707027 /* HTDVController.swift */; };
 		2264E445C9A1259625CD7185 /* NotesCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86FEFB54F5560AB6533F4379 /* NotesCommands.swift */; };
 		234CEE167B9D43140A2EC2A6 /* SystemWindowContextsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71138CCA6F7155839D93DE12 /* SystemWindowContextsSettings.swift */; };
@@ -295,6 +296,7 @@
 		31192FAB78B40EB7225BEC0A /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5CD36148C38DB0350750DD /* ChatMessage.swift */; };
 		31A88BF7DC0FDD533274EF01 /* ThemeEditorSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 318E853592964F2E3951830F /* ThemeEditorSplitViewController.swift */; };
 		31B1CEF46459C53C07621FEB /* DebugAutomationReExports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 576B23E4D655CDCDC2C3F1FF /* DebugAutomationReExports.swift */; };
+		31B9D836BC4FEEE8D831F563 /* MainThreadLanguagesVocabularyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA3E9E64BE934804F7A520F2 /* MainThreadLanguagesVocabularyTests.swift */; };
 		329018C1665E96A3DBEED01F /* ProjectWindowRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F67E456C9D40ADA6FDECEC30 /* ProjectWindowRestoreTests.swift */; };
 		331EE8F2A046A8848422BAF1 /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB783DDA1E4AB17256866125 /* DividerView.swift */; };
 		33AFBBFDC6CE74C0947F7454 /* ExtensionInputBoxModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D282DC10505261D2337F7993 /* ExtensionInputBoxModelTests.swift */; };
@@ -630,6 +632,7 @@
 		7BF1094388E870B830CB7CEF /* ScriptablePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72337013C6184C5FFEF921CE /* ScriptablePane.swift */; };
 		7C4D5EE9AC433563E6099582 /* JSONCPreprocessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68A4BBEE28B705FB8FF593A0 /* JSONCPreprocessor.swift */; };
 		7CB3DB6B65E9305CAA792C9F /* FileSystemWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2951B18E81A33463286D9EE4 /* FileSystemWatcher.swift */; };
+		7CB88413CE22CB6BDCE41B3D /* MainThreadLanguages.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE48B770FE7213956BF5350F /* MainThreadLanguages.swift */; };
 		7CFFEA150BB6C132E93BA1A7 /* SessionListViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC98A9EAFD2AEA6EFC2F2DE2 /* SessionListViewModelTests.swift */; };
 		7D52B2134B493E307A248FF3 /* ProjectFooterStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2C848B48DB529D29C8485C /* ProjectFooterStatusTests.swift */; };
 		7D5F96ED90E05AE4171C33CA /* ChatTranscriptReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAA6F1867906CCB1C562F3E9 /* ChatTranscriptReducerTests.swift */; };
@@ -885,6 +888,7 @@
 		B59602DDBDB81AC8822E9707 /* MenuContribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE1D123A34550F079C478CF /* MenuContribution.swift */; };
 		B603C69C4E1A61D03BBE5A57 /* MockScreenProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFCFE99C5DF2E3BA41DA561E /* MockScreenProvider.swift */; };
 		B6B2D8F61C25776A5B6B23EA /* TopicListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D6391E1372A83A76D72944F /* TopicListViewController.swift */; };
+		B6CE2B177FDC43A8B95EDD7D /* MainThreadLanguagesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69CCEB55C67CF3F03C30221E /* MainThreadLanguagesTests.swift */; };
 		B6DD01A409C6D8DEF9125041 /* ButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBFE6A254091C292617E372F /* ButtonView.swift */; };
 		B805FF747A44A6325223EB2D /* WindowRegistryVisibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74478068B66DC72DF466A367 /* WindowRegistryVisibilityTests.swift */; };
 		B81CD9F51A8DAC3E6F2FAAF1 /* AIPluginKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FD467D736FA5B431DD30B091 /* AIPluginKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -1036,6 +1040,7 @@
 		DF514DAA9384981CE44ABAE0 /* BranchControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94F95FABD4C3468E4FDE16AC /* BranchControllerTests.swift */; };
 		DF6992FE0C43E34D10C09F4A /* Uri.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE0CF7E2BB29D66FDDB7C52 /* Uri.swift */; };
 		DF7B62BAF5C4F5A85985C5A9 /* ComposableTabsTabItemDataSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29EE920E924A2FB534330CD0 /* ComposableTabsTabItemDataSourceTests.swift */; };
+		DF98A9DC28BB381C42363B43 /* VSCodeAPIDisposableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C887AC975CC1D90F45A725F /* VSCodeAPIDisposableTests.swift */; };
 		DFB45E982DB72965DBF94205 /* AIRequestBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 397A28ABB51ED004474C44A5 /* AIRequestBuilder.swift */; };
 		DFC77B42F0A8BE6BC66F0094 /* SystemWindowControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA97AA66D7EAB27142E35CA /* SystemWindowControlling.swift */; };
 		E007B0C86014CC54465EF30B /* extension-runtime.js in Resources */ = {isa = PBXBuildFile; fileRef = EC10A099B7F247FE0860EEAA /* extension-runtime.js */; };
@@ -2589,6 +2594,7 @@
 		69A2C81E9A14A2521C8911E2 /* SyncWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncWire.swift; sourceTree = "<group>"; };
 		69AC7E0D1995557AF7B4A750 /* QuietWindowPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietWindowPresentationTests.swift; sourceTree = "<group>"; };
 		69AFB996C8722DACDFC54FE8 /* AppFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFeature.swift; sourceTree = "<group>"; };
+		69CCEB55C67CF3F03C30221E /* MainThreadLanguagesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadLanguagesTests.swift; sourceTree = "<group>"; };
 		69D0314BEF2FB056EE285DB7 /* SingleWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleWindowController.swift; sourceTree = "<group>"; };
 		69DC46D4A5E4C909C1E2591F /* SemanticVersionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticVersionTests.swift; sourceTree = "<group>"; };
 		6A3684C3A0440E061B80E868 /* SystemWindowContextManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowContextManager.swift; sourceTree = "<group>"; };
@@ -2666,6 +2672,7 @@
 		7B3A174D6B7687410F9254F1 /* ProjectLanguageServicesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLanguageServicesTests.swift; sourceTree = "<group>"; };
 		7B605A0723C1D9CBA19A0D9C /* SessionWatcherSessionActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWatcherSessionActivityTests.swift; sourceTree = "<group>"; };
 		7B7939675F83E77AF61D9C68 /* ProviderPickerViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPickerViewController.swift; sourceTree = "<group>"; };
+		7C887AC975CC1D90F45A725F /* VSCodeAPIDisposableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeAPIDisposableTests.swift; sourceTree = "<group>"; };
 		7CD6447B79EC42AD561B9ACA /* ExtensionInputBoxModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionInputBoxModel.swift; sourceTree = "<group>"; };
 		7CD984745AB88163C81CFC8D /* SqliteStorageProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SqliteStorageProviderTests.swift; sourceTree = "<group>"; };
 		7D845926CC608BB529374532 /* NSWindow+TestHostVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSWindow+TestHostVisibility.swift"; sourceTree = "<group>"; };
@@ -2895,6 +2902,7 @@
 		BDDC303AC0DFFF3C4C7BB3BC /* TerminalSessionSummarizationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionSummarizationCoordinator.swift; sourceTree = "<group>"; };
 		BDF8FD8C2E5D494F6A2E0A36 /* TestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport.swift; sourceTree = "<group>"; };
 		BDFE5A1259670347AA7BA2A8 /* ComposableSettings+Help.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ComposableSettings+Help.swift"; sourceTree = "<group>"; };
+		BE48B770FE7213956BF5350F /* MainThreadLanguages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadLanguages.swift; sourceTree = "<group>"; };
 		BE67D8C1FDFC85BC43E0103B /* AIPluginKitTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPluginKitTestSupport.swift; sourceTree = "<group>"; };
 		BE8834890BAD21FA7B296D5A /* JSONValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONValue.swift; sourceTree = "<group>"; };
 		BED6B521310A0B47DF4E3268 /* DaemonLivePluginRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonLivePluginRuntimeTests.swift; sourceTree = "<group>"; };
@@ -2944,6 +2952,7 @@
 		C96E2B241801AA1778C22BAE /* ExtensionHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionHost.swift; sourceTree = "<group>"; };
 		C9DCC92E537FCCE36F2BAA86 /* RequestsTopic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestsTopic.swift; sourceTree = "<group>"; };
 		CA34B292492025433D5AE7C9 /* HelpContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpContentView.swift; sourceTree = "<group>"; };
+		CA3E9E64BE934804F7A520F2 /* MainThreadLanguagesVocabularyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadLanguagesVocabularyTests.swift; sourceTree = "<group>"; };
 		CA76CBE5CE3BC31037C44C20 /* NotesFolderListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesFolderListViewController.swift; sourceTree = "<group>"; };
 		CA87B6E341A750FF0117D814 /* QuickNoteWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickNoteWindowController.swift; sourceTree = "<group>"; };
 		CABB4CBFA5A6B8DEA5140CF2 /* LogCellValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogCellValue.swift; sourceTree = "<group>"; };
@@ -2956,6 +2965,7 @@
 		CB8EA4CB9A8A704A74264FFE /* CustomHeuristic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomHeuristic.swift; sourceTree = "<group>"; };
 		CBA8C42F9BB7AEDB993FBCE1 /* ComposableTabsPaneChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsPaneChromeTests.swift; sourceTree = "<group>"; };
 		CC0AA8BC9941D7E782CEFB52 /* OllamaModelPageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaModelPageStore.swift; sourceTree = "<group>"; };
+		CC29204CD2079C0872781402 /* HostLanguageVocabulary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostLanguageVocabulary.swift; sourceTree = "<group>"; };
 		CC3D32ED64E53F980B0C0204 /* AgenticToolkitHTDV.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AgenticToolkitHTDV.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CC959528CF23522D84FE859F /* AIProviderMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderMigration.swift; sourceTree = "<group>"; };
 		CCADFB1F47A1689BCEA4DB7B /* DiagnosticOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticOverlayView.swift; sourceTree = "<group>"; };
@@ -4197,7 +4207,9 @@
 		4B7D7EF1823A0CE738254A09 /* VSCodeAPI */ = {
 			isa = PBXGroup;
 			children = (
+				CC29204CD2079C0872781402 /* HostLanguageVocabulary.swift */,
 				1D78D978AA70E3B2E344F328 /* MainThreadCommands.swift */,
+				BE48B770FE7213956BF5350F /* MainThreadLanguages.swift */,
 				A9DFE2A4779358D65B48852C /* MainThreadWindow.swift */,
 				FDDBE70011915E0F851687AD /* MainThreadWorkspace.swift */,
 				5CE0CF7E2BB29D66FDDB7C52 /* Uri.swift */,
@@ -5243,6 +5255,8 @@
 				5101D349833A9CC10839DF2C /* ExtensionTestSupport.swift */,
 				E2E872F8042F0C5864570DA2 /* LanguageContributionPointTests.swift */,
 				5248181B856F366132B0FE86 /* MainThreadCommandsTests.swift */,
+				69CCEB55C67CF3F03C30221E /* MainThreadLanguagesTests.swift */,
+				CA3E9E64BE934804F7A520F2 /* MainThreadLanguagesVocabularyTests.swift */,
 				575D735F6F0010C7C2D480C2 /* MainThreadWindowInputBoxTests.swift */,
 				6B8A3350FA47166F38A83CC1 /* MainThreadWindowQuickPickTests.swift */,
 				66B4551503A5EC9FD911E147 /* MainThreadWindowStatusBarTests.swift */,
@@ -5251,6 +5265,7 @@
 				71FC0CFF8A190FE13E818A71 /* ThemeContributionPointTests.swift */,
 				1DB3E22C2C70AC80B898A263 /* UriTests.swift */,
 				36716DA518F69F5E1CD6D80C /* ViewsContributionPointTests.swift */,
+				7C887AC975CC1D90F45A725F /* VSCodeAPIDisposableTests.swift */,
 				40A3B4B19E6B231F1B293A7B /* VSCodeAPISettlementTests.swift */,
 				1C54B10AA8156F3E91A1B9C0 /* VSCodeAPISubNamespaceTests.swift */,
 			);
@@ -7639,6 +7654,7 @@
 				9AE3DADBDEE779A9C35CCF1E /* HelpPresenting.swift in Sources */,
 				7B2ED1D6783038C46E7AD287 /* HeuristicsSettingsTab.swift in Sources */,
 				819205B285AE90E41D527C3E /* HorizontalStackView.swift in Sources */,
+				220C5B5637F056CA3853B768 /* HostLanguageVocabulary.swift in Sources */,
 				2C13DE619892F06B0F5C60BA /* HostMCPServer.swift in Sources */,
 				2181069656238D481721A527 /* HoverCardPopoverController.swift in Sources */,
 				BAE0602D0C414C5B88276BCC /* IDEDetector.swift in Sources */,
@@ -7676,6 +7692,7 @@
 				917169E897A3FAD6DA99028A /* MCPChipsBarView.swift in Sources */,
 				00D18DF46FCAF355B0DEB859 /* MCPServersPanelViewController.swift in Sources */,
 				5D59ADA9D4F467D04847B9FF /* MainThreadCommands.swift in Sources */,
+				7CB88413CE22CB6BDCE41B3D /* MainThreadLanguages.swift in Sources */,
 				178E43935B10344B9A3C8BDE /* MainThreadWindow.swift in Sources */,
 				2E383D52428083FCF7738063 /* MainThreadWorkspace.swift in Sources */,
 				97369AE07858C9D1A5BAEB8A /* MarkdownNoteStorage.swift in Sources */,
@@ -8316,6 +8333,8 @@
 				8FC6058DE13D71FBE42DCF61 /* LogViewTests.swift in Sources */,
 				C6C255A128CA45F0C98C6BDE /* MainActorScriptCommandTests.swift in Sources */,
 				D1C0451552CB9B16EA6D5094 /* MainThreadCommandsTests.swift in Sources */,
+				B6CE2B177FDC43A8B95EDD7D /* MainThreadLanguagesTests.swift in Sources */,
+				31B9D836BC4FEEE8D831F563 /* MainThreadLanguagesVocabularyTests.swift in Sources */,
 				44A60AFC53E8ABF3A204D122 /* MainThreadWindowInputBoxTests.swift in Sources */,
 				0559D500423474FD5BCDAD7E /* MainThreadWindowQuickPickTests.swift in Sources */,
 				710F9477084896665E0AFBC2 /* MainThreadWindowStatusBarTests.swift in Sources */,
@@ -8412,6 +8431,7 @@
 				4635DCB7F3A90EBADC0E8A8C /* ThemedSplitViewOrientationTests.swift in Sources */,
 				0AFF0852BB6191797F3F6795 /* TopicListViewControllerTests.swift in Sources */,
 				762E9DF12BA480FB3B8F3E8A /* UriTests.swift in Sources */,
+				DF98A9DC28BB381C42363B43 /* VSCodeAPIDisposableTests.swift in Sources */,
 				77C1CC1C137034CAA26B2E21 /* VSCodeAPISettlementTests.swift in Sources */,
 				6868B2039D5F08AD22E091B4 /* VSCodeAPISubNamespaceTests.swift in Sources */,
 				C0EA5ACD7CA9175BC9747A60 /* ViewsContributionPointTests.swift in Sources */,

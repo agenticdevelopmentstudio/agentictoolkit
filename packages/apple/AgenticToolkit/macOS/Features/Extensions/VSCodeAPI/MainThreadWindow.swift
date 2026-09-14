@@ -2154,7 +2154,8 @@ public final class MainThreadWindow {
     /// closures, which is what makes JavaScriptCore bridge them into callable
     /// JS functions rather than plain values — the same block-to-function
     /// bridging `setObject(_:forKeyedSubscript:)` already relies on for
-    /// `makeDisposable`'s method blocks (`MainThreadCommands.swift:416-421`).
+    /// `VSCodeAPI.disposable(in:onDispose:)`'s `dispose` method block
+    /// (`VSCodeAPI.swift:1092`: `public static func disposable(`).
     private static func installAccessor(
         on object: JSValue,
         name: String,
@@ -2193,7 +2194,8 @@ public final class MainThreadWindow {
     /// `defineProperty` accessor pairs for every mutable property, readonly
     /// getters for `id`/`alignment`/`priority`, and `show`/`hide`/`dispose`
     /// method blocks via `setObject(_:forKeyedSubscript:)` —
-    /// `makeDisposable`'s own pattern (`MainThreadCommands.swift:399-421`).
+    /// `VSCodeAPI.disposable(in:onDispose:)`'s own pattern
+    /// (`VSCodeAPI.swift:1092`: `public static func disposable(`).
     ///
     /// **No-capture evidence (Ruling 4), one sentence per block kind
     /// installed here:**
@@ -2215,8 +2217,9 @@ public final class MainThreadWindow {
     ///   `JSValue`.
     /// - `show`, `hide` and `dispose` each capture `item` and `window`, both
     ///   **weakly**; `dispose`'s block additionally closes over a local
-    ///   `disposed` `Bool`, captured by value, on `makeDisposable`'s own
-    ///   idempotence pattern (`MainThreadCommands.swift:416-421`).
+    ///   `disposed` `Bool`, captured by value, on
+    ///   `VSCodeAPI.disposable(in:onDispose:)`'s own idempotence pattern
+    ///   (`VSCodeAPI.swift:1092`: `public static func disposable(`).
     ///
     /// None of the above ever stores a `JSValue` or a `JSContext` on `item`
     /// or anywhere else that outlives one call — the object graph a

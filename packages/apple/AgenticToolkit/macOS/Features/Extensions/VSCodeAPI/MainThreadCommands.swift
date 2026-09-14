@@ -395,36 +395,25 @@ public final class MainThreadCommands {
     private struct DispatchUnavailable {}
 
     /// A JS object whose `dispose()` unregisters exactly the registration
-    /// `token` names, and does nothing the second time it is called.
+    /// `token` names, and does nothing the second time it is called. The
+    /// generic idempotence rule this relies on — `disposed` captured rather
+    /// than re-derived — is `VSCodeAPI.disposable(in:onDispose:)`'s own doc;
+    /// what is specific to a command registration is `token`, below.
     ///
-    /// VS Code's `Disposable` contract is exactly that idempotence, so
-    /// `disposed` is captured by the block rather than re-derived from
-    /// `ownedCallbacks` each call: re-deriving it would make a *second*
-    /// extension's later reuse of the same id (after this one unregistered
-    /// it) look, to a stale `Disposable` from the first registration, like
-    /// something still worth disposing.
-    ///
-    /// **`token` is captured for the same reason, and it is not the same
-    /// guard.** `disposed` only knows whether *this* `Disposable` already
-    /// fired; it says nothing about what `id` names now. Reading the token
-    /// out of `ownedCallbacks` at fire time reads whatever registration is
-    /// current, so a `Disposable` minted before a `dispose()` — never fired,
-    /// so still `disposed == false` — would unregister the adaptor's *own*
-    /// fresh registration of the same id made after that teardown. Captured
-    /// here, the token is the one this `Disposable` was minted for, and the
-    /// mismatch is the no-op it should be.
+    /// **`token` is captured, and it is not the same guard `disposed` is.**
+    /// `disposed` only knows whether *this* `Disposable` already fired; it
+    /// says nothing about what `id` names now. Reading the token out of
+    /// `ownedCallbacks` at fire time reads whatever registration is current,
+    /// so a `Disposable` minted before a `dispose()` — never fired, so still
+    /// unfired as far as `VSCodeAPI.disposable` is concerned — would
+    /// unregister the adaptor's *own* fresh registration of the same id made
+    /// after that teardown. Captured here, the token is the one this
+    /// `Disposable` was minted for, and the mismatch is the no-op it should
+    /// be.
     private func makeDisposable(id: String, token: CommandRegistration, in context: JSContext) -> JSValue? {
-        guard let disposable = JSValue(newObjectIn: context) else { return nil }
-        var disposed = false
-        let dispose: @convention(block) () -> Void = { [weak self] in
-            MainActor.assumeIsolated {
-                guard !disposed else { return }
-                disposed = true
-                self?.unregisterOwned(id: id, token: token)
-            }
+        VSCodeAPI.disposable(in: context) { [weak self] in
+            self?.unregisterOwned(id: id, token: token)
         }
-        disposable.setObject(dispose, forKeyedSubscript: "dispose" as NSString)
-        return disposable
     }
 
     /// Removes the registration `token` names from both the ownership record

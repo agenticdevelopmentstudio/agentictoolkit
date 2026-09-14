@@ -215,6 +215,32 @@ public final class LanguageContributionPoint: ContributionPoint {
         table.mapping(for: fileExtension)
     }
 
+    /// Every language id this point's applied extensions have contributed,
+    /// deduplicated, in `rebuild()`'s own order.
+    ///
+    /// **Computed, never stored.** A stored copy is a second source of truth
+    /// that `apply`/`withdraw` must remember to update, and the first time
+    /// one forgets it this accessor lies with no test able to see it.
+    ///
+    /// **Order:** extension identifiers sorted lexicographically — the same
+    /// order `rebuild()` resolves conflicts in, and for the same reason: the
+    /// apply order is `FileManager.contentsOfDirectory`'s, which changes when
+    /// an unrelated extension is installed — then each extension's entries in
+    /// manifest order, first occurrence of a duplicate id winning. VS Code's
+    /// `getLanguages()` returns "the identifiers of all known languages," not
+    /// one entry per contributor, so two extensions both contributing
+    /// `dockerfile` is one identifier here, not two.
+    public var contributedLanguageIdentifiers: [String] {
+        var seen: Set<String> = []
+        var identifiers: [String] = []
+        for identifier in languagesByExtension.keys.sorted() {
+            for language in languagesByExtension[identifier] ?? [] where seen.insert(language.id).inserted {
+                identifiers.append(language.id)
+            }
+        }
+        return identifiers
+    }
+
     /// Installs `mapping(for:)` as `CustomFileTypeMappings.contributedProvider`.
     ///
     /// Separate from `init` so a test can build one without touching global
