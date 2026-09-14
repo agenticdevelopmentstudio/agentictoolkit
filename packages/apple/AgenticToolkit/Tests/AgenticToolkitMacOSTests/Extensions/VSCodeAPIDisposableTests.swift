@@ -13,9 +13,10 @@ import JavaScriptCore
 /// `onDispose` closures is independently idempotent (removing an already-gone
 /// registration is itself a no-op), so none of them would fail if the guard
 /// here were deleted and `onDispose` ran twice. This suite is the only place
-/// in the repo that pins the guard directly, with an `onDispose` that is
-/// *not* independently idempotent — a bare counter increment — so a second
-/// call is only harmless if the guard itself does the work.
+/// traced (not a sweep of the repo) that pins the guard directly, with an
+/// `onDispose` that is *not* independently idempotent — a bare counter
+/// increment — so a second call is only harmless if the guard itself does
+/// the work.
 @MainActor
 @Suite
 struct VSCodeAPIDisposableTests {
@@ -50,34 +51,39 @@ struct VSCodeAPIDisposableTests {
     /// `disposingTwiceRunsOnDisposeExactlyOnce` above still passes, while after
     /// one call it leaves `disposeCount == 0`, which this test catches.
     ///
-    /// What this test adds is the *direct* pin, not exclusivity. A shifted
-    /// guard is also caught incidentally by a test that disposes a handle
-    /// **exactly once** and then asserts the effect, because the one call it
-    /// makes is the call the mutant suppresses. Three were traced against the
-    /// mutant by hand and do catch it: `MainThreadCommandsTests`'
-    /// `theDisposableUnregistersAndIsIdempotent`, and
-    /// `MainThreadLanguagesTests`' `disposeRemovesTheRegistrationFromTheStore`
-    /// and `twoConfigurationsForOneLanguageBothSurviveAndDisposingOneLeavesTheOther`.
-    /// Each fails for a second reason (a registration that never went away), so
+    /// What this test adds is the *direct* pin, not exclusivity. The mutant
+    /// is also caught incidentally by a test that asserts the effect **after
+    /// the first `dispose()` call, before any second call can repair the
+    /// state** — that assertion observes exactly the call the mutant
+    /// suppresses, regardless of whether a later call on the same handle
+    /// follows it. Three were traced against the mutant by hand and do catch
+    /// it under that rule: `MainThreadCommandsTests`'
+    /// `theDisposableUnregistersAndIsIdempotent` (its assertion sits between
+    /// its two `dispose()` calls), and `MainThreadLanguagesTests`'
+    /// `disposeRemovesTheRegistrationFromTheStore` and
+    /// `twoConfigurationsForOneLanguageBothSurviveAndDisposingOneLeavesTheOther`
+    /// (each asserts after its one call, with no second call at all). Each
+    /// fails for a second reason (a registration that never went away), so
     /// none of them localises the defect; this one does. Three is what was
     /// traced, not a count of the repo — no sweep was done, and others may also
     /// catch it incidentally. Nothing here rests on the number: the point is
     /// that incidental catches exist, so this test is not the only one.
     ///
-    /// Disposing **twice** does not qualify, however close it looks.
     /// `MainThreadLanguagesTests`'
-    /// `disposingTwiceIsANoOpAndDoesNotTouchALaterRegistration` calls
-    /// `dispose()` twice on one handle with a second registration created in
-    /// between, and the mutant is invisible to it:
-    /// correct code removes on call 1 and no-ops on call 2, the mutant no-ops
-    /// on call 1 and removes on call 2, and because both calls are bound to the
-    /// same handle the store ends in the same state either way — one
-    /// registration, the later one. That test's own doc already declines the
-    /// neighbouring *dropped*-guard mutant for a related reason.
+    /// `disposingTwiceIsANoOpAndDoesNotTouchALaterRegistration` does not
+    /// qualify under that same rule: both `dispose()` calls happen inside
+    /// `activate()` with no assertion between them, so nothing observes the
+    /// state the mutant's suppressed first call would have left before the
+    /// second call can repair it. Correct code removes on call 1 and no-ops
+    /// on call 2; the mutant no-ops on call 1 and removes on call 2; and
+    /// because both calls are bound to the same handle the store ends in the
+    /// same state either way — one registration, the later one. That test's
+    /// own doc already declines the neighbouring *dropped*-guard mutant for a
+    /// related reason.
     ///
-    /// The suite doc's "only place in the repo" claim above is about *deleting*
+    /// The suite doc's "only place traced" claim above is about *deleting*
     /// the guard, which those idempotent `onDispose` closures absorb — a
-    /// different mutant.
+    /// different mutant, and (like that claim) not a repo-wide sweep.
     @Test
     func disposingOnceRunsOnDisposeOnce() throws {
         let context = try makeContext()
