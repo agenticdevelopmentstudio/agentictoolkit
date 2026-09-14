@@ -72,6 +72,18 @@ struct VSCodeEngineRangeTests {
         #expect(VSCodeEngineRange(input) == nil)
     }
 
+    @Test("minimumVersion is the floor for caret and >= ranges, and the version itself for an exact range")
+    func minimumVersionIsTheFloor() throws {
+        let caret = try #require(VSCodeEngineRange("^1.74.0"))
+        #expect(caret.minimumVersion == SemanticVersion(major: 1, minor: 74, patch: 0))
+
+        let atLeast = try #require(VSCodeEngineRange(">=1.80.2"))
+        #expect(atLeast.minimumVersion == SemanticVersion(major: 1, minor: 80, patch: 2))
+
+        let exact = try #require(VSCodeEngineRange("1.74.0"))
+        #expect(exact.minimumVersion == SemanticVersion(major: 1, minor: 74, patch: 0))
+    }
+
     /// The largest major this type still evaluates, exercised through
     /// `accepts` rather than parsing alone — the trapping add is in `accepts`,
     /// so a boundary that parses must also be safe to compare against.
