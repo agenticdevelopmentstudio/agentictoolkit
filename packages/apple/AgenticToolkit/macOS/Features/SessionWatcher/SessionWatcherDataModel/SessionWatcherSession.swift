@@ -35,9 +35,10 @@ extension SessionWatcher {
         /// The last thing the agent said, collapsed to a single line. Shown on the
         /// row's second line. Empty until the session has produced assistant text.
         public var lastOutput: String
-        /// The hook event that last touched the session (`PreToolUse`, `Stop`,
-        /// `Notification`, …). Raw rather than pre-digested so the source stays a
-        /// dumb carrier; ``activity`` is the interpretation.
+        /// The last hook event about the session's main turn (`PreToolUse`, `Stop`,
+        /// `Notification`, …, or the daemon's synthetic `Interrupted`). Raw rather
+        /// than pre-digested so the source stays a dumb carrier; ``activity`` is the
+        /// interpretation.
         public var lastEventType: String
 
         public init(
@@ -87,12 +88,17 @@ extension SessionWatcher {
             guard status == .active else { return .idle }
             switch lastEventType {
             // The agent has handed control back to the user and is waiting on them.
+            // (The daemon only records a Notification that asks for an answer — not
+            // the idle reminder sent after every finished turn.)
             case "Notification", "PermissionRequest", "Elicitation":
                 return .waiting
             // The turn is over; nothing is running until the user says something.
-            case "Stop", "SessionEnd", "":
+            // `StopFailure` ends a turn on an API error. `Interrupted` is the daemon's
+            // own record of the user cutting a turn short, which fires no hook.
+            // `SessionStart` opens a session at its prompt.
+            case "Stop", "StopFailure", "Interrupted", "SessionStart", "SessionEnd", "":
                 return .idle
-            // SessionStart, UserPromptSubmit, Pre/PostToolUse, everything else:
+            // UserPromptSubmit, Pre/PostToolUse, everything else:
             // the agent is mid-turn.
             default:
                 return .working
