@@ -1000,34 +1000,56 @@ struct MainThreadCommandsTests {
         #expect(observed.isNull)
     }
 
-    /// A dispatch that cannot be performed **rejects**, and never reads as a
-    /// successful `void` command.
+    /// An extension that tries to pre-empt `__vscodeAPITrampoline` from its
+    /// own top-level module code never gets the chance: the real dispatch
+    /// still runs, and the impostor is a silent no-op.
     ///
-    /// This is the one test that exercises `CallOutcome.unavailable` end to
-    /// end, and therefore the only thing standing under item 4's whole reason
-    /// for existing: before it, `call` answered `.returned(nil)` on this path,
-    /// which resolves the extension's promise with `undefined` — precisely
-    /// what a successful callback returning nothing answers. The extension was
-    /// told its command had run when nothing had.
+    /// This test used to pin the opposite outcome — a rejection — because the
+    /// trampoline was installed lazily, on the *first dispatch*. That left a
+    /// window between a context's creation and that first dispatch during
+    /// which an extension's own top-level code ran first and could assign an
+    /// impostor into `globalThis.__vscodeAPITrampoline` ahead of the host,
+    /// hijacking every later dispatch. Task 5.4a closed that window: `VSCodeAPI`
+    /// now installs the trampoline **eagerly**, inside `ExtensionHost.installRuntime`,
+    /// which runs before `evaluateModule` executes a single line of the
+    /// extension's own source (see `ExtensionHost.performActivation`, which
+    /// calls the former strictly before the latter). By the time this
+    /// fixture's top-level `globalThis.__vscodeAPITrampoline = { … }` line
+    /// runs, the real trampoline is already sitting under that name via
+    /// `Object.defineProperty(..., { writable: false, configurable: false })`.
+    /// The extension module has no `'use strict'` pragma, so a plain `=`
+    /// assignment against a non-writable, non-configurable property is not a
+    /// `TypeError` — sloppy-mode JavaScript silently drops it. The impostor
+    /// object is simply never installed, the real trampoline answers the
+    /// dispatch, and the real callback runs.
     ///
-    /// The genuinely-uninstallable context is not reachable from a test
-    /// without a test-only seam in `VSCodeAPI`, which is shared ceremony that
-    /// tasks 5.4–5.7 would inherit. So the failure is provoked from the other
-    /// side of the same choke point: the extension's module code pre-empts the
-    /// trampoline's global with an object whose `call` answers something that
-    /// is not the contracted `{ ok, … }` record. `VSCodeAPI.sharedHelper`
-    /// adopts it (it is an object, and by design nothing here can prove an
-    /// object's provenance to JavaScript), `outcome(of:in:)` refuses the
-    /// record, and the dispatch lands in exactly the handling a missing
-    /// trampoline reaches.
+    /// This removes the one test route this suite had onto
+    /// `CallOutcome.unavailable`'s reject path for a *whole-object*
+    /// replacement (see the history of this test for that version) — but it
+    /// does not close every route onto that path, and an earlier version of
+    /// this doc claimed it did. It was wrong: a *member-level* hijack —
+    /// `globalThis.__vscodeAPITrampoline.call = function () { … }`, leaving
+    /// the binding itself untouched — was reachable before this fix round,
+    /// because the binding-level freeze this test above describes
+    /// (`writable: false, configurable: false` on the `__vscodeAPITrampoline`
+    /// name) says nothing about the *object* under that name; only the
+    /// binding was protected, not `helper.call` itself, and
+    /// `helperFunction(_:in:)` re-reads `.call` off that object on every
+    /// dispatch. This fix round closes that hole too, by having
+    /// `VSCodeAPI.helperSource` call `Object.freeze(helper)` on the
+    /// trampoline object itself before ever caching it — see
+    /// `VSCodeAPI.sharedHelper(in:)`'s own doc for the two-layer picture this
+    /// leaves. `theMemberLevelHijackIsAlsoIgnored` below is the test that pins
+    /// the closure of that specific hole, the way this test pins the
+    /// whole-object case.
     ///
-    /// **This test depends on the trampoline's global name**, and that is the
-    /// deliberate trade. The name is already a documented part of the design
-    /// with its own doc comment on `helperGlobalName`, so a test that must be
-    /// updated when it changes is honest coupling; the alternative was leaving
-    /// the fail-fast path asserted by nothing at all.
+    /// **This test still depends on the trampoline's global name**, and that
+    /// is the same deliberate trade the old version made: the name is already
+    /// a documented part of the design, with its own doc comment on
+    /// `helperGlobalName`, so a test that must be updated when it changes is
+    /// honest coupling.
     @Test
-    func aPreemptedTrampolineMakesTheDispatchFailRatherThanLookSuccessful() async throws {
+    func theEagerlyInstalledTrampolineIgnoresALatePreemptionAttempt() async throws {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let registry = CommandRegistry()
@@ -1035,8 +1057,11 @@ struct MainThreadCommandsTests {
         let host = try makeHost(
             source: """
             var vscode = require('vscode');
-            // Top-level, so it runs before the host's first use of the
-            // trampoline and is adopted in its place.
+            // Top-level, so it runs before anything else in this module —
+            // but strictly after the host's eager install inside
+            // installRuntime. Against a non-writable, non-configurable
+            // property, this plain assignment is a silent sloppy-mode
+            // no-op: it neither throws nor replaces the real trampoline.
             globalThis.__vscodeAPITrampoline = {
                 call: function () { return { impostor: true }; },
                 thenOf: function () { return { impostor: true }; }
@@ -1045,7 +1070,7 @@ struct MainThreadCommandsTests {
                 globalThis.__callbackRan = false;
                 vscode.commands.registerCommand('ext.preempted', function () {
                     globalThis.__callbackRan = true;
-                    return 'this value must never reach the caller';
+                    return 'the real callback ran';
                 });
                 globalThis.__settled = null;
                 globalThis.run = function () {
@@ -1070,16 +1095,169 @@ struct MainThreadCommandsTests {
         context.evaluateScript("globalThis.run();")
 
         let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
-        // Rejected, not resolved with `undefined`. The `ok` here is the
-        // test fixture's own flag, not the trampoline record's.
-        #expect(settled.forProperty("ok")?.toBool() == false)
-        let message = settled.forProperty("message")?.toString() ?? ""
-        #expect(message.contains("dispatch trampoline"))
+        // Resolved, not rejected: the impostor never displaced the real
+        // trampoline, so the real dispatch ran to completion.
+        #expect(settled.forProperty("ok")?.toBool() == true)
+        #expect(settled.forProperty("value")?.toString() == "the real callback ran")
 
-        // The impostor never called the real callback, and the adaptor did not
-        // paper over that by answering as though it had.
+        // The real callback ran — the impostor was never called at all.
         let callbackRan = try #require(context.evaluateScript("globalThis.__callbackRan"))
-        #expect(callbackRan.toBool() == false)
+        #expect(callbackRan.toBool() == true)
+    }
+
+    /// The narrower hijack the test above's doc calls out by name: instead of
+    /// replacing `globalThis.__vscodeAPITrampoline` wholesale, the extension
+    /// only overwrites its `.call` member, leaving the binding itself alone.
+    /// Before this fix round that member-level write succeeded silently — the
+    /// binding-level `writable: false, configurable: false` never protected
+    /// the object's own properties — and the dispatch below would have
+    /// observed the impostor's `{ impostor: true }` instead of the real
+    /// command result. `VSCodeAPI.helperSource` now calls
+    /// `Object.freeze(helper)` before caching the trampoline, so this
+    /// assignment is refused too, on the same real, host-installed context
+    /// `theEagerlyInstalledTrampolineIgnoresALatePreemptionAttempt` uses.
+    @Test
+    func theMemberLevelHijackIsAlsoIgnored() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = CommandRegistry()
+        let commands = MainThreadCommands(registry: registry)
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            // A member-level hijack, not a whole-object replacement: the
+            // binding itself is untouched, only `.call` is targeted.
+            globalThis.__hijackThrew = false;
+            try {
+                globalThis.__vscodeAPITrampoline.call = function () {
+                    return { impostor: true };
+                };
+            } catch (error) {
+                // A strict-mode extension would land here instead of
+                // silently no-opping; either outcome is consistent with the
+                // trampoline object being frozen.
+                globalThis.__hijackThrew = true;
+            }
+            exports.activate = function () {
+                globalThis.__callbackRan = false;
+                vscode.commands.registerCommand('ext.memberHijacked', function () {
+                    globalThis.__callbackRan = true;
+                    return 'the real callback ran';
+                });
+                globalThis.__settled = null;
+                globalThis.run = function () {
+                    (async function () {
+                        try {
+                            var value = await vscode.commands.executeCommand('ext.memberHijacked');
+                            globalThis.__settled = { ok: true, value: String(value) };
+                        } catch (error) {
+                            globalThis.__settled = { ok: false, message: String(error.message) };
+                        }
+                    })();
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(commands, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        context.evaluateScript("globalThis.run();")
+
+        let settled = try #require(await waitForGlobal(context, "globalThis.__settled"))
+        #expect(settled.forProperty("ok")?.toBool() == true)
+        #expect(settled.forProperty("value")?.toString() == "the real callback ran")
+
+        let callbackRan = try #require(context.evaluateScript("globalThis.__callbackRan"))
+        #expect(callbackRan.toBool() == true)
+    }
+
+    /// The other half of item 2's freezing (F2): `vscode.Uri.parse` reaches
+    /// extension code the same way `vscode.Uri.file` does in
+    /// `ExtensionHostTests.distinctMembersAreRecordedSeparatelyIncludingFetch`,
+    /// but through a real, activated `ExtensionHost` here rather than a bare
+    /// `JSContext` — the "on a context the host installed into" case item 2's
+    /// fix round called for. Before `Uri.swift`'s `uriClassSource` froze
+    /// `Uri` and `Uri.prototype`, `Uri.parse = ...` from extension code would
+    /// have succeeded, and every later `vscode.Uri.parse(...)` call in this
+    /// context — including the one `uriValue(for:in:)` itself makes when
+    /// bridging a Swift `URL` back into JavaScript — would have run the
+    /// extension's replacement instead of the host's.
+    @Test
+    func vscodeUriParseReassignmentIsRefusedThroughARealHost() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                var originalParse = vscode.Uri.parse;
+                globalThis.__reassignThrew = false;
+                try {
+                    vscode.Uri.parse = function () { return 'impostor'; };
+                } catch (error) {
+                    globalThis.__reassignThrew = true;
+                }
+                globalThis.__parseUnchanged = vscode.Uri.parse === originalParse;
+                globalThis.__classFrozen = Object.isFrozen(vscode.Uri);
+                globalThis.__prototypeFrozen = Object.isFrozen(vscode.Uri.prototype);
+                globalThis.__stillWorks = vscode.Uri.parse('file:///tmp') instanceof vscode.Uri;
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        // Either sloppy-mode silent no-op or strict-mode `TypeError` is a
+        // valid outcome of a frozen object rejecting a write; what matters is
+        // that the real `Uri.parse` is what every subsequent call finds.
+        let parseUnchanged = try #require(context.evaluateScript("globalThis.__parseUnchanged"))
+        #expect(parseUnchanged.toBool() == true)
+        let classFrozen = try #require(context.evaluateScript("globalThis.__classFrozen"))
+        #expect(classFrozen.toBool() == true)
+        let prototypeFrozen = try #require(context.evaluateScript("globalThis.__prototypeFrozen"))
+        #expect(prototypeFrozen.toBool() == true)
+        let stillWorks = try #require(context.evaluateScript("globalThis.__stillWorks"))
+        #expect(stillWorks.toBool() == true)
+    }
+
+    /// The real-host counterpart `UriTests`' header now points to instead of
+    /// the false claim it used to make: `vscode.Uri` reached through a real,
+    /// activated `ExtensionHost` — not a bare `JSContext` — behaves like the
+    /// class `UriTests` exercises directly, and stays usable after the
+    /// activation ceremony `ExtensionHost.installRuntime` runs around it.
+    @Test
+    func vscodeUriIsUsableAndFrozenThroughARealHost() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                var uri = vscode.Uri.file('/tmp/example.txt');
+                globalThis.__result = {
+                    isUri: uri instanceof vscode.Uri,
+                    scheme: uri.scheme,
+                    path: uri.path,
+                    frozen: Object.isFrozen(vscode.Uri) && Object.isFrozen(vscode.Uri.prototype)
+                };
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let result = try #require(context.evaluateScript("globalThis.__result"))
+        #expect(result.forProperty("isUri")?.toBool() == true)
+        #expect(result.forProperty("scheme")?.toString() == "file")
+        #expect(result.forProperty("path")?.toString() == "/tmp/example.txt")
+        #expect(result.forProperty("frozen")?.toBool() == true)
     }
 
     /// An object passed to `executeCommand` and handed straight back is the
