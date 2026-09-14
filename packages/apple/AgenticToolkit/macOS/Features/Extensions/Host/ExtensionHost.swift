@@ -85,6 +85,17 @@ public final class ExtensionHost {
     /// gets a private one and never has to think about it.
     public let notImplementedLedger: NotImplementedLedger
 
+    /// The workspace this host's extension sees, or `nil` when no workspace is
+    /// open. `MainThreadWorkspace` (task 5.4c) is the one reader today — its
+    /// caller builds it from this rather than from a second parameter, so a
+    /// host and its `vscode.workspace` adaptor never disagree about which
+    /// workspace they mean.
+    ///
+    /// A narrow protocol, not `ProjectWorkspace` itself: see
+    /// `ExtensionWorkspaceRoots`'s own doc for why this host does not import
+    /// the app's project model to hold one field.
+    public let workspaceRoots: ExtensionWorkspaceRoots?
+
     /// Every `console.*` call the extension makes, alongside the OSLog line it
     /// always produces. A host with no observer still logs; this is for a UI
     /// that wants to show the extension's own output, and for tests, which
@@ -324,10 +335,12 @@ public final class ExtensionHost {
 
     public init(
         loadedExtension: LoadedExtension,
-        notImplementedLedger: NotImplementedLedger = NotImplementedLedger()
+        notImplementedLedger: NotImplementedLedger = NotImplementedLedger(),
+        workspaceRoots: ExtensionWorkspaceRoots? = nil
     ) {
         self.loadedExtension = loadedExtension
         self.notImplementedLedger = notImplementedLedger
+        self.workspaceRoots = workspaceRoots
     }
 
     // MARK: - Activation
@@ -689,11 +702,41 @@ public final class ExtensionHost {
         let origin: String
     }
 
+    /// A `defineVSCodeMember` implementation whose real JavaScriptCore value
+    /// cannot be built until a live `JSContext` exists.
+    ///
+    /// `undefined` is the motivating case. `JSValue(undefinedIn:)` is the only
+    /// way to hand JavaScript a genuine `undefined` — a Swift `nil` boxed in
+    /// `Any` bridges to `NSNull` instead, JavaScript's `null`, exactly as
+    /// `VSCodeAPI.resolvedPromise`'s own doc comment already established for
+    /// the promise case — and building one needs a `JSContext`. Every
+    /// `defineVSCodeMember` caller runs before `activate()`, the convention
+    /// `MainThreadCommands` established and the only order that gets a member
+    /// in place before the extension's own top-level code can read it, which
+    /// means before any context exists. `apply(_:to:)` is the one place a
+    /// queued definition ever meets a live context — immediately, if the
+    /// runtime already exists, or replayed from `installRuntime` otherwise —
+    /// so it is where this box is unwrapped, right before `defineMember`
+    /// bridges the result.
+    ///
+    /// Not part of `defineVSCodeMember`'s own signature: a caller with an
+    /// ordinary bridgeable value (a `String`, a `@convention(block)`) never
+    /// sees this type, and passes `implementation` exactly as before.
+    struct DeferredVSCodeValue {
+        let resolve: @MainActor (JSContext) -> Any
+    }
+
     private func apply(_ definition: VSCodeMemberDefinition, to runtime: JSValue) throws {
         pendingException = nil
+        let implementation: Any
+        if let deferred = definition.implementation as? DeferredVSCodeValue, let context = runtime.context {
+            implementation = deferred.resolve(context)
+        } else {
+            implementation = definition.implementation
+        }
         runtime.invokeMethod(
             "defineMember",
-            withArguments: [definition.namespacePath, definition.name, definition.implementation])
+            withArguments: [definition.namespacePath, definition.name, implementation])
         if let message = pendingException {
             pendingException = nil
             throw ExtensionHostError.vscodeMemberNotDefinable(
@@ -862,13 +905,18 @@ public final class ExtensionHost {
     }
 
     /// Installs the host block table, evaluates the shim, captures
-    /// `__extensionRuntime`, and then removes both globals.
+    /// `__extensionRuntime`, installs the `VSCodeAPI` ceremony that has to be
+    /// in place before any extension code runs (the command-dispatch
+    /// trampoline, `vscode.Uri`), replays every adaptor-registered
+    /// `vscode.*` member onto the fresh runtime, and then removes both
+    /// globals.
     ///
-    /// Removing them is the difference between "the extension is given a
-    /// bounded runtime" and "the extension is given a bounded runtime plus a
-    /// direct line to the app": `__host` carries blocks that schedule timers
-    /// and write to the log, and an extension that found it could use them
-    /// without going through any of the shim's checks.
+    /// Removing `__host` and `__extensionRuntime` is the difference between
+    /// "the extension is given a bounded runtime" and "the extension is given
+    /// a bounded runtime plus a direct line to the app": `__host` carries
+    /// blocks that schedule timers and write to the log, and an extension
+    /// that found it could use them without going through any of the shim's
+    /// checks.
     private func installRuntime(runtimeSource: String, into context: JSContext) throws -> JSValue? {
         guard let table = JSValue(newObjectIn: context) else {
             throw ExtensionHostError.javaScriptEngineUnavailable(identifier: identifier)
@@ -916,6 +964,52 @@ public final class ExtensionHost {
 
         let runtime = context.objectForKeyedSubscript("__extensionRuntime")
         guard let runtime, !runtime.isUndefined, !runtime.isNull else { return nil }
+
+        // Eager, ahead of every adaptor-registered member below and ahead of
+        // the extension's own module code: `VSCodeAPI.installTrampoline(in:)`
+        // caches the command-dispatch trampoline under its non-configurable,
+        // non-writable global *before* anything else in this context can
+        // write to that name first. See `VSCodeAPI.sharedHelper(in:)` for
+        // exactly what that closes and what it cannot. A same-named top-level
+        // assignment the extension makes afterwards has one of two outcomes,
+        // not one: in sloppy-mode extension code it is a silent no-op
+        // (`helperSource` also freezes the trampoline object itself, not
+        // just the global binding, so a member-level hijack like
+        // `.call = ...` no-ops the same way); in strict-mode extension code —
+        // what a `tsc`-compiled extension's own `"use strict"` prologue makes
+        // its top-level statements — the identical assignment throws
+        // `TypeError` instead, and that failure is the extension's own module
+        // evaluation failing, which fails its own activation. What this call
+        // cannot do: a context it does not succeed in still falls back to
+        // the old lazy install, with the old window. Not fatal to
+        // activation: a context that cannot host the trampoline yet is
+        // exactly what the lazy fallback exists for, and
+        // `installTrampoline(in:)` has already logged the failure.
+        VSCodeAPI.installTrampoline(in: context)
+
+        // Same eagerness, for `vscode.Uri`: installed directly into the local
+        // `runtime` rather than through `defineVSCodeMember`, because that
+        // public API's "apply immediately" branch reads `self.runtime`, which
+        // is still `nil` here — `performActivation` only assigns it once this
+        // method returns. Not queued onto `vscodeMemberDefinitions` either:
+        // that list exists for adaptors with an owner to tear down and a
+        // reason to be replayed on a later activation, and `Uri` is neither —
+        // it is host ceremony, installed the same way on every activation,
+        // exactly like the trampoline above. A failure here is logged and
+        // left as the shim's not-implemented stub; it is not fatal to
+        // activation, for the same reason a missing trampoline is not.
+        if let uriClass = VSCodeAPI.installUriClass(in: context) {
+            pendingException = nil
+            runtime.invokeMethod("defineMember", withArguments: ["vscode", "Uri", uriClass])
+            if let message = pendingException {
+                pendingException = nil
+                logger.error(
+                    """
+                    Extension '\(self.identifier, privacy: .public)' could not have 'vscode.Uri' \
+                    installed (\(message, privacy: .public)); it stays the shim's not-implemented stub
+                    """)
+            }
+        }
 
         // Before the extension's first statement runs, so a member defined by
         // an adaptor is already there when the module body reaches for it —
