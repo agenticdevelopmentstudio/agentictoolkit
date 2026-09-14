@@ -291,6 +291,24 @@ final class FormStateTests: XCTestCase {
         XCTAssertTrue(FormState.duplicateFieldKeys(in: spec).isEmpty)
     }
 
+    // MARK: requiresChanges (create dialogs opt out of the dirty requirement)
+
+    func testPrefilledCreateFormWithRequiresChangesFalseCanSaveBeforeAnyEdit() {
+        let state = FormState(spec: makeSpec(recorder: SaveRecorder()), values: ["name": .string("Ada")])
+        state.requiresChanges = false
+        XCTAssertFalse(state.isDirty)
+        XCTAssertTrue(state.canSave, "a create dialog has nothing to change against, so Save is enabled")
+    }
+
+    func testEditFormKeepsRequiringAChangeByDefault() {
+        let state = FormState(spec: makeSpec(recorder: SaveRecorder()), values: ["name": .string("Ada")])
+        XCTAssertFalse(state.isDirty)
+        XCTAssertFalse(state.canSave, "requiresChanges defaults to true, so an unedited edit form cannot save")
+        state.set(.string("Grace"), for: "name")
+        XCTAssertTrue(state.isDirty)
+        XCTAssertTrue(state.canSave)
+    }
+
     func testConcurrentEditDuringSaveSurvivesAndStaysDirty() async {
         let recorder = SaveRecorder()
         recorder.shouldPauseInFlight = true

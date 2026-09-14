@@ -6,6 +6,7 @@ public enum JSONValue: Codable, Hashable, Sendable {
     case object([String: JSONValue])
     case array([JSONValue])
     case string(String)
+    case int(Int64)
     case number(Double)
     case bool(Bool)
     case null
@@ -14,6 +15,7 @@ public enum JSONValue: Codable, Hashable, Sendable {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() { self = .null; return }
         if let bool = try? container.decode(Bool.self) { self = .bool(bool); return }
+        if let int = try? container.decode(Int64.self) { self = .int(int); return }
         if let number = try? container.decode(Double.self) { self = .number(number); return }
         if let string = try? container.decode(String.self) { self = .string(string); return }
         if let array = try? container.decode([JSONValue].self) { self = .array(array); return }
@@ -27,6 +29,7 @@ public enum JSONValue: Codable, Hashable, Sendable {
         case .object(let object): try container.encode(object)
         case .array(let array): try container.encode(array)
         case .string(let string): try container.encode(string)
+        case .int(let int): try container.encode(int)
         case .number(let number): try container.encode(number)
         case .bool(let bool): try container.encode(bool)
         case .null: try container.encodeNil()
@@ -46,6 +49,8 @@ public enum JSONValue: Codable, Hashable, Sendable {
     public static func parse(_ text: String) throws -> JSONValue {
         do {
             return try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+        } catch let error as DecodingError {
+            throw HubError.validation("Invalid JSON: \(error.decodingDebugDescription)")
         } catch {
             throw HubError.validation("Invalid JSON: \(error.localizedDescription)")
         }
@@ -59,5 +64,20 @@ public enum JSONValue: Codable, Hashable, Sendable {
             out[key] = string
         }
         return out
+    }
+}
+
+extension DecodingError {
+    /// `localizedDescription` is a generic, NSError-backed message that names nothing; every case here
+    /// carries a `Context` whose `debugDescription` names the failing position, which is what a
+    /// user-visible parse error should show instead.
+    var decodingDebugDescription: String {
+        switch self {
+        case .typeMismatch(_, let context): return context.debugDescription
+        case .valueNotFound(_, let context): return context.debugDescription
+        case .keyNotFound(_, let context): return context.debugDescription
+        case .dataCorrupted(let context): return context.debugDescription
+        @unknown default: return String(describing: self)
+        }
     }
 }

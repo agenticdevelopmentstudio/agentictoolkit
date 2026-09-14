@@ -14,6 +14,9 @@ public final class FormState {
     public private(set) var isSaving = false
     public private(set) var saveError: String?
     public var onChange: (FormState) -> Void = { _ in }
+    /// Edit forms disable Save until something changes; a create dialog has nothing to change
+    /// against, so it opts out and relies on validation to reject an empty form.
+    public var requiresChanges: Bool = true
 
     private var baseline: [String: FormValue]
     private let fieldsByKey: [String: FormField]
@@ -53,7 +56,9 @@ public final class FormState {
 
     public var isDirty: Bool { values != baseline }
 
-    public var canSave: Bool { spec.actions.save != nil && isDirty && blockedReason == nil && !isSaving }
+    public var canSave: Bool {
+        spec.actions.save != nil && (!requiresChanges || isDirty) && blockedReason == nil && !isSaving
+    }
 
     public func value(for key: String) -> FormValue { values[key] ?? .null }
 

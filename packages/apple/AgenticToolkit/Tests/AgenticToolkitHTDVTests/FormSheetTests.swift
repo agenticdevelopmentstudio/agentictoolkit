@@ -45,6 +45,48 @@ private final class FormReloadDataSource: HTDVDataSource, @unchecked Sendable {
     }
 }
 
+/// Root level with two detail rows ("a" and "b") that both resolve to the SAME `FormViewController`
+/// instance, memoized on first creation. `HTDVDetail.make`'s contract does not require a fresh instance
+/// per call, so a module is free to do this — and `attachFormCallbacks(to:)` must stay idempotent when it
+/// does, rather than accumulating one chained closure per attach.
+private final class MemoizedFormDataSource: HTDVDataSource, @unchecked Sendable {
+    private let lock = NSLock()
+    private var rootCalls = 0
+    private var cachedForm: FormViewController?
+
+    var rootLoadCount: Int { lock.withLock { rootCalls } }
+
+    func rootLevel() async throws -> HTDVLevel {
+        lock.withLock { rootCalls += 1 }
+        return HTDVLevel(
+            id: "root", title: "Root",
+            items: [
+                HTDVItem(id: "a", label: "Alpha", leadsTo: .detail),
+                HTDVItem(id: "b", label: "Bravo", leadsTo: .detail)
+            ]
+        )
+    }
+
+    func child(for path: [HTDVItem]) async throws -> HTDVChild {
+        guard let itemID = path.map(\.id).last, itemID == "a" || itemID == "b" else { return .empty }
+        let detailID = itemID == "a" ? "d1" : "d2"
+        return .detail(HTDVDetail(id: detailID, title: itemID) { [self] in self.memoizedForm() })
+    }
+
+    @MainActor private func memoizedForm() -> FormViewController {
+        if let cachedForm { return cachedForm }
+        let spec = FormSpec(
+            sections: [FormSection(fields: [.text(FormTextField(key: "name", label: "Name"))])],
+            actions: FormActions(save: FormAction(id: "save", title: "Save") { _ in })
+        )
+        let form = FormViewController(
+            state: FormState(spec: spec, values: [:]), markdownEditing: PlainTextMarkdownEditing()
+        )
+        cachedForm = form
+        return form
+    }
+}
+
 @MainActor
 final class FormSheetTests: XCTestCase {
     private func makeForm(saveSucceeds: Bool = true) -> FormViewController {
@@ -110,6 +152,26 @@ final class FormSheetTests: XCTestCase {
         XCTAssertEqual(sheet.title, "New persona")
     }
 
+    /// `isConfirmingDiscard` is set synchronously before `cancel()` spawns its `Task`, so a second
+    /// `cancel()` made before the first's confirmation resolves must see the guard already up and
+    /// return immediately rather than prompting a second time.
+    func testSecondCancelWhileConfirmingDiscardDoesNotPromptTwice() async throws {
+        let form = makeForm()
+        form.state.set(.string("Changed"), for: "name")
+        var confirmCallCount = 0
+        form.confirmDiscardHandler = {
+            confirmCallCount += 1
+            return true
+        }
+        var finished: [Bool] = []
+        let sheet = FormSheetController(title: "New thing", form: form) { finished.append($0) }
+        _ = sheet.view
+        sheet.cancel()
+        sheet.cancel()
+        try await waitUntil { finished.count == 1 }
+        XCTAssertEqual(confirmCallCount, 1, "a second cancel() must not open a second confirm prompt")
+    }
+
     // MARK: Level reload after a form save/delete
 
     /// The host must stay alive for the whole test: `reloadOwningLevel()` captures it weakly, so a host
@@ -154,6 +216,33 @@ final class FormSheetTests: XCTestCase {
         XCTAssertEqual(counter.value, 1, "the factory's own onSaved must still run")
         try await waitUntil { source.rootLoadCount == before + 1 }
         withExtendedLifetime(hosted) {}
+    }
+
+    /// A memoized `FormViewController` returned for two different detail ids gets `attachFormCallbacks`
+    /// called twice; the second attach must be a no-op, so one save still triggers exactly one reload.
+    func testAttachingTheSameFormInstanceTwiceReloadsOnceOnSave() async throws {
+        let source = MemoizedFormDataSource()
+        let controller = HTDVController(dataSource: source)
+        let host = HTDVViewController(controller: controller)
+        host.view.frame = CGRect(x: 0, y: 0, width: 1200, height: 800)
+        host.loadViewIfNeeded()
+        await controller.load()
+        await controller.select(itemID: "a", atLevel: 0)
+        guard let formA = host.detailViewController as? FormViewController else {
+            return XCTFail("expected a form detail")
+        }
+        await controller.select(itemID: "b", atLevel: 0)
+        guard let formB = host.detailViewController as? FormViewController else {
+            return XCTFail("expected a form detail")
+        }
+        XCTAssertTrue(formA === formB, "the fixture memoizes one instance across both detail ids")
+
+        let before = source.rootLoadCount
+        formB.onSaved()
+        try await waitUntil { source.rootLoadCount == before + 1 }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(source.rootLoadCount, before + 1, "the second attach must not add a second reload")
+        withExtendedLifetime(host) {}
     }
 }
 

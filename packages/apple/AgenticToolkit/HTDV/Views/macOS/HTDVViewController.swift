@@ -23,6 +23,10 @@ public final class HTDVViewController: NSViewController {
     /// the recovery net below exists for — from "never loaded", which is by value identical and must
     /// NOT trigger a fetch the app never asked for. See `isEmptyDeadEnd`.
     private var hasEverHadLevels = false
+    /// Forms `attachFormCallbacks(to:)` has already chained onto. `HTDVDetail.make`'s contract does not
+    /// require a fresh `FormViewController` per call, so a memoized instance re-attached on every render
+    /// would otherwise accumulate one chained closure per attach and fire N reloads per save.
+    private var attachedForms: Set<ObjectIdentifier> = []
 
     public init(controller: HTDVController, layoutEngine: HTDVLayoutEngine = HTDVLayoutEngine()) {
         self.controller = controller
@@ -211,6 +215,7 @@ public final class HTDVViewController: NSViewController {
     /// its own bookkeeping on save still gets called.
     private func attachFormCallbacks(to child: NSViewController) {
         guard let form = child as? FormViewController else { return }
+        guard attachedForms.insert(ObjectIdentifier(form)).inserted else { return }
         let existingSaved = form.onSaved
         form.onSaved = { [weak self] in
             existingSaved()

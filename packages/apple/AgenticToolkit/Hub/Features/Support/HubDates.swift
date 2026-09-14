@@ -5,19 +5,11 @@ import Foundation
 /// helpers convert at the edges: forms (`value`), labels (`display`) and request bodies (`iso`).
 public enum HubDates {
     // All four formatters are built once and never mutated after construction; building one per call is
-    // expensive enough to show up when a rail formats a few hundred rows. `DateFormatter` is `Sendable`;
-    // `ISO8601DateFormatter` is not, but it is documented as safe to *use* concurrently once configured,
-    // which is all these two do.
-    nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-    nonisolated(unsafe) private static let whole: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
+    // expensive enough to show up when a rail formats a few hundred rows. `Date.ISO8601FormatStyle` is a
+    // `Sendable` value type, so `fractional`/`whole` need no isolation opt-out; `DateFormatter` is also
+    // `Sendable`, so `output`/`humane` need none either.
+    private static let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let whole = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
     private static let output: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .iso8601)
@@ -35,7 +27,7 @@ public enum HubDates {
 
     public static func parse(_ iso: String?) -> Date? {
         guard let iso, !iso.isEmpty else { return nil }
-        return fractional.date(from: iso) ?? whole.date(from: iso)
+        return (try? fractional.parse(iso)) ?? (try? whole.parse(iso))
     }
 
     public static func iso(_ date: Date) -> String {

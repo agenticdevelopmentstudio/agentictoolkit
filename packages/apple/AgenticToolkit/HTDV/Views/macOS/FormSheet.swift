@@ -7,6 +7,9 @@ public final class FormSheetController: NSViewController {
     public let form: FormViewController
     private var onFinish: (@MainActor (Bool) -> Void)?
     private let sheetTitle: String
+    /// Guards against a second `cancel()` opening a second discard prompt while the first
+    /// `confirmDiscard()` is still awaiting the user.
+    @MainActor private var isConfirmingDiscard = false
 
     public init(title: String, form: FormViewController, onFinish: @escaping @MainActor (Bool) -> Void) {
         self.form = form
@@ -14,7 +17,11 @@ public final class FormSheetController: NSViewController {
         self.sheetTitle = title
         super.init(nibName: nil, bundle: nil)
         self.title = title
-        form.onSaved = { [weak self] in self?.finish(true) }
+        let existingSaved = form.onSaved
+        form.onSaved = { [weak self] in
+            existingSaved()
+            self?.finish(true)
+        }
     }
 
     @available(*, unavailable)
@@ -55,9 +62,14 @@ public final class FormSheetController: NSViewController {
     @objc private func cancelTapped() { cancel() }
 
     public func cancel() {
+        guard !isConfirmingDiscard else { return }
+        isConfirmingDiscard = true
         Task { [weak self] in
             guard let self else { return }
-            if form.hasUnsavedChanges, !(await form.confirmDiscard()) { return }
+            var proceed = true
+            if form.hasUnsavedChanges { proceed = await form.confirmDiscard() }
+            self.isConfirmingDiscard = false
+            guard proceed else { return }
             finish(false)
         }
     }
@@ -84,6 +96,7 @@ public enum FormSheet {
     ) async -> Bool {
         await withCheckedContinuation { continuation in
             let state = FormState(spec: spec, values: values)
+            state.requiresChanges = false
             let form = FormViewController(state: state, markdownEditing: markdownEditing)
             let sheet = FormSheetController(title: title, form: form) { saved in
                 continuation.resume(returning: saved)
