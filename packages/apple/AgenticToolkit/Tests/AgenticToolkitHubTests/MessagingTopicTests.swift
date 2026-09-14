@@ -65,7 +65,35 @@ final class MessagingTopicTests: XCTestCase {
     func testPlaceholdersAreOrderedAndUnique() {
         XCTAssertEqual(MessagingTopic.placeholders(in: "Hi {{name}}, {{ code }} and {{name}}"), ["name", "code"])
         XCTAssertEqual(MessagingTemplate.fixture().placeholders, ["name", "code"])
-        XCTAssertEqual(MessagingTemplate.fixture(textBody: "Plain", smsBody: nil).placeholders, [])
+        // The fixture's default subject is "Welcome, {{name}}!", so a plain body does not mean no
+        // placeholders — the subject is scanned too.
+        XCTAssertEqual(MessagingTemplate.fixture(textBody: "Plain", smsBody: nil).placeholders, ["name"])
+        XCTAssertEqual(
+            MessagingTemplate.fixture(subject: "Hello", textBody: "Plain", smsBody: nil).placeholders, []
+        )
+        // Subject first, then the bodies, in first-seen order.
+        XCTAssertEqual(
+            MessagingTemplate.fixture(subject: "{{greeting}}", textBody: "Hi {{name}}", smsBody: nil).placeholders,
+            ["greeting", "name"]
+        )
+    }
+
+    /// A template whose ONLY placeholder is in the subject must still be gated. Scanning the bodies
+    /// alone reported no placeholders at all, skipped the required-variable check, and mailed the
+    /// customer the literal `{{name}}` as their subject line.
+    func testSendTemplateRequiresAPlaceholderThatOnlyAppearsInTheSubject() async throws {
+        data.templates = [.fixture(subject: "Welcome, {{name}}!", textBody: "Plain body.", smsBody: nil)]
+        let (_, form) = try await rail.form(["send"])
+        form.state.set(.string("c-jane"), for: "userId")
+        form.state.set(.string("tpl-welcome"), for: "templateId")
+        let blocked = await form.state.save()
+        XCTAssertFalse(blocked)
+        XCTAssertEqual(form.state.saveError, "Template needs a value for \"name\".")
+        XCTAssertTrue(data.sends.isEmpty)
+        form.state.set(.string(#"{"name": "Jane"}"#), for: "templateVars")
+        let sent = await form.state.save()
+        XCTAssertTrue(sent)
+        XCTAssertEqual(data.sends.last?.templateVars, ["name": "Jane"])
     }
 
     func testStatusLineAndBanners() {

@@ -22,14 +22,9 @@ public struct Customer: Codable, Hashable, Sendable, Identifiable {
     }
 
     /// `displayName || email || "—"`, treating blank strings as missing.
-    public var label: String { Self.nonBlank(displayName) ?? Self.nonBlank(email) ?? "—" }
+    public var label: String { HubText.nonBlank(displayName) ?? HubText.nonBlank(email) ?? "—" }
     /// `email || externalId || "—"`.
-    public var sublabel: String { Self.nonBlank(email) ?? Self.nonBlank(externalId) ?? "—" }
-
-    static func nonBlank(_ value: String?) -> String? {
-        guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        return value
-    }
+    public var sublabel: String { HubText.nonBlank(email) ?? HubText.nonBlank(externalId) ?? "—" }
 }
 
 /// Body for `POST /customer/customers` and `PUT /customer/customers/{id}`. Optional fields encode as absent,

@@ -101,8 +101,14 @@ final class AuthenticationModuleTests: XCTestCase {
         XCTAssertFalse(missingNameSaved)
         XCTAssertEqual(state.errors["name"], "Name is required")
         state.set(.string("nightly"), for: "name")
-        state.set(.bool(true), for: "scope:research")
+        // Read-only with no scope ticked used to mint an unscoped LEGACY token — the broadest of all —
+        // while the admin believed they had minted the narrowest.
         state.set(.bool(true), for: "readOnly")
+        let noScopeSaved = await state.save()
+        XCTAssertFalse(noScopeSaved)
+        XCTAssertEqual(state.saveError, ApiTokensRail.noScopeSelectedMessage)
+        XCTAssertTrue(api.creates.isEmpty)
+        state.set(.bool(true), for: "scope:research")
         let validSaved = await state.save()
         XCTAssertTrue(validSaved)
         XCTAssertEqual(api.creates.last, ApiTokenCreate(name: "nightly", expiresAt: nil, scope: ["research:read"]))
@@ -120,6 +126,21 @@ final class AuthenticationModuleTests: XCTestCase {
         )
         XCTAssertEqual(form.state.value(for: "token"), .string("tmp_ab12cd34ef56"))
         XCTAssertEqual(form.state.value(for: "notice"), .string(ApplicationsTopic.revealMessage))
+
+        // The reveal is one-shot: going back to the list drops the secret, so the notice
+        // ("you won't be able to see it again") is true rather than aspirational.
+        _ = try await module.child(for: [item("api")])
+        XCTAssertNil(module.apiTokens.revealedSecrets["api-3"])
+        guard case .detail(let again) = try await module.child(for: [item("api"), item("api-3")]) else {
+            return XCTFail("expected detail")
+        }
+        // swiftlint:disable:next force_cast
+        let reopened = again.make() as! FormViewController
+        XCTAssertEqual(
+            reopened.state.spec.fields.map(\.key),
+            ["name", "prefix", "scope", "created", "lastUsed", "expires"]
+        )
+        XCTAssertEqual(reopened.state.value(for: "token"), .null)
     }
 
     func testScopeHelperTreatsEmptyAsLegacy() {

@@ -129,6 +129,9 @@ final class BucketsTopicTests: XCTestCase {
         XCTAssertEqual(BucketsTopic.tableName(from: "  Órders-2 "), "rders_2")
         // Empty input has no characters to collapse, so it maps to the empty string.
         XCTAssertEqual(BucketsTopic.tableName(from: ""), "")
+        // So does a non-empty name made entirely of characters no SQL identifier can hold; the create
+        // form guards this separately (see testNewTableFormRejectsANameWithNoUsableCharacters).
+        XCTAssertEqual(BucketsTopic.tableName(from: "\u{4E88}\u{7D04}"), "")
         // Already snake_case input round-trips unchanged (idempotent).
         XCTAssertEqual(BucketsTopic.tableName(from: "contact_notes"), "contact_notes")
         // A run of consecutive separators (spaces, "!") and surrounding whitespace collapses to a
@@ -281,6 +284,20 @@ final class BucketsTopicTests: XCTestCase {
                 sqlTableName: "contact_notes", name: "Contact Notes"
             )
         ])
+    }
+
+    /// A non-empty name whose derived SQL identifier is empty must be rejected on its own terms. Left
+    /// unguarded it POSTs `sqlTableName: ""`, and the NEXT such table collides on `""` and reports
+    /// "Two tables share the name …" — the wrong cause entirely.
+    func testNewTableFormRejectsANameWithNoUsableCharacters() async throws {
+        let source = FakeBucketsDataSource(buckets: [.fixture()], tables: [])
+        let spec = BucketsTopic(dataSource: source).createTableSpec(for: .fixture(), bucket: .fixture())
+        let state = FormState(spec: spec)
+        state.set(.string("\u{4E88}\u{7D04}"), for: "name")
+        let saved = await state.save()
+        XCTAssertFalse(saved)
+        XCTAssertEqual(state.saveError, BucketsTopic.unusableTableNameMessage)
+        XCTAssertEqual(source.tableCreates, [])
     }
 
     func testTableDetailRenamesAndRemoves() async throws {

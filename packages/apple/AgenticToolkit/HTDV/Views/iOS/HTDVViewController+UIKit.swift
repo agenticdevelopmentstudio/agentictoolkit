@@ -36,10 +36,6 @@ public final class HTDVViewController: UIViewController, UINavigationControllerD
     /// time the restore runs, `self.navigationController` is already nil.
     private weak var previousNavigationDelegate: (any UINavigationControllerDelegate)?
     private weak var navigationControllerWeTookOver: UINavigationController?
-    /// Forms `attachFormCallbacks(to:)` has already chained onto. `HTDVDetail.make`'s contract does not
-    /// require a fresh `FormViewController` per call, so a memoized instance re-attached on every render
-    /// would otherwise accumulate one chained closure per attach and fire N reloads per save.
-    private var attachedForms: Set<ObjectIdentifier> = []
 
     public init(controller: HTDVController, layoutEngine: HTDVLayoutEngine = HTDVLayoutEngine()) {
         self.controller = controller
@@ -196,7 +192,12 @@ public final class HTDVViewController: UIViewController, UINavigationControllerD
     /// its own bookkeeping on save still gets called.
     private func attachFormCallbacks(to child: UIViewController) {
         guard let form = child as? FormViewController else { return }
-        guard attachedForms.insert(ObjectIdentifier(form)).inserted else { return }
+        // `HTDVDetail.make`'s contract does not require a fresh `FormViewController` per call, so a
+        // memoized instance re-attached on every render would otherwise accumulate one chained closure
+        // per attach and fire N reloads per save. The marker is carried BY the form: a host-side set
+        // keyed on `ObjectIdentifier` mistook a recycled address for the previous, already-freed form.
+        guard !form.hasHostLevelReloadAttached else { return }
+        form.hasHostLevelReloadAttached = true
         let existingSaved = form.onSaved
         form.onSaved = { [weak self] in
             existingSaved()

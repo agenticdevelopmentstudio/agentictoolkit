@@ -16,6 +16,8 @@ final class FakeApplicationsDataSource: ApplicationsDataSource, @unchecked Senda
     var failure: HubError?
     var createFailure: HubError?
     var renameFailure: HubError?
+    /// Index into `grantWrites` at which `setSchemaGrants` throws instead of persisting.
+    var grantWriteFailureIndex: Int?
 
     init(applications: [Application]) { self.applications = applications }
 
@@ -65,7 +67,9 @@ final class FakeApplicationsDataSource: ApplicationsDataSource, @unchecked Senda
         try check(); return grants[applicationID] ?? []
     }
     func setSchemaGrants(applicationID: String, _ newGrants: [SchemaGrant]) async throws {
-        try check(); grantWrites.append((applicationID, newGrants)); grants[applicationID] = newGrants
+        try check()
+        if grantWrites.count == grantWriteFailureIndex { throw HubError.transport("grant write failed") }
+        grantWrites.append((applicationID, newGrants)); grants[applicationID] = newGrants
     }
     func tokens(applicationID: String) async throws -> [ApplicationToken] {
         try check(); return tokens[applicationID] ?? []
@@ -121,15 +125,29 @@ final class ApplicationsTopicTests: XCTestCase {
         XCTAssertEqual(ConsumerKind.staff.title, "Staff")
     }
 
-    func testDecodesSchemaGrantsAndTokens() throws {
-        let json = #"{"schemaId":"b-profile","permissions":"C,R","#
-            + #""tables":{"contacts":{"level":"table","permissions":"R"}}}"#
-        let grant = try JSONDecoder().decode(SchemaGrant.self, from: Data(json.utf8))
-        XCTAssertEqual(grant.tables["contacts"], TableGrant(level: "table", permissions: "R"))
+    /// `SchemaGrant`/`TableGrant` are deliberately NOT `Codable` — the wire shape
+    /// (`{schemaId, crud, tables: [{tableId, crud}]}`) lives in the app's adapter, so this test no
+    /// longer decodes a grant straight from JSON. It only covers the token row, which IS a wire type.
+    func testDecodesTokens() throws {
         let tokenJson = #"{"id":"t","name":"CI","prefix":"apk_1","token":"apk_1secret","#
             + #""createdAt":"2026-09-04T10:00:00.000Z"}"#
         let created = try JSONDecoder().decode(ApplicationTokenCreated.self, from: Data(tokenJson.utf8))
         XCTAssertEqual(created.token, "apk_1secret")
+    }
+
+    /// `consumerKind` is an open `string` on the wire. An unknown value must narrow to `.developer`
+    /// rather than failing the whole array decode and blanking the Applications rail.
+    func testUnknownConsumerKindNarrowsToDeveloperWithoutLosingSiblings() throws {
+        let json = #"""
+        [{"id":"app.acme.shop.svc","ecosystemId":"org.acme.shop","slug":"svc","displayName":"Service",
+          "consumerKind":"service"},
+         {"id":"app.acme.shop.web","ecosystemId":"org.acme.shop","slug":"web","displayName":"Web",
+          "consumerKind":"customer"}]
+        """#
+        let rows = try JSONDecoder().decode([Application].self, from: Data(json.utf8))
+        XCTAssertEqual(rows.map(\.id), ["app.acme.shop.svc", "app.acme.shop.web"])
+        XCTAssertEqual(rows[0].consumerKind, .developer)
+        XCTAssertEqual(rows[1].consumerKind, .customer)
     }
 
     func testListShowsApplications() async throws {
@@ -210,9 +228,9 @@ final class ApplicationsTopicTests: XCTestCase {
         XCTAssertTrue(renamed)
         XCTAssertEqual(apps.renames.map(\.current), ["app.acme.shop.web"])
         XCTAssertEqual(apps.renames.map(\.next), ["app.acme.shop.store"])
-        XCTAssertEqual(apps.grantWrites.map(\.id), ["app.acme.shop.web", "app.acme.shop.store"])
-        XCTAssertEqual(apps.grantWrites[0].grants, [])
-        XCTAssertEqual(apps.grantWrites[1].grants, [SchemaGrant(schemaId: "b-profile", permissions: "R", tables: [:])])
+        XCTAssertEqual(apps.grantWrites.map(\.id), ["app.acme.shop.store", "app.acme.shop.web"])
+        XCTAssertEqual(apps.grantWrites[0].grants, [SchemaGrant(schemaId: "b-profile", permissions: "R", tables: [:])])
+        XCTAssertEqual(apps.grantWrites[1].grants, [])
         XCTAssertEqual(apps.updates.map(\.id), ["app.acme.shop.store"])
 
         apps.renameFailure = .conflict("dup")
@@ -221,6 +239,20 @@ final class ApplicationsTopicTests: XCTestCase {
         let renameConflicted = await second.state.save()
         XCTAssertFalse(renameConflicted)
         XCTAssertEqual(second.state.saveError, "The identifier \"app.acme.shop.web\" is already in use.")
+    }
+
+    /// A transient failure on the SECOND grant write must not leave the application with no grants
+    /// anywhere. Writing the new id first means the failing clear-the-old-id call is the harmless one.
+    func testRenameKeepsGrantsWhenTheSecondGrantWriteFails() async throws {
+        let grant = SchemaGrant(schemaId: "b-profile", permissions: "R", tables: [:])
+        apps.grants["app.acme.shop.web"] = [grant]
+        apps.grantWriteFailureIndex = 1
+        let (_, form) = try await rail.form(["app.acme.shop.web", "settings"])
+        form.state.set(.string("store"), for: "slug")
+        let saved = await form.state.save()
+        XCTAssertFalse(saved)
+        XCTAssertEqual(apps.grants["app.acme.shop.store"], [grant])
+        XCTAssertEqual(apps.grants["app.acme.shop.web"], [grant])
     }
 
     func testDeleteDropsGrantsThenDeletes() async throws {
@@ -271,7 +303,7 @@ final class ApplicationsTopicTests: XCTestCase {
         apps.grants["app.acme.shop.web"] = [
             SchemaGrant(
                 schemaId: "b-profile", permissions: "C,R",
-                tables: ["contacts": TableGrant(level: "table", permissions: "R")]
+                tables: ["t1": TableGrant(level: "table", permissions: "R")]
             )
         ]
         let level = try await rail.level(["app.acme.shop.web", "grants", "b-profile"])
@@ -308,7 +340,7 @@ final class ApplicationsTopicTests: XCTestCase {
         apps.grants["app.acme.shop.web"] = [
             SchemaGrant(
                 schemaId: "b-profile", permissions: "C,R",
-                tables: ["contacts": TableGrant(level: "table", permissions: "R")]
+                tables: ["t1": TableGrant(level: "table", permissions: "R")]
             )
         ]
         let (detail, form) = try await rail.form(["app.acme.shop.web", "grants", "b-profile", "contacts"])
@@ -330,7 +362,7 @@ final class ApplicationsTopicTests: XCTestCase {
         let tableSaved = await form.state.save()
         XCTAssertTrue(tableSaved)
         XCTAssertEqual(
-            apps.grants["app.acme.shop.web"]?.first?.tables["contacts"], TableGrant(level: "table", permissions: "C,R")
+            apps.grants["app.acme.shop.web"]?.first?.tables["t1"], TableGrant(level: "table", permissions: "C,R")
         )
         form.state.set(.bool(false), for: "create")
         form.state.set(.bool(false), for: "read")
@@ -366,7 +398,13 @@ final class ApplicationsTopicTests: XCTestCase {
         XCTAssertEqual(form.state.value(for: "token"), .string("apk_ab12cd34ef56"))
         XCTAssertEqual(form.state.value(for: "notice"), .string(ApplicationsTopic.revealMessage))
 
+        // Navigating to a sibling token is navigating away: the one-shot reveal expires, as
+        // "you won't be able to see it again" promises.
         let (_, older) = try await rail.form(["app.acme.shop.web", "tokens", "tok-0"])
+        XCTAssertNil(topic.revealedSecrets["tok-1"])
+        let (_, backAgain) = try await rail.form(["app.acme.shop.web", "tokens", "tok-1"])
+        XCTAssertEqual(backAgain.state.spec.fields.map(\.key), ["name", "prefix", "created"])
+        XCTAssertEqual(backAgain.state.value(for: "token"), .null)
         XCTAssertEqual(older.state.spec.fields.map(\.key), ["name", "prefix", "created"])
         XCTAssertEqual(older.state.value(for: "prefix"), .string("apk_zz99…"))
         let revoke = try XCTUnwrap(older.state.spec.actions.delete)

@@ -24,9 +24,28 @@ public final class ApplicationsTopic: EcosystemTopicProvider {
         self.buckets = buckets
     }
 
+    /// The token whose plaintext secret is currently on screen, if any.
+    ///
+    /// A reveal is one-shot, which is what `ApplicationsTopic.revealMessage` ("you won't be able to see
+    /// it again") promises: once the detail that shows the secret has been rendered and the user
+    /// navigates anywhere else, the secret is dropped. Retaining it for the session made the notice a
+    /// lie — navigate away and back and the plaintext credential was still there.
+    private var revealedOnScreen: String?
+
+    /// Drops the on-screen secret unless the destination is the very detail that is showing it (a
+    /// re-render of the same detail must not blank the token out from under the reader).
+    private func expireRevealedSecret(unless tokenID: String?) {
+        guard let showing = revealedOnScreen, showing != tokenID else { return }
+        revealedSecrets.removeValue(forKey: showing)
+        revealedOnScreen = nil
+    }
+
     // MARK: Rail
 
     public func child(for ecosystem: Ecosystem, path: [HTDVItem], rail: any EcosystemRail) async throws -> HTDVChild {
+        expireRevealedSecret(
+            unless: RailPath.id(at: 1, in: path) == "tokens" ? RailPath.id(at: 2, in: path) : nil
+        )
         guard let appID = RailPath.id(at: 0, in: path) else {
             return .level(try await listLevel(for: ecosystem))
         }
@@ -151,11 +170,14 @@ public final class ApplicationsTopic: EcosystemTopicProvider {
                 } catch {
                     throw HubError.wrap(error)
                 }
-                // Re-home the schema grants under the new identifier, as the web does.
+                // Re-home the schema grants under the new identifier, as the web does. Write the
+                // grants to the new id BEFORE clearing the old one: if the second call fails there is
+                // no compensating write, so the order decides whether a transient error loses the
+                // grants outright or merely leaves a harmless duplicate under the stale id.
                 do {
                     let grants = try await dataSource.schemaGrants(applicationID: app.id)
-                    try await dataSource.setSchemaGrants(applicationID: app.id, [])
                     try await dataSource.setSchemaGrants(applicationID: next, grants)
+                    try await dataSource.setSchemaGrants(applicationID: app.id, [])
                 } catch {
                     throw HubError.wrap(error)
                 }
@@ -297,7 +319,7 @@ public final class ApplicationsTopic: EcosystemTopicProvider {
             )
         ]
         for table in context.tables(of: grant.schemaId) {
-            let summary = grant.tables[table.sqlTableName].map {
+            let summary = grant.tables[table.id].map {
                 CrudPermissions(wire: $0.permissions).summary
             } ?? "No access"
             items.append(HTDVItem(
@@ -387,9 +409,9 @@ public final class ApplicationsTopic: EcosystemTopicProvider {
             }
             var updated = grant
             if permissions.isEmpty {
-                updated.tables.removeValue(forKey: table.sqlTableName)
+                updated.tables.removeValue(forKey: table.id)
             } else {
-                updated.tables[table.sqlTableName] = TableGrant(level: "table", permissions: permissions.wire)
+                updated.tables[table.id] = TableGrant(level: "table", permissions: permissions.wire)
             }
             try await rewriteGrant(applicationID: appID, schemaID: grant.schemaId, replacement: updated)
         }
@@ -404,7 +426,7 @@ public final class ApplicationsTopic: EcosystemTopicProvider {
             ]),
             FormSection(title: "Permissions (ceiling: \(ceiling.summary))", fields: Self.permissionFields())
         ], actions: FormActions(save: save))
-        let existing = grant.tables[table.sqlTableName]
+        let existing = grant.tables[table.id]
         var values = Self.values(for: CrudPermissions(wire: existing?.permissions ?? ""))
         values["level"] = .string(existing?.level ?? "table")
         return FormDetails.form(
@@ -480,6 +502,7 @@ public final class ApplicationsTopic: EcosystemTopicProvider {
             fields.append(.readOnly(FormReadOnlyField(key: "notice", label: "Keep it safe")))
             values["token"] = .string(secret)
             values["notice"] = .string(Self.revealMessage)
+            revealedOnScreen = token.id
         }
         let revoke = FormDeleteAction(
             title: "Revoke token",

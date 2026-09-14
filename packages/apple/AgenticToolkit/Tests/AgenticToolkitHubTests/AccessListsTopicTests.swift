@@ -223,11 +223,27 @@ final class AccessListsTopicTests: XCTestCase {
 
         let state = FormState(spec: topic.memberSpec(groupID: "g-editors"))
         XCTAssertEqual(state.spec.fields.map(\.key), ["memberType", "memberId"])
+        guard case .select(let typeField) = state.spec.fields[0] else { return XCTFail("expected a select") }
+        XCTAssertEqual(typeField.options.map(\.value), ["user", "organization", "persona", "app", "token"])
+        XCTAssertEqual(typeField.options.map(\.title), ["User", "Organization", "Persona", "Application", "Token"])
         state.set(.string("persona"), for: "memberType")
         state.set(.string("persona.me.ada"), for: "memberId")
         let addSaved = await state.save()
         XCTAssertTrue(addSaved)
         XCTAssertEqual(access.memberAdds.last?.body, AccessMemberAdd(memberType: .persona, memberId: "persona.me.ada"))
+
+        // The contract's enum spells this one "app"; "application" is 400ed for every user who picks it.
+        state.set(.string("app"), for: "memberType")
+        state.set(.string("app.acme.shop.web"), for: "memberId")
+        let appSaved = await state.save()
+        XCTAssertTrue(appSaved)
+        XCTAssertEqual(access.memberAdds.last?.body.memberType, .application)
+        let body = AccessMemberAdd(memberType: .application, memberId: "app.acme.shop.web")
+        let encoded = try JSONEncoder().encode(body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(json["memberType"] as? String, "app")
+        XCTAssertEqual(AccessMemberType.application.rawValue, "app")
+        XCTAssertEqual(AccessMemberType.application.title, "Application")
 
         access.failure = HubError.conflict("dup")
         let conflictSaved = await state.save()
@@ -318,7 +334,7 @@ final class AccessListsTopicTests: XCTestCase {
         XCTAssertEqual(state.value(for: "hint"), .string(AccessListsTopic.grantHint))
     }
 
-    func testGrantDetailToggleAndRemove() async throws {
+    func testGrantDetailToggleAndExplicitRemove() async throws {
         let (detail, form) = try await rail.form(["g-editors", "grants", "gr-2"])
         XCTAssertEqual(detail.id, "access-grant:gr-2")
         XCTAssertEqual(detail.title, "Names")
@@ -334,14 +350,21 @@ final class AccessListsTopicTests: XCTestCase {
             AccessGrantUpsert(targetType: .bucketType, targetId: "t-1", crud: "C,R,U,D")
         )
 
+        // Clearing every toggle is the same mistake the add form rejects, so Save rejects it with the
+        // same words rather than silently deleting the grant.
         form.state.set(.bool(false), for: "create"); form.state.set(.bool(false), for: "read")
         form.state.set(.bool(false), for: "update"); form.state.set(.bool(false), for: "delete")
-        let removeSaved = await form.state.save()
-        XCTAssertTrue(removeSaved)
-        XCTAssertEqual(access.grantRemovals.last?.grantID, "gr-2")
+        let emptySaved = await form.state.save()
+        XCTAssertFalse(emptySaved)
+        XCTAssertEqual(form.state.saveError, "Choose at least one permission.")
+        XCTAssertTrue(access.grantRemovals.isEmpty)
 
-        XCTAssertEqual(form.state.spec.actions.delete?.title, "Remove grant")
-        XCTAssertEqual(form.state.spec.actions.delete?.confirmationText, "Remove the grant for Names?")
+        // Removal has its own confirmed action.
+        let remove = try XCTUnwrap(form.state.spec.actions.delete)
+        XCTAssertEqual(remove.title, "Remove grant")
+        XCTAssertEqual(remove.confirmationText, "Remove the grant for Names?")
+        try await remove.perform()
+        XCTAssertEqual(access.grantRemovals.last?.grantID, "gr-2")
     }
 
     func testUnknownPathsAreEmpty() async throws {

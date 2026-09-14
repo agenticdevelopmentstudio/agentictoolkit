@@ -38,9 +38,12 @@ public struct MessagingTemplate: Codable, Hashable, Sendable, Identifiable {
         self.category = category
     }
 
-    /// Placeholder names across the text body and SMS body (never the subject), in first-seen order.
+    /// Placeholder names across every field a template renders — subject, HTML body, text body and SMS
+    /// body — in first-seen order. The subject counts: a template whose only `{{placeholder}}` is in its
+    /// subject would otherwise report none, skip the send form's required-variable gate entirely, and
+    /// mail the customer the literal `{{…}}` as their subject line.
     public var placeholders: [String] {
-        MessagingTopic.placeholders(in: [textBody, smsBody ?? ""].joined(separator: "\n"))
+        MessagingTopic.placeholders(in: [subject, htmlBody, textBody, smsBody ?? ""].joined(separator: "\n"))
     }
 }
 

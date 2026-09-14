@@ -10,6 +10,16 @@ public final class ApiTokensRail {
         "otherwise an empty selection would silently mint a broad legacy token instead of " +
         "the scoped one you intended."
     public static let scopeHelp = "Scope (leave empty for legacy curated-only access)"
+    /// `nonisolated`: read inside the create form's save action, which runs in a `FormAction.perform`
+    /// closure — those closures are not `@MainActor` (`FormSpec.swift`).
+    ///
+    /// `catalogueUnavailableMessage` guards the case where the catalogue fails to load, but the same
+    /// footgun was unguarded when it loads: an empty selection makes `scope(from:)` return `nil`, and a
+    /// `nil` scope is a BROAD legacy token. Ticking "Read-only" and no scope minted the widest token of
+    /// all while the admin believed they had minted the narrowest.
+    public nonisolated static let noScopeSelectedMessage =
+        "Choose at least one scope. An empty selection mints a broad legacy token, " +
+        "not the scoped one you intended."
     public static let scopePrefix = "scope:"
 
     public private(set) var revealedSecrets: [String: String] = [:]
@@ -17,7 +27,24 @@ public final class ApiTokensRail {
 
     public init(dataSource: ApiTokensDataSource) { self.dataSource = dataSource }
 
+    /// The token whose plaintext secret is currently on screen, if any.
+    ///
+    /// A reveal is one-shot, which is what `ApplicationsTopic.revealMessage` ("you won't be able to see
+    /// it again") promises: once the detail that shows the secret has been rendered and the user
+    /// navigates anywhere else, the secret is dropped. Retaining it for the session made the notice a
+    /// lie — navigate away and back and the plaintext credential was still there.
+    private var revealedOnScreen: String?
+
+    /// Drops the on-screen secret unless the destination is the very detail that is showing it (a
+    /// re-render of the same detail must not blank the token out from under the reader).
+    private func expireRevealedSecret(unless tokenID: String?) {
+        guard let showing = revealedOnScreen, showing != tokenID else { return }
+        revealedSecrets.removeValue(forKey: showing)
+        revealedOnScreen = nil
+    }
+
     public func child(path: [HTDVItem]) async throws -> HTDVChild {
+        expireRevealedSecret(unless: path.first?.id)
         let tokens = try await HubError.wrap { try await self.dataSource.list() }
         switch path.count {
         case 0:
@@ -73,10 +100,13 @@ public final class ApiTokensRail {
         return FormSpec(
             sections: [FormSection(fields: fields)],
             actions: FormActions(save: FormAction(id: "create", title: "Create") { [weak self, dataSource] values in
+                guard let scope = await ApiTokensRail.scope(from: values, prefixes: scopes) else {
+                    throw HubError.validation(ApiTokensRail.noScopeSelectedMessage)
+                }
                 let body = ApiTokenCreate(
                     name: values["name"]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? "",
                     expiresAt: values["expiresAt"]?.dateValue.map(HubDates.iso),
-                    scope: await ApiTokensRail.scope(from: values, prefixes: scopes))
+                    scope: scope)
                 let created = try await HubError.wrap { try await dataSource.create(body) }
                 await MainActor.run { self?.revealedSecrets[created.id] = created.token }
             }))
@@ -116,6 +146,7 @@ public final class ApiTokensRail {
             fields.append(.readOnly(FormReadOnlyField(key: "notice", label: "")))
             values["token"] = .string(secret)
             values["notice"] = .string(ApplicationsTopic.revealMessage)
+            revealedOnScreen = token.id
         }
         let spec = FormSpec(
             sections: [FormSection(fields: fields)],

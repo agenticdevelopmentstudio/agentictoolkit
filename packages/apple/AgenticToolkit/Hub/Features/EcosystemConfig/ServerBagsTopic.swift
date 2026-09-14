@@ -11,6 +11,10 @@ public final class ServerBagsTopic: EcosystemTopicProvider {
     /// `FormAction.perform` closure — those closures are not `@MainActor` (`FormSpec.swift`).
     public nonisolated static let invalidJSONMessage =
         "Value must be valid JSON — e.g. true, 42, \"text\", or {\"a\": 1}."
+    /// Server bags have no defaults to fall back to, unlike feature flags: deleting one leaves readers
+    /// with nothing at all. Borrowing `FeatureFlagsTopic.removalMessage` promised a fallback that does
+    /// not exist, in the one dialog whose job is to say what deleting costs.
+    public static let removalMessage = "will be deleted. Anything reading it gets nothing — there is no default."
 
     public var entry: EcosystemTopicEntry { Self.entry }
     private let dataSource: any ServerBagsDataSource
@@ -95,7 +99,7 @@ public final class ServerBagsTopic: EcosystemTopicProvider {
                 },
                 delete: FormDeleteAction(
                     title: "Delete bag",
-                    confirmationText: "\"\(bag.key)\" \(FeatureFlagsTopic.removalMessage)"
+                    confirmationText: "\"\(bag.key)\" \(ServerBagsTopic.removalMessage)"
                 ) { [dataSource] in
                     try await HubError.wrap { try await dataSource.delete(ecosystemID: ecosystem.id, key: bag.key) }
                 }))

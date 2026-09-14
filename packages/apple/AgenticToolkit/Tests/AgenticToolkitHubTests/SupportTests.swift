@@ -130,6 +130,24 @@ final class SupportTests: XCTestCase {
         XCTAssertEqual(String(data: data, encoding: .utf8), "9007199254740993")
         XCTAssertEqual(try JSONDecoder().decode(JSONValue.self, from: data), value)
     }
+    /// An integral `.number` and the `.int` it decodes back as are the SAME JSON number, so they must
+    /// compare equal. `testJSONValueCodableRoundTrip` above cannot catch this: `2.5` never reaches the
+    /// `.int` branch of `init(from:)`. A form's `isDirty` baseline compares the loaded value against the
+    /// edited one, so synthesized case-first equality enabled Save on an untouched form.
+    func testIntegralNumberEqualsTheIntItDecodesBackAs() throws {
+        let value = JSONValue.object(["maxItems": .number(20)])
+        let data = try JSONEncoder().encode(value)
+        let decoded = try JSONDecoder().decode(JSONValue.self, from: data)
+        XCTAssertEqual(decoded, .object(["maxItems": .int(20)]))
+        XCTAssertEqual(decoded, value)
+        XCTAssertEqual(JSONValue.number(20), JSONValue.int(20))
+        XCTAssertEqual(JSONValue.int(20).hashValue, JSONValue.number(20).hashValue)
+        XCTAssertEqual(Set([JSONValue.int(20), .number(20)]).count, 1)
+        // A fractional number is not an integer, and a Double that cannot hold an Int64 exactly is not
+        // that Int64 either (2^53 + 1 rounds to 2^53 as a Double).
+        XCTAssertNotEqual(JSONValue.number(20.5), JSONValue.int(20))
+        XCTAssertNotEqual(JSONValue.int(9_007_199_254_740_993), JSONValue.number(9_007_199_254_740_992))
+    }
     func testStringDictionary() {
         XCTAssertEqual(JSONValue.object(["a": .string("1")]).stringDictionary, ["a": "1"])
         XCTAssertNil(JSONValue.object(["a": .number(1)]).stringDictionary)

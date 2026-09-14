@@ -430,7 +430,7 @@ final class ServerBagsTopicTests: XCTestCase {
         XCTAssertEqual(form.state.spec.actions.delete?.title, "Delete bag")
         XCTAssertEqual(
             form.state.spec.actions.delete?.confirmationText,
-            "\"onboarding\" will be removed. Anything reading it falls back to its default.")
+            "\"onboarding\" will be deleted. Anything reading it gets nothing — there is no default.")
         try await form.state.spec.actions.delete?.perform()
         XCTAssertEqual(data.deleted, ["onboarding"])
     }
@@ -495,6 +495,20 @@ final class StorageTokensTopicTests: XCTestCase {
              "created", "lastUsed", "expires", "token", "notice"])
         XCTAssertEqual(form.state.value(for: "token"), .string("adh_ab12cd34ef56"))
         XCTAssertEqual(form.state.value(for: "notice"), .string(ApplicationsTopic.revealMessage))
+
+        // Re-rendering the same detail must not blank the secret out from under the reader.
+        let (_, stillShowing) = try await rail.form(["tok-nightly"])
+        XCTAssertEqual(stillShowing.state.value(for: "token"), .string("adh_ab12cd34ef56"))
+
+        // …but the notice promises "you won't be able to see it again", so navigating away drops it.
+        _ = try await rail.level([])
+        XCTAssertNil(topic.rail.revealedSecrets["tok-nightly"])
+        let (_, afterLeaving) = try await rail.form(["tok-nightly"])
+        XCTAssertEqual(
+            afterLeaving.state.spec.fields.map(\.key),
+            ["name", "identifier", "prefix", "bucket", "description", "created", "lastUsed", "expires"])
+        XCTAssertEqual(afterLeaving.state.value(for: "token"), .null)
+        XCTAssertEqual(afterLeaving.state.value(for: "notice"), .null)
     }
 
     func testCreateConflictMessage() async throws {

@@ -45,6 +45,41 @@ private final class FormReloadDataSource: HTDVDataSource, @unchecked Sendable {
     }
 }
 
+/// Root level with ten detail rows, each vending a BRAND-NEW `FormViewController`. Navigating between
+/// them tears the previous form down before the next is built, so the replacement can land on the freed
+/// object's address — which is exactly what a host-side `Set<ObjectIdentifier>` of attached forms cannot
+/// tell apart from the form it just released. Every one of these forms must get the host's level-reload
+/// chained onto it.
+private final class FreshFormDataSource: HTDVDataSource, @unchecked Sendable {
+    private let lock = NSLock()
+    private var rootCalls = 0
+
+    static let itemIDs = (0..<10).map { "row-\($0)" }
+
+    var rootLoadCount: Int { lock.withLock { rootCalls } }
+
+    func rootLevel() async throws -> HTDVLevel {
+        lock.withLock { rootCalls += 1 }
+        return HTDVLevel(
+            id: "root", title: "Root",
+            items: Self.itemIDs.map { HTDVItem(id: $0, label: $0, leadsTo: .detail) }
+        )
+    }
+
+    func child(for path: [HTDVItem]) async throws -> HTDVChild {
+        guard let itemID = path.map(\.id).last, Self.itemIDs.contains(itemID) else { return .empty }
+        return .detail(HTDVDetail(id: "detail-\(itemID)", title: itemID) {
+            let spec = FormSpec(
+                sections: [FormSection(fields: [.text(FormTextField(key: "name", label: "Name"))])],
+                actions: FormActions(save: FormAction(id: "save", title: "Save") { _ in })
+            )
+            return FormViewController(
+                state: FormState(spec: spec, values: [:]), markdownEditing: PlainTextMarkdownEditing()
+            )
+        })
+    }
+}
+
 /// Root level with two detail rows ("a" and "b") that both resolve to the SAME `FormViewController`
 /// instance, memoized on first creation. `HTDVDetail.make`'s contract does not require a fresh instance
 /// per call, so a module is free to do this — and `attachFormCallbacks(to:)` must stay idempotent when it
@@ -216,6 +251,29 @@ final class FormSheetTests: XCTestCase {
         XCTAssertEqual(counter.value, 1, "the factory's own onSaved must still run")
         try await waitUntil { source.rootLoadCount == before + 1 }
         withExtendedLifetime(hosted) {}
+    }
+
+    /// Render detail A, tear it down, render detail B: B is a different object that may occupy A's
+    /// freed address, and its `onSaved` must still reload the owning level. Ten hops, because address
+    /// reuse is what makes the failure intermittent rather than absent.
+    func testEachFreshFormReloadsTheOwningLevelAfterTheLastOneWasTornDown() async throws {
+        let source = FreshFormDataSource()
+        let controller = HTDVController(dataSource: source)
+        let host = HTDVViewController(controller: controller)
+        host.view.frame = CGRect(x: 0, y: 0, width: 1200, height: 800)
+        host.loadViewIfNeeded()
+        await controller.load()
+
+        for itemID in FreshFormDataSource.itemIDs {
+            await controller.select(itemID: itemID, atLevel: 0)
+            guard let form = host.detailViewController as? FormViewController else {
+                return XCTFail("expected a form detail for \(itemID)")
+            }
+            let before = source.rootLoadCount
+            form.onSaved()
+            try await waitUntil { source.rootLoadCount > before }
+        }
+        withExtendedLifetime(host) {}
     }
 
     /// A memoized `FormViewController` returned for two different detail ids gets `attachFormCallbacks`

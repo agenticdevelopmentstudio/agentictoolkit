@@ -8,6 +8,15 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
     public var onDeleted: () -> Void = {}
     public var hasUnsavedChanges: Bool { state.isDirty }
 
+    /// Set by the HTDV host the first time it chains its level-reload onto `onSaved`/`onDeleted`.
+    ///
+    /// The flag lives on the form rather than in a host-side `Set<ObjectIdentifier>`: `renderDetail()`
+    /// releases the outgoing detail BEFORE building the incoming one, so a freed form's address can be
+    /// handed straight back to its replacement. The set then reported the brand-new form as already
+    /// attached, the chaining was skipped, and the rail silently stopped reloading after save and
+    /// delete. An identity that cannot be recycled — the object's own storage — cannot collide.
+    var hasHostLevelReloadAttached = false
+
     let saveButton = NSButton(title: "Save", target: nil, action: nil)
     let revertButton = NSButton(title: "Revert", target: nil, action: nil)
     let deleteButton = NSButton(title: "Delete", target: nil, action: nil)

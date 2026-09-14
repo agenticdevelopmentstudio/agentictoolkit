@@ -68,9 +68,7 @@ public final class CustomersTopic: EcosystemTopicProvider {
     }
 
     private nonisolated static func input(from values: [String: FormValue], ecosystemID: String) -> CustomerInput {
-        func optional(_ key: String) -> String? {
-            Customer.nonBlank(values[key]?.stringValue)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
+        func optional(_ key: String) -> String? { HubText.nonBlank(values[key]?.stringValue) }
         return CustomerInput(
             ecosystemId: ecosystemID,
             email: values["email"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",

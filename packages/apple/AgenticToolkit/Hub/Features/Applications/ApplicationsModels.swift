@@ -3,6 +3,14 @@ import Foundation
 public enum ConsumerKind: String, Codable, CaseIterable, Sendable {
     case staff, developer, customer
 
+    /// The contract types `consumerKind` as a free `string` (`maxLength: 16`) with no enum, so an
+    /// unrecognized value must not fail the whole `[Application]` decode and blank the rail. Narrow
+    /// it to `.developer`, exactly as the web client does.
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ConsumerKind(rawValue: raw) ?? .developer
+    }
+
     public var title: String {
         switch self {
         case .staff: "Staff"
@@ -102,14 +110,23 @@ public struct CrudPermissions: Hashable, Sendable {
     }
 }
 
-public struct TableGrant: Codable, Hashable, Sendable {
+/// A per-table grant inside a `SchemaGrant`. `level` is a UI-only concept ("table" vs. the
+/// not-yet-supported "row") and has no wire counterpart, so it is never sent.
+///
+/// Deliberately NOT `Codable`: this is a domain/UI type. The wire shape lives in the adapter
+/// (`TableGrantWire`), so it is impossible to serialize this shape onto the API by accident.
+public struct TableGrant: Hashable, Sendable {
     public var level: String
     public var permissions: String
     public init(level: String, permissions: String) { self.level = level; self.permissions = permissions }
 }
 
-/// One entry of `PUT /ecosystem/applications/{id}/schema-grants`. `tables` is keyed by SQL table name.
-public struct SchemaGrant: Codable, Hashable, Sendable {
+/// One application-to-bucket grant. `tables` is keyed by the table's **id** (the wire's `tableId`),
+/// never by its `sqlTableName`.
+///
+/// Deliberately NOT `Codable` — see `TableGrant`. The API speaks
+/// `{schemaId, crud, tables: [{tableId, crud}]}`; the adapter converts.
+public struct SchemaGrant: Hashable, Sendable {
     public var schemaId: String
     public var permissions: String
     public var tables: [String: TableGrant]

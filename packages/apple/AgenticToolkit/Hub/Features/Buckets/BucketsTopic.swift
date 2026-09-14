@@ -35,6 +35,14 @@ public final class BucketsTopic: EcosystemTopicProvider {
         return out
     }
 
+    /// A name can be non-empty and still derive an EMPTY SQL identifier (every character stripped, e.g.
+    /// an all-non-ASCII name). Posting `sqlTableName: ""` then makes a second such table collide on `""`
+    /// and report a duplicate-name error that names the wrong cause, so the derivation is guarded and
+    /// this message names the real one.
+    public nonisolated static let unusableTableNameMessage =
+        "That name has no letters or digits that can be used in a SQL table name. "
+        + "Use at least one a–z letter or 0–9 digit."
+
     public static func tableCount(_ count: Int) -> String { count == 1 ? "1 table" : "\(count) tables" }
 
     // MARK: Rail
@@ -214,6 +222,7 @@ public final class BucketsTopic: EcosystemTopicProvider {
             let name = values["name"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if name.isEmpty { throw HubError.validation("Every table needs a name.") }
             let sqlName = Self.tableName(from: name)
+            if sqlName.isEmpty { throw HubError.validation(Self.unusableTableNameMessage) }
             let existing: [BucketTable]
             do {
                 existing = try await dataSource.tables(ecosystemID: ecosystem.id).filter { $0.bucketId == bucket.id }

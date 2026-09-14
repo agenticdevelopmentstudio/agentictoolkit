@@ -65,7 +65,12 @@ public protocol ApiTokensDataSource: AnyObject, Sendable {
 // MARK: Bucket access lists (`/bucket/access-groups`)
 
 public enum AccessMemberType: String, CaseIterable, Codable, Sendable {
-    case user, organization, persona, application, token
+    case user, organization, persona
+    /// The contract's enum is `["user","organization","persona","app","token"]`. Sending "application"
+    /// 400s every time, so the raw value is "app"; the case keeps its readable name. Declared here, not
+    /// appended, so `allCases` — and therefore the picker — keeps its order.
+    case application = "app"
+    case token
 
     public var title: String {
         switch self {

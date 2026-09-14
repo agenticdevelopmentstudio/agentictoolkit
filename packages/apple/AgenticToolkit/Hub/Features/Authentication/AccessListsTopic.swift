@@ -360,16 +360,16 @@ public final class AccessListsTopic: EcosystemTopicProvider {
             actions: FormActions(
                 save: FormAction(id: "save", title: "Save") { [dataSource] values in
                     let crud = await AccessListsTopic.crud(from: values)
-                    if crud.isEmpty {
-                        try await HubError.wrap {
-                            try await dataSource.removeGrant(groupID: groupID, grantID: grant.id)
-                        }
-                    } else if let target = grant.target {
-                        let body = AccessGrantUpsert(targetType: target, targetId: grant.targetId, crud: crud.crud)
-                        _ = try await HubError.wrap { try await dataSource.upsertGrant(groupID: groupID, body) }
-                    } else {
+                    // Save with every toggle off used to DELETE the grant, silently and with no
+                    // confirmation — a destructive act behind a button labelled "Save", reachable by
+                    // clearing the last checkbox. "Remove grant" below is how a grant goes away; an
+                    // empty selection is the same mistake the add form rejects, with the same words.
+                    guard !crud.isEmpty else { throw HubError.validation("Choose at least one permission.") }
+                    guard let target = grant.target else {
                         throw HubError.validation("Unknown grant target \"\(grant.targetType)\".")
                     }
+                    let body = AccessGrantUpsert(targetType: target, targetId: grant.targetId, crud: crud.crud)
+                    _ = try await HubError.wrap { try await dataSource.upsertGrant(groupID: groupID, body) }
                 },
                 delete: FormDeleteAction(
                     title: "Remove grant", confirmationText: "Remove the grant for \(label)?"

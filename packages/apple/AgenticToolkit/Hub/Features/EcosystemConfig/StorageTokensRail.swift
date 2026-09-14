@@ -20,10 +20,27 @@ public final class StorageTokensRail {
 
     public init(dataSource: any StorageTokensDataSource) { self.dataSource = dataSource }
 
+    /// The token whose plaintext secret is currently on screen, if any.
+    ///
+    /// A reveal is one-shot, which is what `ApplicationsTopic.revealMessage` ("you won't be able to see
+    /// it again") promises: once the detail that shows the secret has been rendered and the user
+    /// navigates anywhere else, the secret is dropped. Retaining it for the session made the notice a
+    /// lie — navigate away and back and the plaintext credential was still there.
+    private var revealedOnScreen: String?
+
+    /// Drops the on-screen secret unless the destination is the very detail that is showing it (a
+    /// re-render of the same detail must not blank the token out from under the reader).
+    private func expireRevealedSecret(unless tokenID: String?) {
+        guard let showing = revealedOnScreen, showing != tokenID else { return }
+        revealedSecrets.removeValue(forKey: showing)
+        revealedOnScreen = nil
+    }
+
     /// `path` is relative to the level: `[]` → the list, `[token]` → its detail.
     public func child(
         path: [HTDVItem], ecosystemID: String?, levelID: String, title: String
     ) async throws -> HTDVChild {
+        expireRevealedSecret(unless: path.first?.id)
         let tokens = try await HubError.wrap { try await self.dataSource.list(ecosystemID: ecosystemID) }
         switch path.count {
         case 0:
@@ -112,6 +129,7 @@ public final class StorageTokensRail {
             fields.append(.readOnly(FormReadOnlyField(key: "notice", label: "")))
             values["token"] = .string(secret)
             values["notice"] = .string(ApplicationsTopic.revealMessage)
+            revealedOnScreen = token.id
         }
         let spec = FormSpec(
             sections: [FormSection(fields: fields)],

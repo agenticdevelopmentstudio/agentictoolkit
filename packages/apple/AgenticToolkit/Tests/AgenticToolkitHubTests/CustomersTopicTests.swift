@@ -79,6 +79,24 @@ final class CustomersTopicTests: XCTestCase {
         XCTAssertEqual(Customer.fixture(displayName: "").label, "jane@example.com")
         XCTAssertEqual(Customer.fixture(email: nil, displayName: nil).label, "—")
         XCTAssertEqual(Customer.fixture(email: nil, displayName: nil).sublabel, "—")
+        // A newline is whitespace too: `HubText.nonBlank` trims `.whitespacesAndNewlines`, so a
+        // newline-only display name is missing, not a label made of padding.
+        XCTAssertEqual(Customer.fixture(displayName: "\n").label, "jane@example.com")
+        XCTAssertEqual(Customer.fixture(displayName: "  Jane  ").label, "Jane")
+    }
+
+    /// A field holding only a newline must OMIT the key, not encode an empty string. The local
+    /// `Customer.nonBlank` trimmed `.whitespaces` (newlines excluded) and returned the value
+    /// untrimmed, so `"\n"` survived as non-nil and the call site re-trimmed it to `""`.
+    func testNewlineOnlyOptionalFieldIsOmittedNotEmptied() async throws {
+        let source = FakeCustomersDataSource(customers: [.fixture()])
+        let (_, form) = try await makeRail(source).form(["c-jane"])
+        form.state.set(.string("\n"), for: "slug")
+        form.state.set(.string("\n \n"), for: "externalId")
+        let saved = await form.state.save()
+        XCTAssertTrue(saved)
+        XCTAssertNil(source.updates[0].input.slug)
+        XCTAssertNil(source.updates[0].input.externalId)
     }
 
     func testListShowsUsers() async throws {

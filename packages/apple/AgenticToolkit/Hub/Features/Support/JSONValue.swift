@@ -56,6 +56,52 @@ public enum JSONValue: Codable, Hashable, Sendable {
         }
     }
 
+    // MARK: Equality
+    //
+    // Hand-written because the SYNTHESIZED enum equality compares cases first, and `.int` and `.number`
+    // are two spellings of the same JSON number. `.number(20)` encodes to `20`, decodes back as
+    // `.int(20)`, and synthesized `==` called that a change — so a form's `isDirty` baseline comparison
+    // misfired: Save enabled on an untouched form, spurious discard prompts on the way out.
+
+    /// True when `value` is the same JSON number as `int`, at full `Int64` precision.
+    private static func sameNumber(_ int: Int64, _ value: Double) -> Bool {
+        Int64(exactly: value) == int
+    }
+
+    public static func == (lhs: JSONValue, rhs: JSONValue) -> Bool {
+        switch (lhs, rhs) {
+        case (.object(let left), .object(let right)): left == right
+        case (.array(let left), .array(let right)): left == right
+        case (.string(let left), .string(let right)): left == right
+        case (.int(let left), .int(let right)): left == right
+        case (.number(let left), .number(let right)): left == right
+        case (.int(let left), .number(let right)): sameNumber(left, right)
+        case (.number(let left), .int(let right)): sameNumber(right, left)
+        case (.bool(let left), .bool(let right)): left == right
+        case (.null, .null): true
+        default: false
+        }
+    }
+
+    /// Numbers hash on their canonical form — an integral `.number` hashes as the `.int` it equals —
+    /// or `Hashable`'s contract breaks the moment `==` treats the two cases as one.
+    public func hash(into hasher: inout Hasher) {
+        switch self {
+        case .object(let object): hasher.combine(0); hasher.combine(object)
+        case .array(let array): hasher.combine(1); hasher.combine(array)
+        case .string(let string): hasher.combine(2); hasher.combine(string)
+        case .int(let int): hasher.combine(3); hasher.combine(int)
+        case .number(let number):
+            if let exact = Int64(exactly: number) {
+                hasher.combine(3); hasher.combine(exact)
+            } else {
+                hasher.combine(4); hasher.combine(number)
+            }
+        case .bool(let bool): hasher.combine(5); hasher.combine(bool)
+        case .null: hasher.combine(6)
+        }
+    }
+
     public var stringDictionary: [String: String]? {
         guard case .object(let object) = self else { return nil }
         var out: [String: String] = [:]
