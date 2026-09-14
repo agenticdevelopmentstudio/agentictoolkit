@@ -626,8 +626,45 @@ extension SessionWatcher {
 
         /// Line 2's text: what the agent last said, or a placeholder for a session
         /// that hasn't said anything yet.
-        private static func outputText(for session: SessionWatcherSession) -> String {
-            session.lastOutput.isEmpty ? "No output yet." : session.lastOutput
+        ///
+        /// The agent writes markdown, and a one-line label showed its syntax
+        /// verbatim — `**Shipped.**`, backticked hashes, list dashes — so the line
+        /// read as noise. The markdown is parsed to its text, one space between
+        /// blocks (the parser itself drops block boundaries, which glued a heading to
+        /// the paragraph under it), and whitespace collapsed so a multi-line message
+        /// fills the single line. Show Info keeps the raw text.
+        static func outputText(for session: SessionWatcherSession) -> String {
+            guard !session.lastOutput.isEmpty else { return "No output yet." }
+            return plainText(fromMarkdown: session.lastOutput)
+        }
+
+        /// `markdown` as one line of plain text. A message the parser rejects is shown
+        /// as written, whitespace collapsed.
+        static func plainText(fromMarkdown markdown: String) -> String {
+            let options = AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .full,
+                failurePolicy: .returnPartiallyParsedIfPossible
+            )
+            guard let parsed = try? AttributedString(markdown: markdown, options: options) else {
+                return collapsingWhitespace(markdown)
+            }
+            var blocks: [String] = []
+            var current = ""
+            var currentIntent: PresentationIntent?
+            for run in parsed.runs {
+                if run.presentationIntent != currentIntent, !current.isEmpty {
+                    blocks.append(current)
+                    current = ""
+                }
+                currentIntent = run.presentationIntent
+                current += String(parsed[run.range].characters)
+            }
+            blocks.append(current)
+            return collapsingWhitespace(blocks.joined(separator: " "))
+        }
+
+        private static func collapsingWhitespace(_ text: String) -> String {
+            text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         }
 
         /// Line 3's text. This used to read "thinking..." for every session without a
