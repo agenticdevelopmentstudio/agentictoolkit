@@ -156,6 +156,7 @@
 		0EF1CFD3DCE7F3378B0F752D /* ExtensionsCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05E171B3D85980BBE009C932 /* ExtensionsCoordinatorTests.swift */; };
 		0F22943947A3DC7885495DDE /* BraveHeuristic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD401940C45BB508A51A029 /* BraveHeuristic.swift */; };
 		0F858BBC2B7F68DCE5DED594 /* NSWindow+Center.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003E282AAC0D27ACE18306C7 /* NSWindow+Center.swift */; };
+		0FB7F3A8EFA933E1E698D4B7 /* SessionWatcherActivityIconViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B37848871286FA621F0E49E4 /* SessionWatcherActivityIconViewTests.swift */; };
 		0FC4F16A70B6685B425E1D44 /* ConfigurationContributionPoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F1F9B9230F6147C6D788C44 /* ConfigurationContributionPoint.swift */; };
 		0FD51C329CCD840A0184F220 /* ThemePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97968EFD1C9C7597C4C09F4D /* ThemePreviewView.swift */; };
 		1013DCA12A8D958FAF9DA3DC /* PermissionRowViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5C131AA11AA94F3C5BD62B /* PermissionRowViewTests.swift */; };
@@ -2785,6 +2786,7 @@
 		B2DBBC96379BEBF4C59726ED /* UserSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSettings.swift; sourceTree = "<group>"; };
 		B32AC9E3B91C6F8AC5ABFA51 /* KeyedDebouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyedDebouncerTests.swift; sourceTree = "<group>"; };
 		B34A549A9DB4762084ACA258 /* ProviderPickerInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPickerInfo.swift; sourceTree = "<group>"; };
+		B37848871286FA621F0E49E4 /* SessionWatcherActivityIconViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWatcherActivityIconViewTests.swift; sourceTree = "<group>"; };
 		B3D112853E30CE786A73B192 /* UserSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSetting.swift; sourceTree = "<group>"; };
 		B3E5D84B295AC71E18A40CEC /* Spacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spacing.swift; sourceTree = "<group>"; };
 		B426FC57011B3DE26A39286E /* ProjectScriptingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectScriptingTests.swift; sourceTree = "<group>"; };
@@ -5805,6 +5807,7 @@
 			children = (
 				AC98A9EAFD2AEA6EFC2F2DE2 /* SessionListViewModelTests.swift */,
 				D713796FE212AB499F815BCD /* SessionListViewTests.swift */,
+				B37848871286FA621F0E49E4 /* SessionWatcherActivityIconViewTests.swift */,
 				708757CD4B853F7A93EB857F /* TerminalTextInjectorTests.swift */,
 			);
 			path = SessionWatcher;
@@ -8212,6 +8215,7 @@
 				60DACCD0B6C4BD8D65E0F9E5 /* SessionLayoutStateTests.swift in Sources */,
 				7CFFEA150BB6C132E93BA1A7 /* SessionListViewModelTests.swift in Sources */,
 				83EE05B5B7E9A3A0A8496A0D /* SessionListViewTests.swift in Sources */,
+				0FB7F3A8EFA933E1E698D4B7 /* SessionWatcherActivityIconViewTests.swift in Sources */,
 				F60EBB3962E3DA57237A45D3 /* SettingsCardViewsTests.swift in Sources */,
 				DDF7C75CD3FEADD2DFDAF6B9 /* SettingsNavigationHistoryTests.swift in Sources */,
 				15AF44EC957517246EF1186A /* SettingsSearchIndexTests.swift in Sources */,

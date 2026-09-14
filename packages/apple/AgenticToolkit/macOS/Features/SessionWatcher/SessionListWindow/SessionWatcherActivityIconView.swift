@@ -17,13 +17,23 @@ extension SessionWatcher {
     ///
     /// The animations are CoreAnimation rather than SF Symbol effects because
     /// `.rotate` needs macOS 15 and this framework ships to macOS 14.
-    public final class SessionWatcherActivityIconView: NSImageView {
+    ///
+    /// The glyph is drawn into a sublayer the view owns, not into the view's own
+    /// layer. AppKit keeps a view's backing layer in step with its frame and puts
+    /// the anchor point back at the corner whenever it does, so a spin installed on
+    /// that layer turned about the glyph's corner: the arrows orbited down over the
+    /// output line beneath them instead of spinning in place. AppKit never touches a
+    /// sublayer's geometry, so its centred anchor holds.
+    public final class SessionWatcherActivityIconView: NSView {
         private var activity: SessionWatcherActivity
         private var isSummarizing: Bool
+        private var tint: NSColor = .tertiaryLabelColor
+        private let glyph = CALayer()
 
         /// Side of the glyph's box. Small enough to sit inside a two-line row
         /// without pushing its height around.
         private static let side: CGFloat = 13
+        private static let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
 
         private static let rotationKey = "session-activity-rotation"
         private static let pulseKey = "session-activity-pulse"
@@ -32,18 +42,19 @@ extension SessionWatcher {
             self.activity = activity
             self.isSummarizing = isSummarizing
             super.init(frame: .zero)
-            accessibilityID("session-panel.activity.\(isSummarizing ? "summarizing" : activity.rawValue)")
             wantsLayer = true
-            imageScaling = .scaleProportionallyUpOrDown
-            symbolConfiguration = .init(pointSize: 11, weight: .semibold)
-            image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)
-            toolTip = accessibilityLabel
+            glyph.contentsGravity = .resizeAspect
+            layer?.addSublayer(glyph)
+            setAccessibilityElement(true)
+            setAccessibilityRole(.image)
             translatesAutoresizingMaskIntoConstraints = false
             setContentCompressionResistancePriority(.required, for: .horizontal)
             NSLayoutConstraint.activate([
                 widthAnchor.constraint(equalToConstant: Self.side),
                 heightAnchor.constraint(equalToConstant: Self.side)
             ])
+            describeState()
+            renderGlyph()
         }
 
         @available(*, unavailable)
@@ -60,13 +71,11 @@ extension SessionWatcher {
             guard self.activity != activity || self.isSummarizing != isSummarizing else { return }
             self.activity = activity
             self.isSummarizing = isSummarizing
-            accessibilityID("session-panel.activity.\(isSummarizing ? "summarizing" : activity.rawValue)")
-            image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)
-            toolTip = accessibilityLabel
+            describeState()
+            renderGlyph()
             // The state that was animating may not be the state that is, so the old
             // animation goes before the new one is chosen.
-            layer?.removeAnimation(forKey: Self.rotationKey)
-            layer?.removeAnimation(forKey: Self.pulseKey)
+            stopAnimation()
             if window != nil { startAnimation() }
         }
 
@@ -79,7 +88,7 @@ extension SessionWatcher {
             }
         }
 
-        private var accessibilityLabel: String {
+        private var accessibilityText: String {
             if isSummarizing { return "Summarizing" }
             switch activity {
             case .working: return "Working"
@@ -88,18 +97,75 @@ extension SessionWatcher {
             }
         }
 
+        private func describeState() {
+            accessibilityID("session-panel.activity.\(isSummarizing ? "summarizing" : activity.rawValue)")
+            setAccessibilityLabel(accessibilityText)
+            toolTip = accessibilityText
+        }
+
         /// Colours the glyph. Waiting is the one state meant to catch the eye
         /// across a full window of rows, so it takes the warning colour.
         public func applyTheme(_ palette: SemanticPalette) {
             if isSummarizing {
-                contentTintColor = palette.accentColor
+                tint = palette.accentColor
+            } else {
+                switch activity {
+                case .working: tint = palette.accentColor
+                case .idle:    tint = palette.tertiaryTextColor
+                case .waiting: tint = palette.warningColor
+                }
+            }
+            renderGlyph()
+        }
+
+        // MARK: - Drawing
+
+        /// Rasterises the tinted symbol into the glyph layer.
+        ///
+        /// Tinted by filling over the symbol's own pixels rather than through a
+        /// palette configuration, which paints every layer of a multi-layer symbol
+        /// the one colour — the exclamation mark would vanish into its circle.
+        private func renderGlyph() {
+            guard let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityText)?
+                .withSymbolConfiguration(Self.symbolConfiguration) else {
+                glyph.contents = nil
                 return
             }
-            switch activity {
-            case .working: contentTintColor = palette.accentColor
-            case .idle:    contentTintColor = palette.tertiaryTextColor
-            case .waiting: contentTintColor = palette.warningColor
+            let color = tint
+            let tinted = NSImage(size: symbol.size, flipped: false) { rect in
+                symbol.draw(in: rect)
+                color.set()
+                rect.fill(using: .sourceAtop)
+                return true
             }
+            let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+            // A dynamic colour resolves against the appearance current while drawing.
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                glyph.contentsScale = scale
+                glyph.contents = tinted.layerContents(forContentsScale: scale)
+                CATransaction.commit()
+            }
+        }
+
+        public override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            glyph.bounds = bounds
+            glyph.position = CGPoint(x: bounds.midX, y: bounds.midY)
+            CATransaction.commit()
+        }
+
+        public override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            renderGlyph()
+        }
+
+        public override func viewDidChangeBackingProperties() {
+            super.viewDidChangeBackingProperties()
+            renderGlyph()
         }
 
         // MARK: - Animation
@@ -109,44 +175,44 @@ extension SessionWatcher {
         public override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             if window == nil {
-                layer?.removeAnimation(forKey: Self.rotationKey)
-                layer?.removeAnimation(forKey: Self.pulseKey)
+                stopAnimation()
             } else {
+                renderGlyph()
                 startAnimation()
             }
         }
 
-        public override func layout() {
-            super.layout()
-            // Rotate about the glyph's centre. Setting the anchor point moves the
-            // layer, so its position is restored to the view's own centre after.
-            guard let layer else { return }
-            layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            layer.position = CGPoint(x: frame.midX, y: frame.midY)
+        private func stopAnimation() {
+            glyph.removeAnimation(forKey: Self.rotationKey)
+            glyph.removeAnimation(forKey: Self.pulseKey)
         }
 
         private func startAnimation() {
-            guard let layer else { return }
             if isSummarizing || activity == .waiting {
-                guard layer.animation(forKey: Self.pulseKey) == nil else { return }
+                guard glyph.animation(forKey: Self.pulseKey) == nil else { return }
                 let pulse = CABasicAnimation(keyPath: "opacity")
                 pulse.fromValue = 1.0
                 pulse.toValue = 0.25
                 pulse.duration = 0.7
                 pulse.autoreverses = true
                 pulse.repeatCount = .greatestFiniteMagnitude
-                layer.add(pulse, forKey: Self.pulseKey)
+                glyph.add(pulse, forKey: Self.pulseKey)
                 return
             }
             guard activity == .working else { return }
-            guard layer.animation(forKey: Self.rotationKey) == nil else { return }
+            guard glyph.animation(forKey: Self.rotationKey) == nil else { return }
             let spin = CABasicAnimation(keyPath: "transform.rotation.z")
             spin.fromValue = 0
             spin.toValue = -Double.pi * 2   // clockwise on screen (AppKit's y is up)
             spin.duration = 1.1
             spin.repeatCount = .greatestFiniteMagnitude
             spin.timingFunction = CAMediaTimingFunction(name: .linear)
-            layer.add(spin, forKey: Self.rotationKey)
+            glyph.add(spin, forKey: Self.rotationKey)
         }
+
+        // MARK: - Test seams
+
+        /// The layer the glyph is drawn into and animated on.
+        var glyphLayer: CALayer { glyph }
     }
 }
