@@ -192,6 +192,7 @@ public final class HTDVViewController: NSViewController {
         renderedDetailID = controller.detail?.id
         guard let detail = controller.detail else { return }
         let child = detail.make()
+        attachFormCallbacks(to: child)
         addChild(child)
         child.view.translatesAutoresizingMaskIntoConstraints = false
         detailContainer.addSubview(child.view)
@@ -202,6 +203,31 @@ public final class HTDVViewController: NSViewController {
             child.view.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor)
         ])
         detailViewController = child
+    }
+
+    /// A saved or deleted form changes the row that owns it, so the last level is re-fetched: labels
+    /// follow the edit, and `reload(level:)` drops the selection when the row is gone. Chains onto
+    /// whatever the detail factory already installed rather than replacing it, so a module that does
+    /// its own bookkeeping on save still gets called.
+    private func attachFormCallbacks(to child: NSViewController) {
+        guard let form = child as? FormViewController else { return }
+        let existingSaved = form.onSaved
+        form.onSaved = { [weak self] in
+            existingSaved()
+            self?.reloadOwningLevel()
+        }
+        let existingDeleted = form.onDeleted
+        form.onDeleted = { [weak self] in
+            existingDeleted()
+            self?.reloadOwningLevel()
+        }
+    }
+
+    /// Reads the depth at call time, not at attach time: the rail may have grown or shrunk while the
+    /// detail was open.
+    private func reloadOwningLevel() {
+        let index = max(controller.levels.count - 1, 0)
+        Task { [weak self] in await self?.controller.reload(level: index) }
     }
 
     private func applyLayoutMode() {
