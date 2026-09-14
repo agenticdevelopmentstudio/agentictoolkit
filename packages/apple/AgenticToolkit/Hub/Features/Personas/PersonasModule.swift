@@ -78,13 +78,14 @@ public final class PersonasModule: HTDVDataSource {
         }
         guard let facet = Self.facets.first(where: { $0.id == facetID }) else { return .empty }
         let detailID = "persona:\(persona.id):\(facet.id)"
+        let services: [PersonaService]
         if facet.id == "llm" {
-            let services: [PersonaService]
             do { services = try await dataSource.listServices() } catch { throw HubError.wrap(error) }
-            let (spec, values) = facetSpec("llm", persona: persona, services: services)!
-            return .detail(FormDetails.form(id: detailID, title: facet.label, spec: spec, values: values))
+        } else {
+            services = []
         }
-        if let (spec, values) = facetSpec(facet.id, persona: persona, services: []) {
+        if Self.supportedFacetIDs.contains(facet.id),
+           let (spec, values) = facetSpec(facet.id, persona: persona, services: services) {
             return .detail(FormDetails.form(id: detailID, title: facet.label, spec: spec, values: values))
         }
         return .detail(FormDetails.notice(id: detailID, title: facet.label, message: FormDetails.unavailableMessage))
