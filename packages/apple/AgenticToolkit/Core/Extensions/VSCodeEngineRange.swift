@@ -80,5 +80,24 @@ public struct VSCodeEngineRange: Sendable, Hashable, CustomStringConvertible {
         }
     }
 
+    /// The lowest version this range accepts — the floor of a `^` or `>=`
+    /// range, or the exact version itself for a bare `x.y.z`.
+    ///
+    /// Exposed so a caller can compare a range against a threshold version
+    /// rather than a specific one. `ActivationEventMatcher` is the first: it
+    /// needs to know whether a manifest's declared engine is 1.74.0 or later
+    /// — the version VS Code started treating a declared command as
+    /// implicitly activating — and `accepts(_:)` alone cannot answer that
+    /// correctly. Probing `accepts(1.73.0)` comes close, but is wrong for a
+    /// range like `^1.73.5`: its floor is below 1.74.0, yet it still rejects
+    /// the literal version 1.73.0.
+    public var minimumVersion: SemanticVersion {
+        switch requirement {
+        case .caret(let floor): return floor
+        case .atLeast(let floor): return floor
+        case .exact(let exact): return exact
+        }
+    }
+
     public var description: String { rawValue }
 }
