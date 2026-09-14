@@ -169,4 +169,17 @@ final class SupportTests: XCTestCase {
         XCTAssertEqual(form?.state.value(for: "notice"), .string("Not available in this version"))
         XCTAssertNil(form?.state.spec.actions.save)
     }
+
+    // MARK: HubText
+    func testNonBlankReturnsNilForNilOrBlank() {
+        XCTAssertNil(HubText.nonBlank(nil))
+        XCTAssertNil(HubText.nonBlank(""))
+        XCTAssertNil(HubText.nonBlank("   "))
+    }
+    func testNonBlankTrimsWhitespace() {
+        XCTAssertEqual(HubText.nonBlank("  Bob  "), "Bob")
+    }
+    func testNonBlankPassesThroughPlainText() {
+        XCTAssertEqual(HubText.nonBlank("Bob"), "Bob")
+    }
 }
