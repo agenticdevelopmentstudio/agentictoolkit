@@ -339,7 +339,19 @@ extension VSCodeAPI {
     /// lazy caller and adopt whatever object already sits under
     /// `languageModelVocabularyGlobalName`, real or not, with no way to tell
     /// the difference.
-    public static func installLanguageModelVocabulary(in context: JSContext) -> [(String, JSValue)]? {
+    ///
+    /// Returns a `[String: JSValue]`, not the array of `(String, JSValue)`
+    /// tuples this returned before fix round 1: `installTextGeometryClasses`
+    /// and `installDiagnosticTypes` already returned a dictionary, and
+    /// `ExtensionHost.installVSCodeMembers(_:onto:)` (fix round 1, F5) is
+    /// one helper shared by all three install sites, so all three now hand
+    /// it the same shape. `languageModelVocabularyMemberNames`'s declared
+    /// order no longer survives into the caller either way: the shared
+    /// helper installs by sorted key (Ruling 56), where this function's own
+    /// install loop previously did not.
+    public static func installLanguageModelVocabulary(
+        in context: JSContext
+    ) -> [String: JSValue]? {
         let container: JSValue
         if let cached = context.objectForKeyedSubscript(languageModelVocabularyGlobalName), cached.isObject {
             container = cached
@@ -356,7 +368,7 @@ extension VSCodeAPI {
             container = created
         }
 
-        var members: [(String, JSValue)] = []
+        var members: [String: JSValue] = [:]
         members.reserveCapacity(languageModelVocabularyMemberNames.count)
         for memberName in languageModelVocabularyMemberNames {
             guard let member = container.forProperty(memberName), member.isObject else {
@@ -368,7 +380,7 @@ extension VSCodeAPI {
                     """)
                 return nil
             }
-            members.append((memberName, member))
+            members[memberName] = member
         }
         return members
     }

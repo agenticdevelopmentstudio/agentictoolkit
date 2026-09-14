@@ -490,15 +490,16 @@ struct VSCodeAPISubNamespaceTests {
     ///
     /// The recorder captures `context` weakly and returns if it is gone: a
     /// strong capture into a `@convention(block)` the context itself retains
-    /// (through the Proxy handler, through the namespace, through
-    /// `globalThis`) is the cycle
-    /// `subNamespace(path:members:in:)`'s own doc warns callers about, and a
-    /// test that leaks a `JSContext` per run has no business being the worked
-    /// example the next adaptor tasks copy. The unwrap sits *inside*
+    /// (through the Proxy handler, through the namespace, through `globalThis`)
+    /// is the cycle `subNamespace(path:members:in:)`'s own doc warns callers
+    /// about, and a test that leaks a `JSContext` per run has no business being
+    /// the worked example the next adaptor tasks copy. The unwrap sits *inside*
     /// `MainActor.assumeIsolated` to match `VSCodeAPI.swift:72-77` and
-    /// `ExtensionHost.swift:1148-1150`, which is a consistency choice and not
-    /// a compiler requirement: `assumeIsolated`'s operation parameter is
-    /// `@MainActor () throws -> T` with no `sending`, and
+    /// `ExtensionHost.swift:1261-1263` (`MainActor.assumeIsolated {` / `guard
+    /// let self else { return }` / `if succeeded {`, true against this branch's
+    /// fix-round-1 commit), which is a consistency choice and not a compiler
+    /// requirement: `assumeIsolated`'s operation parameter is `@MainActor ()
+    /// throws -> T` with no `sending`, and
     /// `ComposableTabsPaneViewController.swift:243-247` unwraps *outside* and
     /// hands a non-`Sendable` `NSEvent` in, and ships. Both forms may well
     /// compile; no compiler has judged either one here.

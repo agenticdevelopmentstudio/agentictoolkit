@@ -169,3 +169,52 @@ func withInMemorySettings<Result>(_ body: () throws -> Result) rethrows -> Resul
     defer { UserSettings.shared = previous }
     return try body()
 }
+
+/// An `ExtensionEventWindowScheduling` whose windows close only when a test
+/// says so.
+///
+/// Here rather than in one suite because two suites need it —
+/// `ExtensionEventTests` for the emitter's own window behaviour and
+/// `MainThreadDiagnosticsTests` for the same behaviour through the real
+/// adaptor — and this file's own rule is one copy, not three.
+///
+/// **Nothing here sleeps.** A test that waited out the real 50 ms window
+/// would be measuring the machine's load; `closeOpenWindows()` is the whole
+/// point of the seam.
+///
+/// `openCount` is what distinguishes a fixed window from a trailing-edge one:
+/// a trailing-edge implementation has no way to push a pending deadline out
+/// through this protocol (there is no cancel), so it would have to open a
+/// second window per `fire`, and `openCount` would climb.
+@MainActor
+final class ManualExtensionEventWindow: ExtensionEventWindowScheduling {
+
+    /// How many windows have been opened over this scheduler's whole life.
+    private(set) var openCount = 0
+
+    /// The delay each open asked for, in order — so a test can assert the
+    /// emitter passed its own delay through rather than a hardcoded one.
+    private(set) var requestedDelays: [TimeInterval] = []
+
+    private var pendingCloses: [@MainActor () -> Void] = []
+
+    /// Whether a window is open and waiting to be closed.
+    var hasOpenWindow: Bool { !pendingCloses.isEmpty }
+
+    func openWindow(closingAfter delay: TimeInterval, onClose: @escaping @MainActor () -> Void) {
+        openCount += 1
+        requestedDelays.append(delay)
+        pendingCloses.append(onClose)
+    }
+
+    /// Closes every window opened since the last call.
+    ///
+    /// The pending list is emptied *before* the closures run, so a `fire`
+    /// from inside a listener opens a genuinely new window rather than
+    /// landing in the batch being drained.
+    func closeOpenWindows() {
+        let closes = pendingCloses
+        pendingCloses = []
+        for close in closes { close() }
+    }
+}
