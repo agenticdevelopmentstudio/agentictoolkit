@@ -339,12 +339,26 @@ public final class MainThreadWorkspace {
         let identifier = self.extensionIdentifier
         let recordMiss: @convention(block) (String) -> Void = { memberPath in
             MainActor.assumeIsolated {
-                ledger.record(memberPath: memberPath, extensionIdentifier: identifier)
+                // The `_ =` is load-bearing: removing it breaks the build.
+                // `MainActor.assumeIsolated` is generic in its closure's result
+                // and is not `@discardableResult`, so a single-expression body
+                // here infers `T == NotImplementedAccess` against this
+                // `Void`-returning `@convention(block)` closure and fails to
+                // type-check. `record`'s own `@discardableResult`
+                // (`NotImplementedLedger.swift:113`) does not cover that.
+                _ = ledger.record(memberPath: memberPath, extensionIdentifier: identifier)
             }
         }
         let recordProbe: @convention(block) (String) -> Void = { memberPath in
             MainActor.assumeIsolated {
-                ledger.recordProbe(memberPath: memberPath, extensionIdentifier: identifier)
+                // The `_ =` is load-bearing: removing it breaks the build.
+                // `MainActor.assumeIsolated` is generic in its closure's result
+                // and is not `@discardableResult`, so a single-expression body
+                // here infers `T == NotImplementedAccess` against this
+                // `Void`-returning `@convention(block)` closure and fails to
+                // type-check. `recordProbe`'s own `@discardableResult`
+                // (`NotImplementedLedger.swift:124`) does not cover that.
+                _ = ledger.recordProbe(memberPath: memberPath, extensionIdentifier: identifier)
             }
         }
         let members: [String: Any] = [
@@ -551,6 +565,12 @@ public final class MainThreadWorkspace {
         resolveWith: @escaping @MainActor (Value, JSContext) -> Any
     ) -> JSValue? {
         JSValue(newPromiseIn: context) { [weak self] resolveValue, rejectValue in
+            // `valueWithNewPromiseInContext:fromExecutor:` declares both
+            // executor arguments `_Null_unspecified`, so Swift types them
+            // `JSValue?` here. JavaScriptCore always supplies both; with
+            // either missing there is nothing to settle the promise through,
+            // so the only honest answer is to leave it pending.
+            guard let resolveValue, let rejectValue else { return }
             let settlement = SettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {

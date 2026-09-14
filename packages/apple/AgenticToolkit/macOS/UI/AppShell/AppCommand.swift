@@ -218,30 +218,6 @@ public final class CommandRegistry {
         return token
     }
 
-    /// Take back the command registered under `id`.
-    ///
-    /// The counterpart `register(_:)` needed from the moment commands stopped
-    /// being process-lifetime app features and started being per-object: a
-    /// branch controller registers three commands namespaced by its checkout,
-    /// and when that checkout goes away — `git worktree remove`, or the whole
-    /// project window closing — the commands must go with it. Left behind they
-    /// are worse than clutter: they act on a directory that no longer exists,
-    /// under a palette row the user has every reason to trust.
-    ///
-    /// An unknown id is a no-op rather than an error. Teardown is exactly where
-    /// "was this ever registered?" is least worth tracking, and making the
-    /// caller answer it would only invite it to guess (`idempotency`).
-    ///
-    /// Both structures are cleaned. Removing from `commandsByID` alone already
-    /// fixes `allCommands`, `command(id:)`, `isEnabled(id:)` and `execute(id:)`
-    /// — but it leaves the id in `registrationOrder`, where it makes the next
-    /// `register` of that id look new, append a second entry, and list one
-    /// command twice.
-    public func unregister(id: String) {
-        guard commandsByID.removeValue(forKey: id) != nil else { return }
-        registrationOrder.removeAll { $0 == id }
-    }
-
     /// Every registered command, in registration order — what a command palette
     /// lists.
     public var allCommands: [AppCommand] {
@@ -311,6 +287,14 @@ public final class CommandRegistry {
     /// Removes whatever is currently registered under `id`, and its entry in
     /// `registrationOrder`.
     ///
+    /// The counterpart `register(_:)` needed from the moment commands stopped
+    /// being process-lifetime app features and started being per-object: a
+    /// branch controller registers three commands namespaced by its checkout,
+    /// and when that checkout goes away — `git worktree remove`, or the whole
+    /// project window closing — the commands must go with it. Left behind they
+    /// are worse than clutter: they act on a directory that no longer exists,
+    /// under a palette row the user has every reason to trust.
+    ///
     /// **"Whatever is currently registered" is the literal contract**, and a
     /// caller that means "remove the registration *I* made" wants
     /// `unregister(id:token:)` below instead. The distinction is real because
@@ -328,6 +312,12 @@ public final class CommandRegistry {
     /// trusted to shadow the app, and that policy belongs with
     /// `ExtensionRegistry` and the permissions work, not with a registry whose
     /// whole job is turning an id into work.
+    ///
+    /// Both structures are cleaned. Removing from `registrationsByID` alone
+    /// already fixes `allCommands`, `command(id:)`, `isEnabled(id:)` and
+    /// `execute(id:)` — but it leaves the id in `registrationOrder`, where it
+    /// makes the next `register` of that id look new, append a second entry,
+    /// and list one command twice.
     ///
     /// Silent on an unknown id, which is not a mistake worth `fail-fast`ing
     /// over the way an unregistered `execute` is: nothing was supposed to run
