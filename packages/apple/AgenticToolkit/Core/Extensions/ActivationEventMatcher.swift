@@ -87,10 +87,11 @@ public enum ActivationTrigger: Sendable, Equatable {
 /// Decides whether a manifest's `activationEvents` (and, from VS Code 1.74,
 /// its declared commands) wake it for a given trigger.
 ///
-/// Built once from a manifest and then queried repeatedly — `events` is
-/// captured at `init` rather than re-parsed on every `matches(_:)` call, since
-/// a host may check the same extension against many triggers over its
-/// lifetime (each document opened, each command invoked).
+/// Built once from a manifest and then queried repeatedly — `events` and the
+/// `workspaceContains:` glob patterns are both captured at `init` rather than
+/// re-parsed on every `matches(_:)` call, since a host may check the same
+/// extension against many triggers over its lifetime (each document opened,
+/// each command invoked).
 public struct ActivationEventMatcher: Sendable, Equatable {
 
     /// Every entry we understood, in manifest order.
@@ -104,6 +105,16 @@ public struct ActivationEventMatcher: Sendable, Equatable {
     /// They never match; they are surfaced here so a report can say so rather
     /// than leaving an author wondering why their extension never woke.
     public let unsupportedPatterns: [String]
+
+    /// Every `workspaceContains:` glob that parsed, in manifest order, as the
+    /// `GlobPattern` a `.workspaceScanned` trigger is matched against. The
+    /// globs that did *not* parse are in `unsupportedPatterns` and are absent
+    /// from here, which is the whole of how they never match.
+    ///
+    /// Parsed in `init` and kept, rather than rebuilt per `matches(_:)` call:
+    /// parsing is the only part of matching that does real work up front, and
+    /// `init` had to do it anyway to fill `unsupportedPatterns`.
+    private let workspaceContainsPatterns: [GlobPattern]
 
     /// Command ids that wake this extension *without* an `onCommand:` entry,
     /// because it declares an engine of 1.74.0 or later. Empty otherwise.
@@ -126,8 +137,10 @@ public struct ActivationEventMatcher: Sendable, Equatable {
     ///
     /// Parses every `activationEvents` entry once, up front, sorting them
     /// into `events` (recognised) and `unrecognizedEvents` (not); does the
-    /// same triage for `workspaceContains:` globs into `unsupportedPatterns`,
-    /// so a caller never has to re-derive "did this glob parse" for itself.
+    /// same triage for `workspaceContains:` globs, keeping the ones that
+    /// parsed in `workspaceContainsPatterns` and the raw text of the ones
+    /// that did not in `unsupportedPatterns`, so nothing re-derives "did
+    /// this glob parse" — or re-parses it — later.
     /// It also computes `implicitlyActivatingCommands`: from VS Code 1.74, a
     /// command already declared in `contributes.commands` activates its
     /// extension without a matching `onCommand:` entry.
@@ -152,12 +165,17 @@ public struct ActivationEventMatcher: Sendable, Equatable {
         unrecognizedEvents = unrecognized
 
         var unsupported: [String] = []
+        var patterns: [GlobPattern] = []
         for event in parsed {
-            if case .workspaceContains(let glob) = event.kind, GlobPattern(glob) == nil {
+            guard case .workspaceContains(let glob) = event.kind else { continue }
+            if let pattern = GlobPattern(glob) {
+                patterns.append(pattern)
+            } else {
                 unsupported.append(glob)
             }
         }
         unsupportedPatterns = unsupported
+        workspaceContainsPatterns = patterns
 
         if let range = VSCodeEngineRange(manifest.engines.vscode),
            range.minimumVersion >= Self.implicitCommandActivationFloor {
@@ -196,13 +214,8 @@ public struct ActivationEventMatcher: Sendable, Equatable {
             }
 
         case .workspaceScanned(let relativePaths):
-            return events.contains { event in
-                guard case .workspaceContains(let glob) = event.kind else { return false }
-                // A glob already recorded in `unsupportedPatterns` fails to
-                // construct here too and simply never matches — the two
-                // never disagree because both ask the same question.
-                guard let pattern = GlobPattern(glob) else { return false }
-                return relativePaths.contains { pattern.matches($0) }
+            return workspaceContainsPatterns.contains { pattern in
+                relativePaths.contains { pattern.matches($0) }
             }
         }
     }
@@ -223,21 +236,28 @@ public struct ActivationEventMatcher: Sendable, Equatable {
 /// glob to regex requires escaping every regex metacharacter that is also a
 /// legal filename character, and a missed one turns a literal `.` or `+` in
 /// a real filename into a wildcard.
-internal struct GlobPattern {
+internal struct GlobPattern: Equatable, Sendable {
 
-    private enum Token {
+    private enum Token: Equatable, Sendable {
         case literal(Character)
         /// `*` — any run of characters except `/`, including empty.
         case star
-        /// `**` on its own — any run of characters *including* `/`,
-        /// including empty. Distinct from `anyDirectories` below: a bare
-        /// `**` not immediately followed by `/` carries no directory-segment
-        /// meaning, just "anything, including slashes."
+        /// A trailing `**` that is a whole path segment — any run of
+        /// characters *including* `/`, including empty. `tokenize` emits it
+        /// only for a `**` at the end of the pattern (or of a `{...}`
+        /// alternative) that is preceded by `/` or by nothing: `src/**`,
+        /// `**`. Distinct from `anyDirectories` below, which is the same
+        /// `**` followed by a `/` and therefore able to consume that slash
+        /// too. A `**` that is *not* a whole segment — `src**/foo`,
+        /// `lib/**test.js` — is tokenized as `.star` and never reaches this
+        /// case.
         case doubleStar
         /// `?` — exactly one character, not `/`.
         case question
         /// `**/` as one unit, tokenized together rather than as `doubleStar`
-        /// followed by a literal `/`. That distinction is the whole reason
+        /// followed by a literal `/`, and only where the `**` begins a path
+        /// segment — start of the pattern, or a `/` immediately before it.
+        /// That distinction is the whole reason
         /// this case exists: a leading `**/` must also match *zero*
         /// directories, i.e. the slash itself is allowed to vanish along
         /// with everything `**` would have consumed. A plain literal `/`
@@ -296,11 +316,28 @@ internal struct GlobPattern {
             switch characters[index] {
             case "*":
                 if index + 1 < characters.count, characters[index + 1] == "*" {
-                    if index + 2 < characters.count, characters[index + 2] == "/" {
+                    // `**` carries its directory-crossing meaning only when
+                    // it is a whole path segment: start-of-pattern or a `/`
+                    // before it, and a `/` or end-of-pattern after it.
+                    // `src**/foo` and `lib/**test.js` each fail one half of
+                    // that, and in both the `**` is an ordinary `*` that
+                    // cannot cross `/` — two `*` in a row mean no more than
+                    // one, so one `.star` consumes both characters.
+                    //
+                    // `index` is an index into `characters`, which for a
+                    // `{...}` alternative is that alternative's own
+                    // characters, not the whole pattern's: inside a branch,
+                    // `index == 0` is the start of the branch. What precedes
+                    // the `{` is not consulted.
+                    let startsSegment = index == 0 || characters[index - 1] == "/"
+                    if startsSegment, index + 2 < characters.count, characters[index + 2] == "/" {
                         tokens.append(.anyDirectories)
                         index += 3
-                    } else {
+                    } else if startsSegment, index + 2 == characters.count {
                         tokens.append(.doubleStar)
+                        index += 2
+                    } else {
+                        tokens.append(.star)
                         index += 2
                     }
                 } else {

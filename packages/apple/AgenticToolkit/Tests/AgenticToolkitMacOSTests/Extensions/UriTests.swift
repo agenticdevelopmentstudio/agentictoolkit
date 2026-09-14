@@ -236,7 +236,7 @@ struct UriTests {
         #expect(stringified.toString()?.contains("\"path\":\"/tmp\"") == true)
     }
 
-    // MARK: - Freezing (F2)
+    // MARK: - Freezing
 
     /// `Uri` and `Uri.prototype` are frozen the moment `uriClassSource`
     /// installs them — not from Swift, and not with a window between

@@ -23,7 +23,7 @@ import JavaScriptCore
 /// accepting a `LanguageModelToolResultPart` in its content array and
 /// `.Assistant` accepting a `LanguageModelToolCallPart` (neither is enforced
 /// at runtime, and the brief says not to add a runtime check upstream does
-/// not have); and the three PROPOSED members out of scope by Ruling 1
+/// not have); and the three PROPOSED members out of scope
 /// (`LanguageModelChatMessageRole.System` beyond confirming the enum has
 /// exactly two members and is frozen, `LanguageModelToolResultPart.isError`,
 /// `LanguageModelTextPart`/`LanguageModelDataPart`'s `audience`) — there is
@@ -323,14 +323,13 @@ struct LanguageModelMessageVocabularyTests {
         #expect(result.toBool() == true)
     }
 
-    // MARK: - Instances are not frozen (finding 1; not one of the ten numbered mutations)
+    // MARK: - Instances are not frozen (not one of the ten numbered mutations)
 
-    /// Not one of the brief's ten numbered mutations, but the other half of
-    /// finding 1's instruction ("do not freeze instances"): `role` and
-    /// `name` are plain, assignable data properties on a constructed
-    /// message, not read-only. If a future change froze instances to
-    /// "match" the class/prototype freeze convention, this is the test that
-    /// would catch it.
+    /// Not one of the brief's ten numbered mutations: instances are never
+    /// frozen, so `role` and `name` are plain, assignable data properties
+    /// on a constructed message, not read-only. If a future change froze
+    /// instances to "match" the class/prototype freeze convention, this is
+    /// the test that would catch it.
     @Test
     func chatMessageRoleAndNameRemainAssignableAfterConstruction() throws {
         let context = try makeContext()
@@ -347,7 +346,7 @@ struct LanguageModelMessageVocabularyTests {
         #expect(result.toBool() == true)
     }
 
-    // MARK: - Property reads on the four previously-unread constructors (finding 2, not one of the ten mutations)
+    // MARK: - Property reads on the four previously-unread constructors (not one of the ten mutations)
 
     /// `LanguageModelToolCallPart`'s three constructor arguments land on the
     /// correspondingly named properties, not swapped or dropped. `callId` and
@@ -425,13 +424,13 @@ struct LanguageModelMessageVocabularyTests {
         #expect(result.toBool() == true)
     }
 
-    // MARK: - Unpaired surrogates encode as U+FFFD (finding 5; not one of the ten numbered mutations)
+    // MARK: - Unpaired surrogates encode as U+FFFD (not one of the ten numbered mutations)
 
-    /// R2 (task 5.7a-i fix round 1): an unpaired surrogate — high or low —
-    /// encodes as U+FFFD (`EF BF BD`), matching upstream's `TextEncoder`
-    /// (`VSBuffer.fromString`), rather than the raw three-byte surrogate
-    /// sequence (`ED A0 80`), which is not valid UTF-8. `'\uD800'` is a lone
-    /// high surrogate with nothing following it to pair with.
+    /// An unpaired surrogate — high or low — encodes as U+FFFD (`EF BF BD`),
+    /// matching upstream's `TextEncoder` (`VSBuffer.fromString`), rather than
+    /// the raw three-byte surrogate sequence (`ED A0 80`), which is not valid
+    /// UTF-8. `'\uD800'` is a lone high surrogate with nothing following it to
+    /// pair with.
     @Test
     func unpairedSurrogateEncodesAsTheReplacementCharacter() throws {
         let context = try makeContext()
@@ -448,7 +447,7 @@ struct LanguageModelMessageVocabularyTests {
         #expect(result.toBool() == true)
     }
 
-    // MARK: - LanguageModelDataPart.image (finding 9; not one of the ten numbered mutations)
+    // MARK: - LanguageModelDataPart.image (not one of the ten numbered mutations)
 
     /// `LanguageModelDataPart.image`'s `data` and explicit `mime` arguments
     /// both reach the constructed part. This replaces the declaration this

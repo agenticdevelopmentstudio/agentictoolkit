@@ -8,7 +8,7 @@ import JavaScriptCore
 import OSLog
 import AgenticToolkitCore
 
-// MARK: - The seam (Ruling 5)
+// MARK: - The seam (Ledger Ruling 5 — extension diagnostics get their own store)
 
 /// Notified whenever an extension-visible diagnostic collection changes the
 /// diagnostics for one or more `Uri`s — `set` (either overload), `delete`,
@@ -414,9 +414,8 @@ public final class MainThreadDiagnostics {
     /// Raises rather than rejects on a torn-down adaptor: the member answers
     /// a `Disposable` synchronously, not a `Thenable`, and
     /// `VSCodeAPI.TeardownResponse`'s own doc
-    /// (`VSCodeAPI.swift:83-90`, whose rule alone is `:86-90`; commit
-    /// `aafb172a` — that file is untouched by this task, so the numbers hold
-    /// at this commit too) makes that the deciding question. The same choice
+    /// (`VSCodeAPI.swift:89-96`, whose rule alone is `:92-96`) makes that the
+    /// deciding question. The same choice
     /// `createDiagnosticCollection` above makes.
     public private(set) lazy var onDidChangeDiagnostics: Any = VSCodeAPI.member(
         "vscode.languages.onDidChangeDiagnostics", of: self, whenTornDown: .raisedException
@@ -506,17 +505,16 @@ public final class MainThreadDiagnostics {
         // dispatch, so it must fall through to the no-argument branch below
         // exactly as an omitted argument does — matching
         // `handleCreateDiagnosticCollection`'s own `isUndefined`/`isNull`
-        // check above (O4, ledger fix round 1).
+        // check above.
         if let first = arguments.first, !first.isUndefined, !first.isNull {
             guard let url = VSCodeAPI.url(from: first, in: context) else {
                 return VSCodeAPI.raise("getDiagnostics requires a Uri, or no argument.", in: context)
             }
             // Refuses the whole call rather than silently shortening the
             // returned array — the store may hold more diagnostics for
-            // `url` than `VSCodeAPI.diagnosticValue(for:in:)` can decode
-            // (O2, ledger fix round 1); propagates the same
-            // refuse-the-whole-array contract
-            // `DiagnosticTypes.swift:461-464`/`:550-561` already enforces
+            // `url` than `VSCodeAPI.diagnosticValue(for:in:)` can decode;
+            // propagates the same refuse-the-whole-array contract
+            // `DiagnosticTypes.swift:483-486`/`:572-582` already enforces
             // one level down.
             guard let values = MainThreadDiagnostics.diagnosticValues(
                 store.diagnostics(for: url), in: context
@@ -525,13 +523,13 @@ public final class MainThreadDiagnostics {
             }
             return MainThreadDiagnostics.arrayValue(of: values, in: context)
         }
-        var pairValues: [JSValue] = []
-        for entry in store.allDiagnostics() {
-            if let pairValue = MainThreadDiagnostics.pairValue(
-                url: entry.url, diagnostics: entry.diagnostics, in: context
-            ) {
-                pairValues.append(pairValue)
-            }
+        // Refuses the whole call rather than silently shortening the returned
+        // array, exactly as the resource branch above does — see
+        // `pairValues(_:in:)`.
+        guard let pairValues = MainThreadDiagnostics.pairValues(
+            store.allDiagnostics(), in: context
+        ) else {
+            return VSCodeAPI.raise("Could not decode a diagnostic entry.", in: context)
         }
         return MainThreadDiagnostics.arrayValue(of: pairValues, in: context)
     }
@@ -606,7 +604,7 @@ public final class MainThreadDiagnostics {
         }
         // Raises rather than shortening the array on an undecodable
         // diagnostic, matching `getDiagnostics(resource)`'s own choice —
-        // this site can raise, so it does (O2, ledger fix round 1).
+        // this site can raise, so it does.
         guard let values = MainThreadDiagnostics.diagnosticValues(existing, in: context) else {
             return VSCodeAPI.raise("Could not decode a diagnostic for this Uri.", in: context)
         }
@@ -648,8 +646,7 @@ public final class MainThreadDiagnostics {
             // `forEach`'s existing failure unit is the whole entry (the
             // `uriValue` guard above already skips one on a bad Uri) — an
             // undecodable diagnostic must fail the same entry, never
-            // silently shorten its diagnostics array (O2, ledger fix
-            // round 1).
+            // silently shorten its diagnostics array.
             guard let diagnosticsValues = MainThreadDiagnostics.diagnosticValues(entry.diagnostics, in: context),
                   let diagnosticsArrayValue = MainThreadDiagnostics.arrayValue(of: diagnosticsValues, in: context)
             else { continue }
@@ -677,15 +674,18 @@ public final class MainThreadDiagnostics {
     /// to — see `installSymbolIterator(on:getPairs:in:)`. Built from the
     /// same `store.pairs(owner:)` order `forEach` reads, so the two agree
     /// (mutation 8).
+    ///
+    /// Raises rather than shortening the array when an entry will not decode,
+    /// the same refusal `getDiagnostics()`'s two branches make — see
+    /// `pairValues(_:in:)`. That is what makes `for…of` fail the way `forEach`
+    /// does on the same collection, instead of iterating a quietly shorter
+    /// sequence.
     private func pairsArrayValue(owner: String) -> JSValue? {
         guard let context = JSContext.current() else { return nil }
-        var pairValues: [JSValue] = []
-        for entry in store.pairs(owner: owner) {
-            if let pairValue = MainThreadDiagnostics.pairValue(
-                url: entry.url, diagnostics: entry.diagnostics, in: context
-            ) {
-                pairValues.append(pairValue)
-            }
+        guard let pairValues = MainThreadDiagnostics.pairValues(
+            store.pairs(owner: owner), in: context
+        ) else {
+            return VSCodeAPI.raise("Could not decode a diagnostic entry.", in: context)
         }
         return MainThreadDiagnostics.arrayValue(of: pairValues, in: context)
     }
@@ -723,9 +723,9 @@ public final class MainThreadDiagnostics {
         guard let object = JSValue(newObjectIn: context) else { return nil }
 
         // Hoisted above every method block below, and consulted first by
-        // each of them (B3, ledger fix round 1): once `dispose()` frees
-        // `owner`, a *different* collection can be registered under that
-        // same key, and every block here still closes over the same
+        // each of them: once `dispose()` frees `owner`, a *different*
+        // collection can be registered under that same key, and every block
+        // here still closes over the same
         // `owner` string. Without this check, a disposed object's stale
         // `set`/`delete`/`clear`/`get` would reach the new collection
         // rather than staying inert — see the divergence paragraph above
@@ -975,16 +975,16 @@ public final class MainThreadDiagnostics {
     /// directly rather than `Any`: every call site here is a synchronous
     /// method result, never a promise-settlement argument, so there is no
     /// `NSNull()` fallback to widen into. Licensed as a third independent
-    /// copy of this one-line idea by `MainThreadLanguageModels.swift:370-378`
-    /// (commit 6c55bdb0)'s own precedent for `arrayValue(of:in:)` ("not a
-    /// shared helper").
+    /// copy of this one-line idea by
+    /// `MainThreadLanguageModels.swift:666-672`'s own precedent for
+    /// `arrayValue(of:in:)` ("not a shared helper").
     private static func undefinedValue(in context: JSContext) -> JSValue? {
         JSValue(undefinedIn: context)
     }
 
     /// The disposed-collection return value for `set`/`delete`/`clear`/
-    /// `get`/`forEach`, each contractually inert once disposed (B3, ledger
-    /// fix round 1) — `undefined`, resolved via `JSContext.current()` the
+    /// `get`/`forEach`, each contractually inert once disposed —
+    /// `undefined`, resolved via `JSContext.current()` the
     /// same way every handler above resolves its own context, since these
     /// blocks run outside any handler method.
     private static func disposedUndefinedValue() -> JSValue? {
@@ -993,7 +993,7 @@ public final class MainThreadDiagnostics {
     }
 
     /// The disposed-collection return value for `has` — `false`, per the
-    /// same B3 contract `disposedUndefinedValue()` documents.
+    /// same inert-once-disposed contract `disposedUndefinedValue()` documents.
     private static func disposedFalseValue() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
         return JSValue(bool: false, in: context)
@@ -1010,10 +1010,10 @@ public final class MainThreadDiagnostics {
     /// `nil`, not a partial one — the instant a single element fails,
     /// rather than a bare `compactMap`, which would silently hand the
     /// extension fewer diagnostics than the store actually holds for that
-    /// Uri. Propagates the same contract `DiagnosticTypes.swift:461-464`
-    /// (also `DiagnosticTypes.swift:550-561`) already enforces one level
+    /// Uri. Propagates the same contract `DiagnosticTypes.swift:483-486`
+    /// (also `DiagnosticTypes.swift:572-582`) already enforces one level
     /// down; every call site below shares this one implementation rather
-    /// than re-deciding it per site (O2, ledger fix round 1) — only what a
+    /// than re-deciding it per site — only what a
     /// site does with a `nil` result (raise, or fail the one entry it
     /// belongs to) differs.
     private static func diagnosticValues(
@@ -1038,11 +1038,34 @@ public final class MainThreadDiagnostics {
         // Fails the whole pair — `nil` — on an undecodable diagnostic, the
         // same as the `uriValue` guard above already does for a bad Uri,
         // never shortening the diagnostics array within a pair that is
-        // returned (O2, ledger fix round 1).
+        // returned.
         guard let diagnosticsValues = diagnosticValues(diagnostics, in: context),
               let diagnosticsArrayValue = arrayValue(of: diagnosticsValues, in: context)
         else { return nil }
         return arrayValue(of: [uriValue, diagnosticsArrayValue], in: context)
+    }
+
+    /// Every entry in `entries` as a `[uri, diagnostics]` pair, refusing the
+    /// whole array — `nil`, not a partial one — the instant a single entry
+    /// fails to decode.
+    ///
+    /// The same contract `diagnosticValues(_:in:)` enforces one level down,
+    /// applied one level up: an `if let` that appended only the pairs that
+    /// decoded would hand the extension a shorter array that looks like a
+    /// complete answer, and upstream (`extHostDiagnostics.ts:317-334`) never
+    /// drops an entry.
+    private static func pairValues(
+        _ entries: [(url: URL, diagnostics: [VSCodeAPI.ExtensionDiagnostic])], in context: JSContext
+    ) -> [JSValue]? {
+        var result: [JSValue] = []
+        result.reserveCapacity(entries.count)
+        for entry in entries {
+            guard let value = pairValue(
+                url: entry.url, diagnostics: entry.diagnostics, in: context
+            ) else { return nil }
+            result.append(value)
+        }
+        return result
     }
 
     /// A small IIFE that assigns `target[Symbol.iterator]`, delegating to
@@ -1077,20 +1100,4 @@ public final class MainThreadDiagnostics {
 
 extension MainThreadDiagnostics: Loggable {
     public static nonisolated let logger = makeLogger()
-}
-
-// MARK: - Carrying a JSValue? out of MainActor.assumeIsolated
-
-/// `@unchecked Sendable`, on the same terms as `VSCodeAPI.swift`'s own
-/// `private struct UncheckedJSValueBox` and `MainThreadLanguageModels.swift`'s
-/// own local equivalent (both `private` to their own file, so this is a
-/// third independent copy, not a reuse): nothing here actually crosses an
-/// isolation domain — every block above and the `MainActor.assumeIsolated`
-/// call inside it run on the same main actor — but `assumeIsolated`'s
-/// generic return type is checked against `Sendable`, and a bare `JSValue?`
-/// is not, and is not a type this module can extend with a conformance.
-/// This box is the honest way to state the guarantee the surrounding code
-/// already holds.
-private struct UncheckedJSValueBox: @unchecked Sendable {
-    let value: JSValue?
 }

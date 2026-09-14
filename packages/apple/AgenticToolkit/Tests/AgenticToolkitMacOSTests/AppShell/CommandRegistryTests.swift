@@ -276,10 +276,11 @@ struct CommandRegistryTests {
     }
 
     /// The reason the token exists. Two registrants want the same id; the
-    /// second replaces the first (Ruling 5 permits that, loudly), and only
-    /// afterwards does the first let go of its `Disposable`. By id alone that
-    /// deletes the *second* registrant's command — silently, permanently, and
-    /// from code that believes it is only cleaning up after itself.
+    /// second replaces the first (task 5.3's Ruling 5 permits that, loudly),
+    /// and only afterwards does the first let go of its `Disposable`. By id
+    /// alone that deletes the *second* registrant's command — silently,
+    /// permanently, and from code that believes it is only cleaning up after
+    /// itself.
     @Test("A token from a replaced registration unregisters nothing")
     func aStaleTokenUnregistersNothing() {
         let registry = CommandRegistry()

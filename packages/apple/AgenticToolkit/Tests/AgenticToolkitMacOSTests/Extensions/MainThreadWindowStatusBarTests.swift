@@ -88,34 +88,6 @@ struct MainThreadWindowStatusBarTests {
         try ExtensionFixtures.makeTemporaryDirectory("MainThreadWindowStatusBarTests")
     }
 
-    private func manifest(name: String, browser: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "browser": "\(browser)"
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    private func makeHost(
-        name: String = "alpha",
-        source: String,
-        entryPath: String = "dist/web.js",
-        in directory: URL,
-        ledger: NotImplementedLedger = NotImplementedLedger()
-    ) throws -> ExtensionHost {
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(name: name, browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(loadedExtension: loaded, notImplementedLedger: ledger)
-    }
-
     /// Installs `createStatusBarItem` onto `vscode.window` and the
     /// `StatusBarAlignment` table onto **`vscode`** — the top-level
     /// namespace, not `vscode.window`, on `MainThreadWindow
@@ -383,8 +355,8 @@ struct MainThreadWindowStatusBarTests {
     /// An item that is never `show()`n reaches the presenter zero times,
     /// even after property writes — `commitStatusBarUpdate`'s own
     /// `item.isVisible` guard, which every mutating setter now goes through
-    /// (Ruling 7), must hold even though the mutation itself always
-    /// succeeds.
+    /// (task 5.5c's Ruling 7), must hold even though the mutation itself
+    /// always succeeds.
     @Test
     func neverShownItemReachesThePresenterZeroTimesEvenAfterWrites() async throws {
         let directory = try makeTempDirectory()
@@ -433,9 +405,9 @@ struct MainThreadWindowStatusBarTests {
     }
 
     /// A property write issued after `show()` reaches the presenter again —
-    /// one call per write, with no coalescing (Divergence #1, Ruling 7):
-    /// `show()` itself commits once, then two further `text` writes each
-    /// commit once more, for three calls total.
+    /// one call per write, with no coalescing (Divergence #1, task 5.5c's
+    /// Ruling 7): `show()` itself commits once, then two further `text`
+    /// writes each commit once more, for three calls total.
     @Test
     func aWriteAfterShowReachesThePresenterAgainWithNoCoalescing() async throws {
         let directory = try makeTempDirectory()

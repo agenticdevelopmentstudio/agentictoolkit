@@ -74,47 +74,6 @@ struct ExtensionHostTests {
         try ExtensionFixtures.makeTemporaryDirectory("ExtensionHostTests")
     }
 
-    /// A manifest with whichever entry-point keys the caller names. Built by
-    /// decoding JSON, because `ExtensionManifest` has no memberwise
-    /// initializer and inventing one for tests would be a second answer to
-    /// what a manifest is.
-    private func manifest(
-        name: String,
-        browser: String? = nil,
-        main: String? = nil
-    ) throws -> ExtensionManifest {
-        var entries: [String] = []
-        if let browser { entries.append("\"browser\": \"\(browser)\"") }
-        if let main { entries.append("\"main\": \"\(main)\"") }
-        let entryJSON = entries.isEmpty ? "" : ",\n    \(entries.joined(separator: ",\n    "))"
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" }\(entryJSON)
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    /// Writes `source` as the extension's `browser` entry point and returns a
-    /// host over the result.
-    private func makeHost(
-        name: String = "alpha",
-        source: String,
-        entryPath: String = "dist/web.js",
-        in directory: URL,
-        ledger: NotImplementedLedger = NotImplementedLedger()
-    ) throws -> ExtensionHost {
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(name: name, browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(loadedExtension: loaded, notImplementedLedger: ledger)
-    }
-
     // MARK: - Activation
 
     @Test
@@ -202,7 +161,9 @@ struct ExtensionHostTests {
             manifest: try manifest(name: "nodey", main: "out/node.js"),
             directory: directory
         )
-        let host = ExtensionHost(loadedExtension: loaded)
+        let host = ExtensionHost(
+            loadedExtension: loaded, notImplementedLedger: NotImplementedLedger(),
+            workspaceRoots: nil)
         defer { host.dispose() }
 
         // The refusal is by *kind*, not a generic load failure: the case names
@@ -232,7 +193,9 @@ struct ExtensionHostTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let loaded = LoadedExtension(manifest: try manifest(name: "codeless"), directory: directory)
-        let host = ExtensionHost(loadedExtension: loaded)
+        let host = ExtensionHost(
+            loadedExtension: loaded, notImplementedLedger: NotImplementedLedger(),
+            workspaceRoots: nil)
         defer { host.dispose() }
 
         await #expect(throws: ExtensionHostError.noEntryPoint(identifier: "test.codeless")) {
@@ -242,10 +205,10 @@ struct ExtensionHostTests {
 
     /// The containment check, with its premise pinned.
     ///
-    /// Task 4.6 round 3 taught this the hard way: `URL(fileURLWithPath:)`
-    /// consults the file system, so a decoy that does not exist can make the
-    /// resolution itself go a different way and the test passes while proving
-    /// nothing. So the decoy here is a real, readable file whose reachability
+    /// `URL(fileURLWithPath:)` consults the file system, so a decoy that does
+    /// not exist can make the resolution itself go a different way and the
+    /// test passes while proving nothing. So the decoy here is a real,
+    /// readable file whose reachability
     /// is asserted *before* the refusal is — and the refusal is asserted to
     /// name that exact resolved path, which is the only way to know the check
     /// looked at the escape rather than at something else.
@@ -275,7 +238,9 @@ struct ExtensionHostTests {
             manifest: try manifest(name: "escaper", browser: "../outside/evil.js"),
             directory: extensionDirectory
         )
-        let host = ExtensionHost(loadedExtension: loaded)
+        let host = ExtensionHost(
+            loadedExtension: loaded, notImplementedLedger: NotImplementedLedger(),
+            workspaceRoots: nil)
         defer { host.dispose() }
 
         let recorder = ConsoleRecorder()
@@ -329,7 +294,9 @@ struct ExtensionHostTests {
             manifest: try manifest(name: "sibling", browser: "../ext-evil/web.js"),
             directory: extensionDirectory
         )
-        let host = ExtensionHost(loadedExtension: loaded)
+        let host = ExtensionHost(
+            loadedExtension: loaded, notImplementedLedger: NotImplementedLedger(),
+            workspaceRoots: nil)
         defer { host.dispose() }
 
         let recorder = ConsoleRecorder()
@@ -1036,7 +1003,7 @@ struct ExtensionHostTests {
     /// through `ExtensionHost` rather than a bare `JSContext` (see
     /// `UriTests`, which covers the class and the bridge directly, and
     /// `MainThreadCommandsTests.vscodeUriIsUsableAndFrozenThroughARealHost`,
-    /// which additionally pins the freeze this task's fix round added).
+    /// which additionally pins that the class is frozen).
     @Test
     func distinctMembersAreRecordedSeparatelyIncludingFetch() async throws {
         let directory = try makeTempDirectory()
@@ -1079,8 +1046,8 @@ struct ExtensionHostTests {
     }
 
     /// Task 5.7a-i's `vscode.LanguageModel*` message vocabulary, installed by
-    /// the block at `ExtensionHost.swift:1014-1042` the same way `Uri` is
-    /// installed just above it (`:1001-1012`) — through a real activated
+    /// the block at `ExtensionHost.swift:1037-1052` the same way `Uri` is
+    /// installed just above it (`:1024-1035`) — through a real activated
     /// host, not the bare `JSContext` `LanguageModelMessageVocabularyTests`
     /// uses. Nothing else in the repo exercises that install block: deleting
     /// it, or attaching its members under a namespace other than `"vscode"`,
@@ -1316,7 +1283,9 @@ struct ExtensionHostTests {
             manifest: try manifest(name: "absent", browser: "dist/web.js"),
             directory: directory
         )
-        let host = ExtensionHost(loadedExtension: loaded)
+        let host = ExtensionHost(
+            loadedExtension: loaded, notImplementedLedger: NotImplementedLedger(),
+            workspaceRoots: nil)
         defer { host.dispose() }
 
         do {

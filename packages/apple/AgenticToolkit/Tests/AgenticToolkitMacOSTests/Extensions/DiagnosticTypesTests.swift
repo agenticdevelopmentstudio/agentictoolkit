@@ -53,7 +53,7 @@ struct DiagnosticTypesTests {
     /// only by the tamper-check in mutation 10 below, where
     /// `DiagnosticSeverity`/`DiagnosticTag` are already known to exist by
     /// that point in the test, so the "member might not exist" hazard
-    /// `requireInt32` guards against (fix round 1, F2) does not apply the
+    /// `requireInt32` guards against does not apply the
     /// same way; `nil` propagates to a failed `#expect` rather than being
     /// force-unwrapped.
     private func evalInt32(_ script: String, in ctx: JSContext) -> Int32? {
@@ -66,7 +66,7 @@ struct DiagnosticTypesTests {
         ctx.evaluateScript(script)?.toBool()
     }
 
-    /// `evalInt32(_:in:)`'s type-checked counterpart (fix round 1, F2):
+    /// `evalInt32(_:in:)`'s type-checked counterpart:
     /// `#require`s the script's result, `#expect`s it is actually a JS
     /// number, and only then answers the numeric value. `toInt32()` on a
     /// `JSValue` wrapping `undefined` is silently `0` — a member that does
@@ -108,7 +108,7 @@ struct DiagnosticTypesTests {
     /// `Error` alone is `0` and would pass against a stub that always
     /// answers `0` regardless of which member is read. Each read goes
     /// through `requireInt32`/`requireString`, which assert the JS type
-    /// before the value (fix round 1, F2): a member that does not exist at
+    /// before the value: a member that does not exist at
     /// all reads back as `undefined`, and `toInt32()` on that is silently
     /// `0` too, so the `.Error`/`[0]` assertions could not otherwise tell
     /// "is `0`" from "does not exist". The reverse mapping
@@ -143,7 +143,7 @@ struct DiagnosticTypesTests {
     /// values in the right relative order, so the zero check is what turns
     /// that mutant red rather than merely checking the two values differ.
     /// Both reads go through `requireInt32`, which asserts the JS type
-    /// before the value (fix round 1, F2), so a missing member cannot read
+    /// before the value, so a missing member cannot read
     /// back as the in-range `0` a plain `toInt32()` would silently produce.
     /// The reverse mapping is checked too, for the reason
     /// `diagnosticSeverityHasAllFourValuesByNumber` gives.
@@ -199,7 +199,7 @@ struct DiagnosticTypesTests {
     /// since a hypothetical ignore-the-argument stub only shows itself when
     /// a non-`Error` severity is actually passed). `severity.isNumber` is
     /// asserted before its value, as `diagnosticTwoArgConstructorDefaults-
-    /// SeverityToError` above already does (fix round 1, F2): otherwise a
+    /// SeverityToError` above already does: otherwise a
     /// constructor that threw and left `d` undefined would make `severity`
     /// itself `undefined`, whose `toInt32()` is `0`, not `3` — so this
     /// particular value assertion could not accidentally pass regardless,
@@ -227,10 +227,9 @@ struct DiagnosticTypesTests {
     /// reading the JS property straight back (as this test used to) cannot
     /// fail against any implementation of this task, including one with
     /// `diagnosticCode(from:in:)` deleted outright; routing through the
-    /// reader is what actually exercises its `isString` branch (fix round
-    /// 1, F1). An implementation that only handles the object form (or
-    /// only the number form) turns this one red without necessarily failing
-    /// the other two.
+    /// reader is what actually exercises its `isString` branch. An
+    /// implementation that only handles the object form (or only the number
+    /// form) turns this one red without necessarily failing the other two.
     @Test
     func diagnosticCodeAcceptsAPlainString() throws {
         let context = try makeContext()
@@ -248,9 +247,9 @@ struct DiagnosticTypesTests {
     /// `diagnostic.code` set to a bare number decodes through
     /// `VSCodeAPI.diagnostic(from:in:)` as `.scalar(.number(...))` — the
     /// second shape, a separate mutation from the string case above per the
-    /// brief, and routed through the reader for the same reason (fix round
-    /// 1, F1): an implementation handling only strings (or only the object
-    /// form) must turn this red.
+    /// brief, and routed through the reader for the same reason: an
+    /// implementation handling only strings (or only the object form) must
+    /// turn this red.
     @Test
     func diagnosticCodeAcceptsAPlainNumber() throws {
         let context = try makeContext()
@@ -523,7 +522,7 @@ struct DiagnosticTypesTests {
 
     /// The fixture above only ever gives the writer a `.link` code, so
     /// `diagnosticCodeJSValue`'s `.scalar` branch had zero coverage in this
-    /// direction (fix round 1, F1). This is the same round-trip, minimal
+    /// direction. This is the same round-trip, minimal
     /// otherwise, with a bare `.scalar(.number(...))` code instead — an
     /// implementation that only writes the `.link` object form back out
     /// turns this one red without necessarily failing the fixture above.
@@ -556,8 +555,8 @@ struct DiagnosticTypesTests {
     /// `Object.hasOwn` (own-property existence), since an implementation
     /// that assigned `undefined` explicitly would still pass a bare
     /// `d.source === undefined` check but fail both of these. Both go
-    /// through `requireBool`, which asserts the JS type before the value
-    /// (fix round 1, F2): if `new Diagnostic(...)` ever threw, `d` would be
+    /// through `requireBool`, which asserts the JS type before the value: if
+    /// `new Diagnostic(...)` ever threw, `d` would be
     /// `undefined`, `'source' in d` would throw rather than evaluate, and a
     /// plain `toBool()` on the resulting `JSValue` would silently read back
     /// `false` — the very answer this test expects — masking the throw
@@ -578,7 +577,7 @@ struct DiagnosticTypesTests {
         }
     }
 
-    // MARK: - Fix round 1, F3: present-but-malformed optional properties
+    // MARK: - Present-but-malformed optional properties
 
     /// `diagnostic(from:in:)` distinguishes *absent* from
     /// *present-but-undecodable*: a `source` that is present but not a

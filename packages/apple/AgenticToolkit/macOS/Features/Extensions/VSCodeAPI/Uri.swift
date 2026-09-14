@@ -195,8 +195,16 @@ extension VSCodeAPI {
                 return segments.join('/');
             }
 
+            // The leading '/' is what upstream's own `URI.file` adds, and it
+            // is what makes the result round-trip: without it,
+            // `Uri.file('foo/bar').toString()` is 'file://foo/bar', which
+            // `Uri.parse` reads back as authority 'foo', path '/bar'.
             Uri.file = function (path) {
-                return new Uri('file', '', encodePath(path), '', '', true);
+                var encoded = encodePath(path);
+                if (encoded.charAt(0) !== '/') {
+                    encoded = '/' + encoded;
+                }
+                return new Uri('file', '', encoded, '', '', true);
             };
 
             Uri.parse = function (value, strict) {
@@ -312,7 +320,7 @@ extension VSCodeAPI {
     /// extension that won the lazy-adoption window and supplied its own
     /// `Uri` is under no such obligation: its `parse` can throw on anything,
     /// and that throw lands directly in `ExtensionHost.pendingException` with
-    /// no guard between it and this call. This is the original F2 defect
+    /// no guard between it and this call. This is the original defect
     /// (`Uri` reachable before it is trustworthy), narrowed by the freeze to
     /// its one remaining corner rather than eliminated.
     public static func installUriClass(in context: JSContext) -> JSValue? {
@@ -399,7 +407,8 @@ extension VSCodeAPI {
     /// `Uri.parse` cannot have been reassigned, by extension code or anything
     /// else, between installation and this call — not because this call runs
     /// with no extension code on its stack, since `ExtensionHost.installRuntime`
-    /// hands this exact object out as `vscode.Uri` (`ExtensionHost.swift:958-960`)
+    /// hands this exact object out as `vscode.Uri`
+    /// (`ExtensionHost.swift:1024-1026`)
     /// and extension code can reach it too. What this still does not guard
     /// against, even in the genuinely-frozen case, is that implementation
     /// *throwing on its own* — `strict` is never passed here, so the one

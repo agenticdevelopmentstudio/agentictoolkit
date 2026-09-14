@@ -332,10 +332,10 @@ public final class CommandRegistry {
     ///
     /// This is what a registrant with a lifetime shorter than the app's — an
     /// extension, today — should call, and the failure it prevents is concrete:
-    /// an extension registers an id the app already owned (Ruling 5 permits
-    /// it), the app or another extension later re-registers that id, and the
-    /// first extension's `Disposable` fires. By id alone that deletes a command
-    /// it never registered, for the rest of the process, with only
+    /// an extension registers an id the app already owned (task 5.3's Ruling 5
+    /// permits it), the app or another extension later re-registers that id,
+    /// and the first extension's `Disposable` fires. By id alone that deletes
+    /// a command it never registered, for the rest of the process, with only
     /// `register`'s collision warning anywhere in the log. By token it is a
     /// no-op, which is the honest answer: the thing the caller registered is
     /// already gone.

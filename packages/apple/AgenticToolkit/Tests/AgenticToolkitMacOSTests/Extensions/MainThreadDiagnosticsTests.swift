@@ -64,36 +64,6 @@ struct MainThreadDiagnosticsTests {
         try ExtensionFixtures.makeTemporaryDirectory("MainThreadDiagnosticsTests")
     }
 
-    private func manifest(name: String, browser: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "browser": "\(browser)"
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    /// Writes `source` as the extension's `browser` entry point and returns a
-    /// host over the result.
-    private func makeHost(
-        name: String = "alpha",
-        source: String,
-        entryPath: String = "dist/web.js",
-        in directory: URL,
-        ledger: NotImplementedLedger = NotImplementedLedger()
-    ) throws -> ExtensionHost {
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(name: name, browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(loadedExtension: loaded, notImplementedLedger: ledger)
-    }
-
     /// Installs `createDiagnosticCollection`, `getDiagnostics` and
     /// `onDidChangeDiagnostics` onto `host`'s `vscode.languages` namespace —
     /// the two members task 5.6a-iii added and the one task 5.6b added.
@@ -226,8 +196,7 @@ struct MainThreadDiagnosticsTests {
         #expect(context.evaluateScript("globalThis.__bName")?.toString() == "eslint")
         // Asserts the global is actually a boolean, not merely falsy, so a
         // fixture that threw before this assignment (leaving `__bHasX`
-        // `undefined`, itself falsy) cannot pass by accident (ledger fix
-        // round 1, O6).
+        // `undefined`, itself falsy) cannot pass by accident.
         #expect(context.evaluateScript("globalThis.__bHasX")?.isBoolean == true)
         #expect(context.evaluateScript("globalThis.__bHasX")?.toBool() == false)
     }
@@ -346,7 +315,7 @@ struct MainThreadDiagnosticsTests {
         #expect(context.evaluateScript("globalThis.__isArray")?.toBool() == false)
         // Same reasoning as `collidingNameKeepsNameAndMakesADistinctCollection`'s
         // own `__bHasX` fix: assert the global is a boolean before trusting
-        // its value is `false` (ledger fix round 1, O6).
+        // its value is `false`.
         #expect(context.evaluateScript("globalThis.__hasAbsent")?.isBoolean == true)
         #expect(context.evaluateScript("globalThis.__hasAbsent")?.toBool() == false)
     }
@@ -567,8 +536,7 @@ struct MainThreadDiagnosticsTests {
     /// leaves both green, because `createCollection`'s own collision
     /// branch mints a distinct `"eslint0"` owner regardless and `b` is a
     /// live collection under it. `store.containsOwner("eslint0")` is the
-    /// assertion that can see the owner the mutation actually changes
-    /// (ledger fix round 1, B2).
+    /// assertion that can see the owner the mutation actually changes.
     @Test
     func disposeFreesTheNameForReuse() async throws {
         let directory = try makeTempDirectory()
@@ -602,7 +570,6 @@ struct MainThreadDiagnosticsTests {
     }
 
     // MARK: - Regression: disposed collection stays inert after name reuse
-    // (ledger fix round 1, B3)
 
     /// A disposed collection's `set`/`clear`/`get` must stay inert even
     /// after its freed name is reused by a later `createDiagnosticCollection`
@@ -677,8 +644,7 @@ struct MainThreadDiagnosticsTests {
     /// (`getDiagnostics(uri)`) alone proves the same thing mutation 11
     /// already covers, so this also asserts through the no-argument
     /// overload: the disposed collection's Uri is absent from
-    /// `getDiagnostics()` and the live one's is present (ledger fix
-    /// round 1, O5).
+    /// `getDiagnostics()` and the live one's is present.
     @Test
     func disposeRemovesOnlyThisCollectionsDiagnosticsFromGetDiagnostics() async throws {
         let directory = try makeTempDirectory()
@@ -811,7 +777,7 @@ struct MainThreadDiagnosticsTests {
         #expect(context.evaluateScript("globalThis.__onlyAMergedCount")?.toInt32() == 1)
     }
 
-    // MARK: - Regression: getDiagnostics(null) (ledger fix round 1, O4)
+    // MARK: - Regression: getDiagnostics(null)
 
     /// `getDiagnostics(null)` returns the same result as the no-argument
     /// call, not a raised exception — `null` is falsy under
@@ -864,8 +830,8 @@ struct MainThreadDiagnosticsTests {
     /// seven calls, not five: a fixture that clears before disposing needs
     /// a `set` after the clear for `dispose()` to have anything to notify
     /// about, and that `set` is itself a sixth mutating call, not setup
-    /// (ledger fix round 1, B1 — a five-notification fixture that still
-    /// exercises `dispose()`'s own notification is not constructible).
+    /// (a five-notification fixture that still exercises `dispose()`'s own
+    /// notification is not constructible).
     /// Seven assertions against the same `RecordingDiagnosticSink`, read
     /// directly rather than round-tripped through JS.
     @Test

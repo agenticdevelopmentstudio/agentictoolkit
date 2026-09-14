@@ -106,7 +106,7 @@ struct VSCodeAPISubNamespaceTests {
     /// property, so the Swift side reads a *datum* rather than inferring one
     /// from evaluation semantics: `JSContext.evaluateScript` answers a
     /// non-`nil` `undefined` for a script that threw — this repo pins that at
-    /// `MainThreadCommandsTests.swift:610-615` — so a test whose only evidence
+    /// `MainThreadCommandsTests.swift:577-582` — so a test whose only evidence
     /// were the evaluation's own return value could not tell "the script
     /// threw" from "the script answered `undefined`", and a mutation that
     /// turns the first into the second would be invisible to it. Because the
@@ -171,7 +171,7 @@ struct VSCodeAPISubNamespaceTests {
     /// test used to assert `#expect(result.toString() == "undefined")` against
     /// a bare `typeof ns.then`, and `JSContext.evaluateScript` answers a
     /// non-`nil` `undefined` for a script that threw — this repo pins that at
-    /// `MainThreadCommandsTests.swift:610-615` — so that assertion was
+    /// `MainThreadCommandsTests.swift:577-582` — so that assertion was
     /// satisfied by the very throw the test exists to rule out. Because the
     /// flipping assertion expects `true`, it fails on an absent property too,
     /// which is what an `undefined` result would present.
@@ -408,7 +408,7 @@ struct VSCodeAPISubNamespaceTests {
     /// `aThrowingRecordMissDoesNotReplaceTheNotImplementedError` uses, and for
     /// the same reason: `JSContext.evaluateScript` answers a non-`nil`
     /// `undefined` for a script that threw
-    /// (`MainThreadCommandsTests.swift:610-615`), so an assertion that read
+    /// (`MainThreadCommandsTests.swift:577-582`), so an assertion that read
     /// only the evaluation's return value could not tell a throw from an
     /// `undefined` answer. The two flipping assertions expect `true`, so they
     /// fail on an absent property as well, which is what an `undefined`
@@ -494,18 +494,17 @@ struct VSCodeAPISubNamespaceTests {
     /// is the cycle `subNamespace(path:members:in:)`'s own doc warns callers
     /// about, and a test that leaks a `JSContext` per run has no business being
     /// the worked example the next adaptor tasks copy. The unwrap sits *inside*
-    /// `MainActor.assumeIsolated` to match `VSCodeAPI.swift:72-77` and
-    /// `ExtensionHost.swift:1261-1263` (`MainActor.assumeIsolated {` / `guard
-    /// let self else { return }` / `if succeeded {`, true against this branch's
-    /// fix-round-1 commit), which is a consistency choice and not a compiler
-    /// requirement: `assumeIsolated`'s operation parameter is `@MainActor ()
-    /// throws -> T` with no `sending`, and
-    /// `ComposableTabsPaneViewController.swift:243-247` unwraps *outside* and
+    /// `MainActor.assumeIsolated` to match `VSCodeAPI.swift:78-83` and
+    /// `ExtensionHost.swift:1298-1300` (`MainActor.assumeIsolated {` / `guard
+    /// let self else { return }` / `if succeeded {`), which is a consistency
+    /// choice and not a compiler requirement: `assumeIsolated`'s operation
+    /// parameter is `@MainActor () throws -> T` with no `sending`, and
+    /// `ComposableTabsPaneViewController.swift:277-280` unwraps *outside* and
     /// hands a non-`Sendable` `NSEvent` in, and ships. Both forms may well
     /// compile; no compiler has judged either one here.
     ///
     /// The `_ =` on `VSCodeAPI.raise` is belt-and-braces rather than
-    /// load-bearing. `raise` is `@discardableResult` (`VSCodeAPI.swift:145`),
+    /// load-bearing. `raise` is `@discardableResult` (`VSCodeAPI.swift:151-152`),
     /// and this closure is multi-statement with a bare `return`, so `T` is
     /// already `Void` without it — but both of those are non-local facts, and
     /// the discard says at the call site what the reader would otherwise have
@@ -556,7 +555,7 @@ struct VSCodeAPISubNamespaceTests {
     /// corroborating. The script catches its own throw and reports it as a
     /// property, so the Swift side reads a datum rather than inferring one:
     /// `JSContext.evaluateScript` answers a non-`nil` `undefined` for a script
-    /// that threw (`MainThreadCommandsTests.swift:610-615`), which is exactly
+    /// that threw (`MainThreadCommandsTests.swift:577-582`), which is exactly
     /// the case an assertion on the evaluation's own result could not
     /// distinguish from a real answer. Expecting `true` also fails on an
     /// absent property, which is what an `undefined` result presents.

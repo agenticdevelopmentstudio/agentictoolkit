@@ -44,6 +44,18 @@ import AgenticToolkitCore
 ///      accident and would replace a hypothetical falsy-but-valid severity
 ///      incorrectly in general.
 ///
+/// **Divergence from upstream, deliberate: `Diagnostic` requires a real
+/// `Range`, and `DiagnosticRelatedInformation` a real `Location`.** Upstream
+/// checks `range` structurally (`Range.isRange`) and does not check
+/// `location` at all, and real VS Code then reads a duck-typed one back
+/// happily. This host does not: `VSCodeAPI.range(from:in:)` and
+/// `VSCodeAPI.location(from:in:)` check `isInstance(of:)` before reading a
+/// property, a security posture that stays. Accepting at construction what
+/// the reader will refuse means an extension's mistake surfaces at
+/// `collection.set(uri, [d])` as *"Could not decode a diagnostic"*, naming
+/// neither the argument nor the line that built it; refusing in the
+/// constructor puts the failure where the extension can see what it did.
+///
 /// **`DiagnosticSeverity` and `DiagnosticTag` mirror `tsc`'s own compiled
 /// enum shape**: both a forward mapping (`DiagnosticSeverity.Error === 0`)
 /// and a reverse one (`DiagnosticSeverity[0] === "Error"`), exactly what a
@@ -105,19 +117,30 @@ extension VSCodeAPI {
     (function () {
         'use strict';
         try {
-            // `Range.isRange` (`TextGeometry.swift`'s own `rangeIsRangeLike`),
-            // reproduced structurally here because `Range` itself is not a
-            // name this evaluation has — see this file's header.
-            function diagnosticPositionLooksReal(value) {
-                return !!value
-                    && typeof value.line === 'number'
-                    && typeof value.character === 'number';
+            // `Range` and `Location` are not names this evaluation has —
+            // see this file's header — so they are read back out of the
+            // container `installTextGeometryClasses(in:)` publishes, and
+            // read at *construction* time rather than here: this evaluation
+            // may run before that one, and both orders have to work.
+            function vscodeGeometryClass(name) {
+                var classes = globalThis['\(VSCodeAPI.textGeometryGlobalName)'];
+                return classes ? classes[name] : undefined;
             }
 
-            function diagnosticRangeLooksReal(value) {
-                return !!value
-                    && diagnosticPositionLooksReal(value.start)
-                    && diagnosticPositionLooksReal(value.end);
+            // Refuses anything that is not a real instance, rather than
+            // accepting a duck-typed literal the Swift readers will then
+            // refuse. `VSCodeAPI.range(from:in:)` and
+            // `VSCodeAPI.location(from:in:)` both check `isInstance(of:)`
+            // before reading a property, so a structurally-checked
+            // constructor would let an extension build a `Diagnostic` that
+            // cannot be passed to `collection.set` — a failure arriving one
+            // call later, naming neither the argument nor the line that
+            // produced it.
+            function requireGeometryInstance(value, name) {
+                var geometryClass = vscodeGeometryClass(name);
+                if (!geometryClass || !(value instanceof geometryClass)) {
+                    throw new TypeError(name.toLowerCase() + ' must be a vscode.' + name);
+                }
             }
 
             // vscode.d.ts:7024-7046; diagnostic.ts:17-22. `tsc` compiles a
@@ -152,9 +175,11 @@ extension VSCodeAPI {
 
             // vscode.d.ts:7053-7072; diagnostic.ts:24-56. The upstream
             // constructor performs no validation beyond assignment — its
-            // `static is`/`isEqual` do the checking elsewhere — so this one
-            // does not either.
+            // `static is`/`isEqual` do the checking elsewhere. This one
+            // checks `location`, a deliberate divergence: see
+            // `requireGeometryInstance` above.
             function DiagnosticRelatedInformation(location, message) {
+                requireGeometryInstance(location, 'Location');
                 this.location = location;
                 this.message = message;
             }
@@ -164,9 +189,7 @@ extension VSCodeAPI {
             // behaviors (validation, and the `severity` default) and for why
             // the optional properties below are never assigned here.
             function Diagnostic(range, message, severity) {
-                if (!diagnosticRangeLooksReal(range)) {
-                    throw new TypeError('range must be set');
-                }
+                requireGeometryInstance(range, 'Range');
                 if (!message) {
                     throw new TypeError('message must be set');
                 }
@@ -180,10 +203,9 @@ extension VSCodeAPI {
             }
 
             // Frozen after every member is attached, inside the same
-            // evaluation that built them — `Uri.swift:239-246`'s reasoning
-            // (at submodule commit `c83bd261`) applied to all four
-            // declarations at once: there is no window between any of them
-            // existing and its being locked down.
+            // evaluation that built them — `Uri.swift:247-254`'s reasoning
+            // applied to all four declarations at once: there is no window
+            // between any of them existing and its being locked down.
             // Neither `DiagnosticRelatedInformation` nor `Diagnostic` freezes
             // its own *instances* — see this file's header for why.
             Object.freeze(DiagnosticSeverity);
@@ -504,9 +526,9 @@ extension VSCodeAPI {
     /// — and only if — it is a real `vscode.DiagnosticRelatedInformation`
     /// instance, the same `isInstance(of:)`-before-properties discipline
     /// `location(from:in:)` (`TextGeometry.swift`) and `url(from:in:)`
-    /// (`Uri.swift:335-358` at submodule commit `c83bd261`) both use: a
-    /// `{ location, message }` object literal that merely looks like one
-    /// answers `nil` rather than having its properties read.
+    /// (`Uri.swift:343-366`) both use: a `{ location, message }` object
+    /// literal that merely looks like one answers `nil` rather than having
+    /// its properties read.
     public static func diagnosticRelatedInformation(
         from value: JSValue, in context: JSContext
     ) -> ExtensionDiagnosticRelatedInformation? {
@@ -557,8 +579,7 @@ extension VSCodeAPI {
     /// header) — a property that is *present* but fails to decode (wrong
     /// type, an out-of-union `code`, a malformed element inside
     /// `relatedInformation`/`tags`) is refused, not coerced: the whole call
-    /// answers `nil` rather than silently dropping just that field (fix
-    /// round 1, F3).
+    /// answers `nil` rather than silently dropping just that field.
     public static func diagnostic(
         from value: JSValue, in context: JSContext
     ) -> ExtensionDiagnostic? {
@@ -577,7 +598,7 @@ extension VSCodeAPI {
         }
 
         // Each of the four blocks below distinguishes *absent* from
-        // *present-but-undecodable* (fix round 1, F3) — the constructor
+        // *present-but-undecodable* — the constructor
         // above never assigns these four unless an extension sets them
         // (this file's header), so `isUndefined` alone already tells the
         // two cases apart cleanly: an undecodable-but-present value must

@@ -86,7 +86,7 @@ extension VSCodeAPI {
     ///    (`VSBuffer.fromString`, same two lines) — `utf8EncodeToUint8Array`
     ///    below is this source's own encoder, since this `JSContext` has no
     ///    `TextEncoder` global.
-    /// 4. **Three members are PROPOSED API and out of scope** (Ruling 1):
+    /// 4. **Three members are PROPOSED API and out of scope**:
     ///    `LanguageModelChatMessageRole.System` (`extHostTypes.ts:3886-3890`,
     ///    absent from the stable `vscode.d.ts:20130-20140` enum — this
     ///    source's role object has exactly `User`/`Assistant`),
@@ -168,7 +168,7 @@ extension VSCodeAPI {
 
             // vscode.d.ts:20130-20140 — stable API has User/Assistant only.
             // extHostTypes.ts:3886-3890 additionally carries System = 3,
-            // which is PROPOSED and out of scope (Ruling 1, finding 4).
+            // which is PROPOSED and out of scope (point 4 above).
             var LanguageModelChatMessageRole = { User: 1, Assistant: 2 };
             Object.freeze(LanguageModelChatMessageRole);
 
@@ -239,8 +239,8 @@ extension VSCodeAPI {
                 this.role = role;
                 // Through the setter below, not a duplicated coercion here —
                 // extHostTypes.ts:3950 does the same, and it is what makes
-                // the setter's own coercion (finding 1) reachable from a
-                // plain `new LanguageModelChatMessage(...)` call too.
+                // the setter's own coercion reachable from a plain
+                // `new LanguageModelChatMessage(...)` call too.
                 this.content = content;
                 this.name = name;
             }
@@ -278,7 +278,7 @@ extension VSCodeAPI {
             // inside the same evaluation that built them — `Uri.swift`'s
             // exact reasoning (`uriClassSource`'s doc comment) applies
             // verbatim to each of these. Instances are never frozen:
-            // `content`, `role` and `name` are assignable per finding 1.
+            // `content`, `role` and `name` stay assignable.
             Object.freeze(LanguageModelTextPart.prototype);
             Object.freeze(LanguageModelTextPart);
             Object.freeze(LanguageModelPromptTsxPart.prototype);
@@ -341,11 +341,10 @@ extension VSCodeAPI {
     /// the difference.
     ///
     /// Returns a `[String: JSValue]`, not the array of `(String, JSValue)`
-    /// tuples this returned before fix round 1: `installTextGeometryClasses`
-    /// and `installDiagnosticTypes` already returned a dictionary, and
-    /// `ExtensionHost.installVSCodeMembers(_:onto:)` (fix round 1, F5) is
-    /// one helper shared by all three install sites, so all three now hand
-    /// it the same shape. `languageModelVocabularyMemberNames`'s declared
+    /// tuples this once returned: `installTextGeometryClasses` and
+    /// `installDiagnosticTypes` already returned a dictionary, and
+    /// `ExtensionHost.installVSCodeMembers(_:onto:)` is one helper shared by
+    /// all three install sites, so all three hand it the same shape. `languageModelVocabularyMemberNames`'s declared
     /// order no longer survives into the caller either way: the shared
     /// helper installs by sorted key (Ruling 56), where this function's own
     /// install loop previously did not.

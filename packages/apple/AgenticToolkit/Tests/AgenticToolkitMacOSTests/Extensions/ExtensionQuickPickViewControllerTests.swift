@@ -2,7 +2,7 @@ import Testing
 @testable import AgenticToolkitMacOS
 
 /// Pins `ExtensionQuickPickViewController.handleRowClick(_:)` — the seam
-/// `rowClicked()` forwards `tableView.clickedRow` to (F3's fix). Drives it
+/// `rowClicked()` forwards `tableView.clickedRow` to. Drives it
 /// directly with a row number rather than a real mouse event, the way
 /// `TopicListViewControllerTests` forces `loadView` and calls in.
 @Suite("ExtensionQuickPickViewController")

@@ -550,8 +550,9 @@ public struct ExtensionStatusBarItemRequest: Sendable, Equatable {
 /// refreshing what is already up) and taking one down. `hide()` and
 /// `dispose()` both resolve to the same removal upstream — "There is no
 /// `$hideEntry`", `extHostStatusBar.ts:242`'s `this.#proxy.$disposeEntry(...)`
-/// is what `hide()` itself calls — and Ruling 7 forbids replicating
-/// `update()`'s debounce, so nothing here needs a fourth verb for it either.
+/// is what `hide()` itself calls — and task 5.5c's Ruling 7 forbids
+/// replicating `update()`'s debounce, so nothing here needs a fourth verb
+/// for it either.
 ///
 /// Both synchronous — nothing here awaits a user, unlike
 /// `ExtensionQuickPickPresenting.presentQuickPick`.
@@ -561,9 +562,9 @@ public struct ExtensionStatusBarItemRequest: Sendable, Equatable {
 public protocol ExtensionStatusBarPresenting: AnyObject {
 
     /// Puts `request` up, or refreshes it if `request.internalID` is already
-    /// up. Called once per committed change (Ruling 7: no coalescing) —
-    /// never batched, and never called for an item that has not been shown
-    /// (`ExtensionStatusBarItem.isVisible`) or has been disposed.
+    /// up. Called once per committed change (task 5.5c's Ruling 7: no
+    /// coalescing) — never batched, and never called for an item that has not
+    /// been shown (`ExtensionStatusBarItem.isVisible`) or has been disposed.
     func putOrUpdateStatusBarItem(_ request: ExtensionStatusBarItemRequest)
 
     /// Takes the item keyed by `internalID` down. Safe to call for an id the
@@ -622,8 +623,7 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// **The empty-items case (a single "OK" that resolves `nil`) is measured
     /// against upstream, not merely assumed:** with no items at all, VS
     /// Code's own `mainThreadMessageService.ts` shows a single **OK** that
-    /// resolves `undefined` — exactly what this branch already did before
-    /// this fix round, and is unchanged by it.
+    /// resolves `undefined` — exactly what this implementation does.
     public func presentMessage(_ request: ExtensionMessageRequest) async -> Int? {
         let alert = NSAlert()
         alert.messageText = request.message
@@ -670,7 +670,7 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     ///
     /// This matches **`_showModalMessage`**'s button construction exactly
     /// (`mainThreadMessageService.ts:110-148`), measured against upstream
-    /// during this fix round — including the detail that the close-affordance
+    /// itself — including the detail that the close-affordance
     /// item is pulled **out of** the ordinary button list and put in the
     /// cancel slot; it does not render in its own item position, so button
     /// order and item order diverge whenever a close affordance is present.
@@ -902,18 +902,6 @@ public final class MainThreadWindow {
     /// extension-plus-id key for the other case (`:68`, `:83`).
     private var statusBarItemCounter = 0
 
-    /// Carries a promise's `resolve`/`reject` `JSValue`s into a `Task`, on the
-    /// same terms as `MainThreadWorkspace`'s own `SettlementBox`: nothing here
-    /// actually crosses an isolation domain — the `Task` below reads both
-    /// values back on the same main actor that created them — but a bare
-    /// `JSValue` is not `Sendable` and is not a type this module can extend
-    /// with a conformance, so this box states the guarantee explicitly rather
-    /// than reaching for a broader escape hatch.
-    private struct SettlementBox: @unchecked Sendable {
-        let resolve: JSValue
-        let reject: JSValue
-    }
-
     /// - Parameters:
     ///   - presenter: Where a `show*Message` call is actually presented. Not
     ///     defaulted: a caller that forgot to pass a real presenter would
@@ -982,7 +970,7 @@ public final class MainThreadWindow {
     /// and `MainThreadCommands.executeCommand`.
     ///
     /// Argument shape, matching `extHostMessageService.ts` (confirmed against
-    /// upstream during this fix round, not merely this task's original brief):
+    /// upstream itself, not merely this task's original brief):
     /// 1. **argument 0 — the message.** Required; a missing argument 0
     ///    rejects. Present but not a string, it is coerced through
     ///    `coercedString(from:)`: a well-behaved `toString` is honoured, a
@@ -1048,7 +1036,7 @@ public final class MainThreadWindow {
                 // getter — the same accepted, read-only risk named below for
                 // `title` in `isOptionsArgument`, and the same precedent
                 // `Uri.url(from:in:)`'s own doc names for its
-                // `forProperty("toString")` read (`Uri.swift:352-358`),
+                // `forProperty("toString")` read (`Uri.swift:360-366`),
                 // bounded to the extension that wrote the getter acting on
                 // its own context. Every truthy one is recorded, not just the
                 // first: upstream warns about the second and later ones but
@@ -1077,7 +1065,7 @@ public final class MainThreadWindow {
     /// Whether `value` — argument 1 of a `show*Message` call — is options
     /// rather than the first item, per VS Code's actual rule in
     /// `extHostMessageService.ts`'s `isMessageItem` (confirmed verbatim
-    /// against upstream during this fix round): an item is a string, or an
+    /// against upstream itself): an item is a string, or an
     /// object with a **truthy** `title`; anything else in this position is
     /// options.
     ///
@@ -1098,7 +1086,7 @@ public final class MainThreadWindow {
         guard value.isObject else { return true }
         // Reading `title` here can run an extension's own getter — the same
         // accepted, read-only risk `Uri.url(from:in:)`'s own doc names for
-        // its `forProperty("toString")` read (`Uri.swift:352-358`), bounded
+        // its `forProperty("toString")` read (`Uri.swift:360-366`), bounded
         // to the extension that wrote the getter acting on its own context.
         guard let titleValue = value.forProperty("title") else { return true }
         return !titleValue.toBool()
@@ -1111,7 +1099,7 @@ public final class MainThreadWindow {
     /// `value.toString()` — JavaScriptCore's own, unguarded conversion —
     /// directly on any non-string argument, with its doc comment claiming
     /// that matched how `Uri.url(from:in:)` treats a `Uri | string` argument.
-    /// That claim was false: `Uri.url(from:in:)` (`Uri.swift:359-375`) calls
+    /// That claim was false: `Uri.url(from:in:)` (`Uri.swift:367-383`) calls
     /// `.toString()` unguarded **only inside `if value.isString`** — it never
     /// runs arbitrary extension code that way — and routes the real
     /// `toString` *invocation* for a non-string value through the guarded
@@ -1125,18 +1113,18 @@ public final class MainThreadWindow {
     ///   `VSCodeAPI.call(_:thisArg:arguments:)`. Only `case .returned(let
     ///   result)` with `result.isString` counts as success.
     ///
-    /// **Why the guard matters:** measured in this fix round (via `pyobjc`
-    /// driving `JavaScriptCore.framework` directly): for an object whose
+    /// **Why the guard matters:** measured directly (via `pyobjc` driving
+    /// `JavaScriptCore.framework`): for an object whose
     /// `toString` throws, `JSValue.toString()` returns `nil` **and leaves
     /// `context.exception` set**. Unguarded, `?? ""` would swallow the
     /// failure — an alert with a blank `messageText` still reaches the
     /// screen — while the pending exception is separately routed by
     /// `ExtensionHost.makeContext()`'s `context.exceptionHandler`
-    /// (`ExtensionHost.swift:896`) into `pendingException`, which
+    /// (`ExtensionHost.swift:919`) into `pendingException`, which
     /// `callActivate` reads: an extension calling this during `activate()`
     /// could fail its own activation naming an unrelated cause.
     /// `VSCodeAPI.call` exists precisely to keep a thrown exception from
-    /// escaping into that path (`VSCodeAPI.swift:300-320`), which is why the
+    /// escaping into that path (`VSCodeAPI.swift:306-326`), which is why the
     /// non-string branch goes through it rather than calling `toString()`
     /// directly.
     ///
@@ -1596,7 +1584,7 @@ public final class MainThreadWindow {
     /// Every read here can run an extension's own getter on a `Proxy`, the
     /// same accepted, read-only risk `quickPickOptions(from:)`'s own doc
     /// names for its own reads, in turn citing `isOptionsArgument`'s
-    /// (`Uri.swift:352-358`).
+    /// (`Uri.swift:360-366`).
     private static func inputBoxOptions(from value: JSValue) -> InputBoxOptionsParse {
         var options = InputBoxCallOptions()
         options.optionsObject = value
@@ -1609,7 +1597,7 @@ public final class MainThreadWindow {
         if let validate = value.forProperty("validateInput"), validate.isObject {
             options.validateInput = validate
         }
-        switch parseValueSelection(from: value.forProperty("valueSelection"), valueLength: options.value.count) {
+        switch parseValueSelection(from: value.forProperty("valueSelection"), in: options.value) {
         case .parsed(let range):
             options.valueSelection = range
         case .rejected(let message):
@@ -1643,14 +1631,30 @@ public final class MainThreadWindow {
     /// Every rejection names `valueSelection`, so a caller can tell which
     /// option was at fault.
     ///
+    /// **The two numbers are UTF-16 code-unit offsets, and are converted
+    /// here.** They come from JavaScript, where a string index counts UTF-16
+    /// code units; `ExtensionInputBoxRequest.valueSelection` counts
+    /// `Character`s. The two scales agree for any value made only of BMP
+    /// scalars and diverge for anything else: `"🎉ab"` is 4 units long and 3
+    /// Characters, so bounds-checking a JS `end` of 4 against the Swift
+    /// `count` would reject a legal selection, and passing a JS `3` straight
+    /// through would select one Character too many. So the bound is
+    /// `text.utf16.count`, and each offset is resolved through `text` before
+    /// the range leaves this function.
+    ///
+    /// An offset landing inside a surrogate pair rejects, on the same grounds
+    /// as the rest of this function: the alternatives are trapping in
+    /// `String.distance` or silently rounding to a boundary the caller did
+    /// not ask for.
+    ///
     /// - Parameters:
     ///   - value: `argument.forProperty("valueSelection")` — absent,
     ///     `undefined` and `null` all parse to `nil`, matching the
     ///     declaration's own "When `undefined` the whole pre-filled value
     ///     will be selected."
-    ///   - valueLength: The already-parsed `value` option's `count`, the
-    ///     bound an `end` past it is rejected against.
-    private static func parseValueSelection(from value: JSValue?, valueLength: Int) -> ValueSelectionParse {
+    ///   - text: The already-parsed `value` option. Both offsets are UTF-16
+    ///     code-unit indices into it — see this function's note on units.
+    private static func parseValueSelection(from value: JSValue?, in text: String) -> ValueSelectionParse {
         guard let value, !value.isUndefined, !value.isNull else {
             return .parsed(nil)
         }
@@ -1674,11 +1678,20 @@ public final class MainThreadWindow {
         guard end >= start else {
             return .rejected(message: "\(base)'s end (\(end)) must not be before its start (\(start)).")
         }
+        let valueLength = text.utf16.count
         guard end <= valueLength else {
             return .rejected(
                 message: "\(base)'s end (\(end)) is past the end of value, which is \(valueLength) long.")
         }
-        return .parsed(start..<end)
+        guard let lower = String.Index(utf16Offset: start, in: text).samePosition(in: text),
+              let upper = String.Index(utf16Offset: end, in: text).samePosition(in: text) else {
+            return .rejected(
+                message: "\(base)'s offsets (\(start), \(end)) must not fall inside a character of "
+                    + "value.")
+        }
+        return .parsed(
+            text.distance(from: text.startIndex, to: lower)
+                ..< text.distance(from: text.startIndex, to: upper))
     }
 
     /// The `validate` closure `ExtensionInputBoxPresenting.presentInputBox`
@@ -1886,8 +1899,8 @@ public final class MainThreadWindow {
     /// either way: a `ThemeColor`'s `id` *is* the whole value
     /// (`vscode.d.ts:918-930`: the class opens at `:918`, `readonly id:
     /// string;` at `:923`, `constructor(id: string);` at `:929`), so nothing
-    /// is lost by not keeping the original `JSValue` — which Ruling 4
-    /// forbids keeping anyway.
+    /// is lost by not keeping the original `JSValue` — which task 5.5c's
+    /// Ruling 4 forbids keeping anyway.
     private enum ExtensionStatusBarColorValue: Equatable {
         case string(String)
         case themeColor(id: String)
@@ -1906,10 +1919,11 @@ public final class MainThreadWindow {
     /// One `createStatusBarItem()` call's live state. Plain Swift values
     /// only — no `JSValue`, no `JSContext`, ever stored — because
     /// `MainThreadWindow.statusBarItems` (this class's sole strong owner)
-    /// is exactly the registry Ruling 4 describes: `disposeStatusBarItem`
-    /// removes an entry from it, and every block `makeStatusBarItemObject`
-    /// installs on this item's JS object captures the item **weakly**, so a
-    /// removed item's blocks all see `nil` from then on.
+    /// is exactly the registry task 5.5c's Ruling 4 describes:
+    /// `disposeStatusBarItem` removes an entry from it, and every block
+    /// `makeStatusBarItemObject` installs on this item's JS object captures
+    /// the item **weakly**, so a removed item's blocks all see `nil` from
+    /// then on.
     @MainActor
     private final class ExtensionStatusBarItem {
 
@@ -1947,9 +1961,8 @@ public final class MainThreadWindow {
         /// Set once by `disposeStatusBarItem` and never cleared — a
         /// belt-and-suspenders idempotence guard alongside the registry
         /// removal that same method performs, on the reasoning
-        /// `MainThreadWindow.statusBarItems`'s own doc gives: this host has
-        /// already spent a whole fix round (task 5.5b-i) on ARC/JSC-boundary
-        /// timing being less exact than it looks, so a second, explicit
+        /// `MainThreadWindow.statusBarItems`'s own doc gives: ARC/JSC-boundary
+        /// timing is less exact than it looks, so a second, explicit
         /// guard costs one `Bool` and one branch.
         var isDisposed = false
 
@@ -1976,7 +1989,7 @@ public final class MainThreadWindow {
     /// `isDisposed` after, unlike every other member in this file**, so this
     /// guard is its entire teardown story: `VSCodeAPI.member`'s own
     /// weak-owner check only fires once `self` has actually deallocated
-    /// (`VSCodeAPI.swift:66-79`), never merely because `isDisposed` was set
+    /// (`VSCodeAPI.swift:72-85`), never merely because `isDisposed` was set
     /// while this instance is still alive, so a synchronous member with no
     /// later `await` to fall back on must check the flag itself. The message
     /// text matches `VSCodeAPI`'s own torn-down path
@@ -2107,10 +2120,10 @@ public final class MainThreadWindow {
     /// and, when a background *is* accepted, overrides the reported `color`
     /// with that allow-list's paired foreground (`:277-281`). Both are
     /// rendering decisions — which palette is legible against which
-    /// background — and Ruling 5's amendment says this seam carries values
-    /// and a later presenter resolves them, so neither behaviour is
-    /// replicated here: `color` and `backgroundColor` are carried verbatim
-    /// and never rewrite each other.
+    /// background — and the amendment to task 5.5c's Ruling 5 says this seam
+    /// carries values and a later presenter resolves them, so neither
+    /// behaviour is replicated here: `color` and `backgroundColor` are
+    /// carried verbatim and never rewrite each other.
     private static func colorValue(from value: JSValue?) -> ExtensionStatusBarColorValue? {
         guard let value, !value.isUndefined, !value.isNull else { return nil }
         if value.isString, let string = value.toString() {
@@ -2132,9 +2145,9 @@ public final class MainThreadWindow {
     /// `ThemeColor` class, so `result instanceof vscode.ThemeColor` is
     /// `false` for it. `accessibilityInformation`'s getter (below) mints a
     /// fresh plain object the same way, for the same reason: this host
-    /// defines no `AccessibilityInformation` class either. Ruling 5 requires
-    /// saying this plainly rather than leaving a caller to discover it; test
-    /// 19/20 pin it with an assertion.
+    /// defines no `AccessibilityInformation` class either. Task 5.5c's
+    /// Ruling 5 requires saying this plainly rather than leaving a caller to
+    /// discover it; test 19/20 pin it with an assertion.
     private static func makeColorObject(for value: ExtensionStatusBarColorValue, in context: JSContext) -> JSValue? {
         switch value {
         case .string(let string):
@@ -2147,15 +2160,13 @@ public final class MainThreadWindow {
     }
 
     /// Installs a `defineProperty` accessor pair for one mutable property —
-    /// Ruling 3's specified shape, and this framework's first use of
-    /// `JSValue.defineProperty(_:descriptor:)` anywhere under
-    /// `Features/Extensions/` (the survey searched and found none). `get`/
-    /// `set` are boxed into the descriptor dictionary as `@convention(block)`
-    /// closures, which is what makes JavaScriptCore bridge them into callable
-    /// JS functions rather than plain values — the same block-to-function
-    /// bridging `setObject(_:forKeyedSubscript:)` already relies on for
+    /// the shape task 5.5c's Ruling 3 specifies. `get`/`set` are boxed into
+    /// the descriptor dictionary as `@convention(block)` closures, which is
+    /// what makes JavaScriptCore bridge them into callable JS functions
+    /// rather than plain values — the same block-to-function bridging
+    /// `setObject(_:forKeyedSubscript:)` already relies on for
     /// `VSCodeAPI.disposable(in:onDispose:)`'s `dispose` method block
-    /// (`VSCodeAPI.swift:1092`: `public static func disposable(`).
+    /// (`VSCodeAPI.swift:1040`: `public static func disposable(`).
     private static func installAccessor(
         on object: JSValue,
         name: String,
@@ -2182,9 +2193,7 @@ public final class MainThreadWindow {
     /// **Promoted from `private` to internal (task 5.6a-iii)** so
     /// `MainThreadDiagnostics.swift`'s `DiagnosticCollection.name` getter
     /// (itself `readonly` per `vscode.d.ts:7178`) can reuse this exact
-    /// `defineProperty` shape rather than duplicating its body — this file's
-    /// own review discipline prefers promoting a helper it already owns over
-    /// a second, verbatim copy elsewhere in the same framework target.
+    /// `defineProperty` shape rather than duplicating its body.
     static func installReadonlyGetter(
         on object: JSValue,
         name: String,
@@ -2202,10 +2211,10 @@ public final class MainThreadWindow {
     /// getters for `id`/`alignment`/`priority`, and `show`/`hide`/`dispose`
     /// method blocks via `setObject(_:forKeyedSubscript:)` —
     /// `VSCodeAPI.disposable(in:onDispose:)`'s own pattern
-    /// (`VSCodeAPI.swift:1092`: `public static func disposable(`).
+    /// (`VSCodeAPI.swift:1040`: `public static func disposable(`).
     ///
-    /// **No-capture evidence (Ruling 4), one sentence per block kind
-    /// installed here:**
+    /// **No-capture evidence (task 5.5c's Ruling 4), one sentence per block
+    /// kind installed here:**
     /// - Every `installReadonlyGetter`/`installAccessor` getter block
     ///   captures `item` **weakly** and nothing else; a getter that must
     ///   answer genuine `undefined` (rather than relying on `Any?`'s `nil`,
@@ -2217,8 +2226,8 @@ public final class MainThreadWindow {
     /// - Every setter block captures both `item` and `window` **weakly**
     ///   and nothing else: every mutating setter calls
     ///   `window.commitStatusBarUpdate(item)` after a change that actually
-    ///   takes (Ruling 7 — one presenter call per committed change), and
-    ///   `tooltip`'s and `command`'s setters additionally reach
+    ///   takes (task 5.5c's Ruling 7 — one presenter call per committed
+    ///   change), and `tooltip`'s and `command`'s setters additionally reach
     ///   `window.notImplementedLedger` on their unsupported-shape branch —
     ///   both reference types reached through a weak pointer, never a
     ///   `JSValue`.
@@ -2226,7 +2235,7 @@ public final class MainThreadWindow {
     ///   **weakly**; `dispose`'s block additionally closes over a local
     ///   `disposed` `Bool`, captured by value, on
     ///   `VSCodeAPI.disposable(in:onDispose:)`'s own idempotence pattern
-    ///   (`VSCodeAPI.swift:1092`: `public static func disposable(`).
+    ///   (`VSCodeAPI.swift:1040`: `public static func disposable(`).
     ///
     /// None of the above ever stores a `JSValue` or a `JSContext` on `item`
     /// or anywhere else that outlives one call — the object graph a
@@ -2234,7 +2243,8 @@ public final class MainThreadWindow {
     /// whose weak `item` has already gone — because `disposeStatusBarItem`
     /// dropped `MainThreadWindow.statusBarItems`' strong reference to it — is
     /// a no-op for every setter and for `show`/`hide`/`dispose`, and answers
-    /// `undefined` for every getter, satisfying Ruling 4's stated contract.
+    /// `undefined` for every getter, satisfying the contract task 5.5c's
+    /// Ruling 4 states.
     private static func makeStatusBarItemObject(
         for item: ExtensionStatusBarItem,
         of window: MainThreadWindow,
@@ -2399,12 +2409,12 @@ public final class MainThreadWindow {
     /// concern. `MainThreadWindow` and `ExtensionStatusBarPresenting` are
     /// both on the main actor and call each other directly, so that reason
     /// does not transfer, and this method calls the presenter once per
-    /// committed change (Ruling 7). **This costs a presenter that would
-    /// have preferred a coalesced batch one call per property write instead
-    /// of one per redraw cycle** — a presenter that wants to coalesce still
-    /// can, on its own side of the seam, at whatever cost that turns out to
-    /// have; this method has not measured that cost and does not claim it
-    /// is free.
+    /// committed change (task 5.5c's Ruling 7). **This costs a presenter that
+    /// would have preferred a coalesced batch one call per property write
+    /// instead of one per redraw cycle** — a presenter that wants to coalesce
+    /// still can, on its own side of the seam, at whatever cost that turns
+    /// out to have; this method has not measured that cost and does not claim
+    /// it is free.
     private func commitStatusBarUpdate(_ item: ExtensionStatusBarItem) {
         guard item.isVisible, !item.isDisposed else { return }
         statusBarPresenter.putOrUpdateStatusBarItem(item.request)
@@ -2438,11 +2448,11 @@ public final class MainThreadWindow {
     /// this method has already set.
     ///
     /// Removing `item` from `statusBarItems` **after** both of those is what
-    /// makes Ruling 4's promise true: every block `makeStatusBarItemObject`
-    /// installed captured `item` weakly, and this line drops the registry's
-    /// strong reference — the last one — so `item` deallocates once nothing
-    /// else on the call stack still holds it, and every one of those blocks'
-    /// weak references reads `nil` from then on.
+    /// makes the promise of task 5.5c's Ruling 4 true: every block
+    /// `makeStatusBarItemObject` installed captured `item` weakly, and this
+    /// line drops the registry's strong reference — the last one — so `item`
+    /// deallocates once nothing else on the call stack still holds it, and
+    /// every one of those blocks' weak references reads `nil` from then on.
     private func disposeStatusBarItem(_ item: ExtensionStatusBarItem) {
         guard !item.isDisposed else { return }
         hideStatusBarItem(item)
@@ -2472,8 +2482,7 @@ public final class MainThreadWindow {
     /// `guard !self.isDisposed, …` — reading the property directly off the
     /// `self` the first `guard let self` already bound, not re-binding it —
     /// because `self` is a non-optional `let` by that point and a second
-    /// `guard let self` there does not compile; this is the exact shape a
-    /// 5.4c fix round had to correct.
+    /// `guard let self` there does not compile.
     private func presentMessagePromise(
         memberPath: String,
         request: ExtensionMessageRequest,
@@ -2487,7 +2496,7 @@ public final class MainThreadWindow {
             // either missing there is nothing to settle the promise through,
             // so the only honest answer is to leave it pending.
             guard let resolveValue, let rejectValue else { return }
-            let settlement = SettlementBox(resolve: resolveValue, reject: rejectValue)
+            let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
                     MainThreadWindow.rejectTornDown(settlement.reject, path: memberPath)
@@ -2559,7 +2568,7 @@ public final class MainThreadWindow {
             // `presentMessagePromise` for why a missing one leaves the promise
             // pending rather than inventing a settlement.
             guard let resolveValue, let rejectValue else { return }
-            let settlement = SettlementBox(resolve: resolveValue, reject: rejectValue)
+            let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
                     MainThreadWindow.rejectTornDown(settlement.reject, path: path)
@@ -2684,7 +2693,7 @@ public final class MainThreadWindow {
             // `presentMessagePromise` for why a missing one leaves the
             // promise pending rather than inventing a settlement.
             guard let resolveValue, let rejectValue else { return }
-            let settlement = SettlementBox(resolve: resolveValue, reject: rejectValue)
+            let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
                     MainThreadWindow.rejectTornDown(settlement.reject, path: path)
@@ -2765,10 +2774,25 @@ public final class MainThreadWindow {
 
     // MARK: - Teardown
 
-    /// Marks this adaptor torn down. A presentation already in flight rejects
-    /// rather than delivering a result; see this type's own doc.
+    /// Marks this adaptor torn down and disposes every status bar item it
+    /// still holds. A presentation already in flight rejects rather than
+    /// delivering a result; see this type's own doc.
+    ///
+    /// The items go through `disposeStatusBarItem`, the same path the JS
+    /// `dispose()` takes, rather than through a second teardown written here:
+    /// that path is what hides a shown item from the external
+    /// `statusBarPresenter`, and none of the status-bar members consults
+    /// `isDisposed`, so an adaptor that set the flag alone would leave every
+    /// live item registered and on screen after its extension was gone.
+    ///
+    /// Iterating a copy, because `disposeStatusBarItem` removes from
+    /// `statusBarItems` as it goes.
     public func dispose() {
         isDisposed = true
+        for item in Array(statusBarItems.values) {
+            disposeStatusBarItem(item)
+        }
+        statusBarItems.removeAll()
     }
 }
 

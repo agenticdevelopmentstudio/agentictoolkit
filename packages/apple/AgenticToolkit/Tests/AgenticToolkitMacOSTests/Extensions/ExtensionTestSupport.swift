@@ -1,5 +1,5 @@
 import Foundation
-import AgenticToolkitCore
+@testable import AgenticToolkitCore
 @testable import AgenticToolkitMacOS
 
 /// Doubles and fixtures shared by the extension suites in this folder.
@@ -152,6 +152,63 @@ enum ExtensionFixtures {
         theme.attribution = attribution
         return theme
     }
+}
+
+/// A manifest carrying whichever entry-point keys the caller names, alongside
+/// the four keys `ExtensionManifest` requires of every manifest.
+///
+/// Built by decoding JSON, because `ExtensionManifest` has no memberwise
+/// initializer and inventing one for tests would be a second answer to what a
+/// manifest is.
+///
+/// A free function rather than a member of `ExtensionFixtures`, matching
+/// `withInMemorySettings` below: the suites that call it call it unqualified,
+/// and a suite that needs a *contribution point* key instead of an entry point
+/// declares its own overload, which shadows this one for its own callers.
+func manifest(
+    name: String,
+    browser: String? = nil,
+    main: String? = nil
+) throws -> ExtensionManifest {
+    var entries: [String] = []
+    if let browser { entries.append("\"browser\": \"\(browser)\"") }
+    if let main { entries.append("\"main\": \"\(main)\"") }
+    let entryJSON = entries.isEmpty ? "" : ",\n    \(entries.joined(separator: ",\n    "))"
+    let json = """
+    {
+        "name": "\(name)",
+        "publisher": "test",
+        "version": "1.0.0",
+        "engines": { "vscode": "^1.74.0" }\(entryJSON)
+    }
+    """
+    return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
+}
+
+/// Writes `source` as the extension's `browser` entry point and returns a host
+/// over the result.
+///
+/// `ExtensionHost.init` defaults neither `notImplementedLedger` nor
+/// `workspaceRoots`, so that every wiring site has to name both. This helper is
+/// the wiring site the suites in this folder share, and is therefore where
+/// their defaults belong: a suite with nothing to say about the ledger or the
+/// workspace says nothing, and one that does passes it here.
+@MainActor
+func makeHost(
+    name: String = "alpha",
+    source: String,
+    entryPath: String = "dist/web.js",
+    in directory: URL,
+    workspaceRoots: ExtensionWorkspaceRoots? = nil,
+    ledger: NotImplementedLedger = NotImplementedLedger()
+) throws -> ExtensionHost {
+    try ExtensionFixtures.write(source, to: entryPath, in: directory)
+    let loaded = LoadedExtension(
+        manifest: try manifest(name: name, browser: entryPath),
+        directory: directory
+    )
+    return ExtensionHost(
+        loadedExtension: loaded, notImplementedLedger: ledger, workspaceRoots: workspaceRoots)
 }
 
 /// Runs `body` against a `UserSettings.shared` backed by memory, and puts the

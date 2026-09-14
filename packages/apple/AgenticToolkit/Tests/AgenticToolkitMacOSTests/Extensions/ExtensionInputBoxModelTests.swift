@@ -79,8 +79,8 @@ struct ExtensionInputBoxModelTests {
         // surrogate pair, occupying two units by itself. Character offset 1
         // (the start of "a") is UTF-16 offset 2; Character offset 3 (the end
         // of the string) is UTF-16 offset 4. Feeding the Character-offset
-        // range 1..<3 straight into `NSRange(location:length:)` (the F7 bug)
-        // would have produced `NSRange(location: 1, length: 2)`, which lands
+        // range 1..<3 straight into `NSRange(location:length:)` would have
+        // produced `NSRange(location: 1, length: 2)`, which lands
         // one code unit into the middle of 👍's surrogate pair rather than
         // selecting "ab".
         let model = ExtensionInputBoxModel(request: request(value: "👍ab", valueSelection: 1..<3))

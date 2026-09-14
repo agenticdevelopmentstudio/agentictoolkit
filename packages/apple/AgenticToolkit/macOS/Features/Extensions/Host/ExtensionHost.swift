@@ -86,10 +86,15 @@ public final class ExtensionHost {
     public let notImplementedLedger: NotImplementedLedger
 
     /// The workspace this host's extension sees, or `nil` when no workspace is
-    /// open. `MainThreadWorkspace` (task 5.4c) is the one reader today — its
-    /// caller builds it from this rather than from a second parameter, so a
-    /// host and its `vscode.workspace` adaptor never disagree about which
-    /// workspace they mean.
+    /// open. Required at construction, with no default, on the same grounds
+    /// `MainThreadWorkspace.init` states for its own `workspaceRoots`
+    /// parameter: a caller that forgot to pass its real workspace would
+    /// otherwise silently get "no workspace" for every extension, and nothing
+    /// would distinguish that from a caller that meant `nil`.
+    ///
+    /// Nothing in this framework reads this property yet. It is here so that a
+    /// wiring site names the workspace once, and can hand the same value to
+    /// the `MainThreadWorkspace` it builds for this host.
     ///
     /// A narrow protocol, not `ProjectWorkspace` itself: see
     /// `ExtensionWorkspaceRoots`'s own doc for why this host does not import
@@ -333,10 +338,17 @@ public final class ExtensionHost {
 
     // MARK: - Initialization
 
+    /// - Parameters:
+    ///   - loadedExtension: The extension to run.
+    ///   - notImplementedLedger: Where unimplemented API members are recorded.
+    ///     Not defaulted — see the property's own doc.
+    ///   - workspaceRoots: The workspace this host's extension sees, or `nil`
+    ///     when no workspace is open. Not defaulted — see the property's own
+    ///     doc.
     public init(
         loadedExtension: LoadedExtension,
-        notImplementedLedger: NotImplementedLedger = NotImplementedLedger(),
-        workspaceRoots: ExtensionWorkspaceRoots? = nil
+        notImplementedLedger: NotImplementedLedger,
+        workspaceRoots: ExtensionWorkspaceRoots?
     ) {
         self.loadedExtension = loadedExtension
         self.notImplementedLedger = notImplementedLedger
@@ -729,7 +741,18 @@ public final class ExtensionHost {
     private func apply(_ definition: VSCodeMemberDefinition, to runtime: JSValue) throws {
         pendingException = nil
         let implementation: Any
-        if let deferred = definition.implementation as? DeferredVSCodeValue, let context = runtime.context {
+        if let deferred = definition.implementation as? DeferredVSCodeValue {
+            // Separated from the context test, rather than one combined `if`,
+            // so that a `DeferredVSCodeValue` with no context to resolve
+            // against cannot fall through to the `else` arm below — which
+            // would hand `defineMember` the unresolved Swift box instead of a
+            // JavaScript value. No claim is made here that a caller can
+            // produce that state; the guard is what makes its absence a
+            // checked property of this function rather than something the
+            // reader has to establish from every call site.
+            guard let context = runtime.context else {
+                throw ExtensionHostError.javaScriptEngineUnavailable(identifier: identifier)
+            }
             implementation = deferred.resolve(context)
         } else {
             implementation = definition.implementation
@@ -1023,7 +1046,7 @@ public final class ExtensionHost {
         // neither queued onto `vscodeMemberDefinitions` nor routed through
         // `defineVSCodeMember`, for the same reason the `Uri` block above
         // is not. `installVSCodeMembers(_:onto:)` below covers the install
-        // loop itself, including the sorted order (fix round 1, F5).
+        // loop itself, including the sorted order.
         if let languageModelMembers = VSCodeAPI.installLanguageModelVocabulary(in: context) {
             installVSCodeMembers(languageModelMembers, onto: runtime)
         }
@@ -1081,11 +1104,11 @@ public final class ExtensionHost {
     ///
     /// Shared by the language-model, text-geometry and diagnostic-value-type
     /// install blocks in `installRuntime(runtimeSource:into:)` above, which
-    /// were three near-identical copies of this loop before this extraction
-    /// (fix round 1, F5). Sorting here is why the language-model block below
-    /// is now sorted too: it iterated `installLanguageModelVocabulary(in:)`'s
-    /// dictionary in whatever order that dictionary happened to produce
-    /// before this fix, and nothing about that install order was ever load
+    /// were three near-identical copies of this loop before this extraction.
+    /// Sorting here is why the language-model block among them is now sorted
+    /// too: it iterated `installLanguageModelVocabulary(in:)`'s dictionary in
+    /// whatever order that dictionary happened to produce before the
+    /// extraction, and nothing about that install order was ever load
     /// bearing — no code reads it, since `defineMember` writes independent
     /// properties one at a time.
     private func installVSCodeMembers(

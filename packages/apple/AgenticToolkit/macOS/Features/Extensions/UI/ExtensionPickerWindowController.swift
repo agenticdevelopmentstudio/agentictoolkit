@@ -29,7 +29,7 @@ import AppKit
 ///    closed the window.** It means "the user left without answering." The
 ///    content controllers report acceptance on their own callbacks and the
 ///    presenter closes the window afterwards, so acceptance is not also
-///    reported here as a dismissal — the presenter's `ExtensionPickerSession`
+///    reported here as a dismissal — the presenter's `OnceOnlyContinuation`
 ///    (part 1) is what makes that ordering safe, by ignoring the second
 ///    `finish` call, rather than a second flag on this type.
 @MainActor
@@ -65,7 +65,7 @@ final class ExtensionPickerWindowController: NSWindowController {
         // `ExtensionInputBoxViewController` computes and sets it from its
         // assembled Auto Layout height at the *end* of `loadView()` — reading
         // the property before that method has run reads a value that was
-        // never set (F1).
+        // never set.
         let hostedView = content.view
 
         let contentRect = NSRect(origin: .zero, size: content.preferredContentSize)

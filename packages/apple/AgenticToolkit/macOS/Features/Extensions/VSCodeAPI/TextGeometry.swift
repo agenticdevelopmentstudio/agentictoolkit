@@ -86,15 +86,15 @@ import AgenticToolkitCore
 ///
 /// **Immutability, two ways, matching `Uri.swift`'s own convention:** every
 /// instance is `Object.freeze`d at the end of its constructor
-/// (`TextGeometry.swift:216`, `:378` below), exactly where `Uri.swift:114`
+/// (`TextGeometry.swift:232`, `:394` below), exactly where `Uri.swift:114`
 /// already does the same thing for its own instances — not a divergence
 /// this task invented — closing the gap a bare getter-over-private-field
 /// leaves open, since `this._line = value` from outside the class would
 /// otherwise still succeed; and both classes' `prototype` and the class
 /// objects themselves are frozen inside the same evaluation that builds
 /// them, before this function ever hands them out, matching
-/// `Uri.swift:245-246` (class freeze) at submodule commit `a6359db5`, for
-/// the identical reason `Uri.swift:239-244`'s comment gives: there is no
+/// `Uri.swift:253-254` (class freeze), for the identical reason
+/// `Uri.swift:247-252`'s comment gives: there is no
 /// window between a class existing and its being locked down. The instance
 /// freeze is the half that actually diverges from upstream, whose
 /// `Position`/`Range` are plain mutable objects: a strict-mode extension
@@ -102,12 +102,23 @@ import AgenticToolkitCore
 /// silently succeeds in real VS Code.
 ///
 /// **`Location` is the one exception to that instance freeze.**
-/// `vscode.d.ts:6960-6979` does not mark `uri` or `range` `readonly` — the
-/// only place in this file's geometry vocabulary where that word is absent
-/// — so `Location`'s constructor assigns plain, writable own properties and
-/// does not `Object.freeze(this)`. Its class object and prototype are still
-/// frozen inside the same evaluation as everything else here; only the
-/// per-instance freeze is withheld, and only for this one class.
+/// `vscode.d.ts:6964` and `:6969` declare `uri` and `range` as plain stored
+/// properties, and upstream's `Location` really is assignable:
+/// `location.range = someRange` is ordinary extension code, and a frozen
+/// instance would fail it — silently in sloppy mode, by throwing in strict
+/// mode. So `Location`'s constructor assigns plain, writable own properties
+/// and does not `Object.freeze(this)`.
+///
+/// A missing `readonly` is not by itself what decides this. `Range.isEmpty`
+/// (`vscode.d.ts:443`) and `Range.isSingleLine` (`:448`) are declared without
+/// it too, and both are installed below as read-only accessors anyway
+/// (`defineRangeReadOnly`), because a value computed from `_start` and `_end`
+/// has no assignment worth preserving. What separates `Location` is that its
+/// two properties hold the state the object *is*.
+///
+/// Its class object and prototype are still frozen inside the same evaluation
+/// as everything else here; only the per-instance freeze is withheld, and only
+/// for this one class.
 ///
 /// **The swap invariant lives in exactly one place: the JS `Range`
 /// constructor.** Nothing on the Swift side reorders `start`/`end` before
@@ -124,7 +135,12 @@ extension VSCodeAPI {
     /// and `LanguageModelMessageVocabulary.swift`'s
     /// `languageModelVocabularyGlobalName`, generalized the same way both of
     /// those already are.
-    private static nonisolated let textGeometryGlobalName = "__vscodeTextGeometryClasses"
+    ///
+    /// Internal rather than `private`: `DiagnosticTypes.swift`'s constructors
+    /// read `Range` and `Location` back out of this container to check their
+    /// arguments against the real classes, and a second spelling of the name
+    /// in that file is a second thing to keep in step with this one.
+    static nonisolated let textGeometryGlobalName = "__vscodeTextGeometryClasses"
 
     /// `Position`, `Range` and `Location`'s own source, evaluated at most
     /// once per `JSContext`.
@@ -392,7 +408,7 @@ extension VSCodeAPI {
             // only ever compared against a `Position` argument would still
             // pass a `Position`-only test and fail a `Range`-shaped one.
             //
-            // **Fix round 1, F7.** The `Position` branch below deliberately
+            // The `Position` branch below deliberately
             // diverges from `range.ts:83`: upstream compares
             // `this._end.isBefore(positionOrRange)` against the **raw**
             // argument, while this converts it through `positionOf` first
@@ -511,8 +527,8 @@ extension VSCodeAPI {
                 if (!rangeOrPosition) {
                     // extHostTypes.location.ts:32-33: a falsy second
                     // argument leaves `range` unset entirely. `vscode.d.ts`
-                    // (fix round 1, F4) declares `range: Range;` at
-                    // `:6970` — always present — while the implementation
+                    // declares `range: Range;` at `:6970` — always present —
+                    // while the implementation
                     // at `extHostTypes.location.ts:27` declares its own
                     // field `range!: Range;` (definite assignment,
                     // asserting a value arrives before any read). Leaving
@@ -538,7 +554,7 @@ extension VSCodeAPI {
             }
 
             // Frozen after every static and prototype member is attached,
-            // inside the same evaluation that built them — `Uri.swift:239-246`'s
+            // inside the same evaluation that built them — `Uri.swift:247-254`'s
             // reasoning, applied to all three classes at once: there is no
             // window between any of them existing and its being locked down.
             // `Location`'s own *instances* are the one thing this block does
@@ -567,16 +583,16 @@ extension VSCodeAPI {
             }
             return result;
         } catch (error) {
-            // Fix round 1, F8: the outer catch used to discard `error`
-            // entirely (`return null;`), leaving the Swift-side log with no
-            // way to say why the evaluation failed. `Uri.swift`'s own
-            // installer does the identical `catch (error) { return null; }`
-            // and is no better here — this is the improvement, not a
-            // divergence from a precedent worth matching. `installedError`
-            // is a distinct shape from the real `{ Position, Range }`
-            // container above, so `installTextGeometryClasses(in:)` below
-            // can tell failure from success without a `Position`/`Range`
-            // property ever colliding with it.
+            // Discarding `error` entirely (`return null;`) would leave the
+            // Swift-side log with no way to say why the evaluation failed.
+            // `Uri.swift`'s own installer does the identical
+            // `catch (error) { return null; }` and is no better here — this
+            // is the improvement, not a divergence from a precedent worth
+            // matching. `installedError` is a distinct shape from the real
+            // `{ Position, Range }` container above, so
+            // `installTextGeometryClasses(in:)` below can tell failure from
+            // success without a `Position`/`Range` property ever colliding
+            // with it.
             return { installedError: error && error.message ? error.message : 'unknown error' };
         }
     })()
@@ -620,7 +636,7 @@ extension VSCodeAPI {
                     """)
                 return nil
             }
-            // Fix round 1, F8: the evaluated source's outer `catch` reports
+            // The evaluated source's outer `catch` reports
             // failure as `{ installedError: <message> }` rather than
             // discarding it, so this can log the actual reason instead of
             // only "could not install".
@@ -686,7 +702,7 @@ extension VSCodeAPI {
     /// this type.
     ///
     /// **Deliberately not duck-typed**, for `url(from:in:)`'s own reason
-    /// (`Uri.swift:340-347`): a plain `{ line: 1, character: 2 }` object
+    /// (`Uri.swift:348-355`): a plain `{ line: 1, character: 2 }` object
     /// literal answers `nil` here rather than being read for `line`/
     /// `character`-shaped properties, because reading properties off an
     /// object this bridge does not control can run extension-authored
@@ -797,7 +813,7 @@ extension VSCodeAPI {
     /// Reads `value` back into an `ExtensionLocation` if — and only if — it
     /// is a real `vscode.Location` instance, the same
     /// `isInstance(of:)`-before-properties discipline `range(from:in:)` and
-    /// `url(from:in:)` (`Uri.swift:335-358` at submodule commit
+    /// `url(from:in:)` (`Uri.swift:343-366` at submodule commit
     /// `c83bd261`) both use: a `{ uri, range }`
     /// object literal that merely looks like one answers `nil` rather than
     /// having its properties read, so an extension cannot forge a `Location`

@@ -3,11 +3,11 @@ import Foundation
 import JavaScriptCore
 @testable import AgenticToolkitMacOS
 
-/// `VSCodeAPI.disposable(in:onDispose:)` (`VSCodeAPI.swift:1092`): the shared
+/// `VSCodeAPI.disposable(in:onDispose:)` (`VSCodeAPI.swift:1040`): the shared
 /// `{ dispose() }` object builder every disposable-returning adaptor member
 /// hands back to an extension. Its own idempotence — a second `dispose()`
-/// call is a no-op, per `disposed` at `VSCodeAPI.swift:1097` and the
-/// guard/set pair at `:1100-1101` — is exercised only indirectly elsewhere:
+/// call is a no-op, per `disposed` at `VSCodeAPI.swift:1045` and the
+/// guard/set pair at `:1048-1049` — is exercised only indirectly elsewhere:
 /// `MainThreadCommandsTests` and `MainThreadLanguagesTests` each build a
 /// disposable through this helper and dispose it, but every one of their own
 /// `onDispose` closures is independently idempotent (removing an already-gone
@@ -28,7 +28,7 @@ struct VSCodeAPIDisposableTests {
     /// Calling the returned object's `dispose()` twice runs `onDispose` once
     /// — the mutation this kills is deleting (or inverting) the
     /// `guard !disposed else { return }` / `disposed = true` pair at
-    /// `VSCodeAPI.swift:1100-1101`: with either gone, a non-idempotent
+    /// `VSCodeAPI.swift:1048-1049`: with either gone, a non-idempotent
     /// `onDispose` (this counter) would observe 2, not 1.
     @Test
     func disposingTwiceRunsOnDisposeExactlyOnce() throws {

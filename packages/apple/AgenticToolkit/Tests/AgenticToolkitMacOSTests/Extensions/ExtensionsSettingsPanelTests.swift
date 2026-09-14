@@ -162,7 +162,7 @@ struct ExtensionsSettingsPanelTests {
 
             try withPanel(searchPaths: [root]) { _, panel in
                 let detail = try #require(panel.extensionPanels.first)
-                // Matching folds (F39), so everything keyed by identity agrees
+                // Matching folds case, so everything keyed by identity agrees
                 // with itself no matter how the manifest capitalised it …
                 #expect(detail.extensionIdentifier == "ms-python.foo")
                 _ = detail.view
@@ -397,9 +397,9 @@ struct ExtensionsSettingsPanelTests {
             let root = try makeTempDirectory()
             defer { try? FileManager.default.removeItem(at: root) }
             // `capabilities` is a field nothing in this host reads, so a
-            // malformed one used to take the whole extension down with it
-            // (F09). It is skipped now — which would make it silent, were it
-            // not for this line.
+            // malformed one used to take the whole extension down with it. It
+            // is skipped now — which would make it silent, were it not for
+            // this line.
             try write(
                 """
                 {

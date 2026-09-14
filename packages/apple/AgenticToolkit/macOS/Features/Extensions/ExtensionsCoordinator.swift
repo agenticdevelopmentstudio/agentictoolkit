@@ -105,7 +105,7 @@ public final class ExtensionsCoordinator: AppFeature {
         // `establishedIdentifiers` is Optional and passed straight through: a
         // scan that could not name every directory it looked at prunes
         // nothing at all, rather than reading "its manifest would not parse"
-        // as "it is gone" and deleting the user's themes (I1/I2).
+        // as "it is gone" and deleting the user's themes.
         themePoint.pruneOrphans(installedIdentifiers: registry.establishedIdentifiers)
     }
 

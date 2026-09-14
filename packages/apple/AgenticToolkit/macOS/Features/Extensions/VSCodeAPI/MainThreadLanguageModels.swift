@@ -58,8 +58,8 @@ public struct LanguageModelChatDescriptor: Sendable, Equatable {
 /// `JSValue` cannot cross a suspension point safely.
 ///
 /// `text` is built by the same array-reading logic `extractedText(from:)`
-/// already uses for `countTokens` (`:301-325` at this file's original
-/// numbering) — generalised, not duplicated, per this task's own brief: both
+/// already uses for `countTokens` (`:302-326`) — generalised, not
+/// duplicated, per this task's own brief: both
 /// readers agree that `content` is always an array of parts and that only a
 /// part with a string `.value` contributes text.
 public struct ExtensionLanguageModelMessage: Sendable, Equatable {
@@ -144,10 +144,11 @@ public protocol ExtensionLanguageModelProviding: AnyObject {
     /// `AIStreamEvent`, so this protocol carries no `AIPluginKit` dependency.
     ///
     /// `justification` is `options.justification` (`:20392`), passed straight
-    /// through per Ruling 4: this task implements no consent gate, so nothing
-    /// between the extension and this call interprets it. `modelOptions`,
-    /// `tools` and `toolMode` (`:20398`,`:20411`,`:20416`) do **not** reach
-    /// here — Ruling 54 keeps them at the adaptor, recorded into
+    /// through per Ledger Ruling 4: this task implements no consent gate, so
+    /// nothing between the extension and this call interprets it.
+    /// `modelOptions`, `tools` and `toolMode`
+    /// (`:20398`,`:20411`,`:20416`) do **not** reach here — Ruling 54 keeps
+    /// them at the adaptor, recorded into
     /// `notImplementedLedger` instead, because a provider that received them
     /// would have to at least pretend to honour them, and none does yet.
     func streamResponse(
@@ -162,9 +163,9 @@ public protocol ExtensionLanguageModelProviding: AnyObject {
 
 /// The window `onDidChangeChatModelsEmitter` (below) is built with:
 /// `ExtensionEventEmitter.window` has no default
-/// (`ExtensionEvent.swift:166-168`'s own doc explains why a default would
-/// stop the seam from being one — commit `c166d4f0`, which moved those
-/// lines down from `:162-164`), and `onDidChangeChatModels` has nothing for a
+/// (`ExtensionEvent.swift:158-160`'s own doc explains why a default would
+/// stop the seam from being one), and `onDidChangeChatModels` has nothing
+/// for a
 /// window to coalesce — the set-identity filter in
 /// `availableChatModelsDidChange()` *is* the debounce (Ruling 63), the
 /// same division upstream draws in the one step its own constructor
@@ -220,7 +221,7 @@ private final class ChatModelsImmediateWindow: ExtensionEventWindowScheduling {
 /// **Whoever owns this adaptor must call `dispose()`** when it tears the
 /// extension host down, in the shape `MainThreadCommands.swift:36-48` and
 /// `MainThreadWindow.swift:838-842` both use. Nothing calls it in this
-/// framework today: `ExtensionHost.dispose()` (`ExtensionHost.swift:777-804`)
+/// framework today: `ExtensionHost.dispose()` (`ExtensionHost.swift:800-827`)
 /// tears down only its own state, not any adaptor's, because nothing
 /// instantiates `ExtensionHost` in production yet. Inventing an owner here
 /// would be a guess at a wiring design the `ExtensionsCoordinator` task owns.
@@ -237,7 +238,7 @@ public final class MainThreadLanguageModels {
 
     /// Recipient of `sendRequest`'s "not implemented" access — the same
     /// ledger `MainThreadWindow`'s status-bar item setters record into
-    /// (`MainThreadWindow.swift:2276`, `:2289`, commit 6409e2de).
+    /// (`MainThreadWindow.swift:2293-2294`, `:2306-2307`).
     private let notImplementedLedger: NotImplementedLedger
 
     /// Whose extension is asking, for `notImplementedLedger`'s
@@ -272,7 +273,7 @@ public final class MainThreadLanguageModels {
     /// response an extension never fully iterates (or never iterates at
     /// all) is therefore retained for the adaptor's whole lifetime as a
     /// result — the cost Ruling 82 accepts rather than reopening request
-    /// ownership from the JS side, which would overturn Ruling 2's
+    /// ownership from the JS side, which would overturn Ledger Ruling 2's
     /// weak-capture rule. What that retention now holds is broader than a
     /// transient waiter box: each retained request also carries the two
     /// `JSValue` vocabulary constructors cached on it, so what Ruling 82's
@@ -344,7 +345,7 @@ public final class MainThreadLanguageModels {
     /// are dropped from `onDidChangeChatModelsEmitter` — not because the
     /// emitter is shared (it is not: the stored property above is a
     /// private, per-instance `let`, and `Registration.owner`
-    /// (`ExtensionEvent.swift:152`) holds its owner only as an
+    /// (`ExtensionEvent.swift:144`) holds its owner only as an
     /// `ObjectIdentifier`, never strongly, so there is no retain path from
     /// the emitter back to this adaptor for `dispose()` to break) — but
     /// because a registration holds its listener `JSValue` strongly, and
@@ -352,15 +353,14 @@ public final class MainThreadLanguageModels {
     /// registration in place after this adaptor has torn down would leave a
     /// torn-down extension's context outliving its host until that listener
     /// goes — exactly what `ExtensionEvent.swift`'s own "Lifetime" doc
-    /// (`:127-137`) says of every registration, not something this
+    /// (`:119-129`) says of every registration, not something this
     /// adaptor's teardown introduces. `MainThreadDiagnostics.dispose()`
-    /// (`MainThreadDiagnostics.swift:876`, commit `90c38b02` — that file is
-    /// untouched by this task) removes its own listeners for the same
+    /// (`MainThreadDiagnostics.swift:876`) removes its own listeners for the
+    /// same
     /// reason; (5) `handleOnDidChangeChatModels()` and
     /// `availableChatModelsDidChange()` (below) both additionally guard on
     /// `isDisposed`: `VSCodeAPI.member`'s `[weak owner]` capture
-    /// (`VSCodeAPI.swift:72-79`, commit `90c38b02` — that file is untouched
-    /// by this task) only answers a torn-down response once this
+    /// (`VSCodeAPI.swift:78-85`) only answers a torn-down response once this
     /// object actually deallocates, and `dispose()` does not deallocate it —
     /// without this guard, an extension could still register a new listener,
     /// and a later `availableChatModelsDidChange()` could still fire into
@@ -396,9 +396,9 @@ public final class MainThreadLanguageModels {
     /// `implementation` for `vscode.lm.selectChatModels`, handed to
     /// `ExtensionHost.defineVSCodeMember(namespacePath:name:implementation:)`
     /// as-is — the adaptor-with-owner route `MainThreadLanguages.getLanguages`
-    /// uses (`MainThreadLanguages.swift:626-628`, commit 6409e2de), not
-    /// 5.7a-i's host-ceremony route (`ExtensionHost.swift:990-1000`, commit
-    /// 6409e2de, draws that distinction). Rejects on a torn-down adaptor, for
+    /// uses (`MainThreadLanguages.swift:627-629`), not 5.7a-i's host-ceremony
+    /// route (`ExtensionHost.swift:1037-1052`, which draws that distinction).
+    /// Rejects on a torn-down adaptor, for
     /// the reason `MainThreadLanguages.getLanguages` does.
     public private(set) lazy var selectChatModels: Any = VSCodeAPI.member(
         "vscode.lm.selectChatModels", of: self, whenTornDown: .rejectedPromise
@@ -452,24 +452,20 @@ public final class MainThreadLanguageModels {
     /// (`vscode.d.ts:20742`), installed through
     /// `ExtensionHost.defineVSCodeMember(namespacePath:name:implementation:)`
     /// the same way `selectChatModels` above is
-    /// (`MainThreadLanguageModelsTests.swift:116-120`, commit `a563d117`).
+    /// (`MainThreadLanguageModelsTests.swift:86-90`).
     ///
     /// **Raises rather than rejects on a torn-down adaptor.** `Event<T>`
     /// (`vscode.d.ts:1755-1767`, commit
     /// `3addbda66f9e80c3ed1b943822ab823bb6747b02`) answers a `Disposable`
     /// synchronously, not a `Thenable` — `VSCodeAPI.TeardownResponse`'s own
-    /// doc (`VSCodeAPI.swift:97-99`, the case itself `:100`, commit
-    /// `90c38b02` — that file is untouched by this task, so the numbers hold
-    /// at this commit too) makes that the deciding question, the same choice
-    /// `onDidChangeDiagnostics` makes for the same reason
-    /// (`MainThreadDiagnostics.swift:422`, commit `90c38b02` — likewise
-    /// untouched).
+    /// doc (`VSCodeAPI.swift:103-105`, the case itself `:106`) makes that the
+    /// deciding question, the same choice `onDidChangeDiagnostics` makes for
+    /// the same reason (`MainThreadDiagnostics.swift:421`).
     ///
     /// **Also raises between `dispose()` and deallocation, not just after
     /// deallocation.** `whenTornDown: .raisedException` above only answers
     /// once `VSCodeAPI.member`'s `[weak owner]` capture
-    /// (`VSCodeAPI.swift:72-79`, commit `90c38b02` — that file is untouched
-    /// by this task) actually observes `self` as `nil` — and
+    /// (`VSCodeAPI.swift:78-85`) actually observes `self` as `nil` — and
     /// `dispose()` (above) does not deallocate `self`, it only sets
     /// `isDisposed` and drops this adaptor's own listeners. Without a
     /// separate check here, a call arriving in that window would still
@@ -539,14 +535,14 @@ public final class MainThreadLanguageModels {
     /// `readonly` behaviour `vscode.d.ts` declares for every one of them —
     /// and two method blocks, `sendRequest` and `countTokens`, via
     /// `setObject(_:forKeyedSubscript:)`
-    /// (`MainThreadWindow.swift:2159-2171` for the accessor descriptor shape,
-    /// `:2181-2191` for the readonly-getter variant used here, `:2340-2365`
-    /// for the method-block shape, all commit 6409e2de). Never constructed by
+    /// (`MainThreadWindow.swift:2170-2182` for the accessor descriptor shape,
+    /// `:2197-2201` for the readonly-getter variant used here, `:2357-2371`
+    /// for the method-block shape). Never constructed by
     /// an extension with `new` — this is the object-handback pattern, not
     /// 5.7a-i's class pattern, because `LanguageModelChat` is an interface an
     /// extension only ever *receives*.
     ///
-    /// **No-capture evidence (Ruling 4), one sentence per block kind
+    /// **No-capture evidence, one sentence per block kind
     /// installed here:**
     /// - Every readonly-getter block captures `model`, a value type, **by
     ///   copy** — there is no reference to weaken and nothing here can retain
@@ -570,12 +566,12 @@ public final class MainThreadLanguageModels {
     ) -> JSValue? {
         guard let object = JSValue(newObjectIn: context) else { return nil }
 
-        installReadonlyGetter(on: object, name: "name") { model.name }
-        installReadonlyGetter(on: object, name: "id") { model.id }
-        installReadonlyGetter(on: object, name: "vendor") { model.vendor }
-        installReadonlyGetter(on: object, name: "family") { model.family }
-        installReadonlyGetter(on: object, name: "version") { model.version }
-        installReadonlyGetter(on: object, name: "maxInputTokens") { model.maxInputTokens }
+        MainThreadWindow.installReadonlyGetter(on: object, name: "name") { model.name }
+        MainThreadWindow.installReadonlyGetter(on: object, name: "id") { model.id }
+        MainThreadWindow.installReadonlyGetter(on: object, name: "vendor") { model.vendor }
+        MainThreadWindow.installReadonlyGetter(on: object, name: "family") { model.family }
+        MainThreadWindow.installReadonlyGetter(on: object, name: "version") { model.version }
+        MainThreadWindow.installReadonlyGetter(on: object, name: "maxInputTokens") { model.maxInputTokens }
 
         let sendRequest = VSCodeAPI.member(
             "vscode.LanguageModelChat.sendRequest", of: languageModels,
@@ -597,28 +593,6 @@ public final class MainThreadLanguageModels {
         return object
     }
 
-    /// Installs a `defineProperty` getter with no setter — `vscode.d.ts`
-    /// declares every one of `LanguageModelChat`'s six data properties
-    /// `readonly` (`:20247`,`:20252`,`:20258`,`:20264`,`:20270`,`:20275`), and
-    /// assigning to one from non-strict JavaScript is then a silent no-op:
-    /// JavaScript's own behaviour for writing a property whose descriptor has
-    /// no setter, not a check this file performs — `MainThreadWindow.swift
-    /// :2173-2180`'s doc for its own `installReadonlyGetter` (commit
-    /// 6409e2de) states the same rule for `StatusBarItem.id`/`alignment`
-    /// /`priority`, and this is that identical mechanism, not a reimplemented
-    /// copy.
-    private static func installReadonlyGetter(
-        on object: JSValue,
-        name: String,
-        get: @escaping @convention(block) () -> Any?
-    ) {
-        object.defineProperty(name, descriptor: [
-            "enumerable": true,
-            "configurable": true,
-            "get": get
-        ])
-    }
-
     // MARK: - LanguageModelChat.countTokens
 
     /// Extracts the text `countTokens` (`vscode.d.ts:20311`) should count
@@ -634,7 +608,7 @@ public final class MainThreadLanguageModels {
     /// text; a part with no string `.value` (`LanguageModelDataPart`,
     /// `LanguageModelToolCallPart`, `LanguageModelToolResultPart`) is
     /// skipped rather than guessed at, because guessing was out of scope for
-    /// 5.7a-ii; `sendRequest`'s own message reader (`parseMessage(_:)`,
+    /// 5.7a-ii; `sendRequest`'s own message reader (`parseMessages(from:)`,
     /// below) reuses this same rule via `arrayElements(of:)` rather than
     /// disagreeing with it about what counts as text.
     private static func extractedText(from argument: JSValue?) -> String {
@@ -651,7 +625,7 @@ public final class MainThreadLanguageModels {
             guard let value = part.forProperty("value"), value.isString else { return nil }
             return value.toString()
         }
-        return parts.joined(separator: " ")
+        return parts.joined()
     }
 
     /// Reads a JS "array-like" value — anything with a numeric `.length` and
@@ -691,8 +665,8 @@ public final class MainThreadLanguageModels {
 
     /// Builds a JS array from `values` via `JSValue(object:in:)`, falling
     /// back to `NSNull()` on failure — the same shape
-    /// `MainThreadWindow.swift:2705-2710`'s own `arrayValue(of:in:)` uses
-    /// (commit 6409e2de). That one is `private static`, so it is unreachable
+    /// `MainThreadWindow.swift:2716-2726`'s own `arrayValue(of:in:)` uses.
+    /// That one is `private static`, so it is unreachable
     /// from here even though both files are in this module; this is a copy,
     /// not a shared helper. `JSValue(object:in:)` bridges a *new* JS array on
     /// every call, so mutating one call's result never affects the next.
@@ -705,11 +679,30 @@ public final class MainThreadLanguageModels {
     /// The body `makeChatModelObject`'s `VSCodeAPI.member(...)` call hands
     /// `sendRequest` to, with a still-live `self` already resolved from that
     /// helper's own weak capture. Builds the `Thenable`
-    /// `vscode.d.ts:20302` declares. Per O9 every failure path here produces
+    /// `vscode.d.ts:20302` declares. Every failure path here produces
     /// a **rejected** promise, never a synchronous throw — the defect the
     /// stub this replaces had.
+    ///
+    /// All three declared arguments are read (`vscode.d.ts:20302`:
+    /// `sendRequest(messages: LanguageModelChatMessage[], options?:
+    /// LanguageModelChatRequestOptions, token?: CancellationToken)`):
+    /// 1. **the messages.** A message whose `role` is neither `User` (1) nor
+    ///    `Assistant` (2) rejects the whole call — `messageRole(_:)` and
+    ///    `refuseUnsupportedRole(_:in:)`.
+    /// 2. **the options.** `justification` reaches the seam;
+    ///    `modelOptions`/`tools`/`toolMode` are recorded by
+    ///    `ledgerDegradedOptions(_:)`.
+    /// 3. **the cancellation token — honoured**, not accepted and ignored
+    ///    the way `MainThreadWindow`'s `showQuickPick`/`showInputBox` tokens
+    ///    are. A token already cancelled when the request would start
+    ///    rejects the promise instead; one cancelled afterwards reaches
+    ///    `LanguageModelResponseRequest.cancelBySourceToken()`, which stops
+    ///    the pump and fails both cursors by the same `sourceFailure` route
+    ///    a stream that threw takes. Because the token is acted on, it is
+    ///    not a degraded argument and nothing is recorded for it.
+    ///    `LanguageModelCancellation` states what is and is not read off it.
     private func handleSendRequest(for model: LanguageModelChatDescriptor) -> JSValue? {
-        // `nil` is the only possible answer here, not a shortfall of O9's
+        // `nil` is the only possible answer here, not a shortfall of the
         // rule that every failure path is a rejected promise: with no
         // `JSContext`, there is nowhere to construct a `JSValue`/promise
         // *in*, rejected or otherwise. A brief requirement that is not
@@ -724,18 +717,33 @@ public final class MainThreadLanguageModels {
         }
 
         let arguments = VSCodeAPI.currentArguments()
-        let messages = MainThreadLanguageModels.parseMessages(from: arguments.first)
+        let messages: [ExtensionLanguageModelMessage]
+        switch MainThreadLanguageModels.parseMessages(from: arguments.first) {
+        case .parsed(let parsed):
+            messages = parsed
+        case .unsupportedRole(let role):
+            return refuseUnsupportedRole(role, in: context)
+        }
         let optionsArgument = arguments.count > 1 ? arguments[1] : nil
         let options = MainThreadLanguageModels.parseRequestOptions(optionsArgument)
         ledgerDegradedOptions(options)
+        let cancellation = LanguageModelCancellation(
+            token: arguments.count > 2 ? arguments[2] : nil)
 
         return JSValue(newPromiseIn: context) { [weak self] resolveValue, rejectValue in
             guard let resolveValue, let rejectValue else { return }
-            let settlement = LanguageModelSettlementBox(resolve: resolveValue, reject: rejectValue)
+            let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
                     rejectLanguageModelTornDown(
                         settlement.reject, memberPath: "vscode.LanguageModelChat.sendRequest")
+                    return
+                }
+                guard !cancellation.isCancelled else {
+                    rejectLanguageModelError(
+                        settlement.reject,
+                        message: "vscode.LanguageModelChat.sendRequest failed: " +
+                            "\(LanguageModelRequestCancelled())")
                     return
                 }
                 do {
@@ -752,7 +760,6 @@ public final class MainThreadLanguageModels {
                     }
                     let request = LanguageModelResponseRequest(owner: self)
                     self.liveRequests[request.id] = request
-                    request.startPump(consuming: stream)
                     guard let responseObject = request.makeResponseObject(in: resultContext) else {
                         self.liveRequests.removeValue(forKey: request.id)
                         rejectLanguageModelError(
@@ -761,6 +768,8 @@ public final class MainThreadLanguageModels {
                                 "build its response object.")
                         return
                     }
+                    request.startPump(consuming: stream)
+                    cancellation.whenCancelled { [weak request] in request?.cancelBySourceToken() }
                     settlement.resolve.call(withArguments: [responseObject])
                 } catch {
                     rejectLanguageModelError(
@@ -797,38 +806,100 @@ public final class MainThreadLanguageModels {
 
     // MARK: - Reading sendRequest's arguments
 
+    /// What `parseMessages(from:)` answers: every message read, or the first
+    /// one whose `role` this host does not implement. There is no third
+    /// case — a message that is not an object, or has no `content`, still
+    /// parses, to an empty `text`.
+    private enum ParsedMessages {
+        case parsed([ExtensionLanguageModelMessage])
+        case unsupportedRole(UnsupportedRole)
+    }
+
+    /// A `role` that is neither `User` (1) nor `Assistant` (2), carried as
+    /// far as the rejection so the extension is told what it sent.
+    /// `number` is the value when the role was a number at all, which is
+    /// what distinguishes upstream's `System = 3` from arbitrary garbage.
+    private struct UnsupportedRole {
+        var described: String
+        var number: Int32?
+    }
+
     /// Reads `sendRequest`'s first argument, `LanguageModelChatMessage[]`
     /// (`vscode.d.ts:20302`), via `arrayElements(of:)` — the same
     /// array-reading logic `extractedText(from:)` uses for one message's
     /// own `content`.
-    private static func parseMessages(
-        from argument: JSValue?
-    ) -> [ExtensionLanguageModelMessage] {
-        (arrayElements(of: argument) ?? []).map(parseMessage)
-    }
-
-    /// One `LanguageModelChatMessage` (`LanguageModelMessageVocabulary.swift
-    /// :238`): `role` (`:172-173`), `name`, and `text` via the shared
-    /// `extractedText(from:)` reader.
-    private static func parseMessage(_ value: JSValue) -> ExtensionLanguageModelMessage {
-        let role = messageRole(value.forProperty("role"))
-        let name = optionalStringValue(value.forProperty("name"))
-        let text = extractedText(from: value)
-        return ExtensionLanguageModelMessage(role: role, name: name, text: text)
+    private static func parseMessages(from argument: JSValue?) -> ParsedMessages {
+        var messages: [ExtensionLanguageModelMessage] = []
+        for element in arrayElements(of: argument) ?? [] {
+            guard let role = messageRole(element.forProperty("role")) else {
+                return .unsupportedRole(describeRole(element.forProperty("role")))
+            }
+            messages.append(
+                ExtensionLanguageModelMessage(
+                    role: role,
+                    name: optionalStringValue(element.forProperty("name")),
+                    text: extractedText(from: element)))
+        }
+        return .parsed(messages)
     }
 
     /// `vscode.LanguageModelChatMessageRole` is `{ User: 1, Assistant: 2 }`
-    /// (`LanguageModelMessageVocabulary.swift:172`). Any other numeric
-    /// value — there should never be one, the class is frozen — reads as
-    /// `.user` rather than crashing on an extension that forged one.
-    private static func messageRole(_ value: JSValue?) -> ExtensionLanguageModelMessage.Role {
-        guard let value, value.isNumber, value.toInt32() == 2 else { return .user }
-        return .assistant
+    /// (`LanguageModelMessageVocabulary.swift:172`). Anything else answers
+    /// `nil`, which `handleSendRequest` turns into a rejected promise: the
+    /// role is a writable own property assigned from an unvalidated
+    /// constructor argument (`LanguageModelMessageVocabulary.swift:239`,
+    /// and `:280-281` states that instances are never frozen), so an
+    /// out-of-vocabulary value is reachable — upstream's `System = 3`
+    /// (`extHostTypes.ts:3886-3890`) among them — and reading one as
+    /// `.user` would send the model a message the extension did not write.
+    private static func messageRole(_ value: JSValue?) -> ExtensionLanguageModelMessage.Role? {
+        guard let value, value.isNumber else { return nil }
+        switch value.toInt32() {
+        case 1: return .user
+        case 2: return .assistant
+        default: return nil
+        }
+    }
+
+    /// Names an unsupported `role` for the rejection message, without
+    /// calling `toString()` on an arbitrary object — an extension's own
+    /// `toString` would then run inside this reader.
+    private static func describeRole(_ value: JSValue?) -> UnsupportedRole {
+        guard let value else { return UnsupportedRole(described: "no value", number: nil) }
+        if value.isNumber {
+            let number = value.toInt32()
+            return UnsupportedRole(described: "\(number)", number: number)
+        }
+        if value.isUndefined { return UnsupportedRole(described: "undefined", number: nil) }
+        if value.isNull { return UnsupportedRole(described: "null", number: nil) }
+        if value.isString { return UnsupportedRole(described: "a string", number: nil) }
+        if value.isBoolean { return UnsupportedRole(described: "a boolean", number: nil) }
+        return UnsupportedRole(described: "a non-numeric value", number: nil)
+    }
+
+    /// Rejects the whole `sendRequest` call for an unsupported `role`, and
+    /// records the one unsupported value that is a real part of upstream's
+    /// vocabulary. `LanguageModelMessageVocabulary.swift:169-173` names
+    /// `System = 3` PROPOSED and out of scope; an extension that reaches for
+    /// it is reaching for a member this host does not implement, which is
+    /// what `notImplementedLedger` is for. Any other value is not an
+    /// unimplemented member, so nothing is recorded for it.
+    private func refuseUnsupportedRole(_ role: UnsupportedRole, in context: JSContext) -> JSValue? {
+        if role.number == 3 {
+            notImplementedLedger.record(
+                memberPath: "vscode.LanguageModelChatMessageRole.System",
+                extensionIdentifier: extensionIdentifier)
+        }
+        return VSCodeAPI.rejectedPromise(
+            message: "vscode.LanguageModelChat.sendRequest: every message's `role` must be " +
+                "vscode.LanguageModelChatMessageRole.User (1) or .Assistant (2); " +
+                "received \(role.described).",
+            in: context)
     }
 
     /// `sendRequest`'s second argument, `LanguageModelChatRequestOptions?`
     /// (`vscode.d.ts:20387-20417`). `justification` reaches the seam
-    /// (Ruling 4); `modelOptions`/`tools`/`toolMode` are read only for
+    /// (Ledger Ruling 4); `modelOptions`/`tools`/`toolMode` are read only for
     /// presence, for `ledgerDegradedOptions(_:)` — Ruling 54 stops at "was
     /// one passed," not "what was in it."
     private struct ParsedRequestOptions {
@@ -870,16 +941,6 @@ public final class MainThreadLanguageModels {
 
 // MARK: - Shared plumbing for LanguageModelChat.sendRequest's response
 
-/// Carries a promise's resolve/reject pair across a `Task` boundary — same
-/// shape as `MainThreadWindow.SettlementBox` (`MainThreadWindow.swift:912`),
-/// rebuilt here because that one is `private` to its own file and both
-/// `MainThreadLanguageModels` and `LanguageModelResponseRequest` (below)
-/// need it.
-private struct LanguageModelSettlementBox: @unchecked Sendable {
-    let resolve: JSValue
-    let reject: JSValue
-}
-
 /// The error `scan(kind:in:)` fails `.stream` with when a response part
 /// cannot be bridged into a JS value —
 /// distinct from `sourceFailure`, which is the seam's own reported error:
@@ -892,9 +953,79 @@ private struct LanguageModelPartBridgingFailure: Error, CustomStringConvertible 
     }
 }
 
+/// The error a request fails with when the `CancellationToken` handed to
+/// `sendRequest` is cancelled. Distinct from `LanguageModelPartBridgingFailure`
+/// (a defect in this host) and from the seam's own thrown error (a failure in
+/// the provider): this one is the extension asking for the request to stop.
+private struct LanguageModelRequestCancelled: Error, CustomStringConvertible {
+    var description: String {
+        "the CancellationToken passed to sendRequest was cancelled"
+    }
+}
+
+/// The `CancellationToken` `sendRequest` was passed (`vscode.d.ts:20302`),
+/// reduced to the two things this adaptor acts on: whether it is already
+/// cancelled, and one callback for when it becomes cancelled.
+///
+/// The token is read by duck-typing, not by `isInstance(of:)`, because this
+/// host installs no `CancellationToken` type and no `CancellationTokenSource`
+/// for an extension to build one from — the object that arrives here is
+/// whatever the extension brought. What is read is exactly the two members
+/// `vscode.d.ts:1664` (`isCancellationRequested: boolean`) and `:1669`
+/// (`readonly onCancellationRequested: Event<any>`) declare; an argument that
+/// is absent, is not an object, or whose `onCancellationRequested` is not a
+/// `Function` leaves this object permanently un-cancelled rather than
+/// failing the call, because a token is optional in the declared signature.
+///
+/// The listener block captures `self` weakly, so subscribing does not keep
+/// this object — or, through `whenCancelled`'s body, the request — alive: a
+/// token outliving its request fires into a `nil` and does nothing.
+@MainActor
+private final class LanguageModelCancellation {
+    private(set) var isCancelled = false
+    private var body: (() -> Void)?
+
+    init(token: JSValue?) {
+        guard let token, token.isObject else { return }
+        if let requested = token.forProperty("isCancellationRequested"), requested.toBool() {
+            isCancelled = true
+        }
+        guard let subscribe = token.forProperty("onCancellationRequested"),
+              let context = token.context,
+              let functionConstructor = context.objectForKeyedSubscript("Function"),
+              subscribe.isInstance(of: functionConstructor) else {
+            return
+        }
+        let listener: @convention(block) () -> Void = { [weak self] in
+            MainActor.assumeIsolated { self?.cancel() }
+        }
+        subscribe.call(withArguments: [listener])
+    }
+
+    /// Runs `body` when the token is cancelled — immediately if it already
+    /// was, which is what closes the window between the caller's
+    /// `isCancelled` check and this call.
+    func whenCancelled(_ body: @escaping () -> Void) {
+        if isCancelled {
+            body()
+        } else {
+            self.body = body
+        }
+    }
+
+    private func cancel() {
+        guard !isCancelled else { return }
+        isCancelled = true
+        let body = self.body
+        self.body = nil
+        body?()
+    }
+}
+
 /// The wording `MainThreadWindow.rejectTornDown(_:path:)` uses
-/// (`MainThreadWindow.swift:2737`), rebuilt at file scope for the same
-/// reason as `LanguageModelSettlementBox` above.
+/// (`MainThreadWindow.swift:2746`), rebuilt at file scope because that one is
+/// `private` to its own type, and because both `MainThreadLanguageModels` and
+/// `LanguageModelResponseRequest` below need it.
 private func rejectLanguageModelTornDown(_ reject: JSValue, memberPath: String) {
     rejectLanguageModelError(
         reject,
@@ -1005,9 +1136,9 @@ private func installLanguageModelAsyncIterator(
 /// `statusBarItems` (`MainThreadWindow.swift:896`, doc `:892-895`). Every
 /// JS-facing block this class hands to `installLanguageModelAsyncIterator`
 /// captures it **weakly** and re-obtains its `JSContext` at call time
-/// (Ruling 2), and `startPump(consuming:)`'s own `Task` captures it weakly
-/// too — the same rule, not an exception to it. A request already gone by
-/// the time that `Task` starts running exits immediately at its
+/// (Ledger Ruling 2), and `startPump(consuming:)`'s own `Task` captures it
+/// weakly too — the same rule, not an exception to it. A request already
+/// gone by the time that `Task` starts running exits immediately at its
 /// `guard let self else { return }`; past that guard, though, the binding
 /// is strong for the rest of the task body, so a *running* pump holds this
 /// object alive across every `for try await` suspension until `source` ends
@@ -1043,7 +1174,7 @@ private final class LanguageModelResponseRequest {
     private struct CursorState {
         var index = 0
         var isFinished = false
-        var waiter: LanguageModelSettlementBox?
+        var waiter: PromiseSettlementBox?
     }
 
     private enum ScanOutcome {
@@ -1080,9 +1211,12 @@ private final class LanguageModelResponseRequest {
     }
 
     /// Starts the one pump that drains `source` into `buffer`. Called at
-    /// most once, immediately after `init`, once this request is already
-    /// stored in `liveRequests` — so a part arriving on the very first loop
-    /// iteration always has somewhere to be recorded.
+    /// most once, and only once this request is both stored in
+    /// `liveRequests` — so a part arriving on the very first loop iteration
+    /// always has somewhere to be recorded — and past
+    /// `makeResponseObject(in:)`, whose failure branch abandons the request:
+    /// a pump started before that guard would be left running with the one
+    /// reference that could cancel it already removed.
     func startPump(consuming source: AsyncThrowingStream<ExtensionLanguageModelResponsePart, Error>) {
         pumpTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1141,6 +1275,26 @@ private final class LanguageModelResponseRequest {
         pumpTask = nil
     }
 
+    /// The `CancellationToken` handed to `sendRequest` was cancelled. Puts
+    /// this request into the exact state a source that *threw* leaves it in
+    /// — pump stopped, `sourceFailure` set, source finished — so every
+    /// outstanding and future `next()` settles through `scan(kind:in:)`'s
+    /// existing `sourceFailure` branch rather than through a second
+    /// cancellation path of its own. Parts already buffered are still
+    /// delivered before that failure, because `scan(kind:in:)` reads
+    /// `sourceFailure` only once the buffer is exhausted for that cursor.
+    /// A source that has already finished is left alone: there is nothing
+    /// left to cancel, and overwriting its outcome would turn a completed
+    /// response into a failed one.
+    func cancelBySourceToken() {
+        guard !isSourceFinished else { return }
+        cancelSource()
+        sourceFailure = LanguageModelRequestCancelled()
+        isSourceFinished = true
+        wake(.stream)
+        wake(.text)
+    }
+
     // MARK: - The async-iterable factory
 
     private func makeAsyncIterable(kind: CursorKind, in context: JSContext) -> JSValue? {
@@ -1176,7 +1330,7 @@ private final class LanguageModelResponseRequest {
             guard let resolveValue, let rejectValue else { return }
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let settlement = LanguageModelSettlementBox(
+                let settlement = PromiseSettlementBox(
                     resolve: resolveValue, reject: rejectValue)
                 self.attemptSettleOrStore(kind: kind, settlement: settlement, in: context)
             }
@@ -1184,9 +1338,10 @@ private final class LanguageModelResponseRequest {
     }
 
     /// One cursor's `return(value)` — called by `for await…of` on a `break`
-    /// or early exit (Ruling 53, and the second cancellation route
-    /// `vscode.d.ts:20213-20214` documents). Marks only *this* cursor
-    /// finished; the other branch is unaffected and keeps draining.
+    /// or early exit (Ruling 53, and the second of the two cancellation
+    /// routes `vscode.d.ts:20206-20207` names, the first being the
+    /// `CancellationToken` `handleSendRequest` honours). Marks only *this*
+    /// cursor finished; the other branch is unaffected and keeps draining.
     private func returned(kind: CursorKind, in context: JSContext) -> JSValue? {
         if let settlement = waiter(for: kind) {
             setWaiter(nil, for: kind)
@@ -1218,7 +1373,7 @@ private final class LanguageModelResponseRequest {
 
     private func attemptSettleOrStore(
         kind: CursorKind,
-        settlement: LanguageModelSettlementBox,
+        settlement: PromiseSettlementBox,
         in context: JSContext
     ) {
         guard let owner, !owner.isDisposed else {
@@ -1368,7 +1523,7 @@ private final class LanguageModelResponseRequest {
     /// `dispose()`. That is a known, accepted cost (Ruling 82): re-owning a
     /// response's lifetime from the JS side instead — so it could be
     /// released the moment the extension drops it, the way upstream's own
-    /// teed iterable is garbage-collected — would overturn Ruling 2's
+    /// teed iterable is garbage-collected — would overturn Ledger Ruling 2's
     /// weak-capture rule, which is why that route is deferred rather than
     /// taken here.
     private func checkCompletion() {
@@ -1386,11 +1541,11 @@ private final class LanguageModelResponseRequest {
         }
     }
 
-    private func waiter(for kind: CursorKind) -> LanguageModelSettlementBox? {
+    private func waiter(for kind: CursorKind) -> PromiseSettlementBox? {
         withCursor(kind) { $0.waiter }
     }
 
-    private func setWaiter(_ waiter: LanguageModelSettlementBox?, for kind: CursorKind) {
+    private func setWaiter(_ waiter: PromiseSettlementBox?, for kind: CursorKind) {
         withCursor(kind) { $0.waiter = waiter }
     }
 
@@ -1457,19 +1612,4 @@ private struct LanguageModelChatSelectorCriteria {
 
 extension MainThreadLanguageModels: Loggable {
     public static nonisolated let logger = makeLogger()
-}
-
-// MARK: - Carrying a JSValue? out of MainActor.assumeIsolated
-
-/// `@unchecked Sendable`, on the same terms as `VSCodeAPI.swift`'s own
-/// `private struct UncheckedJSValueBox` (that type is private to its file,
-/// so this is a local equivalent, not a reuse): nothing here actually
-/// crosses an isolation domain — `countTokens`'s block and the
-/// `MainActor.assumeIsolated` call inside it both run on the same main
-/// actor — but `assumeIsolated`'s generic return type is checked against
-/// `Sendable`, and a bare `JSValue?` is not, and is not a type this module
-/// can extend with a conformance. This box is the honest way to state the
-/// guarantee the surrounding code already holds.
-private struct UncheckedJSValueBox: @unchecked Sendable {
-    let value: JSValue?
 }

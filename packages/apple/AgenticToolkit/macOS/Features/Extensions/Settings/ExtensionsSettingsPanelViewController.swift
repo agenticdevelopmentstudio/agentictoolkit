@@ -236,7 +236,7 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
             style: .continuation)
         group.addSettingSubview(
             // `displayIdentifier`, not `identifier`: identity is matched
-            // case-insensitively (F39), but this line is the app repeating the
+            // case-insensitively, but this line is the app repeating the
             // author's own manifest back to them, and folding it would name
             // their extension something they never wrote.
             ComposableSettings.ExplanationView(
@@ -497,7 +497,7 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
         // Both levels: the manifest's own failures as well as its
         // `contributes` block's. `activationEvents`, `extensionKind` and
         // `capabilities` are now skipped rather than fatal when they are
-        // malformed (F09), which means an author can ship one wrong and never
+        // malformed, which means an author can ship one wrong and never
         // hear about it — the extension loads, nothing this host reads is
         // affected, and the only thing that changed is that something they
         // wrote was thrown away. This line is the whole of what stops that

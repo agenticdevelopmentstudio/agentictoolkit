@@ -50,23 +50,15 @@ public final class ExtensionEventTimerWindow: ExtensionEventWindowScheduling {
 
     public func openWindow(closingAfter delay: TimeInterval, onClose: @escaping @MainActor () -> Void) {
         // `asyncAfter`'s block is `@Sendable` and `onClose` is not, so the
-        // closure crosses in a box on the same terms as this directory's
-        // other `@unchecked Sendable` boxes: nothing actually changes
-        // isolation domain — the block runs on `DispatchQueue.main`, which is
-        // the main actor — but the compiler cannot see that through
-        // `asyncAfter`'s signature.
-        let work = UncheckedMainActorWork(body: onClose)
+        // closure crosses in `UncheckedSendableBox`, on the terms that type
+        // states: nothing actually changes isolation domain — the block runs
+        // on `DispatchQueue.main`, which is the main actor — but the compiler
+        // cannot see that through `asyncAfter`'s signature.
+        let work = UncheckedSendableBox(value: onClose)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            MainActor.assumeIsolated { work.body() }
+            MainActor.assumeIsolated { work.value() }
         }
     }
-}
-
-/// Carries a `@MainActor` closure through `asyncAfter`'s `@Sendable`
-/// requirement — see `ExtensionEventTimerWindow.openWindow` for why this is
-/// honest rather than a hole.
-private struct UncheckedMainActorWork: @unchecked Sendable {
-    let body: @MainActor () -> Void
 }
 
 // MARK: - The emitter

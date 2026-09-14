@@ -53,7 +53,7 @@ private final class SettlementRecorder {
 
 /// Carries the two non-`Sendable` JavaScriptCore values into that `Task`.
 ///
-/// `@unchecked Sendable` on `VSCodeAPI.UncheckedSettlementBox`'s own terms:
+/// `@unchecked Sendable` on `UncheckedSendableBox`'s own terms:
 /// `Task.init`'s `operation` closure is checked against `Sendable` and neither
 /// `JSValue` nor `JSContext` is, but the closure is `@MainActor` and both
 /// values were created on — and are only ever touched from — that same actor.
@@ -134,29 +134,6 @@ struct VSCodeAPISettlementTests {
 
     private func makeTempDirectory() throws -> URL {
         try ExtensionFixtures.makeTemporaryDirectory("VSCodeAPISettlementTests")
-    }
-
-    private func manifest(browser: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "settlement",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "browser": "\(browser)"
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    private func makeHost(source: String, in directory: URL) throws -> ExtensionHost {
-        let entryPath = "dist/web.js"
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(loadedExtension: loaded)
     }
 
     /// An extension whose `activate` evaluates `expression` in its own module

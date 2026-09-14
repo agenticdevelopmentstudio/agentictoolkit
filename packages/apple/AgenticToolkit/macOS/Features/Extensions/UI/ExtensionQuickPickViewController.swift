@@ -67,7 +67,7 @@ final class ExtensionQuickPickViewController: NSViewController {
         // The brief's fixed 560×400 list size (task-5.5b-iv-brief.md:326).
         // Set in `init`, not `loadView`, so it is already in place the first
         // time `ExtensionPickerWindowController` reads
-        // `preferredContentSize` — see that type's own doc comment (F1).
+        // `preferredContentSize` — see that type's own doc comment.
         preferredContentSize = NSSize(width: 560, height: 400)
     }
 
@@ -221,7 +221,7 @@ final class ExtensionQuickPickViewController: NSViewController {
     /// alone), but the single-select branch used to call `choose()`
     /// unconditionally afterwards, which accepted whatever was still
     /// highlighted from before the click — a click on a section heading was
-    /// silently accepting the previous item (F3). The guard here, shared by
+    /// silently accepting the previous item. The guard here, shared by
     /// both branches, is what stops that.
     func handleRowClick(_ row: Int) {
         guard row >= 0,

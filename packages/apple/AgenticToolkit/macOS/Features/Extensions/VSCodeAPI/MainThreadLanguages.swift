@@ -480,7 +480,7 @@ public protocol ExtensionLanguageVocabulary: AnyObject {
 ///
 /// Holds only the plain Swift values `LanguageConfiguration` is built from —
 /// no `JSValue`, no `JSContext` — so nothing here is subject to the
-/// no-JSValue-capture rule (`VSCodeAPI.swift:563-572`) in the first place, and
+/// no-JSValue-capture rule (`VSCodeAPI.swift:569-578`) in the first place, and
 /// an entry left in this store after its owning `MainThreadLanguages` is
 /// disposed leaks nothing beyond the entry itself.
 ///
@@ -586,7 +586,8 @@ public final class MainThreadLanguages {
     /// defaulted: a caller that forgot to pass the host's real store would
     /// silently get a private one nothing else can read, defeating the whole
     /// reason `MainThreadWorkspace.notImplementedLedger` is injected the same
-    /// way (`MainThreadWorkspace.swift:180`) — so a test, or a future report,
+    /// way (`MainThreadWorkspace.swift:165-167`) — so a test, or a future
+    /// report,
     /// can construct a store, hand it in, and read it back.
     private let store: LanguageConfigurationStore
 
@@ -620,7 +621,7 @@ public final class MainThreadLanguages {
     ///
     /// Rejects rather than raises on a torn-down adaptor: `vscode.d.ts:14733`
     /// declares this member `Thenable<string[]>`, not a value, so
-    /// `VSCodeAPI.member`'s own doc (`VSCodeAPI.swift:91-101`) says a
+    /// `VSCodeAPI.member`'s own doc (`VSCodeAPI.swift:97-107`) says a
     /// torn-down answer here must be a rejected promise, the same choice
     /// `MainThreadCommands.getCommands` makes for the same reason.
     public private(set) lazy var getLanguages: Any = VSCodeAPI.member(
@@ -650,7 +651,7 @@ public final class MainThreadLanguages {
     /// Raises rather than rejects on a torn-down adaptor: `vscode.d.ts:15301`
     /// declares this member `Disposable`, not `Thenable` — it answers
     /// synchronously, so `VSCodeAPI.member`'s own doc
-    /// (`VSCodeAPI.swift:47-54`) says a torn-down answer here must be a raised
+    /// (`VSCodeAPI.swift:53-60`) says a torn-down answer here must be a raised
     /// exception, the same choice `MainThreadCommands.registerCommand` and
     /// `MainThreadWorkspace.getWorkspaceFolder` make for the same reason.
     public private(set) lazy var setLanguageConfiguration: Any = VSCodeAPI.member(

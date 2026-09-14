@@ -15,8 +15,8 @@ import AgenticToolkitCore
 /// **One instance per extension**, mirroring `ExtensionHost` itself. Nothing
 /// enforces it — `defineVSCodeMember` will install these blocks on any number
 /// of hosts — but every ownership question below is answered as if it holds.
-/// That is what makes Ruling 5's duplicate check ("an id *this adaptor*
-/// already owns") answerable at all: two extensions are two
+/// That is what makes the duplicate check task 5.3's Ruling 5 requires ("an
+/// id *this adaptor* already owns") answerable at all: two extensions are two
 /// `MainThreadCommands`, so one extension registering `'x'` twice is a
 /// collision this type can see, and two different extensions each registering
 /// `'x'` once is not — that second case is the registry's replace-and-warn
@@ -28,10 +28,10 @@ import AgenticToolkitCore
 /// Not `@convention(block)` itself — the three properties below are. This
 /// class exists so those blocks have somewhere to keep the state a bare
 /// closure cannot: the registry they dispatch through, and the ownership
-/// record `dispose()` and Ruling 5 both read. The ceremony of *making* those
-/// blocks lives in `VSCodeAPI`, which tasks 5.4–5.7 share, so that what is
-/// left here reads as the `commands` adaptor rather than as four copies of an
-/// incantation.
+/// record `dispose()` and task 5.3's Ruling 5 both read. The ceremony of
+/// *making* those blocks lives in `VSCodeAPI`, which tasks 5.4–5.7 share, so
+/// that what is left here reads as the `commands` adaptor rather than as four
+/// copies of an incantation.
 ///
 /// **Whoever owns this adaptor must call `dispose()` when it tears the
 /// extension host down.** There is deliberately no `deinit` net, and nothing
@@ -63,11 +63,11 @@ public final class MainThreadCommands {
     /// the token naming *that* registration in the registry.
     ///
     /// The token is the difference between "unregister this id" and
-    /// "unregister what I registered". Ruling 5 lets an extension register an
-    /// id the app already owned, and `register` replaces in place, so the two
-    /// routinely name different things a moment later; by id alone a stale
-    /// `Disposable` deletes whatever now answers to the id, including one of
-    /// the app's own commands.
+    /// "unregister what I registered". Task 5.3's Ruling 5 lets an extension
+    /// register an id the app already owned, and `register` replaces in
+    /// place, so the two routinely name different things a moment later; by
+    /// id alone a stale `Disposable` deletes whatever now answers to the id,
+    /// including one of the app's own commands.
     private struct OwnedCommand {
         let callback: JSValue
         let token: CommandRegistration
@@ -77,12 +77,12 @@ public final class MainThreadCommands {
     ///
     /// **Not a second command table.** Dispatch always goes through
     /// `registry`; this dictionary is purely the ownership record — the answer
-    /// to "did *I* register this id" that Ruling 5's duplicate check needs, and
-    /// the list `dispose()` walks to unregister everything this adaptor is
-    /// responsible for. Losing this and reading the registry instead would
-    /// answer a different question: whether the id is registered at all,
-    /// which is true for the app's own commands too, and Ruling 5 is explicit
-    /// that those may be shadowed.
+    /// to "did *I* register this id" that the duplicate check of task 5.3's
+    /// Ruling 5 needs, and the list `dispose()` walks to unregister everything
+    /// this adaptor is responsible for. Losing this and reading the registry
+    /// instead would answer a different question: whether the id is registered
+    /// at all, which is true for the app's own commands too, and task 5.3's
+    /// Ruling 5 is explicit that those may be shadowed.
     private var ownedCallbacks: [String: OwnedCommand] = [:]
 
     /// - Parameter registry: The registry extension commands dispatch through.
@@ -107,17 +107,17 @@ public final class MainThreadCommands {
         "vscode.commands.registerCommand", of: self, whenTornDown: .raisedException
     ) { $0.handleRegisterCommand() }
 
-    /// Ruling 6: `registerCommand` raises rather than rejects, because it
-    /// returns a `Disposable`, not a `Thenable` — there is nothing for a
-    /// synchronous failure here to reject.
+    /// Task 5.3's Ruling 6: `registerCommand` raises rather than rejects,
+    /// because it returns a `Disposable`, not a `Thenable` — there is nothing
+    /// for a synchronous failure here to reject.
     ///
     /// Three ways this refuses, in order: a missing or non-string command id,
-    /// a callback that is not callable (Ruling 6, test 10), and Ruling 5's
-    /// duplicate — an id *this* adaptor already owns. A duplicate the app or a
-    /// different extension owns is not this type's call: VS Code itself lets
-    /// extensions override some built-in ids, and refusing that here would be
-    /// a trust decision that belongs with `ExtensionRegistry` and the
-    /// permissions work, not with an API adaptor.
+    /// a callback that is not callable (task 5.3's Ruling 6, test 10), and the
+    /// duplicate of task 5.3's Ruling 5 — an id *this* adaptor already owns. A
+    /// duplicate the app or a different extension owns is not this type's
+    /// call: VS Code itself lets extensions override some built-in ids, and
+    /// refusing that here would be a trust decision that belongs with
+    /// `ExtensionRegistry` and the permissions work, not with an API adaptor.
     private func handleRegisterCommand() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
         let arguments = VSCodeAPI.currentArguments()
@@ -155,9 +155,9 @@ public final class MainThreadCommands {
             return VSCodeAPI.raise(VSCodeAPI.dispatchUnavailableMessage(for: context), in: context)
         }
 
-        // `undefined` and `null` both mean "no `thisArg`" (Ruling 7); anything
-        // else, including a JS `false` or `0`, is a real value an extension
-        // deliberately bound and must be honoured.
+        // `undefined` and `null` both mean "no `thisArg`" (task 5.3's
+        // Ruling 7); anything else, including a JS `false` or `0`, is a real
+        // value an extension deliberately bound and must be honoured.
         let rawThisArg: JSValue? = arguments.count > 2 ? arguments[2] : nil
         let boundThisArg: JSValue? = {
             guard let rawThisArg, !rawThisArg.isUndefined, !rawThisArg.isNull else { return nil }
@@ -211,9 +211,9 @@ public final class MainThreadCommands {
     /// `try { await vscode.commands.executeCommand('x') } catch { … }` has
     /// handled its own failure correctly and completely, so logging it at
     /// `error` in the host's subsystem would report an extension behaving
-    /// properly as an app fault, and at volume. The round-1 ruling this
-    /// descends from said a palette dispatch is logged and swallowed *because
-    /// there is no caller to tell* — so where there is a caller, the caller is
+    /// properly as an app fault, and at volume. The rule it descends from is
+    /// that a palette dispatch is logged and swallowed *because there is no
+    /// caller to tell* — so where there is a caller, the caller is
     /// told and the log stays quiet. `hasCaller` is that bit, read off
     /// `dispatchHasCaller` and consumed by the registry closure that calls
     /// this; both failure shapes below read it, one rule rather than two,
@@ -221,8 +221,8 @@ public final class MainThreadCommands {
     /// ceremony.
     /// Note what this does *not* touch: for a callback reached through the
     /// trampoline this host installs, the exception still does not land in
-    /// `ExtensionHost.pendingException` on either path — F3/F4 were about
-    /// where it goes, not about who writes it down. **That is a claim about
+    /// `ExtensionHost.pendingException` on either path — what differs is
+    /// where it goes, not who writes it down. **That is a claim about
     /// this host's trampoline, not about every context.** An extension that
     /// pre-empts `globalThis.__vscodeAPITrampoline` with a `call` that
     /// *throws* rather than returning a record puts its exception into
@@ -274,7 +274,7 @@ public final class MainThreadCommands {
         case .threw(let exception):
             // Same rule as the rejection above, and deliberately one rule
             // rather than two: an extension awaiting `executeCommand` receives
-            // this as a rejection and owns it. What F3/F4 were about is where
+            // this as a rejection and owns it. What differs here is where
             // the exception *goes* — out through the trampoline's record
             // rather than into `ExtensionHost.pendingException` — which
             // `VSCodeAPI.call` holds on both paths for the trampoline this
@@ -441,18 +441,20 @@ public final class MainThreadCommands {
     /// `implementation` for `vscode.commands.executeCommand`.
     ///
     /// Rejects rather than raises on a torn-down adaptor: this member returns a
-    /// `Thenable`, and Ruling 6's whole argument is that a synchronous failure
-    /// from underneath an `await` reaches a `catch` the extension did not
-    /// write. Answering `undefined` would be the worst version of that — the
-    /// extension's own `.then` would be the thing that threw.
+    /// `Thenable`, and the whole argument of task 5.3's Ruling 6 is that a
+    /// synchronous failure from underneath an `await` reaches a `catch` the
+    /// extension did not write. Answering `undefined` would be the worst
+    /// version of that — the extension's own `.then` would be the thing that
+    /// threw.
     public private(set) lazy var executeCommand: Any = VSCodeAPI.member(
         "vscode.commands.executeCommand", of: self, whenTornDown: .rejectedPromise
     ) { $0.handleExecuteCommand() }
 
-    /// Ruling 6: always a settled promise, never a synchronous throw. VS Code
-    /// extensions write `await vscode.commands.executeCommand(...)` inside
-    /// `try`, and a synchronous throw from underneath an `await` reaches a
-    /// `catch` other than the one they wrote.
+    /// Task 5.3's Ruling 6: always a settled promise, never a synchronous
+    /// throw. VS Code extensions write
+    /// `await vscode.commands.executeCommand(...)` inside `try`, and a
+    /// synchronous throw from underneath an `await` reaches a `catch` other
+    /// than the one they wrote.
     ///
     /// Dispatch is genuinely synchronous — this host runs one extension's
     /// JavaScript and the app's own command dispatch on the same actor, so the

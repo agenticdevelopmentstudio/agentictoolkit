@@ -1,26 +1,26 @@
 import Testing
 @testable import AgenticToolkitMacOS
 
-@Suite("ExtensionPickerSession")
+@Suite("OnceOnlyContinuation")
 @MainActor
-struct ExtensionPickerSessionTests {
+struct OnceOnlyContinuationTests {
 
     @Test("finish(value) delivers that value to the awaiting caller")
     func finishDeliversValue() async {
-        let result = await withCheckedContinuation { (continuation: CheckedContinuation<Int?, Never>) in
-            let session = ExtensionPickerSession<Int>(continuation: continuation)
+        let boxed: UncheckedSendableBox<Int?> = await withCheckedContinuation { continuation in
+            let session = OnceOnlyContinuation<Int?>(continuation: continuation)
             session.finish(42)
         }
-        #expect(result == 42)
+        #expect(boxed.value == 42)
     }
 
     @Test("finish(nil) delivers nil")
     func finishDeliversNil() async {
-        let result = await withCheckedContinuation { (continuation: CheckedContinuation<Int?, Never>) in
-            let session = ExtensionPickerSession<Int>(continuation: continuation)
+        let boxed: UncheckedSendableBox<Int?> = await withCheckedContinuation { continuation in
+            let session = OnceOnlyContinuation<Int?>(continuation: continuation)
             session.finish(nil)
         }
-        #expect(result == nil)
+        #expect(boxed.value == nil)
     }
 
     @Test("a second finish neither traps nor changes the delivered answer, and isFinished is true throughout")
@@ -28,8 +28,8 @@ struct ExtensionPickerSessionTests {
         var isFinishedBefore = true
         var isFinishedAfterFirst = false
         var isFinishedAfterSecond = false
-        let result = await withCheckedContinuation { (continuation: CheckedContinuation<Int?, Never>) in
-            let session = ExtensionPickerSession<Int>(continuation: continuation)
+        let boxed: UncheckedSendableBox<Int?> = await withCheckedContinuation { continuation in
+            let session = OnceOnlyContinuation<Int?>(continuation: continuation)
             isFinishedBefore = session.isFinished
             session.finish(1)
             isFinishedAfterFirst = session.isFinished
@@ -39,6 +39,6 @@ struct ExtensionPickerSessionTests {
         #expect(isFinishedBefore == false)
         #expect(isFinishedAfterFirst == true)
         #expect(isFinishedAfterSecond == true)
-        #expect(result == 1)
+        #expect(boxed.value == 1)
     }
 }
