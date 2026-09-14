@@ -2178,7 +2178,14 @@ public final class MainThreadWindow {
     /// a check this file performs — which is what test 8 exercises: even
     /// setting `object.priority = X` still hands the getter the assignment
     /// never touched.
-    private static func installReadonlyGetter(
+    ///
+    /// **Promoted from `private` to internal (task 5.6a-iii)** so
+    /// `MainThreadDiagnostics.swift`'s `DiagnosticCollection.name` getter
+    /// (itself `readonly` per `vscode.d.ts:7178`) can reuse this exact
+    /// `defineProperty` shape rather than duplicating its body — this file's
+    /// own review discipline prefers promoting a helper it already owns over
+    /// a second, verbatim copy elsewhere in the same framework target.
+    static func installReadonlyGetter(
         on object: JSValue,
         name: String,
         get: @escaping @convention(block) () -> Any?

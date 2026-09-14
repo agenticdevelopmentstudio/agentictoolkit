@@ -1022,23 +1022,36 @@ public final class ExtensionHost {
         // ceremony installed identically on every activation, so this is
         // neither queued onto `vscodeMemberDefinitions` nor routed through
         // `defineVSCodeMember`, for the same reason the `Uri` block above
-        // is not. A member this loop fails to install is logged and left as
-        // the shim's not-implemented stub; that failure is not fatal to
-        // activation.
+        // is not. `installVSCodeMembers(_:onto:)` below covers the install
+        // loop itself, including the sorted order (fix round 1, F5).
         if let languageModelMembers = VSCodeAPI.installLanguageModelVocabulary(in: context) {
-            for (memberName, memberValue) in languageModelMembers {
-                pendingException = nil
-                runtime.invokeMethod("defineMember", withArguments: ["vscode", memberName, memberValue])
-                if let message = pendingException {
-                    pendingException = nil
-                    logger.error(
-                        """
-                        Extension '\(self.identifier, privacy: .public)' could not have \
-                        'vscode.\(memberName, privacy: .public)' installed \
-                        (\(message, privacy: .public)); it stays the shim's not-implemented stub
-                        """)
-                }
-            }
+            installVSCodeMembers(languageModelMembers, onto: runtime)
+        }
+
+        // Same eagerness and the same reasoning, for task 5.6a-i's text
+        // geometry: `vscode.Position` and `vscode.Range`, two top-level
+        // `vscode.*` classes rather than a namespace — `defineMember` is
+        // called with `"vscode"` as the namespace path for each, exactly as
+        // it is for `Uri` and the language-model vocabulary above. Host
+        // ceremony installed identically on every activation, so this is
+        // neither queued onto `vscodeMemberDefinitions` nor routed through
+        // `defineVSCodeMember`, for the same reason those two blocks are not.
+        if let textGeometryMembers = VSCodeAPI.installTextGeometryClasses(in: context) {
+            installVSCodeMembers(textGeometryMembers, onto: runtime)
+        }
+
+        // Same eagerness and the same reasoning, for task 5.6a-ii's four
+        // diagnostic value types: `vscode.DiagnosticSeverity`,
+        // `vscode.DiagnosticTag`, `vscode.DiagnosticRelatedInformation` and
+        // `vscode.Diagnostic` — four more top-level `vscode.*` declarations,
+        // installed the identical way the text-geometry block above installs
+        // `Position`/`Range`/`Location`. `vscode.Location` itself is not
+        // installed here: it is one of `textGeometryMembers` above, not one
+        // of `installDiagnosticTypes(in:)`'s four — see `TextGeometry.swift`'s
+        // header for why `Location` lives there instead of in
+        // `DiagnosticTypes.swift`.
+        if let diagnosticMembers = VSCodeAPI.installDiagnosticTypes(in: context) {
+            installVSCodeMembers(diagnosticMembers, onto: runtime)
         }
 
         // Before the extension's first statement runs, so a member defined by
@@ -1054,6 +1067,46 @@ public final class ExtensionHost {
 
         context.evaluateScript("delete globalThis.__extensionRuntime; delete globalThis.__host;")
         return runtime
+    }
+
+    /// Installs every member of `members` onto `"vscode"` via `runtime`'s
+    /// `defineMember`, visiting keys in sorted order — dictionary iteration
+    /// order is not a contract, so an unsorted loop would define members in
+    /// an arbitrary-but-not-stable order across runs of the process, exactly
+    /// what `LanguageContributionPoint.rebuild()`'s own reasoning
+    /// (`LanguageContributionPoint.swift:272-278`) already refuses, the same
+    /// way that method's own sorted loop (`:279`) does. A member that fails
+    /// to install is logged and left as the shim's not-implemented stub;
+    /// that failure is not fatal to activation.
+    ///
+    /// Shared by the language-model, text-geometry and diagnostic-value-type
+    /// install blocks in `installRuntime(runtimeSource:into:)` above, which
+    /// were three near-identical copies of this loop before this extraction
+    /// (fix round 1, F5). Sorting here is why the language-model block below
+    /// is now sorted too: it iterated `installLanguageModelVocabulary(in:)`'s
+    /// dictionary in whatever order that dictionary happened to produce
+    /// before this fix, and nothing about that install order was ever load
+    /// bearing — no code reads it, since `defineMember` writes independent
+    /// properties one at a time.
+    private func installVSCodeMembers(
+        _ members: [String: JSValue], onto runtime: JSValue
+    ) {
+        for memberName in members.keys.sorted() {
+            guard let memberValue = members[memberName] else {
+                continue
+            }
+            pendingException = nil
+            runtime.invokeMethod("defineMember", withArguments: ["vscode", memberName, memberValue])
+            if let message = pendingException {
+                pendingException = nil
+                logger.error(
+                    """
+                    Extension '\(self.identifier, privacy: .public)' could not have \
+                    'vscode.\(memberName, privacy: .public)' installed \
+                    (\(message, privacy: .public)); it stays the shim's not-implemented stub
+                    """)
+            }
+        }
     }
 
     private static let runtimeSourceURL = URL(fileURLWithPath: "/agentic-extension-runtime.js")
