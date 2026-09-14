@@ -1078,6 +1078,40 @@ struct ExtensionHostTests {
         #expect(uriFileSucceeded.toBool() == true)
     }
 
+    /// Task 5.7a-i's `vscode.LanguageModel*` message vocabulary, installed by
+    /// the block at `ExtensionHost.swift:1014-1042` the same way `Uri` is
+    /// installed just above it (`:1001-1012`) — through a real activated
+    /// host, not the bare `JSContext` `LanguageModelMessageVocabularyTests`
+    /// uses. Nothing else in the repo exercises that install block: deleting
+    /// it, or attaching its members under a namespace other than `"vscode"`,
+    /// leaves every other test in the repo passing while this one goes red.
+    @Test
+    func languageModelVocabularyIsUsableThroughARealHost() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                var message = vscode.LanguageModelChatMessage.User('hello');
+                globalThis.__languageModelMessageIsUsable =
+                    message instanceof vscode.LanguageModelChatMessage &&
+                    message.content[0] instanceof vscode.LanguageModelTextPart;
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let flag = "globalThis.__languageModelMessageIsUsable"
+        let languageModelMessageIsUsable = try #require(context.evaluateScript(flag))
+        #expect(languageModelMessageIsUsable.toBool() == true)
+    }
+
     /// One ledger, two extensions: the rows stay attributed. Task 5.8's report
     /// groups by extension, and a ledger that lost the identifier would make
     /// that impossible after the hosts are gone.

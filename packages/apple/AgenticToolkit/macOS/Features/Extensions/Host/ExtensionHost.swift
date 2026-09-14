@@ -1011,6 +1011,36 @@ public final class ExtensionHost {
             }
         }
 
+        // Same eagerness and the same reasoning, for task 5.7a-i's
+        // language-model message vocabulary: eight top-level `vscode.*`
+        // classes (`LanguageModelChatMessageRole`, `LanguageModelChatMessage`,
+        // `LanguageModelToolCallPart`, `LanguageModelToolResultPart`,
+        // `LanguageModelTextPart`, `LanguageModelPromptTsxPart`,
+        // `LanguageModelToolResult`, `LanguageModelDataPart`), not a
+        // namespace — `defineMember` is called with `"vscode"` as the
+        // namespace path for each, exactly as it is for `Uri` above. Host
+        // ceremony installed identically on every activation, so this is
+        // neither queued onto `vscodeMemberDefinitions` nor routed through
+        // `defineVSCodeMember`, for the same reason the `Uri` block above
+        // is not. A member this loop fails to install is logged and left as
+        // the shim's not-implemented stub; that failure is not fatal to
+        // activation.
+        if let languageModelMembers = VSCodeAPI.installLanguageModelVocabulary(in: context) {
+            for (memberName, memberValue) in languageModelMembers {
+                pendingException = nil
+                runtime.invokeMethod("defineMember", withArguments: ["vscode", memberName, memberValue])
+                if let message = pendingException {
+                    pendingException = nil
+                    logger.error(
+                        """
+                        Extension '\(self.identifier, privacy: .public)' could not have \
+                        'vscode.\(memberName, privacy: .public)' installed \
+                        (\(message, privacy: .public)); it stays the shim's not-implemented stub
+                        """)
+                }
+            }
+        }
+
         // Before the extension's first statement runs, so a member defined by
         // an adaptor is already there when the module body reaches for it —
         // extensions routinely destructure `vscode` at the top of the file.
