@@ -115,4 +115,41 @@ final class SessionListViewTests: XCTestCase {
                              SessionWatcher.SessionWatcherEmptyStateView.preferredHeight,
                              "a populated list should size to its cards, not the empty-state height")
     }
+
+    // MARK: - Last-output line
+
+    private typealias Row = SessionWatcher.SessionWatcherRowAppKitView
+
+    /// The row's one-line preview showed the agent's markdown verbatim —
+    /// `**Shipped.**`, backticked hashes, list dashes.
+    func testOutputLineShowsMarkdownAsPlainText() {
+        XCTAssertEqual(
+            Row.plainText(fromMarkdown: "**Shipped.** Both landed on `main`:\n- **`c4c2ed2`** fix it\n- `abc123` more"),
+            "Shipped. Both landed on main: c4c2ed2 fix it abc123 more"
+        )
+    }
+
+    /// The parser drops block boundaries, so without a separator a heading ran
+    /// straight into the paragraph beneath it.
+    func testOutputLineKeepsBlocksApart() {
+        XCTAssertEqual(
+            Row.plainText(fromMarkdown: "# Done\nSome *text*, a [link](https://x.io).\n\n```\nlet x = 1\n```\nAfter."),
+            "Done Some text, a link. let x = 1 After."
+        )
+    }
+
+    /// A single-line label only ever showed a multi-line message's first line.
+    func testOutputLineJoinsPlainLines() {
+        XCTAssertEqual(Row.plainText(fromMarkdown: "line one\nline two\n\n  line three  "),
+                       "line one line two line three")
+    }
+
+    func testOutputLineShowsUnbalancedMarkupAsWritten() {
+        XCTAssertEqual(Row.plainText(fromMarkdown: "unbalanced **bold"), "unbalanced **bold")
+    }
+
+    func testOutputLinePlaceholderForASilentSession() {
+        let session = makeSession("quiet", cwd: "/Users/me/p", projectRoot: "/Users/me/p")
+        XCTAssertEqual(Row.outputText(for: session), "No output yet.")
+    }
 }
