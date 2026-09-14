@@ -148,39 +148,6 @@ struct MainThreadWindowTests {
         try ExtensionFixtures.makeTemporaryDirectory("MainThreadWindowTests")
     }
 
-    private func manifest(name: String, browser: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "browser": "\(browser)"
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    /// Writes `source` as the extension's `browser` entry point and returns a
-    /// host over the result. `MainThreadWindow` needs no `workspaceRoots`, so
-    /// unlike `MainThreadWorkspaceTests.makeHost` this one omits it entirely
-    /// rather than threading through a parameter nothing here would ever
-    /// pass.
-    private func makeHost(
-        name: String = "alpha",
-        source: String,
-        entryPath: String = "dist/web.js",
-        in directory: URL,
-        ledger: NotImplementedLedger = NotImplementedLedger()
-    ) throws -> ExtensionHost {
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(name: name, browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(loadedExtension: loaded, notImplementedLedger: ledger)
-    }
-
     /// Installs all three of `window`'s members onto `host`'s `vscode.window`
     /// namespace, exactly as a later `ExtensionsCoordinator` task will.
     private func install(_ window: MainThreadWindow, on host: ExtensionHost) throws {
@@ -537,7 +504,7 @@ struct MainThreadWindowTests {
     /// Both calls are confirmed genuinely overlapping — `waitUntilEntered(2)`
     /// only returns once *both* are parked mid-`presentMessage` — and are
     /// then released **out of order** (the second call's continuation first),
-    /// so a mutation that shares state between the two `SettlementBox`
+    /// so a mutation that shares state between the two `PromiseSettlementBox`
     /// instances, or that resolves whichever promise happens to settle last
     /// with the wrong presenter answer, would cross the results: `__settledA`
     /// would come back `"B2"` or `__settledB` would come back `"A1"` instead
@@ -763,8 +730,7 @@ struct MainThreadWindowTests {
 
     // MARK: - 13. A message whose `toString` throws rejects, and no request reaches the presenter
 
-    /// The hostile object is built in JS inside the test script, exactly as
-    /// the reviewer measured the underlying `JSValue.toString()` behaviour.
+    /// The hostile object is built in JS inside the test script.
     /// Asserts both halves the defect touched: the call rejects (a mutation
     /// that reverts to unguarded `messageArgument.toString() ?? ""` would
     /// instead resolve with a blank message), *and* `presenter.requests` is
@@ -806,9 +772,9 @@ struct MainThreadWindowTests {
 
     // MARK: - 14. A non-string message with a well-behaved `toString` is coerced and presented
 
-    /// Guards against LB2's fix over-correcting into "reject everything
-    /// non-string": a `toString` that returns normally is honoured, and the
-    /// presenter still sees the call.
+    /// The non-string guard rejects only what it cannot coerce, never
+    /// everything non-string: a `toString` that returns normally is honoured,
+    /// and the presenter still sees the call.
     @Test
     func aNonStringMessageWithAWellBehavedToStringIsCoercedAndPresented() async throws {
         let directory = try makeTempDirectory()
@@ -846,8 +812,8 @@ struct MainThreadWindowTests {
 
     // MARK: - 15. A missing argument 0 rejects
 
-    /// Specified in this task's original brief but never actually covered by
-    /// a test until this round.
+    /// `showInformationMessage()` with no arguments rejects, the rejection
+    /// names the missing argument, and nothing reaches the presenter.
     @Test
     func aMissingMessageArgumentRejects() async throws {
         let directory = try makeTempDirectory()
@@ -955,8 +921,7 @@ struct MainThreadWindowTests {
     ///
     /// - **No affordance (`[]` → `[0, 1, 2, nil]`, and the one-item
     ///   `[0, nil]`):** deleting the branch that appends the synthesized
-    ///   `"Cancel"` slot — round 1's LB3 defect. Without it these answer
-    ///   `[0, 1, 2]` and `[0]`.
+    ///   `"Cancel"` slot. Without it these answer `[0, 1, 2]` and `[0]`.
     /// - **One affordance (`[0]` → `[1, 2, 0]`, `[1]` → `[0, 2, 1]`,
     ///   `[2]` → `[0, 1, 2]`):** dropping the skip, so the flagged item also
     ///   renders in its own position — that answers `[0, 1, 2, 0]` and
@@ -967,9 +932,8 @@ struct MainThreadWindowTests {
     ///   (`[0, 1, 2]` → `[2]`):** `request.closeAffordanceIndices.last` →
     ///   `.first`, which answers `[1, 0]` and `[0]`; and
     ///   `where !closeAffordanceIndices.contains(index)` →
-    ///   `where index != request.closeAffordanceIndices.first` (round 1's
-    ///   exact defect moved into the presenter), which answers `[1, 2, 2]`
-    ///   for both. Neither mutation is visible with fewer than two flagged
+    ///   `where index != request.closeAffordanceIndices.first`, which answers
+    ///   `[1, 2, 2]` for both. Neither mutation is visible with fewer than two flagged
     ///   items, which is why both rows are here.
     /// - **One item, flagged (`[0]` → `[0]`):** the flagged item is the whole
     ///   plan; a synthesized `"Cancel"` appended regardless —

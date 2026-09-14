@@ -89,7 +89,7 @@ public final class ExtensionInputBoxModel {
     /// one Character but two UTF-16 units, so a Character offset past it is
     /// short by one in UTF-16 terms. Feeding a Character offset straight to
     /// `NSRange(location:length:)` can land the selection one code unit into
-    /// the wrong grapheme, or split a surrogate pair outright (F7). Walking
+    /// the wrong grapheme, or split a surrogate pair outright. Walking
     /// through `String.Index` — `NSRange(_:in:)` — is what keeps the two
     /// scales from being conflated.
     public func initialSelectionUTF16Range() -> NSRange {

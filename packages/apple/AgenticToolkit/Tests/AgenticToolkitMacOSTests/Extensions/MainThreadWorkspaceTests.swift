@@ -107,41 +107,6 @@ struct MainThreadWorkspaceTests {
         try ExtensionFixtures.makeTemporaryDirectory("MainThreadWorkspaceTests")
     }
 
-    private func manifest(name: String, browser: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "browser": "\(browser)"
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    /// Writes `source` as the extension's `browser` entry point and returns a
-    /// host over the result, carrying `workspaceRoots` exactly as a real
-    /// caller would — see `ExtensionHost.workspaceRoots`'s own doc for why
-    /// this is a constructor parameter rather than a second, independent
-    /// binding `MainThreadWorkspace` could disagree with.
-    private func makeHost(
-        name: String = "alpha",
-        source: String,
-        entryPath: String = "dist/web.js",
-        in directory: URL,
-        workspaceRoots: ExtensionWorkspaceRoots? = nil,
-        ledger: NotImplementedLedger = NotImplementedLedger()
-    ) throws -> ExtensionHost {
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(name: name, browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(
-            loadedExtension: loaded, notImplementedLedger: ledger, workspaceRoots: workspaceRoots)
-    }
-
     /// Installs all four of `workspace`'s members onto `host`'s
     /// `vscode.workspace` namespace, exactly as a later `ExtensionsCoordinator`
     /// task will.
@@ -1217,10 +1182,10 @@ struct MainThreadWorkspaceTests {
     /// stands in for it, and for `isWritableFileSystem` and everything else
     /// `subNamespace`'s own stub still owns) still throws
     /// `NotImplementedError` **and** is recorded in the ledger under
-    /// `vscode.workspace.fs.copy` — the fix for the fix brief's item 3.
-    /// Before that fix, `fs`'s `subNamespace` call passed `recordMiss: nil,
-    /// recordProbe: nil`: the throw still happened (it is unconditional in
-    /// the shim's `get` trap), but nothing under `fs` ever reached the
+    /// `vscode.workspace.fs.copy`. The recording is the whole assertion:
+    /// with `fs`'s `subNamespace` call passing `recordMiss: nil,
+    /// recordProbe: nil`, the throw still happens — it is unconditional in
+    /// the shim's `get` trap — and nothing under `fs` ever reaches the
     /// ledger.
     ///
     /// The fixture probes before it calls: `'copy' in vscode.workspace.fs`
@@ -1350,9 +1315,9 @@ struct MainThreadWorkspaceTests {
     /// *after* disposal, and the promise must still reject rather than
     /// deliver `readFile`'s real result or crash.
     ///
-    /// This is the fix for the fix brief's item 5, and it exercises exactly
-    /// the guard item 4 rewrote: `runFileSystemOperation`'s post-`await`
-    /// `guard !self.isDisposed, let resultContext = …`. Kills a mutation
+    /// It exercises exactly one guard: `runFileSystemOperation`'s
+    /// post-`await` `guard !self.isDisposed, let resultContext = …`, and
+    /// nothing else in the operation path. Kills a mutation
     /// that removes or weakens that `!self.isDisposed` check — without it,
     /// this test would observe `ok: true` with `readFile`'s real (fabricated)
     /// contents instead of a "torn down" rejection.

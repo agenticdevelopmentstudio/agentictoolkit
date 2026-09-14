@@ -57,38 +57,45 @@ extension ExtensionPickerPresenter: ExtensionQuickPickPresenting {
         // `viewDidLoad()` and publishes the opening highlight through
         // `onHighlight` synchronously — the listener must already be
         // attached before that happens, or the first highlight is published
-        // to nobody (F8).
+        // to nobody.
         viewController.onHighlight = onHighlight
         let windowController = ExtensionPickerWindowController(
             content: viewController, ignoreFocusOut: request.ignoreFocusOut)
 
-        return await withCheckedContinuation { continuation in
-            let session = ExtensionPickerSession<[Int]>(continuation: continuation)
+        let answer: UncheckedSendableBox<[Int]?> = await withCheckedContinuation { continuation in
+            let session = OnceOnlyContinuation<[Int]?>(continuation: continuation)
             self.current = (windowController, { session.finish(nil) })
 
             // `[weak windowController]`, not a strong capture, breaks the
             // retain cycle windowController → contentController(viewController)
-            // → this closure → windowController (F4). `self?.current = nil`
+            // → this closure → windowController. The `current` assignment
             // runs last in each closure, after `windowController` is used —
             // `self.current` is the panel's other strong owner, so nilling it
             // first could deallocate `windowController` before
             // `windowController?.close()` ever ran.
+            //
+            // The identity test is what makes each closure clear only its own
+            // session: `current` is whatever the most recent request put
+            // there, and these closures outlive the request that installed
+            // them. With the test, a closure that fires after its window has
+            // been replaced leaves the replacement's `current` alone.
             viewController.onAccept = { [weak self, weak windowController] indices in
                 session.finish(indices)
                 windowController?.onDismiss = {}
                 windowController?.close()
-                self?.current = nil
+                if self?.current?.window === windowController { self?.current = nil }
             }
             viewController.onCancel = { [weak self, weak windowController] in
                 session.finish(nil)
                 windowController?.onDismiss = {}
                 windowController?.close()
-                self?.current = nil
+                if self?.current?.window === windowController { self?.current = nil }
             }
             windowController.onDismiss = { session.finish(nil) }
 
             windowController.show()
         }
+        return answer.value
     }
 }
 
@@ -107,39 +114,41 @@ extension ExtensionPickerPresenter: ExtensionInputBoxPresenting {
         let windowController = ExtensionPickerWindowController(
             content: viewController, ignoreFocusOut: request.ignoreFocusOut)
 
-        return await withCheckedContinuation { continuation in
-            let session = ExtensionPickerSession<String>(continuation: continuation)
+        let answer: UncheckedSendableBox<String?> = await withCheckedContinuation { continuation in
+            let session = OnceOnlyContinuation<String?>(continuation: continuation)
             self.current = (windowController, { session.finish(nil) })
 
-            // `[weak windowController]`, not a strong capture — see the same
-            // note on `presentQuickPick` above (F4). `self?.current = nil`
-            // runs last, after `windowController` is used.
+            // `[weak windowController]`, not a strong capture, and the same
+            // identity test before clearing `current` — see the note on
+            // `presentQuickPick` above. The `current` assignment runs
+            // last, after `windowController` is used.
             viewController.onAccept = { [weak self, weak windowController] value in
                 session.finish(value)
                 windowController?.onDismiss = {}
                 windowController?.close()
-                self?.current = nil
+                if self?.current?.window === windowController { self?.current = nil }
             }
             viewController.onCancel = { [weak self, weak windowController] in
                 session.finish(nil)
                 windowController?.onDismiss = {}
                 windowController?.close()
-                self?.current = nil
+                if self?.current?.window === windowController { self?.current = nil }
             }
             viewController.onValueChanged = { [weak viewController] value in
                 Task { @MainActor in
-                    let answer = await validate(value)
+                    let validation = await validate(value)
                     // Drop a late answer for a superseded value rather than
                     // painting it — the extension's validator is async and
                     // answers can arrive out of order. Compared against the
                     // model's current value at the moment the answer lands.
                     guard let viewController, model.value == value else { return }
-                    viewController.showValidation(answer)
+                    viewController.showValidation(validation)
                 }
             }
             windowController.onDismiss = { session.finish(nil) }
 
             windowController.show()
         }
+        return answer.value
     }
 }

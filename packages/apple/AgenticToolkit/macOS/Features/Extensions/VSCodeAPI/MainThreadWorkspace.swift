@@ -148,21 +148,6 @@ public final class MainThreadWorkspace {
         let value: JSValue
     }
 
-    /// Carries a promise's `resolve`/`reject` `JSValue`s into a `Task`.
-    ///
-    /// `@unchecked Sendable`, on the same terms as `VSCodeAPI.swift`'s own
-    /// `UncheckedJSValueBox`: nothing here actually crosses an isolation
-    /// domain — `runFileSystemOperation`'s `Task { @MainActor in … }` reads
-    /// both values back on the same main actor that created them — but
-    /// `Task.init` checks its `operation` closure against `Sendable`, and a
-    /// bare `JSValue` is not, and is not a type this module can extend with
-    /// a conformance. This box is the honest way to state the guarantee the
-    /// surrounding code already holds.
-    private struct SettlementBox: @unchecked Sendable {
-        let resolve: JSValue
-        let reject: JSValue
-    }
-
     /// - Parameters:
     ///   - workspaceRoots: The workspace this adaptor exposes, or `nil` for
     ///     none. Not defaulted: a caller that forgot to pass the host's real
@@ -549,15 +534,15 @@ public final class MainThreadWorkspace {
     /// path uses, rather than delivering a result — or a raw thrown error —
     /// to an extension the host has already abandoned.
     ///
-    /// `resolve`/`reject` are handed to the `Task` through `SettlementBox`,
-    /// not captured directly. `Task.init`'s `operation` closure is checked
-    /// against `Sendable`, and a bare `JSValue` — not `Sendable`, and not a
-    /// type this module owns to add a conformance to — would be flagged
-    /// there even though both values are only ever touched back on the main
-    /// actor that created them. `VSCodeAPI.swift`'s own `UncheckedJSValueBox`
-    /// is the precedent for this exact shape: an `@unchecked Sendable`
-    /// wrapper stating the guarantee the surrounding design already holds,
-    /// rather than reaching for a broader escape hatch.
+    /// `resolve`/`reject` are handed to the `Task` through
+    /// `PromiseSettlementBox`, not captured directly. `Task.init`'s
+    /// `operation` closure is checked against `Sendable`, and a bare
+    /// `JSValue` — not `Sendable`, and not a type this module owns to add a
+    /// conformance to — would be flagged there even though both values are
+    /// only ever touched back on the main actor that created them. That box
+    /// and `UncheckedSendableBox`, which it is declared beside in
+    /// `VSCodeAPI.swift`, are this directory's one statement of that
+    /// guarantee, rather than a broader escape hatch.
     private func runFileSystemOperation<Value: Sendable>(
         path: String,
         in context: JSContext,
@@ -571,7 +556,7 @@ public final class MainThreadWorkspace {
             // either missing there is nothing to settle the promise through,
             // so the only honest answer is to leave it pending.
             guard let resolveValue, let rejectValue else { return }
-            let settlement = SettlementBox(resolve: resolveValue, reject: rejectValue)
+            let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
                     MainThreadWorkspace.rejectTornDown(settlement.reject, path: path)

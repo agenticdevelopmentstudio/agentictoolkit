@@ -2,11 +2,11 @@ import AppKit
 import Testing
 @testable import AgenticToolkitMacOS
 
-/// Pins fix round 1's F1: `ExtensionPickerWindowController.init` reads
+/// Pins the read order in `ExtensionPickerWindowController.init`: it reads
 /// `content.preferredContentSize` only after forcing `content.view` to load
-/// (see that type's own doc comment). The evidence F1's own report gave was
-/// an inference from `NSViewController.loadView`'s lifecycle, not a
-/// measurement — these tests measure the **window** itself, the way
+/// (see that type's own doc comment). `NSViewController.loadView`'s
+/// lifecycle is an argument that the order matters, not a measurement of it —
+/// these tests measure the **window** itself, the way
 /// `TabPaneViewControllerTests` measures `preferredContentSize` elsewhere in
 /// this target.
 @Suite("ExtensionPickerWindowController")
@@ -72,17 +72,17 @@ struct ExtensionPickerWindowControllerTests {
     /// `Tests/AgenticToolkitMacOSTests/Extensions/` asserts either number, so
     /// editing that line to any other size fails here and nowhere else.
     ///
-    /// It does NOT kill the F1 mutation (moving the `preferredContentSize`
-    /// read back above `let hostedView = content.view` in
-    /// `ExtensionPickerWindowController.init`) — that value is set in the
+    /// It does NOT kill the read-order mutation (moving the
+    /// `preferredContentSize` read back above `let hostedView = content.view`
+    /// in `ExtensionPickerWindowController.init`) — that value is set in the
     /// view controller's own `init`, so it is already present no matter how
-    /// early the window controller reads it, and reverting F1 would still
+    /// early the window controller reads it, and the moved read would still
     /// leave this panel 560x400. `inputBoxWindowSizedToComputedPreferredContentSize`
-    /// below is the test that kills F1.
+    /// below is the test that kills it.
     @Test(
         """
         quick pick window is 560x400 from ExtensionQuickPickViewController's own preferredContentSize \
-        (kills a change to that spelled size; F1 is killed by the input box test below)
+        (kills a change to that spelled size; the read order is killed by the input box test below)
         """
     )
     func quickPickWindowSizedToFixedPreferredContentSize() {
@@ -94,11 +94,11 @@ struct ExtensionPickerWindowControllerTests {
         #expect(size == NSSize(width: 560, height: 400))
     }
 
-    /// Kills the F1 mutation. `ExtensionInputBoxViewController` sets
+    /// Kills the read-order mutation. `ExtensionInputBoxViewController` sets
     /// `preferredContentSize` only at the end of `loadView()`
     /// (`ExtensionInputBoxViewController.swift:127`), computed from the
-    /// assembled Auto Layout height — never in `init`. Reverting F1 (reading
-    /// `preferredContentSize` before forcing `content.view` to load) would
+    /// assembled Auto Layout height — never in `init`. Reading
+    /// `preferredContentSize` before forcing `content.view` to load would
     /// read that property before it is ever set, i.e. `NSZeroSize`, and this
     /// panel's window would collapse to zero. Asserted against
     /// `content.preferredContentSize` itself rather than a retyped height,
@@ -107,7 +107,7 @@ struct ExtensionPickerWindowControllerTests {
     @Test(
         """
         input box window is sized to ExtensionInputBoxViewController's own computed preferredContentSize, \
-        at least the 72pt floor (kills the F1 mutation — that value is set at the end of loadView, not init)
+        at least the 72pt floor (kills reading it before loadView — that value is set at the end of loadView)
         """
     )
     func inputBoxWindowSizedToComputedPreferredContentSize() {

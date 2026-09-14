@@ -48,36 +48,6 @@ struct MainThreadLanguagesGetLanguagesTests {
         try ExtensionFixtures.makeTemporaryDirectory("MainThreadLanguagesVocabularyTests")
     }
 
-    private func manifest(name: String, browser: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "browser": "\(browser)"
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    /// Writes `source` as the extension's `browser` entry point and returns a
-    /// host over the result.
-    private func makeHost(
-        name: String = "alpha",
-        source: String,
-        entryPath: String = "dist/web.js",
-        in directory: URL,
-        ledger: NotImplementedLedger = NotImplementedLedger()
-    ) throws -> ExtensionHost {
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(name: name, browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(loadedExtension: loaded, notImplementedLedger: ledger)
-    }
-
     /// Installs `languages.getLanguages` onto `host`'s `vscode.languages`
     /// namespace — the one member this suite exercises, deliberately not
     /// `setLanguageConfiguration`, which `MainThreadLanguagesTests` already
@@ -242,36 +212,12 @@ struct MainThreadLanguagesGetLanguagesTests {
 /// `LanguageContributionPoint.contributedLanguageIdentifiers` (task 5.6d):
 /// the extension half of `getLanguages`'s vocabulary, against real
 /// `ExtensionManifest.Language` values decoded from JSON — mirroring
-/// `LanguageContributionPointTests`'s own fixture pattern, duplicated here
-/// (rather than shared) because that suite's fixtures are `private` to its
-/// own file.
+/// `LanguageContributionPointTests`'s own fixture pattern, over the
+/// file-scope `manifest`/`apply` fixtures at the end of this file, which this
+/// suite shares with `HostLanguageVocabularyTests`.
 @MainActor
 @Suite
 struct LanguageContributionPointVocabularyTests {
-
-    // MARK: - Fixtures
-
-    /// Handed to `apply` and never opened — this point resolves no paths, so
-    /// a directory that does not exist is the cheapest way to keep that true.
-    private static let unusedDirectory = URL(fileURLWithPath: "/var/empty/agentic-tests-nonexistent")
-
-    private func manifest(name: String, languages: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "acme",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "contributes": { "languages": \(languages) }
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    private func apply(_ manifest: ExtensionManifest, to point: LanguageContributionPoint) throws {
-        let contributions = try #require(manifest.contributes)
-        try point.apply(contributions, from: manifest, at: Self.unusedDirectory)
-    }
 
     // MARK: - Deduplication across extensions
 
@@ -356,26 +302,6 @@ struct LanguageContributionPointVocabularyTests {
 @Suite
 struct HostLanguageVocabularyTests {
 
-    private static let unusedDirectory = URL(fileURLWithPath: "/var/empty/agentic-tests-nonexistent")
-
-    private func manifest(name: String, languages: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "acme",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "contributes": { "languages": \(languages) }
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    private func apply(_ manifest: ExtensionManifest, to point: LanguageContributionPoint) throws {
-        let contributions = try #require(manifest.contributes)
-        try point.apply(contributions, from: manifest, at: Self.unusedDirectory)
-    }
-
     /// A contributed `swift` does not appear twice: CodeEditLanguages already
     /// has a built-in `swift`, and an extension separately contributing a
     /// `swift` entry must not duplicate it. Kills mutation #4 — an
@@ -432,4 +358,43 @@ struct HostLanguageVocabularyTests {
         let contributedIndex = try #require(identifiers.firstIndex(of: "cobol"))
         #expect(builtInIndex < contributedIndex)
     }
+}
+
+// MARK: - Fixtures
+
+/// Handed to `apply` and never opened — a language contribution point
+/// resolves no paths, so a directory that does not exist is the cheapest way to
+/// keep that true.
+private let unusedDirectory = URL(fileURLWithPath: "/var/empty/agentic-tests-nonexistent")
+
+/// A manifest contributing `languages`, for the two suites in this file that
+/// need a contribution-point key where `ExtensionTestSupport`'s shared
+/// `manifest` takes entry points.
+///
+/// File-scope rather than per-suite, which is the shape
+/// `ExtensionTestSupport.swift:164-167` describes: one overload shadows the
+/// shared one for every caller in the file. Both suites here need exactly this
+/// manifest, so declaring it twice made the same fixture two answers to one
+/// question — and the copies were byte-identical, so neither was the reason
+/// for the other.
+private func manifest(name: String, languages: String) throws -> ExtensionManifest {
+    let json = """
+    {
+        "name": "\(name)",
+        "publisher": "acme",
+        "version": "1.0.0",
+        "engines": { "vscode": "^1.74.0" },
+        "contributes": { "languages": \(languages) }
+    }
+    """
+    return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
+}
+
+/// `@MainActor` because `LanguageContributionPoint` is
+/// (`LanguageContributionPoint.swift:108`), matching how the shared helpers in
+/// `ExtensionTestSupport.swift` that touch main-actor state are marked.
+@MainActor
+private func apply(_ manifest: ExtensionManifest, to point: LanguageContributionPoint) throws {
+    let contributions = try #require(manifest.contributes)
+    try point.apply(contributions, from: manifest, at: unusedDirectory)
 }

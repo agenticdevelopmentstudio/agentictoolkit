@@ -23,40 +23,6 @@ struct MainThreadCommandsTests {
         try ExtensionFixtures.makeTemporaryDirectory("MainThreadCommandsTests")
     }
 
-    /// A manifest with a `browser` entry point, decoded rather than
-    /// memberwise-initialised for the same reason `ExtensionHostTests` does
-    /// it that way: `ExtensionManifest` has no memberwise initialiser, and
-    /// inventing one here would be a second answer to what a manifest is.
-    private func manifest(name: String, browser: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "browser": "\(browser)"
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    /// Writes `source` as the extension's `browser` entry point and returns a
-    /// host over the result.
-    private func makeHost(
-        name: String = "alpha",
-        source: String,
-        entryPath: String = "dist/web.js",
-        in directory: URL,
-        ledger: NotImplementedLedger = NotImplementedLedger()
-    ) throws -> ExtensionHost {
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(name: name, browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(loadedExtension: loaded, notImplementedLedger: ledger)
-    }
-
     /// Installs all three of `commands`'s members onto `host`'s
     /// `vscode.commands` namespace, exactly as a later `ExtensionsCoordinator`
     /// task will. `registerTextEditorCommand` is deliberately absent — it is
@@ -393,10 +359,11 @@ struct MainThreadCommandsTests {
         #expect(registry.command(id: "ext.two") == nil)
     }
 
-    // MARK: - Ruling 5: duplicates
+    // MARK: - task 5.3's Ruling 5: duplicates
 
     /// Registering the same id twice from **one** extension raises a JS
-    /// exception (Ruling 5), and the first registration is left intact.
+    /// exception (task 5.3's Ruling 5), and the first registration is left
+    /// intact.
     @Test
     func duplicateRegistrationFromOneExtensionRaisesAndKeepsTheFirst() async throws {
         let directory = try makeTempDirectory()
@@ -433,7 +400,7 @@ struct MainThreadCommandsTests {
         #expect(result.toString() == "first")
     }
 
-    // MARK: - Ruling 6: registerCommand raises synchronously
+    // MARK: - task 5.3's Ruling 6: registerCommand raises synchronously
 
     /// A non-function callback raises a JS exception rather than
     /// registering something nothing could ever run.
@@ -467,7 +434,7 @@ struct MainThreadCommandsTests {
         #expect(registry.command(id: "ext.bad") == nil)
     }
 
-    // MARK: - Ruling 7: thisArg
+    // MARK: - task 5.3's Ruling 7: thisArg
 
     /// `thisArg`, when present and neither `undefined` nor `null`, binds
     /// `this` for the callback.
@@ -541,7 +508,7 @@ struct MainThreadCommandsTests {
         #expect(filteredIDs == ["ext.visible"])
     }
 
-    // MARK: - Ruling 6 verification: a raise leaves the host usable
+    // MARK: - task 5.3's Ruling 6 verification: a raise leaves the host usable
 
     /// A `registerCommand` that raises — where "raises" means the exception
     /// genuinely escapes into `ExtensionHost`'s own `exceptionHandler`, not
@@ -563,10 +530,10 @@ struct MainThreadCommandsTests {
     /// `pendingException = nil` before it invokes `defineMember`. A
     /// `defineVSCodeMember` throwing `vscodeMemberNotDefinable` with a stale
     /// message is not a failure mode this call has. The falsifiable claims
-    /// left are the ones that matter for Ruling 6's raise: the raise really
-    /// escaped, the first registration survived, and a member defined after it
-    /// is live. The "does a callback's throw stay out of the host's
-    /// bookkeeping" question is pinned instead by
+    /// left are the ones that matter for the raise task 5.3's Ruling 6
+    /// requires: the raise really escaped, the first registration survived,
+    /// and a member defined after it is live. The "does a callback's throw
+    /// stay out of the host's bookkeeping" question is pinned instead by
     /// `aThrowingCallbackRejectsAndNeverReachesTheHostsBookkeeping` below,
     /// whose first half puts an exception into the one window where the
     /// answer is observable at all and shows what the host does with it.
@@ -1029,14 +996,14 @@ struct MainThreadCommandsTests {
     /// does not close every route onto that path, and an earlier version of
     /// this doc claimed it did. It was wrong: a *member-level* hijack —
     /// `globalThis.__vscodeAPITrampoline.call = function () { … }`, leaving
-    /// the binding itself untouched — was reachable before this fix round,
-    /// because the binding-level freeze this test above describes
+    /// the binding itself untouched — is not stopped by the binding-level
+    /// freeze this test above describes
     /// (`writable: false, configurable: false` on the `__vscodeAPITrampoline`
-    /// name) says nothing about the *object* under that name; only the
-    /// binding was protected, not `helper.call` itself, and
+    /// name), which says nothing about the *object* under that name; only the
+    /// binding is protected, not `helper.call` itself, and
     /// `helperFunction(_:in:)` re-reads `.call` off that object on every
-    /// dispatch. This fix round closes that hole too, by having
-    /// `VSCodeAPI.helperSource` call `Object.freeze(helper)` on the
+    /// dispatch. What closes that hole is
+    /// `VSCodeAPI.helperSource` calling `Object.freeze(helper)` on the
     /// trampoline object itself before ever caching it — see
     /// `VSCodeAPI.sharedHelper(in:)`'s own doc for the two-layer picture this
     /// leaves. `theMemberLevelHijackIsAlsoIgnored` below is the test that pins
@@ -1108,10 +1075,10 @@ struct MainThreadCommandsTests {
     /// The narrower hijack the test above's doc calls out by name: instead of
     /// replacing `globalThis.__vscodeAPITrampoline` wholesale, the extension
     /// only overwrites its `.call` member, leaving the binding itself alone.
-    /// Before this fix round that member-level write succeeded silently — the
-    /// binding-level `writable: false, configurable: false` never protected
-    /// the object's own properties — and the dispatch below would have
-    /// observed the impostor's `{ impostor: true }` instead of the real
+    /// Against a binding-level freeze alone that member-level write succeeds
+    /// silently — `writable: false, configurable: false` on the name never
+    /// protected the object's own properties — and the dispatch below would
+    /// then observe the impostor's `{ impostor: true }` instead of the real
     /// command result. `VSCodeAPI.helperSource` now calls
     /// `Object.freeze(helper)` before caching the trampoline, so this
     /// assignment is refused too, on the same real, host-installed context
@@ -1174,12 +1141,12 @@ struct MainThreadCommandsTests {
         #expect(callbackRan.toBool() == true)
     }
 
-    /// The other half of item 2's freezing (F2): `vscode.Uri.parse` reaches
+    /// The other half of item 2's freezing: `vscode.Uri.parse` reaches
     /// extension code the same way `vscode.Uri.file` does in
     /// `ExtensionHostTests.distinctMembersAreRecordedSeparatelyIncludingFetch`,
     /// but through a real, activated `ExtensionHost` here rather than a bare
-    /// `JSContext` — the "on a context the host installed into" case item 2's
-    /// fix round called for. Before `Uri.swift`'s `uriClassSource` froze
+    /// `JSContext` — the "on a context the host installed into" case item 2
+    /// called for. Before `Uri.swift`'s `uriClassSource` froze
     /// `Uri` and `Uri.prototype`, `Uri.parse = ...` from extension code would
     /// have succeeded, and every later `vscode.Uri.parse(...)` call in this
     /// context — including the one `uriValue(for:in:)` itself makes when
@@ -1388,12 +1355,12 @@ struct MainThreadCommandsTests {
     /// nothing.
     ///
     /// The scenario, end to end: the extension registers an id, the app then
-    /// registers that same id (Ruling 5 permits the shadowing, and `register`
-    /// replaces in place), and only afterwards does the extension's
-    /// `Disposable` fire. By id alone that deletes the app's brand-new
-    /// command, permanently, with only `register`'s collision warning anywhere
-    /// in the log. The registration token is what makes it the no-op it should
-    /// be.
+    /// registers that same id (task 5.3's Ruling 5 permits the shadowing,
+    /// and `register` replaces in place), and only afterwards does the
+    /// extension's `Disposable` fire. By id alone that deletes the app's
+    /// brand-new command, permanently, with only `register`'s collision
+    /// warning anywhere in the log. The registration token is what makes it
+    /// the no-op it should be.
     @Test
     func aStaleDisposableDoesNotRemoveSomebodyElsesCommand() async throws {
         let directory = try makeTempDirectory()
@@ -1523,9 +1490,10 @@ struct MainThreadCommandsTests {
     /// What none of them may do is answer `undefined`, which is what returning
     /// `nil` from the block reaches JavaScript as. For `executeCommand` and
     /// `getCommands` that makes the extension's own `.then` throw
-    /// synchronously — precisely the failure Ruling 6 exists to prevent, in its
-    /// worst form. For `registerCommand` it lets the extension push `undefined`
-    /// onto `context.subscriptions` and believe it registered a command.
+    /// synchronously — precisely the failure task 5.3's Ruling 6 exists to
+    /// prevent, in its worst form. For `registerCommand` it lets the extension
+    /// push `undefined` onto `context.subscriptions` and believe it registered
+    /// a command.
     @Test
     func aTornDownAdaptorRaisesOrRejectsButNeverAnswersUndefined() async throws {
         let directory = try makeTempDirectory()

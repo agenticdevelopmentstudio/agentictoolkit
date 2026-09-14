@@ -21,6 +21,12 @@ import AgenticToolkitCore
 /// written, and so a change of policy — what a dead adaptor answers, how a
 /// thrown callback is reported — is one edit rather than five that drift.
 ///
+/// **Where the `Ruling N` citations throughout this directory resolve:** a
+/// `Ledger Ruling N` is a heading in the `whippet` superproject's
+/// `docs/planning/vsc-extensions-stage5-ledger.md`, while a `task N's
+/// Ruling M` is that task's own brief, which is not tracked in any of these
+/// repositories and may not be present at all.
+///
 /// A caseless `enum`, not a class: there is no state worth keeping. Everything
 /// a member needs is either handed in or read from `JSContext.current()`, which
 /// JavaScriptCore fills in for the duration of a block call.
@@ -308,13 +314,13 @@ public enum VSCodeAPI {
     /// setting `context.exception`, so reading `context.exception` after the
     /// call finds nothing and there is nothing to clear.
     ///
-    /// **The catch is in JavaScript, not in the handler.** An earlier round
-    /// swapped `context.exceptionHandler` for the duration of the call, and
-    /// that was wrong in two directions: `exceptionHandler` is *context-wide*
-    /// state being used for a *call-scoped* job, so restoring it
-    /// unconditionally undid `ExtensionHost.dispose()`'s deliberate
-    /// `exceptionHandler = nil`, and any host operation re-entered from inside
-    /// a callback lost its own exception into the sink. Going through a JS
+    /// **The catch is in JavaScript, not in the handler.** Swapping
+    /// `context.exceptionHandler` for the duration of the call is wrong in
+    /// two directions: `exceptionHandler` is *context-wide* state being used
+    /// for a *call-scoped* job, so restoring it unconditionally undoes
+    /// `ExtensionHost.dispose()`'s deliberate `exceptionHandler = nil`, and
+    /// any host operation re-entered from inside a callback loses its own
+    /// exception into the sink. Going through a JS
     /// `try`/`catch` instead touches no context-wide state at all, and is
     /// re-entrant for free: each invocation gets its own JavaScript stack
     /// frame.
@@ -322,9 +328,9 @@ public enum VSCodeAPI {
     /// - Parameters:
     ///   - function: The extension's callback.
     ///   - thisArg: What to bind as `this`, or `nil` for the default. `nil`,
-    ///     JS `undefined` and JS `null` are the same answer here (Ruling 7),
-    ///     and `undefined` is the spelling the trampoline's `Reflect.apply`
-    ///     receives for it.
+    ///     JS `undefined` and JS `null` are the same answer here (task 5.3's
+    ///     Ruling 7), and `undefined` is the spelling the trampoline's
+    ///     `Reflect.apply` receives for it.
     ///   - arguments: Anything `JSValue.call(withArguments:)` accepts —
     ///     `JSValue`s pass through untouched, native Swift values are bridged
     ///     by JavaScriptCore itself.
@@ -607,23 +613,23 @@ public enum VSCodeAPI {
         // cycle the doc above sets out, so the handlers mint their own.
         guard JSValue(undefinedIn: context) != nil else { return .unavailable }
 
-        let answer: UncheckedSettlementBox = await withCheckedContinuation { continuation in
-            let box = SettlementContinuationBox(continuation: continuation)
+        let answer: UncheckedSendableBox<Settlement> = await withCheckedContinuation { continuation in
+            let box = OnceOnlyContinuation<Settlement>(continuation: continuation)
             let onFulfilled: @convention(block) () -> Void = {
                 MainActor.assumeIsolated {
                     if let fulfilledWith = settlementHandlerArgument() {
-                        box.settle(.fulfilled(fulfilledWith))
+                        box.finish(.fulfilled(fulfilledWith))
                     } else {
-                        box.settle(.unavailable)
+                        box.finish(.unavailable)
                     }
                 }
             }
             let onRejected: @convention(block) () -> Void = {
                 MainActor.assumeIsolated {
                     if let reason = settlementHandlerArgument() {
-                        box.settle(.rejected(reason))
+                        box.finish(.rejected(reason))
                     } else {
-                        box.settle(.unavailable)
+                        box.finish(.unavailable)
                     }
                 }
             }
@@ -635,12 +641,12 @@ public enum VSCodeAPI {
             case .returned:
                 break
             case .threw(let reason):
-                box.settle(.rejected(reason))
+                box.finish(.rejected(reason))
             case .unavailable:
-                box.settle(.unavailable)
+                box.finish(.unavailable)
             }
         }
-        return answer.settlement
+        return answer.value
     }
 
     /// The value one of `settlement(of:in:)`'s handler blocks was invoked
@@ -667,63 +673,6 @@ public enum VSCodeAPI {
         if let argument = currentArguments().first { return argument }
         guard let context = JSContext.current() else { return nil }
         return JSValue(undefinedIn: context)
-    }
-
-    /// Carries a `Settlement` through `CheckedContinuation.resume(returning:)`.
-    ///
-    /// `@unchecked Sendable`, on `UncheckedJSValueBox`'s terms: `resume`
-    /// declares its parameter `sending` (`CheckedContinuation.swift:164`), and
-    /// a `Settlement` reaching it through `@MainActor`
-    /// `SettlementContinuationBox.settle(_:)` is main-actor-isolated rather
-    /// than disconnected, which the compiler rejects by name ("sending
-    /// 'settlement' risks causing data races"). Nothing actually crosses an
-    /// isolation domain: the handlers that build one, the box that takes it
-    /// and the `await` that receives it are all on the same main actor. The
-    /// box states that guarantee rather than widening `Settlement` itself,
-    /// which is public and carries a `JSValue` no caller should be told is
-    /// safe to move.
-    private struct UncheckedSettlementBox: @unchecked Sendable {
-        let settlement: Settlement
-    }
-
-    /// Holds a `settlement(of:in:)` continuation and resumes it at most once.
-    ///
-    /// The once-only guard is new here, and this tier has no precedent for it.
-    /// The two boxes that share the name — `MainThreadWorkspace`'s
-    /// `SettlementBox` (`MainThreadWorkspace.swift:151-164`) and
-    /// `MainThreadWindow`'s — are each a `struct` of two `JSValue`s whose
-    /// stated reason for existing is `Task.init`'s `Sendable` check; neither
-    /// holds a continuation and neither has a `hasSettled` flag.
-    ///
-    /// Holding rather than borrowing is load-bearing — the two
-    /// `@convention(block)` handlers are this box's only owners, and the
-    /// continuation has to outlive `settlement(of:in:)`'s own stack frame for
-    /// a thenable that settles later.
-    ///
-    /// `@MainActor` written out, not inherited: a global actor on a type does
-    /// **not** propagate to a type nested inside it, so `VSCodeAPI`'s own
-    /// `@MainActor` would leave this class nonisolated and `hasSettled` a
-    /// `var` the type system does not protect. Every caller is already on the
-    /// main actor — the two handlers through `MainActor.assumeIsolated`, the
-    /// `call` arms through `settlement(of:in:)` itself.
-    @MainActor
-    private final class SettlementContinuationBox {
-        private let continuation: CheckedContinuation<UncheckedSettlementBox, Never>
-        private var hasSettled = false
-
-        init(continuation: CheckedContinuation<UncheckedSettlementBox, Never>) {
-            self.continuation = continuation
-        }
-
-        /// Resumes with `settlement` the first time, and ignores every later
-        /// call. Ignoring rather than logging: an extension's `then` calling
-        /// `resolve` twice is legal JavaScript that a native promise also
-        /// ignores, so there is nothing here to report.
-        func settle(_ settlement: Settlement) {
-            guard !hasSettled else { return }
-            hasSettled = true
-            continuation.resume(returning: UncheckedSettlementBox(settlement: settlement))
-        }
     }
 
     // MARK: - The JavaScript trampoline
@@ -803,12 +752,11 @@ public enum VSCodeAPI {
     /// none of this. The exception leaves `callWithArguments:` through
     /// JavaScriptCore's `notifyException:`, so it is in
     /// `ExtensionHost.pendingException` before there is any record to inspect —
-    /// exactly as an uncaught callback throw would be, which is the F3/F4
-    /// defect in its original shape. The only defence that would close it is to
-    /// stop trusting the cached global and re-evaluate `helperSource` on every
-    /// dispatch, and that was weighed and refused: it costs a JavaScript
-    /// evaluation per command invocation, forever, for every adaptor tasks
-    /// 5.4–5.7 add, to buy one outcome.
+    /// exactly as an uncaught callback throw would be. The only defence that
+    /// would close it is to stop trusting the cached global and re-evaluate
+    /// `helperSource` on every dispatch, and that was weighed and refused: it
+    /// costs a JavaScript evaluation per command invocation, forever, for
+    /// every adaptor tasks 5.4–5.7 add, to buy one outcome.
     ///
     /// The bound is what makes that trade defensible, and it is a bound on
     /// *blast radius*, not on occurrence. An extension that pre-empts this
@@ -1474,16 +1422,49 @@ extension VSCodeAPI: Loggable {
     public static nonisolated let logger = makeLogger()
 }
 
-/// Carries a `JSValue?` out of `MainActor.assumeIsolated`, whose generic
-/// return type must be `Sendable` even though nothing here actually crosses
-/// an isolation domain: every block above runs synchronously, on the one
-/// thread JavaScriptCore ever calls it from, which is why `assumeIsolated`
-/// applies in the first place. `JSValue` itself has no `Sendable`
-/// conformance to appeal to — it is a JavaScriptCore class, not a type this
-/// module owns — so this box is the honest way to tell the compiler what the
-/// surrounding design already guarantees, rather than reaching for
-/// `@preconcurrency import JavaScriptCore` and quietly widening that escape
-/// hatch to every use of the framework in this file.
-private struct UncheckedJSValueBox: @unchecked Sendable {
-    let value: JSValue?
+// MARK: - Carrying a value across a Sendable check this directory satisfies by isolation
+
+/// Carries a value across a `Sendable` check that the surrounding code
+/// already satisfies by running everything on one actor.
+///
+/// Nothing boxed here ever changes isolation domain. What forces the box is
+/// that three separate standard-library signatures ask for `Sendable` in
+/// places this directory cannot answer: `MainActor.assumeIsolated`'s generic
+/// return type, `Task.init`'s `operation` closure, and
+/// `DispatchQueue.asyncAfter`'s `@Sendable` block. The values involved are
+/// `JSValue`s and closures over them, and `JSValue` is a JavaScriptCore
+/// class, not a type this module owns and can extend with a conformance. So
+/// the choice is this box or `@preconcurrency import JavaScriptCore`, which
+/// would widen the same escape hatch to *every* use of the framework in the
+/// file that wrote it.
+///
+/// Internal and generic because it replaced a set of `private` structs spread
+/// under several names across this directory, each one's doc explaining that
+/// it was a copy of another one. One declaration is what stops that.
+///
+/// `@unchecked` rather than a constrained `Sendable` conformance: a
+/// conditional conformance would only hold for `Value: Sendable`, which is
+/// exactly the case that needs no box.
+struct UncheckedSendableBox<Value>: @unchecked Sendable {
+    let value: Value
+}
+
+/// The `JSValue?` form of `UncheckedSendableBox`, which is the one
+/// `MainActor.assumeIsolated` blocks in this directory return. A name for one
+/// specialization of the one box, not a second box: there is no declaration
+/// behind it to drift.
+typealias UncheckedJSValueBox = UncheckedSendableBox<JSValue?>
+
+/// A promise's `resolve`/`reject` pair, carried into a `Task` on
+/// `UncheckedSendableBox`'s terms — the `Task` reads both values back on the
+/// same main actor that created them, and `Task.init` checks its `operation`
+/// closure against `Sendable` regardless.
+///
+/// A struct of its own rather than `UncheckedSendableBox<some pair>`: the two
+/// fields are read by name at every use, and a generic box would spell each
+/// of those `settlement.value.resolve` without making anything safer. The
+/// `@unchecked Sendable` reasoning is the box's, stated once above.
+struct PromiseSettlementBox: @unchecked Sendable {
+    let resolve: JSValue
+    let reject: JSValue
 }

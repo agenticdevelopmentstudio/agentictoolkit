@@ -17,11 +17,11 @@ import JavaScriptCore
 /// 5.6a-i's brief enumerates, and names no mutation an earlier test in this
 /// file already kills.
 ///
-/// **Fix round 1 added seven further tests, for five behaviors** the 5.6a
-/// upstream addendum mandates (or a pre-existing code comment already
-/// claimed) that no earlier test exercised: negative-argument throws split
-/// across two tests; `translate`/`with` identity-on-no-change (a code
-/// comment already claimed this as tested, but no test did); the
+/// **Seven further tests cover five behaviors** the 5.6a upstream addendum
+/// mandates (or a pre-existing code comment already claimed) that no earlier
+/// test exercised: negative-argument throws split across two tests;
+/// `translate`/`with` identity-on-no-change (a code comment already claimed
+/// this as tested, but no test did); the
 /// touching-ranges-answer-an-empty-range-not-`undefined` fixture the
 /// addendum requires, which the original intersection test's fixture could
 /// not reach; equal-position comparisons across all four comparison
@@ -29,12 +29,7 @@ import JavaScriptCore
 /// two tests. Six of the seven sit under an "Addendum mutation" `MARK`;
 /// `intersectionOfTouchingRangesIsAnEmptyRangeNotUndefined` sits under
 /// "Mutation 4: intersection" instead, alongside the pre-existing
-/// disjoint-range test it complements. Three of the seven —
-/// `positionConstructorThrowsOnANegativeLine`,
-/// `isEqualIsNotDuckTypedAndThrowsOnAPlainObjectLiteral` and
-/// `comparisonMethodsAgreeOnEqualPositions` — carry the literal doc string
-/// "Added fix round 1"; the other four are doc-commented as fix-round-1
-/// additions in their own words instead, not that literal string.
+/// disjoint-range test it complements.
 ///
 /// **Task 5.6a-ii added two further tests, for `vscode.Location`'s
 /// constructor dispatch** (`TextGeometry.swift`, not `DiagnosticTypes.swift`
@@ -64,8 +59,7 @@ struct TextGeometryTests {
         context.setObject(rangeClass, forKeyedSubscript: "Range" as NSString)
         context.setObject(locationClass, forKeyedSubscript: "Location" as NSString)
         // `Location.uri` is read through `url(from:in:)`, itself not
-        // duck-typed (`Uri.swift:340-347` at submodule commit `c83bd261`) —
-        // a real `vscode.Location` fixture
+        // duck-typed (`Uri.swift:348-355`) — a real `vscode.Location` fixture
         // needs a real `vscode.Uri` for `uri`, hence `Uri` is exposed here
         // too, `UriTests.makeContext()`'s own reasoning.
         let uriClass = try #require(VSCodeAPI.installUriClass(in: context))
@@ -112,7 +106,7 @@ struct TextGeometryTests {
 
     /// `new Position(-1, 0)` throws, mentioning `line`.
     ///
-    /// **Added fix round 1, F4.1.** The addendum: "a stub that clamps to `0`
+    /// **The addendum:** "a stub that clamps to `0`
     /// and a stub that checks only `line` are different bugs, and a test
     /// passing `(-1, 0)` alone catches only the first." This test and
     /// `positionConstructorThrowsOnANegativeCharacter` below are the pair
@@ -168,14 +162,14 @@ struct TextGeometryTests {
     /// via `Position.prototype.with`): `r.with(newStart)` returns a new
     /// object and leaves `r` at its original `start`/`end`.
     ///
-    /// **Fix round 1, F1 (Critical):** the first version of this test used
+    /// The first version of this test used
     /// `r.with(new Position(1, 1))` against `r = new Range((0,0), (0,5))`.
     /// `with` builds `new Range((1,1), (0,5))`, and `(1,1).isBefore((0,5))`
     /// is `false`, so the `Range` constructor's own swap branch — the
     /// correct behavior mutation 1 pins — swaps the pair, making
     /// `changed.start.line` `0`, not the `1` the old assertion required. The
     /// test was red against the correct implementation, not merely weak.
-    /// Confirmed under `node` this round: for the fixture below,
+    /// Confirmed under `node`: for the fixture below,
     /// `changed.start` is `(0, 1)`, `r` is untouched at `(0, 0)`/`(0, 5)`,
     /// and `r !== changed`. Fixed by choosing a `newStart` — `(0, 1)` — that
     /// stays before `r`'s `end` of `(0, 5)`, so the swap invariant does not
@@ -215,7 +209,7 @@ struct TextGeometryTests {
     /// (`this`), not merely an equal copy — the addendum: "`translate` and
     /// `with` return `this` when nothing changes — identity, not a copy."
     ///
-    /// **Fix round 1, F6 (Minor).** `TextGeometry.swift`'s comment above
+    /// `TextGeometry.swift`'s comment above
     /// `Position.prototype.translate` names this branch as what
     /// `TextGeometryTests` pins for immutability, but before this test
     /// nothing did:
@@ -240,7 +234,7 @@ struct TextGeometryTests {
     /// `intersection` of two genuinely disjoint ranges — a gap between them,
     /// not merely touching at one point — answers `undefined`.
     ///
-    /// **Fix round 1, F3 (Important).** The original doc claimed this
+    /// The original doc claimed this
     /// fixture also killed the "touching ranges wrongly answer `undefined`
     /// instead of an empty range" mutation the addendum requires a test for
     /// — it does not: a gapped pair is exactly the fixture the addendum
@@ -270,7 +264,7 @@ struct TextGeometryTests {
     /// `intersection` of two ranges that touch at exactly one point —
     /// `(0,0)-(0,5)` and `(0,5)-(0,10)` share only the point `(0,5)` —
     /// answers an **empty range**, not `undefined`. This is the fixture the
-    /// addendum requires (added fix round 1, F3/F4): `range.ts:98` answers
+    /// addendum requires: `range.ts:98` answers
     /// `undefined` only when the computed start is *strictly after* the
     /// computed end; a touching pair's computed start equals its computed
     /// end, so `start.isAfter(end)` is `false` and a real (empty) `Range` is
@@ -377,7 +371,7 @@ struct TextGeometryTests {
     /// (`range.ts:92`) rather than going through `Range.isRange`, so a
     /// duck-typed plain-object argument throws instead of comparing.
     ///
-    /// **Added fix round 1, F4.3.** The addendum: "Do not make them
+    /// **The addendum:** "Do not make them
     /// uniform — the asymmetry is upstream's behaviour, and a test should
     /// pin each side." This test pins the `isEqual` side; paired with
     /// `containsIsDuckTypedAndAnswersFalseRatherThanThrowing` below, which
@@ -401,9 +395,8 @@ struct TextGeometryTests {
     /// `Range.prototype.contains` goes through `Position.isPosition`/
     /// `Range.isRange` (duck-typed) and answers `false` for a shape that is
     /// not a real `Position`/`Range`, rather than throwing — the other half
-    /// of the asymmetry the addendum pins, verified this round to actually
-    /// hold in this implementation (F4's own instruction: report and stop
-    /// rather than change the implementation if it does not — it does).
+    /// of the asymmetry the addendum pins, verified to actually hold in this
+    /// implementation rather than changed to make it hold.
     /// Confirmed under `node`: a plain `{ line, character }` literal outside
     /// the range answers `false`, with no exception raised.
     @Test
@@ -437,7 +430,7 @@ struct TextGeometryTests {
     /// `isBefore`, `isBeforeOrEqual`, `isAfter` and `isAfterOrEqual`, all
     /// exercised on the same pair of **equal** positions in one test.
     ///
-    /// **Added fix round 1, F4.2.** The addendum: "An implementation writing
+    /// **The addendum:** "An implementation writing
     /// all four independently gets exactly one of the equal-position cases
     /// wrong, and only a test that exercises equal positions on all four can
     /// see it." An implementation that gets, say, `isAfterOrEqual` wrong for
@@ -514,7 +507,7 @@ struct TextGeometryTests {
     /// does not change what a later `contains` call does — removing the
     /// `Object.freeze` pair on `Range`/`Range.prototype` turns this red.
     ///
-    /// **Fix round 1, F2 (Important).** The tampering assignment sets
+    /// The tampering assignment sets
     /// `contains` to a function returning the string `"tampered"`. The old
     /// assertion was `result.toBool() == true`, and `JSValue.toBool()` is
     /// JavaScript's `ToBoolean`, which is `true` for *any* non-empty

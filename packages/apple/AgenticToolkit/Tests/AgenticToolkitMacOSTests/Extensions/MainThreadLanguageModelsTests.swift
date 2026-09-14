@@ -57,7 +57,7 @@ private final class TestLanguageModelProvider: ExtensionLanguageModelProviding {
 /// `MainThreadLanguagesGetLanguagesTests` does for `HostLanguageVocabulary`.
 /// What is pinned here is the JS/Swift boundary itself: selector semantics,
 /// the readonly object-handback shape, both `countTokens` argument shapes,
-/// and `sendRequest`'s tee'd `stream`/`text` response (Rulings 51-54, O9) —
+/// and `sendRequest`'s tee'd `stream`/`text` response (Rulings 51-54) —
 /// never a real provider's own composition, which a double makes irrelevant
 /// to these tests by construction.
 @MainActor
@@ -78,36 +78,6 @@ struct MainThreadLanguageModelsTests {
 
     private func makeTempDirectory() throws -> URL {
         try ExtensionFixtures.makeTemporaryDirectory("MainThreadLanguageModelsTests")
-    }
-
-    private func manifest(name: String, browser: String) throws -> ExtensionManifest {
-        let json = """
-        {
-            "name": "\(name)",
-            "publisher": "test",
-            "version": "1.0.0",
-            "engines": { "vscode": "^1.74.0" },
-            "browser": "\(browser)"
-        }
-        """
-        return try JSONDecoder().decode(ExtensionManifest.self, from: Data(json.utf8))
-    }
-
-    /// Writes `source` as the extension's `browser` entry point and returns a
-    /// host over the result.
-    private func makeHost(
-        name: String = "alpha",
-        source: String,
-        entryPath: String = "dist/web.js",
-        in directory: URL,
-        ledger: NotImplementedLedger = NotImplementedLedger()
-    ) throws -> ExtensionHost {
-        try ExtensionFixtures.write(source, to: entryPath, in: directory)
-        let loaded = LoadedExtension(
-            manifest: try manifest(name: name, browser: entryPath),
-            directory: directory
-        )
-        return ExtensionHost(loadedExtension: loaded, notImplementedLedger: ledger)
     }
 
     /// Installs `lm.selectChatModels` onto `host`'s `vscode.lm` namespace —
@@ -536,7 +506,7 @@ struct MainThreadLanguageModelsTests {
     /// in-flight against a provider that yields three parts, so the drained
     /// loop actually calls `next()` more than once, then asserts the
     /// observed maximum. Kills a `CursorState` that grew a queue instead of a
-    /// single `LanguageModelSettlementBox?` for the wrong reason.
+    /// single `PromiseSettlementBox?` for the wrong reason.
     ///
     /// One of the 4-question probe's questions — that settlement happens on
     /// the main actor — is not asserted directly by anything below; it is
@@ -1196,8 +1166,8 @@ struct MainThreadLanguageModelsTests {
 
     /// T9: the seam throwing synchronously (before ever returning a stream)
     /// must still produce a **rejected** promise from `sendRequest`, never a
-    /// synchronous JS throw — O9's own requirement, and the defect the
-    /// `NotImplemented` stub this task replaces had.
+    /// synchronous JS throw — the shape the `NotImplemented` stub this task
+    /// replaces got wrong.
     @Test
     func seamSynchronousThrowProducesARejectedPromiseNotASynchronousThrow() async throws {
         let directory = try makeTempDirectory()
@@ -2232,15 +2202,14 @@ struct MainThreadLanguageModelsTests {
 
     /// **`dispose()` stops delivery to an already-registered listener**, on
     /// `MainThreadDiagnostics.dispose()`'s own pattern
-    /// (`MainThreadDiagnostics.swift:876`, commit `90c38b02` — that file is
-    /// untouched by this task): a registration holds its listener `JSValue`,
-    /// and through it that extension's `JSContext`, strongly, so leaving it
-    /// behind after `dispose()` would leave a torn-down extension's context
-    /// outliving its host until that listener goes — exactly what
-    /// `ExtensionEvent.swift`'s own "Lifetime" doc (`:127-137`) says of every
-    /// registration. (Not because `onDidChangeChatModelsEmitter` is shared —
+    /// (`MainThreadDiagnostics.swift:876`): a registration holds its listener
+    /// `JSValue`, and through it that extension's `JSContext`, strongly, so
+    /// leaving it behind after `dispose()` would leave a torn-down
+    /// extension's context outliving its host until that listener goes —
+    /// exactly what `ExtensionEvent.swift`'s own "Lifetime" doc
+    /// (`:119-129`) says of every registration. (Not because `onDidChangeChatModelsEmitter` is shared —
     /// it is a private, per-instance `let`, and `Registration.owner`
-    /// (`ExtensionEvent.swift:152`) holds its owner only as an
+    /// (`ExtensionEvent.swift:144`) holds its owner only as an
     /// `ObjectIdentifier`, never strongly, so there is no retain path from
     /// the emitter back to the adaptor either way.)
     ///

@@ -153,7 +153,7 @@ final class ExtensionInputBoxViewController: NSViewController {
         view.window?.makeFirstResponder(field)
         // `initialSelectionUTF16Range()`, not a raw `NSRange` built from
         // `initialSelection()`'s Character offsets directly — `NSRange` is
-        // UTF-16, and a Character offset is not (F7).
+        // UTF-16, and a Character offset is not.
         field.currentEditor()?.selectedRange = model.initialSelectionUTF16Range()
     }
 
