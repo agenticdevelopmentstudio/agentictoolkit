@@ -540,6 +540,220 @@ struct ExtensionsSettingsPanelTests {
         }
     }
 
+    // MARK: - Not implemented
+
+    @Test("a used member and a probed member read as distinct sentences")
+    func aUsedMemberAndAProbedMemberReadAsDistinctSentences() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try installExtension(named: "alpha", in: root)
+
+            try withPanel(searchPaths: [root]) { coordinator, _ in
+                let ledger = coordinator.notImplementedLedger
+                // count only.
+                ledger.record(
+                    memberPath: "vscode.window.createStatusBarItem",
+                    extensionIdentifier: "test.alpha")
+                // probeCount only.
+                ledger.recordProbe(
+                    memberPath: "vscode.env.remoteName",
+                    extensionIdentifier: "test.alpha")
+                // both.
+                ledger.record(
+                    memberPath: "vscode.commands.registerCommand",
+                    extensionIdentifier: "test.alpha")
+                ledger.recordProbe(
+                    memberPath: "vscode.commands.registerCommand",
+                    extensionIdentifier: "test.alpha")
+
+                // Rows are recorded, then a fresh panel is built: the
+                // group is a snapshot taken in `viewDidLoad`, and a row
+                // recorded after that panel loads would not appear.
+                let fresh = coordinator.settingsPanel()
+                _ = fresh.view
+                let detail = try #require(fresh.extensionPanels.first)
+                let text = labels(in: detail.view)
+
+                // Built as separate `let` statements, not inline inside
+                // `#expect`: the macro's own expression capture combined
+                // with `+`-concatenation this long is what made the
+                // compiler time out type-checking the expression.
+                let countOnly: String =
+                    "vscode.window.createStatusBarItem is a VS Code API "
+                        + "member this app hasn't implemented yet — a gap "
+                        + "here, not in the extension. The extension "
+                        + "called it 1 time, and was refused."
+                let probeOnly: String =
+                    "vscode.env.remoteName is a VS Code API member this "
+                        + "app hasn't implemented yet — a gap here, not "
+                        + "in the extension. The extension asked whether "
+                        + "it exists 1 time, and was correctly told no."
+                let both: String =
+                    "vscode.commands.registerCommand is a VS Code API "
+                        + "member this app hasn't implemented yet — a gap "
+                        + "here, not in the extension. The extension "
+                        + "called it 1 time, and was refused. The "
+                        + "extension asked whether it exists 1 time, "
+                        + "and was correctly told no."
+
+                #expect(text.contains("Not implemented by this app"))
+                #expect(text.contains(countOnly))
+                #expect(text.contains(probeOnly))
+                #expect(text.contains(both))
+            }
+        }
+    }
+
+    @Test("rows are attributed: each extension's panel shows only its own")
+    func rowsAreAttributedToTheirOwnPanel() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try installExtension(named: "alpha", in: root)
+            try installExtension(named: "beta", in: root)
+
+            try withPanel(searchPaths: [root]) { coordinator, _ in
+                let ledger = coordinator.notImplementedLedger
+                ledger.record(
+                    memberPath: "vscode.window.createStatusBarItem",
+                    extensionIdentifier: "test.alpha")
+                ledger.record(
+                    memberPath: "vscode.tasks.registerTaskProvider",
+                    extensionIdentifier: "test.beta")
+
+                // Rows are recorded, then a fresh panel is built: the
+                // group is a snapshot taken in `viewDidLoad`, and a row
+                // recorded after that panel loads would not appear.
+                let fresh = coordinator.settingsPanel()
+                _ = fresh.view
+                let byIdentifier = Dictionary(
+                    uniqueKeysWithValues: fresh.extensionPanels.map {
+                        ($0.extensionIdentifier, $0)
+                    })
+                let alpha = try #require(byIdentifier["test.alpha"])
+                let beta = try #require(byIdentifier["test.beta"])
+
+                _ = alpha.view
+                // Alpha sorts first, so `_ = fresh.view` already loaded
+                // its view through the rebuild; beta is never shown by
+                // that rebuild, so this is the load that actually puts
+                // beta's row on screen.
+                _ = beta.view
+                let alphaText = labels(in: alpha.view)
+                let betaText = labels(in: beta.view)
+
+                #expect(alphaText.contains {
+                    $0.hasPrefix("vscode.window.createStatusBarItem ")
+                })
+                #expect(!alphaText.contains {
+                    $0.hasPrefix("vscode.tasks.registerTaskProvider ")
+                })
+                #expect(betaText.contains {
+                    $0.hasPrefix("vscode.tasks.registerTaskProvider ")
+                })
+                #expect(!betaText.contains {
+                    $0.hasPrefix("vscode.window.createStatusBarItem ")
+                })
+            }
+        }
+    }
+
+    @Test("an extension with no unimplemented rows gets no group at all")
+    func anExtensionWithNoRowsGetsNoGroupAtAll() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try installExtension(named: "alpha", in: root)
+
+            try withPanel(searchPaths: [root]) { _, panel in
+                let detail = try #require(panel.extensionPanels.first)
+                // Nothing ever writes to the ledger for this extension.
+                _ = detail.view
+                let text = labels(in: detail.view)
+
+                // A row that is expected to be present, so this test cannot
+                // pass because the panel rendered nothing at all.
+                #expect(text.contains { $0.hasPrefix("Version ") })
+                #expect(!text.contains("Not implemented by this app"))
+            }
+        }
+    }
+
+    @Test("not-implemented lines state count and probeCount, pluralized")
+    func theNotImplementedLineStatesCountAndProbeCountSeparately() {
+        func access(
+            count: Int = 0, probeCount: Int = 0
+        ) -> NotImplementedAccess {
+            NotImplementedAccess(
+                extensionIdentifier: "test.alpha",
+                memberPath: "vscode.window.createWebviewPanel",
+                firstAccess: Date(),
+                count: count,
+                probeCount: probeCount
+            )
+        }
+
+        // Each expected sentence is built as its own `let` rather than
+        // inline inside `#expect`: an array-equality check whose right
+        // side is a multi-fragment `+`-concatenation is what made the
+        // compiler time out type-checking the expression.
+        let countOne: String =
+            "vscode.window.createWebviewPanel is a VS Code API "
+                + "member this app hasn't implemented yet — a gap "
+                + "here, not in the extension. The extension called "
+                + "it 1 time, and was refused."
+        #expect(
+            ExtensionDetailPanel.notImplementedLines(for: [access(count: 1)])
+                == [countOne]
+        )
+        let countThree: String =
+            "vscode.window.createWebviewPanel is a VS Code API "
+                + "member this app hasn't implemented yet — a gap "
+                + "here, not in the extension. The extension called "
+                + "it 3 times, and was refused."
+        #expect(
+            ExtensionDetailPanel.notImplementedLines(for: [access(count: 3)])
+                == [countThree]
+        )
+        let probeOne: String =
+            "vscode.window.createWebviewPanel is a VS Code API "
+                + "member this app hasn't implemented yet — a gap "
+                + "here, not in the extension. The extension asked "
+                + "whether it exists 1 time, and was correctly told no."
+        #expect(
+            ExtensionDetailPanel.notImplementedLines(
+                for: [access(probeCount: 1)]
+            ) == [probeOne]
+        )
+        let probeTwo: String =
+            "vscode.window.createWebviewPanel is a VS Code API "
+                + "member this app hasn't implemented yet — a gap "
+                + "here, not in the extension. The extension asked "
+                + "whether it exists 2 times, and was correctly told no."
+        #expect(
+            ExtensionDetailPanel.notImplementedLines(
+                for: [access(probeCount: 2)]
+            ) == [probeTwo]
+        )
+        let both: String =
+            "vscode.window.createWebviewPanel is a VS Code API "
+                + "member this app hasn't implemented yet — a gap "
+                + "here, not in the extension. The extension called "
+                + "it 2 times, and was refused. The extension asked "
+                + "whether it exists 3 times, and was correctly told no."
+        #expect(
+            ExtensionDetailPanel.notImplementedLines(
+                for: [access(count: 2, probeCount: 3)]
+            ) == [both]
+        )
+        // An empty array is what an extension with no rows produces —
+        // `addNotImplementedGroup`'s own guard is what turns that into no
+        // group at all, but the pure function's contract is simply that it
+        // returns nothing to render.
+        #expect(ExtensionDetailPanel.notImplementedLines(for: []).isEmpty)
+    }
+
     // MARK: - The problems panel
 
     @Test("every load failure has a sentence, and none of them says nothing")

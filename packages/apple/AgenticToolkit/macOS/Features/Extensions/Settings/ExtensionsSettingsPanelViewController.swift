@@ -181,6 +181,16 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
                     + "cannot apply, a setting type it cannot draw, an icon it has no symbol "
                     + "for — it says so rather than doing nothing quietly. None of it means "
                     + "the extension is broken."
+            ),
+            .init(
+                title: "What This App Hasn't Built Yet",
+                body: "An extension's code can reach for parts of the VS Code "
+                    + "API this app hasn't implemented yet. Reaching for one "
+                    + "fails loudly and by name, instead of doing nothing and "
+                    + "leaving the extension looking broken. A member listed "
+                    + "here is a gap in this app's support, not a defect in "
+                    + "the extension — none of it means the extension is "
+                    + "misbehaving."
             )
         ])
     }
@@ -205,6 +215,7 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
         addContributedSettingsGroup()
         addContributedViewsGroup()
         addDecisionsGroup()
+        addNotImplementedGroup()
         addGroup(makeUninstallGroup())
     }
 
@@ -313,6 +324,24 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
         let group = ComposableSettings.GroupView(withTitle: "Decisions this app made")
         for line in lines {
             group.addSettingSubview(ComposableSettings.ExplanationView(withText: line))
+        }
+        addGroup(group)
+    }
+
+    private func addNotImplementedGroup() {
+        let accesses = coordinator.notImplementedLedger
+            .accesses(for: extensionIdentifier)
+        let lines = Self.notImplementedLines(for: accesses)
+        guard !lines.isEmpty else { return }
+        // Named for whose gap this is, not the extension's: a reader who
+        // sees `vscode.window.createWebviewPanel` here must not conclude
+        // their extension is broken, so the title says where the fault
+        // actually lies before a single row does.
+        let group = ComposableSettings.GroupView(
+            withTitle: "Not implemented by this app")
+        for line in lines {
+            group.addSettingSubview(
+                ComposableSettings.ExplanationView(withText: line))
         }
         addGroup(group)
     }
@@ -546,6 +575,44 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
     private static func list(_ values: [String]) -> String {
         guard values.count > 1, let last = values.last else { return values.joined() }
         return values.dropLast().joined(separator: ", ") + " and " + last
+    }
+
+    /// One sentence per row of what an extension reached for that this app
+    /// does not implement, in the order the ledger already returns them.
+    ///
+    /// `count` and `probeCount` are two different facts about one member
+    /// (see `NotImplementedAccess.probeCount`'s own doc) — a row carrying
+    /// both states both, in their own clauses, rather than collapsing them
+    /// into a single number.
+    static func notImplementedLines(
+        for accesses: [NotImplementedAccess]
+    ) -> [String] {
+        accesses.map(notImplementedLine(for:))
+    }
+
+    private static func notImplementedLine(
+        for access: NotImplementedAccess
+    ) -> String {
+        var sentence = "\(access.memberPath) is a VS Code API member this "
+            + "app hasn't implemented yet — a gap here, not in the extension."
+        if access.count > 0 {
+            sentence += " The extension called it \(access.count) "
+                + "\(pluralTimes(access.count)), and was refused."
+        }
+        if access.probeCount > 0 {
+            sentence += " The extension asked whether it exists "
+                + "\(access.probeCount) \(pluralTimes(access.probeCount)), "
+                + "and was correctly told no."
+        }
+        return sentence
+    }
+
+    /// `"1 time"` / `"3 times"`. `noun(forKey:count:)` above is not this
+    /// function: its `forKey:` label and its doc's safety argument are
+    /// both a closed-world claim about `Contributions` keys, and `"times"`
+    /// is not one of them — reusing it would read as asserting otherwise.
+    private static func pluralTimes(_ count: Int) -> String {
+        count == 1 ? "time" : "times"
     }
 }
 
