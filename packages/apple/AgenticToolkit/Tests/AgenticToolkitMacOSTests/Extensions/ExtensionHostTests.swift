@@ -2187,18 +2187,27 @@ struct ExtensionHostTests {
 
         try await host.activate()
 
-        #expect(recorder.texts == [
+        try #require(recorder.texts.count == 8)
+        #expect(Array(recorder.texts.prefix(4)) == [
             "concat: [VSCodeNamespace vscode]",
             "template: [VSCodeNamespace vscode.commands]",
             "[VSCodeNamespace vscode.window]",
-            "[VSCodeNamespace vscode.workspace] [VSCodeNamespace vscode.languages]",
-            // Inspecting a namespace shows what is *in* it, which is a
-            // different and more useful answer than stringifying it.
-            "{ commands: {}, workspace: {}, window: {}, languages: {}, lm: {} }",
-            "[VSCodeNamespace vscode.window]",
-            "true,false",
-            "{\"commands\":{},\"workspace\":{},\"window\":{},\"languages\":{},\"lm\":{}}"
+            "[VSCodeNamespace vscode.workspace] [VSCodeNamespace vscode.languages]"
         ])
+        // Inspecting a namespace shows what is *in* it, which is a different
+        // and more useful answer than stringifying it. Only the opening is
+        // pinned: the rest of the top-level surface — `Uri`, the
+        // language-model vocabulary, and the text-geometry and diagnostic
+        // value classes — belongs to
+        // `aNegativeProbeIsAnsweredHonestlyAndStillRecorded`, which pins that
+        // list deliberately. A second copy here would be a second copy to
+        // keep true, and this test is about coercion, not about membership.
+        #expect(recorder.texts[4].hasPrefix(
+            "{ commands: {}, workspace: {}, window: {}, languages: {}, lm: {}, "))
+        #expect(recorder.texts[5] == "[VSCodeNamespace vscode.window]")
+        #expect(recorder.texts[6] == "true,false")
+        #expect(recorder.texts[7].hasPrefix(
+            "{\"commands\":{},\"workspace\":{},\"window\":{},\"languages\":{},\"lm\":{},"))
         // None of that is a reach for an unimplemented member, and none of it
         // may be recorded as one.
         #expect(ledger.accesses.isEmpty)
@@ -2283,7 +2292,25 @@ struct ExtensionHostTests {
 
         try await host.activate()
 
-        #expect(recorder.texts == ["false,true", "true", "commands,workspace,window,languages,lm"])
+        // The third line is the pin on the whole top-level `vscode` surface,
+        // in the order `ExtensionHost` installs it: the five namespaces, then
+        // `Uri`, then the language-model vocabulary, the text geometry
+        // (`Location`/`Position`/`Range`) and the four diagnostic value types,
+        // each block sorted within itself by `installVSCodeMembers`. A new
+        // top-level `vscode.*` member belongs in this list — that is what the
+        // line is for.
+        #expect(recorder.texts == [
+            "false,true",
+            "true",
+            "commands,workspace,window,languages,lm,Uri,"
+                + "LanguageModelChatMessage,LanguageModelChatMessageRole,"
+                + "LanguageModelDataPart,LanguageModelPromptTsxPart,"
+                + "LanguageModelTextPart,LanguageModelToolCallPart,"
+                + "LanguageModelToolResult,LanguageModelToolResultPart,"
+                + "Location,Position,Range,"
+                + "Diagnostic,DiagnosticRelatedInformation,"
+                + "DiagnosticSeverity,DiagnosticTag"
+        ])
 
         #expect(ledger.accesses.map(\.memberPath) == [
             "vscode.commands.registerCommand", "vscode.window.activeTextEditor"
