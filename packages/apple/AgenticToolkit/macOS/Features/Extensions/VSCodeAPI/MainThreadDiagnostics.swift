@@ -625,8 +625,18 @@ public final class MainThreadDiagnostics {
     /// mirrored here via `VSCodeAPI.call`'s `.threw` case setting
     /// `context.exception` directly and returning, rather than swallowing
     /// or continuing.
-    private func handleCollectionForEach(owner: String, collection: JSValue) -> JSValue? {
+    private func handleCollectionForEach(owner: String) -> JSValue? {
         guard let context = JSContext.current() else { return nil }
+        // The collection the callback receives as its third argument
+        // (`vscode.d.ts:7221`) is the receiver of this very call, read at
+        // callback time from the same family of accessors `currentArguments()`
+        // belongs to — never captured. `VSCodeAPI.settlement(of:in:)`'s doc
+        // sets out why a block exported to JavaScript may not hold a `JSValue`
+        // (`JSManagedValue.h:49`), and holding one *weakly* to sidestep that
+        // is worse than the cycle it avoids: `JSValue(newObjectIn:)` is
+        // autoreleased, so the Swift wrapper is gone by the next drain and
+        // every later `forEach` then iterates nothing at all, silently.
+        guard let collection = JSContext.currentThis() else { return nil }
         let arguments = VSCodeAPI.currentArguments()
         // `callback instanceof Function` — `isObject` is true of `{}` too, and
         // "requires a callback function" has to mean callable or it means
@@ -707,14 +717,17 @@ public final class MainThreadDiagnostics {
     ///
     /// **No-capture evidence:** every block below captures `diagnostics`
     /// (this adaptor) weakly and nothing else, on `MainThreadWindow
-    /// .makeStatusBarItemObject`'s own pattern. `forEach`'s block and the
-    /// `Symbol.iterator` installer additionally capture `object` itself
-    /// weakly, so the object can hand its own `JSValue` to a callback
-    /// (`forEach`'s third argument, `vscode.d.ts:7221`'s declared
-    /// `(uri, diagnostics, collection) => any`) — safe because `object`
-    /// holds these blocks *strongly* (via `setObject`), so a weak
-    /// self-reference from a block back to its own owner creates no
-    /// retain cycle; the object's own lifetime already bounds it.
+    /// .makeStatusBarItemObject`'s own pattern. None of them captures
+    /// `object`, not even weakly. `forEach` needs the collection itself —
+    /// `vscode.d.ts:7221`'s declared `(uri, diagnostics, collection) => any`
+    /// third argument — and reads it from `JSContext.currentThis()` when it
+    /// runs instead. A weak capture looks like the safe way to hand an
+    /// object its own `JSValue`, and it is not: `JSValue(newObjectIn:)`
+    /// returns an autoreleased wrapper, and the strong references that keep
+    /// the *JavaScript* object alive (this context, and `object` holding
+    /// these blocks) hold nothing at all in Swift. The wrapper dies at the
+    /// next drain while the JS object lives on, and `forEach` then iterates
+    /// nothing, silently, forever after.
     private static func makeDiagnosticCollectionObject(
         owner: String,
         of diagnostics: MainThreadDiagnostics,
@@ -816,9 +829,9 @@ public final class MainThreadDiagnostics {
         }
         object.setObject(hasMethod, forKeyedSubscript: "has" as NSString)
 
-        let forEachMethod: @convention(block) () -> JSValue? = { [weak diagnostics, weak object] in
+        let forEachMethod: @convention(block) () -> JSValue? = { [weak diagnostics] in
             MainActor.assumeIsolated {
-                guard let diagnostics, let collectionValue = object else {
+                guard let diagnostics else {
                     return UncheckedJSValueBox(value: nil)
                 }
                 guard !disposed else {
@@ -826,8 +839,7 @@ public final class MainThreadDiagnostics {
                         value: MainThreadDiagnostics.disposedUndefinedValue())
                 }
                 return UncheckedJSValueBox(
-                    value: diagnostics.handleCollectionForEach(
-                        owner: owner, collection: collectionValue))
+                    value: diagnostics.handleCollectionForEach(owner: owner))
             }.value
         }
         object.setObject(forEachMethod, forKeyedSubscript: "forEach" as NSString)
