@@ -299,16 +299,41 @@ final class ProjectWindowManagerControllerTests: XCTestCase {
         // `storedTabs()` is first written — so the baseline is taken only
         // once the call count has gone quiet, not at the first sight of
         // stored tabs.
+        //
+        // Going quiet and running out of time are not the same outcome, and
+        // the loop has to report which one happened. Every counted call is a
+        // `python3` spawn, so on a machine that is also running a build the
+        // reconcile can still be landing calls many seconds in. Exit on the
+        // deadline and the baseline is a mid-flight number: the leftover
+        // call arrives inside the window below and is reported as a refresh
+        // the stale observer caused — the exact false red this loop exists
+        // to prevent, and one whose message names the wrong cause. So the
+        // budget is generous, and never going quiet fails on its own terms.
         var callsAfterReopen = try callCount(in: logDir)
         var quietSince = Date()
-        let quiesceDeadline = Date().addingTimeInterval(5)
-        while Date().timeIntervalSince(quietSince) < 0.3, Date() < quiesceDeadline {
+        let quiesceDeadline = Date().addingTimeInterval(60)
+        var wentQuiet = false
+        while Date() < quiesceDeadline {
+            if Date().timeIntervalSince(quietSince) >= 0.3 {
+                wentQuiet = true
+                break
+            }
             try await Task.sleep(for: .milliseconds(50))
             let current = try callCount(in: logDir)
             if current != callsAfterReopen {
                 callsAfterReopen = current
                 quietSince = Date()
             }
+        }
+        guard wentQuiet else {
+            manager.closeProject(repoID: repo.id)
+            XCTFail("""
+                the reopened project's own reconcile was still calling git 60s \
+                after the window came back, so there is no quiet baseline to \
+                measure the stale post against. This says nothing either way \
+                about the key observer — it means the reconcile does not settle.
+                """)
+            return
         }
 
         // Posted against the *dead* window, not the reopened one.
