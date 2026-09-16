@@ -246,6 +246,48 @@ final class SessionListViewTests: XCTestCase {
         XCTAssertEqual(Set(fonts).count, 1)
     }
 
+    private func makeSession(branch: String, name: String) -> SessionWatcher.SessionWatcherSession {
+        SessionWatcher.SessionWatcherSession(
+            sessionId: "row",
+            cwd: "/Users/me/stenographer",
+            gitBranch: branch,
+            termProgram: "iTerm.app",
+            projectRoot: "/Users/me/stenographer",
+            sessionName: name
+        )
+    }
+
+    /// Checking out another branch, or renaming the session, changes a label's text
+    /// and nothing about the row's shape — so it must go down the in-place path.
+    /// Refusing it rebuilt the whole list, which resets the scroll, drops the hover
+    /// and restarts every spinner.
+    func testRenamingABreadcrumbSegmentUpdatesInPlace() {
+        let row = makeRow(branch: "main", name: "first name")
+
+        let moved = row.update(
+            session: makeSession(branch: "session-window", name: "second name"),
+            isSummarizing: false, isFrontmost: false, summariesEnabled: false
+        )
+
+        XCTAssertTrue(moved, "a renamed branch or session is new text, not a new shape")
+        XCTAssertEqual(row.branchLabel?.stringValue, "session-window")
+        XCTAssertEqual(row.sessionNameLabel?.stringValue, "second name")
+    }
+
+    /// A segment that appears or vanishes *is* a shape change: the row has no label
+    /// to write into, so the caller has to build a new one.
+    func testASegmentAppearingForcesARebuild() {
+        let row = makeRow(branch: "main", name: "")
+
+        XCTAssertFalse(
+            row.update(
+                session: makeSession(branch: "main", name: "now named"),
+                isSummarizing: false, isFrontmost: false, summariesEnabled: false
+            ),
+            "a session name that appeared needs a label the row doesn't have"
+        )
+    }
+
     /// With no rows there is no breadcrumb to keep whole, so the list asks for no
     /// width and the host's own floor applies.
     func testListMinimumContentWidthIsZeroWithoutRows() {

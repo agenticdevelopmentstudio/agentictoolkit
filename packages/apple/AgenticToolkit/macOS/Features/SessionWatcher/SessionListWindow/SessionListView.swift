@@ -474,8 +474,9 @@ extension SessionWatcher {
         /// `summariesEnabled` decides whether the summary exists at all.
         ///
         /// Everything that actually moves poll to poll — what the agent last said,
-        /// its activity, its summary, whether it is the frontmost session — is a
-        /// string or a colour on a label that is already there.
+        /// its activity, its summary, whether it is the frontmost session, and the
+        /// branch and session name themselves — is a string or a colour on a label
+        /// that is already there.
         public func update(
             session newSession: SessionWatcherSession,
             isSummarizing newIsSummarizing: Bool,
@@ -484,7 +485,7 @@ extension SessionWatcher {
         ) -> Bool {
             guard newSession.sessionId == session.sessionId,
                   newSummariesEnabled == summariesEnabled,
-                  Self.headerSegments(for: newSession) == Self.headerSegments(for: session)
+                  Self.headerShape(for: newSession) == Self.headerShape(for: session)
             else { return false }
 
             session = newSession
@@ -525,11 +526,14 @@ extension SessionWatcher {
                 + Metrics.horizontalPadding
         }
 
-        /// The header's optional segments, in order — branch then session name,
-        /// each present only when non-empty. The row is built around this list and
-        /// `update(...)` refuses any change to its shape.
-        private static func headerSegments(for session: SessionWatcherSession) -> [String] {
-            [session.gitBranch, session.sessionName].filter { !$0.isEmpty }
+        /// Which of the header's optional segments exist — branch, then session name,
+        /// each present only when non-empty. The row is built around exactly this,
+        /// so it is what `update(...)` compares: *presence*, never the text. A
+        /// renamed branch or session still has the label to write the new name into,
+        /// and comparing the text there sent every rename down the rebuild path the
+        /// in-place update exists to avoid.
+        private static func headerShape(for session: SessionWatcherSession) -> [Bool] {
+            [!session.gitBranch.isEmpty, !session.sessionName.isEmpty]
         }
 
         /// The row's resting background. A list row has no border of its own — the
