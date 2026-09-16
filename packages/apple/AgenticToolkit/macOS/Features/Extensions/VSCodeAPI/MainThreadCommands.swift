@@ -171,15 +171,24 @@ public final class MainThreadCommands {
         // inventing a title from the id here would be a second, worse answer
         // that the real one would then have to displace. The `contributes`
         // wiring task is the one that fixes it.
-        let token = registry.register(AppCommand(id: command, title: command, run: { rawArguments in
-            // The dispatch starting here consumes `dispatchHasCaller`: it is
-            // the dispatch the bit was set for, and anything nested inside it
-            // must read `false`. See the property's doc.
-            let hasCaller = MainThreadCommands.consumeDispatchHasCaller()
-            return MainThreadCommands.invoke(
-                callback, thisArg: boundThisArg, arguments: rawArguments, commandID: command,
-                hasCaller: hasCaller)
-        }))
+        // `isExtensionContributed: true` is what arms
+        // `CommandRegistry.register(_:isExtensionContributed:)`'s refusal, and
+        // this call site is the one its doc names: the flag defaults to
+        // `false` because every *app* caller is built-in, so the protection
+        // against an extension displacing `workbench.action.closeWindow` is
+        // inert until the adaptor that registers third-party commands opts in.
+        // It is the whole reason the parameter exists.
+        let token = registry.register(
+            AppCommand(id: command, title: command, run: { rawArguments in
+                // The dispatch starting here consumes `dispatchHasCaller`: it is
+                // the dispatch the bit was set for, and anything nested inside it
+                // must read `false`. See the property's doc.
+                let hasCaller = MainThreadCommands.consumeDispatchHasCaller()
+                return MainThreadCommands.invoke(
+                    callback, thisArg: boundThisArg, arguments: rawArguments, commandID: command,
+                    hasCaller: hasCaller)
+            }),
+            isExtensionContributed: true)
         ownedCallbacks[command] = OwnedCommand(callback: callback, token: token)
 
         return makeDisposable(id: command, token: token, in: context)

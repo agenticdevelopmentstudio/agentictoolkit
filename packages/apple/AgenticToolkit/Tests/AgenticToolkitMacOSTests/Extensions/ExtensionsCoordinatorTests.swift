@@ -2,7 +2,36 @@ import Testing
 import AppKit
 import Foundation
 import AgenticToolkitCore
+import AgenticDeveloperToolkitUI
 @testable import AgenticToolkitMacOS
+
+/// A minimal `ExtensionLanguageModelProviding` double for the
+/// `installExtensionHosts` hand-through tests below.
+///
+/// `MainThreadLanguageModelsTests.TestLanguageModelProvider` is `private` to
+/// that file and not reusable here, so this is a second, deliberately tiny
+/// copy — just enough to hand a fixed model list to `vscode.lm` and observe
+/// that the exact instance `installExtensionHosts` was given is the one a
+/// real extension's JS ends up talking to.
+@MainActor
+private final class FakeLanguageModelProvider: ExtensionLanguageModelProviding {
+    let availableChatModels: [LanguageModelChatDescriptor]
+
+    init(modelCount: Int) {
+        availableChatModels = (0..<modelCount).map { index in
+            LanguageModelChatDescriptor(
+                name: "model-\(index)", id: "model-\(index)", vendor: "fake",
+                family: "fake", version: "1", maxInputTokens: 4096)
+        }
+    }
+
+    func streamResponse(
+        for model: LanguageModelChatDescriptor, messages: [ExtensionLanguageModelMessage],
+        justification: String?, extensionIdentifier: String
+    ) async throws -> AsyncThrowingStream<ExtensionLanguageModelResponsePart, Error> {
+        AsyncThrowingStream { $0.finish() }
+    }
+}
 
 /// The feature that brings the extension subsystem up.
 ///
@@ -446,6 +475,233 @@ struct ExtensionsCoordinatorTests {
             #expect(ComposableTabsLayout.current?.spec.allows.contains {
                 !(ComposableTabsLayout.current?.registry.isRegistered($0.viewID) ?? false)
             } == false)
+        }
+    }
+
+    // MARK: - installExtensionHosts
+
+    /// An eagerly-activating (`"*"`) extension with a `browser` entry point,
+    /// so `reconcile()` brings its host up and runs its real JS without any
+    /// activation trigger from the test.
+    private func eagerManifestJSON(name: String) -> String {
+        """
+        {
+            "name": "\(name)", "publisher": "test", "version": "1.0.0",
+            "displayName": "\(name)", "engines": { "vscode": "^1.74.0" },
+            "activationEvents": ["*"], "browser": "dist/web.js"
+        }
+        """
+    }
+
+    /// A fixed settle time for a host's real JS to activate and finish
+    /// running, matching the `.milliseconds(400)` convention already
+    /// established in `ExtensionHostTests` for the same kind of wait.
+    private func settle() async throws {
+        try await Task.sleep(for: .milliseconds(400))
+    }
+
+    /// `installExtensionHosts` builds one `ExtensionHost` per enabled
+    /// extension, not one host shared across all of them — pinned by loading
+    /// two extensions that each register a *different* real command from
+    /// inside their own `activate()`, then showing both commands are
+    /// reachable and each runs its own extension's code, not the other's.
+    @Test("installExtensionHosts builds one host per extension and runs each one's real code")
+    func installExtensionHostsBuildsOneHostPerExtensionAndRunsEachOnesRealCode() async throws {
+        // Not `withInMemorySettings`/`withCoordinator`: both take a
+        // non-async `throws` closure, and this test has to `await` a real
+        // host's JS settling before it can tear anything down — so the swap
+        // and the coordinator are built inline instead, with their own
+        // `defer`s doing exactly what those two helpers do internally.
+        let previousSettings = UserSettings.shared
+        UserSettings.shared = UserSettings(with: InMemorySettingsStorageProvider())
+        defer { UserSettings.shared = previousSettings }
+
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try write(eagerManifestJSON(name: "exta"), to: "package.json", in: root.appendingPathComponent("exta-1.0.0"))
+        try write(
+            """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.commands.registerCommand('exta.hello', function () { return 'real-a'; });
+            };
+            """,
+            to: "dist/web.js", in: root.appendingPathComponent("exta-1.0.0"))
+
+        try write(eagerManifestJSON(name: "extb"), to: "package.json", in: root.appendingPathComponent("extb-1.0.0"))
+        try write(
+            """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.commands.registerCommand('extb.hello', function () { return 'real-b'; });
+            };
+            """,
+            to: "dist/web.js", in: root.appendingPathComponent("extb-1.0.0"))
+
+        let previousProvider = CustomFileTypeMappings.contributedProvider
+        defer { CustomFileTypeMappings.contributedProvider = previousProvider }
+
+        let coordinator = ExtensionsCoordinator(
+            searchPaths: [root], themeStore: ThemeStore(storage: ExtensionTestThemeStorage()), viewRegistry: nil)
+        defer { coordinator.unregister() }
+
+        try #require(coordinator.registry.extensions.count == 2)
+
+        let commandRegistry = CommandRegistry()
+        coordinator.installExtensionHosts(
+            commandRegistry: commandRegistry,
+            languageModelProvider: FakeLanguageModelProvider(modelCount: 0),
+            frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+            openDocumentLanguageIDs: { [] })
+
+        try await settle()
+
+        let resultA = try commandRegistry.execute(id: "exta.hello", arguments: [])
+        let resultB = try commandRegistry.execute(id: "extb.hello", arguments: [])
+        #expect(resultA as? String == "real-a")
+        #expect(resultB as? String == "real-b")
+    }
+
+    /// The `footers` seam reaches a real `WindowFooterStatusBarPresenter`
+    /// wired to the actual `WindowFooterBar` `installExtensionHosts` was
+    /// given — pinned by an extension that calls the real
+    /// `vscode.window.createStatusBarItem()` / `.show()` from its own
+    /// `activate()`, then checking the footer itself for a rendered item.
+    @Test("installExtensionHosts wires the given footers into a real status bar item")
+    func installExtensionHostsWiresTheGivenFootersIntoARealStatusBarItem() async throws {
+        let previousSettings = UserSettings.shared
+        UserSettings.shared = UserSettings(with: InMemorySettingsStorageProvider())
+        defer { UserSettings.shared = previousSettings }
+
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let extensionDirectory = root.appendingPathComponent("extc-1.0.0")
+        try write(eagerManifestJSON(name: "extc"), to: "package.json", in: extensionDirectory)
+        try write(
+            """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                var item = vscode.window.createStatusBarItem();
+                item.text = 'hi';
+                item.show();
+            };
+            """,
+            to: "dist/web.js", in: extensionDirectory)
+
+        let previousProvider = CustomFileTypeMappings.contributedProvider
+        defer { CustomFileTypeMappings.contributedProvider = previousProvider }
+
+        let coordinator = ExtensionsCoordinator(
+            searchPaths: [root], themeStore: ThemeStore(storage: ExtensionTestThemeStorage()), viewRegistry: nil)
+        defer { coordinator.unregister() }
+
+        try #require(coordinator.registry.extensions.count == 1)
+
+        let footer = WindowFooterBar(accessibilityPrefix: "test")
+        coordinator.installExtensionHosts(
+            commandRegistry: CommandRegistry(),
+            languageModelProvider: FakeLanguageModelProvider(modelCount: 0),
+            frontWindow: { nil }, footers: { [footer] }, workspaceRoots: { nil },
+            openDocumentLanguageIDs: { [] })
+
+        try await settle()
+
+        let container = try #require(footer.trailingAccessories.first as? NSStackView)
+        #expect(container.arrangedSubviews.count == 1)
+    }
+
+    /// The `languageModelProvider` seam reaches the real
+    /// `vscode.lm.selectChatModels()` — pinned by an extension that awaits
+    /// that real call and reports the model count back out through a
+    /// command the test registered on the same `CommandRegistry` before
+    /// installing the hosts, so the count observed is the exact
+    /// `FakeLanguageModelProvider` instance `installExtensionHosts` was
+    /// given, round-tripped through real JS.
+    @Test("installExtensionHosts wires the given languageModelProvider into vscode.lm")
+    func installExtensionHostsWiresTheGivenLanguageModelProviderIntoVscodeLm() async throws {
+        let previousSettings = UserSettings.shared
+        UserSettings.shared = UserSettings(with: InMemorySettingsStorageProvider())
+        defer { UserSettings.shared = previousSettings }
+
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let extensionDirectory = root.appendingPathComponent("extd-1.0.0")
+        try write(eagerManifestJSON(name: "extd"), to: "package.json", in: extensionDirectory)
+        try write(
+            """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.lm.selectChatModels().then(function (models) {
+                    vscode.commands.executeCommand('test.report', models.length);
+                });
+            };
+            """,
+            to: "dist/web.js", in: extensionDirectory)
+
+        let previousProvider = CustomFileTypeMappings.contributedProvider
+        defer { CustomFileTypeMappings.contributedProvider = previousProvider }
+
+        let coordinator = ExtensionsCoordinator(
+            searchPaths: [root], themeStore: ThemeStore(storage: ExtensionTestThemeStorage()), viewRegistry: nil)
+        defer { coordinator.unregister() }
+
+        try #require(coordinator.registry.extensions.count == 1)
+
+        var reportedCount: Int?
+        let commandRegistry = CommandRegistry()
+        commandRegistry.register(AppCommand(id: "test.report", title: "Report", run: { arguments in
+            reportedCount = arguments.first as? Int
+            return nil
+        }))
+
+        coordinator.installExtensionHosts(
+            commandRegistry: commandRegistry,
+            languageModelProvider: FakeLanguageModelProvider(modelCount: 3),
+            frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+            openDocumentLanguageIDs: { [] })
+
+        try await settle()
+
+        #expect(reportedCount == 3)
+    }
+
+    /// `installExtensionHosts` subscribes to `registry.contributionsDidChange`
+    /// by *chaining* whatever handler was already there, not replacing it —
+    /// pinned by assigning a recorder before installing, then triggering a
+    /// real later change (`setEnabled`) and checking the recorder still ran
+    /// alongside the coordinator's own handling of that change.
+    @Test("installExtensionHosts chains the previous contributionsDidChange rather than replacing it")
+    func installExtensionHostsChainsThePreviousContributionsDidChangeRatherThanReplacingIt() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let extensionDirectory = root.appendingPathComponent("everything-1.0.0")
+            try write(Self.everythingManifestJSON, to: "package.json", in: extensionDirectory)
+            try write(ExtensionFixtures.goodThemeJSON, to: "themes/night.json", in: extensionDirectory)
+            try write(Self.snippetJSON, to: "snippets/widget.json", in: extensionDirectory)
+
+            let previousProvider = CustomFileTypeMappings.contributedProvider
+            defer { CustomFileTypeMappings.contributedProvider = previousProvider }
+
+            try withCoordinator(searchPaths: [root]) { coordinator in
+                try #require(coordinator.registry.extensions.count == 1)
+
+                var priorHandlerRuns = 0
+                coordinator.registry.contributionsDidChange = { priorHandlerRuns += 1 }
+
+                coordinator.installExtensionHosts(
+                    commandRegistry: CommandRegistry(),
+                    languageModelProvider: FakeLanguageModelProvider(modelCount: 0),
+                    frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+                    openDocumentLanguageIDs: { [] })
+
+                // A real, later contribution change — not a direct call to
+                // the closure, which would prove nothing about chaining.
+                coordinator.registry.setEnabled(false, for: "test.everything")
+
+                #expect(priorHandlerRuns == 1)
+            }
         }
     }
 }

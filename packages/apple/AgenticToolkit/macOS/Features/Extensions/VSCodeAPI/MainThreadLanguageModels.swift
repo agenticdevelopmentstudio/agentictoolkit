@@ -337,7 +337,8 @@ public final class MainThreadLanguageModels {
     /// Tears this adaptor down: (1) `isDisposed = true`, so no `sendRequest`
     /// promise created after this point ever settles with data; (2) every
     /// live request's outstanding `next()` promises reject with the same
-    /// wording `rejectTornDown(_:path:)` uses; (3) each request's source is
+    /// wording `rejectLanguageModelTornDown(_:memberPath:)` uses; (3) each
+    /// request's source is
     /// cancelled, so nothing keeps pumping the seam's stream once nothing
     /// can observe it; (4) this adaptor's `onDidChangeChatModels` listeners
     /// are dropped from `onDidChangeChatModelsEmitter` — not because the
@@ -440,7 +441,7 @@ public final class MainThreadLanguageModels {
             }
             return object
         }
-        let arrayValue = MainThreadLanguageModels.arrayValue(of: objects, in: context)
+        let arrayValue = JSValueBridge.arrayOrNull(of: objects, in: context)
         return VSCodeAPI.resolvedPromise(with: arrayValue, in: context)
     }
 
@@ -670,17 +671,6 @@ public final class MainThreadLanguageModels {
 
     // MARK: - Bridging a Swift array to a fresh JS array
 
-    /// Builds a JS array from `values` via `JSValue(object:in:)`, falling
-    /// back to `NSNull()` on failure — the same shape
-    /// `MainThreadWindow.swift:2716-2726`'s own `arrayValue(of:in:)` uses.
-    /// That one is `private static`, so it is unreachable
-    /// from here even though both files are in this module; this is a copy,
-    /// not a shared helper. `JSValue(object:in:)` bridges a *new* JS array on
-    /// every call, so mutating one call's result never affects the next.
-    private static func arrayValue(of values: [JSValue], in context: JSContext) -> Any {
-        JSValue(object: values, in: context) ?? NSNull()
-    }
-
     // MARK: - LanguageModelChat.sendRequest
 
     /// The body `makeChatModelObject`'s `VSCodeAPI.member(...)` call hands
@@ -845,7 +835,7 @@ public final class MainThreadLanguageModels {
             messages.append(
                 ExtensionLanguageModelMessage(
                     role: role,
-                    name: optionalStringValue(element.forProperty("name")),
+                    name: JSValueBridge.stringOptionalField(element.forProperty("name")),
                     text: extractedText(from: element)))
         }
         return .parsed(messages)
@@ -946,18 +936,10 @@ public final class MainThreadLanguageModels {
                 hasToolMode: false)
         }
         return ParsedRequestOptions(
-            justification: optionalStringValue(value.forProperty("justification")),
+            justification: JSValueBridge.stringOptionalField(value.forProperty("justification")),
             hasModelOptions: isPresentField(value.forProperty("modelOptions")),
             hasTools: isPresentField(value.forProperty("tools")),
             hasToolMode: isPresentField(value.forProperty("toolMode")))
-    }
-
-    /// `nil` unless `value` is a JS string — mirrors
-    /// `LanguageModelChatSelectorCriteria.stringOptionalField`, duplicated
-    /// rather than shared because that one is `private` to its own type.
-    private static func optionalStringValue(_ value: JSValue?) -> String? {
-        guard let value, value.isString, let string = value.toString() else { return nil }
-        return string
     }
 
     /// `true` unless `value` is absent, `undefined` or `null` — an option
@@ -1056,10 +1038,11 @@ private final class LanguageModelCancellation {
     }
 }
 
-/// The wording `MainThreadWindow.rejectTornDown(_:path:)` uses
-/// (`MainThreadWindow.swift:2746`), rebuilt at file scope because that one is
-/// `private` to its own type, and because both `MainThreadLanguageModels` and
-/// `LanguageModelResponseRequest` below need it.
+/// The wording `JSValueBridge.rejectTornDown(_:path:)` uses, rebuilt at file
+/// scope rather than called: this one rejects through
+/// `rejectLanguageModelError`, which attaches the `code` property a language
+/// model rejection carries and the bridge's plain `Error` does not. Both
+/// `MainThreadLanguageModels` and `LanguageModelResponseRequest` below use it.
 private func rejectLanguageModelTornDown(_ reject: JSValue, memberPath: String) {
     rejectLanguageModelError(
         reject,
@@ -1657,10 +1640,10 @@ private struct LanguageModelChatSelectorCriteria {
             return LanguageModelChatSelectorCriteria(vendor: nil, family: nil, version: nil, id: nil)
         }
         return LanguageModelChatSelectorCriteria(
-            vendor: stringOptionalField(selector.forProperty("vendor")),
-            family: stringOptionalField(selector.forProperty("family")),
-            version: stringOptionalField(selector.forProperty("version")),
-            id: stringOptionalField(selector.forProperty("id")))
+            vendor: JSValueBridge.stringOptionalField(selector.forProperty("vendor")),
+            family: JSValueBridge.stringOptionalField(selector.forProperty("family")),
+            version: JSValueBridge.stringOptionalField(selector.forProperty("version")),
+            id: JSValueBridge.stringOptionalField(selector.forProperty("id")))
     }
 
     /// A conjunction, not a disjunction: every field this criteria value
@@ -1675,13 +1658,6 @@ private struct LanguageModelChatSelectorCriteria {
         return true
     }
 
-    /// `nil` unless `value` is a JS string — an `undefined` property (a field
-    /// the extension left unset) and a non-string value are both read as "no
-    /// constraint on this field," never as an empty-string constraint.
-    private static func stringOptionalField(_ value: JSValue?) -> String? {
-        guard let value, value.isString, let string = value.toString() else { return nil }
-        return string
-    }
 }
 
 // MARK: - Logging

@@ -81,7 +81,62 @@ public enum ActivationTrigger: Sendable, Equatable {
     /// The workspace's contents, as paths relative to the workspace root, with
     /// `/` separators and no leading slash. The caller does the directory walk;
     /// this type does pure pattern matching and touches no filesystem.
-    case workspaceScanned(relativePaths: [String])
+    case workspaceScanned(WorkspaceScan)
+
+    /// The same trigger from the paths themselves, for a caller with one
+    /// matcher to ask — a test, or a replay for a single extension that has
+    /// no prepared scan to hand.
+    ///
+    /// **A caller with more than one matcher to ask must not use this.** It
+    /// builds a `WorkspaceScan`, and the whole point of that type is that the
+    /// work it does happens once for the whole workspace rather than once per
+    /// extension; see its own doc.
+    public static func workspaceScanned(relativePaths: [String]) -> ActivationTrigger {
+        .workspaceScanned(WorkspaceScan(relativePaths: relativePaths))
+    }
+}
+
+/// One directory walk's answer, prepared once for every matcher that will be
+/// asked about it.
+///
+/// `GlobPattern` matches over `[Character]`, so a `String` path has to be
+/// decomposed before it can be matched against anything. That decomposition
+/// is the expensive half of a `workspaceContains:` check — a real workspace
+/// carries tens of thousands of paths — and it depends only on the path, not
+/// on the pattern or the extension. Held here, it happens once per scan.
+/// Held inside `matches(_:)`, as it was, it happened once per *extension*:
+/// the installer replays one completed scan at every installed extension in
+/// turn, so a 20,000-path workspace with 30 extensions installed decomposed
+/// 600,000 paths, all of it on the main actor, to answer a question whose
+/// input never changed between the calls.
+///
+/// `relativePaths` is kept alongside because it is what the scan *is*; the
+/// decomposition is a derived index, which is why equality is defined on the
+/// paths alone.
+public struct WorkspaceScan: Sendable, Equatable {
+
+    /// Paths relative to the workspace root, with `/` separators and no
+    /// leading slash — the vocabulary `workspaceContains:` globs are written
+    /// in.
+    public let relativePaths: [String]
+
+    /// `relativePaths`, decomposed for `GlobPattern.matches(_:)`, at matching
+    /// indices.
+    ///
+    /// Eager rather than lazy: a lazily filled cache would need either
+    /// `mutating` access from a `matches(_:)` that is deliberately
+    /// non-mutating, or a lock, and the scan is built exactly once on the
+    /// path that already walked the filesystem to produce it.
+    let decomposedPaths: [[Character]]
+
+    public init(relativePaths: [String]) {
+        self.relativePaths = relativePaths
+        self.decomposedPaths = relativePaths.map(Array.init)
+    }
+
+    public static func == (lhs: WorkspaceScan, rhs: WorkspaceScan) -> Bool {
+        lhs.relativePaths == rhs.relativePaths
+    }
 }
 
 /// Decides whether a manifest's `activationEvents` (and, from VS Code 1.74,
@@ -213,20 +268,19 @@ public struct ActivationEventMatcher: Sendable, Equatable {
                 return false
             }
 
-        case .workspaceScanned(let relativePaths):
+        case .workspaceScanned(let scan):
             // Path outside, pattern inside — deliberately, because the path
             // is what costs anything to prepare. `GlobPattern` indexes
             // characters, so a `String` has to be decomposed before it can
-            // be matched; with the patterns outside, every pattern
-            // decomposed the same path again. A scan carries every relative
-            // path of the workspace and this runs once per extension, so
-            // that was the whole workspace re-decomposed per glob. Both
-            // `contains` still short-circuit, so a path is decomposed only
-            // if the search actually reaches it.
+            // be matched; with the patterns outside, every pattern would
+            // decompose the same path again, which is the whole workspace
+            // re-decomposed per glob. The decomposition itself is no longer
+            // done here at all: `WorkspaceScan` carries it, so it happens
+            // once per scan rather than once per extension asked. Both
+            // `contains` still short-circuit.
             guard !workspaceContainsPatterns.isEmpty else { return false }
-            return relativePaths.contains { path in
-                let characters = Array(path)
-                return workspaceContainsPatterns.contains { $0.matches(characters) }
+            return scan.decomposedPaths.contains { path in
+                workspaceContainsPatterns.contains { $0.matches(path) }
             }
         }
     }
@@ -335,21 +389,47 @@ internal struct GlobPattern: Equatable, Sendable {
         guard let tokens = Self.tokenize(Array(pattern), &branches) else { return nil }
         self.tokens = tokens
         self.branches = branches
-        let backtrackingTokens = branches.reduce(Self.backtrackingTokenCount(tokens)) { total, branch in
-            total + Self.backtrackingTokenCount(branch)
-        }
-        self.needsMemoization = backtrackingTokens > 1
+        self.needsMemoization = Self.backtrackingTokenCount(tokens, branches) > 1
     }
 
     /// How many of `tokens` are the kind that can consume a variable amount
-    /// of the path and therefore be backtracked into.
-    private static func backtrackingTokenCount(_ tokens: [Token]) -> Int {
+    /// of the path and therefore be backtracked into — counting `.alternation`
+    /// itself as one.
+    ///
+    /// **`.alternation` is a backtracking point, not a fixed-width token.**
+    /// `matchTokens`'s own `.alternation` case tries each branch in turn via
+    /// `branchIDs.contains { matchBranch(...) }` and backtracks to the next
+    /// branch on failure — the same shape `.star`/`.doubleStar`/
+    /// `.anyDirectories` already score `+1` for. Scoring it `0` (as a
+    /// `.literal` or `.question` would be) undercounts a pattern whose only
+    /// real cost is trying several alternatives: `*.{js,ts,jsx,tsx,mjs,cjs}`
+    /// has exactly one non-alternation backtracking token (the leading `*`),
+    /// so the old count of `1` sat at, not past, `needsMemoization`'s `> 1`
+    /// threshold — both `memo` and `branchMemo` stayed `nil`, and every one
+    /// of a workspace scan's up to 20,000 paths re-explored the six
+    /// alternatives from scratch, on the main actor, with no cache to
+    /// collapse repeated `(tokenIndex, pathIndex)` states into one
+    /// evaluation.
+    ///
+    /// Each branch's *own* contained tokens are added in too — recursively,
+    /// via this same function — rather than left for a caller to add
+    /// separately: `tokenize` guarantees a branch can never itself contain a
+    /// nested `.alternation` (a `{` inside `{...}` is rejected at parse
+    /// time), so the recursion is exactly one level deep and always
+    /// terminates. A branch that is itself wildcard-heavy —
+    /// `{*.test.js,*.spec.js}` — must contribute its own `*`s to the total
+    /// the same way a bare `*` outside any `{...}` would.
+    private static func backtrackingTokenCount(_ tokens: [Token], _ branches: [[Token]]) -> Int {
         tokens.reduce(0) { count, token in
             switch token {
             case .star, .doubleStar, .anyDirectories:
                 return count + 1
-            case .literal, .question, .alternation:
+            case .literal, .question:
                 return count
+            case .alternation(let branchIDs):
+                return branchIDs.reduce(count + 1) { branchCount, branchID in
+                    branchCount + Self.backtrackingTokenCount(branches[branchID], branches)
+                }
             }
         }
     }

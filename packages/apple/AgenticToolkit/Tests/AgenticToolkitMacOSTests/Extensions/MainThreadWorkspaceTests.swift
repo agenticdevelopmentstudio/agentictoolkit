@@ -173,7 +173,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -212,7 +213,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -266,7 +268,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -352,7 +355,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -392,7 +396,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -431,7 +436,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -467,7 +473,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -508,7 +515,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -542,7 +550,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -578,7 +587,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -617,7 +627,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -658,7 +669,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -708,7 +720,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -750,7 +763,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -784,7 +798,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -825,7 +840,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: roots,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -871,7 +887,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: roots,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -933,7 +950,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: roots,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -966,7 +984,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: roots,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -998,7 +1017,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -1037,7 +1057,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: roots,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -1090,7 +1111,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: roots,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -1127,7 +1149,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: roots,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -1167,7 +1190,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -1225,7 +1249,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose(); workspace.dispose() }
         try install(workspace, on: host)
@@ -1288,7 +1313,8 @@ struct MainThreadWorkspaceTests {
         let workspace = MainThreadWorkspace(
             workspaceRoots: nil,
             notImplementedLedger: host.notImplementedLedger,
-            extensionIdentifier: host.identifier
+            extensionIdentifier: host.identifier,
+            fileSystemService: FileSystemService()
         )
         defer { host.dispose() }
         try install(workspace, on: host)

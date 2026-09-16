@@ -243,7 +243,7 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
                 withText: "Identifier: \(manifest.displayIdentifier)"),
             style: .continuation)
         group.addSettingSubview(
-            ComposableSettings.ExplanationView(withText: "Folder: \(loaded.directory.path)"),
+            ComposableSettings.PathView(withPath: loaded.directory.path, caption: "Folder"),
             style: .continuation)
         return group
     }
@@ -642,7 +642,7 @@ final class ExtensionsEmptyStatePanel: ComposableSettings.SettingsPanelViewContr
         super.viewDidLoad()
         let group = ComposableSettings.GroupView(withTitle: "Where Extensions Are Looked For")
         for path in searchPaths {
-            group.addSettingSubview(ComposableSettings.ExplanationView(withText: path.path))
+            group.addSettingSubview(ComposableSettings.PathView(withPath: path.path))
         }
         group.addSettingSubview(
             ComposableSettings.ExplanationView(

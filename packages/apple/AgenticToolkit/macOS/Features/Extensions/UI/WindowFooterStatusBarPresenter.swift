@@ -88,31 +88,12 @@ public final class WindowFooterStatusBarPresenter: ExtensionStatusBarPresenting 
     /// disposed", and nothing in this file decides that.
     private var items: [String: ExtensionStatusBarItemRequest] = [:]
 
-    /// Watches for a window arriving after the last render, so its footer
-    /// picks up the items already up. See `windowsDidChange()`.
-    private var windowObserver: NSObjectProtocol?
-
     public init(
         footers: @escaping () -> [WindowFooterBar],
         onCommand: @escaping (String) -> Void
     ) {
         self.footers = footers
         self.onCommand = onCommand
-        windowObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.windowsDidChange() }
-        }
-    }
-
-    // `isolated deinit` rather than a plain one: the observer token is
-    // `any NSObjectProtocol`, which is not `Sendable`, so a nonisolated
-    // deinit cannot touch it. The same idiom `ComposableTabsWindowController`
-    // and `ProjectBrowserViewController` already use to unregister theirs.
-    isolated deinit {
-        if let windowObserver {
-            NotificationCenter.default.removeObserver(windowObserver)
-        }
     }
 
     /// Renders the items already up into whatever windows are open now.
@@ -125,11 +106,25 @@ public final class WindowFooterStatusBarPresenter: ExtensionStatusBarPresenting 
     /// on showing nothing until some extension happened to change an item.
     /// Opening a second project window lost the status bar.
     ///
-    /// Driven by `NSWindow.didBecomeKeyNotification` rather than by a window
-    /// manager, on the same grounds as `footers`: this type deliberately knows
-    /// nothing about `ProjectWindowManager`, and a window becoming key is the
-    /// generic AppKit fact that a window is now in front of the user. It is
-    /// also public, so an owner with a better signal can drive it directly.
+    /// **The owner drives this; the presenter does not listen for it.** In
+    /// production that is `ProjectWindowManager.onOpenProjectsChanged` →
+    /// `ExtensionsCoordinator.projectWindowsDidChange()` →
+    /// `ExtensionHostInstaller.windowsDidChange()` → here, which fires exactly
+    /// when the set of project windows moves and names no other kind of
+    /// window.
+    ///
+    /// This used to observe `NSWindow.didBecomeKeyNotification` with
+    /// `object: nil` instead, and that observer was wrong in both directions
+    /// in this app. It fired too little: the app is an `LSUIElement` menubar
+    /// host that opens project windows under quiet presentation, without
+    /// activating, so a new window routinely never becomes key and the bug
+    /// above survived the fix that was meant to close it. And it fired too
+    /// much: `object: nil` is *every* window, so a settings panel or a
+    /// notes window taking focus re-rendered every footer for nothing. The
+    /// reason given for it — that this type deliberately knows nothing about
+    /// `ProjectWindowManager` — is satisfied by this method being `public`
+    /// and called from outside, which it already was; observing a
+    /// notification bought no independence, only a worse signal.
     ///
     /// A no-op with nothing up: a new window has nothing to receive, and the
     /// removal that emptied `items` already re-rendered every footer that was
@@ -156,20 +151,59 @@ public final class WindowFooterStatusBarPresenter: ExtensionStatusBarPresenting 
     // MARK: - Rendering
 
     /// Re-renders every open footer from `items`. Called once per committed
-    /// change (task 5.5c's Ruling 7: no coalescing), so this is deliberately
-    /// a full rebuild of one small stack view rather than a diff — a status
-    /// bar holds a handful of items, and a diff would be more code to get
-    /// wrong than the rebuild costs.
+    /// change (task 5.5c's Ruling 7: no coalescing), so every write an
+    /// extension makes to an item it already put up arrives here.
+    ///
+    /// **An item's view outlives the change.** A view is matched to a request
+    /// by `internalID` and updated in place; only an item that genuinely
+    /// arrived or left is built or torn down, and only an item whose rank
+    /// moved is re-inserted. The earlier version emptied the container and
+    /// rebuilt every view on every pass, which is wrong for the commonest
+    /// thing a status bar item does — `item.text = "…"` on a timer, which VS
+    /// Code extensions write per second — three ways that a rebuild of one
+    /// small stack view does not cost enough to excuse:
+    ///
+    /// - The tooltip an item carries is a `toolTip` on a view AppKit is
+    ///   tracking. Replace the view mid-hover and the tooltip that was about
+    ///   to appear never does, and the one on screen does not update — it
+    ///   belongs to a view that left the hierarchy.
+    /// - `resetCursorRects` runs when a view enters a window. A pointer
+    ///   already resting on a clickable item keeps the pointing-hand cursor
+    ///   from the view that just left, over a view that has not been asked
+    ///   for its rects yet.
+    /// - `accessibilityID` is set per view, so a UI test or an accessibility
+    ///   client that reads the footer while a per-second item is up races a
+    ///   view being destroyed between the query and the read. `dev.py ax`
+    ///   sees an element that answers nothing.
+    ///
+    /// Reuse is keyed on `internalID` for the reason `items` and the
+    /// accessibility identifier already are: it is minted per item and
+    /// therefore total, so it cannot match two views or the wrong one.
     private func render() {
         let ordered = orderedItems()
         for footer in footers() {
             let container = container(in: footer)
-            for view in container.arrangedSubviews {
+            var reusable: [String: StatusItemView] = [:]
+            for case let view as StatusItemView in container.arrangedSubviews {
+                reusable[view.internalID] = view
+            }
+
+            let wanted: [StatusItemView] = ordered.map { request in
+                guard let view = reusable.removeValue(forKey: request.internalID) else {
+                    return makeItemView(request)
+                }
+                view.update(with: request)
+                return view
+            }
+
+            // Whatever is still in `reusable` is an item that came down.
+            for view in reusable.values {
                 container.removeArrangedSubview(view)
                 view.removeFromSuperview()
             }
-            for request in ordered {
-                container.addArrangedSubview(makeItemView(request))
+            for (index, view) in wanted.enumerated()
+            where container.arrangedSubviews.firstIndex(of: view) != index {
+                container.insertArrangedSubview(view, at: index)
             }
             container.isHidden = ordered.isEmpty
         }
@@ -218,9 +252,22 @@ public final class WindowFooterStatusBarPresenter: ExtensionStatusBarPresenting 
         }
     }
 
-    private func makeItemView(_ request: ExtensionStatusBarItemRequest) -> NSView {
+    /// Identified by `internalID`, not `id`, for the same reason `items` is
+    /// keyed by it: `id` is whatever the extension passed to
+    /// `createStatusBarItem` — or, when it passed nothing, the extension
+    /// identifier — so two items from one extension that asked for the same
+    /// id, or from two extensions that happened to choose the same string,
+    /// collide. An accessibility identifier that names two views addresses
+    /// neither, which makes the item untestable exactly when there is more
+    /// than one of it. `internalID` is minted per item and therefore total,
+    /// so it is what everything else in this file already identifies by.
+    ///
+    /// Returns the concrete type rather than `NSView` because `render()`
+    /// matches a footer's existing views back to requests through it — an
+    /// `NSView` return would push that back to a cast at every call site.
+    private func makeItemView(_ request: ExtensionStatusBarItemRequest) -> StatusItemView {
         let view = StatusItemView(request: request, onCommand: onCommand)
-        view.accessibilityID("extensions.statusbar.item.\(request.id)")
+        view.accessibilityID("extensions.statusbar.item.\(request.internalID)")
         return view
     }
 }
@@ -239,16 +286,31 @@ public final class WindowFooterStatusBarPresenter: ExtensionStatusBarPresenting 
 @MainActor
 private final class StatusItemView: NSView {
 
-    private let command: String?
+    /// The item this view is, for the whole time it is up. Immutable because
+    /// it is the key `render()` matches views back to requests on: a view
+    /// whose identity could change would be reused for a different item.
+    let internalID: String
+
+    private let label: ThemedLabel
     private let onCommand: (String) -> Void
 
+    /// Whatever `accessibilityRole()` answered before this view overrode it.
+    /// Read once, after `super.init`, so that an extension which takes its
+    /// `role` back away restores AppKit's own answer rather than a guess at
+    /// what that answer was. `nil` until then, and never written again.
+    private var inheritedAccessibilityRole: NSAccessibility.Role?
+
+    /// `var`, because an extension may add, change or take away `command` on
+    /// an item it already put up — and the cursor depends on it.
+    private var command: String?
+
     init(request: ExtensionStatusBarItemRequest, onCommand: @escaping (String) -> Void) {
-        self.command = request.command
+        self.internalID = request.internalID
         self.onCommand = onCommand
+        self.label = ThemedLabel(string: request.text, role: .secondaryText, textRole: .caption)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
-        let label = ThemedLabel(string: request.text, role: .secondaryText, textRole: .caption)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)
@@ -259,6 +321,32 @@ private final class StatusItemView: NSView {
             label.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             label.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
         ])
+        inheritedAccessibilityRole = accessibilityRole()
+        apply(request)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Rewrites this view to `request`, which `render()` has already checked
+    /// carries the same `internalID`.
+    ///
+    /// Asserted rather than trusted: reuse keyed on the wrong id would show
+    /// one extension's text under another's accessibility identifier, which
+    /// is a bug that reads on screen as the feature working.
+    func update(with request: ExtensionStatusBarItemRequest) {
+        assert(request.internalID == internalID, "reused a status item view for a different item")
+        apply(request)
+    }
+
+    /// Everything about this view that comes from the request — read by both
+    /// `init` and `update(with:)`, so a field added to
+    /// `ExtensionStatusBarItemRequest` cannot be honoured on first render and
+    /// forgotten on the next one.
+    private func apply(_ request: ExtensionStatusBarItemRequest) {
+        let hadCommand = command != nil
+        command = request.command
+        label.stringValue = request.text
 
         // `tooltip` is the item's own; `name` is what VS Code shows in its
         // "hide this item" menu, which this footer has no equivalent of, so
@@ -269,14 +357,18 @@ private final class StatusItemView: NSView {
         // `accessibilityRole` arrives as VS Code's own string
         // (`AccessibilityInformation.role`, an ARIA role). Only the one that
         // has an unambiguous AppKit counterpart is honoured; anything else
-        // keeps the default rather than being mapped onto a guess.
-        if request.accessibilityRole == "button" {
-            setAccessibilityRole(.button)
+        // keeps the default rather than being mapped onto a guess. Set both
+        // ways round on an update: an extension that takes the role away
+        // should get the default back, not keep a stale `.button`.
+        setAccessibilityRole(request.accessibilityRole == "button" ? .button : inheritedAccessibilityRole)
+
+        // A view that gained or lost its command has the wrong cursor until
+        // its rects are rebuilt, and AppKit only asks unprompted when the
+        // view enters a window.
+        if hadCommand != (command != nil) {
+            window?.invalidateCursorRects(for: self)
         }
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
 
     override func mouseDown(with event: NSEvent) {
         guard let command else {

@@ -22,9 +22,21 @@ import AgenticToolkitCore
 /// `Sendable`, every adaptor Stage 5 builds on top of this hangs off main-actor
 /// components (the command registry, the document store, the window layout),
 /// and a host that hopped executors would have to marshal JavaScript values
-/// across them. The one thing that genuinely does not belong on the main thread
-/// — reading a bundled extension's JavaScript off disk, which can be megabytes
-/// — is the one thing `activate()` does off it.
+/// across them.
+///
+/// Two things genuinely do not belong on the main thread, and `activate()`
+/// does both off it: **reading** a bundled extension's JavaScript off disk
+/// (`readSource(at:identifier:)`) and **compiling** it
+/// (`compileModule(source:entryPoint:)`). A bundled entry point is one
+/// concatenated file and routinely megabytes, so the parse is at least as
+/// heavy as the read, and leaving it on the main actor stalled the app for its
+/// length once per enabled extension, at launch. Compiling can move because it
+/// *runs* none of the extension's code — `evaluateScript` on a function
+/// expression produces a closure and calls nothing — so it reaches no adaptor.
+/// Everything that does run extension code stays here: `evaluateModule` runs
+/// the module top level, `callActivate` runs `activate()`, and both call
+/// synchronously into main-actor components. That is a property of what those
+/// two execute, not a stage of the work left undone.
 ///
 /// What this host deliberately does *not* do is give the extension anything to
 /// call. The `vscode` namespace it hands to `require('vscode')` is a wall of
@@ -233,11 +245,13 @@ public final class ExtensionHost {
     /// boundary is.
     ///
     /// That line is the boundary because it is the only line that runs the
-    /// extension's code. *Compiling* the module does not, and `evaluateModule`
-    /// throws three ways above the assignment with zero extension statements
+    /// extension's code. *Compiling* the module does not — which is what lets
+    /// `compileModule(source:entryPoint:)` do it off the main actor entirely —
+    /// and that method throws three ways with zero extension statements
     /// executed (measured): no `JSContext`, a source that will not parse, and
-    /// a wrapper that did not compile to a function. So
-    /// `performActivation`'s `catch` tests this field rather than assuming
+    /// a wrapper that did not compile to a function. All three land in
+    /// `performActivation`'s `do` block, above this assignment. So
+    /// its `catch` tests this field rather than assuming
     /// its `do` block implies it — it does not. It once did, and a host whose
     /// extension file merely would not parse was told its code had already
     /// run, refused a retry, and refused `defineVSCodeMember` besides.
@@ -533,8 +547,8 @@ public final class ExtensionHost {
         // The `catch` below and `endActivation`'s cancellation are the two
         // writers of `terminationReason`, and they agree because they read one
         // predicate. The `catch` tests it rather than inferring it from the
-        // `do` block: `evaluateModule` throws three ways with nothing
-        // executed, and the commonest of them is a syntax error in the
+        // `do` block: `compileModule` and `evaluateModule` throw with nothing
+        // executed, and the commonest of those is a syntax error in the
         // extension's own file.
         //
         // Everything before that boundary is deliberately not terminal: no
@@ -548,7 +562,24 @@ public final class ExtensionHost {
         // reason behind a different error; a file that will not parse is the
         // case where the retry can actually differ, once the file is fixed.
         do {
-            let exports = try evaluateModule(runtime: runtime, source: source, entryPoint: entryPoint)
+            let wrapper = try await compileModule(source: source, entryPoint: entryPoint)
+
+            // The compile is a suspension point, and it sits *above* the
+            // `moduleEvaluated` boundary — so a `dispose()` or a cancellation
+            // that lands during it is re-checked here, exactly as the pair
+            // above the context was created re-checks the source reads. Past
+            // this pair the extension's own code runs and stopping becomes
+            // `dispose()`'s job; before it, nothing has run and neither guard
+            // is terminal.
+            guard !isDisposed else {
+                throw ExtensionHostError.hostDisposed(identifier: identifier)
+            }
+            guard !Task.isCancelled else {
+                throw ExtensionHostError.activationCancelled(identifier: identifier)
+            }
+
+            let exports = try evaluateModule(
+                runtime: runtime, wrapper: wrapper, entryPoint: entryPoint)
             try await callActivate(on: exports, runtime: runtime)
         } catch {
             if moduleEvaluated { markTerminal(.failed) }
@@ -847,10 +878,16 @@ public final class ExtensionHost {
         finishActivation(.failure(.hostDisposed(identifier: identifier)))
 
         // Blocks installed into the context capture this host weakly, so there
-        // is no cycle to break — but the handler is cleared anyway, because a
+        // is no cycle to break — but the handler is taken off anyway, because a
         // context torn down mid-evaluation would otherwise still have a route
         // to `pendingException` on a host that is no longer listening.
-        context?.exceptionHandler = nil
+        //
+        // Replaced rather than set to `nil`: `JSContext.notifyException`
+        // (`JSContext.mm:365-368`) calls the handler with no nil check, so a
+        // context that outlives this `dispose()` — one a retained `JSValue`
+        // still holds up — would crash the process on its next uncaught
+        // exception instead of ignoring it. See `recordExceptionOnContext`.
+        context?.exceptionHandler = Self.recordExceptionOnContext
         runtime = nil
         context = nil
 
@@ -951,15 +988,48 @@ public final class ExtensionHost {
             throw ExtensionHostError.javaScriptEngineUnavailable(identifier: identifier)
         }
         context.name = "extension:\(identifier)"
+        installExceptionHandler(on: context)
+        return context
+    }
+
+    /// Routes the context's uncaught exceptions into `pendingException`.
+    ///
+    /// Factored out because it is installed twice: here, and again by
+    /// `compileModule(source:entryPoint:)` when it puts back what it swapped
+    /// out for its one hop off the main actor.
+    private func installExceptionHandler(on context: JSContext) {
         context.exceptionHandler = { [weak self] _, exception in
             // The handler runs synchronously inside `evaluateScript` /
             // `JSValue.call`, on whatever thread made that call — and this host
-            // only ever makes them from the main actor.
+            // only ever makes them from the main actor. `MainActor
+            // .assumeIsolated` is what states that, and it does not merely
+            // assert it: off the main thread it traps. The one call this host
+            // makes from anywhere else is the compile in
+            // `compileModule(source:entryPoint:)`, which is why that method
+            // swaps this handler for `Self.recordExceptionOnContext` first.
             MainActor.assumeIsolated {
                 self?.pendingException = self?.describe(exception)
             }
         }
-        return context
+    }
+
+    /// JavaScriptCore's own default handler, restated: park the exception on
+    /// the context and tell nobody.
+    ///
+    /// `JSContext.init` installs exactly this block
+    /// (`JSContext.mm:89-91`), and it is spelled out again here because two
+    /// places in this file need a handler that touches no Swift state —
+    /// `compileModule(source:entryPoint:)`, which runs on a background
+    /// thread where the real handler would trap, and `dispose()`, which wants
+    /// the route to this host gone.
+    ///
+    /// **Neither may use `nil` for that.** `JSContext.notifyException`
+    /// (`JSContext.mm:365-368`) calls `self.exceptionHandler(...)`
+    /// unconditionally, with no nil check, so a context whose handler has
+    /// been cleared crashes the process on the next uncaught exception rather
+    /// than ignoring it.
+    private static let recordExceptionOnContext: (JSContext?, JSValue?) -> Void = { context, exception in
+        context?.exception = exception
     }
 
     /// Installs the host block table, evaluates the shim, captures
@@ -1210,7 +1280,7 @@ public final class ExtensionHost {
     /// *n* of the author's file is line *n* of the compiled script. Only the
     /// first line's columns shift, and a stack trace an author reads against
     /// their own editor agrees with it everywhere else.
-    private static func moduleWrapperSource(_ source: String) -> String {
+    nonisolated private static func moduleWrapperSource(_ source: String) -> String {
         // The trailing newline before `})` matters for the opposite reason: a
         // source whose last line is a `//` comment would otherwise swallow the
         // closing brace.
@@ -1218,7 +1288,8 @@ public final class ExtensionHost {
     }
 
     /// Compiles the extension's module *as its own script*, named after the
-    /// entry point, and runs it through the shim's CommonJS wrapper.
+    /// entry point — **off the main thread**, and it is the only JavaScript
+    /// this host ever runs anywhere else.
     ///
     /// Compiling host-side rather than with `new Function` inside the shim is
     /// what puts the author's own path and line numbers in their stack traces.
@@ -1227,29 +1298,94 @@ public final class ExtensionHost {
     /// `Error.stack`, whose frames come back with an empty location — so the
     /// source URL has to be attached at compile time, which only the host can
     /// do.
-    private func evaluateModule(runtime: JSValue, source: String, entryPoint: URL) throws -> JSValue {
+    ///
+    /// ### Why this one may leave the main actor, and nothing around it can
+    ///
+    /// A bundled web extension's entry point is one concatenated file and
+    /// routinely megabytes, and this line is what parses all of it. On the
+    /// main actor that is a stall the length of the parse, at the worst
+    /// possible moment — the app opening a project — repeated once per
+    /// enabled extension. `readSource(at:identifier:)` already moves the
+    /// *read* of those same megabytes off; leaving the parse of them on was
+    /// the half of the rule that was never honoured.
+    ///
+    /// It can move because **compiling executes none of the extension's
+    /// code**. `evaluateScript` on a function *expression* produces a closure
+    /// and calls nothing, so nothing here can reach the adaptors this host
+    /// hands the extension — every one of which is main-actor isolated, and
+    /// which is exactly why running the module (`evaluateModule`) and
+    /// `activate()` itself (`callActivate`) stay where they are. Those two
+    /// are not an oversight to be fixed later; they are extension code
+    /// calling synchronously into the command registry, the document store
+    /// and the window layout, and moving them would mean making all of that
+    /// thread-safe rather than moving one call.
+    ///
+    /// Two things make the hop safe rather than merely faster.
+    /// `JSVirtualMachine` locks itself around every JavaScriptCore entry
+    /// point, so no two threads execute JavaScript in this process's one VM
+    /// at once — a main-actor caller that wants JavaScript while this compile
+    /// runs waits exactly as long as it waits today, when the main actor is
+    /// the one parsing. And the context's exception handler comes off for the
+    /// duration: the real one reaches this host through
+    /// `MainActor.assumeIsolated`, which *traps* rather than returns on a
+    /// background thread, so a syntax error — the single commonest failure
+    /// here — would otherwise kill the process. `recordExceptionOnContext`
+    /// parks it on the context instead, and this method reads it back after
+    /// the hop.
+    private func compileModule(source: String, entryPoint: URL) async throws -> JSValue {
         guard let context else {
             throw ExtensionHostError.javaScriptEngineUnavailable(identifier: identifier)
         }
 
         pendingException = nil
-        let wrapper = context.evaluateScript(
-            Self.moduleWrapperSource(source), withSourceURL: entryPoint)
-        if let message = pendingException {
+        context.exception = nil
+        context.exceptionHandler = Self.recordExceptionOnContext
+        defer {
+            // Only if the host still has this context. A `dispose()` that
+            // landed during the hop has already put its own handler on and let
+            // the context go, and re-arming a route to this host on the way
+            // out would undo exactly what that teardown did.
+            if self.context === context { installExceptionHandler(on: context) }
+        }
+
+        let carried = JSCrossThread(context)
+        let compiled = await Task.detached(priority: .userInitiated) {
+            let context = carried.value
+            // The wrapper string is built here rather than by the caller: it is
+            // a second copy of those same megabytes, and allocating it on the
+            // main actor would put back a slice of what this hop exists to
+            // take off.
+            let wrapper = context.evaluateScript(
+                Self.moduleWrapperSource(source), withSourceURL: entryPoint)
+            let exception = context.exception
+            context.exception = nil
+            return JSCrossThread((wrapper: wrapper, exception: exception))
+        }.value
+
+        if let exception = compiled.value.exception {
             // A syntax error in the extension's own file lands here, already
             // carrying the file name it came from.
-            pendingException = nil
+            let message = describe(exception)
             logger.error(
                 "Extension '\(self.identifier, privacy: .public)' would not compile: \(message, privacy: .public)")
             throw ExtensionHostError.entryPointThrew(identifier: identifier, message: message)
         }
-        guard let wrapper, wrapper.isObject else {
+        guard let wrapper = compiled.value.wrapper, wrapper.isObject else {
             throw ExtensionHostError.entryPointThrew(
                 identifier: identifier,
                 message: "The entry point did not compile to a module function."
             )
         }
+        return wrapper
+    }
 
+    /// Runs the compiled module through the shim's CommonJS wrapper, and
+    /// returns what it exported.
+    ///
+    /// Takes the compiled `wrapper` rather than the source: compiling happens
+    /// in `compileModule(source:entryPoint:)`, off the main actor. Everything
+    /// below is the extension's own code running, so it stays here.
+    private func evaluateModule(runtime: JSValue, wrapper: JSValue, entryPoint: URL) throws -> JSValue {
         pendingException = nil
         // The boundary. Everything above compiles; the line below *runs*, and
         // from the instant it does the extension's code cannot be un-run, so
@@ -1576,6 +1712,28 @@ public final class ExtensionHost {
 
 extension ExtensionHost: Loggable {
     public static nonisolated let logger = makeLogger()
+}
+
+/// Carries a JavaScriptCore value across the one actor hop this file makes —
+/// `ExtensionHost.compileModule(source:entryPoint:)`'s detached compile.
+///
+/// `JSContext` and `JSValue` are not `Sendable`, and the compiler is right to
+/// say so in general: passing either one around freely is how two threads end
+/// up executing JavaScript in the same virtual machine. What makes the single
+/// hop this box exists for safe is not an assertion, it is
+/// `JSVirtualMachine` — every JavaScriptCore entry point takes the VM's own
+/// lock, so the API is thread-safe by construction and Apple's own guidance is
+/// that a context may be used from any thread. Concurrency is what the lock
+/// costs you, not correctness.
+///
+/// It is deliberately unhelpful: no conveniences, no `Sendable` conformance
+/// leaking onto anything else, and one call site. A wider seam — making
+/// `JSValue` conditionally `Sendable`, or a generic "unchecked box" utility —
+/// would silence the compiler everywhere instead of at the one place that
+/// argued for it.
+private struct JSCrossThread<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
 }
 
 /// Resolves this framework's bundle for `Bundle(for:)`. Same device as

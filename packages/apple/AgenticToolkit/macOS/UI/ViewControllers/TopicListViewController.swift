@@ -469,6 +469,52 @@ extension TopicListViewController {
     }
 }
 
+/// A topic row's label, which is also the row's handle in the accessibility
+/// tree — so it is what answers `AXPress` by selecting the row it labels.
+///
+/// Nothing in an outline publishes a press otherwise: the selection is reachable
+/// by mouse and keyboard only, and an assistive client can read every row in
+/// this list and choose none of them. That is the same gap a Switch Control user
+/// hits and the one `dev.py ax press` hits — and that second one is how this app
+/// is checked on screen without taking the foreground, so a list nothing can
+/// drive is a list nothing can verify.
+///
+/// The label rather than the cell or the row view, because AppKit synthesizes a
+/// table's `AXRow` and `AXCell` elements itself: an identifier or an action put
+/// on `NSTableRowView`/`NSTableCellView` never reaches the tree, and the label is
+/// the row's one real element in it.
+///
+/// The press ends in `selectRowIndexes`, which is where a click ends too, so
+/// `outlineViewSelectionDidChange` — and with it `onSelect` — fires once, on the
+/// one path (`dry`). It asks `shouldSelectItem:` first because `selectRowIndexes`
+/// does not: without that, a disabled "coming soon" row would be selectable
+/// through accessibility and not by mouse, a difference no caller asked for.
+private final class TopicListItemLabel: NSTextField {
+
+    override func accessibilityPerformPress() -> Bool {
+        var ancestor: NSView? = superview
+        while let view = ancestor, !(view is NSOutlineView) { ancestor = view.superview }
+        guard let outlineView = ancestor as? NSOutlineView else { return false }
+
+        let row = outlineView.row(for: self)
+        guard row >= 0 else { return false }
+        if let item = outlineView.item(atRow: row),
+           outlineView.delegate?.outlineView?(outlineView, shouldSelectItem: item) == false {
+            return false
+        }
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        return true
+    }
+
+    /// AppKit decides which actions to publish from what the class implements,
+    /// and the selector above is the only one this type adds. Spelling it out
+    /// keeps the answer from depending on that inference.
+    override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+        if selector == #selector(accessibilityPerformPress) { return true }
+        return super.isAccessibilitySelectorAllowed(selector)
+    }
+}
+
 private final class TopicListNode: NSObject {
     enum Kind {
         case header(String)
@@ -534,6 +580,24 @@ extension TopicListViewController: NSOutlineViewDelegate {
             let id = NSUserInterfaceItemIdentifier("TopicListItem")
             let cell = outlineView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView
                 ?? Self.makeItemCell(identifier: id)
+            // On the label and not on the cell or the row view, because those
+            // two are not what an assistive client sees: AppKit synthesizes the
+            // `AXRow` and `AXCell` elements of a table itself, and an identifier
+            // set on `NSTableRowView`/`NSTableCellView` does not reach them. The
+            // label is the row's only real element in the tree, so it carries
+            // the row's name — and, in `TopicListItemLabel`, the row's press.
+            //
+            // Slugged from the title rather than `item.id`, because the id is
+            // the caller's private key — the settings window's is the panel's
+            // index in an array, so `topic-list.item.2` names the third row and
+            // says nothing about which row that is, and renames itself whenever
+            // a panel is inserted above it. The title is what the row is called
+            // on screen, which is what someone driving the list knows about it.
+            //
+            // Set here and not in `makeItemCell`, alongside the title it is
+            // derived from: cells are pooled, so an identifier baked in at
+            // creation names whichever row the cell was first used for, forever.
+            cell.textField?.accessibilityID("topic-list.item.\(AccessibilityID.slug(item.title))")
             cell.textField?.stringValue = item.title
             // Cells are pooled, so the font is reapplied here alongside the color
             // rather than at creation — a font baked in stays stale after a swap.
@@ -589,7 +653,10 @@ extension TopicListViewController: NSOutlineViewDelegate {
         let imageView = NSImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
 
-        let textField = NSTextField(labelWithString: "")
+        // `TopicListItemLabel` and not a bare `NSTextField`: the subclass exists
+        // only to answer `AXPress`, which is what makes a row choosable by
+        // anything other than a mouse or the keyboard.
+        let textField = TopicListItemLabel(labelWithString: "")
         textField.lineBreakMode = .byTruncatingTail
         textField.translatesAutoresizingMaskIntoConstraints = false
 

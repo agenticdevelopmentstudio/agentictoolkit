@@ -352,6 +352,29 @@ public final class MainThreadDiagnostics {
     /// adaptor's own collections, matching `MainThreadLanguages.ownedHandles`.
     private var ownedOwners: Set<String> = []
 
+    /// Marks a collection's captured `disposed` flag from outside the
+    /// closures in `makeDiagnosticCollectionObject` that read it.
+    ///
+    /// A plain `Bool` cannot do this: the flag those closures consult is a
+    /// local captured by value at the moment each block is created, so
+    /// nothing outside that one call to `makeDiagnosticCollectionObject` can
+    /// reach it again. Boxing it in a reference type is what lets this
+    /// adaptor's own `dispose()` (below) flip the same bit the collection's
+    /// own JS-visible `dispose()` method flips — without one, tearing down
+    /// the *extension* left every `DiagnosticCollection` object it handed to
+    /// JavaScript still reading `disposed == false`, so a reference JS code
+    /// held past teardown kept writing into `store` under a released owner
+    /// name, landing in whatever collection a later `createDiagnosticCollection`
+    /// call reused that name for.
+    private final class DisposalFlag {
+        var isDisposed = false
+    }
+
+    /// One flag per collection this adaptor created, keyed the same way
+    /// `ownedOwners` is. Populated in `handleCreateDiagnosticCollection` and
+    /// consulted — not owned — by the collection object's own closures.
+    private var collectionDisposalFlags: [String: DisposalFlag] = [:]
+
     /// The emitter behind `vscode.languages.onDidChangeDiagnostics`, read
     /// from here and written from the sink (see this type's own doc). Not
     /// defaulted, for the same reason `store` and `sink` are not — and
@@ -459,7 +482,7 @@ public final class MainThreadDiagnostics {
             guard let uriValue = VSCodeAPI.uriValue(for: uri, in: context) else { return nil }
             uriValues.append(uriValue)
         }
-        guard let urisValue = arrayValue(of: uriValues, in: context),
+        guard let urisValue = JSValueBridge.array(of: uriValues, in: context),
               let objectConstructor = context.objectForKeyedSubscript("Object"),
               !objectConstructor.isUndefined,
               let frozen = objectConstructor.invokeMethod("freeze", withArguments: [urisValue]),
@@ -489,7 +512,10 @@ public final class MainThreadDiagnostics {
         }
         let created = store.createCollection(name: name)
         ownedOwners.insert(created.owner)
-        return MainThreadDiagnostics.makeDiagnosticCollectionObject(owner: created.owner, of: self, in: context)
+        let flag = DisposalFlag()
+        collectionDisposalFlags[created.owner] = flag
+        return MainThreadDiagnostics.makeDiagnosticCollectionObject(
+            owner: created.owner, of: self, disposalFlag: flag, in: context)
     }
 
     // MARK: - vscode.languages.getDiagnostics
@@ -521,7 +547,7 @@ public final class MainThreadDiagnostics {
             ) else {
                 return VSCodeAPI.raise("Could not decode a diagnostic for this Uri.", in: context)
             }
-            return MainThreadDiagnostics.arrayValue(of: values, in: context)
+            return JSValueBridge.array(of: values, in: context)
         }
         // Refuses the whole call rather than silently shortening the returned
         // array, exactly as the resource branch above does — see
@@ -531,7 +557,7 @@ public final class MainThreadDiagnostics {
         ) else {
             return VSCodeAPI.raise("Could not decode a diagnostic entry.", in: context)
         }
-        return MainThreadDiagnostics.arrayValue(of: pairValues, in: context)
+        return JSValueBridge.array(of: pairValues, in: context)
     }
 
     // MARK: - The collection object's own methods
@@ -545,7 +571,7 @@ public final class MainThreadDiagnostics {
         guard let first = arguments.first, !MainThreadDiagnostics.isFalsy(first) else {
             let affected = store.clear(owner: owner)
             if !affected.isEmpty { sink.diagnosticsChanged(for: affected) }
-            return MainThreadDiagnostics.undefinedValue(in: context)
+            return JSValueBridge.undefined(in: context)
         }
 
         if first.isArray {
@@ -554,7 +580,7 @@ public final class MainThreadDiagnostics {
             }
             let affected = store.setEntries(owner: owner, entries: entries)
             if !affected.isEmpty { sink.diagnosticsChanged(for: affected) }
-            return MainThreadDiagnostics.undefinedValue(in: context)
+            return JSValueBridge.undefined(in: context)
         }
 
         guard let url = VSCodeAPI.url(from: first, in: context) else {
@@ -572,7 +598,7 @@ public final class MainThreadDiagnostics {
         case .invalid:
             return VSCodeAPI.raise("Invalid diagnostics array passed to DiagnosticCollection.set.", in: context)
         }
-        return MainThreadDiagnostics.undefinedValue(in: context)
+        return JSValueBridge.undefined(in: context)
     }
 
     private func handleCollectionDelete(owner: String) -> JSValue? {
@@ -583,14 +609,14 @@ public final class MainThreadDiagnostics {
         }
         let affected = store.delete(owner: owner, uri: url)
         if !affected.isEmpty { sink.diagnosticsChanged(for: affected) }
-        return MainThreadDiagnostics.undefinedValue(in: context)
+        return JSValueBridge.undefined(in: context)
     }
 
     private func handleCollectionClear(owner: String) -> JSValue? {
         guard let context = JSContext.current() else { return nil }
         let affected = store.clear(owner: owner)
         if !affected.isEmpty { sink.diagnosticsChanged(for: affected) }
-        return MainThreadDiagnostics.undefinedValue(in: context)
+        return JSValueBridge.undefined(in: context)
     }
 
     private func handleCollectionGet(owner: String) -> JSValue? {
@@ -600,7 +626,7 @@ public final class MainThreadDiagnostics {
             return VSCodeAPI.raise("DiagnosticCollection.get requires a Uri.", in: context)
         }
         guard let existing = store.get(owner: owner, uri: url) else {
-            return MainThreadDiagnostics.undefinedValue(in: context)
+            return JSValueBridge.undefined(in: context)
         }
         // Raises rather than shortening the array on an undecodable
         // diagnostic, matching `getDiagnostics(resource)`'s own choice —
@@ -608,7 +634,7 @@ public final class MainThreadDiagnostics {
         guard let values = MainThreadDiagnostics.diagnosticValues(existing, in: context) else {
             return VSCodeAPI.raise("Could not decode a diagnostic for this Uri.", in: context)
         }
-        return MainThreadDiagnostics.arrayValue(of: values, in: context)
+        return JSValueBridge.array(of: values, in: context)
     }
 
     private func handleCollectionHas(owner: String) -> JSValue? {
@@ -668,7 +694,7 @@ public final class MainThreadDiagnostics {
                     in: context)
             }
             guard let diagnosticsValues = MainThreadDiagnostics.diagnosticValues(entry.diagnostics, in: context),
-                  let diagnosticsArrayValue = MainThreadDiagnostics.arrayValue(of: diagnosticsValues, in: context)
+                  let diagnosticsArrayValue = JSValueBridge.array(of: diagnosticsValues, in: context)
             else {
                 return VSCodeAPI.raise(
                     "DiagnosticCollection.forEach could not decode a diagnostic for this Uri.",
@@ -685,12 +711,20 @@ public final class MainThreadDiagnostics {
                 return VSCodeAPI.raise("DiagnosticCollection.forEach could not invoke its callback.", in: context)
             }
         }
-        return MainThreadDiagnostics.undefinedValue(in: context)
+        return JSValueBridge.undefined(in: context)
     }
 
     private func handleCollectionDispose(owner: String) {
         let affected = store.removeCollection(owner: owner)
         ownedOwners.remove(owner)
+        // The caller here is the collection object's own JS-visible
+        // `dispose` method, which has already set the flag itself before
+        // calling this — this removal just stops the adaptor's own
+        // `dispose()` (below) from doing it a second time. Kept anyway
+        // rather than trusted implicitly, in case a future caller reaches
+        // this method some other way.
+        collectionDisposalFlags[owner]?.isDisposed = true
+        collectionDisposalFlags.removeValue(forKey: owner)
         if !affected.isEmpty { sink.diagnosticsChanged(for: affected) }
     }
 
@@ -711,7 +745,7 @@ public final class MainThreadDiagnostics {
         ) else {
             return VSCodeAPI.raise("Could not decode a diagnostic entry.", in: context)
         }
-        return MainThreadDiagnostics.arrayValue(of: pairValues, in: context)
+        return JSValueBridge.array(of: pairValues, in: context)
     }
 
     // MARK: - The collection object factory
@@ -730,9 +764,15 @@ public final class MainThreadDiagnostics {
     /// hand-writing a generator.
     ///
     /// **No-capture evidence:** every block below captures `diagnostics`
-    /// (this adaptor) weakly and nothing else, on `MainThreadWindow
-    /// .makeStatusBarItemObject`'s own pattern. None of them captures
-    /// `object`, not even weakly. `forEach` needs the collection itself —
+    /// (this adaptor) weakly, and `disposalFlag` strongly — nothing else, on
+    /// `MainThreadWindow.makeStatusBarItemObject`'s own pattern for the weak
+    /// half. `disposalFlag` is captured strongly on purpose: it is the box
+    /// both this object's own `dispose()` method and the *adaptor's*
+    /// `dispose()` write to (see the property's own doc), and a weak capture
+    /// of it would let the box disappear the moment this method returns,
+    /// since nothing else here retains it once `collectionDisposalFlags`
+    /// forgets it. None of the blocks below captures `object`, not even
+    /// weakly. `forEach` needs the collection itself —
     /// `vscode.d.ts:7221`'s declared `(uri, diagnostics, collection) => any`
     /// third argument — and reads it from `JSContext.currentThis()` when it
     /// runs instead. A weak capture looks like the safe way to hand an
@@ -745,6 +785,7 @@ public final class MainThreadDiagnostics {
     private static func makeDiagnosticCollectionObject(
         owner: String,
         of diagnostics: MainThreadDiagnostics,
+        disposalFlag: DisposalFlag,
         in context: JSContext
     ) -> JSValue? {
         guard let object = JSValue(newObjectIn: context) else { return nil }
@@ -761,11 +802,21 @@ public final class MainThreadDiagnostics {
         // `.name` never changes across its own lifetime (only a collision
         // at *creation* affects it), so freezing it is both correct before
         // disposal and immune to a later collection's name after it.
-        var disposed = false
+        //
+        // The flag itself lives in `disposalFlag`, not as a local `var`
+        // here: a local captured by value would only ever be set by this
+        // object's own `dispose` method below, and this adaptor's own
+        // `dispose()` — extension teardown — has no way to reach it. That
+        // was the bug: tearing down the extension left every collection
+        // object it had handed to still-live JavaScript reading `disposed
+        // == false`, so a reference held past teardown went on writing into
+        // `store` under a released owner name, landing in whatever
+        // collection a later `createDiagnosticCollection` call reused that
+        // name for.
         let capturedName = diagnostics.store.name(ownedBy: owner)
 
         MainThreadWindow.installReadonlyGetter(on: object, name: "name") { [weak diagnostics] in
-            disposed ? capturedName : diagnostics?.store.name(ownedBy: owner)
+            disposalFlag.isDisposed ? capturedName : diagnostics?.store.name(ownedBy: owner)
         }
 
         let setMethod: @convention(block) () -> JSValue? = { [weak diagnostics] in
@@ -773,7 +824,7 @@ public final class MainThreadDiagnostics {
                 guard let diagnostics else {
                     return UncheckedJSValueBox(value: nil)
                 }
-                guard !disposed else {
+                guard !disposalFlag.isDisposed else {
                     return UncheckedJSValueBox(
                         value: MainThreadDiagnostics.disposedUndefinedValue())
                 }
@@ -788,7 +839,7 @@ public final class MainThreadDiagnostics {
                 guard let diagnostics else {
                     return UncheckedJSValueBox(value: nil)
                 }
-                guard !disposed else {
+                guard !disposalFlag.isDisposed else {
                     return UncheckedJSValueBox(
                         value: MainThreadDiagnostics.disposedUndefinedValue())
                 }
@@ -803,7 +854,7 @@ public final class MainThreadDiagnostics {
                 guard let diagnostics else {
                     return UncheckedJSValueBox(value: nil)
                 }
-                guard !disposed else {
+                guard !disposalFlag.isDisposed else {
                     return UncheckedJSValueBox(
                         value: MainThreadDiagnostics.disposedUndefinedValue())
                 }
@@ -818,7 +869,7 @@ public final class MainThreadDiagnostics {
                 guard let diagnostics else {
                     return UncheckedJSValueBox(value: nil)
                 }
-                guard !disposed else {
+                guard !disposalFlag.isDisposed else {
                     return UncheckedJSValueBox(
                         value: MainThreadDiagnostics.disposedUndefinedValue())
                 }
@@ -833,7 +884,7 @@ public final class MainThreadDiagnostics {
                 guard let diagnostics else {
                     return UncheckedJSValueBox(value: nil)
                 }
-                guard !disposed else {
+                guard !disposalFlag.isDisposed else {
                     return UncheckedJSValueBox(
                         value: MainThreadDiagnostics.disposedFalseValue())
                 }
@@ -848,7 +899,7 @@ public final class MainThreadDiagnostics {
                 guard let diagnostics else {
                     return UncheckedJSValueBox(value: nil)
                 }
-                guard !disposed else {
+                guard !disposalFlag.isDisposed else {
                     return UncheckedJSValueBox(
                         value: MainThreadDiagnostics.disposedUndefinedValue())
                 }
@@ -860,8 +911,8 @@ public final class MainThreadDiagnostics {
 
         let disposeMethod: @convention(block) () -> Void = { [weak diagnostics] in
             MainActor.assumeIsolated {
-                guard !disposed else { return }
-                disposed = true
+                guard !disposalFlag.isDisposed else { return }
+                disposalFlag.isDisposed = true
                 diagnostics?.handleCollectionDispose(owner: owner)
             }
         }
@@ -869,7 +920,7 @@ public final class MainThreadDiagnostics {
 
         let getPairs: @convention(block) () -> JSValue? = { [weak diagnostics] in
             MainActor.assumeIsolated {
-                guard let diagnostics, !disposed else {
+                guard let diagnostics, !disposalFlag.isDisposed else {
                     return UncheckedJSValueBox(value: nil)
                 }
                 return UncheckedJSValueBox(
@@ -888,6 +939,20 @@ public final class MainThreadDiagnostics {
     /// — `store` may be shared, matching `MainThreadLanguages.dispose()`'s
     /// own boundary (mutation 16).
     ///
+    /// **Also marks every one of those collections' own `disposed` flags —
+    /// this is not optional.** `store.removeCollection` frees `owner` inside
+    /// `store`, but any `DiagnosticCollection` object this adaptor already
+    /// handed to JavaScript is still live out there and still reads its own
+    /// `disposalFlag`, not `store`, to decide whether it is inert. Without
+    /// this, a reference JS code held past extension teardown kept its
+    /// `disposed` bit `false` forever, so `set`/`delete`/`clear`/`get`
+    /// called on it after teardown ran `handleCollection*(owner:)` against
+    /// an `owner` this adaptor no longer owns — silently landing diagnostics
+    /// in whatever collection a later `createDiagnosticCollection` call
+    /// reused that same owner name for. Setting the flag first, in the same
+    /// loop, is what makes every one of those calls the same inert no-op a
+    /// collection's own `dispose()` already produces.
+    ///
     /// Also drops this adaptor's `onDidChangeDiagnostics` listeners, and only
     /// this adaptor's: `events` is shared across adaptors on purpose, and a
     /// registration holds its listener's `JSValue`, which holds that
@@ -895,10 +960,12 @@ public final class MainThreadDiagnostics {
     /// extension's context alive inside an emitter that outlives it.
     public func dispose() {
         for owner in ownedOwners {
+            collectionDisposalFlags[owner]?.isDisposed = true
             let affected = store.removeCollection(owner: owner)
             if !affected.isEmpty { sink.diagnosticsChanged(for: affected) }
         }
         ownedOwners.removeAll()
+        collectionDisposalFlags.removeAll()
         events.removeListeners(ownedBy: self)
     }
 
@@ -994,18 +1061,6 @@ public final class MainThreadDiagnostics {
         return result
     }
 
-    /// A genuine JS `undefined` — a small local copy of
-    /// `MainThreadWindow.undefinedValue(in:)`'s idea, returning `JSValue?`
-    /// directly rather than `Any`: every call site here is a synchronous
-    /// method result, never a promise-settlement argument, so there is no
-    /// `NSNull()` fallback to widen into. Licensed as a third independent
-    /// copy of this one-line idea by
-    /// `MainThreadLanguageModels.swift:666-672`'s own precedent for
-    /// `arrayValue(of:in:)` ("not a shared helper").
-    private static func undefinedValue(in context: JSContext) -> JSValue? {
-        JSValue(undefinedIn: context)
-    }
-
     /// The disposed-collection return value for `set`/`delete`/`clear`/
     /// `get`/`forEach`, each contractually inert once disposed —
     /// `undefined`, resolved via `JSContext.current()` the
@@ -1013,7 +1068,7 @@ public final class MainThreadDiagnostics {
     /// blocks run outside any handler method.
     private static func disposedUndefinedValue() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
-        return undefinedValue(in: context)
+        return JSValueBridge.undefined(in: context)
     }
 
     /// The disposed-collection return value for `has` — `false`, per the
@@ -1021,12 +1076,6 @@ public final class MainThreadDiagnostics {
     private static func disposedFalseValue() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
         return JSValue(bool: false, in: context)
-    }
-
-    /// A JS array holding `values`, `JSValue?`-returning for the same
-    /// reason `undefinedValue(in:)` is — see that method's own doc.
-    private static func arrayValue(of values: [JSValue], in context: JSContext) -> JSValue? {
-        JSValue(object: values, in: context)
     }
 
     /// Decodes every diagnostic in `diagnostics` via
@@ -1064,9 +1113,9 @@ public final class MainThreadDiagnostics {
         // never shortening the diagnostics array within a pair that is
         // returned.
         guard let diagnosticsValues = diagnosticValues(diagnostics, in: context),
-              let diagnosticsArrayValue = arrayValue(of: diagnosticsValues, in: context)
+              let diagnosticsArrayValue = JSValueBridge.array(of: diagnosticsValues, in: context)
         else { return nil }
-        return arrayValue(of: [uriValue, diagnosticsArrayValue], in: context)
+        return JSValueBridge.array(of: [uriValue, diagnosticsArrayValue], in: context)
     }
 
     /// Every entry in `entries` as a `[uri, diagnostics]` pair, refusing the

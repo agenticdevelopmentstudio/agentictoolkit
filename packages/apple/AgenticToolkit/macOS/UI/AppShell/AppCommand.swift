@@ -119,13 +119,15 @@ public enum CommandRegistryError: Error, Equatable, CustomStringConvertible {
 /// Which registration of an id a caller is talking about.
 ///
 /// Ids are not unique over time. `CommandRegistry.register` replaces a live id
-/// in place (see its doc comment for why), so "the command registered as
-/// `notes.action.newNote`" names one thing today and can name a different one
-/// a moment later — and a caller holding a `Disposable`, or tearing down an
-/// extension, means *the registration it made*, not whatever now answers to
-/// that id. Without this, `unregister(id:)` was the only tool either caller
-/// had, and an extension that shadowed an app command could delete the app's
-/// command outright on the way out.
+/// in place for same-kind collisions (see its doc comment for why, and for
+/// the one collision — an extension displacing a built-in — it now refuses
+/// instead), so "the command registered as `notes.action.newNote`" names one
+/// thing today and can name a different one a moment later — and a caller
+/// holding a `Disposable`, or tearing down an extension, means *the
+/// registration it made*, not whatever now answers to that id. Without this,
+/// `unregister(id:)` was the only tool either caller had, and an extension
+/// that shadowed an app command could delete the app's command outright on
+/// the way out.
 ///
 /// Opaque on purpose: a `UUID` nobody outside this file can mint or read. The
 /// only way to hold one is to have performed the registration it names, which
@@ -165,6 +167,15 @@ public final class CommandRegistry {
     private struct Registration {
         let command: AppCommand
         let token: CommandRegistration
+
+        /// Whether this registration came from an extension (`true`) or is
+        /// the app's own first-class command (`false`, the default every
+        /// existing call site gets for free). This is the fact `register(_:
+        /// isExtensionContributed:)`'s collision check reads, and the fact
+        /// task 5.3's Ruling 5 had no way to express: without it, "the app's
+        /// command" and "an extension's command" are the same shape, and
+        /// nothing stops the second from standing in for the first.
+        let isExtensionContributed: Bool
     }
 
     private var registrationsByID: [String: Registration] = [:]
@@ -179,8 +190,9 @@ public final class CommandRegistry {
 
     /// Register `command`, or replace the one already filed under its id.
     ///
-    /// **Duplicate ids replace, in place, and log a warning.** The three
-    /// candidate behaviours were replace, ignore and trap:
+    /// **Duplicate ids replace, in place, and log a warning — but only
+    /// between registrants of the same kind.** The three candidate
+    /// behaviours for a same-kind collision were replace, ignore and trap:
     ///
     /// - *Trap* is wrong because Stage 5 registers commands from extensions
     ///   that can be reloaded, and a reload re-registers every id it owns.
@@ -194,10 +206,49 @@ public final class CommandRegistry {
     ///   in place, keeping its original position.
     ///
     /// Replacement's own risk is that two unrelated features colliding on an id
-    /// silently lose one of them, so the collision is logged at `warning`:
-    /// visible to whoever is looking, without breaking reload for whoever is
-    /// not.
+    /// silently lose one of them, so a same-kind collision is logged at
+    /// `warning`: visible to whoever is looking, without breaking reload for
+    /// whoever is not.
     ///
+    /// **An extension-contributed registration can never displace a
+    /// built-in one.** This used to be exactly the same replace-and-warn as
+    /// above — task 5.3's Ruling 5 read that as permission for an extension
+    /// to shadow an app-owned id — and the consequence was concrete: an
+    /// extension registers `workbench.action.closeWindow`, the app's own
+    /// handler is gone the instant it does, and when the extension is later
+    /// torn down `unregister(id:token:)` removes *that* registration
+    /// correctly by its own contract, leaving the id unregistered for the
+    /// rest of the process (`unregister(id:)`'s own doc: displacement here
+    /// has no stack to revert to). A warning nobody is watching a log for is
+    /// not a defense against that, so this collision is refused instead of
+    /// merely warned about: `isExtensionContributed` is checked against the
+    /// existing registration's own flag, and `false` (built-in) beaten by
+    /// `true` (extension) is the one shape that does not replace. Every
+    /// other combination — app over app, extension over extension (a
+    /// reload, or `ExtensionHostInstaller`'s activation stub being replaced
+    /// by the same extension's real `registerCommand`), and even app over
+    /// extension — keeps the original replace-and-warn, unchanged.
+    ///
+    /// A refused registration still returns a valid-looking token so every
+    /// caller keeps compiling and behaving as it already does around a
+    /// `CommandRegistration` it does not fully trust — the same shape
+    /// `unregister(id:token:)` already gives a stale token. That token just
+    /// never named anything: it was never filed in `registrationsByID`, so
+    /// passing it to `unregister(id:token:)` later is the harmless no-op a
+    /// stale token always is.
+    ///
+    /// - Parameter isExtensionContributed: Whether `command` came from an
+    ///   extension rather than from the app itself. Defaults to `false`
+    ///   (built-in) because every one of this method's call sites inside the
+    ///   app is exactly that. Two callers are not, and both pass `true`:
+    ///   `MainThreadCommands`' `vscode.commands.registerCommand` adaptor, and
+    ///   `ExtensionHostInstaller.registerActivationCommands`, which files the
+    ///   `onCommand:` activation stub the adaptor later replaces. They are
+    ///   what make this refusal mean anything for a real third-party
+    ///   extension rather than only for a future in-process caller that
+    ///   remembers to opt in — and they must agree with each other, because a
+    ///   stub filed as built-in would refuse the very registration it exists
+    ///   to be replaced by.
     /// - Returns: A token naming *this* registration, for a caller that will
     ///   later want to remove what it registered and nothing else — see
     ///   `unregister(id:token:)`. `@discardableResult` because the app's own
@@ -205,8 +256,18 @@ public final class CommandRegistry {
     ///   token; only a registrant that can be torn down independently, which
     ///   today means an extension, has a use for it.
     @discardableResult
-    public func register(_ command: AppCommand) -> CommandRegistration {
-        if registrationsByID[command.id] != nil {
+    public func register(_ command: AppCommand, isExtensionContributed: Bool = false) -> CommandRegistration {
+        if let existing = registrationsByID[command.id] {
+            guard !(!existing.isExtensionContributed && isExtensionContributed) else {
+                Self.logger.error(
+                    """
+                    Refusing to let extension-contributed command \
+                    '\(command.id, privacy: .public)' replace a built-in registration \
+                    under the same id
+                    """
+                )
+                return CommandRegistration()
+            }
             Self.logger.warning(
                 "Command id already registered, replacing: \(command.id, privacy: .public)"
             )
@@ -214,7 +275,8 @@ public final class CommandRegistry {
             registrationOrder.append(command.id)
         }
         let token = CommandRegistration()
-        registrationsByID[command.id] = Registration(command: command, token: token)
+        registrationsByID[command.id] = Registration(
+            command: command, token: token, isExtensionContributed: isExtensionContributed)
         return token
     }
 

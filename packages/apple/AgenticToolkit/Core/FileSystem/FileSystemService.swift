@@ -571,14 +571,34 @@ public actor FileSystemService {
     /// classified against `toPath`. A caller that branches on the path in that
     /// case should not assume it is the source.
     ///
-    /// **The destination is never pre-checked.** The move is attempted first,
-    /// and only a move that fails because something is already at `toPath`
-    /// leads to a removal. That ordering is what makes a case-only rename and
-    /// `fromPath == toPath` safe: on the default macOS volume, which is
-    /// case-insensitive, `FOO.txt` names the same file as `foo.txt`, so a
-    /// removal of `toPath` before the move destroys the very file being
-    /// renamed. `FileManager.moveItem` was measured on this machine to succeed
-    /// outright for both of those cases, so neither ever reaches a removal.
+    /// **The destination is never pre-checked before the first move.** The
+    /// move is attempted first, and only a move that fails because something
+    /// is already at `toPath` leads to a removal. That ordering is what makes
+    /// a case-only rename and `fromPath == toPath` safe: on the default macOS
+    /// volume, which is case-insensitive, `FOO.txt` names the same file as
+    /// `foo.txt`, so a removal of `toPath` before the move destroys the very
+    /// file being renamed. `FileManager.moveItem` was measured on this machine
+    /// to succeed outright for both of those cases, so neither ever reaches a
+    /// removal — nor, therefore, the guards below, which sit strictly inside
+    /// the `overwrite` branch that only a genuinely occupied destination can
+    /// reach.
+    ///
+    /// **`overwrite` replaces the destination; it does not erase a subtree.**
+    /// Before the removal, the destination's kind is compared against the
+    /// source's and the three refusals `rename(2)` itself makes are
+    /// reproduced: ``FileSystemServiceError/fileIsADirectory(path:)`` for a
+    /// non-directory moved onto a directory (`EISDIR`),
+    /// ``FileSystemServiceError/fileNotADirectory(path:)`` for the reverse
+    /// (`ENOTDIR`), and ``FileSystemServiceError/directoryNotEmpty(path:)``
+    /// for a directory destination with entries in it (`ENOTEMPTY`). Each
+    /// throws having removed nothing. Doing the overwrite by hand had
+    /// discarded all three, which made this method strictly more destructive
+    /// than the syscall it emulates — `overwrite: true` onto a populated
+    /// directory recursively deleted it, permanently and with no Trash copy.
+    /// The removal that remains can therefore only take a single
+    /// non-directory or an empty directory, and so is left permanent: routing
+    /// it through the Trash would deposit an item on every atomic
+    /// write-temp-then-rename-over save.
     ///
     /// Comparing the two items instead — by path string, by folded case, or by
     /// their device and file numbers — does not work either. A hard link is two
@@ -622,9 +642,10 @@ public actor FileSystemService {
                 using: manager,
                 onFailure: failed
             )
-            guard source != nil else {
+            guard let sourceAttributes = source else {
                 throw FileSystemServiceError.fileNotFound(path: fromPath)
             }
+            let sourceBits = Self.typeBits(for: sourceAttributes[.type] as? FileAttributeType)
             let sourceURL = URL(fileURLWithPath: fromPath)
             let destinationURL = URL(fileURLWithPath: toPath)
             let moveFailure: Error?
@@ -647,6 +668,61 @@ public actor FileSystemService {
             }
             guard overwrite else {
                 throw FileSystemServiceError.fileExists(path: toPath)
+            }
+            // `overwrite` licenses replacing the destination, not erasing an
+            // arbitrary subtree. `removeItem(at:)` recurses unconditionally
+            // and never consults the Trash, so reaching it with no checks
+            // first made `rename(from:to:overwrite: true)` strictly more
+            // destructive than the `rename(2)` this method's own doc says it
+            // emulates: the kernel refuses to replace a directory with a
+            // non-directory (`ENOTDIR`), refuses the reverse (`EISDIR`), and
+            // refuses to replace a *non-empty* directory at all
+            // (`ENOTEMPTY`). Doing the move by hand threw all three away, so
+            // `vscode.workspace.fs.rename(file, dir, {overwrite: true})` from
+            // an extension deleted the user's whole directory tree, with no
+            // Trash copy and nothing to undo it.
+            //
+            // These three guards put those refusals back. They are checked
+            // against the destination's *link* attributes, so a symlink at
+            // `toPath` is a non-directory that gets replaced as itself —
+            // matching the delete path above, and matching `rename(2)`, which
+            // renames the link and not its target.
+            //
+            // The removal deliberately does **not** route through the Trash.
+            // After these guards the only things it can destroy are a single
+            // non-directory or an empty directory, which is precisely what
+            // "overwrite" is asked for; and the write-temp-then-rename-over
+            // idiom that editors use for atomic saves would otherwise drop a
+            // Trash item on every keystroke-triggered save.
+            let destination = try Self.linkAttributes(
+                atPath: toPath,
+                reportedAs: toPath,
+                using: manager,
+                onFailure: failed
+            )
+            if let destinationAttributes = destination {
+                let destinationBits = Self.typeBits(for: destinationAttributes[.type] as? FileAttributeType)
+                switch (sourceBits.contains(.directory), destinationBits.contains(.directory)) {
+                case (false, true):
+                    throw FileSystemServiceError.fileIsADirectory(path: toPath)
+                case (true, false):
+                    throw FileSystemServiceError.fileNotADirectory(path: toPath)
+                case (true, true):
+                    let children: [String]
+                    do {
+                        children = try manager.contentsOfDirectory(atPath: toPath)
+                    } catch {
+                        // An unreadable destination directory is not an empty
+                        // one. Reading it as empty would license exactly the
+                        // recursive erase this guard exists to prevent.
+                        throw Self.distinguished(error, path: toPath) ?? failed(error)
+                    }
+                    guard children.isEmpty else {
+                        throw FileSystemServiceError.directoryNotEmpty(path: toPath)
+                    }
+                case (false, false):
+                    break
+                }
             }
             do {
                 try manager.removeItem(at: destinationURL)

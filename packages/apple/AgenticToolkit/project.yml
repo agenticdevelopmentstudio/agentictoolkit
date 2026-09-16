@@ -294,6 +294,22 @@ targets:
       - target: AgenticToolkitLanguage
         embed: true
         codeSign: true
+      # A test bundle loads its frameworks out of its OWN Frameworks
+      # directory, so everything those frameworks link has to be in there --
+      # the whole transitive closure, not only what the tests `import`. These
+      # bundles pass today because `xcodebuild test` sets
+      # `DYLD_FRAMEWORK_PATH` to the build products directory, where every
+      # framework happens to sit beside every other; run one `.xctest` any
+      # other way -- `xctest` directly, or the bundle copied somewhere else --
+      # and dyld fails naming a framework the tests never mention. `otool -L`
+      # on each built binary, not this file's `dependencies:` lists, is the
+      # authority for what each closure contains.
+      - target: AgenticToolkitCore
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+        embed: true
+        codeSign: true
 
   AgenticToolkitSync:
     type: framework
@@ -434,6 +450,13 @@ targets:
         codeSign: true
       # MarkdownStoreTests imports AgenticToolkitSync directly (LocalMutation,
       # SyncStoreFailure), same transitive-linking reason as above.
+      # Closure completion -- see the note in AgenticToolkitLanguageTests.
+      - target: AgenticToolkitSyncGRDB
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+        embed: true
+        codeSign: true
       - target: AgenticToolkitSync
         embed: true
         codeSign: true
@@ -451,6 +474,10 @@ targets:
       - target: AgenticToolkitCore
         embed: true
         codeSign: true
+      # Closure completion -- see the note in AgenticToolkitLanguageTests.
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+        embed: true
+        codeSign: true
 
   AgenticToolkitCoreUITests:
     type: bundle.unit-test
@@ -464,6 +491,10 @@ targets:
         embed: true
         codeSign: true
       - target: AgenticToolkitCore
+        embed: true
+        codeSign: true
+      # Closure completion -- see the note in AgenticToolkitLanguageTests.
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
         embed: true
         codeSign: true
 
@@ -481,6 +512,16 @@ targets:
       - target: AgenticToolkitCore
         embed: true
         codeSign: true
+      # Closure completion -- see the note in AgenticToolkitLanguageTests.
+      - target: AgenticToolkitCoreUI
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+        embed: true
+        codeSign: true
 
   AIPluginKitTests:
     type: bundle.unit-test
@@ -494,6 +535,10 @@ targets:
         embed: true
         codeSign: true
       - target: AgenticToolkitCore
+        embed: true
+        codeSign: true
+      # Closure completion -- see the note in AgenticToolkitLanguageTests.
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
         embed: true
         codeSign: true
 
@@ -563,6 +608,36 @@ targets:
       - target: AgenticToolkitMarkdown-macOS
         embed: true
         codeSign: true
+      # Closure completion -- see the note in AgenticToolkitLanguageTests.
+      # `AgenticToolkitMacOS` links all seven of these directly or through
+      # `AgenticToolkitMarkdown`; `AgenticToolkitDatabase`,
+      # `AgenticToolkitSyncGRDB` and `AgenticToolkitMarkdown` each load the
+      # GRDB package product, which is why the package is named here too --
+      # linking it is what makes Xcode copy it in, exactly as the app target
+      # does.
+      - target: AgenticToolkitPermissions
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitPermissionsUI
+        embed: true
+        codeSign: true
+      - target: AIPluginKit
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitLanguage
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitDatabase
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitSync
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitSyncGRDB
+        embed: true
+        codeSign: true
+      - package: GRDB
+        product: GRDB
 
   AgenticToolkitHTDV:
     type: framework

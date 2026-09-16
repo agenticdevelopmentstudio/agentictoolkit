@@ -54,7 +54,18 @@ public struct VSCodeEngineRange: Sendable, Hashable, CustomStringConvertible {
     public func accepts(_ version: SemanticVersion) -> Bool {
         switch requirement {
         case .caret(let floor):
-            // `floor.major + 1` is a *trapping* add. What keeps it off a
+            // npm's `^` does not always mean "same major": it means "the
+            // leftmost non-zero component is held fixed," because for a 0.x
+            // (and especially 0.0.x) package every component below major is
+            // still treated as breaking. `^1.2.3` is `>=1.2.3 <2.0.0`,
+            // `^0.2.3` is `>=0.2.3 <0.3.0` (the major is 0, so the minor is
+            // what's held fixed), and `^0.0.3` is `>=0.0.3 <0.0.4` (major and
+            // minor are both 0, so even the patch is breaking). Picking the
+            // component to bump is a cascade: major first, then minor only
+            // when major is 0, then patch only when both are 0 — never more
+            // than one component moves.
+            //
+            // Each `+ 1` below is a *trapping* add. What keeps it off a
             // hostile manifest's `Int.max` is `SemanticVersion.init?(String)`
             // refusing that number in the first place — the guard is there, at
             // the one place a version is admitted from text, so every consumer
@@ -65,13 +76,24 @@ public struct VSCodeEngineRange: Sendable, Hashable, CustomStringConvertible {
             // initialiser is public and unbounded: today no initialiser on
             // this type can reach it with such a floor, but the day one takes
             // a `SemanticVersion` directly, the difference between this branch
-            // and a bare `+` is a crash. Overflow means the floor is already
-            // the largest major expressible, so "below the next major" admits
-            // every version at or above it — there is no next major to be
-            // below.
-            let (nextMajor, overflowed) = floor.major.addingReportingOverflow(1)
-            guard !overflowed else { return version >= floor }
-            let ceiling = SemanticVersion(major: nextMajor, minor: 0, patch: 0)
+            // and a bare `+` is a crash. Overflow means the component being
+            // bumped is already the largest expressible, so "below the next
+            // value" admits every version at or above the floor — there is no
+            // next value to be below.
+            let ceiling: SemanticVersion
+            if floor.major > 0 {
+                let (nextMajor, overflowed) = floor.major.addingReportingOverflow(1)
+                guard !overflowed else { return version >= floor }
+                ceiling = SemanticVersion(major: nextMajor, minor: 0, patch: 0)
+            } else if floor.minor > 0 {
+                let (nextMinor, overflowed) = floor.minor.addingReportingOverflow(1)
+                guard !overflowed else { return version >= floor }
+                ceiling = SemanticVersion(major: 0, minor: nextMinor, patch: 0)
+            } else {
+                let (nextPatch, overflowed) = floor.patch.addingReportingOverflow(1)
+                guard !overflowed else { return version >= floor }
+                ceiling = SemanticVersion(major: 0, minor: 0, patch: nextPatch)
+            }
             return version >= floor && version < ceiling
         case .atLeast(let floor):
             return version >= floor

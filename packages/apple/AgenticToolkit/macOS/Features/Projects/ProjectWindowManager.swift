@@ -146,14 +146,52 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
     }
 
     /// The frontmost project window, for anything that acts on "the current
-    /// project" — menu validation, the scripting bridge.
+    /// project" — menu validation, the scripting bridge, and the
+    /// `workspaceRoots` seam the extension hosts read.
+    ///
+    /// **AppKit answers first, this manager's own ordering answers last.**
+    /// The two `NSApp` reads are the accurate ones while the app is active and
+    /// a project window is genuinely key, and they stay first for that reason.
+    /// But neither is answerable at every moment this property is asked, and
+    /// the gap is not hypothetical:
+    ///
+    /// - This is a menubar host that opens project windows under *quiet*
+    ///   presentation (see `activateApp` below, declined by
+    ///   `activateUnlessQuiet()`). With the app not active, `NSApp.keyWindow`
+    ///   is `nil` — there is no key window anywhere in a background app.
+    /// - `orderedWindows` reflects the window server's ordering, which is
+    ///   settled by `orderFront`, not by this manager's bookkeeping.
+    ///
+    /// So before `openProject(_:)` has actually put the window on screen,
+    /// *both* reads answer for the previous front window, or for nothing at
+    /// all when this is the first project of the session. That is what made
+    /// `onOpenProjectsChanged` a lie for its most important consumer: the
+    /// extension hosts' `workspaceRoots` closure read this property, got `nil`,
+    /// and `ExtensionsCoordinator.projectWindowsDidChange()` took its
+    /// `guard !roots.isEmpty else { return }` early exit — with no retry, so
+    /// every `workspaceContains:` extension stayed dormant for the entire
+    /// process lifetime.
+    ///
+    /// The final fallback closes that gap for good. `openOrder.last` is the
+    /// most recently opened project still in `controllers`, which is precisely
+    /// what this type means by "front" when the window server has not yet
+    /// been asked — and it is the same pair (`openOrder` + `controllers`) that
+    /// `refreshOpenWorkspaceIDs()` republishes, so this property now agrees
+    /// with `openWorkspaces` and `openWindowControllers` at the instant
+    /// `onOpenProjectsChanged` fires, which is what that callback's own doc
+    /// already promises. Ordering the window on screen is still done first
+    /// (see `openProject(_:)`), so the fallback is a floor rather than the
+    /// normal path.
     public var frontWindowController: ComposableTabsWindowController? {
         if let key = NSApp.keyWindow?.windowController as? ComposableTabsWindowController {
             return key
         }
-        return NSApp.orderedWindows
-            .compactMap { $0.windowController as? ComposableTabsWindowController }
-            .first
+        if let ordered = NSApp.orderedWindows
+            .compactMap({ $0.windowController as? ComposableTabsWindowController })
+            .first {
+            return ordered
+        }
+        return openOrder.last.flatMap { controllers[$0] }
     }
 
     /// Every open project's workspace, in the order their projects were
@@ -325,7 +363,6 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         }
         controllers[repo.id] = controller
         openOrder.append(repo.id)
-        refreshOpenWorkspaceIDs()
         controller.showWindow(nil)
         // `makeKeyAndOrderFront(nil)` runs before `observeBecameKey` is
         // installed below, so whether this window's own *initial* key
@@ -344,6 +381,27 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
         // Declined under quiet presentation, which is the whole point of the
         // helper — an automated session opens project windows constantly.
         activateApp()
+        // Fired here — *after* the window is registered, ordered front and the
+        // app has been offered activation — and not at the registration above.
+        //
+        // Every consumer of this callback asks a question about the window
+        // that just opened, and two of the three seams it drives read AppKit
+        // rather than this type's dictionaries: `frontWindow` and
+        // `workspaceRoots` both go through `frontWindowController`. Firing at
+        // registration time therefore published "the open set changed" while
+        // `NSApp` still described the previous window — so the extension
+        // hosts' `workspaceContains:` check ran against the *old* project's
+        // roots, or against none at all on the first project of the session,
+        // and never ran again.
+        //
+        // `frontWindowController` now carries a fallback that makes it
+        // answer correctly even if the window server has not caught up, so
+        // this ordering is belt and braces rather than the only guard. Both
+        // are kept: the fallback is what makes the seam *correct*, and this
+        // ordering is what makes it *accurate* — the difference between
+        // naming the right project and naming the window the user is actually
+        // looking at.
+        refreshOpenWorkspaceIDs()
         observeClose(of: controller, repoID: repo.id, recordsOpenState: true)
         observeBecameKey(of: controller, repoID: repo.id)
         // The window is on screen with whatever tabs were stored; the checkout

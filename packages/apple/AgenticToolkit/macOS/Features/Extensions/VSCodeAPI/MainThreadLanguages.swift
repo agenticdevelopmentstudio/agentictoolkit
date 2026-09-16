@@ -244,16 +244,33 @@ public struct EnterAction: Sendable, Equatable {
     /// `IndentAction` declares — the one required field, so an
     /// unrepresentable `indentAction` makes the whole action unrepresentable,
     /// on the same grounds as `IndentationRule.make(from:)`.
+    ///
+    /// Both numeric fields are read through `Int32(exactly:)`, never
+    /// `toInt32()` — `VSCodeAPI.swift:151-159`'s reasoning applies here
+    /// unchanged, and the consequence for `indentAction` is concrete: read
+    /// through `toInt32()`'s ECMAScript `ToInt32` wraparound,
+    /// `{ indentAction: 4294967297 }` arrives as `1` and is silently
+    /// accepted as a valid `.indent` action, when `4294967297` is not one of
+    /// the four numbers `IndentAction` declares at all. `Int32(exactly:)`
+    /// answers `nil` for it instead, so this correctly refuses the whole
+    /// action.
     static func make(from value: JSValue?) -> EnterAction? {
         guard let value, !value.isUndefined, !value.isNull else { return nil }
         guard let indentActionValue = value.forProperty("indentAction"), indentActionValue.isNumber,
-              let indentAction = IndentAction(rawValue: Int(indentActionValue.toInt32())) else {
+              let indentActionNumber = Int32(exactly: indentActionValue.toDouble()),
+              let indentAction = IndentAction(rawValue: Int(indentActionNumber)) else {
             return nil
         }
         let appendTextValue = value.forProperty("appendText")
         let appendText = (appendTextValue?.isString == true) ? appendTextValue?.toString() : nil
         let removeTextValue = value.forProperty("removeText")
-        let removeText = (removeTextValue?.isNumber == true) ? Int(removeTextValue?.toInt32() ?? 0) : nil
+        let removeText: Int?
+        if let removeTextValue, removeTextValue.isNumber,
+           let removeTextNumber = Int32(exactly: removeTextValue.toDouble()) {
+            removeText = Int(removeTextNumber)
+        } else {
+            removeText = nil
+        }
         return EnterAction(indentAction: indentAction, appendText: appendText, removeText: removeText)
     }
 }
@@ -325,6 +342,12 @@ public enum SyntaxTokenType: Int, Sendable, Equatable {
     /// Every element of `value` that is one of these four numbers, in order,
     /// dropping anything else. `AutoClosingPair.notIn` is the argument this
     /// exists for.
+    ///
+    /// Read through `Int32(exactly:)`, not `toInt32()` —
+    /// `VSCodeAPI.swift:151-159`'s reasoning applies here too: a value
+    /// `toInt32()`'s ECMAScript `ToInt32` wraparound coincidentally folds
+    /// onto `0`-`3` would be accepted as a token type the extension never
+    /// actually wrote.
     /// `@MainActor` because reading the array's length goes through
     /// `VSCodeAPI.arrayLength(of:)`, which is where the length bound lives
     /// — and that whole enum is pinned to the actor the JS context runs on.
@@ -336,7 +359,8 @@ public enum SyntaxTokenType: Int, Sendable, Equatable {
         types.reserveCapacity(count)
         for index in 0..<count {
             guard let element = value.atIndex(index), element.isNumber,
-                  let type = SyntaxTokenType(rawValue: Int(element.toInt32())) else {
+                  let number = Int32(exactly: element.toDouble()),
+                  let type = SyntaxTokenType(rawValue: Int(number)) else {
                 continue
             }
             types.append(type)
@@ -711,10 +735,26 @@ public final class MainThreadLanguages {
         }
     }
 
+    /// The four pattern **sources** upstream exempts from the empty-match
+    /// refusal below even though each one matches the empty string —
+    /// `regExpLeadsToEndlessLoop` (`strings.ts`, not one of this branch's
+    /// pinned upstream files; these four sources are the citable fact
+    /// carried over from it) hard-codes exactly these, not a computed rule.
+    /// Compared against the pattern's **source text** verbatim, not its
+    /// compiled behaviour: a `wordPattern` whose source is `^$` is exempt
+    /// regardless of flags, while a functionally-identical `wordPattern`
+    /// spelled some other way still refuses if it matches the empty string.
+    private static let emptyMatchExemptPatterns: Set<String> = ["^", "^$", "$", "^\\s*$"]
+
     /// Ruling 12's one refusal — the message to raise, or `nil` when there is
-    /// nothing to refuse. Two branches, deliberately not three:
+    /// nothing to refuse. Four branches, deliberately not three:
     ///
     /// - No `wordPattern` at all: nothing to check, `nil`.
+    /// - A `wordPattern` whose source exactly matches one of
+    ///   `emptyMatchExemptPatterns`: **not** a refusal, even though every one
+    ///   of the four matches the empty string — upstream's own hard-coded
+    ///   exemption, checked before compiling so it does not depend on
+    ///   `NSRegularExpression` agreeing with V8 about anything.
     /// - A `wordPattern` that does not **compile** under
     ///   `NSRegularExpression`: **not** a refusal. V8 (upstream's engine) and
     ///   ICU (`NSRegularExpression`'s) are not the same regex engine, so a
@@ -727,6 +767,7 @@ public final class MainThreadLanguages {
     ///   `extHostLanguageFeatures.ts:3009-3012`'s message shape.
     private static func wordPatternRefusal(for wordPattern: SerializedRegExp?) -> String? {
         guard let wordPattern else { return nil }
+        guard !emptyMatchExemptPatterns.contains(wordPattern.pattern) else { return nil }
         let compiled: NSRegularExpression
         do {
             compiled = try NSRegularExpression(

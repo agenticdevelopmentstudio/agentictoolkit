@@ -626,7 +626,20 @@
                 'Known namespaces: ' + Object.keys(namespaceTables).join(', ') + '.'
             );
         }
-        table[name] = value;
+        // A plain assignment here would throw under `'use strict'` if a prior
+        // `defineLiveMember` call for this same name left a getter-only
+        // accessor on `table` — assigning to a property that has a getter but
+        // no setter is a TypeError, `configurable: true` notwithstanding (see
+        // `defineLiveMember`'s comment below). Going through
+        // `Object.defineProperty` with a plain data descriptor sidesteps that:
+        // it replaces whatever descriptor is already there, accessor or data,
+        // rather than writing through it.
+        Object.defineProperty(table, name, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
     }
 
     // Installs one real implementation whose value is read at every access,
@@ -645,10 +658,18 @@
     // `ownKeys` trap is `Object.keys(table)` and `probeValue`'s
     // `propertyIsEnumerable` answers from the descriptor, so a
     // non-enumerable member would vanish from both while still being
-    // readable. `configurable: true` matches what a plain assignment leaves
-    // behind, so a later `defineMember` for the same name can still replace
-    // this one — an accessor that could not be redefined would make member
-    // installation order load-bearing.
+    // readable. `configurable: true` is what lets a later `defineMember` for
+    // the same name replace this one — but only because `defineMember`
+    // installs through `Object.defineProperty`, not through a plain
+    // assignment. `configurable: true` permits *redefinition*; it says
+    // nothing about *assignment*. Under `'use strict'`, assigning to a
+    // property that has a getter but no setter throws a TypeError
+    // regardless of configurability — the engine never gets as far as
+    // asking whether the property could be redefined, because assignment
+    // and redefinition are different operations. So a plain `table[name] =
+    // value` would have thrown here even with `configurable: true` in
+    // place; going through `defineProperty` on both sides is what actually
+    // makes installation order not matter.
     //
     // No setter: the namespace proxy's `set` trap already refuses assignment
     // one level up, and a getter-only property makes the same refusal true of

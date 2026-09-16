@@ -27,16 +27,43 @@ public final class ExtensionPickerPresenter {
     /// has to guess which session belongs to which window.
     private var current: (window: ExtensionPickerWindowController, dismiss: () -> Void)?
 
+    /// The in-flight validation for the input box's current value, if any.
+    /// **One at a time:** a new keystroke cancels the previous one before
+    /// starting its own, and finishing or replacing the panel cancels
+    /// whatever is left. Without it, every keystroke started a `Task` that
+    /// nothing ever cancelled, each capturing the view controller and the
+    /// extension's validator closure, and each one lived until its validator
+    /// answered — so typing twenty characters into a box with a slow
+    /// validator left twenty of them alive at once.
+    ///
+    /// **What cancellation does and does not buy.** `validate` is an
+    /// extension's arbitrary async JavaScript; cancellation is cooperative,
+    /// so a validator that never answers leaves its task suspended no matter
+    /// what is cancelled here. What this does guarantee is that only the
+    /// newest keystroke's validation is *reachable* from this presenter, that
+    /// superseded work stops at the first suspension point that checks, and
+    /// that nothing survives the panel it belongs to.
+    private var validationTask: Task<Void, Never>?
+
     public init() {}
 
     /// Finish any in-flight session as dismissed and close its window. Safe
     /// to call with nothing on screen.
     private func dismissCurrent() {
+        cancelValidation()
         guard let current else { return }
         self.current = nil
         current.dismiss()
         current.window.onDismiss = {}
         current.window.close()
+    }
+
+    /// Stop the in-flight validation, if any. Called wherever the input box
+    /// stops being on screen — replaced, accepted, or cancelled — so a
+    /// validation never outlives the panel that asked for it.
+    private func cancelValidation() {
+        validationTask?.cancel()
+        validationTask = nil
     }
 }
 
@@ -124,23 +151,29 @@ extension ExtensionPickerPresenter: ExtensionInputBoxPresenting {
             // last, after `windowController` is used.
             viewController.onAccept = { [weak self, weak windowController] value in
                 session.finish(value)
+                self?.cancelValidation()
                 windowController?.onDismiss = {}
                 windowController?.close()
                 if self?.current?.window === windowController { self?.current = nil }
             }
             viewController.onCancel = { [weak self, weak windowController] in
                 session.finish(nil)
+                self?.cancelValidation()
                 windowController?.onDismiss = {}
                 windowController?.close()
                 if self?.current?.window === windowController { self?.current = nil }
             }
-            viewController.onValueChanged = { [weak viewController] value in
-                Task { @MainActor in
+            viewController.onValueChanged = { [weak self, weak viewController] value in
+                self?.cancelValidation()
+                self?.validationTask = Task { @MainActor in
                     let validation = await validate(value)
                     // Drop a late answer for a superseded value rather than
                     // painting it — the extension's validator is async and
-                    // answers can arrive out of order. Compared against the
-                    // model's current value at the moment the answer lands.
+                    // answers can arrive out of order. Two tests, because they
+                    // catch different things: cancellation covers a keystroke
+                    // this presenter has already superseded, and the value
+                    // comparison covers an answer that raced past it.
+                    guard !Task.isCancelled else { return }
                     guard let viewController, model.value == value else { return }
                     viewController.showValidation(validation)
                 }

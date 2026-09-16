@@ -171,7 +171,8 @@ public final class ExtensionHostInstallation {
         self.workspace = MainThreadWorkspace(
             workspaceRoots: collaborators.workspaceRoots,
             notImplementedLedger: notImplementedLedger,
-            extensionIdentifier: identifier)
+            extensionIdentifier: identifier,
+            fileSystemService: collaborators.fileSystemService)
         self.languageModels = MainThreadLanguageModels(
             provider: seams.languageModelProvider,
             notImplementedLedger: notImplementedLedger,
@@ -335,14 +336,26 @@ public final class ExtensionHostInstallation {
                     """)
                 continue
             }
-            let token = commandRegistry.register(AppCommand(
-                id: id,
-                title: command.title,
-                category: command.category ?? "",
-                run: { [weak self] arguments in
-                    self?.runActivationStub(commandID: id, arguments: arguments)
-                    return nil
-                }))
+            // `isExtensionContributed: true` for two reasons, and the second
+            // is the one that would break if it were left off. It is true —
+            // the id comes from a manifest's `contributes.commands` — and
+            // `CommandRegistry.register(_:isExtensionContributed:)` refuses
+            // exactly one combination: extension over built-in. A stub filed
+            // as built-in would therefore refuse the extension's own
+            // `registerCommand` when it arrives moments later to replace it,
+            // leaving the extension permanently talking to its own activation
+            // stub. Extension over extension is the replace-and-warn the
+            // handoff has always relied on.
+            let token = commandRegistry.register(
+                AppCommand(
+                    id: id,
+                    title: command.title,
+                    category: command.category ?? "",
+                    run: { [weak self] arguments in
+                        self?.runActivationStub(commandID: id, arguments: arguments)
+                        return nil
+                    }),
+                isExtensionContributed: true)
             stubCommands[id] = token
         }
     }
@@ -485,6 +498,9 @@ extension ExtensionHostInstallation: Loggable {
 ///   contribution point, which is already one per app.
 /// - The three presenters — they render into windows, and there is one set of
 ///   windows.
+/// - `FileSystemService` — its serial queue is what orders two extensions'
+///   writes to the same file, and an instance each is two queues and no
+///   ordering at all.
 @MainActor
 public final class ExtensionHostInstaller {
 
@@ -500,6 +516,12 @@ public final class ExtensionHostInstaller {
         let pickerPresenter: ExtensionPickerPresenter
         let statusBarPresenter: WindowFooterStatusBarPresenter
         let workspaceRoots: ClosureWorkspaceRoots
+
+        /// The one service every extension's `vscode.workspace.fs` runs
+        /// through. Shared for the reason in this type's list above, and
+        /// typed as the protocol so a test can substitute a double for all of
+        /// them at once.
+        let fileSystemService: FileSystemServicing
     }
 
     private let registry: ExtensionRegistry
@@ -507,8 +529,78 @@ public final class ExtensionHostInstaller {
     private let seams: ExtensionHostSeams
     private let collaborators: Collaborators
 
-    /// One installation per running extension, keyed by identifier.
-    public private(set) var installations: [String: ExtensionHostInstallation] = [:]
+    /// One installation per running extension, keyed by identifier, each
+    /// stored beside the identity it was built from so `reconcile()` can tell
+    /// "already running" from "already running *this*".
+    private var installed: [String: Installed] = [:]
+
+    /// The running installations, keyed by identifier. Computed from
+    /// `installed` rather than stored alongside it: two dictionaries that must
+    /// agree is a drift waiting to happen, and every reader here wants one or
+    /// the other, never both.
+    public var installations: [String: ExtensionHostInstallation] {
+        installed.mapValues(\.installation)
+    }
+
+    /// A running installation and the on-disk state it was built from.
+    private struct Installed {
+        let installation: ExtensionHostInstallation
+        let identity: InstalledIdentity
+    }
+
+    /// Everything about an extension that a running host has already baked in:
+    /// its manifest, the directory it came from, and a signature of the code
+    /// that was evaluated. Two equal identities mean the host on screen is
+    /// still the host this extension would get if it were installed now.
+    ///
+    /// `LoadedExtension` alone would not do. It is the manifest plus the
+    /// directory, so it catches an edited `package.json` — a changed
+    /// `activationEvents`, a new contribution, a moved entry point — but an
+    /// extension author's ordinary edit is to the *code*, which leaves the
+    /// manifest byte-identical.
+    private struct InstalledIdentity: Equatable {
+        let loaded: LoadedExtension
+        let entryPoint: EntryPointSignature?
+    }
+
+    /// A cheap stand-in for "the code on disk is the code that is running":
+    /// the entry point's size and modification date.
+    ///
+    /// Not a content hash, deliberately. The entry point of a bundled web
+    /// extension is one concatenated file and routinely megabytes, and this is
+    /// computed on the main actor inside `reconcile()`, which runs on every
+    /// contribution change. Two fields of a `stat` cost nothing and catch every
+    /// edit an ordinary save produces.
+    ///
+    /// What it does not catch, plainly: a rewrite that lands on the same byte
+    /// count *and* the same timestamp, and an edit to a file the entry point
+    /// pulls in at runtime rather than to the entry point itself. The first
+    /// takes deliberate effort; the second is invisible to any signature short
+    /// of walking the extension's whole directory, which is the walk this is
+    /// deliberately not.
+    ///
+    /// **`nil` means "did not resolve or did not stat", and two `nil`s compare
+    /// equal.** That is the safe direction: an entry point that cannot be read
+    /// keeps the host that is already running, rather than tearing it down for
+    /// a `bringUp` that would fail on the same unreadable path and leave the
+    /// extension with nothing.
+    private struct EntryPointSignature: Equatable {
+        let size: Int
+        let modified: Date
+    }
+
+    /// Stats `loaded`'s entry point, or answers `nil` if there is nothing to
+    /// stat — no `browser` entry point declared, a path that escapes the
+    /// extension's directory, or a file that is not there.
+    private static func entryPointSignature(for loaded: LoadedExtension) -> EntryPointSignature? {
+        guard let browser = loaded.manifest.browser,
+              let url = try? ExtensionResourcePath.resolve(browser, inside: loaded.directory),
+              let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+              let size = values.fileSize,
+              let modified = values.contentModificationDate
+        else { return nil }
+        return EntryPointSignature(size: size, modified: modified)
+    }
 
     /// The last completed scan, replayed at every extension that comes up
     /// afterwards so a scan is not re-run per extension. `nil` until the first
@@ -531,7 +623,12 @@ public final class ExtensionHostInstaller {
     /// One finished scan: what it found, and what it was looking at.
     private struct CompletedScan {
         let roots: [URL]
-        let relativePaths: [String]
+
+        /// Held as a prepared `WorkspaceScan` rather than as the raw paths,
+        /// so the replay below hands every extension the same decomposed
+        /// copy instead of each matcher decomposing the workspace again —
+        /// see `WorkspaceScan`'s own doc.
+        let scan: WorkspaceScan
     }
 
     public init(
@@ -579,7 +676,8 @@ public final class ExtensionHostInstaller {
                             """)
                     }
                 }),
-            workspaceRoots: workspaceRoots)
+            workspaceRoots: workspaceRoots,
+            fileSystemService: FileSystemService())
     }
 
     // MARK: - Bringing hosts up
@@ -588,25 +686,49 @@ public final class ExtensionHostInstaller {
     /// asked for startup, and starts the workspace scan the rest may be
     /// waiting on.
     ///
-    /// Idempotent: an extension that already has a host keeps it, so this is
-    /// also the reconcile called when the registry's contributions change.
+    /// Idempotent in the sense that matters: an extension whose identity has
+    /// not moved keeps the host it has, so this is also the reconcile called
+    /// when the registry's contributions change.
+    ///
+    /// **Identity, not identifier.** Keying on the identifier alone made
+    /// "already installed" mean "never install again": `ExtensionRegistry
+    /// .loadAll()` re-reads every manifest from disk and fires
+    /// `contributionsDidChange`, so an extension edited and rescanned arrived
+    /// here with a new `LoadedExtension` and was skipped — the running host
+    /// went on executing the previous code, with the registry, the
+    /// contribution points and the settings UI all showing the new manifest.
+    /// An author editing an extension saw their changes appear everywhere
+    /// except in the extension. Comparing `InstalledIdentity` disposes that
+    /// host and brings up a fresh one instead.
     public func reconcile() {
         let enabled = registry.extensions.filter { registry.isEnabled($0.identifier) }
         let enabledIdentifiers = Set(enabled.map(\.identifier))
 
-        for (identifier, installation) in installations where !enabledIdentifiers.contains(identifier) {
-            installation.dispose()
-            installations[identifier] = nil
+        for (identifier, entry) in installed where !enabledIdentifiers.contains(identifier) {
+            entry.installation.dispose()
+            installed[identifier] = nil
         }
 
-        for loaded in enabled where installations[loaded.identifier] == nil {
-            bringUp(loaded)
+        for loaded in enabled {
+            let identity = InstalledIdentity(
+                loaded: loaded, entryPoint: Self.entryPointSignature(for: loaded))
+            if let current = installed[loaded.identifier] {
+                guard current.identity != identity else { continue }
+                // Disposed before the replacement is built, not after: the two
+                // hosts would otherwise both be live across the `bringUp`,
+                // each holding this extension's identifier in five adaptors
+                // that record against it, and the teardown of the old one
+                // would then withdraw the new one's registrations.
+                current.installation.dispose()
+                installed[loaded.identifier] = nil
+            }
+            bringUp(loaded, identity: identity)
         }
 
         startWorkspaceScanIfNeeded()
     }
 
-    private func bringUp(_ loaded: LoadedExtension) {
+    private func bringUp(_ loaded: LoadedExtension, identity: InstalledIdentity) {
         let installation: ExtensionHostInstallation
         do {
             installation = try ExtensionHostInstallation(
@@ -622,7 +744,7 @@ public final class ExtensionHostInstaller {
                 """)
             return
         }
-        installations[loaded.identifier] = installation
+        installed[loaded.identifier] = Installed(installation: installation, identity: identity)
         installation.registerActivationCommands(loaded.manifest.contributes?.commands ?? [])
         installation.activateIfTriggered(by: .startupFinished)
         // Replayed only while it still describes the open workspace. A scan
@@ -632,8 +754,7 @@ public final class ExtensionHostInstaller {
         // meaning is "this project looks like mine".
         if let completedScan,
            completedScan.roots == (seams.workspaceRoots()?.workspaceRootURLs ?? []) {
-            installation.activateIfTriggered(
-                by: .workspaceScanned(relativePaths: completedScan.relativePaths))
+            installation.activateIfTriggered(by: .workspaceScanned(completedScan.scan))
         }
         // The same replay, for `onLanguage:`. An extension enabled while a
         // Swift file is already on screen never sees the `.opened` event that
@@ -653,23 +774,23 @@ public final class ExtensionHostInstaller {
     /// is no equivalent on close, because `onLanguage:` has no un-activation
     /// — an extension that has run cannot be made not to have run.
     public func documentDidOpen(languageID: String) {
-        for installation in installations.values {
-            installation.activateIfTriggered(by: .documentOpened(languageID: languageID))
+        for entry in installed.values {
+            entry.installation.activateIfTriggered(by: .documentOpened(languageID: languageID))
         }
     }
 
     /// Tells every running extension that the configured chat models moved.
     public func availableChatModelsDidChange() {
-        for installation in installations.values {
-            installation.availableChatModelsDidChange()
+        for entry in installed.values {
+            entry.installation.availableChatModelsDidChange()
         }
     }
 
     public func disposeAll() {
-        for installation in installations.values {
-            installation.dispose()
+        for entry in installed.values {
+            entry.installation.dispose()
         }
-        installations = [:]
+        installed = [:]
     }
 
     // MARK: - workspaceContains:
@@ -753,7 +874,9 @@ public final class ExtensionHostInstaller {
     ///    for.
     ///  - And a project switch must not replay the old project's paths at a
     ///    newly installed extension, which is why `completedScan` carries the
-    ///    roots it was taken from.
+    ///    roots it was taken from — nor record them, which is why the
+    ///    completion below compares against the *live* roots and not only
+    ///    against `scanningRoots`.
     private func startWorkspaceScanIfNeeded() {
         let roots = seams.workspaceRoots()?.workspaceRootURLs ?? []
         // No workspace to scan. Deliberately records nothing: this is the
@@ -763,13 +886,39 @@ public final class ExtensionHostInstaller {
         scanningRoots = roots
         Task { @MainActor [weak self] in
             let paths = await Self.scan(roots: roots)
-            // A scan whose roots were superseded while it ran is discarded,
-            // not recorded: the tree it walked is no longer the workspace.
+            // A scan superseded by a *newer* scan is discarded and nothing
+            // else: `scanningRoots` already names the walk that replaced it,
+            // and clearing it here would cancel that one's own completion.
             guard let self, self.scanningRoots == roots else { return }
             self.scanningRoots = nil
-            self.completedScan = CompletedScan(roots: roots, relativePaths: paths)
-            for installation in self.installations.values {
-                installation.activateIfTriggered(by: .workspaceScanned(relativePaths: paths))
+
+            // And a scan superseded by the workspace *moving back* is
+            // discarded too — the case `scanningRoots` alone cannot see.
+            // Roots A, then B, then A again: the return to A is refused a
+            // scan by the guard above, correctly, because `completedScan`
+            // still holds A's paths. But the walk of B is still running, and
+            // recording it here would file B's paths as the answer for a
+            // workspace showing A, replay them at every extension, and then
+            // *stay* wrong — the next `workspaceDidChange()` for A would find
+            // `completedScan.roots` reading B and start a walk, while every
+            // extension already activated on files from a project that is not
+            // open. So the live roots are re-read and compared, and a
+            // mismatch records nothing and replays nothing.
+            let liveRoots = self.seams.workspaceRoots()?.workspaceRootURLs ?? []
+            guard liveRoots == roots else {
+                // Whatever is open now may never have been walked — A had an
+                // answer in this example, C in an A→B→C→B ordering would not
+                // — and nothing else is going to ask. The re-entry is cheap
+                // and idempotent: it returns immediately when `completedScan`
+                // already describes the live roots.
+                self.startWorkspaceScanIfNeeded()
+                return
+            }
+
+            let scan = WorkspaceScan(relativePaths: paths)
+            self.completedScan = CompletedScan(roots: roots, scan: scan)
+            for entry in self.installed.values {
+                entry.installation.activateIfTriggered(by: .workspaceScanned(scan))
             }
         }
     }

@@ -143,19 +143,31 @@ public final class MainThreadWorkspace {
     /// directly — see that protocol's own doc for why.
     private let workspaceRoots: ExtensionWorkspaceRoots?
 
-    /// Where every `fs` operation actually reads and writes. A private
-    /// default rather than a required parameter, unlike `MainThreadCommands`'
-    /// `registry`: `FileSystemService` holds no state a caller could lose by
-    /// not sharing an instance — it wraps `FileManager`, which is itself
-    /// already process-wide — so nothing is silently dropped the way an
-    /// unshared `CommandRegistry` would drop the app's own command palette.
+    /// Where every `fs` operation actually reads and writes. **Required, and
+    /// shared with every other extension's adaptor** — the same rule as
+    /// `MainThreadCommands`' `registry`, for a reason that is easy to miss.
+    ///
+    /// This used to carry a private default, on the argument that
+    /// `FileSystemService` "holds no state a caller could lose" because it
+    /// wraps a process-wide `FileManager`. That was wrong about the one piece
+    /// of state it does hold: its **serial `DispatchQueue`**, which is the
+    /// whole of its ordering guarantee. Two extensions with an instance each
+    /// are two queues, so their writes to one file interleave at block
+    /// granularity — a `writeFile` from each, and the result is neither
+    /// extension's bytes. With one instance the queue orders them, and the
+    /// loser's write lands whole. The cost is the throughput ceiling
+    /// `FileSystemService`'s own concurrency discussion already names, which
+    /// is the trade that discussion says to make.
+    ///
+    /// `ExtensionHostInstaller.Collaborators` owns the shared instance, beside
+    /// the diagnostic store and the presenters, for the same reason they are
+    /// there.
     ///
     /// Typed as ``FileSystemServicing``, not the concrete actor: the only
     /// reason is a test's need to substitute a double whose operations
     /// suspend under the test's own control, so it can exercise
     /// `runFileSystemOperation`'s in-flight teardown path. Nothing here
-    /// depends on the concrete type; the default argument still constructs
-    /// one.
+    /// depends on the concrete type.
     private let fileSystemService: FileSystemServicing
 
     /// Where a reach for an undefined `fs` member is recorded — the same
@@ -210,13 +222,16 @@ public final class MainThreadWorkspace {
     ///     disagree about where a miss goes.
     ///   - extensionIdentifier: The extension this adaptor belongs to, carried
     ///     alongside every ledger entry. Mirrors `ExtensionHost.identifier`.
-    ///   - fileSystemService: Where `fs` operations run. Defaults to a private
-    ///     instance — see the property's own doc for why that is safe here.
+    ///   - fileSystemService: Where `fs` operations run. Not defaulted, on the
+    ///     same grounds as `workspaceRoots` and for a sharper reason: an
+    ///     instance per extension is a serial queue per extension, which is no
+    ///     write ordering between two extensions at all. See the property's
+    ///     own doc.
     public init(
         workspaceRoots: ExtensionWorkspaceRoots?,
         notImplementedLedger: NotImplementedLedger,
         extensionIdentifier: String,
-        fileSystemService: FileSystemServicing = FileSystemService()
+        fileSystemService: FileSystemServicing
     ) {
         self.workspaceRoots = workspaceRoots
         self.notImplementedLedger = notImplementedLedger
@@ -234,7 +249,7 @@ public final class MainThreadWorkspace {
     /// see this type's own doc.
     public private(set) lazy var name: Any = ExtensionHost.LiveVSCodeValue { [weak self] context in
         guard let displayName = self?.workspaceRoots?.workspaceDisplayName else {
-            return MainThreadWorkspace.undefinedValue(in: context)
+            return JSValueBridge.undefinedOrNull(in: context)
         }
         return displayName
     }
@@ -249,9 +264,9 @@ public final class MainThreadWorkspace {
     /// extension reads this during activation and this host activates at app
     /// launch, before any project window exists.
     public private(set) lazy var workspaceFolders: Any = ExtensionHost.LiveVSCodeValue { [weak self] context in
-        guard let self else { return MainThreadWorkspace.undefinedValue(in: context) }
+        guard let self else { return JSValueBridge.undefinedOrNull(in: context) }
         let entries = self.folderEntries(in: context)
-        guard !entries.isEmpty else { return MainThreadWorkspace.undefinedValue(in: context) }
+        guard !entries.isEmpty else { return JSValueBridge.undefinedOrNull(in: context) }
         return entries.map(\.value)
     }
 
@@ -391,7 +406,7 @@ public final class MainThreadWorkspace {
     /// while still throwing correctly — the throw and the recording are two
     /// independent things, and only wiring these closures turns both on.
     public private(set) lazy var fs: Any = ExtensionHost.DeferredVSCodeValue { [weak self] context in
-        guard let self else { return MainThreadWorkspace.undefinedValue(in: context) }
+        guard let self else { return JSValueBridge.undefinedOrNull(in: context) }
         let ledger = self.notImplementedLedger
         let identifier = self.extensionIdentifier
         let recordMiss: @convention(block) (String) -> Void = { memberPath in
@@ -445,7 +460,7 @@ public final class MainThreadWorkspace {
             path: "vscode.workspace.fs", members: members, in: context,
             recordMiss: recordMiss, recordProbe: recordProbe
         ) else {
-            return MainThreadWorkspace.undefinedValue(in: context)
+            return JSValueBridge.undefinedOrNull(in: context)
         }
         return namespaceValue
     }
@@ -457,7 +472,7 @@ public final class MainThreadWorkspace {
         let arguments = VSCodeAPI.currentArguments()
         guard let url = MainThreadWorkspace.requiredURL(from: arguments, at: 0, in: context) else {
             return VSCodeAPI.rejectedPromise(
-                message: "vscode.workspace.fs.readFile requires a vscode.Uri argument.", in: context)
+                message: "vscode.workspace.fs.readFile requires a file-scheme vscode.Uri argument.", in: context)
         }
         let path = url.path
         let service = fileSystemService
@@ -476,7 +491,7 @@ public final class MainThreadWorkspace {
         let arguments = VSCodeAPI.currentArguments()
         guard let url = MainThreadWorkspace.requiredURL(from: arguments, at: 0, in: context) else {
             return VSCodeAPI.rejectedPromise(
-                message: "vscode.workspace.fs.writeFile requires a vscode.Uri argument.", in: context)
+                message: "vscode.workspace.fs.writeFile requires a file-scheme vscode.Uri argument.", in: context)
         }
         guard arguments.count > 1, let data = MainThreadWorkspace.data(fromUint8Array: arguments[1]) else {
             return VSCodeAPI.rejectedPromise(
@@ -486,7 +501,7 @@ public final class MainThreadWorkspace {
         let service = fileSystemService
         return runFileSystemOperation(path: "vscode.workspace.fs.writeFile", in: context, {
             try await service.writeFile(atPath: path, contents: data, create: true, overwrite: true)
-        }, resolveWith: { _, context in MainThreadWorkspace.undefinedValue(in: context) })
+        }, resolveWith: { _, context in JSValueBridge.undefinedOrNull(in: context) })
     }
 
     /// `readDirectory(uri): Thenable<[string, FileType][]>` — an array of
@@ -497,7 +512,7 @@ public final class MainThreadWorkspace {
         let arguments = VSCodeAPI.currentArguments()
         guard let url = MainThreadWorkspace.requiredURL(from: arguments, at: 0, in: context) else {
             return VSCodeAPI.rejectedPromise(
-                message: "vscode.workspace.fs.readDirectory requires a vscode.Uri argument.", in: context)
+                message: "vscode.workspace.fs.readDirectory requires a file-scheme vscode.Uri argument.", in: context)
         }
         let path = url.path
         let service = fileSystemService
@@ -519,7 +534,7 @@ public final class MainThreadWorkspace {
         let arguments = VSCodeAPI.currentArguments()
         guard let url = MainThreadWorkspace.requiredURL(from: arguments, at: 0, in: context) else {
             return VSCodeAPI.rejectedPromise(
-                message: "vscode.workspace.fs.stat requires a vscode.Uri argument.", in: context)
+                message: "vscode.workspace.fs.stat requires a file-scheme vscode.Uri argument.", in: context)
         }
         let path = url.path
         let service = fileSystemService
@@ -540,7 +555,7 @@ public final class MainThreadWorkspace {
         let arguments = VSCodeAPI.currentArguments()
         guard let url = MainThreadWorkspace.requiredURL(from: arguments, at: 0, in: context) else {
             return VSCodeAPI.rejectedPromise(
-                message: "vscode.workspace.fs.delete requires a vscode.Uri argument.", in: context)
+                message: "vscode.workspace.fs.delete requires a file-scheme vscode.Uri argument.", in: context)
         }
         let options = arguments.count > 1 ? arguments[1] : nil
         let recursive = MainThreadWorkspace.boolOption(options, key: "recursive")
@@ -549,7 +564,7 @@ public final class MainThreadWorkspace {
         let service = fileSystemService
         return runFileSystemOperation(path: "vscode.workspace.fs.delete", in: context, {
             try await service.delete(atPath: path, recursive: recursive, useTrash: useTrash)
-        }, resolveWith: { _, context in MainThreadWorkspace.undefinedValue(in: context) })
+        }, resolveWith: { _, context in JSValueBridge.undefinedOrNull(in: context) })
     }
 
     /// `rename(source, target, options?): Thenable<void>`. `overwrite`
@@ -560,7 +575,7 @@ public final class MainThreadWorkspace {
         guard let fromURL = MainThreadWorkspace.requiredURL(from: arguments, at: 0, in: context),
               let toURL = MainThreadWorkspace.requiredURL(from: arguments, at: 1, in: context) else {
             return VSCodeAPI.rejectedPromise(
-                message: "vscode.workspace.fs.rename requires two vscode.Uri arguments.", in: context)
+                message: "vscode.workspace.fs.rename requires two file-scheme vscode.Uri arguments.", in: context)
         }
         let options = arguments.count > 2 ? arguments[2] : nil
         let overwrite = options?.forProperty("overwrite")?.toBool() ?? false
@@ -569,7 +584,7 @@ public final class MainThreadWorkspace {
         let service = fileSystemService
         return runFileSystemOperation(path: "vscode.workspace.fs.rename", in: context, {
             try await service.rename(fromPath: fromPath, toPath: toPath, overwrite: overwrite)
-        }, resolveWith: { _, context in MainThreadWorkspace.undefinedValue(in: context) })
+        }, resolveWith: { _, context in JSValueBridge.undefinedOrNull(in: context) })
     }
 
     /// `createDirectory(uri): Thenable<void>`.
@@ -578,13 +593,13 @@ public final class MainThreadWorkspace {
         let arguments = VSCodeAPI.currentArguments()
         guard let url = MainThreadWorkspace.requiredURL(from: arguments, at: 0, in: context) else {
             return VSCodeAPI.rejectedPromise(
-                message: "vscode.workspace.fs.createDirectory requires a vscode.Uri argument.", in: context)
+                message: "vscode.workspace.fs.createDirectory requires a file-scheme vscode.Uri argument.", in: context)
         }
         let path = url.path
         let service = fileSystemService
         return runFileSystemOperation(path: "vscode.workspace.fs.createDirectory", in: context, {
             try await service.createDirectory(atPath: path)
-        }, resolveWith: { _, context in MainThreadWorkspace.undefinedValue(in: context) })
+        }, resolveWith: { _, context in JSValueBridge.undefinedOrNull(in: context) })
     }
 
     // MARK: - The promise bridge
@@ -631,19 +646,19 @@ public final class MainThreadWorkspace {
             let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
-                    MainThreadWorkspace.rejectTornDown(settlement.reject, path: path)
+                    JSValueBridge.rejectTornDown(settlement.reject, path: path)
                     return
                 }
                 do {
                     let result = try await operation()
                     guard !self.isDisposed, let resultContext = settlement.resolve.context else {
-                        MainThreadWorkspace.rejectTornDown(settlement.reject, path: path)
+                        JSValueBridge.rejectTornDown(settlement.reject, path: path)
                         return
                     }
                     settlement.resolve.call(withArguments: [resolveWith(result, resultContext)])
                 } catch {
                     guard !self.isDisposed, let errorContext = settlement.reject.context else {
-                        MainThreadWorkspace.rejectTornDown(settlement.reject, path: path)
+                        JSValueBridge.rejectTornDown(settlement.reject, path: path)
                         return
                     }
                     settlement.reject.call(
@@ -651,19 +666,6 @@ public final class MainThreadWorkspace {
                 }
             }
         }
-    }
-
-    /// Rejects `reject` with the same wording `VSCodeAPI.member`'s own
-    /// teardown path uses, so an extension's `catch` sees one consistent
-    /// message for "this adaptor is gone" everywhere it can happen.
-    private static func rejectTornDown(_ reject: JSValue, path: String) {
-        guard let context = reject.context,
-              let errorValue = JSValue(
-                newErrorFromMessage: "\(path) is unavailable: this extension's host has been torn down.",
-                in: context) else {
-            return
-        }
-        reject.call(withArguments: [errorValue])
     }
 
     // MARK: - Error mapping
@@ -683,7 +685,7 @@ public final class MainThreadWorkspace {
             code = nil
         }
         guard let errorValue = JSValue(newErrorFromMessage: message, in: context) else {
-            return MainThreadWorkspace.undefinedValue(in: context)
+            return JSValueBridge.undefinedOrNull(in: context)
         }
         if let code {
             errorValue.setObject(code, forKeyedSubscript: "code" as NSString)
@@ -732,17 +734,6 @@ public final class MainThreadWorkspace {
 
     // MARK: - Bridging helpers
 
-    /// A genuine JavaScript `undefined`, built from whatever context is live
-    /// at the call site. Falls back to `NSNull` — JavaScript `null` — only if
-    /// `JSValue(undefinedIn:)` itself fails to answer, which nothing observed
-    /// while building this adaptor ever caused.
-    private static func undefinedValue(in context: JSContext) -> Any {
-        if let value = JSValue(undefinedIn: context) {
-            return value
-        }
-        return NSNull()
-    }
-
     /// `Data` to a genuine JavaScript `Uint8Array`, through JavaScriptCore's
     /// own typed-array C entry point.
     ///
@@ -785,7 +776,7 @@ public final class MainThreadWorkspace {
             &exception)
         guard let object, exception == nil, let value = JSValue(jsValueRef: object, in: context) else {
             bytes.deallocate()
-            return undefinedValue(in: context)
+            return JSValueBridge.undefinedOrNull(in: context)
         }
         return value
     }
@@ -847,7 +838,7 @@ public final class MainThreadWorkspace {
 
     /// `stat`'s `{type, ctime, mtime, size}` object.
     private static func statValue(for stat: FileSystemService.FileStat, in context: JSContext) -> Any {
-        guard let object = JSValue(newObjectIn: context) else { return undefinedValue(in: context) }
+        guard let object = JSValue(newObjectIn: context) else { return JSValueBridge.undefinedOrNull(in: context) }
         object.setObject(stat.type.rawValue, forKeyedSubscript: "type" as NSString)
         object.setObject(millisecondsSinceEpoch(stat.creationDate), forKeyedSubscript: "ctime" as NSString)
         object.setObject(millisecondsSinceEpoch(stat.modificationDate), forKeyedSubscript: "mtime" as NSString)
@@ -864,11 +855,39 @@ public final class MainThreadWorkspace {
     }
 
     /// `arguments[index]`, converted to a `URL` via `VSCodeAPI.url(from:in:)`,
-    /// or `nil` if the index is out of range or the value is not a
-    /// `vscode.Uri`.
+    /// or `nil` if the index is out of range, the value is not a
+    /// `vscode.Uri`, or the URI does not carry the `file:` scheme.
+    ///
+    /// **The scheme check is a security boundary, not a tidiness rule.**
+    /// `VSCodeAPI.url(from:in:)` deliberately accepts any scheme, because its
+    /// other callers need that: a diagnostic is keyed by an `untitled:` URI
+    /// before the document is saved, and a `DiagnosticRelatedInformation`
+    /// target is legitimately an `https:` documentation link. Every member
+    /// reached through *this* helper, by contrast, ends in
+    /// `FileSystemService`, which is handed `url.path` and reads or writes
+    /// that path on disk with no scheme of its own to check against.
+    ///
+    /// Without this guard `URL(string:)` happily parses
+    /// `https://attacker.example/etc/passwd`, whose `.path` is `/etc/passwd`,
+    /// so `fs.readFile('https://attacker.example/etc/passwd')` reads the local
+    /// file and hands its bytes back to extension JavaScript — the host's
+    /// authority, reachable from a string the extension chose. The same shape
+    /// turns `fs.delete` and `fs.writeFile` into arbitrary local writes. The
+    /// check belongs here rather than in `url(from:in:)` because this is the
+    /// narrowest point that every filesystem member passes through and no
+    /// non-filesystem caller does.
+    ///
+    /// `isFileURL` is the whole test: it is true only for an absolute URL
+    /// whose scheme is `file`, so a scheme-relative string (`/tmp/x`, which
+    /// `URL(string:)` parses with a `nil` scheme) is refused too. VS Code's
+    /// own `workspace.fs` surface takes a `Uri` and never a string, so
+    /// nothing legitimate is lost.
     private static func requiredURL(from arguments: [JSValue], at index: Int, in context: JSContext) -> URL? {
         guard arguments.indices.contains(index) else { return nil }
-        return VSCodeAPI.url(from: arguments[index], in: context)
+        guard let url = VSCodeAPI.url(from: arguments[index], in: context), url.isFileURL else {
+            return nil
+        }
+        return url
     }
 
     /// `options?.<key>` as a `Bool`, defaulting `false` when `options` is

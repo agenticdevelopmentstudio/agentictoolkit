@@ -354,6 +354,26 @@ extension VSCodeAPI {
                 return new Position(line, character);
             };
 
+            // Not declared in `vscode.d.ts` — see this file's header for the
+            // declared-surface-only boundary that leaves
+            // `Location.prototype.toJSON` unimplemented for the identical
+            // reason. This one is added anyway, because `JSON.stringify`
+            // only ever walks an object's OWN enumerable properties, never
+            // the prototype chain: the `line`/`character` getters
+            // `definePositionReadOnly` installs above live on
+            // `Position.prototype`, not on the instance, so without this,
+            // `JSON.stringify(position)` would serialize this instance's own
+            // `_line`/`_character` backing fields — the frozen-immutability
+            // implementation detail this file's header describes — instead
+            // of the `{ line, character }` shape upstream's own
+            // `position.ts:186-188` documents and real VS Code produces.
+            // `Location` has no equivalent gap: its `uri`/`range` are plain
+            // own properties (see the `Location` section below), so they
+            // already serialize correctly with no override.
+            Position.prototype.toJSON = function () {
+                return { line: this.line, character: this.character };
+            };
+
             // vscode.d.ts:408-513. Two readonly properties (413, 418), two
             // constructor overloads (427, 438), two computed properties
             // (`isEmpty` :443, `isSingleLine` :448) and five methods in six
@@ -522,6 +542,19 @@ extension VSCodeAPI {
                     return this;
                 }
                 return new Range(start, end);
+            };
+
+            // Same not-declared-in-`vscode.d.ts` caveat as
+            // `Position.prototype.toJSON` above, and the identical reason:
+            // without it, `JSON.stringify(range)` would walk this instance's
+            // own `_start`/`_end` backing fields instead of the shape
+            // upstream produces. Matches upstream's own shape exactly
+            // (`range.ts:152-154`): an array of the two positions, not an
+            // object with `start`/`end` keys — `JSON.stringify` then
+            // recurses into each `Position`'s own `toJSON` for its two
+            // elements.
+            Range.prototype.toJSON = function () {
+                return [this.start, this.end];
             };
 
             // vscode.d.ts:6960-6979 (task 5.6a-ii). Built here, not in
@@ -733,11 +766,25 @@ extension VSCodeAPI {
               value.isInstance(of: positionClass) else {
             return nil
         }
+        // `Int32(exactly:)`, not `toInt32()` — `VSCodeAPI.swift:151-159` and
+        // `MainThreadLanguageModels.swift:864-870` document why: `toInt32()`
+        // is ECMAScript `ToInt32`, which wraps modulo 2³² and truncates
+        // fractions, so `Number.MAX_VALUE` reads as `0` and `2147483648`
+        // reads as `-2147483648`. A genuinely frozen `Position` can only
+        // ever hold what its own constructor accepted, but an object that is
+        // merely `instanceof Position` — the lazy-adoption window this
+        // file's header and `installTextGeometryClasses(in:)`'s own doc both
+        // name — is not bound by that, so this reads `line`/`character`
+        // through the same exactness check as every other numeric crossing
+        // in this bridge, rejecting anything not exactly representable
+        // rather than silently wrapping it.
         guard let lineValue = value.forProperty("line"), lineValue.isNumber,
-              let characterValue = value.forProperty("character"), characterValue.isNumber else {
+              let line = Int32(exactly: lineValue.toDouble()),
+              let characterValue = value.forProperty("character"), characterValue.isNumber,
+              let character = Int32(exactly: characterValue.toDouble()) else {
             return nil
         }
-        return ExtensionPosition(line: Int(lineValue.toInt32()), character: Int(characterValue.toInt32()))
+        return ExtensionPosition(line: Int(line), character: Int(character))
     }
 
     /// Reads an `ExtensionRange` out of a JavaScript value that is a real
@@ -779,6 +826,17 @@ extension VSCodeAPI {
         }
         guard let result = positionClass.construct(withArguments: [position.line, position.character]),
               !result.isUndefined, !result.isNull else {
+            // A throwing `Position` constructor — a negative `line`/
+            // `character`, per this file's header — leaves `context.exception`
+            // armed exactly the way `VSCodeAPI.raise(_:in:)`'s own doc
+            // describes for a `@convention(block)` closure
+            // (`VSCodeAPI.swift:187-215`); `JSValue.construct(withArguments:)`
+            // shares that mechanic. This function's contract is to swallow a
+            // construction failure and answer `nil`, not to raise, so the
+            // armed exception must be cleared here — left set, it would still
+            // be sitting on `context` for the extension's NEXT, unrelated
+            // call to trip over.
+            context.exception = nil
             return nil
         }
         return result
@@ -809,6 +867,12 @@ extension VSCodeAPI {
         }
         guard let result = rangeClass.construct(withArguments: [startValue, endValue]),
               !result.isUndefined, !result.isNull else {
+            // Same swallowed-throw hazard `positionValue(for:in:)` above
+            // documents, for the same reason: a throwing `Range` constructor
+            // leaves `context.exception` armed, and this function answers
+            // `nil` rather than raising, so it must clear that exception
+            // itself or leave it for the extension's next, unrelated call.
+            context.exception = nil
             return nil
         }
         return result
@@ -868,6 +932,9 @@ extension VSCodeAPI {
         }
         guard let result = locationClass.construct(withArguments: [uriJSValue, rangeJSValue]),
               !result.isUndefined, !result.isNull else {
+            // Same swallowed-throw hazard `positionValue(for:in:)` and
+            // `rangeValue(for:in:)` above document, for the same reason.
+            context.exception = nil
             return nil
         }
         return result

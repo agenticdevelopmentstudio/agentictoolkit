@@ -3,797 +3,10 @@
 //  AgenticToolkit
 //
 
-import AppKit
 import Foundation
 import JavaScriptCore
 import OSLog
 import AgenticToolkitCore
-
-// MARK: - The presentation seam
-
-/// How urgently a `vscode.window.show*Message` call wants to be noticed.
-public enum ExtensionMessageSeverity: Sendable, Equatable {
-    case information, warning, error
-}
-
-/// One `vscode.window.show*Message` call, reduced to what a presenter needs
-/// to show something and report back which button — if any — the user chose.
-public struct ExtensionMessageRequest: Sendable {
-    public let severity: ExtensionMessageSeverity
-    public let message: String
-    public let detail: String?
-    public let isModal: Bool
-    public let itemTitles: [String]
-
-    /// Every index into `itemTitles` whose item carried a truthy
-    /// `isCloseAffordance`, in item order — empty when none did. VS Code's
-    /// rule for which item, if any, *is* the dismissal rather than one more
-    /// button next to an implicit Cancel.
-    ///
-    /// A list rather than one index, because upstream keeps the flag on
-    /// **every** item that set it. `extHostMessageService.ts` logs
-    /// `Only one message item can have 'isCloseAffordance'` for the second
-    /// and later ones but still pushes `isCloseAffordance: !!isCloseAffordance`
-    /// for each, and `mainThreadMessageService.ts` then routes every flagged
-    /// command to `cancelButton = button` — so each one is kept out of the
-    /// ordinary button list and the **last** overwrites the cancel slot.
-    /// Modelling only the first made a second flagged item render as an
-    /// ordinary button, which upstream never does. See
-    /// `NSAlertMessagePresenter.presentMessage(_:)` for what a presenter does
-    /// with this.
-    public let closeAffordanceIndices: [Int]
-}
-
-/// What `MainThreadWindow` depends on instead of AppKit directly, so the
-/// adaptor's argument parsing and promise settlement are testable with no UI
-/// — the same move `FileSystemServicing` made for `MainThreadWorkspace`'s
-/// `fs`, and the same placement `ExtensionWorkspaceRoots` uses: declared
-/// beside the one consumer that needs it, in the same file, rather than
-/// anticipating a tier split before a second conformer exists.
-///
-/// `@MainActor`, matching every protocol and class in this directory:
-/// nothing here is ever read off the main actor.
-@MainActor
-public protocol ExtensionMessagePresenting: AnyObject {
-
-    /// The index into `request.itemTitles` of the button the user chose, or
-    /// `nil` if they dismissed it. Always `nil` when `itemTitles` is empty.
-    func presentMessage(_ request: ExtensionMessageRequest) async -> Int?
-}
-
-/// One item of a `vscode.window.showQuickPick` call, reduced to what a
-/// presenter needs to render a row and report which rows the user chose.
-///
-/// **`iconPath`, `resourceUri` and `buttons` are deliberately not carried,**
-/// and that is a decision rather than an omission. `buttons` because the
-/// declaration says they are not rendered by this API at all — "Buttons are
-/// only rendered when using a quick pick created by the
-/// {@link window.createQuickPick createQuickPick} API. Buttons are not
-/// rendered when using the {@link window.showQuickPick showQuickPick} API"
-/// (`vscode.d.ts:1979-1981`). `iconPath` and `resourceUri` because nothing in
-/// this repo resolves an extension-supplied icon path to an image, and a
-/// field that is always dropped is worse than an absent one: it reads to the
-/// next person as a capability that exists.
-public struct ExtensionQuickPickItem: Sendable, Equatable {
-
-    /// The row's text. The only property `QuickPickItem` declares
-    /// non-optional (`vscode.d.ts:1907`), and the only one that applies to a
-    /// separator.
-    public let label: String
-
-    /// Rendered less prominently on the same line (`vscode.d.ts:1929`), or
-    /// `nil` when the item carried none — or carried one that was not a
-    /// string, which is omitted rather than rejected, on the same terms
-    /// `handleShowMessage` omits an unusable `detail`.
-    public let description: String?
-
-    /// Rendered less prominently on a separate line (`vscode.d.ts:1939`), or
-    /// `nil` on the same terms as `description`.
-    public let detail: String?
-
-    /// The item's `kind` was `QuickPickItemKind.Separator` — the number `-1`
-    /// (`vscode.d.ts:1886`) — so it is a visual grouping rather than a
-    /// selectable row.
-    ///
-    /// Every other property of a separator is left at its default here,
-    /// because the declaration says so: "The only property that applies is
-    /// {@link QuickPickItem.label label}. All other properties on
-    /// {@link QuickPickItem} will be ignored and have no effect"
-    /// (`vscode.d.ts:1881-1884`).
-    public let isSeparator: Bool
-
-    /// The item carried a truthy `picked` (`vscode.d.ts:1966`): it should
-    /// start out selected.
-    ///
-    /// **Carried truthfully whatever `canPickMany` says.** The declaration's
-    /// rule — "This is only honored when the picker allows multiple
-    /// selections" (`vscode.d.ts:1959`) — is the presenter's to apply, not
-    /// the parser's. A parser that zeroed this out would leave the presenter
-    /// unable to tell "the extension did not ask for this row" from "the
-    /// extension asked and something upstream discarded it".
-    public let isPicked: Bool
-
-    /// The item carried a truthy `alwaysShow` (`vscode.d.ts:1974`): keep the
-    /// row visible even when the user's filter text would exclude it.
-    ///
-    /// `MainThreadWindow` puts it on the request and stops there — filtering
-    /// is the panel's job, and `ExtensionQuickPickModel.matches(_:filter:)`
-    /// is where this flag is actually honoured.
-    public let alwaysShow: Bool
-
-    /// Spelled out rather than synthesised: this type is `public`, so the
-    /// memberwise initialiser would be `internal` and a test in another
-    /// module could not call it.
-    public init(
-        label: String,
-        description: String?,
-        detail: String?,
-        isSeparator: Bool,
-        isPicked: Bool,
-        alwaysShow: Bool
-    ) {
-        self.label = label
-        self.description = description
-        self.detail = detail
-        self.isSeparator = isSeparator
-        self.isPicked = isPicked
-        self.alwaysShow = alwaysShow
-    }
-}
-
-/// One `vscode.window.showQuickPick` call, reduced to what a presenter needs
-/// to show a picker and report back which rows — if any — the user chose.
-public struct ExtensionQuickPickRequest: Sendable, Equatable {
-
-    /// `QuickPickOptions.title` (`vscode.d.ts:1997`), or `nil`.
-    public let title: String?
-
-    /// `QuickPickOptions.placeHolder` (`vscode.d.ts:2012`) — placeholder text
-    /// for the filter field — or `nil`.
-    public let placeHolder: String?
-
-    /// `QuickPickOptions.prompt` (`vscode.d.ts:2019`), or `nil`.
-    ///
-    /// **Carried, and read by nothing this task builds.** The declaration
-    /// says it is "displayed below the input box and above the list of items"
-    /// (`vscode.d.ts:2017`) and upstream forwards it to the renderer as one
-    /// more field of the `$show` payload (`extHostQuickOpen.ts:72`); what a
-    /// renderer does with it is the renderer's business, and this host has no
-    /// renderer for it. The field records what the extension asked for.
-    public let prompt: String?
-
-    /// The items, in the order the extension supplied them — separators
-    /// included, at their own positions. Indices into this array are the
-    /// whole vocabulary `ExtensionQuickPickPresenting` answers in.
-    public let items: [ExtensionQuickPickItem]
-
-    /// `QuickPickOptions.canPickMany` (`vscode.d.ts:2030`): the user may
-    /// accept more than one row, and "the result is an array of picks".
-    public let canPickMany: Bool
-
-    /// `QuickPickOptions.matchOnDescription` (`vscode.d.ts:2002`): include
-    /// each item's `description` when filtering. Documented default `false`.
-    public let matchOnDescription: Bool
-
-    /// `QuickPickOptions.matchOnDetail` (`vscode.d.ts:2007`): include each
-    /// item's `detail` when filtering. Documented default `false`.
-    public let matchOnDetail: Bool
-
-    /// `QuickPickOptions.ignoreFocusOut` (`vscode.d.ts:2025`): keep the
-    /// picker open when focus moves elsewhere.
-    public let ignoreFocusOut: Bool
-
-    /// Spelled out for `ExtensionQuickPickItem.init`'s reason: a `public`
-    /// type's synthesised memberwise initialiser is `internal`, and this
-    /// one's callers include a test module.
-    public init(
-        title: String?,
-        placeHolder: String?,
-        prompt: String?,
-        items: [ExtensionQuickPickItem],
-        canPickMany: Bool,
-        matchOnDescription: Bool,
-        matchOnDetail: Bool,
-        ignoreFocusOut: Bool
-    ) {
-        self.title = title
-        self.placeHolder = placeHolder
-        self.prompt = prompt
-        self.items = items
-        self.canPickMany = canPickMany
-        self.matchOnDescription = matchOnDescription
-        self.matchOnDetail = matchOnDetail
-        self.ignoreFocusOut = ignoreFocusOut
-    }
-}
-
-/// How urgently a `vscode.window.showInputBox` validation message wants to be
-/// noticed — `InputBoxValidationSeverity` (`vscode.d.ts:2194-2207`, measured
-/// against commit `3addbda6`): `Info = 1` (`:2198`), `Warning = 2` (`:2202`),
-/// `Error = 3` (`:2206`).
-///
-/// `case information`, not `.info` — matching this file's own
-/// `ExtensionMessageSeverity` spelling rather than the declaration's member
-/// name, for the same reason that type already made: a Swift enum case name
-/// is this codebase's word, not a transcription of upstream's.
-///
-/// **No `.ignore` case.** `Severity.Ignore` exists on upstream's internal
-/// `$validateInput` bridge (`extHostQuickOpen.ts:187-189`) for a validation
-/// result whose `severity` matched none of the three and whose `message` was
-/// also empty — upstream's way of saying "nothing to show." This type has no
-/// member for that because `inputValidation(from:)` below answers `nil` for
-/// that same case instead: a severity is only ever attached to a message that
-/// exists, so "nothing to show" is the absence of an `ExtensionInputValidation`
-/// altogether, not a fourth severity.
-public enum ExtensionInputValidationSeverity: Sendable, Equatable {
-    case information, warning, error
-}
-
-/// One validation result from a `vscode.window.showInputBox` call's
-/// `validateInput`, reduced to what a presenter needs to show a message and
-/// decide whether to keep accepting the current value.
-///
-/// `InputBoxValidationMessage` (`vscode.d.ts:2212-2225`, measured against
-/// commit `3addbda6`). **A presenter must not accept a value whose most
-/// recent validation carried `.error`:** "When using
-/// {@link InputBoxValidationSeverity.Error}, the user will not be able to
-/// accept the input (e.g., by pressing Enter)" (`vscode.d.ts:2221-2223`).
-/// Enforcing that belongs to whatever type builds an `NSTextField` around
-/// this — task 5.5b-iv — not to this type or to `MainThreadWindow`, which
-/// only carries the presenter's answer back to the extension.
-public struct ExtensionInputValidation: Sendable, Equatable {
-    public let message: String
-    public let severity: ExtensionInputValidationSeverity
-
-    /// Spelled out rather than synthesised, for `ExtensionQuickPickItem.init`'s
-    /// reason: a `public` type's memberwise initialiser is `internal`, and
-    /// this one's callers include a test module.
-    public init(message: String, severity: ExtensionInputValidationSeverity) {
-        self.message = message
-        self.severity = severity
-    }
-}
-
-/// One `vscode.window.showInputBox` call, reduced to what a presenter needs
-/// to show a text field and report back the value the user accepted.
-///
-/// `InputBoxOptions` (`vscode.d.ts:2231-2282`, measured against commit
-/// `3addbda6`).
-public struct ExtensionInputBoxRequest: Sendable, Equatable {
-
-    /// `InputBoxOptions.title` (`vscode.d.ts:2236`), or `nil`.
-    public let title: String?
-
-    /// `InputBoxOptions.prompt` (`vscode.d.ts:2251-2254`) — "The text to
-    /// display underneath the input box" — or `nil`.
-    public let prompt: String?
-
-    /// `InputBoxOptions.placeHolder` (`vscode.d.ts:2259`), or `nil`.
-    public let placeHolder: String?
-
-    /// `InputBoxOptions.value` (`vscode.d.ts:2241`): the value to pre-fill.
-    /// **Non-optional, defaulting to `""`** — every consumer of this request
-    /// seeds a text field with a `String`, never an `Optional` to unwrap
-    /// first, and `""` is the spelling that means "an empty box."
-    public let value: String
-
-    /// `InputBoxOptions.valueSelection` (`vscode.d.ts:2243-2249`): "Defined as
-    /// tuple of two number where the first is the inclusive start index and
-    /// the second the exclusive end index." `nil` means "the whole
-    /// pre-filled value will be selected"; an empty range (`start == end`)
-    /// means "only the cursor will be set" — both the declaration's own
-    /// words, and both left to the presenter to act on, since carrying them
-    /// as anything but this range would force this type to guess what
-    /// `value.count` is going to be by the time a presenter reads it.
-    ///
-    /// A `Range<Int>`, not the declaration's tuple: parsing rejects a pair
-    /// this type could not otherwise represent — reversed, negative, or past
-    /// `value`'s end — rather than trapping when a presenter eventually tried
-    /// to build a `Range` from a raw tuple. See `parseValueSelection(from:valueLength:)`.
-    public let valueSelection: Range<Int>?
-
-    /// `InputBoxOptions.password` (`vscode.d.ts:2261-2264`): "Controls if a
-    /// password input is shown."
-    public let isPassword: Bool
-
-    /// `InputBoxOptions.ignoreFocusOut` (`vscode.d.ts:2270`).
-    public let ignoreFocusOut: Bool
-
-    /// Whether this call carried a `validateInput` function at all.
-    ///
-    /// A separate stored field rather than something a presenter derives
-    /// from the `validate` closure `ExtensionInputBoxPresenting` hands it
-    /// alongside this request — the two are separate parameters precisely so
-    /// a presenter can decide whether to call `validate` at all without
-    /// having to invoke it once to find out, on the same terms upstream's
-    /// own `typeof this._validateInput === 'function'`
-    /// (`extHostQuickOpen.ts:156`) is computed once and threaded through
-    /// rather than re-derived from the function reference each time.
-    public let isValidating: Bool
-
-    /// Spelled out for `ExtensionQuickPickItem.init`'s reason: a `public`
-    /// type's synthesised memberwise initialiser is `internal`, and this
-    /// one's callers include a test module.
-    public init(
-        title: String?,
-        prompt: String?,
-        placeHolder: String?,
-        value: String,
-        valueSelection: Range<Int>?,
-        isPassword: Bool,
-        ignoreFocusOut: Bool,
-        isValidating: Bool
-    ) {
-        self.title = title
-        self.prompt = prompt
-        self.placeHolder = placeHolder
-        self.value = value
-        self.valueSelection = valueSelection
-        self.isPassword = isPassword
-        self.ignoreFocusOut = ignoreFocusOut
-        self.isValidating = isValidating
-    }
-}
-
-/// Where a `vscode.window.showQuickPick` call actually puts a picker on
-/// screen (or, in a test, records what it was asked to show).
-///
-/// **A separate protocol from `ExtensionMessagePresenting`, deliberately.**
-/// `NSAlertMessagePresenter` below is the right conformer for a message and
-/// the wrong one for a picker; one protocol carrying both members would force
-/// it to implement a presentation it has no business showing. Interface
-/// segregation, and the cost is that `MainThreadWindow.init` takes two
-/// presenters rather than one.
-///
-/// Declared in this file rather than a new one, and beside its one consumer
-/// rather than in a lower tier — the placement `ExtensionMessagePresenting`
-/// above already uses, and `ExtensionWorkspaceRoots`
-/// (`MainThreadWorkspace.swift:28`) before it: no tier split before a second
-/// consumer exists.
-///
-/// `ExtensionPickerPresenter` is the production conformer, and it conforms to
-/// `ExtensionInputBoxPresenting` as well — one panel serving both seams, which
-/// is why neither was designed without the other in view.
-///
-/// `@MainActor`, matching every protocol and class in this directory.
-@MainActor
-public protocol ExtensionQuickPickPresenting: AnyObject {
-
-    /// Shows `request` and answers **indices into `request.items`**.
-    ///
-    /// Indices, never labels. VS Code resolves `showQuickPick` with the
-    /// original value the caller passed — `items[handle]` for single select,
-    /// `handle.map(h => items[h])` for multi (`extHostQuickOpen.ts:125-131`)
-    /// — so two items sharing a label have to stay distinguishable, and only
-    /// a position distinguishes them.
-    ///
-    /// **`nil` means dismissed. An empty array does not.** With
-    /// `request.canPickMany` a user can accept a selection of nothing, and
-    /// upstream's `handle.map(…)` of an empty handle array resolves `[]`
-    /// rather than `undefined` (`extHostQuickOpen.ts:128-129`). A conformer
-    /// that answers `[]` for a dismissal tells the extension the user
-    /// accepted an empty selection, which is a different answer.
-    ///
-    /// Single select answers a **one-element array**, not a bare `Int`: one
-    /// return type for both modes, because `canPickMany` is a field of the
-    /// request every conformer already reads, and two overloads would make
-    /// each conformer spell the dismissal rule twice.
-    ///
-    /// - Parameters:
-    ///   - request: What to show.
-    ///   - onHighlight: Called with an index into `request.items` each time
-    ///     the highlighted row changes. This is what VS Code's
-    ///     `QuickPickOptions.onDidSelectItem` (`vscode.d.ts:2035`) is built
-    ///     on, and upstream fires it from the widget's `onDidFocus`
-    ///     (`mainThreadQuickOpen.ts:63-67`) rather than on acceptance. It may
-    ///     be called any number of times, including zero, and must not be
-    ///     called after `presentQuickPick` has returned.
-    /// - Returns: The chosen indices, in the order the selection should be
-    ///   reported to the extension, or `nil` if the picker was dismissed.
-    func presentQuickPick(
-        _ request: ExtensionQuickPickRequest,
-        onHighlight: @escaping (Int) -> Void
-    ) async -> [Int]?
-}
-
-/// Where a `vscode.window.showInputBox` call actually puts a text field on
-/// screen (or, in a test, records what it was asked to show).
-///
-/// A third presenter rather than a member added to `ExtensionMessagePresenting`
-/// or `ExtensionQuickPickPresenting` — see `ExtensionQuickPickPresenting`'s
-/// own doc for the interface-segregation reasoning that already governs this
-/// adaptor's other seam.
-///
-/// `ExtensionPickerPresenter` is the production conformer, serving this seam
-/// and `ExtensionQuickPickPresenting` both.
-///
-/// `@MainActor`, matching every protocol and class in this directory.
-@MainActor
-public protocol ExtensionInputBoxPresenting: AnyObject {
-
-    /// Shows `request` and answers the value the user accepted.
-    ///
-    /// **`nil` means dismissed. An empty string does not** — the user can
-    /// accept an empty value, and that is a different answer from never
-    /// answering at all, on the same terms `ExtensionQuickPickPresenting`
-    /// draws between a dismissal and an accepted empty selection.
-    ///
-    /// - Parameters:
-    ///   - request: What to show.
-    ///   - validate: Runs `request`'s `validateInput`, if it has one, against
-    ///     a candidate value, and answers `nil` for "valid" — following
-    ///     `InputBoxOptions.validateInput`'s own contract: "Return
-    ///     `undefined`, `null`, or the empty string when 'value' is valid"
-    ///     (`vscode.d.ts:2278`, measured against commit `3addbda6`). **A
-    ///     conformer must not accept a value whose most recent call to
-    ///     `validate` answered `.error` severity** —
-    ///     `InputBoxValidationMessage`'s own doc: "the user will not be able
-    ///     to accept the input (e.g., by pressing Enter)" for that severity
-    ///     (`vscode.d.ts:2221-2223`). When `request.isValidating` is `false`,
-    ///     `validate` always answers `nil`, and a conformer has no reason to
-    ///     call it — but it is not made optional, so every conformer handles
-    ///     one shape rather than two.
-    /// - Returns: The accepted value, or `nil` if dismissed.
-    func presentInputBox(
-        _ request: ExtensionInputBoxRequest,
-        validate: @escaping (String) async -> ExtensionInputValidation?
-    ) async -> String?
-}
-
-/// `vscode.window.StatusBarAlignment` (`vscode.d.ts:7545-7556`, measured
-/// against pinned upstream `3addbda6`): `Left = 1`, `Right = 2`. Lowercased
-/// cases, matching `ExtensionMessageSeverity` (`:15-17` above) — the raw JS
-/// numbers map onto these cases at the boundary
-/// (`MainThreadWindow.statusBarAlignmentMembers` and `parseAlignment(_:)`)
-/// and nowhere else.
-public enum ExtensionStatusBarAlignment: Sendable, Equatable {
-    case left, right
-}
-
-/// One `vscode.window.createStatusBarItem` object, reduced to what a
-/// presenter needs to render it — everything Ruling 5 of task 5.5c's brief
-/// says this host carries by value, and nothing it routes to
-/// `NotImplementedLedger` instead.
-///
-/// `color` and `backgroundColor` are always the flat `id` string here, never
-/// the shape the extension actually wrote: `vscode.d.ts:7605-7608` types
-/// `color` as `string | ThemeColor | undefined` and `:7610-7622` types
-/// `backgroundColor` as `ThemeColor | undefined`, and
-/// `ExtensionStatusBarItem` (the model class inside `MainThreadWindow`)
-/// is what remembers which of the two it was, so it can hand the *getter*
-/// back the right shape. A presenter that renders a colour only ever needs
-/// the id, never the original `JSValue`-shaped shell around it.
-///
-/// Sendable and a plain value type on purpose: a presenter may hop off the
-/// main actor to lay out a view before touching AppKit again, and this is
-/// the snapshot it carries across that hop — the same reason
-/// `ExtensionQuickPickRequest` and `ExtensionInputBoxRequest` are structs
-/// and not references to the live model.
-public struct ExtensionStatusBarItemRequest: Sendable, Equatable {
-
-    /// The key this item is put under, and the key `removeStatusBarItem`
-    /// must be called with to remove the same item. Never shown to the
-    /// extension — see `ExtensionStatusBarItem.internalID`'s own doc for how
-    /// it differs from `id` below.
-    public let internalID: String
-
-    /// `StatusBarItem.id` (`vscode.d.ts:7564-7570`): the caller's id, or —
-    /// quoting the property's own doc — "if no identifier was provided by
-    /// the [...] method, the identifier will match the [...] extension
-    /// identifier."
-    public let id: String
-
-    public let alignment: ExtensionStatusBarAlignment
-
-    /// `StatusBarItem.priority` (`vscode.d.ts:7577-7581`): `number |
-    /// undefined`. `nil` for "undefined", never coerced to `0` — see Ruling
-    /// 8 in task 5.5c's brief for why a presenter must not either.
-    public let priority: Double?
-
-    public var name: String?
-    public var text: String
-    public var tooltip: String?
-    public var color: String?
-    public var backgroundColor: String?
-    public var command: String?
-    public var accessibilityLabel: String?
-    public var accessibilityRole: String?
-
-    /// Spelled out for `ExtensionQuickPickItem.init`'s reason: a `public`
-    /// type's synthesised memberwise initialiser is `internal`, and this
-    /// one's callers include a test module.
-    public init(
-        internalID: String,
-        id: String,
-        alignment: ExtensionStatusBarAlignment,
-        priority: Double?,
-        name: String?,
-        text: String,
-        tooltip: String?,
-        color: String?,
-        backgroundColor: String?,
-        command: String?,
-        accessibilityLabel: String?,
-        accessibilityRole: String?
-    ) {
-        self.internalID = internalID
-        self.id = id
-        self.alignment = alignment
-        self.priority = priority
-        self.name = name
-        self.text = text
-        self.tooltip = tooltip
-        self.color = color
-        self.backgroundColor = backgroundColor
-        self.command = command
-        self.accessibilityLabel = accessibilityLabel
-        self.accessibilityRole = accessibilityRole
-    }
-}
-
-/// Where a `vscode.window.createStatusBarItem` object actually puts
-/// something on screen (or, in a test, records what it was asked to show).
-///
-/// **Task 5.5c builds this seam and not its view** — Ruling 1 and Ruling 2
-/// of that task's brief name the eventual home
-/// (`WindowFooterBar.trailingAccessories`, `WindowFooterBar.swift:35-46`)
-/// without building it, on the same terms `ExtensionQuickPickPresenting`
-/// above was left for 5.5b-iv to conform to.
-///
-/// **Two operations, not four.** Upstream's `ExtHostStatusBarEntry` exposes
-/// `show()`, `hide()`, a private debounced `update()`, and `dispose()`
-/// (`extHostStatusBar.ts:233`, `:238`, `:244`, `:303`), but only two of those
-/// are distinct *observable effects on a presenter*: putting an item up (or
-/// refreshing what is already up) and taking one down. `hide()` and
-/// `dispose()` both resolve to the same removal upstream — "There is no
-/// `$hideEntry`", `extHostStatusBar.ts:242`'s `this.#proxy.$disposeEntry(...)`
-/// is what `hide()` itself calls — and task 5.5c's Ruling 7 forbids
-/// replicating `update()`'s debounce, so nothing here needs a fourth verb
-/// for it either.
-///
-/// Both synchronous — nothing here awaits a user, unlike
-/// `ExtensionQuickPickPresenting.presentQuickPick`.
-///
-/// `@MainActor`, matching every protocol and class in this directory.
-@MainActor
-public protocol ExtensionStatusBarPresenting: AnyObject {
-
-    /// Puts `request` up, or refreshes it if `request.internalID` is already
-    /// up. Called once per committed change (task 5.5c's Ruling 7: no
-    /// coalescing) — never batched, and never called for an item that has not
-    /// been shown (`ExtensionStatusBarItem.isVisible`) or has been disposed.
-    func putOrUpdateStatusBarItem(_ request: ExtensionStatusBarItemRequest)
-
-    /// Takes the item keyed by `internalID` down. Safe to call for an id the
-    /// presenter never put up — `MainThreadWindow.hideStatusBarItem`'s own
-    /// doc explains why an adaptor may call this before ever calling
-    /// `putOrUpdateStatusBarItem`.
-    func removeStatusBarItem(internalID: String)
-}
-
-// MARK: - The AppKit conformer
-
-/// Presents a `vscode.window.show*Message` request with `NSAlert`.
-///
-/// **Presentation rule, decided here:** a sheet
-/// (`beginSheetModal(for:completionHandler:)`) when `window()` answers a real
-/// window, and an app-modal `runModal()` when it answers `nil`. This is a
-/// menu-bar app — having no window is the ordinary case, not the edge — so
-/// the window this presenter attaches to is read from a `() -> NSWindow?`
-/// this type is initialised with, rather than guessed at from
-/// `NSApplication.shared` or some other ambient source, and the no-window
-/// fallback is written out below rather than left to whatever `NSAlert`
-/// happens to do when handed no window at all.
-///
-/// **Hazard, stated rather than designed away:** the app-modal branch
-/// (`runModal()`) blocks the main thread until the user responds. An
-/// extension that calls `showInformationMessage` while no window is
-/// available — the ordinary case for this app — can wedge the whole app's UI
-/// until someone dismisses the alert. That is a genuine cost of giving
-/// extensions `showInformationMessage` at all, not an oversight in this
-/// conformer, and the next person changing this file needs to find it
-/// stated rather than rediscover it.
-///
-/// **`request.isModal == false` is presented modally anyway.** Real VS Code
-/// shows a non-modal message as a notification toast; this repo has no toast
-/// primitive today, and inventing one is outside this task. `isModal` is
-/// carried on `ExtensionMessageRequest` truthfully, so a later, non-modal
-/// presenter can honour it — this conformer does not, and does not pretend
-/// to.
-@MainActor
-public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
-
-    /// Where to attach a sheet, or `nil` to fall back to an app-modal alert.
-    /// Called fresh at presentation time rather than cached, so this answers
-    /// with whatever window is frontmost when the extension actually asks,
-    /// not whatever was frontmost when this presenter was constructed.
-    private let window: () -> NSWindow?
-
-    /// - Parameter window: Not defaulted, deliberately: see this type's own
-    ///   doc for why the no-window fallback must be an explicit choice a
-    ///   caller made, rather than an incidental default this initialiser
-    ///   picked for it.
-    public init(window: @escaping () -> NSWindow?) {
-        self.window = window
-    }
-
-    /// **The empty-items case (a single "OK" that resolves `nil`) is measured
-    /// against upstream, not merely assumed:** with no items at all, VS
-    /// Code's own `mainThreadMessageService.ts` shows a single **OK** that
-    /// resolves `undefined` — exactly what this implementation does.
-    public func presentMessage(_ request: ExtensionMessageRequest) async -> Int? {
-        let alert = NSAlert()
-        alert.messageText = request.message
-        if let detail = request.detail {
-            alert.informativeText = detail
-        }
-        alert.alertStyle = NSAlertMessagePresenter.alertStyle(for: request.severity)
-
-        guard !request.itemTitles.isEmpty else {
-            alert.addButton(withTitle: "OK")
-            _ = await presentedResponse(for: alert)
-            return nil
-        }
-
-        let buttonItemIndices = NSAlertMessagePresenter.addButtons(for: request, to: alert)
-        let response = await presentedResponse(for: alert)
-        let buttonIndex = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-        guard buttonItemIndices.indices.contains(buttonIndex) else { return nil }
-        return buttonItemIndices[buttonIndex]
-    }
-
-    /// The position→item mapping `addButtons(for:to:)` renders, split out as a
-    /// pure function of the request so it can be pinned without an `NSAlert`:
-    /// one entry per button, in add order, holding the item index that button
-    /// resolves to, and `nil` for the synthesized `"Cancel"`.
-    ///
-    /// **`internal`, not `private`, deliberately.** `MainThreadWindowTests`
-    /// calls this directly through `@testable import AgenticToolkitMacOS`;
-    /// tightening it to `private` compiles here and breaks that suite.
-    ///
-    /// Going through `presentMessage` instead is not a substitute for that
-    /// direct call: it indexes the plan and returns a single item index
-    /// rather than the plan itself, and it reaches that point only after
-    /// awaiting `presentedResponse(for:)`, which runs
-    /// `beginSheetModal(for:completionHandler:)` or `runModal()`.
-    ///
-    /// Entries come out in item order, **skipping every index in**
-    /// `request.closeAffordanceIndices`, then one more for the "cancel slot":
-    /// the **last** flagged item's index when there is a close affordance,
-    /// otherwise `nil`. Last wins because upstream's loop assigns
-    /// `cancelButton = button` for each flagged command in turn
-    /// (`mainThreadMessageService.ts:120-124`), so an earlier one is
-    /// overwritten and never rendered at all.
-    ///
-    /// This matches **`_showModalMessage`**'s button construction exactly
-    /// (`mainThreadMessageService.ts:110-148`), measured against upstream
-    /// itself — including the detail that the close-affordance
-    /// item is pulled **out of** the ordinary button list and put in the
-    /// cancel slot; it does not render in its own item position, so button
-    /// order and item order diverge whenever a close affordance is present.
-    /// Naming the function matters because the same file builds buttons a
-    /// second way in `_showMessage` (lines 54-108, the non-modal path), where
-    /// every command — flagged or not — becomes a primary action
-    /// (`commands.map(command => toAction(…))`, line 58) and there is no
-    /// cancel button at all. Read against *that* function the claim is false,
-    /// so a later non-modal presenter must not cite this as its precedent.
-    static func buttonPlan(for request: ExtensionMessageRequest) -> [Int?] {
-        var plan: [Int?] = []
-        let closeAffordanceIndices = Set(request.closeAffordanceIndices)
-        for index in request.itemTitles.indices where !closeAffordanceIndices.contains(index) {
-            plan.append(index)
-        }
-        // The cancel slot: the last flagged item's index, or `nil` for the
-        // synthesized `"Cancel"` when no item carries a close affordance.
-        plan.append(request.closeAffordanceIndices.last)
-        return plan
-    }
-
-    /// The position in a `buttonPlan(for:)` result that should be given
-    /// Escape explicitly — the cancel slot, `plan.count - 1` — or `nil` when
-    /// no button should be given it, which is a plan of one entry or none.
-    ///
-    /// **`internal`, not `private`, deliberately,** for the same reason as
-    /// `buttonPlan(for:)`: `MainThreadWindowTests` calls this directly
-    /// through `@testable import AgenticToolkitMacOS`, and tightening it to
-    /// `private` compiles here and breaks that suite.
-    ///
-    /// **Why one entry is the exception.** The cancel slot is always the
-    /// plan's last entry, so with two or more entries it is never the *first*
-    /// button and Escape costs nothing. With exactly one entry that slot is
-    /// also the first button, and two header facts collide: `NSAlert.h:96`,
-    /// the doc on `-addButtonWithTitle:`, gives the first button a key
-    /// equivalent of Return by default, while `NSButton.h:164` says
-    /// `keyEquivalent` is a single `NSString` — "Setting the key equivalent to
-    /// the Return character causes it to act as the default button for its
-    /// window." Assigning Escape therefore *replaces* Return, and the
-    /// default-button status with it. Nothing is bought by the trade: a
-    /// one-entry plan means no item survived the skip, so — `presentMessage`
-    /// having already short-circuited on empty `itemTitles` — every item is
-    /// flagged and the only button *is* the close affordance. Return on it
-    /// already produces the outcome Escape would.
-    static func escapeKeyEquivalentPosition(in plan: [Int?]) -> Int? {
-        plan.count > 1 ? plan.count - 1 : nil
-    }
-
-    /// Adds one button per `buttonPlan(for:)` entry, in plan order — the
-    /// item's own title for an entry naming an item, `"Cancel"` for the `nil`
-    /// entry — and returns that plan unchanged. `presentMessage` reads the
-    /// chosen item back by button position, rather than with
-    /// `response - .alertFirstButtonReturn` arithmetic read straight into
-    /// `itemTitles`, which no longer holds once a button has been skipped.
-    ///
-    /// **The final button — always the cancel slot — is given Escape
-    /// explicitly, but only when there is more than one button:**
-    /// `escapeKeyEquivalentPosition(in:)` decides, because on a one-button
-    /// alert that slot is also the first button and the assignment would take
-    /// away the Return it has by default (see that function's doc).
-    /// `NSAlert.h:96`, the doc on `-addButtonWithTitle:`, gives
-    /// Escape only to a button whose *title* is "Cancel", so the
-    /// close-affordance path, where the slot carries the flagged item's own
-    /// title, would otherwise have no Escape at all — and that is the path
-    /// this whole seam exists for. Upstream puts the flagged command in the
-    /// dialog's `cancelButton` argument rather than in `buttons`
-    /// (`mainThreadMessageService.ts:146`). Setting it on the synthesized
-    /// `"Cancel"` too changes no behaviour — AppKit gives that one Escape by
-    /// title anyway — but stating the intent in code is what stops the next
-    /// person renaming the string and silently losing Escape. The button to
-    /// set it on is the one `addButtonWithTitle:` returns (same header,
-    /// `- Returns: The button that was added to the alert.`).
-    private static func addButtons(for request: ExtensionMessageRequest, to alert: NSAlert) -> [Int?] {
-        let plan = buttonPlan(for: request)
-        let escapePosition = escapeKeyEquivalentPosition(in: plan)
-        for (position, itemIndex) in plan.enumerated() {
-            let title = itemIndex.map { request.itemTitles[$0] } ?? "Cancel"
-            let button = alert.addButton(withTitle: title)
-            if position == escapePosition {
-                button.keyEquivalent = "\u{1b}"
-            }
-        }
-        return plan
-    }
-
-    /// `.information → .informational`, `.warning → .warning`,
-    /// `.error → .critical` — the mapping this task's brief specifies.
-    private static func alertStyle(for severity: ExtensionMessageSeverity) -> NSAlert.Style {
-        switch severity {
-        case .information: return .informational
-        case .warning: return .warning
-        case .error: return .critical
-        }
-    }
-
-    /// A sheet when `window()` answers one, an app-modal alert otherwise —
-    /// see this type's own doc for the reasoning and for the hazard the
-    /// app-modal branch carries.
-    ///
-    /// **No other `beginSheetModal` site under `macOS/` is bridged into a
-    /// continuation** — measured by searching this tier: every other
-    /// `beginSheetModal` call (`ComposableTabsPaneViewController`,
-    /// `AISettingsViewPanelController`, `ExtensionsSettingsPanelViewController`,
-    /// `NotesFolderListViewController`, `NotesSplitViewController`) drives its
-    /// completion handler directly rather than bridging it into `async`.
-    /// (`withCheckedContinuation`/`withCheckedThrowingContinuation` is not
-    /// itself unprecedented in this tier — `ExtensionHost.swift` uses one for
-    /// bridging a JS activation callback — so the narrower, accurate claim is
-    /// about `beginSheetModal`/`NSAlert` sites specifically, not continuations
-    /// in general.) The continuation is kept here anyway — it is what makes
-    /// `presentMessage` itself `async`, matching `ExtensionMessagePresenting`
-    /// — but nothing about it should be read as matching how this tier's
-    /// other `NSAlert` call sites are written, because it does not.
-    private func presentedResponse(for alert: NSAlert) async -> NSApplication.ModalResponse {
-        guard let window = window() else {
-            return alert.runModal()
-        }
-        return await withCheckedContinuation { continuation in
-            alert.beginSheetModal(for: window) { response in
-                continuation.resume(returning: response)
-            }
-        }
-    }
-}
-
-// MARK: - The adaptor
 
 /// The `vscode.window` adaptor: `showInformationMessage`,
 /// `showWarningMessage` and `showErrorMessage` (task 5.5a), each terminating
@@ -1299,16 +512,6 @@ public final class MainThreadWindow {
         return coercedString(from: value)
     }
 
-    /// A `String` only for a property that is genuinely a JavaScript string —
-    /// `nil` for absent, and `nil` for a number or an object rather than a
-    /// coercion of it. Used for an item's `description` and `detail`, which
-    /// are decoration: a non-string one is omitted rather than rejecting the
-    /// call, exactly as `handleShowMessage` omits an unusable `detail`.
-    private static func stringOptionalField(_ value: JSValue?) -> String? {
-        guard let value, value.isString else { return nil }
-        return value.toString()
-    }
-
     /// What `parseQuickPickItems(from:)` found.
     private enum QuickPickItemsParse {
 
@@ -1380,8 +583,8 @@ public final class MainThreadWindow {
             } else {
                 items.append(ExtensionQuickPickItem(
                     label: label,
-                    description: stringOptionalField(element.forProperty("description")),
-                    detail: stringOptionalField(element.forProperty("detail")),
+                    description: JSValueBridge.stringOptionalField(element.forProperty("description")),
+                    detail: JSValueBridge.stringOptionalField(element.forProperty("detail")),
                     isSeparator: false,
                     isPicked: element.forProperty("picked")?.toBool() ?? false,
                     alwaysShow: element.forProperty("alwaysShow")?.toBool() ?? false))
@@ -1476,13 +679,14 @@ public final class MainThreadWindow {
     ///
     /// **Keys are the declaration's own member spellings — `"Info"`, not
     /// `"information"`.** `ExtensionInputValidationSeverity.information`
-    /// exists for this file's internal use, on `ExtensionMessageSeverity`'s
+    /// exists for this adaptor's internal use, on `ExtensionMessageSeverity`'s
     /// own precedent; what an extension writes is
     /// `vscode.InputBoxValidationSeverity.Info` (`vscode.d.ts:2198`), and this
     /// table is what makes that expression resolve rather than reach for an
     /// undefined member. The case-name mismatch between the two is
-    /// deliberate and does not need reconciling — nothing outside this file
-    /// reads `ExtensionInputValidationSeverity` by its case names, and
+    /// deliberate and does not need reconciling — nothing outside this
+    /// adaptor reads `ExtensionInputValidationSeverity` by its case names,
+    /// and
     /// nothing outside `extension-runtime.js`'s namespace tables reads this
     /// one by its keys.
     ///
@@ -1778,7 +982,7 @@ public final class MainThreadWindow {
     ) -> (String) async -> ExtensionInputValidation? {
         { [weak self] value in
             guard let self, !self.isDisposed else { return nil }
-            let valueArgument = MainThreadWindow.stringValue(value, in: context)
+            let valueArgument = JSValueBridge.stringOrNull(value, in: context)
             guard case .returned(let returned) = VSCodeAPI.call(
                 validateInput, thisArg: optionsObject, arguments: [valueArgument]
             ), let returned else {
@@ -1812,8 +1016,9 @@ public final class MainThreadWindow {
     /// - an array → `nil`. Arrays are objects in JavaScript, and this rule is
     ///   listed ahead of the object rule below rather than falling into it,
     ///   since an array has no `message` property of its own to read.
-    /// - an object → its `message`, read the same way `stringOptionalField(_:)`
-    ///   reads item decoration: `nil` for anything that is not a string,
+    /// - an object → its `message`, read the same way
+    ///   `JSValueBridge.stringOptionalField(_:)` reads item decoration: `nil`
+    ///   for anything that is not a string,
     ///   which answers `nil` for the whole result, on the reasoning this
     ///   doc's opening paragraph gives. With a usable `message`, `severity`
     ///   is read as a number, one-based per `InputBoxValidationSeverity`
@@ -2122,7 +1327,7 @@ public final class MainThreadWindow {
     /// it was assigned to. `nil` for absent, `undefined`, `null`, or
     /// anything that is neither a string nor an object with a string `id` —
     /// this task's own design choice for a malformed write, on
-    /// `stringOptionalField(_:)`'s own precedent elsewhere in this file:
+    /// `JSValueBridge.stringOptionalField(_:)`'s own precedent:
     /// collapse every value this setter cannot use to the type's "unset"
     /// state, `nil`, rather than leaving a stale value in place. `tooltip`
     /// and `command` (below) do **not** follow this precedent, because they
@@ -2236,7 +1441,7 @@ public final class MainThreadWindow {
     /// - Every `installReadonlyGetter`/`installAccessor` getter block
     ///   captures `item` **weakly** and nothing else; a getter that must
     ///   answer genuine `undefined` (rather than relying on `Any?`'s `nil`,
-    ///   which this framework's own `undefinedValue(in:)` precedent treats
+    ///   which `JSValueBridge.undefinedOrNull(in:)`'s own precedent treats
     ///   as unsafe to assume — see that method's callers throughout
     ///   `MainThreadWorkspace.swift`) calls `JSContext.current()` inside the
     ///   block, at call time, never a context captured from this factory
@@ -2277,7 +1482,7 @@ public final class MainThreadWindow {
         }
         installReadonlyGetter(on: object, name: "priority") { [weak item] in
             guard let item, let priority = item.priority else {
-                return JSContext.current().map { MainThreadWindow.undefinedValue(in: $0) }
+                return JSContext.current().map { JSValueBridge.undefinedOrNull(in: $0) }
             }
             return priority
         }
@@ -2286,7 +1491,7 @@ public final class MainThreadWindow {
             get: { [weak item] in item?.name },
             set: { [weak item, weak window] value in
                 guard let item, let window else { return }
-                item.name = MainThreadWindow.stringOptionalField(value)
+                item.name = JSValueBridge.stringOptionalField(value)
                 window.commitStatusBarUpdate(item)
             })
 
@@ -2311,7 +1516,7 @@ public final class MainThreadWindow {
         //    a tooltip away. It neither cleared nor committed, so the old
         //    text stayed on screen with the extension's own model saying
         //    otherwise — and `name`, three accessors above, has always
-        //    cleared through `stringOptionalField`, so the two setters
+        //    cleared through `JSValueBridge.stringOptionalField`, so the two setters
         //    disagreed about the same gesture.
         //  - It also filed a not-implemented ledger row for that clear, which
         //    is a false report: the extension report then told the user their
@@ -2334,7 +1539,7 @@ public final class MainThreadWindow {
                         extensionIdentifier: window.extensionIdentifier)
                     return
                 }
-                item.tooltip = MainThreadWindow.stringOptionalField(value)
+                item.tooltip = JSValueBridge.stringOptionalField(value)
                 window.commitStatusBarUpdate(item)
             })
 
@@ -2348,7 +1553,7 @@ public final class MainThreadWindow {
                         extensionIdentifier: window.extensionIdentifier)
                     return
                 }
-                item.command = MainThreadWindow.stringOptionalField(value)
+                item.command = JSValueBridge.stringOptionalField(value)
                 window.commitStatusBarUpdate(item)
             })
 
@@ -2394,7 +1599,7 @@ public final class MainThreadWindow {
                     return
                 }
                 item.accessibilityLabel = label
-                item.accessibilityRole = MainThreadWindow.stringOptionalField(value.forProperty("role"))
+                item.accessibilityRole = JSValueBridge.stringOptionalField(value.forProperty("role"))
                 window.commitStatusBarUpdate(item)
             })
 
@@ -2543,16 +1748,16 @@ public final class MainThreadWindow {
             let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
-                    MainThreadWindow.rejectTornDown(settlement.reject, path: memberPath)
+                    JSValueBridge.rejectTornDown(settlement.reject, path: memberPath)
                     return
                 }
                 let chosenIndex = await self.presenter.presentMessage(request)
                 guard !self.isDisposed, let resultContext = settlement.resolve.context else {
-                    MainThreadWindow.rejectTornDown(settlement.reject, path: memberPath)
+                    JSValueBridge.rejectTornDown(settlement.reject, path: memberPath)
                     return
                 }
                 guard let chosenIndex, itemValues.indices.contains(chosenIndex) else {
-                    settlement.resolve.call(withArguments: [MainThreadWindow.undefinedValue(in: resultContext)])
+                    settlement.resolve.call(withArguments: [JSValueBridge.undefinedOrNull(in: resultContext)])
                     return
                 }
                 settlement.resolve.call(withArguments: [itemValues[chosenIndex]])
@@ -2616,12 +1821,12 @@ public final class MainThreadWindow {
             let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
-                    MainThreadWindow.rejectTornDown(settlement.reject, path: path)
+                    JSValueBridge.rejectTornDown(settlement.reject, path: path)
                     return
                 }
                 let itemsSettlement = await VSCodeAPI.settlement(of: itemsArgument, in: context)
                 guard !self.isDisposed else {
-                    MainThreadWindow.rejectTornDown(settlement.reject, path: path)
+                    JSValueBridge.rejectTornDown(settlement.reject, path: path)
                     return
                 }
                 let itemsValue: JSValue
@@ -2645,7 +1850,7 @@ public final class MainThreadWindow {
                     settlement.reject.call(withArguments: [reason])
                     return
                 case .unavailable:
-                    MainThreadWindow.rejectWithError(
+                    JSValueBridge.rejectWithError(
                         settlement.reject, message: VSCodeAPI.dispatchUnavailableMessage(for: context))
                     return
                 }
@@ -2656,7 +1861,7 @@ public final class MainThreadWindow {
                     items = parsedItems
                     itemValues = parsedValues
                 case .rejected(let message):
-                    MainThreadWindow.rejectWithError(settlement.reject, message: message)
+                    JSValueBridge.rejectWithError(settlement.reject, message: message)
                     return
                 }
                 let request = ExtensionQuickPickRequest(
@@ -2672,22 +1877,22 @@ public final class MainThreadWindow {
                     request,
                     onHighlight: MainThreadWindow.highlightHandler(for: options, itemValues: itemValues))
                 guard !self.isDisposed, let resultContext = settlement.resolve.context else {
-                    MainThreadWindow.rejectTornDown(settlement.reject, path: path)
+                    JSValueBridge.rejectTornDown(settlement.reject, path: path)
                     return
                 }
                 guard let chosenIndices,
                       chosenIndices.allSatisfy({ itemValues.indices.contains($0) }) else {
-                    settlement.resolve.call(withArguments: [MainThreadWindow.undefinedValue(in: resultContext)])
+                    settlement.resolve.call(withArguments: [JSValueBridge.undefinedOrNull(in: resultContext)])
                     return
                 }
                 let chosenValues = chosenIndices.map { itemValues[$0] }
                 if options.canPickMany {
                     settlement.resolve.call(
-                        withArguments: [MainThreadWindow.arrayValue(of: chosenValues, in: resultContext)])
+                        withArguments: [JSValueBridge.arrayOrNull(of: chosenValues, in: resultContext)])
                     return
                 }
                 guard let first = chosenValues.first else {
-                    settlement.resolve.call(withArguments: [MainThreadWindow.undefinedValue(in: resultContext)])
+                    settlement.resolve.call(withArguments: [JSValueBridge.undefinedOrNull(in: resultContext)])
                     return
                 }
                 settlement.resolve.call(withArguments: [first])
@@ -2713,7 +1918,7 @@ public final class MainThreadWindow {
     /// A `nil` answer resolves `undefined`, matching `Thenable<string |
     /// undefined>` (`vscode.d.ts:11491`) — a dismissal. A string answer,
     /// **including the empty string**, resolves a JS string built fresh in
-    /// the settled context via `stringValue(_:in:)`: an accepted empty value
+    /// the settled context via `JSValueBridge.stringOrNull(_:in:)`: an accepted
     /// is a real answer, never conflated with dismissal, on this file's own
     /// stated rule for `ExtensionInputBoxPresenting.presentInputBox`.
     ///
@@ -2741,80 +1946,21 @@ public final class MainThreadWindow {
             let settlement = PromiseSettlementBox(resolve: resolveValue, reject: rejectValue)
             Task { @MainActor [weak self] in
                 guard let self, !self.isDisposed else {
-                    MainThreadWindow.rejectTornDown(settlement.reject, path: path)
+                    JSValueBridge.rejectTornDown(settlement.reject, path: path)
                     return
                 }
                 let answer = await self.inputBoxPresenter.presentInputBox(request, validate: validate)
                 guard !self.isDisposed, let resultContext = settlement.resolve.context else {
-                    MainThreadWindow.rejectTornDown(settlement.reject, path: path)
+                    JSValueBridge.rejectTornDown(settlement.reject, path: path)
                     return
                 }
                 guard let answer else {
-                    settlement.resolve.call(withArguments: [MainThreadWindow.undefinedValue(in: resultContext)])
+                    settlement.resolve.call(withArguments: [JSValueBridge.undefinedOrNull(in: resultContext)])
                     return
                 }
-                settlement.resolve.call(withArguments: [MainThreadWindow.stringValue(answer, in: resultContext)])
+                settlement.resolve.call(withArguments: [JSValueBridge.stringOrNull(answer, in: resultContext)])
             }
         }
-    }
-
-    /// A JavaScript array holding `values`, for a `canPickMany` resolution.
-    ///
-    /// `NSNull()` when the bridge cannot build one, matching
-    /// `undefinedValue(in:)`'s own fallback: settling with *something* keeps
-    /// an extension's `await` from hanging forever on a failure it cannot see.
-    private static func arrayValue(of values: [JSValue], in context: JSContext) -> Any {
-        if let value = JSValue(object: values, in: context) {
-            return value
-        }
-        return NSNull()
-    }
-
-    /// A JavaScript string holding `value`, built fresh in `context`.
-    ///
-    /// `NSNull()` when the bridge cannot build one, matching
-    /// `arrayValue(of:in:)`'s own fallback and for the same reason: settling
-    /// or calling with *something* keeps an extension's `await` from hanging
-    /// forever on a failure it cannot see. Used both to resolve
-    /// `presentInputBoxPromise`'s accepted answer — including the empty
-    /// string — and to build `makeValidateClosure`'s own argument to
-    /// `validateInput`.
-    private static func stringValue(_ value: String, in context: JSContext) -> Any {
-        if let value = JSValue(object: value, in: context) {
-            return value
-        }
-        return NSNull()
-    }
-
-    /// Rejects `reject` with the same wording `VSCodeAPI.member`'s own
-    /// teardown path uses, matching `MainThreadWorkspace.rejectTornDown`.
-    private static func rejectTornDown(_ reject: JSValue, path: String) {
-        rejectWithError(reject, message: "\(path) is unavailable: this extension's host has been torn down.")
-    }
-
-    /// Rejects `reject` with a JavaScript `Error` carrying `message`.
-    ///
-    /// An `Error` and not a bare string, so an extension's `catch` sees
-    /// `error.message` and a stack — which is what
-    /// `VSCodeAPI.rejectedPromise(message:in:)` builds for the synchronous
-    /// refusals, and the asynchronous ones should not be a different shape.
-    /// Silent when the context is gone: there is then nothing left to reject
-    /// into.
-    private static func rejectWithError(_ reject: JSValue, message: String) {
-        guard let context = reject.context,
-              let errorValue = JSValue(newErrorFromMessage: message, in: context) else {
-            return
-        }
-        reject.call(withArguments: [errorValue])
-    }
-
-    /// A genuine JavaScript `undefined`, matching
-    /// `MainThreadWorkspace.undefinedValue(in:)`.
-    private static func undefinedValue(in context: JSContext) -> Any {
-        if let value = JSValue(undefinedIn: context) {
-            return value
-        }
-        return NSNull()
     }
 
     // MARK: - Teardown
