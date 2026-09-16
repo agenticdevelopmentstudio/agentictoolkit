@@ -54,7 +54,7 @@ public enum PermissionPresenter {
             guard await checker.request(permission) != .granted else { return }
             guard let pane = permission.settingsPaneURL else { return }
             NSWorkspace.shared.open(pane)
-        case .notifications, .location, .microphone, .screenCapture, .keychain:
+        case .notifications, .location, .microphone, .screenCapture:
             // These can always be asked — the system owns the dialog and puts it
             // up whatever else is or isn't running — so an undetermined answer
             // here really is the user declining to answer, and opening the pane
@@ -64,13 +64,52 @@ public enum PermissionPresenter {
             // answers `.denied` from memory ever after, so the pane is the only
             // way back and the button has to reach it.
             guard await checker.request(permission) == .denied else { return }
-            // …and some permissions have no pane to fall back to. `.keychain` is
-            // granted by the dialog the request above already raised, and System
-            // Settings does not list it anywhere, so a denial is the end of the
-            // road rather than a handoff.
             guard let pane = permission.settingsPaneURL else { return }
             NSWorkspace.shared.open(pane)
+        case .keychain(let service):
+            // Asking for this one *is* a read of the item, which gives it a
+            // third outcome the permissions above do not have: the item was not
+            // there to read. That is not a refusal. The ACL this row describes
+            // does not exist yet, because this app has never written the item —
+            // macOS creates the item and the grant together, the first time the
+            // app stores something under that service. Until then there is no
+            // dialog for the request to raise and no pane to hand off to, so
+            // pressing the button did nothing whatsoever and read as an app with
+            // a dead control. Saying so is the only honest thing left to do, and
+            // pressing is the only way to find out: the ledger the row's status
+            // comes from records reads that happened, and cannot distinguish an
+            // item this app has never read from one that is not there at all.
+            switch await checker.request(permission) {
+            case .granted:
+                // The read went through; the panel's refresh turns the row green.
+                return
+            case .denied:
+                // The user answered the system's own dialog, and `.keychain` has
+                // no System Settings pane to fall back to.
+                return
+            case .undetermined:
+                presentNothingToGrantYet(service: service)
+            }
         }
+    }
+
+    /// Explains a keychain row whose item does not exist yet.
+    ///
+    /// An alert rather than a change to the row, because this is only knowable
+    /// at the moment of asking — the row's status comes from a ledger of reads
+    /// that have happened, which cannot tell "never read" from "not there".
+    private static func presentNothingToGrantYet(service: String) {
+        let alert = NSAlert()
+        alert.messageText = "Nothing to grant yet"
+        alert.informativeText =
+            "This app has not stored anything in your keychain under "
+            + "\u{201C}\(service)\u{201D} yet. macOS creates the item and the "
+            + "permission to read it at the same moment — the first time the app "
+            + "saves to it, which for this app is when you sign in. There is no "
+            + "dialog to show until then, and nothing you need to do here."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     /// Brings up Keychain Access, where a keychain grant is taken back.
