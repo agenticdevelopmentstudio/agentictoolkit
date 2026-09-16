@@ -487,8 +487,7 @@ extension VSCodeAPI {
     private static func diagnosticRelatedInformationArray(
         from value: JSValue, in context: JSContext
     ) -> [ExtensionDiagnosticRelatedInformation]? {
-        guard let lengthValue = value.forProperty("length"), lengthValue.isNumber else { return nil }
-        let count = Int(lengthValue.toInt32())
+        guard let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         var result: [ExtensionDiagnosticRelatedInformation] = []
         result.reserveCapacity(count)
         for index in 0..<count {
@@ -508,8 +507,7 @@ extension VSCodeAPI {
     private static func diagnosticTagArray(
         from value: JSValue, in context: JSContext
     ) -> [ExtensionDiagnosticTag]? {
-        guard let lengthValue = value.forProperty("length"), lengthValue.isNumber else { return nil }
-        let count = Int(lengthValue.toInt32())
+        guard let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         var result: [ExtensionDiagnosticTag] = []
         result.reserveCapacity(count)
         for index in 0..<count {
@@ -580,6 +578,16 @@ extension VSCodeAPI {
     /// type, an out-of-union `code`, a malformed element inside
     /// `relatedInformation`/`tags`) is refused, not coerced: the whole call
     /// answers `nil` rather than silently dropping just that field.
+    ///
+    /// An **empty** `message` is refused for the same reason the `Diagnostic`
+    /// constructor throws on one (`:193-194`, matching upstream's
+    /// `diagnostic.ts:70-75`): `message` is a writable own property, so
+    /// `d.message = ''` after construction produces a real `Diagnostic`
+    /// instance the constructor would never have built. Accepting it put a
+    /// value into the store that `diagnosticValue(for:in:)` could not
+    /// reconstruct — and because the store is process-wide, one extension's
+    /// blanked message made `getDiagnostics()` answer `nil` for that whole
+    /// file, for every extension that asked.
     public static func diagnostic(
         from value: JSValue, in context: JSContext
     ) -> ExtensionDiagnostic? {
@@ -591,23 +599,35 @@ extension VSCodeAPI {
         guard let rangeProperty = value.forProperty("range"),
               let decodedRange = range(from: rangeProperty, in: context),
               let messageProperty = value.forProperty("message"), messageProperty.isString,
-              let message = messageProperty.toString(),
+              let message = messageProperty.toString(), !message.isEmpty,
               let severityProperty = value.forProperty("severity"), severityProperty.isNumber,
-              let severity = ExtensionDiagnosticSeverity(rawValue: Int(severityProperty.toInt32())) else {
+              let severityNumber = Int32(exactly: severityProperty.toDouble()),
+              let severity = ExtensionDiagnosticSeverity(rawValue: Int(severityNumber)) else {
             return nil
         }
 
         // Each of the four blocks below distinguishes *absent* from
-        // *present-but-undecodable* — the constructor
-        // above never assigns these four unless an extension sets them
-        // (this file's header), so `isUndefined` alone already tells the
-        // two cases apart cleanly: an undecodable-but-present value must
+        // *present-but-undecodable*: an undecodable-but-present value must
         // refuse the whole diagnostic instead of quietly reading back as if
         // the property were never set, matching `diagnosticRelatedInformationArray`'s
         // and `diagnosticTagArray`'s own "nil, not a partial array" contract
         // one level up.
+        //
+        // *Absent* is `undefined` **or `null`**. The constructor never
+        // assigns these four unless an extension sets them (this file's
+        // header), so `undefined` is what an untouched property reads as —
+        // but `null` is what an extension that fills the object from LSP
+        // writes, because the LSP `Diagnostic` wire type spells an unset
+        // optional `null` and `JSON.parse` keeps it. Reading `null` as
+        // present-but-undecodable refused the diagnostic, and
+        // `MainThreadDiagnostics`' array reader refuses the whole file's
+        // array when one element refuses — so one `source: null` from a
+        // language-server bridge dropped every diagnostic in that file.
+        // (`code: null` hit this hardest: `diagnosticCode(from:)`'s object
+        // branch cannot match it either, `null` not being an object.)
         var source: String?
-        if let sourceProperty = value.forProperty("source"), !sourceProperty.isUndefined {
+        if let sourceProperty = value.forProperty("source"),
+           !sourceProperty.isUndefined, !sourceProperty.isNull {
             guard sourceProperty.isString, let decodedSource = sourceProperty.toString() else {
                 return nil
             }
@@ -615,7 +635,8 @@ extension VSCodeAPI {
         }
 
         var code: ExtensionDiagnosticCode?
-        if let codeProperty = value.forProperty("code"), !codeProperty.isUndefined {
+        if let codeProperty = value.forProperty("code"),
+           !codeProperty.isUndefined, !codeProperty.isNull {
             guard let decodedCode = diagnosticCode(from: codeProperty, in: context) else {
                 return nil
             }
@@ -624,7 +645,7 @@ extension VSCodeAPI {
 
         var relatedInformation: [ExtensionDiagnosticRelatedInformation]?
         if let relatedInformationProperty = value.forProperty("relatedInformation"),
-           !relatedInformationProperty.isUndefined {
+           !relatedInformationProperty.isUndefined, !relatedInformationProperty.isNull {
             guard relatedInformationProperty.isObject,
                   let decodedRelatedInformation = diagnosticRelatedInformationArray(
                       from: relatedInformationProperty, in: context
@@ -635,7 +656,8 @@ extension VSCodeAPI {
         }
 
         var tags: [ExtensionDiagnosticTag]?
-        if let tagsProperty = value.forProperty("tags"), !tagsProperty.isUndefined {
+        if let tagsProperty = value.forProperty("tags"),
+           !tagsProperty.isUndefined, !tagsProperty.isNull {
             guard tagsProperty.isObject,
                   let decodedTags = diagnosticTagArray(from: tagsProperty, in: context) else {
                 return nil

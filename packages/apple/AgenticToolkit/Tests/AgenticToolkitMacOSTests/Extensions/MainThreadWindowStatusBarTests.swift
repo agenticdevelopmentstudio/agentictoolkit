@@ -716,7 +716,9 @@ struct MainThreadWindowStatusBarTests {
     // MARK: - 22-25. Unsupported shapes go through the ledger, not an exception
 
     /// A `MarkdownString`-shaped tooltip (an object, not a string) records
-    /// exactly one ledger entry at `vscode.StatusBarItem.tooltip`, throws
+    /// exactly one ledger entry at `vscode.StatusBarItem.tooltip:
+    /// MarkdownString` — the path names the shape, not the member, because
+    /// the member itself is implemented — throws
     /// nothing, and — because a real tooltip was set first — leaves that
     /// *previous* value in place rather than clearing it: the assertion is
     /// not vacuous, since a mutation that simply never wrote `tooltip` at
@@ -753,12 +755,12 @@ struct MainThreadWindowStatusBarTests {
         let accesses = host.notImplementedLedger.accesses
         #expect(accesses.count == 1)
         let access = try #require(accesses.first)
-        #expect(access.memberPath == "vscode.StatusBarItem.tooltip")
+        #expect(access.memberPath == "vscode.StatusBarItem.tooltip: MarkdownString")
         #expect(access.count == 1)
     }
 
     /// A `Command`-object command does the same at
-    /// `vscode.StatusBarItem.command`.
+    /// `vscode.StatusBarItem.command: Command`.
     @Test
     func commandObjectShapedCommandRecordsALedgerEntryAndLeavesThePreviousValue() async throws {
         let directory = try makeTempDirectory()
@@ -791,7 +793,7 @@ struct MainThreadWindowStatusBarTests {
         let accesses = host.notImplementedLedger.accesses
         #expect(accesses.count == 1)
         let access = try #require(accesses.first)
-        #expect(access.memberPath == "vscode.StatusBarItem.command")
+        #expect(access.memberPath == "vscode.StatusBarItem.command: Command")
         #expect(access.count == 1)
     }
 

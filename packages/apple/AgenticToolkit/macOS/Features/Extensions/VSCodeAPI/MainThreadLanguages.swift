@@ -163,12 +163,16 @@ public struct CharacterPair: Sendable, Equatable {
     /// An element that does not is dropped rather than failing the whole
     /// array — the same permissive rule `LanguageConfiguration.make(from:)`
     /// states for the configuration as a whole.
+    /// `@MainActor` because reading the array's length goes through
+    /// `VSCodeAPI.arrayLength(of:)`, which is where the length bound lives
+    /// — and that whole enum is pinned to the actor the JS context runs on.
+    @MainActor
     static func makeArray(from value: JSValue?) -> [CharacterPair]? {
         guard let value, !value.isUndefined, !value.isNull, value.isArray else { return nil }
-        let count = Int(value.forProperty("length")?.toInt32() ?? 0)
+        guard let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         var pairs: [CharacterPair] = []
-        pairs.reserveCapacity(max(count, 0))
-        for index in 0..<max(count, 0) {
+        pairs.reserveCapacity(count)
+        for index in 0..<count {
             guard let element = value.atIndex(index), let pair = CharacterPair.make(from: element) else { continue }
             pairs.append(pair)
         }
@@ -293,12 +297,16 @@ public struct OnEnterRule: Sendable, Equatable {
     /// `_serializeOnEnterRule` has no such fallback because upstream never
     /// meets a malformed rule (TypeScript already refused it); this side of
     /// the bridge has no such guarantee about what JavaScript handed over.
+    /// `@MainActor` because reading the array's length goes through
+    /// `VSCodeAPI.arrayLength(of:)`, which is where the length bound lives
+    /// — and that whole enum is pinned to the actor the JS context runs on.
+    @MainActor
     static func makeArray(from value: JSValue?) -> [OnEnterRule]? {
         guard let value, !value.isUndefined, !value.isNull, value.isArray else { return nil }
-        let count = Int(value.forProperty("length")?.toInt32() ?? 0)
+        guard let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         var rules: [OnEnterRule] = []
-        rules.reserveCapacity(max(count, 0))
-        for index in 0..<max(count, 0) {
+        rules.reserveCapacity(count)
+        for index in 0..<count {
             guard let element = value.atIndex(index), let rule = OnEnterRule.make(from: element) else { continue }
             rules.append(rule)
         }
@@ -317,12 +325,16 @@ public enum SyntaxTokenType: Int, Sendable, Equatable {
     /// Every element of `value` that is one of these four numbers, in order,
     /// dropping anything else. `AutoClosingPair.notIn` is the argument this
     /// exists for.
+    /// `@MainActor` because reading the array's length goes through
+    /// `VSCodeAPI.arrayLength(of:)`, which is where the length bound lives
+    /// — and that whole enum is pinned to the actor the JS context runs on.
+    @MainActor
     static func makeArray(from value: JSValue?) -> [SyntaxTokenType]? {
         guard let value, !value.isUndefined, !value.isNull, value.isArray else { return nil }
-        let count = Int(value.forProperty("length")?.toInt32() ?? 0)
+        guard let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         var types: [SyntaxTokenType] = []
-        types.reserveCapacity(max(count, 0))
-        for index in 0..<max(count, 0) {
+        types.reserveCapacity(count)
+        for index in 0..<count {
             guard let element = value.atIndex(index), element.isNumber,
                   let type = SyntaxTokenType(rawValue: Int(element.toInt32())) else {
                 continue
@@ -351,6 +363,9 @@ public struct AutoClosingPair: Sendable, Equatable {
         self.notIn = notIn
     }
 
+    /// `@MainActor` because `notIn` is decoded by
+    /// `SyntaxTokenType.makeArray(from:)`, which is — see its own note.
+    @MainActor
     static func make(from value: JSValue?) -> AutoClosingPair? {
         guard let value, !value.isUndefined, !value.isNull, value.isObject else { return nil }
         guard let openValue = value.forProperty("open"), openValue.isString, let open = openValue.toString(),
@@ -362,12 +377,16 @@ public struct AutoClosingPair: Sendable, Equatable {
         return AutoClosingPair(open: open, close: close, notIn: notIn)
     }
 
+    /// `@MainActor` because reading the array's length goes through
+    /// `VSCodeAPI.arrayLength(of:)`, which is where the length bound lives
+    /// — and that whole enum is pinned to the actor the JS context runs on.
+    @MainActor
     static func makeArray(from value: JSValue?) -> [AutoClosingPair]? {
         guard let value, !value.isUndefined, !value.isNull, value.isArray else { return nil }
-        let count = Int(value.forProperty("length")?.toInt32() ?? 0)
+        guard let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         var pairs: [AutoClosingPair] = []
-        pairs.reserveCapacity(max(count, 0))
-        for index in 0..<max(count, 0) {
+        pairs.reserveCapacity(count)
+        for index in 0..<count {
             guard let element = value.atIndex(index), let pair = AutoClosingPair.make(from: element) else {
                 continue
             }
@@ -431,6 +450,9 @@ public struct LanguageConfiguration: Sendable, Equatable {
     /// `MainThreadLanguages.logger` to report a pattern that fails to
     /// *compile*, and this type has no logger of its own — see
     /// `MainThreadLanguages.wordPatternRefusal(for:)`.
+    /// `@MainActor` because the `makeArray` decoders it calls are — see
+    /// `CharacterPair.makeArray(from:)`.
+    @MainActor
     static func make(from configurationValue: JSValue?) -> LanguageConfiguration {
         LanguageConfiguration(
             comments: CommentRule.make(from: configurationValue?.forProperty("comments")),

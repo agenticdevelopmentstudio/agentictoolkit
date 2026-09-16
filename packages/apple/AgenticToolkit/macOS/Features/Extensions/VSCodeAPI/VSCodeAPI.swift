@@ -128,6 +128,57 @@ public enum VSCodeAPI {
         (JSContext.currentArguments() as? [JSValue]) ?? []
     }
 
+    // MARK: - Reading a JS array
+
+    /// The largest array this shim will decode from an extension.
+    ///
+    /// Every decoder below walks the array element by element across the
+    /// JavaScriptCore bridge on the main actor, so the cost of a long one is
+    /// paid where the user can feel it. 100,000 is far above anything the
+    /// surfaces that use it produce — a file's diagnostics, a language
+    /// configuration's bracket pairs, a quick pick's items, a chat request's
+    /// messages — and far below the point where that walk stalls the app.
+    ///
+    /// The bound exists because clamping a negative length does not close the
+    /// hole it was written for: `reserveCapacity(2_147_483_647)` succeeds,
+    /// commits about 17 GB of address space, and then runs a two-billion
+    /// iteration loop synchronously inside the extension's own call.
+    public static let maximumDecodableArrayLength = 100_000
+
+    /// The length of a JS array, or `nil` if `value` is not an array this
+    /// shim is willing to walk.
+    ///
+    /// **Read the length through `Int32(exactly:)`, never `toInt32()`.**
+    /// `toInt32()` implements ECMAScript `ToInt32`, which wraps modulo 2³²
+    /// and truncates fractions, so it answers a plausible small number for
+    /// values that are nothing of the sort: `new Array(4294967295)` reports
+    /// its length as `-1`, and `{length: -1}` reports `-1` directly. A
+    /// negative count reaches `0..<count` as a range whose lower bound
+    /// exceeds its upper, and that is a Swift precondition failure — an
+    /// uncatchable trap that takes down the whole app rather than the
+    /// extension, because the JS trampoline cannot catch it.
+    ///
+    /// `isArray` rather than `isObject` is the other half: every caller wants
+    /// an actual array, and an object literal carrying nothing but a `length`
+    /// property is precisely the shape that reaches the arithmetic above.
+    public static func arrayLength(of value: JSValue) -> Int? {
+        guard value.isArray,
+              let lengthValue = value.forProperty("length"),
+              lengthValue.isNumber,
+              let count = Int32(exactly: lengthValue.toDouble()),
+              count >= 0
+        else { return nil }
+        guard Int(count) <= maximumDecodableArrayLength else {
+            logger.error(
+                """
+                refusing an array of \(count, privacy: .public) elements: longer than \
+                the \(maximumDecodableArrayLength, privacy: .public) this host decodes
+                """)
+            return nil
+        }
+        return Int(count)
+    }
+
     // MARK: - Raising
 
     /// Raises `message` as a JavaScript `Error` on `context` and answers `nil`,

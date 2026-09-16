@@ -616,11 +616,16 @@ public final class MainThreadLanguageModels {
         if argument.isString, let string = argument.toString() {
             return string
         }
-        guard argument.isObject,
-              let content = argument.forProperty("content"),
-              let elements = arrayElements(of: content) else {
-            return ""
-        }
+        guard argument.isObject, let content = argument.forProperty("content") else { return "" }
+        // A message built through `LanguageModelChatMessage` always has an
+        // array here, because that class's accessor pair coerces a bare-string
+        // assignment into `[new LanguageModelTextPart(value)]`. A message that
+        // did not come through it — an object literal, a `JSON.parse`d
+        // message, a polyfill — carries the plain string `vscode.d.ts` also
+        // allows, and reading only the array shape turned that into an empty
+        // prompt that was still forwarded to the provider and billed.
+        if content.isString, let string = content.toString() { return string }
+        guard let elements = arrayElements(of: content) else { return "" }
         let parts = elements.compactMap { part -> String? in
             guard let value = part.forProperty("value"), value.isString else { return nil }
             return value.toString()
@@ -628,23 +633,27 @@ public final class MainThreadLanguageModels {
         return parts.joined()
     }
 
-    /// Reads a JS "array-like" value — anything with a numeric `.length` and
-    /// indexable elements — into a Swift array of its elements, via
+    /// Reads a JS array into a Swift array of its elements, via
     /// `.atIndex(_:)` element by element. This is `extractedText(from:)`'s
     /// own array-reading logic, factored out so `parseMessages(from:)`
     /// (below) reads the top-level `LanguageModelChatMessage[]` argument the
     /// same way `extractedText(from:)` reads one message's `content` —
     /// one reader, not two that could quietly disagree.
+    ///
+    /// The length goes through `VSCodeAPI.arrayLength(of:)`, which is what
+    /// keeps `reserveCapacity` honest: a `length` an extension chose —
+    /// `{length: 2_100_000_000}` — reserved sixteen gigabytes and then
+    /// walked two billion indices on the main actor. That helper also
+    /// demands a real array rather than any object carrying a `length`, so
+    /// a string (`"abc".length === 3`, no `atIndex`) reads as absent here
+    /// instead of as three undefined elements.
     private static func arrayElements(of value: JSValue?) -> [JSValue]? {
-        guard let value, value.isObject, let lengthValue = value.forProperty("length") else {
-            return nil
-        }
-        let count = lengthValue.toInt32()
+        guard let value, let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         guard count > 0 else { return [] }
         var elements: [JSValue] = []
-        elements.reserveCapacity(Int(count))
+        elements.reserveCapacity(count)
         for index in 0..<count {
-            guard let element = value.atIndex(Int(index)) else { continue }
+            guard let element = value.atIndex(index) else { continue }
             elements.append(element)
         }
         return elements
@@ -758,7 +767,8 @@ public final class MainThreadLanguageModels {
                             memberPath: "vscode.LanguageModelChat.sendRequest")
                         return
                     }
-                    let request = LanguageModelResponseRequest(owner: self)
+                    let request = LanguageModelResponseRequest(
+                        owner: self, cancellation: cancellation)
                     self.liveRequests[request.id] = request
                     guard let responseObject = request.makeResponseObject(in: resultContext) else {
                         self.liveRequests.removeValue(forKey: request.id)
@@ -852,9 +862,19 @@ public final class MainThreadLanguageModels {
     /// out-of-vocabulary value is reachable — upstream's `System = 3`
     /// (`extHostTypes.ts:3886-3890`) among them — and reading one as
     /// `.user` would send the model a message the extension did not write.
+    ///
+    /// The number is read with `Int32(exactly:)` rather than `toInt32()`,
+    /// the way `MainThreadWindow.swift:1844` reads its own enum argument.
+    /// `toInt32()` is ECMA-262 ToInt32: it truncates the fraction and then
+    /// wraps modulo 2³², so `role: 4294967297` — a perfectly ordinary
+    /// double — arrives as `1` and is read as `.user`, and `role: 1.5`
+    /// arrives as `1` too. Both are out-of-vocabulary values that must
+    /// reject, not values that round into a role.
     private static func messageRole(_ value: JSValue?) -> ExtensionLanguageModelMessage.Role? {
-        guard let value, value.isNumber else { return nil }
-        switch value.toInt32() {
+        guard let value, value.isNumber, let number = Int32(exactly: value.toDouble()) else {
+            return nil
+        }
+        switch number {
         case 1: return .user
         case 2: return .assistant
         default: return nil
@@ -864,10 +884,22 @@ public final class MainThreadLanguageModels {
     /// Names an unsupported `role` for the rejection message, without
     /// calling `toString()` on an arbitrary object — an extension's own
     /// `toString` would then run inside this reader.
+    ///
+    /// `number` is filled in only for a value that *is* an `Int32`, because
+    /// it is what decides whether a ledger row is filed for upstream's
+    /// `System = 3`. Read through `toInt32()`'s wrapping, `role: 4294967299`
+    /// answered `3` and filed a row saying the extension asked for
+    /// `LanguageModelChatMessageRole.System`, which it had not. A number
+    /// outside the range still names itself in the rejection — the
+    /// extension author needs to see the value they passed — it just does
+    /// not claim to be a member of the vocabulary.
     private static func describeRole(_ value: JSValue?) -> UnsupportedRole {
         guard let value else { return UnsupportedRole(described: "no value", number: nil) }
         if value.isNumber {
-            let number = value.toInt32()
+            let double = value.toDouble()
+            guard let number = Int32(exactly: double) else {
+                return UnsupportedRole(described: "\(double)", number: nil)
+            }
             return UnsupportedRole(described: "\(number)", number: number)
         }
         if value.isUndefined { return UnsupportedRole(described: "undefined", number: nil) }
@@ -979,7 +1011,11 @@ private struct LanguageModelRequestCancelled: Error, CustomStringConvertible {
 ///
 /// The listener block captures `self` weakly, so subscribing does not keep
 /// this object — or, through `whenCancelled`'s body, the request — alive: a
-/// token outliving its request fires into a `nil` and does nothing.
+/// token outliving its request fires into a `nil` and does nothing. That is
+/// why somebody else has to own it, and
+/// `LanguageModelResponseRequest.cancellation` does: held by the `Task`
+/// alone, it died with the promise's resolution and every later cancel was
+/// a silent no-op.
 @MainActor
 private final class LanguageModelCancellation {
     private(set) var isCancelled = false
@@ -1079,14 +1115,42 @@ private func languageModelResponsePartJSValue(
 /// (`LanguageModelMessageVocabulary.swift:192-196`) takes `input` as an
 /// `object`, not a string, so `argumentsJSON`'s bytes are parsed through
 /// the context's own `JSON.parse` rather than handed over as a raw string.
+///
+/// **Through `VSCodeAPI.call`, because `JSON.parse` throws.** `argumentsJSON`
+/// is whatever the *model* emitted for a tool call, so malformed JSON is an
+/// ordinary outcome and not a bug in anything local. A bare
+/// `parse.call(withArguments:)` lets the resulting `SyntaxError` leave
+/// JavaScriptCore through `notifyException:`, which `ExtensionHost`'s
+/// `exceptionHandler` records into `pendingException` — and that is read after
+/// `callActivate`, so a bad tool call arriving while an `async activate()` was
+/// still in flight failed the *extension's activation*, naming a JSON syntax
+/// error as the reason. Keeping a throw out of the host's bookkeeping is the
+/// single thing `VSCodeAPI.call` exists for.
+///
+/// `null` is the answer in every failure branch, unchanged: the part is still
+/// delivered, with an `input` that says the arguments could not be read,
+/// rather than the whole response dying over one malformed tool call. The
+/// throw is logged so the malformed payload is not invisible.
+@MainActor
 private func languageModelParsedJSON(_ data: Data, in context: JSContext) -> JSValue {
     guard let jsonString = String(data: data, encoding: .utf8),
           let json = context.globalObject.forProperty("JSON"),
-          let parse = json.forProperty("parse"),
-          let parsed = parse.call(withArguments: [jsonString]) else {
+          let parse = json.forProperty("parse") else {
         return JSValue(nullIn: context)
     }
-    return parsed
+    switch VSCodeAPI.call(parse, thisArg: json, arguments: [jsonString]) {
+    case .returned(let parsed):
+        return parsed ?? JSValue(nullIn: context)
+    case .threw(let exception):
+        MainThreadLanguageModels.logger.error(
+            """
+            A language model tool call carried arguments JSON that would not parse, so its \
+            input is null: \(exception.toString() ?? "unknown error", privacy: .public)
+            """)
+        return JSValue(nullIn: context)
+    case .unavailable:
+        return JSValue(nullIn: context)
+    }
 }
 
 /// A small IIFE that assigns `target[Symbol.asyncIterator]`,
@@ -1206,8 +1270,22 @@ private final class LanguageModelResponseRequest {
     private var textPartConstructor: JSValue?
     private var toolCallPartConstructor: JSValue?
 
-    init(owner: MainThreadLanguageModels) {
+    /// The request's own `token` argument, held here for the request's
+    /// whole life. It has to be held *somewhere* that outlives
+    /// `handleSendRequest`'s `Task`: the token object on the JS side holds
+    /// only the listener block, which captures the cancellation weakly, so
+    /// a cancellation owned by the `Task` alone was deallocated the moment
+    /// the promise resolved — and every cancel after that, which is nearly
+    /// all of them, fired into a `nil` and did nothing while the provider
+    /// kept streaming and billing. `liveRequests` keeps this request
+    /// reachable for exactly as long as a cancel could still matter, so it
+    /// is the right owner; the edge back is `whenCancelled`'s
+    /// `[weak request]`, so there is no cycle.
+    private let cancellation: LanguageModelCancellation
+
+    init(owner: MainThreadLanguageModels, cancellation: LanguageModelCancellation) {
         self.owner = owner
+        self.cancellation = cancellation
     }
 
     /// Starts the one pump that drains `source` into `buffer`. Called at

@@ -23,13 +23,26 @@ final class ExtensionInputBoxViewController: NSViewController {
     /// Escape.
     var onCancel: () -> Void = {}
 
-    /// The field's text changed. The presenter turns this into a `validate`
-    /// round trip and calls `showValidation` back.
+    /// The value needs validating — the field's text changed, or the panel
+    /// has just appeared carrying `InputBoxOptions.value`. The presenter
+    /// turns this into a `validate` round trip and calls `showValidation`
+    /// back. Always paired with a `model.beginValidating()` that has
+    /// already run, so `model.canAccept` is false until the answer lands.
     var onValueChanged: (String) -> Void = { _ in }
 
     // MARK: - State
 
     private let model: ExtensionInputBoxModel
+
+    /// A Return pressed while `model.isValidating` was true. Replayed by
+    /// `showValidation(_:)` once the answer lands, and dropped by any
+    /// further edit — so waiting on a slow `validateInput` delays the
+    /// acceptance rather than swallowing the keystroke.
+    private var acceptWhenValidationLands = false
+
+    /// `viewDidAppear` can run more than once for one panel; the prefill is
+    /// validated on the first of those only.
+    private var hasValidatedPrefill = false
 
     // MARK: - Views
 
@@ -137,6 +150,26 @@ final class ExtensionInputBoxViewController: NSViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         keyboard.startEscapeMonitor(for: view.window)
+        validatePrefillIfNeeded()
+    }
+
+    /// Validates `InputBoxOptions.value` the way a keystroke is validated.
+    /// Until this ran, a prefilled value had never been past the
+    /// extension's `validateInput` at all, so the very first Return
+    /// accepted a value the extension was about to reject — with the
+    /// validator never consulted and no message ever shown. Upstream
+    /// validates the initial value on show for the same reason
+    /// (`vscode.d.ts:2251-2256` describes `validateInput` as validating the
+    /// input, not the edits).
+    ///
+    /// Here rather than in `viewDidLoad`: the presenter assigns
+    /// `onValueChanged` and only then shows the window, so `viewDidLoad`
+    /// can run before there is anything to call.
+    private func validatePrefillIfNeeded() {
+        guard !hasValidatedPrefill else { return }
+        hasValidatedPrefill = true
+        model.beginValidating()
+        onValueChanged(model.value)
     }
 
     override func viewWillDisappear() {
@@ -163,16 +196,20 @@ final class ExtensionInputBoxViewController: NSViewController {
     /// in the panel a theme could not reach.
     func showValidation(_ validation: ExtensionInputValidation?) {
         model.recordValidation(validation)
-        guard let validation else {
+        if let validation {
+            validationLabel.isHidden = false
+            validationLabel.stringValue = validation.message
+            switch validation.severity {
+            case .error: validationLabel.role = .danger
+            case .warning: validationLabel.role = .warning
+            case .information: validationLabel.role = .secondaryText
+            }
+        } else {
             validationLabel.isHidden = true
-            return
         }
-        validationLabel.isHidden = false
-        validationLabel.stringValue = validation.message
-        switch validation.severity {
-        case .error: validationLabel.role = .danger
-        case .warning: validationLabel.role = .warning
-        case .information: validationLabel.role = .secondaryText
+        if acceptWhenValidationLands {
+            acceptWhenValidationLands = false
+            if model.canAccept { onAccept(model.value) }
         }
     }
 
@@ -182,7 +219,14 @@ final class ExtensionInputBoxViewController: NSViewController {
     /// nothing and the message stays on screen (the contract quoted on
     /// `ExtensionInputBoxModel.canAccept`).
     private func choose() {
-        guard model.canAccept else { return }
+        guard model.canAccept else {
+            // Not "no" — "not yet". A Return pressed while the extension's
+            // `validateInput` is still deciding is held and replayed by
+            // `showValidation(_:)`; a Return under a standing `.error` is
+            // the contract's own refusal and is simply dropped.
+            if model.isValidating { acceptWhenValidationLands = true }
+            return
+        }
         onAccept(model.value)
     }
 }
@@ -193,7 +237,9 @@ extension ExtensionInputBoxViewController: NSTextFieldDelegate {
 
     func controlTextDidChange(_ obj: Notification) {
         let value = field.stringValue
+        acceptWhenValidationLands = false
         model.value = value
+        model.beginValidating()
         onValueChanged(value)
     }
 

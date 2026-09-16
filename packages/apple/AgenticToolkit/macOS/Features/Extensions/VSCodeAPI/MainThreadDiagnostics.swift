@@ -652,14 +652,28 @@ public final class MainThreadDiagnostics {
         }
         let thisArg = arguments.count > 1 ? arguments[1] : nil
         for entry in store.pairs(owner: owner) {
-            guard let uriValue = VSCodeAPI.uriValue(for: entry.url, in: context) else { continue }
-            // `forEach`'s existing failure unit is the whole entry (the
-            // `uriValue` guard above already skips one on a bad Uri) — an
-            // undecodable diagnostic must fail the same entry, never
-            // silently shorten its diagnostics array.
+            // **An entry that will not decode raises, it is never skipped.**
+            // `get` raises on exactly this (`handleCollectionGet` above) and
+            // so does `for…of` (`pairsArrayValue`), and all three read the
+            // same `store.pairs(owner:)` order — so a `continue` here made
+            // one collection answer "three entries" to two of its own
+            // traversals and "two entries" to the third, with nothing thrown
+            // and nothing logged to say which. An extension counting
+            // diagnostics in a `forEach` got a number that was quietly wrong.
+            // Failing loudly at the same entry all three ways is the only
+            // answer that stays consistent with itself.
+            guard let uriValue = VSCodeAPI.uriValue(for: entry.url, in: context) else {
+                return VSCodeAPI.raise(
+                    "DiagnosticCollection.forEach could not decode the Uri of an entry.",
+                    in: context)
+            }
             guard let diagnosticsValues = MainThreadDiagnostics.diagnosticValues(entry.diagnostics, in: context),
                   let diagnosticsArrayValue = MainThreadDiagnostics.arrayValue(of: diagnosticsValues, in: context)
-            else { continue }
+            else {
+                return VSCodeAPI.raise(
+                    "DiagnosticCollection.forEach could not decode a diagnostic for this Uri.",
+                    in: context)
+            }
             let callArguments = [uriValue, diagnosticsArrayValue, collection]
             switch VSCodeAPI.call(callback, thisArg: thisArg, arguments: callArguments) {
             case .returned:
@@ -941,8 +955,7 @@ public final class MainThreadDiagnostics {
     private static func diagnosticArray(
         from value: JSValue, in context: JSContext
     ) -> [VSCodeAPI.ExtensionDiagnostic]? {
-        guard let lengthValue = value.forProperty("length"), lengthValue.isNumber else { return nil }
-        let count = Int(lengthValue.toInt32())
+        guard let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         var result: [VSCodeAPI.ExtensionDiagnostic] = []
         result.reserveCapacity(count)
         for index in 0..<count {
@@ -960,8 +973,7 @@ public final class MainThreadDiagnostics {
     private static func setEntriesArray(
         from value: JSValue, in context: JSContext
     ) -> [(url: URL, diagnostics: [VSCodeAPI.ExtensionDiagnostic]?)]? {
-        guard let lengthValue = value.forProperty("length"), lengthValue.isNumber else { return nil }
-        let count = Int(lengthValue.toInt32())
+        guard let count = VSCodeAPI.arrayLength(of: value) else { return nil }
         var result: [(url: URL, diagnostics: [VSCodeAPI.ExtensionDiagnostic]?)] = []
         result.reserveCapacity(count)
         for index in 0..<count {

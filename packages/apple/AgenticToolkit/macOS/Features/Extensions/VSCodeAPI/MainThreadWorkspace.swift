@@ -55,26 +55,42 @@ public protocol ExtensionWorkspaceRoots: AnyObject {
 /// either see a stale cache or silently rebuild one, neither of which this
 /// type tries to detect.
 ///
-/// **`workspaceRoots` is read once**, the first time either `workspaceFolders`
-/// or `getWorkspaceFolder` needs it, and never again. A workspace that adds or
-/// removes a folder after that point is invisible to an already-activated
-/// extension — the same snapshot-at-activation contract `vscode.workspace.name`
-/// keeps. Nothing in this task asked for live updates, and the shim's
-/// `defineMember` has no notion of one: `table[name] = value` is a plain
-/// assignment, not a JavaScript accessor property, so there is nowhere to
-/// route a later change even if this type tried to notice one. The only way
-/// a later root shows up is a new `MainThreadWorkspace` built for a freshly
-/// (re-)activated host — there is no in-place refresh path, and none is
-/// planned.
+/// **`workspaceRoots` is read on every access**, not snapshotted. Each read of
+/// `workspaceFolders` or `getWorkspaceFolder` asks the roots object what the
+/// roots are now, and rebuilds the folder objects only when that answer
+/// differs from the one they were built from (`folderEntries(in:)`).
+///
+/// The alternative — snapshot at first read — is what shipped first, and it
+/// is wrong here for a reason specific to *when* this host activates:
+/// extensions are activated at app launch, ahead of any project window, and
+/// an extension's top-level code reads `workspaceFolders` right then. The
+/// snapshot therefore captured "no roots" on the ordinary launch and held it
+/// for the life of the process. `vscode.workspace.name` keeps no such
+/// snapshot either, for the same reason — it is a
+/// `DeferredVSCodeValue` that reads `workspaceDisplayName` when resolved.
+///
+/// Both members are installed through the shim's `defineLiveMember` — an
+/// accessor property whose getter calls back into this adaptor — rather than
+/// `defineMember`'s plain `table[name] = value` assignment, which is what
+/// made "read once" the only available behaviour before.
+///
+/// What this type still does *not* do is *notify*: there are no
+/// `onDidChangeWorkspaceFolders` events, because no event plumbing exists to
+/// route one through. An extension that reads sees the current workspace; an
+/// extension waiting to be told does not. The two are separable, and only the
+/// first was a defect.
 ///
 /// **`undefined`, not `null`, for an absent `name` or `workspaceFolders`.**
 /// `JSValue(undefinedIn:)` is the only way to build a genuine `undefined`, and
 /// it needs a live `JSContext` — unavailable at the point this adaptor's
 /// `Any` values are constructed for `defineVSCodeMember`, which runs before
 /// `activate()` so the member exists before the extension's own top-level
-/// code can read it. `fs`, `workspaceFolders` and `name` are therefore built
-/// as `ExtensionHost.DeferredVSCodeValue`, resolved by `apply(_:to:)` at the
-/// one point a queued definition meets a live context. This is a small,
+/// code can read it. `fs` is therefore built as an
+/// `ExtensionHost.DeferredVSCodeValue`, resolved by `apply(_:to:)` at the one
+/// point a queued definition meets a live context; `workspaceFolders` and
+/// `name` take the live form of the same box
+/// (`ExtensionHost.LiveVSCodeValue`), which resolves in the same place and
+/// then again on every read. This is a small,
 /// additive change to `ExtensionHost.apply(_:to:)` beyond what this task's
 /// brief named (an `ExtensionHost.init` parameter) — see the task report for
 /// why the alternative (a Swift `nil` boxed in `Any`, which bridges to
@@ -93,6 +109,32 @@ public protocol ExtensionWorkspaceRoots: AnyObject {
 /// `@MainActor` for the reason every adaptor in this file is: `JSContext` and
 /// `JSValue` are not `Sendable`, and every block below runs on the thread that
 /// made the call, which for this host is always the main actor.
+/// Frees the buffer `uint8ArrayValue(from:in:)` handed to
+/// `JSObjectMakeTypedArrayWithBytesNoCopy`, once JavaScriptCore has collected
+/// the array that adopted it.
+///
+/// **This is at file scope, outside the `@MainActor` class, deliberately.** It
+/// is the one piece of this file that does *not* run on the main actor:
+/// JavaScriptCore calls a typed-array deallocator from its own garbage
+/// collector thread, in `Heap::runEndPhase`. Written as a closure literal
+/// inside the class it inherited the class's isolation, and the isolation
+/// check Swift emits on the `@convention(c)` thunk then trapped the whole
+/// process — `dispatch_assert_queue` on a thread that is not and cannot be the
+/// main queue. It killed the test runner outright rather than failing a test,
+/// and only when a GC happened to collect a `readFile` result, which is why it
+/// read as a flake: the crash is in the collector, arbitrarily far from the
+/// read that allocated the buffer.
+///
+/// Nothing here touches the actor's state, so nonisolation costs nothing:
+/// `deallocate()` on a pointer JavaScriptCore is finished with is the whole
+/// body.
+private func freeTypedArrayBytes(
+    _ bytes: UnsafeMutableRawPointer?,
+    _ deallocatorContext: UnsafeMutableRawPointer?
+) {
+    bytes?.deallocate()
+}
+
 @MainActor
 public final class MainThreadWorkspace {
 
@@ -135,10 +177,18 @@ public final class MainThreadWorkspace {
     private var isDisposed = false
 
     /// This adaptor's own answer to `vscode.workspace.workspaceFolders`,
-    /// built once and reused by `getWorkspaceFolder` so the two answer with
-    /// the same object identity. `nil` until first needed; see the type's own
-    /// doc for why a workspace change after that point is not reflected.
+    /// built on demand and reused by `getWorkspaceFolder` so the two answer
+    /// with the same object identity. `nil` until first needed, and again
+    /// whenever `cachedFolderURLs` stops matching the roots — see
+    /// `folderEntries(in:)`.
     private var cachedFolderEntries: [WorkspaceFolderEntry]?
+
+    /// The `workspaceRootURLs` `cachedFolderEntries` was built from, which is
+    /// what makes the cache re-derivable rather than write-once. `nil` and
+    /// `[]` are deliberately different values here: `[]` is "built, from no
+    /// roots", `nil` is "not built yet", and conflating them is what made a
+    /// read taken before a project opened stick forever.
+    private var cachedFolderURLs: [URL]?
 
     /// One built folder: the pieces `getWorkspaceFolder`'s longest-prefix
     /// match needs (`url`), and the already-bridged JavaScript object
@@ -178,10 +228,11 @@ public final class MainThreadWorkspace {
 
     /// `implementation` for `vscode.workspace.name`, handed to
     /// `ExtensionHost.defineVSCodeMember(namespacePath:name:implementation:)`
-    /// as-is. A `ExtensionHost.DeferredVSCodeValue`, not a plain `String?`: see
-    /// this type's own doc for why an absent name needs a live `JSContext` to
-    /// become genuine `undefined`.
-    public private(set) lazy var name: Any = ExtensionHost.DeferredVSCodeValue { [weak self] context in
+    /// as-is. An `ExtensionHost.LiveVSCodeValue`, not a plain `String?`, for
+    /// two reasons: an absent name needs a live `JSContext` to become genuine
+    /// `undefined`, and the name is app state that arrives after activation —
+    /// see this type's own doc.
+    public private(set) lazy var name: Any = ExtensionHost.LiveVSCodeValue { [weak self] context in
         guard let displayName = self?.workspaceRoots?.workspaceDisplayName else {
             return MainThreadWorkspace.undefinedValue(in: context)
         }
@@ -193,19 +244,39 @@ public final class MainThreadWorkspace {
     /// `implementation` for `vscode.workspace.workspaceFolders`. `undefined`
     /// when there are no roots — never an empty array, matching VS Code's own
     /// contract for this member.
-    public private(set) lazy var workspaceFolders: Any = ExtensionHost.DeferredVSCodeValue { [weak self] context in
+    ///
+    /// An `ExtensionHost.LiveVSCodeValue`: read at every access, because an
+    /// extension reads this during activation and this host activates at app
+    /// launch, before any project window exists.
+    public private(set) lazy var workspaceFolders: Any = ExtensionHost.LiveVSCodeValue { [weak self] context in
         guard let self else { return MainThreadWorkspace.undefinedValue(in: context) }
         let entries = self.folderEntries(in: context)
         guard !entries.isEmpty else { return MainThreadWorkspace.undefinedValue(in: context) }
         return entries.map(\.value)
     }
 
-    /// Builds (once) and returns the folder objects both `workspaceFolders`
-    /// and `getWorkspaceFolder` answer with. Idempotent, so it makes no
+    /// Builds and returns the folder objects both `workspaceFolders` and
+    /// `getWorkspaceFolder` answer with. Idempotent, so it makes no
     /// difference which of the two is read first.
+    ///
+    /// The cache is keyed on the roots it was built from, not on "have I run
+    /// before". An extension's top-level code reads
+    /// `vscode.workspace.workspaceFolders` during activation, and this host
+    /// activates extensions at app launch — before any project window exists,
+    /// so `workspaceRootURLs` is empty at that moment for the ordinary
+    /// launch. A run-once cache recorded that emptiness permanently: the
+    /// extension saw `undefined`, and so did every later read, for the whole
+    /// life of the process, no matter which project the user then opened.
+    /// Every `workspaceContains:`-shaped extension was dead on arrival.
+    ///
+    /// Re-deriving costs a `[URL]` comparison per read and preserves the
+    /// object identity `getWorkspaceFolder` promises for as long as the
+    /// answer is genuinely the same: identity is rebuilt exactly when the
+    /// workspace itself changed, which is the one case where handing back the
+    /// old objects would be wrong anyway.
     private func folderEntries(in context: JSContext) -> [WorkspaceFolderEntry] {
-        if let cachedFolderEntries { return cachedFolderEntries }
         let urls = workspaceRoots?.workspaceRootURLs ?? []
+        if let cachedFolderEntries, cachedFolderURLs == urls { return cachedFolderEntries }
         var entries: [WorkspaceFolderEntry] = []
         entries.reserveCapacity(urls.count)
         for (index, url) in urls.enumerated() {
@@ -215,6 +286,7 @@ public final class MainThreadWorkspace {
             entries.append(WorkspaceFolderEntry(url: url, value: value))
         }
         cachedFolderEntries = entries
+        cachedFolderURLs = urls
         return entries
     }
 
@@ -671,29 +743,98 @@ public final class MainThreadWorkspace {
         return NSNull()
     }
 
-    /// `Data` to a genuine JavaScript `Uint8Array`. `JSValue` has no direct
-    /// bridge from `NSData` to a typed array — `NSData` is absent from
-    /// `JSValue`'s own Objective-C conversion table entirely, so an `NSData`
-    /// handed across would arrive as an opaque wrapper object, not something
-    /// `instanceof Uint8Array` or indexing would work on. Going through a
-    /// plain array of byte numbers and `new Uint8Array(...)` is the
-    /// unglamorous route that is actually in that table twice over: `NSArray`
-    /// bridges to a JavaScript `Array`, and `Uint8Array`'s own constructor
-    /// accepts any array-like of numbers.
+    /// `Data` to a genuine JavaScript `Uint8Array`, through JavaScriptCore's
+    /// own typed-array C entry point.
+    ///
+    /// `JSValue` has no *Objective-C* bridge from `NSData` to a typed array —
+    /// `NSData` is absent from `JSValue`'s conversion table entirely, so an
+    /// `NSData` handed across arrives as an opaque wrapper object, not
+    /// something `instanceof Uint8Array` or indexing would work on. The route
+    /// that table does offer — a plain `[UInt8]` bridged to a JS `Array`, fed
+    /// to `new Uint8Array(...)` — is correct and quadratically expensive in
+    /// the wrong place: it boxes **one `NSNumber` per byte** (a megabyte file
+    /// is a million allocations), builds a second JS array of a million
+    /// doubles to copy them out of, and recompiles the same one-line
+    /// constructor script on every single `readFile`. All of it on the main
+    /// actor, where `fs.readFile` runs.
+    ///
+    /// `JSObjectMakeTypedArrayWithBytesNoCopy` (macOS 10.12+) takes the bytes
+    /// directly and adopts the buffer, so the whole cost is one `memcpy` out
+    /// of the `Data` into a buffer JavaScriptCore then owns: the deallocator
+    /// it calls when the array is collected is what frees it, which is why
+    /// the allocation cannot be a Swift array's storage. Every failure path
+    /// below frees the buffer itself, since a call that returns `nil` never
+    /// took ownership and so never calls the deallocator.
     private static func uint8ArrayValue(from data: Data, in context: JSContext) -> Any {
-        guard let arrayValue = JSValue(object: [UInt8](data), in: context),
-              let constructor = context.evaluateScript("(function (bytes) { return new Uint8Array(bytes); })"),
-              let result = constructor.call(withArguments: [arrayValue]) else {
+        let byteCount = data.count
+        // One byte minimum: `UnsafeMutableRawPointer.allocate` with a zero
+        // byte count is undefined, and an empty file is an ordinary read.
+        let bytes = UnsafeMutableRawPointer.allocate(
+            byteCount: max(byteCount, 1), alignment: MemoryLayout<UInt8>.alignment)
+        if byteCount > 0 {
+            data.copyBytes(to: bytes.assumingMemoryBound(to: UInt8.self), count: byteCount)
+        }
+        var exception: JSValueRef?
+        let object = JSObjectMakeTypedArrayWithBytesNoCopy(
+            context.jsGlobalContextRef,
+            kJSTypedArrayTypeUint8Array,
+            bytes,
+            byteCount,
+            freeTypedArrayBytes,
+            nil,
+            &exception)
+        guard let object, exception == nil, let value = JSValue(jsValueRef: object, in: context) else {
+            bytes.deallocate()
             return undefinedValue(in: context)
         }
-        return result
+        return value
     }
 
-    /// A `Uint8Array` argument to `Data`. `JSValue.toArray()` reads `length`
-    /// and indexed properties — which a typed array has, same as a plain
-    /// array — so it works directly on a `Uint8Array` without a JavaScript
-    /// conversion step first.
+    /// A `Uint8Array` argument to `Data` — the inverse of
+    /// `uint8ArrayValue(from:in:)`, and cheap for the same reason.
+    ///
+    /// `JSValue.toArray()` also works here (a typed array has `length` and
+    /// indexed properties, same as a plain array) and carries the same
+    /// per-byte `NSNumber` on the way in that the read path carried on the
+    /// way out, so `writeFile` of a megabyte was a million boxes on the main
+    /// actor. `JSObjectGetTypedArrayBytesPtr` hands over the backing store
+    /// instead, and `Data(bytes:count:)` copies once out of it.
+    ///
+    /// The pointer is only valid until JavaScript next runs — a typed array's
+    /// buffer can be detached or moved — so it is read into `Data`
+    /// immediately and never stored.
+    ///
+    /// **The array-of-numbers path stays, as a fallback.** `vscode.d.ts`
+    /// declares `content: Uint8Array` and that is what the fast path reads,
+    /// but `toArray()` accepted a plain `[1, 2, 3]` before this and an
+    /// extension that passes one is writing a file today. Narrowing what is
+    /// accepted is a separate decision from making the declared shape cheap,
+    /// and this change is only the second.
     private static func data(fromUint8Array value: JSValue) -> Data? {
+        guard let context = value.context else { return numbersData(from: value) }
+        let contextRef = context.jsGlobalContextRef
+        let valueRef = value.jsValueRef
+        guard JSValueGetTypedArrayType(contextRef, valueRef, nil) == kJSTypedArrayTypeUint8Array else {
+            return numbersData(from: value)
+        }
+        var exception: JSValueRef?
+        guard let object = JSValueToObject(contextRef, valueRef, &exception), exception == nil else {
+            return nil
+        }
+        let byteLength = JSObjectGetTypedArrayByteLength(contextRef, object, &exception)
+        guard exception == nil else { return nil }
+        guard byteLength > 0 else { return Data() }
+        guard let bytes = JSObjectGetTypedArrayBytesPtr(contextRef, object, &exception),
+              exception == nil else {
+            return nil
+        }
+        return Data(bytes: bytes, count: byteLength)
+    }
+
+    /// Anything array-like of byte numbers, read one boxed `NSNumber` at a
+    /// time. See `data(fromUint8Array:)` for when this runs and why it is no
+    /// longer the path a `Uint8Array` takes.
+    private static func numbersData(from value: JSValue) -> Data? {
         guard let numbers = value.toArray() else { return nil }
         var bytes = [UInt8]()
         bytes.reserveCapacity(numbers.count)

@@ -214,8 +214,19 @@ public struct ActivationEventMatcher: Sendable, Equatable {
             }
 
         case .workspaceScanned(let relativePaths):
-            return workspaceContainsPatterns.contains { pattern in
-                relativePaths.contains { pattern.matches($0) }
+            // Path outside, pattern inside — deliberately, because the path
+            // is what costs anything to prepare. `GlobPattern` indexes
+            // characters, so a `String` has to be decomposed before it can
+            // be matched; with the patterns outside, every pattern
+            // decomposed the same path again. A scan carries every relative
+            // path of the workspace and this runs once per extension, so
+            // that was the whole workspace re-decomposed per glob. Both
+            // `contains` still short-circuit, so a path is decomposed only
+            // if the search actually reaches it.
+            guard !workspaceContainsPatterns.isEmpty else { return false }
+            return relativePaths.contains { path in
+                let characters = Array(path)
+                return workspaceContainsPatterns.contains { $0.matches(characters) }
             }
         }
     }
@@ -291,6 +302,28 @@ internal struct GlobPattern: Equatable, Sendable {
     /// `tokens`.
     private let branches: [[Token]]
 
+    /// Whether a match of this pattern is worth caching its search states.
+    ///
+    /// The caches on `matchTokens`/`matchBranch` exist for one shape only:
+    /// **two or more** backtracking tokens (`*`, `**`, `**/`), which is what
+    /// makes the search re-derive the same state through every combination
+    /// of how much each one consumed. With one such token there is a single
+    /// loop over non-backtracking tokens, and with none there is no loop at
+    /// all — in both cases every state is reached once already, and the
+    /// cache can only add to the work.
+    ///
+    /// That is not a rounding error at this call site. A `workspaceContains:`
+    /// glob is usually a bare filename (`package.json`, `.eslintrc`), and it
+    /// is matched against **every** relative path of a workspace scan: with
+    /// the cache unconditional, a pattern that cannot backtrack still hashed
+    /// and stored one dictionary entry per character of every path it was
+    /// tried against, and threw the whole table away a path later.
+    ///
+    /// Counted once here, over the pattern's own tokens *and* every `{...}`
+    /// branch, because a branch's tokens run the same search — see
+    /// `matchBranch`.
+    private let needsMemoization: Bool
+
     /// `nil` when `pattern` uses syntax this matcher does not support: a
     /// `[...]` character class, a leading `!` negation, or a nested `{`
     /// inside a `{...}` group. Those are refused rather than approximated —
@@ -302,6 +335,23 @@ internal struct GlobPattern: Equatable, Sendable {
         guard let tokens = Self.tokenize(Array(pattern), &branches) else { return nil }
         self.tokens = tokens
         self.branches = branches
+        let backtrackingTokens = branches.reduce(Self.backtrackingTokenCount(tokens)) { total, branch in
+            total + Self.backtrackingTokenCount(branch)
+        }
+        self.needsMemoization = backtrackingTokens > 1
+    }
+
+    /// How many of `tokens` are the kind that can consume a variable amount
+    /// of the path and therefore be backtracked into.
+    private static func backtrackingTokenCount(_ tokens: [Token]) -> Int {
+        tokens.reduce(0) { count, token in
+            switch token {
+            case .star, .doubleStar, .anyDirectories:
+                return count + 1
+            case .literal, .question, .alternation:
+                return count
+            }
+        }
     }
 
     /// Tokenizes `characters`, appending each `{...}` branch it discovers
@@ -390,10 +440,28 @@ internal struct GlobPattern: Equatable, Sendable {
 
     /// Whether `path` matches this pattern, anchored at both ends — the
     /// whole relative path, not a substring of it.
+    ///
+    /// Converts `path` to characters and hands off. A caller with several
+    /// patterns to try against the same path should convert once itself and
+    /// call the `[Character]` overload — see `ActivationEventMatcher`'s
+    /// `.workspaceScanned` case, which is every pattern of every extension
+    /// against every path of a scan.
     func matches(_ path: String) -> Bool {
-        var memo: [MemoKey: Bool] = [:]
-        var branchMemo: [BranchMemoKey: Bool] = [:]
-        return Self.matchTokens(tokens, 0, Array(path), 0, branches, &memo, &branchMemo)
+        matches(Array(path))
+    }
+
+    /// Whether `path` — already decomposed into the characters the matcher
+    /// indexes — matches this pattern.
+    ///
+    /// The caches are built here rather than held on the pattern: they are
+    /// keyed on positions in *this* path, so they are worth exactly one
+    /// match and nothing beyond it. `needsMemoization` decides whether they
+    /// exist at all; `nil` means every state below is reached once and the
+    /// bookkeeping would be pure cost.
+    func matches(_ path: [Character]) -> Bool {
+        var memo: [MemoKey: Bool]? = needsMemoization ? [:] : nil
+        var branchMemo: [BranchMemoKey: Bool]? = needsMemoization ? [:] : nil
+        return Self.matchTokens(tokens, 0, path, 0, branches, &memo, &branchMemo)
     }
 
     /// Whether `path[pathIndex...]` matches `tokens[tokenIndex...]`.
@@ -421,14 +489,19 @@ internal struct GlobPattern: Equatable, Sendable {
     /// `{a**a**a**a**a**a**a**b}` parses to one `.alternation` with one
     /// branch holding that same adversarial token list), so `matchBranch`
     /// keeps an equivalent cache of its own rather than leaning on this one.
+    ///
+    /// Both caches are `nil` for a pattern that cannot reach that blowup at
+    /// all — see `needsMemoization` — and every read and write below is then
+    /// a no-op, rather than a table whose every entry is written once and
+    /// read never.
     private static func matchTokens(
         _ tokens: [Token], _ tokenIndex: Int, _ path: [Character], _ pathIndex: Int,
-        _ branches: [[Token]], _ memo: inout [MemoKey: Bool], _ branchMemo: inout [BranchMemoKey: Bool]
+        _ branches: [[Token]], _ memo: inout [MemoKey: Bool]?, _ branchMemo: inout [BranchMemoKey: Bool]?
     ) -> Bool {
         guard tokenIndex < tokens.count else { return pathIndex == path.count }
 
         let key = MemoKey(tokenIndex: tokenIndex, pathIndex: pathIndex)
-        if let cached = memo[key] { return cached }
+        if let cached = memo?[key] { return cached }
 
         let result: Bool
         switch tokens[tokenIndex] {
@@ -488,7 +561,7 @@ internal struct GlobPattern: Equatable, Sendable {
             }
         }
 
-        memo[key] = result
+        memo?[key] = result
         return result
     }
 
@@ -526,14 +599,14 @@ internal struct GlobPattern: Equatable, Sendable {
         _ branchID: BranchID, _ branch: [Token], _ branchIndex: Int,
         _ outerTokens: [Token], _ outerTokenIndex: Int,
         _ path: [Character], _ pathIndex: Int,
-        _ branches: [[Token]], _ memo: inout [MemoKey: Bool], _ branchMemo: inout [BranchMemoKey: Bool]
+        _ branches: [[Token]], _ memo: inout [MemoKey: Bool]?, _ branchMemo: inout [BranchMemoKey: Bool]?
     ) -> Bool {
         guard branchIndex < branch.count else {
             return matchTokens(outerTokens, outerTokenIndex, path, pathIndex, branches, &memo, &branchMemo)
         }
 
         let key = BranchMemoKey(branch: branchID, branchIndex: branchIndex, pathIndex: pathIndex)
-        if let cached = branchMemo[key] { return cached }
+        if let cached = branchMemo?[key] { return cached }
 
         let result: Bool
         switch branch[branchIndex] {
@@ -610,7 +683,7 @@ internal struct GlobPattern: Equatable, Sendable {
             preconditionFailure("a { ... } branch cannot itself contain a nested alternation")
         }
 
-        branchMemo[key] = result
+        branchMemo?[key] = result
         return result
     }
 }

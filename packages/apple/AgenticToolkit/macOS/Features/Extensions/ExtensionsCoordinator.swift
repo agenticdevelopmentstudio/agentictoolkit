@@ -52,11 +52,21 @@ public final class ExtensionsCoordinator: AppFeature {
     /// torn down. The panel reads it back through `accesses(for:)`, so a
     /// row outlives the host that wrote it.
     ///
-    /// `ExtensionHost.init` defaults to a ledger of its own, so a host built
-    /// for this coordinator's extensions has to be handed *this* one by
-    /// name. A host built without it records into a ledger nothing reads,
-    /// and the rows never reach the panel — with nothing to say they were
-    /// written at all.
+    /// **Both `ExtensionHost.init` and `ExtensionHostInstaller.init` require
+    /// the ledger by name** — neither defaults to one of its own any more,
+    /// because a default is exactly how a host ends up recording into a
+    /// ledger nothing reads, with nothing to say the rows were written at
+    /// all. Passing this one is therefore something the compiler asks for
+    /// rather than something a wiring site has to remember.
+    ///
+    /// **Nothing writes to it in this process yet.** The only writers are the
+    /// `vscode` adaptors, which exist only inside an `ExtensionHostInstaller`,
+    /// and this coordinator does not build one — hosts are instantiated by
+    /// `installExtensionHosts(...)`, which the app calls once the seams a host
+    /// needs (the command registry, the chat model provider, the front window,
+    /// the footers, the workspace roots) are all available. Until that call,
+    /// the panel's "not implemented" list is empty because no extension code
+    /// has run, which is the truthful answer rather than a missing writer.
     public let notImplementedLedger: NotImplementedLedger
 
     public init(

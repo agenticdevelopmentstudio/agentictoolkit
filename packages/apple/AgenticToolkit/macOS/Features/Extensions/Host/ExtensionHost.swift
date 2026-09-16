@@ -738,10 +738,45 @@ public final class ExtensionHost {
         let resolve: @MainActor (JSContext) -> Any
     }
 
+    /// A `defineVSCodeMember` implementation that must be re-read on every
+    /// access, rather than resolved once and assigned.
+    ///
+    /// `DeferredVSCodeValue` above solves *when* a value can be built; this
+    /// solves *how often*. Both members that need it report app state —
+    /// `vscode.workspace.workspaceFolders` and `vscode.workspace.name` — and
+    /// an extension reads them from its own top-level code, which this host
+    /// runs at app launch, before any project window exists. A value assigned
+    /// once at that moment says "no workspace" for the life of the process.
+    ///
+    /// The value is read from `JSContext.current()` inside the getter rather
+    /// than from a captured `JSContext`: a block exported to JavaScript must
+    /// not hold one (it is the retain cycle the whole adaptor layer is built
+    /// to avoid), and the context a getter runs in is by construction the one
+    /// it was installed on.
+    struct LiveVSCodeValue {
+        let read: @MainActor (JSContext) -> Any
+    }
+
     private func apply(_ definition: VSCodeMemberDefinition, to runtime: JSValue) throws {
         pendingException = nil
         let implementation: Any
-        if let deferred = definition.implementation as? DeferredVSCodeValue {
+        // Which of the shim's two installers this definition goes through.
+        // `defineLiveMember` takes a getter and installs an accessor;
+        // `defineMember` takes a value and assigns it. See
+        // `LiveVSCodeValue`.
+        var installer = "defineMember"
+        if let live = definition.implementation as? LiveVSCodeValue {
+            let getter: @convention(block) () -> Any? = {
+                MainActor.assumeIsolated {
+                    guard let context = JSContext.current() else {
+                        return UncheckedSendableBox<Any?>(value: nil)
+                    }
+                    return UncheckedSendableBox<Any?>(value: live.read(context))
+                }.value
+            }
+            implementation = getter
+            installer = "defineLiveMember"
+        } else if let deferred = definition.implementation as? DeferredVSCodeValue {
             // Separated from the context test, rather than one combined `if`,
             // so that a `DeferredVSCodeValue` with no context to resolve
             // against cannot fall through to the `else` arm below — which
@@ -758,7 +793,7 @@ public final class ExtensionHost {
             implementation = definition.implementation
         }
         runtime.invokeMethod(
-            "defineMember",
+            installer,
             withArguments: [definition.namespacePath, definition.name, implementation])
         if let message = pendingException {
             pendingException = nil

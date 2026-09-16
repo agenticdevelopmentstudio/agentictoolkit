@@ -123,7 +123,13 @@ final class ExtensionPickerWindowController: NSWindowController {
     func show() {
         guard let window else { return }
         position(window)
-        NSApp.activate(ignoringOtherApps: true)
+        // `activateUnlessQuiet()`, not the bare `activate(ignoringOtherApps:)`
+        // the copied order came with: every one of this app's other activation
+        // sites goes through it, and it is what makes an automated run — which
+        // drives these panels — stop stealing the screen from whoever is
+        // typing. An extension calling `showQuickPick` is exactly the path a
+        // test drives.
+        NSApp.activateUnlessQuiet()
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         takeInitialFocus()

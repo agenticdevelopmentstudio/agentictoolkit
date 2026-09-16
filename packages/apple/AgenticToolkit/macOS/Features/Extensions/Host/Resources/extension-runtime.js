@@ -629,6 +629,45 @@
         table[name] = value;
     }
 
+    // Installs one real implementation whose value is read at every access,
+    // rather than written once.
+    //
+    // `defineMember` above is a plain assignment, which is right for a member
+    // whose value cannot change — a function, a class, a sub-namespace. It is
+    // wrong for a member that *reports app state*:
+    // `vscode.workspace.workspaceFolders` and `vscode.workspace.name` are
+    // read by an extension's top-level code during activation, and this host
+    // activates extensions at app launch, ahead of any project window. Written
+    // once, those members recorded "no workspace" and kept saying it for the
+    // life of the process, whatever the user opened afterwards.
+    //
+    // `enumerable: true` is load-bearing, not decorative: the proxy's
+    // `ownKeys` trap is `Object.keys(table)` and `probeValue`'s
+    // `propertyIsEnumerable` answers from the descriptor, so a
+    // non-enumerable member would vanish from both while still being
+    // readable. `configurable: true` matches what a plain assignment leaves
+    // behind, so a later `defineMember` for the same name can still replace
+    // this one — an accessor that could not be redefined would make member
+    // installation order load-bearing.
+    //
+    // No setter: the namespace proxy's `set` trap already refuses assignment
+    // one level up, and a getter-only property makes the same refusal true of
+    // the table itself.
+    function defineLiveMember(namespacePath, name, getter) {
+        var table = namespaceTables[namespacePath];
+        if (!table) {
+            throw new Error(
+                "Cannot implement '" + name + "' on '" + namespacePath + "': no such namespace. " +
+                'Known namespaces: ' + Object.keys(namespaceTables).join(', ') + '.'
+            );
+        }
+        Object.defineProperty(table, name, {
+            get: getter,
+            enumerable: true,
+            configurable: true
+        });
+    }
+
     // Deliberately not implemented in this task, and this stub is the record
     // of that decision rather than a comment promising one later. Giving
     // arbitrary extension JavaScript unrestricted network access is a
@@ -1500,6 +1539,9 @@
         // The seam. Stages 5.3-5.7 each install real members through this and
         // change nothing else here.
         defineMember: defineMember,
+        // The same seam for a member that reports app state and so must be
+        // read at every access — see `defineLiveMember`.
+        defineLiveMember: defineLiveMember,
         // Used for the argument `activate(context)` receives: a recorded,
         // throwing stub like every other unimplemented surface, so an
         // extension that reaches for `context.subscriptions` today gets told

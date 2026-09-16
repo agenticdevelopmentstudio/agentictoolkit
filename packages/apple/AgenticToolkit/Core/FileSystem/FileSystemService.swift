@@ -328,17 +328,43 @@ public actor FileSystemService {
             guard resolved.contains(.directory) else {
                 throw FileSystemServiceError.fileNotADirectory(path: path)
             }
-            let names: [String]
+            // The link is resolved before enumerating, because
+            // `contentsOfDirectory(at:)` refuses one: it decides for itself
+            // whether the URL names a directory, and that decision does not
+            // traverse a link, so a link to a directory fails `ENOTDIR` — a
+            // trailing slash (`isDirectory: true`) does not change it either,
+            // measured. The path-based listing this replaced followed the
+            // link for free, and this is a listing of the directory the link
+            // names, so resolving restores exactly that contract. The
+            // children are still named by their own last path component, so
+            // nothing about the answer changes.
+            let directoryURL = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+            let children: [URL]
             do {
-                names = try manager.contentsOfDirectory(atPath: path)
+                // The keys are *prefetched*: `contentsOfDirectory(at:…)` asks
+                // the file system for them in bulk while it enumerates, so
+                // reading them back below costs a cache hit rather than a
+                // syscall per child. Asking each child for
+                // `attributesOfItem(atPath:)` instead — which is what this
+                // did — is a full attribute dictionary per entry, including
+                // the owner and group *names*, whose lookup goes through
+                // Directory Services. A directory of a few thousand files
+                // paid that thousands of times to answer a question about
+                // three bits.
+                children = try manager.contentsOfDirectory(
+                    at: directoryURL,
+                    includingPropertiesForKeys: [
+                        .isSymbolicLinkKey, .isDirectoryKey, .isRegularFileKey
+                    ],
+                    options: [])
             } catch {
                 throw Self.distinguished(error, path: path)
                     ?? FileSystemServiceError.readDirectoryFailed(path: path, underlying: error)
             }
-            let directoryURL = URL(fileURLWithPath: path)
-            return names.map { name in
-                let childPath = directoryURL.appendingPathComponent(name).path
-                return DirectoryEntry(name: name, type: Self.fileType(atPath: childPath, using: manager))
+            return children.map { url in
+                DirectoryEntry(
+                    name: url.lastPathComponent,
+                    type: Self.prefetchedTypeBits(of: url, using: manager))
             }
         }
     }
@@ -706,6 +732,45 @@ public actor FileSystemService {
             return .unknown
         }
         return typeBits(ofLinkAttributes: attributes, atPath: path, using: manager)
+    }
+
+    /// The type bits for one child of a listing, read from the resource
+    /// values ``readDirectory(atPath:)`` asked the enumeration to prefetch.
+    ///
+    /// For everything that is not a link the three keys answer directly what
+    /// ``typeBits(ofLinkAttributes:atPath:using:)`` computes: `isDirectory`
+    /// or `isRegularFile` for the two kinds a listing names, and none of the
+    /// three — ``FileType/unknown``, as before — for a socket, a FIFO or a
+    /// device.
+    ///
+    /// **A link is handed back to the per-child read**, because none of the
+    /// three traverses it: the enumeration answers `isSymbolicLink` alone
+    /// even where the target is a directory, and the contract this listing
+    /// has always kept is the *union* of the link's own bit with its
+    /// target's — 65 for a link to a file, 66 for a link to a directory,
+    /// `symbolicLink` alone only where the target is gone. Links are a
+    /// rounding error in a directory listing, so paying the old attribute
+    /// read for exactly those keeps the answer whole at no measurable cost.
+    ///
+    /// A child whose values cannot be read at all falls back the same way,
+    /// and only then to ``FileType/unknown``: a listing reports an unreadable
+    /// child rather than failing, and it is worth one syscall to be sure that
+    /// is what it is.
+    private static func prefetchedTypeBits(of url: URL, using manager: FileManager) -> FileType {
+        guard let values = try? url.resourceValues(forKeys: [
+            .isSymbolicLinkKey, .isDirectoryKey, .isRegularFileKey
+        ]) else {
+            return fileType(atPath: url.path, using: manager)
+        }
+        guard values.isSymbolicLink != true else {
+            return fileType(atPath: url.path, using: manager)
+        }
+        // `.unknown` *is* the empty set (see its declaration), so no bit set
+        // is already the answer for a socket, a FIFO or a device.
+        var bits: FileType = .unknown
+        if values.isDirectory == true { bits.formUnion(.directory) }
+        if values.isRegularFile == true { bits.formUnion(.file) }
+        return bits
     }
 
     /// The attributes of the item at `path`, or `nil` when nothing is there.

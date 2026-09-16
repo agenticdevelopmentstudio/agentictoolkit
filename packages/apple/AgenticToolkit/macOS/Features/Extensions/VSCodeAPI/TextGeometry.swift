@@ -485,6 +485,20 @@ extension VSCodeAPI {
             // reconciled with `Position`'s stricter check. Explicit `null`
             // throws (`range.ts:130-131`); answers `this` when nothing
             // changes (`:146-147`).
+            //
+            // Both computed endpoints go through `positionOf` before the
+            // `isEqual` comparison, the same deliberate divergence
+            // `contains` above makes and for the same reason. Upstream's
+            // `isPosition` check (`range.ts:138`) admits a plain
+            // `{ line, character }` literal and then calls `.isEqual` on it
+            // (`:145`) — a literal has no such method, so upstream's own
+            // `with({line: 0, character: 0})` raises a TypeError naming
+            // `isEqual`, from inside a method `vscode.d.ts:494` documents as
+            // simply returning a range. Converting first makes the two
+            // duck-typed forms behave the way the declaration says they do,
+            // and leaves a genuinely non-position argument to
+            // `Range`'s own `'Invalid arguments'`, which is the error the
+            // extension can act on.
             Range.prototype.with = function (startOrChange, endArg) {
                 if (startOrChange === null || endArg === null) {
                     throw illegalArgument();
@@ -499,6 +513,11 @@ extension VSCodeAPI {
                     start = startOrChange.start || this.start;
                     end = startOrChange.end || this.end;
                 }
+                if (!positionIsPositionLike(start) || !positionIsPositionLike(end)) {
+                    return new Range(start, end);
+                }
+                start = positionOf(start);
+                end = positionOf(end);
                 if (start.isEqual(this._start) && end.isEqual(this._end)) {
                     return this;
                 }

@@ -26,22 +26,46 @@ public final class ExtensionInputBoxModel {
     /// `.error` left standing over new text would refuse a keystroke the
     /// extension never saw.
     public var value: String {
-        didSet { validation = nil }
+        didSet {
+            validation = nil
+            isValidating = false
+        }
     }
 
     /// The latest validation answer, or nil when the value is valid or
     /// nothing has been validated yet.
     public private(set) var validation: ExtensionInputValidation?
 
+    /// True between `beginValidating()` and the `recordValidation(_:)` that
+    /// answers it — i.e. while the extension's `validateInput` is in flight
+    /// for the current `value`. Cleared by a further edit, which supersedes
+    /// the answer being waited on.
+    ///
+    /// It exists because `validation` alone cannot tell "valid" from "not
+    /// asked yet": setting `value` clears `validation`, so between a
+    /// keystroke and its answer the model looked exactly as it does for a
+    /// value the validator approved, and `canAccept` said yes. Return
+    /// pressed in that window accepted text the extension was in the middle
+    /// of rejecting.
+    public private(set) var isValidating = false
+
     public init(request: ExtensionInputBoxRequest) {
         self.request = request
         self.value = request.value
     }
 
+    /// Note that `validateInput` has been asked about the current `value`
+    /// and has not answered yet. Call it synchronously, before the `await`.
+    public func beginValidating() {
+        isValidating = true
+    }
+
     /// Record the latest answer from `request`'s `validateInput`, or nil for
-    /// "valid" / "nothing to show".
+    /// "valid" / "nothing to show". Ends the `isValidating` window the
+    /// matching `beginValidating()` opened.
     public func recordValidation(_ validation: ExtensionInputValidation?) {
         self.validation = validation
+        isValidating = false
     }
 
     /// False exactly when the latest validation was `.error`. `.information`
@@ -54,8 +78,13 @@ public final class ExtensionInputBoxModel {
     /// InputBoxValidationSeverity.Info Info} and {@link
     /// InputBoxValidationSeverity.Warning Warning} severities will still
     /// allow the input to be accepted."
+    ///
+    /// A value still being validated is not acceptable *yet* — see
+    /// `isValidating`. The controller remembers the Return and replays it
+    /// when the answer lands, so a slow validator delays acceptance rather
+    /// than swallowing the keystroke.
     public var canAccept: Bool {
-        validation?.severity != .error
+        !isValidating && validation?.severity != .error
     }
 
     /// The selection to apply to the field on first show, clamped to the

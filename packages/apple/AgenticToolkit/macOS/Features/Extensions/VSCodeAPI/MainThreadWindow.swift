@@ -895,12 +895,19 @@ public final class MainThreadWindow {
     /// brief, for why that is load-bearing.
     private var statusBarItems: [String: ExtensionStatusBarItem] = [:]
 
-    /// Backs the internal id of a `createStatusBarItem()` call that carried
-    /// no caller-supplied id — mirroring upstream's own `ID_GEN`
-    /// (`extHostStatusBar.ts:21`, `private static ID_GEN = 0;`), a bare
-    /// incrementing counter distinct from `asStatusBarItemIdentifier`'s
-    /// extension-plus-id key for the other case (`:68`, `:83`).
-    private var statusBarItemCounter = 0
+    /// Backs the internal id of every `createStatusBarItem()` call, with or
+    /// without a caller-supplied id — mirroring upstream's own `ID_GEN`
+    /// (`extHostStatusBar.ts:21`, `private static ID_GEN = 0;`) including
+    /// its being `static`: one sequence for the whole host, because the
+    /// presenter these ids key into is process-wide and every adaptor
+    /// instance writes into that one table. This type's `@MainActor`
+    /// isolation is what makes the increment safe without a lock.
+    private static var statusBarItemCounter = 0
+
+    private static func nextStatusBarItemOrdinal() -> Int {
+        defer { statusBarItemCounter += 1 }
+        return statusBarItemCounter
+    }
 
     /// - Parameters:
     ///   - presenter: Where a `show*Message` call is actually presented. Not
@@ -1347,10 +1354,17 @@ public final class MainThreadWindow {
             return .rejected(
                 message: "\(quickPickMemberPath)'s argument 0 is neither an array nor a promise of one.")
         }
-        let count = Int(value.forProperty("length")?.toInt32() ?? 0)
+        guard let count = VSCodeAPI.arrayLength(of: value) else {
+            return .rejected(
+                message: """
+                    \(quickPickMemberPath)'s argument 0 is an array of more than \
+                    \(VSCodeAPI.maximumDecodableArrayLength) items, or reports a length \
+                    this host cannot read.
+                    """)
+        }
         var items: [ExtensionQuickPickItem] = []
         var values: [JSValue] = []
-        for index in 0..<max(count, 0) {
+        for index in 0..<count {
             guard let element = value.atIndex(index) else {
                 return .rejected(message: unreadableItemMessage(at: index))
             }
@@ -2039,23 +2053,37 @@ public final class MainThreadWindow {
         let alignment = MainThreadWindow.parseAlignment(alignmentArgument)
         let priority = MainThreadWindow.parsePriority(priorityArgument)
 
+        // The ordinal is what makes `internalID` unique, and it is drawn in
+        // **both** branches. `internalID` keys `statusBarItems` — the sole
+        // strong reference to each item — and the presenter's own table, so
+        // two live items sharing one is not a collision that resolves
+        // itself, it is an item destroyed:
+        //
+        //  - With a caller id, upstream's key shape alone
+        //    (`extHostStatusBar.ts:68`,
+        //    `asStatusBarItemIdentifier(extension.identifier, id)`) is not
+        //    unique. `createStatusBarItem('lint')` twice is legal and
+        //    ordinary, and the second call's insert dropped the first
+        //    item's only reference — deallocating a bar item the extension
+        //    still held a live JS object for.
+        //  - Without one, the counter this mirrors
+        //    (`extHostStatusBar.ts:21`: `private static ID_GEN = 0;`,
+        //    `:83`: `this._entryId = String(ExtHostStatusBarEntry.ID_GEN++);`)
+        //    is `static` — one sequence for the whole extension host. Ours
+        //    was per-instance, i.e. per extension, while the presenter it
+        //    keys into is process-wide: every extension's first id-less item
+        //    claimed `status-bar-item-0`, and they overwrote each other.
+        //
+        // Nothing outside this file reads the string back, so the format is
+        // free; only uniqueness is observable.
+        let ordinal = MainThreadWindow.nextStatusBarItemOrdinal()
         let internalID: String
         let publicID: String
         if let id {
-            // Mirrors upstream's own key *shape* — extension identifier plus
-            // caller id (`extHostStatusBar.ts:68`:
-            // `asStatusBarItemIdentifier(extension.identifier, id)`) — not
-            // its exact format, which lives in `extHostTypes.ts` and is not
-            // part of this task's pin. Only uniqueness is observable from
-            // outside this file: nothing reads this string back.
-            internalID = "\(extensionIdentifier).\(id)"
+            internalID = "\(extensionIdentifier).\(id)#\(ordinal)"
             publicID = id
         } else {
-            // Mirrors upstream's own bare counter for the id-less case
-            // (`extHostStatusBar.ts:21`: `private static ID_GEN = 0;`,
-            // `:83`: `this._entryId = String(ExtHostStatusBarEntry.ID_GEN++);`).
-            internalID = "status-bar-item-\(statusBarItemCounter)"
-            statusBarItemCounter += 1
+            internalID = "status-bar-item-\(ordinal)"
             // `vscode.d.ts:7566-7568`: "if no identifier was provided ... the
             // identifier will match the ... extension identifier."
             publicID = extensionIdentifier
@@ -2282,30 +2310,56 @@ public final class MainThreadWindow {
                 window.commitStatusBarUpdate(item)
             })
 
+        // `tooltip` and `command` are each `string | <an object> | undefined`
+        // (`vscode.d.ts:7588` `string | MarkdownString | undefined`,
+        // `:7610` `string | Command | undefined`), so a setter has **three**
+        // cases, not two. Collapsing the last two into one else-arm got both
+        // of the collapsed cases wrong at once:
+        //
+        //  - `undefined` (and `null`) is the documented way to clear the
+        //    field, and `item.tooltip = undefined` is how an extension takes
+        //    a tooltip away. It neither cleared nor committed, so the old
+        //    text stayed on screen with the extension's own model saying
+        //    otherwise — and `name`, three accessors above, has always
+        //    cleared through `stringOptionalField`, so the two setters
+        //    disagreed about the same gesture.
+        //  - It also filed a not-implemented ledger row for that clear, which
+        //    is a false report: the extension report then told the user their
+        //    extension wanted a member this host lacks, when it wanted one it
+        //    has.
+        //
+        // The genuinely unimplemented case is the middle one — a
+        // `MarkdownString` tooltip, a `Command` object — and that is what the
+        // ledger row now records, under a path naming the shape rather than
+        // the member, so a reader can tell "this host has no
+        // `StatusBarItem.command`" (untrue) from "this host takes only the
+        // string form of it" (true).
         installAccessor(on: object, name: "tooltip",
             get: { [weak item] in item?.tooltip },
             set: { [weak item, weak window] value in
                 guard let item, let window else { return }
-                if let value, value.isString, let string = value.toString() {
-                    item.tooltip = string
-                    window.commitStatusBarUpdate(item)
-                } else {
+                if let value, !value.isUndefined, !value.isNull, !value.isString {
                     window.notImplementedLedger.record(
-                        memberPath: "vscode.StatusBarItem.tooltip", extensionIdentifier: window.extensionIdentifier)
+                        memberPath: "vscode.StatusBarItem.tooltip: MarkdownString",
+                        extensionIdentifier: window.extensionIdentifier)
+                    return
                 }
+                item.tooltip = MainThreadWindow.stringOptionalField(value)
+                window.commitStatusBarUpdate(item)
             })
 
         installAccessor(on: object, name: "command",
             get: { [weak item] in item?.command },
             set: { [weak item, weak window] value in
                 guard let item, let window else { return }
-                if let value, value.isString, let string = value.toString() {
-                    item.command = string
-                    window.commitStatusBarUpdate(item)
-                } else {
+                if let value, !value.isUndefined, !value.isNull, !value.isString {
                     window.notImplementedLedger.record(
-                        memberPath: "vscode.StatusBarItem.command", extensionIdentifier: window.extensionIdentifier)
+                        memberPath: "vscode.StatusBarItem.command: Command",
+                        extensionIdentifier: window.extensionIdentifier)
+                    return
                 }
+                item.command = MainThreadWindow.stringOptionalField(value)
+                window.commitStatusBarUpdate(item)
             })
 
         installAccessor(on: object, name: "color",

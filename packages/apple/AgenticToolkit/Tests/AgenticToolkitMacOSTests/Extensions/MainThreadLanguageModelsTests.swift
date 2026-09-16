@@ -1601,6 +1601,375 @@ struct MainThreadLanguageModelsTests {
         #expect(ledger.accesses.isEmpty)
     }
 
+    // MARK: - The cancellation token
+
+    /// The third argument `sendRequest` declares (`vscode.d.ts:20302`),
+    /// built in JS because that is where it comes from in life: this host
+    /// installs no `CancellationToken` type and no `CancellationTokenSource`,
+    /// so the object that reaches the adaptor is whatever the extension
+    /// brought, and a Swift-side fixture would be testing a token the
+    /// adaptor can never actually receive.
+    ///
+    /// `onCancellationRequested` parks the host's listener on
+    /// `globalThis.__fire`, so a test cancels by calling that — at the
+    /// moment it chooses, which is the whole difference between the two
+    /// halves of the contract. `requested` seeds
+    /// `isCancellationRequested`: the only difference between a token that
+    /// arrives already cancelled and one cancelled afterwards.
+    private static func tokenSource(alreadyCancelled: Bool) -> String {
+        """
+        globalThis.__fire = null;
+        globalThis.__token = {
+            isCancellationRequested: \(alreadyCancelled),
+            onCancellationRequested: function (listener) { globalThis.__fire = listener; }
+        };
+        """
+    }
+
+    /// A token already cancelled when the request would start rejects the
+    /// promise **and never reaches the seam at all** — the guard runs
+    /// before `provider.streamResponse`, so `callCount` is what tells
+    /// "refused before starting" apart from "started, then cancelled". A
+    /// rejection alone cannot: both halves of the contract reject.
+    @Test
+    func aTokenAlreadyCancelledRejectsSendRequestWithoutCallingTheSeam() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let provider = TestLanguageModelProvider([Self.alpha])
+        let languageModels = MainThreadLanguageModels(
+            provider: provider, notImplementedLedger: NotImplementedLedger(),
+            extensionIdentifier: "unused")
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__result = null;
+                \(Self.tokenSource(alreadyCancelled: true))
+                vscode.lm.selectChatModels().then(function (models) {
+                    return models[0].sendRequest([], {}, globalThis.__token);
+                }).then(
+                    function () { globalThis.__result = { outcome: 'resolved' }; },
+                    function (error) {
+                        globalThis.__result = { outcome: 'rejected', message: error.message };
+                    }
+                );
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(languageModels, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let result = try #require(await waitForGlobal(context, "globalThis.__result"))
+        #expect(result.forProperty("outcome")?.toString() == "rejected")
+        #expect(result.forProperty("message")?.toString()
+            == "vscode.LanguageModelChat.sendRequest failed: "
+            + "the CancellationToken passed to sendRequest was cancelled")
+        #expect(provider.callCount == 0)
+    }
+
+    /// A token cancelled *after* the response object is handed back fails
+    /// both cursors' in-flight `next()` — the source is put into the state
+    /// a source that threw leaves it in, so the failure arrives by the
+    /// `sourceFailure` route rather than by a second path of its own. The
+    /// source here never yields and never finishes, so both promises are
+    /// genuinely outstanding at the moment the token fires.
+    @Test
+    func cancellingAfterTheResponseArrivesRejectsInFlightNextOnBothCursors() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let provider = TestLanguageModelProvider([Self.alpha])
+        var heldContinuation:
+            AsyncThrowingStream<ExtensionLanguageModelResponsePart, Error>.Continuation?
+        provider.streamResponseHandler = { _, _, _, _ in
+            AsyncThrowingStream { continuation in heldContinuation = continuation }
+        }
+        let languageModels = MainThreadLanguageModels(
+            provider: provider, notImplementedLedger: NotImplementedLedger(),
+            extensionIdentifier: "unused")
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__bothIssued = null;
+                globalThis.__streamResult = null;
+                globalThis.__textResult = null;
+                \(Self.tokenSource(alreadyCancelled: false))
+                vscode.lm.selectChatModels().then(function (models) {
+                    return models[0].sendRequest([], {}, globalThis.__token);
+                }).then(function (response) {
+                    response.stream.next().then(
+                        function () { globalThis.__streamResult = { outcome: 'resolved' }; },
+                        function (error) {
+                            globalThis.__streamResult = { outcome: 'rejected', message: error.message };
+                        }
+                    );
+                    response.text.next().then(
+                        function () { globalThis.__textResult = { outcome: 'resolved' }; },
+                        function (error) {
+                            globalThis.__textResult = { outcome: 'rejected', message: error.message };
+                        }
+                    );
+                    globalThis.__bothIssued = true;
+                });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(languageModels, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__bothIssued"))
+        // The subscription happens synchronously inside `sendRequest`, so
+        // the listener is parked by the time the response resolves.
+        #expect(context.evaluateScript("typeof globalThis.__fire")?.toString() == "function")
+
+        context.evaluateScript("globalThis.__fire();")
+
+        let streamResult = try #require(await waitForGlobal(context, "globalThis.__streamResult"))
+        let textResult = try #require(await waitForGlobal(context, "globalThis.__textResult"))
+        let cancelled = "vscode.LanguageModelChat.sendRequest failed: "
+            + "the CancellationToken passed to sendRequest was cancelled"
+        #expect(streamResult.forProperty("outcome")?.toString() == "rejected")
+        #expect(streamResult.forProperty("message")?.toString() == cancelled)
+        #expect(textResult.forProperty("outcome")?.toString() == "rejected")
+        #expect(textResult.forProperty("message")?.toString() == cancelled)
+        // Keeps the source alive to the end of the test rather than being
+        // dropped at the `provider.streamResponseHandler` closure's exit.
+        heldContinuation?.finish()
+    }
+
+    /// Parts already buffered when the token fires are still delivered,
+    /// and the failure arrives only once that buffer is exhausted — a
+    /// cancellation discards the future, not the past. The test waits for
+    /// JS to have *seen* both texts before cancelling, so the ordering it
+    /// asserts is established rather than raced for.
+    @Test
+    func partsBufferedBeforeCancellationAreDeliveredBeforeTheFailure() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let provider = TestLanguageModelProvider([Self.alpha])
+        var heldContinuation:
+            AsyncThrowingStream<ExtensionLanguageModelResponsePart, Error>.Continuation?
+        provider.streamResponseHandler = { _, _, _, _ in
+            AsyncThrowingStream { continuation in heldContinuation = continuation }
+        }
+        let languageModels = MainThreadLanguageModels(
+            provider: provider, notImplementedLedger: NotImplementedLedger(),
+            extensionIdentifier: "unused")
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__seenBoth = null;
+                globalThis.__outcome = null;
+                \(Self.tokenSource(alreadyCancelled: false))
+                vscode.lm.selectChatModels().then(function (models) {
+                    return models[0].sendRequest([], {}, globalThis.__token);
+                }).then(function (response) {
+                    var texts = [];
+                    (async function () {
+                        try {
+                            for await (const t of response.text) {
+                                texts.push(t);
+                                if (texts.length === 2) { globalThis.__seenBoth = true; }
+                            }
+                            globalThis.__outcome = { outcome: 'done', texts: texts };
+                        } catch (error) {
+                            globalThis.__outcome = {
+                                outcome: 'rejected', message: error.message, texts: texts
+                            };
+                        }
+                    })();
+                });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(languageModels, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        // Yielding needs the handler to have run, which happens inside the
+        // promise's `Task`; poll for the continuation rather than assuming
+        // it is already there.
+        for _ in 0..<200 where heldContinuation == nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let continuation = try #require(heldContinuation)
+        continuation.yield(.text("a"))
+        continuation.yield(.text("b"))
+        _ = try #require(await waitForGlobal(context, "globalThis.__seenBoth"))
+
+        context.evaluateScript("globalThis.__fire();")
+
+        let outcome = try #require(await waitForGlobal(context, "globalThis.__outcome"))
+        #expect(outcome.forProperty("outcome")?.toString() == "rejected")
+        #expect((outcome.forProperty("texts")?.toArray() as? [String]) == ["a", "b"])
+        continuation.finish()
+    }
+
+    /// A token that fires after the source has already finished leaves the
+    /// completed response completed: there is nothing left to cancel, and
+    /// overwriting the outcome would turn a response the extension
+    /// successfully received into a failed one. Pinned on the `stream`
+    /// cursor, which has not been iterated at all when the token fires —
+    /// a cursor that had already drained would report `done` whether or
+    /// not the cancellation was suppressed, and so would prove nothing.
+    @Test
+    func cancellingAfterTheSourceFinishedLeavesTheCompletedResponseCompleted() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let provider = TestLanguageModelProvider([Self.alpha])
+        provider.streamResponseHandler = { _, _, _, _ in
+            MainThreadLanguageModelsTests.makeStream([.text("a"), .end(stopReason: nil)])
+        }
+        let languageModels = MainThreadLanguageModels(
+            provider: provider, notImplementedLedger: NotImplementedLedger(),
+            extensionIdentifier: "unused")
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__textDone = null;
+                globalThis.__streamOutcome = null;
+                \(Self.tokenSource(alreadyCancelled: false))
+                vscode.lm.selectChatModels().then(function (models) {
+                    return models[0].sendRequest([], {}, globalThis.__token);
+                }).then(function (response) {
+                    globalThis.drainStream = function () {
+                        (async function () {
+                            var count = 0;
+                            try {
+                                for await (const part of response.stream) { count++; }
+                                globalThis.__streamOutcome = { outcome: 'done', count: count };
+                            } catch (error) {
+                                globalThis.__streamOutcome = {
+                                    outcome: 'rejected', message: error.message
+                                };
+                            }
+                        })();
+                    };
+                    (async function () {
+                        var texts = [];
+                        for await (const t of response.text) { texts.push(t); }
+                        globalThis.__textDone = texts.length;
+                    })();
+                });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(languageModels, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__textDone"))
+
+        context.evaluateScript("globalThis.__fire();")
+        context.evaluateScript("globalThis.drainStream();")
+
+        let outcome = try #require(await waitForGlobal(context, "globalThis.__streamOutcome"))
+        #expect(outcome.forProperty("outcome")?.toString() == "done")
+        #expect(outcome.forProperty("count")?.toInt32() == 1)
+    }
+
+    /// A token whose `onCancellationRequested` is not a function is left
+    /// permanently un-cancelled rather than failing the call — the token
+    /// is optional in the declared signature, so an object that does not
+    /// answer the declared shape is no worse than an absent one. The
+    /// evidence that the host declined to subscribe is that nothing was
+    /// ever handed anywhere for it to park: the request simply runs to
+    /// completion.
+    @Test
+    func aTokenWithoutACallableSubscriberLeavesTheRequestUncancelledNotFailed() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let provider = TestLanguageModelProvider([Self.alpha])
+        provider.streamResponseHandler = { _, _, _, _ in
+            MainThreadLanguageModelsTests.makeStream([.text("a"), .end(stopReason: nil)])
+        }
+        let languageModels = MainThreadLanguageModels(
+            provider: provider, notImplementedLedger: NotImplementedLedger(),
+            extensionIdentifier: "unused")
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__texts = null;
+                var token = {
+                    isCancellationRequested: false,
+                    onCancellationRequested: 'not a function'
+                };
+                vscode.lm.selectChatModels().then(function (models) {
+                    return models[0].sendRequest([], {}, token);
+                }).then(function (response) {
+                    (async function () {
+                        var texts = [];
+                        for await (const t of response.text) { texts.push(t); }
+                        globalThis.__texts = texts;
+                    })();
+                });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(languageModels, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        let texts = try #require(await waitForGlobal(context, "globalThis.__texts"))
+        #expect((texts.toArray() as? [String]) == ["a"])
+        #expect(provider.callCount == 1)
+    }
+
+    /// The token is **acted on**, so it is not a degraded argument and
+    /// nothing is recorded for it — unlike `modelOptions`, which makes the
+    /// request answer wrongly and is ledgered. Both travel in the same
+    /// call here, so the ledger's single entry is what separates them: a
+    /// test passing only a token could not tell "not ledgered because it
+    /// is honoured" from "not ledgered because this call ledgers nothing".
+    @Test
+    func anHonouredCancellationTokenIsNotLedgeredAlongsideADegradedOption() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let ledger = NotImplementedLedger()
+        let languageModels = MainThreadLanguageModels(
+            provider: TestLanguageModelProvider([Self.alpha]),
+            notImplementedLedger: ledger,
+            extensionIdentifier: "test.ext")
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__done = null;
+                \(Self.tokenSource(alreadyCancelled: false))
+                vscode.lm.selectChatModels().then(function (models) {
+                    return models[0].sendRequest(
+                        [], { modelOptions: { temperature: 0.5 } }, globalThis.__token);
+                }).then(function () { globalThis.__done = true; });
+            };
+            """,
+            in: directory,
+            ledger: ledger
+        )
+        defer { host.dispose() }
+        try install(languageModels, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        _ = try #require(await waitForGlobal(context, "globalThis.__done"))
+        #expect(ledger.accesses.map { $0.memberPath }
+            == ["vscode.LanguageModelChatRequestOptions.modelOptions"])
+    }
+
     // MARK: - Teardown
 
     /// A torn-down adaptor rejects `selectChatModels()` rather than answering
