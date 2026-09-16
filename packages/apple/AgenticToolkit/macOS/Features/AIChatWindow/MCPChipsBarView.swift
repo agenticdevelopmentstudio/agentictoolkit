@@ -10,6 +10,7 @@ import Combine
 import SwiftUI
 
 import AgenticToolkitCore
+import AgenticToolkitCoreMacOS
 
 /// Header bar that lets the user pick which configured MCP servers are
 /// active for this chat. Hosts a SwiftUI view inside an `NSHostingView`.
