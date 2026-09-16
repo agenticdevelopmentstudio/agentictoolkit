@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AIPluginKit
 import AgenticToolkitCore
+import AgenticToolkitCoreMacOS
 
 /// Editor for one configuration: rename and per-template fields.
 ///

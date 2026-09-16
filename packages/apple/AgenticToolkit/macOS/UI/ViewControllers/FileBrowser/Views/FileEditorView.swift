@@ -1,4 +1,5 @@
 import AgenticToolkitCore
+import AgenticToolkitCoreMacOS
 import AgenticToolkitLanguage
 import SwiftUI
 import AppKit

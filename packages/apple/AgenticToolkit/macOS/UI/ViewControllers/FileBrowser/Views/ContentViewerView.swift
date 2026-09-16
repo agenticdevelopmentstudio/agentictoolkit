@@ -1,6 +1,7 @@
 import SwiftUI
 
 import AgenticToolkitCore
+import AgenticToolkitCoreMacOS
 
 /// The content viewer pane that displays file metadata when a file is selected.
 ///

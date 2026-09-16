@@ -385,17 +385,26 @@ extension SessionWatcher {
 
                 log.append("=== Results: \(passCount) passed, \(failCount) failed ===")
 
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     NSApp.activateUnlessQuiet()
                     let logPath = ActivationTestLog.whippetShared.logPath ?? "(no path)"
-                    self.lastActionError =
+                    self?.lastActionError =
                         "Test: \(passCount) passed, \(failCount) failed — see \(logPath)"
+                    self?.scheduleActivationTestStatusClear()
+                }
+            }
+        }
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
-                        if self?.lastActionError?.hasPrefix("Test:") == true {
-                            self?.lastActionError = nil
-                        }
-                    }
+        /// Clears the activation test's result line once it has had time to be read.
+        ///
+        /// Its own method rather than a closure nested in `testActivation`: a
+        /// `[weak self]` capture inside a closure that already holds `self`
+        /// strongly is a compile error, and holding the view model alive for the
+        /// 30 seconds is not what this wants.
+        private func scheduleActivationTestStatusClear() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+                if self?.lastActionError?.hasPrefix("Test:") == true {
+                    self?.lastActionError = nil
                 }
             }
         }
