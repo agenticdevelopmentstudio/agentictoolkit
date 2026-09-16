@@ -105,7 +105,11 @@ public final class WindowFooterStatusBarPresenter: ExtensionStatusBarPresenting 
         }
     }
 
-    deinit {
+    // `isolated deinit` rather than a plain one: the observer token is
+    // `any NSObjectProtocol`, which is not `Sendable`, so a nonisolated
+    // deinit cannot touch it. The same idiom `ComposableTabsWindowController`
+    // and `ProjectBrowserViewController` already use to unregister theirs.
+    isolated deinit {
         if let windowObserver {
             NotificationCenter.default.removeObserver(windowObserver)
         }

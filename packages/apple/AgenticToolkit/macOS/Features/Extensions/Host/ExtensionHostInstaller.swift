@@ -38,10 +38,10 @@ public final class ClosureWorkspaceRoots: ExtensionWorkspaceRoots {
 
 /// Everything the extension host needs from the app around it, in one value.
 ///
-/// Closures rather than references for the three window-shaped seams: the app
-/// owns `ProjectWindowManager`, this framework does not reach for a shared
-/// instance from inside a feature, and every one of the three changes
-/// underneath a host that outlives it.
+/// Closures rather than references for the four read-through seams: the app
+/// owns `ProjectWindowManager` and `TextDocumentCoordinator`, this framework
+/// does not reach for a shared instance from inside a feature, and every one
+/// of the four changes underneath a host that outlives it.
 @MainActor
 public struct ExtensionHostSeams {
 
@@ -65,18 +65,31 @@ public struct ExtensionHostSeams {
     /// open.
     public let workspaceRoots: () -> ExtensionWorkspaceRoots?
 
+    /// The language id of every document open in an editor right now, for
+    /// `onLanguage:` activation.
+    ///
+    /// Read-through, and read only when an extension is installed: the live
+    /// event is `ExtensionHostInstaller.documentDidOpen(languageID:)`, and
+    /// this answers the other half of the same question — what was already
+    /// open when an extension the user just enabled came up. Duplicates are
+    /// not filtered here; `activateIfTriggered(by:)` is idempotent per
+    /// installation, so the second `swift` costs a matcher call.
+    public let openDocumentLanguageIDs: () -> [String]
+
     public init(
         commandRegistry: CommandRegistry,
         languageModelProvider: ExtensionLanguageModelProviding,
         frontWindow: @escaping () -> NSWindow?,
         footers: @escaping () -> [WindowFooterBar],
-        workspaceRoots: @escaping () -> ExtensionWorkspaceRoots?
+        workspaceRoots: @escaping () -> ExtensionWorkspaceRoots?,
+        openDocumentLanguageIDs: @escaping () -> [String]
     ) {
         self.commandRegistry = commandRegistry
         self.languageModelProvider = languageModelProvider
         self.frontWindow = frontWindow
         self.footers = footers
         self.workspaceRoots = workspaceRoots
+        self.openDocumentLanguageIDs = openDocumentLanguageIDs
     }
 }
 
@@ -310,7 +323,7 @@ public final class ExtensionHostInstallation {
     /// is quietly inert on that trigger: that is a fact about the
     /// installation that is invisible from inside the extension, and it is
     /// logged rather than skipped in silence.
-    fileprivate func registerActivationCommands(_ contributed: [ExtensionManifest.Contributions.Command]) {
+    fileprivate func registerActivationCommands(_ contributed: [ExtensionManifest.Command]) {
         for command in contributed where activationMatcher.matches(.commandInvoked(command.command)) {
             let id = command.command
             guard commandRegistry.command(id: id) == nil else {
@@ -622,6 +635,27 @@ public final class ExtensionHostInstaller {
             installation.activateIfTriggered(
                 by: .workspaceScanned(relativePaths: completedScan.relativePaths))
         }
+        // The same replay, for `onLanguage:`. An extension enabled while a
+        // Swift file is already on screen never sees the `.opened` event that
+        // has already been delivered, and `onLanguage:swift` means "a
+        // document of this language is open", not "one opened after you were
+        // installed". Read live rather than from a remembered set, so a
+        // document since closed cannot activate anything.
+        for languageID in seams.openDocumentLanguageIDs() {
+            installation.activateIfTriggered(by: .documentOpened(languageID: languageID))
+        }
+    }
+
+    /// Tells every installed extension that a document of `languageID` was
+    /// opened, which is what `onLanguage:<id>` activates on.
+    ///
+    /// The app forwards this from the one shared `TextDocumentStore`; there
+    /// is no equivalent on close, because `onLanguage:` has no un-activation
+    /// — an extension that has run cannot be made not to have run.
+    public func documentDidOpen(languageID: String) {
+        for installation in installations.values {
+            installation.activateIfTriggered(by: .documentOpened(languageID: languageID))
+        }
     }
 
     /// Tells every running extension that the configured chat models moved.
@@ -642,23 +676,29 @@ public final class ExtensionHostInstaller {
 
     /// How deep the scan walks, and how many entries it will collect.
     ///
+    /// All three constants in this section are `nonisolated`: `scan(roots:)`
+    /// reads them from inside a detached task, which is the whole point of
+    /// that task — the walk is the expensive part and it must not run on the
+    /// main actor. They are immutable values of `Sendable` type, so leaving
+    /// the actor is exactly as safe as reading a global `let`.
+    ///
     /// `workspaceContains:` patterns are overwhelmingly shallow — a
     /// `package.json`, a `.csproj`, a `Cargo.toml` — and the cost of being
     /// wrong in the other direction is a full recursive walk of a source tree
     /// at every launch. A pattern that genuinely needs more than six levels
     /// goes unmatched, and the extension stays dormant until its command is
     /// invoked, which is a worse outcome than a launch that stalls.
-    private static let scanDepthLimit = 6
+    private nonisolated static let scanDepthLimit = 6
 
     /// The entry cap. Reached on a large tree, at which point the scan stops
     /// and matches against what it has.
-    private static let scanEntryLimit = 20_000
+    private nonisolated static let scanEntryLimit = 20_000
 
     /// Directories the scan never descends into. Every one of them is either
     /// machine-generated or a checkout of somebody else's source, and a
     /// `workspaceContains:` pattern matching inside one is matching a fact
     /// about a dependency rather than about this project.
-    private static let skippedDirectoryNames: Set<String> = [
+    private nonisolated static let skippedDirectoryNames: Set<String> = [
         ".build", ".git", ".svn", ".venv", "DerivedData", "Pods",
         "__pycache__", "build", "dist", "node_modules", "target", "vendor"
     ]
@@ -673,6 +713,24 @@ public final class ExtensionHostInstaller {
     /// is on disk, and the events that move them are unrelated.
     public func workspaceDidChange() {
         startWorkspaceScanIfNeeded()
+    }
+
+    /// Tells the status bar presenter that the set of windows moved, so a
+    /// footer that did not exist at the last render picks up the items already
+    /// up.
+    ///
+    /// The presenter drives itself off `NSWindow.didBecomeKeyNotification`
+    /// too, and that is deliberately kept: it is the generic AppKit fact, and
+    /// it covers a host that has no better signal. This is the better signal —
+    /// it fires on the window *set* changing, which is the event that actually
+    /// matters, and it fires for the case the key-window notification cannot
+    /// see at all: a window opened without taking key.
+    ///
+    /// Forwarded from here rather than by handing the presenter out, because
+    /// the presenter is one of this installer's shared collaborators and
+    /// nothing outside should be able to put items on it.
+    public func windowsDidChange() {
+        collaborators.statusBarPresenter.windowsDidChange()
     }
 
     /// Runs the scan, off the main actor, and replays the result at every host

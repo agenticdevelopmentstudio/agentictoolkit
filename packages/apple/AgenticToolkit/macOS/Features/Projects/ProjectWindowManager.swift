@@ -109,6 +109,24 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
     /// merely losing focus.
     public var onProjectClosed: (@MainActor (ProjectWorkspace) -> Void)?
 
+    /// Fires whenever the set of open project windows changes — one opened,
+    /// one closed, one adopted for scripting, one forgotten.
+    ///
+    /// `onProjectClosed` above answers "*this* project is going away" and is
+    /// the wrong shape for a reader that wants the new set: it never fires on
+    /// an open, and it fires before the controller leaves `controllers`.
+    ///
+    /// A closure rather than a subscription to `$openWorkspaceIDs`, for a
+    /// reason `@Published` makes easy to get wrong: it publishes from
+    /// `willSet`, so a sink that reads `openWorkspaces` or
+    /// `openWindowControllers` in response sees the set as it was *before* the
+    /// change. This fires from `refreshOpenWorkspaceIDs()` after the
+    /// assignment, so every accessor on this type already agrees with it.
+    /// (`makeLanguageServerPanel` in the app takes the other route
+    /// deliberately, mapping the ids the publisher hands it rather than
+    /// reading back.)
+    public var onOpenProjectsChanged: (@MainActor () -> Void)?
+
     /// How this manager brings the app forward when a project window opens.
     ///
     /// A seam, not a setting: `activateUnlessQuiet()` already declines under
@@ -161,6 +179,7 @@ public final class ProjectWindowManager: ProjectOpening, ObservableObject {
     /// controller is not open.
     private func refreshOpenWorkspaceIDs() {
         openWorkspaceIDs = openOrder.filter { controllers[$0] != nil }
+        onOpenProjectsChanged?()
     }
 
     /// Registers a window this manager did not open, so scripting can see it.

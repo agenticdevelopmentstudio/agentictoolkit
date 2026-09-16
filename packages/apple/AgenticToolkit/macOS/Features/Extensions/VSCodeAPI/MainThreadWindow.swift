@@ -116,10 +116,9 @@ public struct ExtensionQuickPickItem: Sendable, Equatable {
     /// The item carried a truthy `alwaysShow` (`vscode.d.ts:1974`): keep the
     /// row visible even when the user's filter text would exclude it.
     ///
-    /// Nothing in this task reads it. `MainThreadWindow` puts it on the
-    /// request and stops there, and this task builds no conformer of
-    /// `ExtensionQuickPickPresenting` at all; task 5.5b-iv is the task that
-    /// builds one, and filtering is that panel's job.
+    /// `MainThreadWindow` puts it on the request and stops there — filtering
+    /// is the panel's job, and `ExtensionQuickPickModel.matches(_:filter:)`
+    /// is where this flag is actually honoured.
     public let alwaysShow: Bool
 
     /// Spelled out rather than synthesised: this type is `public`, so the
@@ -352,10 +351,9 @@ public struct ExtensionInputBoxRequest: Sendable, Equatable {
 /// (`MainThreadWorkspace.swift:28`) before it: no tier split before a second
 /// consumer exists.
 ///
-/// **No type in this module conforms to it.** That is this task's deliberate,
-/// temporary state: task 5.5b-iv builds one panel serving both this seam and
-/// `showInputBox`'s, and a panel written now against one of the two is how it
-/// ends up unable to serve the other.
+/// `ExtensionPickerPresenter` is the production conformer, and it conforms to
+/// `ExtensionInputBoxPresenting` as well — one panel serving both seams, which
+/// is why neither was designed without the other in view.
 ///
 /// `@MainActor`, matching every protocol and class in this directory.
 @MainActor
@@ -406,9 +404,8 @@ public protocol ExtensionQuickPickPresenting: AnyObject {
 /// own doc for the interface-segregation reasoning that already governs this
 /// adaptor's other seam.
 ///
-/// **No type in this module conforms to it.** `ExtensionQuickPickPresenting`'s
-/// own doc already anticipates the panel that will: task 5.5b-iv builds one
-/// conformer serving both this seam and that one.
+/// `ExtensionPickerPresenter` is the production conformer, serving this seam
+/// and `ExtensionQuickPickPresenting` both.
 ///
 /// `@MainActor`, matching every protocol and class in this directory.
 @MainActor
@@ -918,20 +915,18 @@ public final class MainThreadWindow {
     ///     presented. Not defaulted, for `presenter:`'s own reason: a picker
     ///     that silently answered "dismissed" would tell every extension the
     ///     user refused something they were never shown, so there is no "do
-    ///     nothing" presenter to default to here either. No type in this
-    ///     module conforms to `ExtensionQuickPickPresenting` yet, so every
-    ///     conformer today is a test double.
+    ///     nothing" presenter to default to here either. Production passes
+    ///     `ExtensionPickerPresenter`.
     ///   - inputBoxPresenter: Where a `showInputBox` call is actually
     ///     presented. Not defaulted, for `presenter:`'s own reason: a text
     ///     field that silently answered "dismissed" would tell every
-    ///     extension the user refused something they were never shown. No
-    ///     type in this module conforms to `ExtensionInputBoxPresenting` yet
-    ///     either, so every conformer today is a test double.
+    ///     extension the user refused something they were never shown.
+    ///     Production passes `ExtensionPickerPresenter`, the same object as
+    ///     `quickPickPresenter:`.
     ///   - statusBarPresenter: Where a `createStatusBarItem` object's
     ///     `show()` or a property write is actually presented. Not defaulted,
-    ///     for `presenter:`'s own reason. No type in this module conforms to
-    ///     `ExtensionStatusBarPresenting` yet either, so every conformer
-    ///     today is a test double.
+    ///     for `presenter:`'s own reason. Production passes
+    ///     `WindowFooterStatusBarPresenter`.
     ///   - notImplementedLedger: Mirrors `MainThreadWorkspace.init`'s
     ///     parameter of the same name. See this type's own doc for how it is
     ///     used.
@@ -1191,10 +1186,8 @@ public final class MainThreadWindow {
     /// lands on the object `require('vscode')` returns without editing that
     /// file.
     ///
-    /// **Nothing installs it.** No type in this module constructs a
-    /// `MainThreadWindow` at all, so no member on this adaptor is installed
-    /// today; this is the value the installer needs, and the installer does
-    /// not exist.
+    /// `ExtensionHostInstallation` installs it on `"vscode"`, alongside
+    /// `inputBoxValidationSeverityMembers` and `statusBarAlignmentMembers`.
     public static let quickPickItemKindMembers: [String: Int] = ["Separator": -1, "Default": 0]
 
     /// Rejects rather than raises on a torn-down adaptor, matching the three
@@ -1499,9 +1492,8 @@ public final class MainThreadWindow {
     /// `quickPickItemKindMembers`'s own doc already gives the measured
     /// citations for why that resolves.
     ///
-    /// **Nothing installs it.** Same state as `quickPickItemKindMembers`: no
-    /// type in this module constructs a `MainThreadWindow`'s installer, so no
-    /// member on this adaptor is installed today.
+    /// Installed by `ExtensionHostInstallation`, same as
+    /// `quickPickItemKindMembers`.
     public static let inputBoxValidationSeverityMembers: [String: Int] = [
         "Info": 1, "Warning": 2, "Error": 3
     ]
@@ -1900,10 +1892,8 @@ public final class MainThreadWindow {
     /// export exactly as `QuickPickItemKind` is, and `quickPickItemKindMembers`'s
     /// own doc already gives the measured citations for why that resolves.
     ///
-    /// **Nothing installs it.** Same state as `quickPickItemKindMembers` and
-    /// `inputBoxValidationSeverityMembers`: no type in this module constructs
-    /// a `MainThreadWindow`'s installer, so no member on this adaptor is
-    /// installed today.
+    /// Installed by `ExtensionHostInstallation`, same as
+    /// `quickPickItemKindMembers` and `inputBoxValidationSeverityMembers`.
     public static let statusBarAlignmentMembers: [String: Int] = ["Left": 1, "Right": 2]
 
     /// How `color`/`backgroundColor` was written, kept so the getter can
@@ -2583,9 +2573,10 @@ public final class MainThreadWindow {
     /// the presenter is called once, with the finished request. The cost is
     /// real: an extension whose items promise is slow shows nothing at all in
     /// that interval. Making `ExtensionQuickPickPresenting` able to express
-    /// "show now, fill later" is a different protocol, and designing it for a
-    /// conformer that does not exist yet is how it ends up the wrong shape —
-    /// task 5.5b-iv builds the first conformer.
+    /// "show now, fill later" is a different protocol, and it stays undesigned
+    /// until an extension is actually hurt by this: `ExtensionPickerPresenter`
+    /// is the only conformer, and it would have to grow the incremental seam
+    /// too.
     ///
     /// **The parse happens after the items settle, not before**, for the
     /// reason `handleShowQuickPick`'s own doc gives: whether argument 0 is an

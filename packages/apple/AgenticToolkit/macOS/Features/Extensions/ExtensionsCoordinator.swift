@@ -59,14 +59,12 @@ public final class ExtensionsCoordinator: AppFeature {
     /// all. Passing this one is therefore something the compiler asks for
     /// rather than something a wiring site has to remember.
     ///
-    /// **Nothing writes to it in this process yet.** The only writers are the
-    /// `vscode` adaptors, which exist only inside an `ExtensionHostInstaller`,
-    /// and this coordinator does not build one — hosts are instantiated by
-    /// `installExtensionHosts(...)`, which the app calls once the seams a host
-    /// needs (the command registry, the chat model provider, the front window,
-    /// the footers, the workspace roots) are all available. Until that call,
-    /// the panel's "not implemented" list is empty because no extension code
-    /// has run, which is the truthful answer rather than a missing writer.
+    /// The only writers are the `vscode` adaptors, which exist only inside an
+    /// `ExtensionHostInstaller` — so nothing writes here until
+    /// `installExtensionHosts(...)` builds one. A host that never makes that
+    /// call (headless, or a test that wants the registry and the panel without
+    /// running any JavaScript) sees an empty "not implemented" list, which is
+    /// the truthful answer rather than a missing writer.
     public let notImplementedLedger: NotImplementedLedger
 
     public init(
@@ -174,12 +172,51 @@ public final class ExtensionsCoordinator: AppFeature {
         // A second call with a different base has to rebuild even if the same
         // views are contributed, so the recorded set cannot short-circuit it.
         installedContributedViewIDs = []
+        subscribeToContributions()
+        refreshDocumentLayout()
+    }
+
+    // MARK: - The one contributions subscription
+
+    /// Whatever was handling `registry.contributionsDidChange` before this
+    /// coordinator took it over, called first on every change.
+    ///
+    /// The registry has room for exactly one handler, and this coordinator now
+    /// has two things to do on a change — rebuild the document layout, and
+    /// reconcile the extension hosts. Assigning from each of the two public
+    /// entry points meant whichever ran second silently un-wired the first: the
+    /// wiring site calls `maintainDocumentLayout(basedOn:)` and then
+    /// `installExtensionHosts(...)`, so enabling an extension after launch
+    /// brought its host up and left its view unplaceable.
+    private var priorContributionsDidChange: (() -> Void)?
+
+    /// Whether `subscribeToContributions()` has already taken the registry's
+    /// handler. Guards against capturing this coordinator's *own* handler as
+    /// the prior one — which a second `maintainDocumentLayout(basedOn:)` call
+    /// would otherwise do, building a chain one link longer on every call.
+    private var hasSubscribedToContributions = false
+
+    /// Takes over `registry.contributionsDidChange` once, chaining whatever
+    /// was there.
+    private func subscribeToContributions() {
+        guard !hasSubscribedToContributions else { return }
+        hasSubscribedToContributions = true
+        priorContributionsDidChange = registry.contributionsDidChange
         // `[weak self]`: the registry is this coordinator's own property, so a
         // strong capture is a cycle that outlives `unregister()`.
         registry.contributionsDidChange = { [weak self] in
-            self?.refreshDocumentLayout()
+            self?.contributionsDidChange()
         }
+    }
+
+    /// The layout first, then the hosts: a view has to be placeable before the
+    /// extension that contributes it starts running, or its first render lands
+    /// in a layout with no room for it. Both are no-ops for the half that is
+    /// not wired, so the order costs nothing when only one is.
+    private func contributionsDidChange() {
+        priorContributionsDidChange?()
         refreshDocumentLayout()
+        hostInstaller?.reconcile()
     }
 
     /// Rebuilds the installed layout from the base one and what is contributed
@@ -207,6 +244,118 @@ public final class ExtensionsCoordinator: AppFeature {
                 """
             )
         }
+    }
+
+    // MARK: - Extension hosts
+
+    /// The running extensions, or `nil` until the app calls
+    /// `installExtensionHosts(...)`.
+    ///
+    /// Optional rather than built in `init` because a host needs five things
+    /// this coordinator is constructed too early to have — the command
+    /// registry, the chat model provider, and three window-shaped seams — and
+    /// because a headless host (the settings panel under test, a scripting
+    /// process) legitimately wants the registry, the contribution points and
+    /// the panel with no JavaScript running anywhere.
+    private var hostInstaller: ExtensionHostInstaller?
+
+    /// Starts one `ExtensionHost` per enabled extension, and keeps that set in
+    /// step with the registry from here on.
+    ///
+    /// **This is the call that first runs extension JavaScript in production.**
+    /// Everything before it — loading manifests, registering contributions,
+    /// widening the layout — reads what an extension *declares*. This is where
+    /// its code starts executing, which is why a hardened-runtime host needs
+    /// `com.apple.security.cs.allow-jit` from the same commit that adds this
+    /// call. The entitlement is the app's to declare, not this framework's;
+    /// see the comment on it in the app's `App.entitlements`.
+    ///
+    /// Idempotent in the only sense that matters: a second call is a
+    /// programmer error — it would bring up a second host, a second JavaScript
+    /// context and a second set of adaptors for every extension already
+    /// running — so it is refused and logged rather than honoured.
+    ///
+    /// - Parameters:
+    ///   - commandRegistry: where `vscode.commands` registers into and executes
+    ///     from. The app's own registry, so a contributed command is reachable
+    ///     from the palette and the menus.
+    ///   - languageModelProvider: what `vscode.lm` offers. One for every host.
+    ///   - frontWindow: where an alert sheet attaches, or `nil` for an app
+    ///     modal alert. Read at presentation time, never captured.
+    ///   - footers: every footer a status bar item renders into.
+    ///   - workspaceRoots: the workspace extensions see right now, or `nil`
+    ///     when no project is open. Also read through, for the same reason.
+    ///   - openDocumentLanguageIDs: the language id of every document open in
+    ///     an editor right now. Read once per extension installed, to give an
+    ///     extension enabled mid-session the `onLanguage:` activation whose
+    ///     `.opened` event was delivered before it existed.
+    public func installExtensionHosts(
+        commandRegistry: CommandRegistry,
+        languageModelProvider: ExtensionLanguageModelProviding,
+        frontWindow: @escaping () -> NSWindow?,
+        footers: @escaping () -> [WindowFooterBar],
+        workspaceRoots: @escaping () -> ExtensionWorkspaceRoots?,
+        openDocumentLanguageIDs: @escaping () -> [String]
+    ) {
+        guard hostInstaller == nil else {
+            logger.error("Extension hosts are already installed — ignoring a second install.")
+            return
+        }
+        let installer = ExtensionHostInstaller(
+            registry: registry,
+            notImplementedLedger: notImplementedLedger,
+            languagePoint: languagePoint,
+            seams: ExtensionHostSeams(
+                commandRegistry: commandRegistry,
+                languageModelProvider: languageModelProvider,
+                frontWindow: frontWindow,
+                footers: footers,
+                workspaceRoots: workspaceRoots,
+                openDocumentLanguageIDs: openDocumentLanguageIDs))
+        hostInstaller = installer
+        subscribeToContributions()
+        installer.reconcile()
+    }
+
+    /// Tells the hosts that a document of `languageID` was opened, which is
+    /// what `onLanguage:<id>` activates on.
+    ///
+    /// Driven from the app because the store is the app's: there is exactly
+    /// one `TextDocumentStore` for the process and it lives in
+    /// `TextDocumentCoordinator`, a feature this coordinator knows nothing
+    /// about.
+    ///
+    /// A no-op before `installExtensionHosts(...)`.
+    public func extensionDocumentOpened(languageID: String) {
+        hostInstaller?.documentDidOpen(languageID: languageID)
+    }
+
+    /// Tells every running extension that the configured chat models moved, so
+    /// `vscode.lm.onDidChangeChatModels` fires.
+    ///
+    /// Driven from the app because the provider is the app's: it observes the
+    /// user's AI provider settings, and this coordinator must not reach for
+    /// them.
+    public func extensionChatModelsDidChange() {
+        hostInstaller?.availableChatModelsDidChange()
+    }
+
+    /// Tells the hosts that the set of open project windows moved.
+    ///
+    /// Two different things want this one fact, and both are behind the
+    /// installer:
+    ///
+    ///  - the workspace scan, because the front window is where
+    ///    `workspaceContains:` looks and hosts come up at launch with no
+    ///    project open at all;
+    ///  - the status bar presenter, because a window that opened after the
+    ///    last item changed has a footer nothing has rendered into.
+    ///
+    /// A no-op before `installExtensionHosts(...)`, which is the state a
+    /// headless host stays in.
+    public func projectWindowsDidChange() {
+        hostInstaller?.workspaceDidChange()
+        hostInstaller?.windowsDidChange()
     }
 }
 

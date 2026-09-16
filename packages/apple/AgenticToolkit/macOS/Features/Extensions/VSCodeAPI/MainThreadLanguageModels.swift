@@ -119,11 +119,9 @@ public enum ExtensionLanguageModelResponsePart: Sendable, Equatable {
 /// `selectChatModels` construct a real provider, the same reason
 /// `ExtensionLanguageVocabulary` exists instead of a direct reference to
 /// `LanguageContributionPoint` (`MainThreadLanguages.swift:448-463`, commit
-/// 6409e2de). This task writes no production conformer: no model provider
-/// exists in this host yet, and inventing a placeholder that returns a
-/// hardcoded model would make `selectChatModels` answer with something no
-/// extension can actually use. A test hands in a double; production wires a
-/// conformer when a provider exists.
+/// 6409e2de). `AIPluginLanguageModelProvider` is the production conformer —
+/// it reads the user's configured AI providers and sends through the
+/// `.aiplugin` behind each one — and a test hands in a double instead.
 ///
 /// Two members, not one — `streamResponse` joined `availableChatModels`
 /// under Rulings 52 and 54 — but `MainThreadLanguageModels` still does all
