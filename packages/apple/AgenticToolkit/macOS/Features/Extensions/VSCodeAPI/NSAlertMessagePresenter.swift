@@ -234,8 +234,28 @@ public final class NSAlertMessagePresenter: ExtensionMessagePresenting {
     /// `presentMessage` itself `async`, matching `ExtensionMessagePresenting`
     /// — but nothing about it should be read as matching how this tier's
     /// other `NSAlert` call sites are written, because it does not.
+    /// The window a sheet would attach to right now — the one `window()`
+    /// answers with, else any visible window, else `nil`, which is the
+    /// message being dropped.
+    ///
+    /// **`internal`, not `private`, and split out of `presentedResponse(for:)`
+    /// deliberately**, on the same grounds as `buttonPlan(for:)` above: it is
+    /// the only part of the presentation decision a test can exercise without
+    /// running `beginSheetModal(for:completionHandler:)`, and running that in
+    /// a test would put a sheet on someone's screen — the one thing this
+    /// type's own doc says it exists to avoid. Going through `presentMessage`
+    /// instead is not a substitute: it reaches this point only by showing the
+    /// alert.
+    ///
+    /// Calling this is what makes the `() -> NSWindow?` seam observable, and
+    /// the call happens per presentation rather than once at construction —
+    /// see the `window` property's own doc.
+    func sheetWindow() -> NSWindow? {
+        window() ?? NSAlertMessagePresenter.anyVisibleWindow()
+    }
+
     private func presentedResponse(for alert: NSAlert) async -> NSApplication.ModalResponse? {
-        guard let window = window() ?? NSAlertMessagePresenter.anyVisibleWindow() else {
+        guard let window = sheetWindow() else {
             NSAlertMessagePresenter.logger.error(
                 "Dropped a show*Message; no window for its sheet: \(alert.messageText, privacy: .public)")
             return nil

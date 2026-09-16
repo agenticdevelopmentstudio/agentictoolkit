@@ -4,6 +4,7 @@
 //
 
 import Testing
+import AppKit
 import Foundation
 import JavaScriptCore
 @testable import AgenticToolkitCore
@@ -36,6 +37,50 @@ private final class NullLanguageModelProvider: ExtensionLanguageModelProviding {
     ) async throws -> AsyncThrowingStream<ExtensionLanguageModelResponsePart, Error> {
         AsyncThrowingStream { $0.finish() }
     }
+}
+
+/// The `frontWindow` seam under a test's control: it answers with whatever
+/// `window` currently holds and counts how many times it was asked, which is
+/// what separates "read fresh at presentation time" from "snapshotted when
+/// the presenter was built".
+@MainActor
+private final class WindowSeamProbe {
+    var window: NSWindow?
+    private(set) var asked = 0
+
+    func answer() -> NSWindow? {
+        asked += 1
+        return window
+    }
+}
+
+/// A `FileSystemServicing` double that records the path of every write it is
+/// handed, so a test can ask *which* service two different extensions' `fs`
+/// calls arrived at. Only `writeFile` is implemented: nothing here calls the
+/// other six, and giving them behavior would invite a future test to lean on
+/// something this double does not exist to provide.
+private actor RecordingFileSystemService: FileSystemServicing {
+    private struct Unused: Error {}
+
+    private(set) var writtenPaths: [String] = []
+
+    func writeFile(atPath path: String, contents: Data, create: Bool, overwrite: Bool) async throws {
+        writtenPaths.append(path)
+    }
+
+    func readFile(atPath path: String) async throws -> Data { throw Unused() }
+
+    func readDirectory(atPath path: String) async throws -> [FileSystemService.DirectoryEntry] {
+        throw Unused()
+    }
+
+    func stat(atPath path: String) async throws -> FileSystemService.FileStat { throw Unused() }
+
+    func createDirectory(atPath path: String) async throws { throw Unused() }
+
+    func delete(atPath path: String, recursive: Bool, useTrash: Bool) async throws { throw Unused() }
+
+    func rename(fromPath: String, toPath: String, overwrite: Bool) async throws { throw Unused() }
 }
 
 /// `ExtensionHostInstaller`, `ClosureWorkspaceRoots` and `ExtensionHostSeams`
@@ -271,5 +316,144 @@ struct ExtensionHostInstallerTests {
         try await settle()
 
         #expect(try activated(installer, "test.extb") == false)
+    }
+
+    // MARK: - One file system, shared by every host
+
+    /// `MainThreadWorkspace`'s own doc on `fileSystemService` says why this
+    /// has to be one instance: "an instance per extension is a serial queue
+    /// per extension, which is no write ordering between two extensions at
+    /// all." Nothing pinned it, because the installer built the service
+    /// itself and no test could see which one any host got.
+    ///
+    /// It is a seam now, so the claim is checkable from outside: two real
+    /// extensions each write a file through `vscode.workspace.fs`, and the
+    /// single injected service is asked what it saw. Both writes, or the
+    /// hosts are not sharing it.
+    ///
+    /// Pinned through the JavaScript boundary rather than by comparing object
+    /// identity on a stored property: identity would pass just as happily if
+    /// the adaptor stopped routing `fs` through the service it was handed.
+    @Test("every host's vscode.workspace.fs reaches the one injected file system")
+    func everyHostSharesOneFileSystemService() async throws {
+        // Inlined for the same reason as the tests above: this one awaits
+        // real JS settling, and `withInMemorySettings`'s body is not `async`.
+        let previousSettings = UserSettings.shared
+        UserSettings.shared = UserSettings(with: InMemorySettingsStorageProvider())
+        defer { UserSettings.shared = previousSettings }
+
+        let extensionsRoot = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: extensionsRoot) }
+
+        // Two extensions, each activating at startup and writing one path
+        // only it writes — so what the service recorded says *which*
+        // extensions reached it, not merely how many writes did.
+        for name in ["extone", "exttwo"] {
+            let directory = extensionsRoot.appendingPathComponent("\(name)-1.0.0")
+            try write(
+                """
+                {
+                    "name": "\(name)", "publisher": "test", "version": "1.0.0",
+                    "displayName": "Ext \(name)", "engines": { "vscode": "^1.74.0" },
+                    "activationEvents": ["*"], "browser": "dist/web.js"
+                }
+                """,
+                to: "package.json", in: directory)
+            // The path is never touched on disk — the recording double is
+            // what answers `writeFile` — so `/tmp` here names nothing real.
+            try write(
+                """
+                var vscode = require('vscode');
+                exports.activate = function () {
+                    vscode.workspace.fs.writeFile(
+                        vscode.Uri.file('/tmp/\(name)-wrote-this'), new Uint8Array([1]));
+                    globalThis.__activated = true;
+                };
+                """,
+                to: "dist/web.js", in: directory)
+        }
+
+        let registry = ExtensionRegistry(
+            searchPaths: [extensionsRoot], hostVersion: ExtensionRegistry.declaredVSCodeVersion)
+        registry.loadAll()
+        try #require(registry.extensions.count == 2)
+
+        let fileSystem = RecordingFileSystemService()
+        let seams = ExtensionHostSeams(
+            commandRegistry: CommandRegistry(), languageModelProvider: NullLanguageModelProvider(),
+            frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+            openDocumentLanguageIDs: { [] }, fileSystemService: fileSystem)
+        let installer = ExtensionHostInstaller(
+            registry: registry, notImplementedLedger: NotImplementedLedger(),
+            languagePoint: LanguageContributionPoint(), seams: seams)
+        defer { installer.disposeAll() }
+
+        installer.reconcile()
+        try await settle()
+        try #require(try activated(installer, "test.extone"))
+        try #require(try activated(installer, "test.exttwo"))
+
+        let written = await fileSystem.writtenPaths
+        #expect(written.contains("/tmp/extone-wrote-this"))
+        #expect(written.contains("/tmp/exttwo-wrote-this"))
+    }
+
+    // MARK: - The frontWindow seam
+
+    /// Where an extension's `show*Message` sheet attaches is the
+    /// `frontWindow` seam's whole job, and nothing pinned that it is wired
+    /// into the presenter at all — the installer builds the presenter
+    /// privately, and the only other way to find out is to show an alert,
+    /// which is a sheet on somebody's screen.
+    ///
+    /// So the check is made against `NSAlertMessagePresenter.sheetWindow()`,
+    /// the window decision split out of `presentedResponse(for:)` for exactly
+    /// this, and it pins both halves of the seam's contract: the installer
+    /// routes it into the message presenter, and the presenter asks it at
+    /// presentation time rather than snapshotting an answer when it was
+    /// built. A cached seam is the failure this catches — a menu-bar app
+    /// spends most of its life with no window at all, so the window a host
+    /// was constructed against is routinely the wrong one by the time an
+    /// extension speaks.
+    @Test("the frontWindow seam is what the installer's message sheets attach to, read fresh every time")
+    func frontWindowSeamReachesTheMessagePresenterAndIsReadFresh() throws {
+        let extensionsRoot = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: extensionsRoot) }
+
+        // Never ordered front, never made visible: `sheetWindow()` answers
+        // from the closure, and nothing here shows anything.
+        let probe = WindowSeamProbe()
+        let first = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
+            styleMask: [.titled], backing: .buffered, defer: true)
+        probe.window = first
+
+        let registry = ExtensionRegistry(
+            searchPaths: [extensionsRoot], hostVersion: ExtensionRegistry.declaredVSCodeVersion)
+        let seams = ExtensionHostSeams(
+            commandRegistry: CommandRegistry(), languageModelProvider: NullLanguageModelProvider(),
+            frontWindow: { probe.answer() }, footers: { [] }, workspaceRoots: { nil },
+            openDocumentLanguageIDs: { [] })
+        let installer = ExtensionHostInstaller(
+            registry: registry, notImplementedLedger: NotImplementedLedger(),
+            languagePoint: LanguageContributionPoint(), seams: seams)
+        defer { installer.disposeAll() }
+
+        // Building the installer must not have asked yet: an answer taken
+        // here is an answer from before any window existed.
+        #expect(probe.asked == 0)
+
+        let presenter = installer.collaborators.messagePresenter
+        #expect(presenter.sheetWindow() === first)
+        #expect(probe.asked == 1)
+
+        // The front window changed, as it does whenever someone switches
+        // projects. The next message follows it.
+        let second = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
+            styleMask: [.titled], backing: .buffered, defer: true)
+        probe.window = second
+        #expect(presenter.sheetWindow() === second)
+        #expect(probe.asked == 2)
     }
 }

@@ -55,6 +55,13 @@ public struct ExtensionHostSeams {
     /// property of the user's settings, not of an extension.
     public let languageModelProvider: ExtensionLanguageModelProviding
 
+    /// What `vscode.workspace.fs` reaches the disk through. One service for
+    /// every host — a file read is a file read whichever extension asked —
+    /// and a seam rather than a hardcoded `FileSystemService()` so that
+    /// sharing is a claim a test can actually make: hand two extensions one
+    /// double, and the double is what answers both.
+    public let fileSystemService: FileSystemServicing
+
     /// Where an alert sheet attaches, or `nil` for an app-modal alert.
     public let frontWindow: () -> NSWindow?
 
@@ -82,10 +89,15 @@ public struct ExtensionHostSeams {
         frontWindow: @escaping () -> NSWindow?,
         footers: @escaping () -> [WindowFooterBar],
         workspaceRoots: @escaping () -> ExtensionWorkspaceRoots?,
-        openDocumentLanguageIDs: @escaping () -> [String]
+        openDocumentLanguageIDs: @escaping () -> [String],
+        // Defaulted, because the real answer is the only answer every caller
+        // outside a test wants: the app has no second file system to choose
+        // between, and making every call site spell it would be ceremony.
+        fileSystemService: FileSystemServicing = FileSystemService()
     ) {
         self.commandRegistry = commandRegistry
         self.languageModelProvider = languageModelProvider
+        self.fileSystemService = fileSystemService
         self.frontWindow = frontWindow
         self.footers = footers
         self.workspaceRoots = workspaceRoots
@@ -527,7 +539,13 @@ public final class ExtensionHostInstaller {
     private let registry: ExtensionRegistry
     private let notImplementedLedger: NotImplementedLedger
     private let seams: ExtensionHostSeams
-    private let collaborators: Collaborators
+
+    /// **`internal`, not `private`, deliberately**, on the same grounds as
+    /// `NSAlertMessagePresenter.buttonPlan(for:)`: which collaborator each
+    /// seam ends up wired into is a claim about this initialiser, and the
+    /// only way to check it without a running window server is to read the
+    /// built collaborator back out. `ExtensionHostInstallerTests` does.
+    let collaborators: Collaborators
 
     /// One installation per running extension, keyed by identifier, each
     /// stored beside the identity it was built from so `reconcile()` can tell
@@ -677,7 +695,7 @@ public final class ExtensionHostInstaller {
                     }
                 }),
             workspaceRoots: workspaceRoots,
-            fileSystemService: FileSystemService())
+            fileSystemService: seams.fileSystemService)
     }
 
     // MARK: - Bringing hosts up

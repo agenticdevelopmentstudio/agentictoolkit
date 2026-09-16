@@ -6,6 +6,7 @@
 import Foundation
 import Testing
 @testable import AIPluginKit
+@testable import AgenticToolkitCore
 @testable import AgenticToolkitMacOS
 
 /// `AIPluginLanguageModelProvider`, the production `ExtensionLanguageModelProviding`

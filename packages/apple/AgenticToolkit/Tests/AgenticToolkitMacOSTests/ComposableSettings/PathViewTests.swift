@@ -22,7 +22,7 @@ struct PathViewTests {
         let view = ComposableSettings.PathView(withPath: Self.longPath)
         #expect(view.path == Self.longPath)
         #expect(view.label.toolTip == Self.longPath)
-        #expect(view.label.accessibilityValue() as? String == Self.longPath)
+        #expect(view.label.accessibilityValue() == Self.longPath)
     }
 
     @Test("one line, truncated in the middle")
