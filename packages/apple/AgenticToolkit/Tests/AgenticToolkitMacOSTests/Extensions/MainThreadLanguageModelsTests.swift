@@ -2040,7 +2040,7 @@ struct MainThreadLanguageModelsTests {
     // provider's `availableChatModels` and then calling
     // `languageModels.availableChatModelsDidChange()` directly — the seam
     // this task adds no caller for in production (that class's own doc). No
-    // test here sleeps or polls a window closed: `ChatModelsImmediateWindow`
+    // test here sleeps or polls a window closed: `ExtensionEventImmediateWindow`
     // calls `onClose` synchronously from inside `openWindow`, and
     // `ExtensionEventEmitter.fire(_:)` (`ExtensionEvent.swift`) queues this
     // call's payload *before* calling `openWindow` for exactly that reason —

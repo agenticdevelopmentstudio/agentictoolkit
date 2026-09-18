@@ -61,6 +61,39 @@ public final class ExtensionEventTimerWindow: ExtensionEventWindowScheduling {
     }
 }
 
+/// A window that is already closed: it calls `onClose` inside `openWindow`.
+///
+/// For an event with nothing to coalesce. `ExtensionEventEmitter`'s window is
+/// upstream's `DebounceEmitter` window, and a debounce is only worth having
+/// where a burst of events would otherwise reach an extension one at a time —
+/// a file's diagnostics being rewritten line by line. An event that fires once
+/// per user-visible act (a webview's page posting a message, a panel being
+/// disposed, the set of chat models changing) has no burst, and a window over
+/// it would only mean an extension hears about the act one turn of the run
+/// loop later than it happened.
+///
+/// It delivers **synchronously with the `fire(_:)` that opened it**, which is a
+/// property of `fire(_:)` rather than of this type: `fire(_:)` queues the
+/// payload *before* opening the window, precisely so a conformer that closes
+/// the window immediately finds the payload already there. See `fire(_:)`'s own
+/// doc for why upstream's literal statement order does not carry over to a seam
+/// that allows a synchronous conformer.
+///
+/// That synchrony is load-bearing in two directions. It is what lets a test
+/// assert a delivery without polling or sleeping — and it is what makes a
+/// message arriving from a webview reach the extension in the same turn the
+/// page sent it, which is what `postMessage`-based request/response between an
+/// extension and its page assumes.
+@MainActor
+public final class ExtensionEventImmediateWindow: ExtensionEventWindowScheduling {
+
+    public init() {}
+
+    public func openWindow(closingAfter delay: TimeInterval, onClose: @escaping @MainActor () -> Void) {
+        onClose()
+    }
+}
+
 // MARK: - The emitter
 
 /// This host's port of VS Code's `DebounceEmitter` + `PauseableEmitter` +
@@ -221,8 +254,7 @@ public final class ExtensionEventEmitter<Payload> {
     ///
     /// `ExtensionEventWindowScheduling` makes no such promise: it is a seam,
     /// and a conformer is free to call `onClose` synchronously, inline,
-    /// before `openWindow` returns (`vscode.lm.onDidChangeChatModels`'s
-    /// `ChatModelsImmediateWindow` in `MainThreadLanguageModels.swift` does
+    /// before `openWindow` returns (`ExtensionEventImmediateWindow` above does
     /// exactly this, deliberately, so the member never has to poll or sleep
     /// for a real timer to close). Opening the window first would then run
     /// `closeWindow()` against a still-empty queue — the payload not yet

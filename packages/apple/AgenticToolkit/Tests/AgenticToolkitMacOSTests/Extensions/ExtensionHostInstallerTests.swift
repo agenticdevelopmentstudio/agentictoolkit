@@ -195,6 +195,7 @@ struct ExtensionHostInstallerTests {
         let seams = ExtensionHostSeams(
             commandRegistry: CommandRegistry(), languageModelProvider: NullLanguageModelProvider(),
             frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+            placeWebviewPanel: { _ in nil },
             openDocumentLanguageIDs: { ["swift"] })
         let installer = ExtensionHostInstaller(
             registry: registry, notImplementedLedger: NotImplementedLedger(),
@@ -287,6 +288,7 @@ struct ExtensionHostInstallerTests {
         let seams = ExtensionHostSeams(
             commandRegistry: CommandRegistry(), languageModelProvider: NullLanguageModelProvider(),
             frontWindow: { nil }, footers: { [] }, workspaceRoots: { testRoots },
+            placeWebviewPanel: { _ in nil },
             openDocumentLanguageIDs: { [] })
         let installer = ExtensionHostInstaller(
             registry: registry, notImplementedLedger: NotImplementedLedger(),
@@ -382,6 +384,7 @@ struct ExtensionHostInstallerTests {
         let seams = ExtensionHostSeams(
             commandRegistry: CommandRegistry(), languageModelProvider: NullLanguageModelProvider(),
             frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+            placeWebviewPanel: { _ in nil },
             openDocumentLanguageIDs: { [] }, fileSystemService: fileSystem)
         let installer = ExtensionHostInstaller(
             registry: registry, notImplementedLedger: NotImplementedLedger(),
@@ -433,6 +436,7 @@ struct ExtensionHostInstallerTests {
         let seams = ExtensionHostSeams(
             commandRegistry: CommandRegistry(), languageModelProvider: NullLanguageModelProvider(),
             frontWindow: { probe.answer() }, footers: { [] }, workspaceRoots: { nil },
+            placeWebviewPanel: { _ in nil },
             openDocumentLanguageIDs: { [] })
         let installer = ExtensionHostInstaller(
             registry: registry, notImplementedLedger: NotImplementedLedger(),
