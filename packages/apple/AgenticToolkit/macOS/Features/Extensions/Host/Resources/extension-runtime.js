@@ -586,6 +586,75 @@
         });
     }
 
+    // The object `activate(context)` receives.
+    //
+    // Every member of it throws by name, as it always has, with exactly one
+    // exception: `subscriptions` is a real, mutable array. That is upstream's
+    // own shape rather than a convenience — `extHostExtensionService.ts:527`
+    // builds the context with `Object.freeze({ ..., subscriptions: [], ... })`,
+    // so the *property* is immutable and the array it holds is not. The proxy's
+    // `set` trap already refuses `context.subscriptions = []`, which is the
+    // half `Object.freeze` provides; what an extension actually writes —
+    // `context.subscriptions.push(disposable)`, or handing the array to an
+    // event as its third argument — mutates the array and goes through
+    // untouched.
+    //
+    // This is the member that gated essentially every real extension. It is
+    // read on the first line of a great many `activate` functions, so reading
+    // it threw before the extension had done anything at all, and the ledger
+    // then recorded `context.subscriptions` against extensions whose only
+    // mistake was being ordinary.
+    function makeActivationContext() {
+        var table = Object.create(null);
+        table.subscriptions = [];
+        return makeStubNamespace('context', table);
+    }
+
+    // Upstream's `dispose(context.subscriptions)`
+    // (`vs/base/common/lifecycle.ts:332`), which is deliberately not the
+    // obvious loop. Three of its properties are load-bearing: it disposes in
+    // **insertion order**; it **skips falsy entries** rather than reporting
+    // them, because `push(maybeDisposable)` is a shape real extensions write
+    // and a `null` in the list is not a failure; and it **catches each
+    // failure**, so one disposable that throws cannot strand the ones queued
+    // behind it. Upstream collects the errors and rethrows them together at the
+    // end; this collects them and hands them back, because the caller is
+    // `ExtensionHost.dispose()` — teardown, which has nothing useful to do with
+    // an exception but every reason to log what failed.
+    //
+    // The list is emptied, which upstream does not do: its `dispose` answers a
+    // *new* empty array and leaves the original populated, safe there because
+    // the context dies with the call. Here `ExtensionHost.dispose()` is
+    // documented safe to call more than once, and a second teardown must not
+    // dispose the same objects again. Emptying also bounds a disposable that
+    // pushes onto the list while being disposed: `length` is read live, exactly
+    // as upstream's iterator does, so the growth is visited once and then
+    // cleared.
+    function disposeSubscriptions(context) {
+        var pending = context.subscriptions;
+        var failures = [];
+        var disposed = 0;
+        for (var index = 0; index < pending.length; index += 1) {
+            var entry = pending[index];
+            if (!entry) {
+                continue;
+            }
+            try {
+                // Not guarded by a `typeof entry.dispose === 'function'` test:
+                // upstream calls it and lets the TypeError land in the same
+                // collection as any other failure, and an extension that pushed
+                // a non-disposable wants to be told so rather than have it
+                // silently skipped.
+                entry.dispose();
+                disposed += 1;
+            } catch (error) {
+                failures.push(describeThrown(error));
+            }
+        }
+        pending.length = 0;
+        return { disposed: disposed, failures: failures };
+    }
+
     // The namespaces stages 5.3-5.7 fill in. Listing one here is what makes
     // `vscode.commands.registerCommand` record the *full* path rather than
     // stopping at `vscode.commands` — the namespace is traversable, its
@@ -1563,10 +1632,13 @@
         // The same seam for a member that reports app state and so must be
         // read at every access — see `defineLiveMember`.
         defineLiveMember: defineLiveMember,
-        // Used for the argument `activate(context)` receives: a recorded,
-        // throwing stub like every other unimplemented surface, so an
-        // extension that reaches for `context.subscriptions` today gets told
-        // so by name.
-        makeStubNamespace: function (path) { return makeStubNamespace(path, Object.create(null)); }
+        // The argument `activate(context)` receives: a recorded, throwing stub
+        // like every other unimplemented surface, except for `subscriptions`,
+        // which is real. See `makeActivationContext`.
+        makeActivationContext: makeActivationContext,
+        // Teardown's half of that same member. The host calls it while the
+        // context is still alive, which is the only window in which the
+        // disposables are still callable.
+        disposeSubscriptions: disposeSubscriptions
     };
 }(this));

@@ -1113,9 +1113,9 @@ struct ExtensionHostTests {
         #expect(ledger.accesses(for: "test.beta").map(\.memberPath) == ["vscode.workspace.workspaceFolders"])
     }
 
-    /// The activation argument is a stub too — an extension that reaches for
-    /// `context.subscriptions` is told which member it wanted, rather than
-    /// failing later on an `undefined`.
+    /// The activation argument is a stub too, `subscriptions` aside — an
+    /// extension that reaches for a member this host has not built is told
+    /// which one it wanted, rather than failing later on an `undefined`.
     @Test
     func theActivationContextIsARecordedStub() async throws {
         let directory = try makeTempDirectory()
@@ -1125,7 +1125,7 @@ struct ExtensionHostTests {
         let host = try makeHost(
             source: """
             exports.activate = function (context) {
-                try { context.subscriptions.push(1); } catch (error) { console.log(error.memberPath); }
+                try { context.workspaceState.get('x'); } catch (error) { console.log(error.memberPath); }
             };
             """,
             in: directory,
@@ -1138,11 +1138,244 @@ struct ExtensionHostTests {
 
         try await host.activate()
 
-        // `context.subscriptions`, not `vscode.ExtensionContext.subscriptions`:
-        // the ledger is read by a person looking for the line they wrote, and
-        // the type's name appears nowhere in their file.
-        #expect(recorder.texts == ["context.subscriptions"])
-        #expect(ledger.accesses.map(\.memberPath) == ["context.subscriptions"])
+        // `context.workspaceState`, not
+        // `vscode.ExtensionContext.workspaceState`: the ledger is read by a
+        // person looking for the line they wrote, and the type's name appears
+        // nowhere in their file.
+        #expect(recorder.texts == ["context.workspaceState"])
+        #expect(ledger.accesses.map(\.memberPath) == ["context.workspaceState"])
+    }
+
+    // MARK: - context.subscriptions
+
+    /// `subscriptions` is the one member of the context that is real, because
+    /// it is read on the first line of a great many `activate` functions and a
+    /// throw there stops an extension that has done nothing wrong.
+    ///
+    /// Reading it must also leave the ledger alone: a recorded miss against an
+    /// implemented member would put the extension in the "needs work" list for
+    /// using the API correctly.
+    @Test
+    func contextSubscriptionsIsARealArrayAndIsNotRecordedAsAMiss() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let ledger = NotImplementedLedger()
+        let host = try makeHost(
+            source: """
+            exports.activate = function (context) {
+                context.subscriptions.push({ dispose: function () {} });
+                context.subscriptions.push({ dispose: function () {} });
+                console.log('length ' + context.subscriptions.length);
+                console.log('isArray ' + Array.isArray(context.subscriptions));
+            };
+            """,
+            in: directory,
+            ledger: ledger
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        // `Array.isArray` rather than `typeof`: an extension that hands the
+        // list to `onDidChangeX(fn, null, context.subscriptions)` reaches the
+        // emitter's own array handling, which asks exactly this question.
+        #expect(recorder.texts == ["length 2", "isArray true"])
+        #expect(ledger.accesses.isEmpty)
+    }
+
+    /// The property is immutable even though the array is not — upstream
+    /// freezes the context object (`extHostExtensionService.ts:527`), so
+    /// `context.subscriptions = []` is a no-op there and a throw here.
+    ///
+    /// Worth its own test because the two halves come from different places:
+    /// the array is `makeActivationContext`'s, and the refusal is the stub
+    /// proxy's existing `set` trap, which nothing about this change touched.
+    @Test
+    func contextSubscriptionsCannotBeReplaced() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function (context) {
+                context.subscriptions.push({ dispose: function () {} });
+                try {
+                    context.subscriptions = [];
+                    console.log('replaced');
+                } catch (error) {
+                    console.log('refused ' + (error instanceof TypeError));
+                }
+                console.log('length ' + context.subscriptions.length);
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+
+        #expect(recorder.texts == ["refused true", "length 1"])
+    }
+
+    /// Teardown disposes what the extension registered, in the order it
+    /// registered it. Insertion order is upstream's
+    /// (`vs/base/common/lifecycle.ts:332`) and it is the order an extension
+    /// author can reason about: a disposable pushed later may depend on one
+    /// pushed earlier, never the reverse.
+    ///
+    /// `onConsoleMessage` is cleared by `dispose()` — at the *end* of it, after
+    /// the subscriptions run, which is what makes this observable at all.
+    @Test
+    func disposeRunsEverySubscriptionInInsertionOrder() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function (context) {
+                ['first', 'second', 'third'].forEach(function (name) {
+                    context.subscriptions.push({
+                        dispose: function () { console.log('disposed ' + name); }
+                    });
+                });
+            };
+            """,
+            in: directory
+        )
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        #expect(recorder.texts.isEmpty)
+
+        host.dispose()
+
+        #expect(recorder.texts == ["disposed first", "disposed second", "disposed third"])
+    }
+
+    /// A `null` in the list is skipped rather than reported. Upstream skips
+    /// falsy entries, and `push(somethingThatMightBeUndefined)` is a shape real
+    /// extensions write — a hole in the list is not a failure.
+    @Test
+    func disposeSkipsFalsySubscriptions() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function (context) {
+                context.subscriptions.push(null);
+                context.subscriptions.push(undefined);
+                context.subscriptions.push({
+                    dispose: function () { console.log('disposed real'); }
+                });
+            };
+            """,
+            in: directory
+        )
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        host.dispose()
+
+        #expect(recorder.texts == ["disposed real"])
+    }
+
+    /// One disposable that throws must not strand the ones queued behind it.
+    /// This is the property the whole per-entry `try` exists for: teardown runs
+    /// once, at a moment nothing can retry, so a single bad extension object
+    /// cannot be allowed to leak every command and panel registered after it.
+    @Test
+    func aThrowingSubscriptionDoesNotStrandTheRest() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function (context) {
+                context.subscriptions.push({
+                    dispose: function () { console.log('disposed first'); }
+                });
+                context.subscriptions.push({
+                    dispose: function () { throw new Error('boom'); }
+                });
+                // Not a disposable at all — the TypeError from calling a
+                // missing method lands in the same place as any other throw.
+                context.subscriptions.push({ notADispose: true });
+                context.subscriptions.push({
+                    dispose: function () { console.log('disposed last'); }
+                });
+            };
+            """,
+            in: directory
+        )
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        host.dispose()
+
+        #expect(recorder.texts == ["disposed first", "disposed last"])
+    }
+
+    /// `dispose()` is documented safe to call more than once, so a subscription
+    /// must not be disposed twice. Upstream leaves its list populated and gets
+    /// away with it because the context dies with the call; here the list is
+    /// emptied, and this is the test that says why.
+    @Test
+    func disposeDoesNotRunASubscriptionTwice() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: """
+            exports.activate = function (context) {
+                context.subscriptions.push({
+                    dispose: function () { console.log('disposed once'); }
+                });
+            };
+            """,
+            in: directory
+        )
+
+        let recorder = ConsoleRecorder()
+        recorder.attach(to: host)
+
+        try await host.activate()
+        host.dispose()
+        host.dispose()
+
+        #expect(recorder.texts == ["disposed once"])
+    }
+
+    /// A host that never activated has no context to walk, and tearing one down
+    /// must not fault. The `guard` in `disposeSubscriptions` is the whole
+    /// implementation of this, which is exactly why it needs a test: nothing
+    /// else would notice if it were removed.
+    @Test
+    func disposingAHostThatNeverActivatedIsSafe() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let host = try makeHost(
+            source: "exports.activate = function () {};",
+            in: directory
+        )
+
+        host.dispose()
+
+        #expect(host.isDisposed)
     }
 
     /// The `vscode` object may not be mutated into working. An extension that
