@@ -513,6 +513,7 @@
 		550072BE972384152ABA9016 /* ThemeTypographyTopicPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F709F299F1389F0EFB6F18F7 /* ThemeTypographyTopicPanel.swift */; };
 		5522370EA709F4488A169123 /* ModelCatalogStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 567F45EDE9A5E884E7D823B6 /* ModelCatalogStoreTests.swift */; };
 		55780F80FFD5A4BB11707330 /* AISettingsViewPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11DC671245ACFEC3DFDF0AC /* AISettingsViewPanelController.swift */; };
+		5585FE4687F5CD2F6C6A3529 /* WebviewSchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EAC127F7D872A76094055DA /* WebviewSchemeHandler.swift */; };
 		5589D9698D9879A781C600E1 /* SubprocessChannelRunTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77056A8F13FFC28E2E59D2E0 /* SubprocessChannelRunTests.swift */; };
 		5591B5599B996583DABDB2B7 /* GRDBSyncStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFBA4A0CF10115E47B07547E /* GRDBSyncStore.swift */; };
 		55A2B4475678381A15B3E621 /* FeatureFlagsTopic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F8A8322273B4AA56E9B7A70 /* FeatureFlagsTopic.swift */; };
@@ -1213,6 +1214,7 @@
 		E51F07001AD93A8863C4A64E /* HubWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744440285E8490608CB81FFC /* HubWorkspace.swift */; };
 		E54C5712DCB1369C05A68847 /* ChatSessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF83EC0036A5B9DE88298D63 /* ChatSessionState.swift */; };
 		E5709B3624590C95A2C26081 /* HubText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C0F3C02C6C6FCFDF019FB03 /* HubText.swift */; };
+		E57CABF48958483AB64BE94D /* WebviewPanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C63140A5AC2AB2E21F5F534 /* WebviewPanelViewController.swift */; };
 		E58E821DD06939A2EB6C18D2 /* AgenticDeveloperToolkitUI-iOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4BD0915D46D2FA04D0D71295 /* AgenticDeveloperToolkitUI-iOS.framework */; };
 		E59DFBB850273CAB5EC5B72B /* SystemWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65FA4F440C79D5213367B98 /* SystemWindowManager.swift */; };
 		E5E64A21285D19829D23FD95 /* SecureStoredSettingsStorageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7D1B477544576902F376315 /* SecureStoredSettingsStorageProvider.swift */; };
@@ -2629,6 +2631,7 @@
 		1D889B0CC6F47C39934E3401 /* EcosystemsModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcosystemsModule.swift; sourceTree = "<group>"; };
 		1D8AF051E35975AF66D86F3E /* ChatTranscriptReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptReducer.swift; sourceTree = "<group>"; };
 		1DB3E22C2C70AC80B898A263 /* UriTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UriTests.swift; sourceTree = "<group>"; };
+		1EAC127F7D872A76094055DA /* WebviewSchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewSchemeHandler.swift; sourceTree = "<group>"; };
 		1EEFD96B23DBED0737E91903 /* MatchStrategy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchStrategy.swift; sourceTree = "<group>"; };
 		1F1F9B9230F6147C6D788C44 /* ConfigurationContributionPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationContributionPoint.swift; sourceTree = "<group>"; };
 		2035AE53EF8F5238E77BF732 /* ProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressView.swift; sourceTree = "<group>"; };
@@ -2950,6 +2953,7 @@
 		6B8A3350FA47166F38A83CC1 /* MainThreadWindowQuickPickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadWindowQuickPickTests.swift; sourceTree = "<group>"; };
 		6BB0D0EE367682A79B4BF411 /* ComposableSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableSettings.swift; sourceTree = "<group>"; };
 		6BBA4688BC9F1C5415C1D4D4 /* NSWindowFitWidthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSWindowFitWidthTests.swift; sourceTree = "<group>"; };
+		6C63140A5AC2AB2E21F5F534 /* WebviewPanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewPanelViewController.swift; sourceTree = "<group>"; };
 		6C768913C2E67B08FB03FB83 /* LocalModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelCatalog.swift; sourceTree = "<group>"; };
 		6CBC256AD954EA9FBF3877BF /* ApiTokensRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApiTokensRail.swift; sourceTree = "<group>"; };
 		6EA98FE84B8447FA9DB6F211 /* SettingsPanelDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelDescriptor.swift; sourceTree = "<group>"; };
@@ -5451,6 +5455,15 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
+		928DA71A75E920D69E45310B /* Webview */ = {
+			isa = PBXGroup;
+			children = (
+				6C63140A5AC2AB2E21F5F534 /* WebviewPanelViewController.swift */,
+				1EAC127F7D872A76094055DA /* WebviewSchemeHandler.swift */,
+			);
+			path = Webview;
+			sourceTree = "<group>";
+		};
 		931A00CCBF0958F882DCAA88 /* Triggers */ = {
 			isa = PBXGroup;
 			children = (
@@ -5601,6 +5614,7 @@
 				D7D48D64736242B3DE551C0D /* Settings */,
 				6A8AA2A18F4025F73941BBC4 /* UI */,
 				4B7D7EF1823A0CE738254A09 /* VSCodeAPI */,
+				928DA71A75E920D69E45310B /* Webview */,
 				1F1F9B9230F6147C6D788C44 /* ConfigurationContributionPoint.swift */,
 				054EE267FE62903BB10C2434 /* ExtensionsCoordinator.swift */,
 				BBB7EE2A1E5250C0936ACE6D /* LanguageContributionPoint.swift */,
@@ -8510,6 +8524,8 @@
 				1EEFE431083CCF3925C185D3 /* ViewLayout.swift in Sources */,
 				D95E2BA90114CC65AE8BDA0C /* ViewModel.swift in Sources */,
 				19898340262CA488212E8477 /* ViewsContributionPoint.swift in Sources */,
+				E57CABF48958483AB64BE94D /* WebviewPanelViewController.swift in Sources */,
+				5585FE4687F5CD2F6C6A3529 /* WebviewSchemeHandler.swift in Sources */,
 				063C07FB68027C7B91836EA9 /* WhippetChatBackend.swift in Sources */,
 				A7CB53AD9111F5F7F7884E40 /* WindowActivationStrategy.swift in Sources */,
 				E79A585CE11E7583105060F3 /* WindowActivationTarget.swift in Sources */,
