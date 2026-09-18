@@ -634,6 +634,12 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
         let status = ComposableSettings.ExplanationView(withText: "")
         let button = NSButton(title: "Update", target: nil, action: nil)
         button.bezelStyle = .rounded
+        // Named after the extension, not by position: these rows are one per
+        // update and reorder as extensions come and go, so "the second Update
+        // button" is not a thing anyone — a scripting client, voice control, a
+        // driven check — can hold onto between two checks.
+        button.accessibilityID("extensions.browse.update.\(update.identifier)")
+        status.label.accessibilityID("extensions.browse.update.\(update.identifier).status")
         let action = UpdateRowAction { [weak self] in
             self?.install(update.latest, progressInto: status)
         }
