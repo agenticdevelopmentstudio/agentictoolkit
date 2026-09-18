@@ -101,6 +101,9 @@ struct MainThreadWebviewsTests {
         try host.defineVSCodeMember(
             namespacePath: "vscode.window", name: "createWebviewPanel",
             implementation: webviews.createWebviewPanel)
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "registerWebviewPanelSerializer",
+            implementation: webviews.registerWebviewPanelSerializer)
     }
 
     /// The whole arrangement in one call, because every test below needs all
@@ -783,6 +786,270 @@ struct MainThreadWebviewsTests {
         let context = try #require(fixture.host.javaScriptContext)
         #expect(context.evaluateScript("globalThis.__create()")?.toString() == "threw")
         #expect(fixture.presenter.requests.isEmpty)
+    }
+
+    // MARK: - registerWebviewPanelSerializer
+
+    @Test
+    func registerWebviewPanelSerializerClaimsItsViewTypeAndOnlyThatOne() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.window.registerWebviewPanelSerializer('markdown.preview', {
+                    deserializeWebviewPanel: function () {}
+                });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        #expect(fixture.webviews.hasSerializer(for: "markdown.preview"))
+        #expect(!fixture.webviews.hasSerializer(for: "markdown.other"))
+    }
+
+    /// The registration is a `Disposable`, and disposing it has to actually
+    /// give the view type up — an extension that deactivates and comes back
+    /// must not leave a serializer behind that nothing can call.
+    @Test
+    func disposingTheRegistrationGivesTheViewTypeUp() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__registration = vscode.window.registerWebviewPanelSerializer(
+                    'markdown.preview', { deserializeWebviewPanel: function () {} });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+        #expect(fixture.webviews.hasSerializer(for: "markdown.preview"))
+
+        let context = try #require(fixture.host.javaScriptContext)
+        context.evaluateScript("globalThis.__registration.dispose()")
+
+        #expect(!fixture.webviews.hasSerializer(for: "markdown.preview"))
+    }
+
+    /// A serializer that is not an object with a `deserializeWebviewPanel`
+    /// function is an extension bug, and one whose whole symptom is a panel
+    /// that silently never comes back. Raising names it at the call
+    /// (`fail-fast`).
+    @Test(
+        "a registration this host cannot call back is refused at the call",
+        arguments: [
+            "vscode.window.registerWebviewPanelSerializer(1, { deserializeWebviewPanel: function () {} })",
+            "vscode.window.registerWebviewPanelSerializer('t')",
+            "vscode.window.registerWebviewPanelSerializer('t', {})",
+            "vscode.window.registerWebviewPanelSerializer('t', { deserializeWebviewPanel: 7 })"
+        ]
+    )
+    func aMalformedRegistrationIsRefused(_ call: String) async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__register = function (call) {
+                    try {
+                        call();
+                        return 'returned';
+                    } catch (error) {
+                        return 'threw';
+                    }
+                };
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        let context = try #require(fixture.host.javaScriptContext)
+        let outcome = context.evaluateScript("globalThis.__register(function () { \(call); })")
+
+        #expect(outcome?.toString() == "threw")
+        #expect(!fixture.webviews.hasSerializer(for: "t"))
+    }
+
+    // MARK: - restore
+
+    /// The whole point of the registration: a panel rebuilt from pane state is
+    /// handed back to the extension, as a `vscode.WebviewPanel` object with the
+    /// state it saved beside it.
+    @Test
+    func restoreCallsTheSerializerWithAPanelObjectAndTheSavedState() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.window.registerWebviewPanelSerializer('markdown.preview', {
+                    deserializeWebviewPanel: function (panel, state) {
+                        globalThis.__seenScrollTop = state.scrollTop;
+                        globalThis.__seenViewType = panel.viewType;
+                        panel.webview.html = '<p>restored</p>';
+                    }
+                });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        let panel = TestWebviewPanel(panelID: "restored-1", title: "Preview")
+        let restored = fixture.webviews.restore(
+            panel, viewType: "markdown.preview", state: #"{"scrollTop":420}"#)
+
+        #expect(restored)
+        let context = try #require(fixture.host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.__seenScrollTop")?.toInt32() == 420)
+        #expect(context.evaluateScript("globalThis.__seenViewType")?.toString() == "markdown.preview")
+        #expect(panel.html == "<p>restored</p>")
+    }
+
+    /// `getState()` on a page that never called `setState` must read
+    /// `undefined`, which is how an extension tells a first run from a
+    /// restore. A panel restored with no state has to arrive the same way —
+    /// `null` would read as "the extension saved null".
+    @Test
+    func aPanelWithNoSavedStateIsDeserializedWithUndefined() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.window.registerWebviewPanelSerializer('markdown.preview', {
+                    deserializeWebviewPanel: function (panel, state) {
+                        globalThis.__stateType = (state === undefined) ? 'undefined'
+                            : (state === null) ? 'null' : typeof state;
+                    }
+                });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        _ = fixture.webviews.restore(
+            TestWebviewPanel(panelID: "restored-1"), viewType: "markdown.preview", state: nil)
+
+        let context = try #require(fixture.host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.__stateType")?.toString() == "undefined")
+    }
+
+    /// A restored panel is a live panel: its messages and its disposal have to
+    /// reach the extension exactly as a created one's do, or an extension that
+    /// deserialized a panel finds it inert.
+    @Test
+    func aRestoredPanelIsWiredForMessagesAndDisposal() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.window.registerWebviewPanelSerializer('markdown.preview', {
+                    deserializeWebviewPanel: function (panel) {
+                        panel.webview.onDidReceiveMessage(function (message) {
+                            globalThis.__received = message.ping;
+                        });
+                        panel.onDidDispose(function () { globalThis.__disposed = true; });
+                    }
+                });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        let panel = TestWebviewPanel(panelID: "restored-1")
+        _ = fixture.webviews.restore(panel, viewType: "markdown.preview", state: nil)
+        panel.onDidReceiveMessage?(["ping": "pong"])
+        panel.dispose()
+
+        let context = try #require(fixture.host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.__received")?.toString() == "pong")
+        #expect(context.evaluateScript("globalThis.__disposed")?.toBool() == true)
+    }
+
+    @Test
+    func restoringAViewTypeNobodyRegisteredIsRefused() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {};
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        #expect(!fixture.webviews.restore(
+            TestWebviewPanel(panelID: "restored-1"), viewType: "markdown.preview", state: nil))
+    }
+
+    /// Disposing the adaptor drops every registration with it — the context
+    /// those serializer objects live in is going away, and a call into it
+    /// afterwards is a call into a torn-down host.
+    @Test
+    func disposingTheAdaptorDropsEverySerializer() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                vscode.window.registerWebviewPanelSerializer('markdown.preview', {
+                    deserializeWebviewPanel: function () {}
+                });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        fixture.webviews.dispose()
+
+        #expect(!fixture.webviews.hasSerializer(for: "markdown.preview"))
+        #expect(!fixture.webviews.restore(
+            TestWebviewPanel(panelID: "restored-1"), viewType: "markdown.preview", state: nil))
+    }
+
+    /// The roots a restored panel is built with come from here, because only
+    /// this adaptor knows the extension's directory. Declared-empty must stay
+    /// empty: a panel that renounced file access must not get it back by being
+    /// restored.
+    @Test
+    func resourceRootsResolveAgainstTheExtensionDirectoryAndTheWorkspace() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = URL(fileURLWithPath: "/Users/someone/Development/whippet")
+        let fixture = try makeFixture(
+            source: "exports.activate = function () {};",
+            extensionDirectory: directory,
+            workspaceRoots: TestWorkspaceRoots([workspace]))
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        let undeclared = fixture.webviews.resourceRoots(
+            for: WebviewPanelOptions(
+                enableScripts: nil, enableForms: nil, localResourceRoots: nil))
+        let renounced = fixture.webviews.resourceRoots(
+            for: WebviewPanelOptions(
+                enableScripts: nil, enableForms: nil, localResourceRoots: []))
+
+        #expect(undeclared.map(\.path) == [directory.path, workspace.path])
+        #expect(renounced.isEmpty)
     }
 
     // MARK: - Helpers

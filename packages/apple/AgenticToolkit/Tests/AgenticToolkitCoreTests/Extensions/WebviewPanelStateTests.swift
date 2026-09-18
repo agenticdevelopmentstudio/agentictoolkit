@@ -12,11 +12,16 @@ import Testing
 @Suite
 struct WebviewPanelStateTests {
 
+    /// The posture every panel here is created with unless the test is
+    /// about the options themselves: scripts off, default roots.
+    private let defaultOptions = WebviewPanelOptions(
+        enableScripts: nil, enableForms: nil, localResourceRoots: nil)
+
     @Test("a panel round-trips through its stored text")
     func roundTripsThroughText() throws {
         let original = WebviewPanelState(
             viewType: "markdown.preview", title: "Preview README.md",
-            state: #"{"scrollTop":420}"#)
+            state: #"{"scrollTop":420}"#, options: defaultOptions)
 
         let restored = try WebviewPanelState(json: original.encoded())
 
@@ -30,7 +35,7 @@ struct WebviewPanelStateTests {
     @Test("a panel that never saved state restores with none")
     func absentStateStaysAbsent() throws {
         let original = WebviewPanelState(
-            viewType: "markdown.preview", title: "Preview", state: nil)
+            viewType: "markdown.preview", title: "Preview", state: nil, options: defaultOptions)
 
         let restored = try WebviewPanelState(json: original.encoded())
 
@@ -54,7 +59,8 @@ struct WebviewPanelStateTests {
     )
     func theExtensionsStateIsCarriedVerbatim(_ state: String) throws {
         let restored = try WebviewPanelState(
-            json: WebviewPanelState(viewType: "v", title: "t", state: state).encoded())
+            json: WebviewPanelState(
+                viewType: "v", title: "t", state: state, options: defaultOptions).encoded())
 
         #expect(restored.state == state)
     }
@@ -99,10 +105,80 @@ struct WebviewPanelStateTests {
     @Test("awkward titles and view types survive")
     func awkwardTitlesSurvive() throws {
         let original = WebviewPanelState(
-            viewType: "vendor.view-type_2", title: #"Preview "a"b.md — café"#, state: nil)
+            viewType: "vendor.view-type_2", title: #"Preview "a"b.md — café"#, state: nil,
+            options: defaultOptions)
 
         let restored = try WebviewPanelState(json: original.encoded())
 
         #expect(restored == original)
+    }
+
+    // MARK: - The options a restored panel has to be built with
+
+    /// `enableScripts` is baked into the `WKWebViewConfiguration` at first
+    /// load, so a restored panel that guessed it would come back unable to run
+    /// the page its extension is about to hand it — and nothing the extension
+    /// could do afterwards would fix it.
+    @Test("a scripted panel comes back scripted")
+    func scriptsSurviveTheRoundTrip() throws {
+        let original = WebviewPanelState(
+            viewType: "markdown.preview", title: "Preview", state: nil,
+            options: WebviewPanelOptions(
+                enableScripts: true, enableForms: nil, localResourceRoots: nil))
+
+        let restored = try WebviewPanelState(json: original.encoded())
+
+        #expect(restored.options.enableScripts)
+        #expect(restored.options.enableForms)
+    }
+
+    /// The dangerous direction. A panel that declared *no* roots renounced file
+    /// access entirely; if that decays to "declared nothing" it comes back with
+    /// its extension directory and the whole workspace readable — access the
+    /// extension explicitly gave up.
+    @Test("a panel that renounced file access does not get it back")
+    func anEmptyRootDeclarationSurvives() throws {
+        let original = WebviewPanelState(
+            viewType: "markdown.preview", title: "Preview", state: nil,
+            options: WebviewPanelOptions(
+                enableScripts: true, enableForms: nil, localResourceRoots: []))
+
+        let restored = try WebviewPanelState(json: original.encoded())
+
+        #expect(restored.options.resourceRoots(
+            extensionDirectory: URL(fileURLWithPath: "/ext"),
+            workspaceRoots: [URL(fileURLWithPath: "/work")]).isEmpty)
+    }
+
+    @Test("declared roots come back as the same directories")
+    func declaredRootsSurvive() throws {
+        let declared = [URL(fileURLWithPath: "/ext/media"), URL(fileURLWithPath: "/work/docs")]
+        let original = WebviewPanelState(
+            viewType: "markdown.preview", title: "Preview", state: nil,
+            options: WebviewPanelOptions(
+                enableScripts: nil, enableForms: nil, localResourceRoots: declared))
+
+        let restored = try WebviewPanelState(json: original.encoded())
+
+        #expect(restored.options.resourceRoots(
+            extensionDirectory: URL(fileURLWithPath: "/ext"),
+            workspaceRoots: [URL(fileURLWithPath: "/work")]).map(\.path)
+            == declared.map(\.path))
+    }
+
+    /// An entry written before options were stored is still a panel the user
+    /// had open. It must come back — but with the safe posture, not with
+    /// capabilities nobody recorded it having.
+    @Test("a panel stored before options existed comes back unscripted")
+    func absentOptionsDecodeToTheSafePosture() throws {
+        let stored = #"{"viewType":"markdown.preview","title":"Preview"}"#
+
+        let restored = try WebviewPanelState(json: stored)
+
+        #expect(restored.options.enableScripts == false)
+        #expect(restored.options.enableForms == false)
+        #expect(restored.options.resourceRoots(
+            extensionDirectory: URL(fileURLWithPath: "/ext"),
+            workspaceRoots: [URL(fileURLWithPath: "/work")]).map(\.path) == ["/ext", "/work"])
     }
 }

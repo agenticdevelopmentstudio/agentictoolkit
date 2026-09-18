@@ -44,6 +44,7 @@ public final class WebviewPanelViewController: NSViewController {
         didSet {
             guard title != oldValue else { return }
             onTitleChanged?()
+            onRestorationStateChanged?()
         }
     }
 
@@ -77,10 +78,22 @@ public final class WebviewPanelViewController: NSViewController {
     /// being closed. Fires exactly once.
     public var onDidDispose: (() -> Void)?
 
-    /// Called when `title` changes, or when `state` does. Both are things the
-    /// serializer has to write down and the chrome has to re-read.
+    /// Called when `title` changes — the pane chrome's callback, claimed by
+    /// `PaneViewController.wireContentCallbacks()` through
+    /// `PaneTitleProviding.onPaneTitleChange`.
     public var onTitleChanged: (() -> Void)?
-    public var onStateChanged: (() -> Void)?
+
+    /// Called whenever `restorationState` would answer differently — a retitle
+    /// or a `setState` — for whoever has to write it down.
+    ///
+    /// A **second** callback rather than a second listener on
+    /// `onTitleChanged`, because that one is already spoken for: the pane
+    /// claims it the moment this panel becomes its content, and it does so in
+    /// `viewDidLoad`, which runs *after* the factory that built this panel
+    /// returned. Anything the factory installed there would be silently
+    /// overwritten a moment later — so the serializer gets a callback of its
+    /// own, and the two owners never contend (`explicit-over-implicit`).
+    public var onRestorationStateChanged: (() -> Void)?
 
     /// Called when the extension asks for the panel to be brought forward, with
     /// `preserveFocus`.
@@ -145,6 +158,29 @@ public final class WebviewPanelViewController: NSViewController {
         schemeHandler.localResourceRoots = localResourceRoots
         schemeHandler.contentSecurityPolicy = options.contentSecurityPolicy
         relay.delegate = self
+    }
+
+    /// The panel a persisted pane comes back as, before its extension has seen
+    /// it.
+    ///
+    /// The page's own `getState()` has to answer what the page last saved from
+    /// the very first document load — that is the contract a webview author
+    /// writes against — so the state is seeded here rather than assigned after
+    /// the view exists. `loadView()` has not run at this point; by the time it
+    /// does, `loadHostDocument()` reads this value as the document's
+    /// `initialState`.
+    ///
+    /// - Parameters:
+    ///   - state: What the pane stored, as `restorationState` wrote it.
+    ///   - localResourceRoots: Resolved for the extension that claimed this
+    ///     view type, exactly as at creation.
+    public convenience init(restoring state: WebviewPanelState, localResourceRoots: [URL]) {
+        self.init(
+            viewType: state.viewType,
+            title: state.title,
+            options: state.options,
+            localResourceRoots: localResourceRoots)
+        self.state = state.state
     }
 
     @available(*, unavailable)
@@ -221,7 +257,7 @@ public final class WebviewPanelViewController: NSViewController {
 
     /// What the pane stores, and what `WebviewPanelSerializer` reads back.
     public var restorationState: WebviewPanelState {
-        WebviewPanelState(viewType: viewType, title: title ?? "", state: state)
+        WebviewPanelState(viewType: viewType, title: title ?? "", state: state, options: options)
     }
 }
 
@@ -237,7 +273,7 @@ extension WebviewPanelViewController: WebviewMessageReceiving {
 
         case .setState:
             state = Self.jsonText(of: body)
-            onStateChanged?()
+            onRestorationStateChanged?()
         }
     }
 
@@ -317,11 +353,13 @@ extension WebviewPanelViewController: PaneTitleProviding {
     /// callback.
     ///
     /// `PaneViewController.wireContentCallbacks()` claims this the moment the
-    /// panel becomes a pane's content, so anything else that wants to hear
-    /// about a retitle — the serializer, which has to write the new one down —
-    /// must capture the existing closure and call it, the way
-    /// `DocumentTabsViewController.wireTitles(in:tabID:)` does. Overwriting it
-    /// silently stops the pane's title bar from updating.
+    /// panel becomes a pane's content — in `viewDidLoad`, after the factory
+    /// that built the panel has returned. Anything else that wants to hear
+    /// about a retitle listens to `onRestorationStateChanged` instead; that is
+    /// what it is for, and it is why the serializer does not have to chain
+    /// onto this the way `DocumentTabsViewController.wireTitles(in:tabID:)`
+    /// does. Overwriting this one silently stops the pane's title bar from
+    /// updating.
     public var onPaneTitleChange: (() -> Void)? {
         get { onTitleChanged }
         set { onTitleChanged = newValue }

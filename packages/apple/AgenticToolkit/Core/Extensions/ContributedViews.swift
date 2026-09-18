@@ -338,7 +338,8 @@ public enum ContributedViewsBuilder {
                     viewID: declared.id,
                     kind: .webviewNeedsHost,
                     detail: "is a webview: its content is drawn by the extension's own code, "
-                        + "which needs an extension host this app does not run yet."
+                        + "through a registerWebviewViewProvider call the extension host does "
+                        + "not implement yet. Webview panels an extension opens itself do work."
                 ))
             }
 

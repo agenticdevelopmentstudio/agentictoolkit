@@ -51,12 +51,16 @@ struct ActivationEventMatcherTests {
         let workspace = ActivationEvent(rawValue: "workspaceContains:**/*.csproj")
         #expect(workspace?.kind == .workspaceContains("**/*.csproj"))
         #expect(workspace?.rawValue == "workspaceContains:**/*.csproj")
+
+        let panel = ActivationEvent(rawValue: "onWebviewPanel:markdown.preview")
+        #expect(panel?.kind == .webviewPanel("markdown.preview"))
+        #expect(panel?.rawValue == "onWebviewPanel:markdown.preview")
     }
 
     @Test(
         "empty payloads, blank entries and gibberish are unrecognized",
         arguments: [
-            "onLanguage:", "onCommand:", "workspaceContains:",
+            "onLanguage:", "onCommand:", "workspaceContains:", "onWebviewPanel:",
             "", "   ", "onDebug", "onView:explorer"
         ]
     )
@@ -299,5 +303,42 @@ struct ActivationEventMatcherTests {
         let matcher = ActivationEventMatcher(manifest: manifest)
 
         #expect(matcher.matches(.workspaceScanned(relativePaths: ["bx"])))
+    }
+
+    // MARK: - onWebviewPanel
+
+    @Test("a restored panel wakes the extension that declared its view type")
+    func aRestoredPanelActivatesItsDeclarer() throws {
+        let manifest = try Self.manifest(
+            activationEvents: ["onWebviewPanel:markdown.preview"])
+        let matcher = ActivationEventMatcher(manifest: manifest)
+
+        #expect(matcher.matches(.webviewPanelRestored(viewType: "markdown.preview")))
+        #expect(!matcher.matches(.webviewPanelRestored(viewType: "markdown.other")))
+    }
+
+    /// The question `declaresWebviewPanel(viewType:)` answers is *ownership*,
+    /// and that is why it is not `matches(_:)`. `"*"` means "wake me for
+    /// anything", which `matches` honours for every trigger — so asking
+    /// through `matches` would hand every restored panel in the app to the
+    /// first `"*"` extension installed, including panels belonging to an
+    /// extension that is merely not awake yet.
+    @Test("a star activation does not claim other extensions' panels")
+    func aStarDoesNotClaimAPanel() throws {
+        let matcher = ActivationEventMatcher(manifest: try Self.manifest(activationEvents: ["*"]))
+
+        #expect(matcher.matches(.webviewPanelRestored(viewType: "markdown.preview")))
+        #expect(!matcher.declaresWebviewPanel(viewType: "markdown.preview"))
+    }
+
+    @Test("a declared view type is claimed, and only that one")
+    func onlyTheDeclaredViewTypeIsClaimed() throws {
+        let manifest = try Self.manifest(
+            activationEvents: ["onStartupFinished", "onWebviewPanel:markdown.preview"])
+        let matcher = ActivationEventMatcher(manifest: manifest)
+
+        #expect(matcher.declaresWebviewPanel(viewType: "markdown.preview"))
+        #expect(!matcher.declaresWebviewPanel(viewType: "markdown.Preview"))
+        #expect(!matcher.declaresWebviewPanel(viewType: ""))
     }
 }

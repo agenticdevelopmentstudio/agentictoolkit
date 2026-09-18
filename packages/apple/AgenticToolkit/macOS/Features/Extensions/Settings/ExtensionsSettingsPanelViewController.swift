@@ -300,7 +300,7 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
         group.addSettingSubview(ComposableSettings.ExplanationView(
             withText: "These panes are registered and can be opened. What they show is not "
                 + "implemented yet: a view's content is drawn by the extension's own code, "
-                + "which needs an extension host this app does not run."))
+                + "through view provider APIs the extension host does not implement yet."))
         for view in views {
             group.addSettingSubview(
                 ComposableSettings.ExplanationView(withText: "\(view.name) (\(view.viewID))"))

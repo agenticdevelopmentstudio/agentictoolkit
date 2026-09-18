@@ -222,7 +222,7 @@ public final class ExtensionHostInstallation {
         try installVSCodeMembers()
     }
 
-    /// Installs all twenty-one members and all three enum tables.
+    /// Installs all twenty-two members and all three enum tables.
     ///
     /// **Nothing here installs `Uri`, the text-geometry classes, the
     /// diagnostic classes, the language-model vocabulary or the trampoline.**
@@ -300,6 +300,9 @@ public final class ExtensionHostInstallation {
         try host.defineVSCodeMember(
             namespacePath: "vscode.window", name: "createWebviewPanel",
             implementation: webviews.createWebviewPanel)
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "registerWebviewPanelSerializer",
+            implementation: webviews.registerWebviewPanelSerializer)
 
         // The three enum tables go on **`vscode`**, the top-level namespace,
         // never on `vscode.window` — each adaptor's own table doc gives the
@@ -327,6 +330,65 @@ public final class ExtensionHostInstallation {
     public func activateIfTriggered(by trigger: ActivationTrigger) {
         guard !isDisposed, activationMatcher.matches(trigger) else { return }
         activate(then: nil)
+    }
+
+    /// Whether this extension is the one a restored panel of `viewType`
+    /// belongs to.
+    ///
+    /// Two ways to be that extension, and the order matters. An extension
+    /// already awake *with a serializer registered* has said so at runtime,
+    /// which is the strongest claim there is. An extension not yet awake can
+    /// only have said so in its manifest, as `onWebviewPanel:<viewType>` —
+    /// and that declaration is read directly rather than through
+    /// `ActivationEventMatcher.matches(_:)`, which `"*"` answers yes to for
+    /// every trigger. See `declaresWebviewPanel(viewType:)`.
+    fileprivate func claimsWebviewPanel(viewType: String) -> Bool {
+        guard !isDisposed else { return false }
+        return webviews.hasSerializer(for: viewType)
+            || activationMatcher.declaresWebviewPanel(viewType: viewType)
+    }
+
+    /// Where a panel of this extension's may read files from, given what it
+    /// was created with. See `MainThreadWebviews.resourceRoots(for:)` — the
+    /// extension directory it resolves against is this installation's.
+    fileprivate func resourceRoots(for options: WebviewPanelOptions) -> [URL] {
+        webviews.resourceRoots(for: options)
+    }
+
+    /// Activates this extension if it is not awake yet, then hands it the
+    /// restored panel.
+    ///
+    /// The panel is on screen and blank throughout: `activate(then:)` runs the
+    /// extension's `activate` on a detached task and calls back on the main
+    /// actor, so a restore of a not-yet-awake extension completes a turn or
+    /// two later. That is the whole reason this is a closure rather than a
+    /// return value — there is nothing to hand back synchronously, and the
+    /// pane is already where it belongs.
+    fileprivate func restoreWebviewPanel(_ panel: any ExtensionWebviewPanel, state: WebviewPanelState) {
+        guard !isDisposed else { return }
+        if webviews.hasSerializer(for: state.viewType) {
+            handOver(panel, state: state)
+            return
+        }
+        activate { [weak self] in
+            self?.handOver(panel, state: state)
+        }
+    }
+
+    private func handOver(_ panel: any ExtensionWebviewPanel, state: WebviewPanelState) {
+        guard !isDisposed else { return }
+        guard webviews.restore(panel, viewType: state.viewType, state: state.state) else {
+            // The pane stays, holding a blank panel, rather than being taken
+            // out from under the user: the layout is theirs, and a webview
+            // whose extension failed to deserialize it is a page that did not
+            // render, not a tab they asked to close.
+            Self.logger.error(
+                """
+                Extension '\(self.identifier, privacy: .public)' claimed the restored webview panel \
+                of type '\(state.viewType, privacy: .public)' but did not deserialize it
+                """)
+            return
+        }
     }
 
     /// Registers one stub `AppCommand` per command this extension contributes
@@ -827,6 +889,71 @@ public final class ExtensionHostInstaller {
         for entry in installed.values {
             entry.installation.activateIfTriggered(by: .documentOpened(languageID: languageID))
         }
+    }
+
+    /// Rebuilds the webview panel a pane restored from a persisted layout is
+    /// supposed to hold, and hands it to the extension that owns its view type.
+    ///
+    /// **The panel cannot be built by its caller, which is why this builds it.**
+    /// A webview's `enableScripts` is baked into its `WKWebViewConfiguration`
+    /// at first load, and its `localResourceRoots` resolve against the *owning
+    /// extension's* directory — so a panel has to know which extension it
+    /// belongs to before it exists, and that is precisely what is being decided
+    /// here. `makePanel` receives the resolved roots and answers with the
+    /// panel; it is not called at all when nobody claims the view type, so
+    /// nothing is built for a panel that has nowhere to go.
+    ///
+    /// Exactly one extension is asked, and it is asked by *claim* rather than
+    /// by broadcast — every other signal here (a document opened, a command
+    /// invoked) is news that any number of extensions may care about, but a
+    /// restored panel belongs to one of them and delivering it twice would
+    /// give two extensions a handle on the same page.
+    ///
+    /// **A view type nobody claims leaves the pane blank, and says so.** That
+    /// is a real state with real causes — the extension was uninstalled or
+    /// disabled since the layout was saved — and it is not this installer's
+    /// place to close a pane the user arranged.
+    ///
+    /// Generic over the panel rather than returning `any ExtensionWebviewPanel`
+    /// so the caller gets back exactly what it built — this type has no
+    /// business naming `WebviewPanelViewController`, and the caller has no
+    /// business downcasting to it.
+    ///
+    /// - Returns: The panel `makePanel` built, or `nil` when no installed
+    ///   extension claims the view type. A returned panel is claimed, not yet
+    ///   deserialized: an extension that has to be activated first fills it a
+    ///   turn or two later, or logs why it could not.
+    public func restoreWebviewPanel<Panel: ExtensionWebviewPanel>(
+        state: WebviewPanelState,
+        makePanel: (_ localResourceRoots: [URL]) -> Panel
+    ) -> Panel? {
+        // Sorted, so which extension wins a contested view type is the same
+        // on every launch. Two extensions claiming one view type is their
+        // authors' bug; answering it differently each time would make it look
+        // like this app's.
+        let claimants = installed.values
+            .map(\.installation)
+            .filter { $0.claimsWebviewPanel(viewType: state.viewType) }
+            .sorted { $0.identifier < $1.identifier }
+        guard let owner = claimants.first else {
+            Self.logger.notice(
+                """
+                A restored webview panel of type '\(state.viewType, privacy: .public)' has no \
+                installed extension claiming it; its pane stays blank
+                """)
+            return nil
+        }
+        if claimants.count > 1 {
+            Self.logger.error(
+                """
+                \(claimants.count, privacy: .public) installed extensions claim webview panel type \
+                '\(state.viewType, privacy: .public)'; \
+                '\(owner.identifier, privacy: .public)' gets it
+                """)
+        }
+        let panel = makePanel(owner.resourceRoots(for: state.options))
+        owner.restoreWebviewPanel(panel, state: state)
+        return panel
     }
 
     /// Tells every running extension that the configured chat models moved.

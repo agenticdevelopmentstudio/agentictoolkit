@@ -125,6 +125,10 @@ public final class MainThreadWebviews {
     /// `ExtensionHostInstaller.installVSCodeMembers()`.
     public static let createWebviewPanelMemberPath = "vscode.window.createWebviewPanel"
 
+    /// `vscode.window.registerWebviewPanelSerializer` (`vscode.d.ts:12552`).
+    public static let registerWebviewPanelSerializerMemberPath =
+        "vscode.window.registerWebviewPanelSerializer"
+
     private let presenter: any ExtensionWebviewPresenting
     private let notImplementedLedger: NotImplementedLedger
     private let extensionIdentifier: String
@@ -149,6 +153,30 @@ public final class MainThreadWebviews {
     /// makes a disposed panel's JavaScript surface go quiet, with no flag for
     /// each block to check.
     private var panels: [String: ExtensionWebviewPanelModel] = [:]
+
+    /// One live `registerWebviewPanelSerializer` registration.
+    ///
+    /// The token is what makes the returned `Disposable` specific: an
+    /// extension that registers, disposes, and registers again for the same
+    /// view type must not have its *second* registration torn out by the
+    /// first `Disposable` — the same distinction
+    /// `MainThreadCommands.makeDisposable(id:token:in:)` draws.
+    ///
+    /// The serializer object is held whole rather than its
+    /// `deserializeWebviewPanel` function: upstream reads the method off the
+    /// object at call time (`mainThreadWebviewPanels.ts`), so an extension
+    /// that swaps the method afterwards gets the method it is using now, and
+    /// `this` is the object it was written to expect.
+    private struct SerializerRegistration {
+        let token: UUID
+        let serializer: JSValue
+    }
+
+    /// Serializers by view type. A Swift-side table rather than anything
+    /// stored on a `JSValue`, for `ExtensionEvent`'s reason: the adaptor is
+    /// what outlives a single call, and a registration that lived in the
+    /// context would be a reference cycle through JavaScriptCore.
+    private var serializers: [String: SerializerRegistration] = [:]
 
     private var isDisposed = false
 
@@ -189,7 +217,29 @@ public final class MainThreadWebviews {
         whenTornDown: .raisedException
     ) { $0.handleCreateWebviewPanel() }
 
+    /// `.raisedException` for `createWebviewPanel`'s reason: this returns a
+    /// `Disposable` synchronously (`vscode.d.ts:12552`), and an extension's
+    /// `activate` pushes it onto `context.subscriptions` on the next line.
+    public private(set) lazy var registerWebviewPanelSerializer: Any = VSCodeAPI.member(
+        MainThreadWebviews.registerWebviewPanelSerializerMemberPath,
+        of: self,
+        whenTornDown: .raisedException
+    ) { $0.handleRegisterWebviewPanelSerializer() }
+
     // MARK: - Creating a panel
+
+    /// The directories a panel of this extension's may read files from.
+    ///
+    /// Public because a *restored* panel is built outside this adaptor — by
+    /// `ExtensionHostInstaller`, from a `WebviewPanelState` — and resolving the
+    /// declared roots needs the extension's own directory and the open
+    /// workspace, which is knowledge this object holds and the installer does
+    /// not (`dry`: the creation path below calls this same method).
+    public func resourceRoots(for options: WebviewPanelOptions) -> [URL] {
+        options.resourceRoots(
+            extensionDirectory: extensionDirectory,
+            workspaceRoots: workspaceRoots?.workspaceRootURLs ?? [])
+    }
 
     private func handleCreateWebviewPanel() -> JSValue? {
         guard let context = JSContext.current() else { return nil }
@@ -217,9 +267,7 @@ public final class MainThreadWebviews {
             viewType: viewType,
             title: title,
             options: options,
-            localResourceRoots: options.resourceRoots(
-                extensionDirectory: extensionDirectory,
-                workspaceRoots: workspaceRoots?.workspaceRootURLs ?? []),
+            localResourceRoots: resourceRoots(for: options),
             preserveFocus: preserveFocus,
             extensionIdentifier: extensionIdentifier)
 
@@ -269,6 +317,164 @@ public final class MainThreadWebviews {
     private func forget(_ panelID: String) {
         guard let model = panels.removeValue(forKey: panelID) else { return }
         model.removeListeners()
+    }
+
+    // MARK: - Restoring a panel
+
+    private func handleRegisterWebviewPanelSerializer() -> JSValue? {
+        guard let context = JSContext.current() else { return nil }
+        let path = MainThreadWebviews.registerWebviewPanelSerializerMemberPath
+        guard !isDisposed else {
+            return VSCodeAPI.raise(
+                "\(path) is unavailable: this extension's host has been torn down.", in: context)
+        }
+
+        let arguments = VSCodeAPI.currentArguments()
+        guard let viewTypeArgument = arguments.first, viewTypeArgument.isString,
+              let viewType = viewTypeArgument.toString()
+        else {
+            return VSCodeAPI.raise("\(path)'s first argument must be a view type string.", in: context)
+        }
+        // The *method* is what gets called, so it is what is checked for —
+        // `isObject` is true of `{}`, and an extension that mistyped the name
+        // would otherwise register successfully and restore nothing, months
+        // later, with no error anywhere (`fail-fast`).
+        let serializer: JSValue? = arguments.count > 1 ? arguments[1] : nil
+        guard let serializer, serializer.isObject,
+              MainThreadWebviews.isFunction(
+                serializer.forProperty("deserializeWebviewPanel"), in: context)
+        else {
+            return VSCodeAPI.raise(
+                """
+                \(path)'s second argument must be an object with a \
+                deserializeWebviewPanel(panel, state) method.
+                """,
+                in: context)
+        }
+
+        // Last registration wins, as upstream's map assignment does, but it is
+        // logged: two serializers for one view type is a bug in an extension
+        // that nothing else would ever tell its author about.
+        if serializers[viewType] != nil {
+            Self.logger.error(
+                """
+                \(self.extensionIdentifier, privacy: .public) registered a second webview panel \
+                serializer for view type \(viewType, privacy: .public); the later one wins
+                """)
+        }
+        let token = UUID()
+        serializers[viewType] = SerializerRegistration(token: token, serializer: serializer)
+
+        return VSCodeAPI.disposable(in: context) { [weak self] in
+            guard let self, self.serializers[viewType]?.token == token else { return }
+            self.serializers.removeValue(forKey: viewType)
+        }
+    }
+
+    /// Whether this extension has claimed `viewType` by registering a
+    /// serializer for it.
+    ///
+    /// Asked by `ExtensionHostInstallation` *after* activating the extension:
+    /// a serializer is registered from `activate`, so before that the honest
+    /// answer for every awake-on-demand extension is "no."
+    public func hasSerializer(for viewType: String) -> Bool {
+        !isDisposed && serializers[viewType] != nil
+    }
+
+    /// Hands a restored panel to the extension that registered a serializer
+    /// for its view type, and adopts it as a live panel of this adaptor's.
+    ///
+    /// The panel is already on screen and blank when this is called — the pane
+    /// tree rebuilt it from what the project stored — so this is the moment its
+    /// extension gets to put its page back. Everything after adoption is
+    /// indistinguishable from a panel the extension created itself: the same
+    /// model, the same wiring, the same JS object.
+    ///
+    /// - Returns: `false` when there is no serializer for the view type, or
+    ///   when the registering context is gone — in which case the caller still
+    ///   has a blank pane, and the log says why.
+    @discardableResult
+    public func restore(
+        _ panel: any ExtensionWebviewPanel, viewType: String, state: String?
+    ) -> Bool {
+        guard !isDisposed, let registration = serializers[viewType] else { return false }
+        guard let context = registration.serializer.context,
+              let deserialize = registration.serializer.forProperty("deserializeWebviewPanel"),
+              MainThreadWebviews.isFunction(deserialize, in: context)
+        else {
+            Self.logger.error(
+                """
+                \(self.extensionIdentifier, privacy: .public) has a serializer for view type \
+                \(viewType, privacy: .public) but no deserializeWebviewPanel to call
+                """)
+            return false
+        }
+
+        let model = ExtensionWebviewPanelModel(panel: panel, viewType: viewType)
+        panels[panel.panelID] = model
+        wire(model)
+        guard let panelObject = MainThreadWebviews.makePanelObject(for: model, of: self, in: context)
+        else {
+            Self.logger.error(
+                """
+                A restored panel of view type \(viewType, privacy: .public) could not be given a \
+                JavaScript object; it stays blank
+                """)
+            return false
+        }
+
+        let stateValue = MainThreadWebviews.restoredStateValue(state, in: context)
+        switch VSCodeAPI.call(deserialize, thisArg: registration.serializer,
+                              arguments: [panelObject, stateValue]) {
+        case .returned:
+            return true
+        case .threw(let error):
+            Self.logger.error(
+                """
+                \(self.extensionIdentifier, privacy: .public)'s deserializeWebviewPanel threw for \
+                view type \(viewType, privacy: .public): \
+                \(error.toString() ?? "<unprintable>", privacy: .public)
+                """)
+            return false
+        case .unavailable:
+            Self.logger.error(
+                """
+                \(self.extensionIdentifier, privacy: .public)'s deserializeWebviewPanel could not \
+                be invoked for view type \(viewType, privacy: .public)
+                """)
+            return false
+        }
+    }
+
+    /// The saved state as the value `deserializeWebviewPanel` receives.
+    ///
+    /// Parsed here rather than by the page's `JSON.parse`, because handing the
+    /// context a string it has to parse would set `context.exception` on a
+    /// corrupted entry — an exception belonging to no call, which the next
+    /// unrelated call would see. `.fragmentsAllowed` for
+    /// `WebviewPanelViewController.jsonText(of:)`'s reason: `setState(42)` is
+    /// a thing a page may do, so `42` is a thing this may have to read back.
+    private static func restoredStateValue(_ state: String?, in context: JSContext) -> Any {
+        guard let state,
+              let object = try? JSONSerialization.jsonObject(
+                with: Data(state.utf8), options: [.fragmentsAllowed])
+        else {
+            // `undefined`, which is what upstream passes a panel that never
+            // called `setState` — and `null` would not be the same answer: an
+            // extension's `state ?? defaults` reads both, but `if (state ===
+            // undefined)` does not.
+            return JSValue(undefinedIn: context) as Any
+        }
+        return object
+    }
+
+    /// `x instanceof Function`, the check `MainThreadCommands` makes of a
+    /// callback: `isObject` is true of `{}`, so it cannot stand in.
+    private static func isFunction(_ value: JSValue?, in context: JSContext) -> Bool {
+        guard let value, let functionConstructor = context.objectForKeyedSubscript("Function") else {
+            return false
+        }
+        return value.isInstance(of: functionConstructor)
     }
 
     // MARK: - Reading the arguments
@@ -685,6 +891,10 @@ public final class MainThreadWebviews {
             model.removeListeners()
         }
         panels.removeAll()
+        // The serializers go with them: each is a `JSValue` into a context
+        // that is being torn down, and `hasSerializer(for:)` must stop
+        // claiming view types this extension can no longer restore.
+        serializers.removeAll()
     }
 }
 
