@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Settings, Table2, Users, KeyRound, Network, Boxes, Plus, Inbox, Send, Database,
-  ShieldCheck, LogIn, MailPlus,
+  ShieldCheck, LogIn, MailPlus, Puzzle,
 } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
@@ -29,6 +29,7 @@ import {
   type Ecosystem,
 } from "@agentic-toolkit/data/ecosystems";
 import { EcosystemSettingsPane } from "./EcosystemSettingsPane";
+import { EcosystemFeaturesPane } from "./EcosystemFeaturesPane";
 import {
   EcosystemDetail,
   ecoBlank,
@@ -82,13 +83,24 @@ export interface RenderTopicPaneCtx {
 }
 
 /**
- * The topic rows for the two topics this package renders ENTIRELY in-package (the entity
- * Settings pane and the Child Ecosystems rail). The package is the SSoT for what it renders:
+ * The topic rows for the topics this package renders ENTIRELY in-package (the Features
+ * picker, the entity Settings pane and the Child Ecosystems rail). The package is the SSoT
+ * for what it renders:
  * a host composing only these (a feature-site mount) spreads them instead of hand-copying
  * ids/labels/icons that would silently drift; the hub builds its fuller rail from its own
  * ECOSYSTEM_TOPICS catalog, where these two ids appear with the same meaning.
  */
 export const IN_PACKAGE_TOPICS: EcosystemsTopicConfig[] = [
+  {
+    // FIRST, because it is now what an ecosystem IS. A new one is created empty and every
+    // other topic in the rail describes something a feature added here put there, so a rail
+    // that opened anywhere else would open on the consequences before the cause.
+    id: "features",
+    label: "Features",
+    icon: <Puzzle size={16} aria-hidden />,
+    description: "What this ecosystem has been provisioned with.",
+    dividerAfter: false,
+  },
   {
     id: "settings",
     label: "Settings",
@@ -499,14 +511,14 @@ export function EcosystemsFeature({
     dividerAfter: t.dividerAfter,
     render: (ecoId, titleFor, leaf, subLeafFor) => {
       if (!canManageScoped(ecoId)) return notManageablePane;
-      // FIRST refusal goes to the host, for EVERY topic id — including the four this package
+      // FIRST refusal goes to the host, for EVERY topic id — including the ones this package
       // can render itself. A host mounting this feature under its own concept may legitimately
       // put its OWN pane behind a reserved-looking id: the gamification site's rail is
       // Catalog / Levels / Custom Events / Settings, where "settings" means the realm config,
       // not the ecosystem record. Reserving ids here would have forced that site to misname a
       // topic in its URL to dodge a collision the toolkit invented. Everything a host declines
       // (returns null for) still lands on the in-package panes below, so the hub — whose
-      // renderProductTopicPane claims none of these four ids — behaves exactly as before.
+      // renderProductTopicPane claims none of these ids — behaves exactly as before.
       const hostPane = renderTopicPane(t.id, {
         ecosystemId: ecoId,
         title: titleFor(t.label),
@@ -514,6 +526,17 @@ export function EcosystemsFeature({
         subLeafFor,
       });
       if (hostPane) return hostPane;
+      if (t.id === "features") {
+        // Editable exactly when the topic pane itself is reachable: `canManageScoped` above has
+        // already turned an unmanageable ecosystem into one honest notice, so anyone who gets
+        // this far may add and remove. A read-only reader would need a distinction the rail
+        // does not draw yet.
+        return ecoId ? (
+          <EcosystemFeaturesPane ecosystemId={ecoId} />
+        ) : (
+          <TopicSelectHint noun={lowerSingular} />
+        );
+      }
       if (t.id === "settings") {
         return (
           <EcosystemSettingsPane
