@@ -1,29 +1,29 @@
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
+import AgenticDeveloperToolkit
+import AgenticDeveloperToolkitUI
 import AppKit
-
-public enum HTDVBadgeColorMapping {
-    public static func nsColor(_ color: HTDVBadgeColor) -> NSColor {
-        switch color {
-        case .red: .systemRed
-        case .orange: .systemOrange
-        case .yellow: .systemYellow
-        case .green: .systemGreen
-        case .blue: .systemBlue
-        case .gray: .systemGray
-        }
-    }
-}
 
 /// One row in an `HTDVRailView`: optional icon, title, optional subtitle, optional badge, optional chevron.
 public final class HTDVRailCellView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("HTDVRailCellView")
 
     let iconView = NSImageView()
-    let titleLabel = NSTextField(labelWithString: "")
-    let subtitleLabel = NSTextField(labelWithString: "")
-    let badgeLabel = NSTextField(labelWithString: "")
-    let badgeDot = NSView()
+    let titleLabel = ThemedLabel()
+    let subtitleLabel = ThemedLabel(role: .secondaryText, textRole: .caption)
+    let badgeLabel = ThemedLabel(role: .secondaryText, textRole: .caption)
+    let badgeDot = ThemedBackgroundView(role: .secondaryText)
     let chevron = NSImageView()
+
+    /// The badge dot's colour is a *value* the row carries, not a role the cell
+    /// has — so it is kept here and re-resolved on every theme change, the way
+    /// every other painted colour in this cell is. Held as the semantic badge
+    /// rather than an `NSColor` for the same reason: a colour resolved once
+    /// would still be the old theme's after a swap.
+    private var badgeColor: HTDVBadgeColor? {
+        didSet { badgeDot.colorOverride = badgeColor.map { palette.nsColor($0.themeRole) } }
+    }
+
+    private var palette: SemanticPalette = ThemePaletteObserver.currentPalette
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -35,18 +35,32 @@ public final class HTDVRailCellView: NSTableCellView {
     required init?(coder: NSCoder) { nil }
 
     private func build() {
-        titleLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         titleLabel.lineBreakMode = .byTruncatingTail
-        subtitleLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.lineBreakMode = .byTruncatingTail
-        badgeLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
-        badgeLabel.textColor = .secondaryLabelColor
+        // The count badge was the one monospaced-digit font here, so digits
+        // would not jitter as a count ticked. `code` is the theme's monospaced
+        // role, which keeps that property and gains the theme's family and
+        // scale.
+        badgeLabel.textRole = .code
         badgeDot.wantsLayer = true
         badgeDot.layer?.cornerRadius = 4
         chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Shows more")
-        chevron.contentTintColor = .tertiaryLabelColor
-        iconView.contentTintColor = .secondaryLabelColor
+        // Tints, not text, so neither has a themed subclass to inherit — but
+        // both are painted colours the theme owns, and a cell is reused, so
+        // they re-resolve on every change rather than once at build.
+        chevron.observeTheme { chevron, palette in
+            chevron.contentTintColor = palette.tertiaryTextColor
+        }
+        iconView.observeTheme { icon, palette in
+            icon.contentTintColor = palette.secondaryTextColor
+        }
+        // The cell itself watches the palette so the badge dot's *value*
+        // colour — which no themed subclass can resolve, since it comes from
+        // the row's content — is recomputed on a theme swap too.
+        observeTheme { cell, palette in
+            cell.palette = palette
+            cell.badgeDot.colorOverride = cell.badgeColor.map { palette.nsColor($0.themeRole) }
+        }
 
         let textStack = NSStackView(views: [titleLabel, subtitleLabel])
         textStack.orientation = .vertical
@@ -86,15 +100,17 @@ public final class HTDVRailCellView: NSTableCellView {
         }
         switch content.badge {
         case .count(let count):
+            badgeColor = nil
             badgeLabel.stringValue = String(count)
             badgeLabel.isHidden = false
             badgeDot.isHidden = true
         case .dot(let color):
-            badgeDot.layer?.backgroundColor = HTDVBadgeColorMapping.nsColor(color).cgColor
+            badgeColor = color
             badgeDot.isHidden = false
             badgeLabel.stringValue = ""
             badgeLabel.isHidden = true
         case nil:
+            badgeColor = nil
             badgeLabel.stringValue = ""
             badgeLabel.isHidden = true
             badgeDot.isHidden = true

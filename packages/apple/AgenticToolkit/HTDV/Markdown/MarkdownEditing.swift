@@ -1,3 +1,4 @@
+import AgenticDeveloperToolkitUI
 import Foundation
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
 import AppKit
@@ -43,7 +44,7 @@ public struct PlainTextMarkdownEditing: MarkdownEditing {
 
 public final class PlainTextEditorViewController: NSViewController, NSTextViewDelegate, MarkdownTextReplacing {
     let textView = NSTextView()
-    private let scrollView = NSScrollView()
+    private let scrollView = ThemedScrollView()
     private let onChange: @MainActor (String) -> Void
     private let initialText: String
 
@@ -60,7 +61,14 @@ public final class PlainTextEditorViewController: NSViewController, NSTextViewDe
 
     override public func loadView() {
         textView.isRichText = false
-        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        // `code` is the theme's own monospaced role, so a plain-text markdown
+        // pane follows the selected theme's code font instead of the system's.
+        textView.observeTheme { textView, palette in
+            textView.backgroundColor = palette.controlBackgroundColor
+            textView.textColor = palette.primaryTextColor
+            textView.insertionPointColor = palette.cursorColor
+            textView.font = palette.font(.code)
+        }
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.allowsUndo = true
@@ -88,7 +96,7 @@ public final class PlainTextEditorViewController: NSViewController, NSTextViewDe
 
 public final class PlainTextViewerViewController: NSViewController {
     let textView = NSTextView()
-    private let scrollView = NSScrollView()
+    private let scrollView = ThemedScrollView()
     private let initialText: String
 
     public var text: String { textView.string }
@@ -105,7 +113,14 @@ public final class PlainTextViewerViewController: NSViewController {
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = false
-        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        // `code` is the theme's own monospaced role, so a plain-text markdown
+        // pane follows the selected theme's code font instead of the system's.
+        textView.observeTheme { textView, palette in
+            textView.backgroundColor = palette.controlBackgroundColor
+            textView.textColor = palette.primaryTextColor
+            textView.insertionPointColor = palette.cursorColor
+            textView.font = palette.font(.code)
+        }
         textView.string = initialText
         textView.autoresizingMask = [.width]
         textView.isVerticallyResizable = true
@@ -135,7 +150,12 @@ public final class PlainTextEditorViewController: UIViewController, UITextViewDe
     required init?(coder: NSCoder) { nil }
 
     override public func loadView() {
-        textView.font = .monospacedSystemFont(ofSize: UIFont.systemFontSize, weight: .regular)
+        textView.observeTheme { textView, palette in
+            textView.backgroundColor = palette.controlBackgroundColor
+            textView.textColor = palette.primaryTextColor
+            textView.tintColor = palette.cursorColor
+            textView.font = palette.font(.code)
+        }
         textView.autocorrectionType = .no
         textView.autocapitalizationType = .none
         textView.smartQuotesType = .no
@@ -171,7 +191,12 @@ public final class PlainTextViewerViewController: UIViewController {
 
     override public func loadView() {
         textView.isEditable = false
-        textView.font = .monospacedSystemFont(ofSize: UIFont.systemFontSize, weight: .regular)
+        textView.observeTheme { textView, palette in
+            textView.backgroundColor = palette.controlBackgroundColor
+            textView.textColor = palette.primaryTextColor
+            textView.tintColor = palette.cursorColor
+            textView.font = palette.font(.code)
+        }
         textView.text = initialText
         view = textView
     }

@@ -1,4 +1,5 @@
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
+import AgenticDeveloperToolkitUI
 import AppKit
 
 /// Sheet container for a create dialog: title row with Cancel, then the form (whose own footer holds Save).
@@ -29,15 +30,27 @@ public final class FormSheetController: NSViewController {
     required init?(coder: NSCoder) { nil }
 
     override public func loadView() {
-        let root = NSView()
+        // A sheet floats above the window that presented it, so it gets the
+        // `surface` plane rather than `windowBackground` — the distinction the
+        // palette draws between "the window" and "a thing on top of it".
+        let root = ThemedBackgroundView(role: .surface)
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        let titleLabel = NSTextField(labelWithString: sheetTitle)
-        titleLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
+        // Was `systemFontSize + 2` at semibold — a size arithmetic on the
+        // system font, which no theme scale reaches. `title` is the role that
+        // means exactly this.
+        let titleLabel = ThemedLabel(string: sheetTitle, textRole: .title)
         cancelButton.target = self
         cancelButton.action = #selector(cancelTapped)
         cancelButton.keyEquivalent = "\u{1B}"
         cancelButton.setAccessibilityIdentifier("htdv.form.cancel")
+        // The stock secondary push button draws neither bezel nor title over a
+        // themed backdrop (see `applySecondaryActionTheme`), so it paints
+        // itself — and keeps its Escape key equivalent, which is why it stays
+        // an `NSButton` rather than becoming a `ThemedSecondaryButton`.
+        cancelButton.observeTheme { button, palette in
+            button.applySecondaryActionTheme(palette)
+        }
         let header = NSStackView(views: [titleLabel, NSView(), cancelButton])
         header.orientation = .horizontal
         header.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 0, right: 20)

@@ -1,3 +1,4 @@
+import AgenticDeveloperToolkit
 import Foundation
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
 import AppKit
@@ -18,9 +19,32 @@ public enum HTDVLeadsTo: Sendable, Hashable {
     case detail
 }
 
-/// Semantic badge colours; each platform view maps these to system colours.
+/// Semantic badge colours.
 public enum HTDVBadgeColor: Sendable, Hashable {
     case red, orange, yellow, green, blue, gray
+
+    /// The palette role this badge paints in.
+    ///
+    /// One mapping, here, rather than the pair of platform tables this
+    /// replaced: an AppKit `nsColor(_:)` and a UIKit `uiColor(_:)` that each
+    /// answered the same question — what does `.red` mean — with the same
+    /// answer, in two places, from the system palette rather than the user's
+    /// theme (`dry`). A role is platform-free, so the question is settled once
+    /// and each view just asks its palette for the colour.
+    ///
+    /// `orange` and `yellow` both land on `warning` because the palette has no
+    /// separate orange, exactly as `SemanticPalette.color(named:)` resolves the
+    /// same two names.
+    public var themeRole: ThemeRole {
+        switch self {
+        case .red:    .danger
+        case .orange: .warning
+        case .yellow: .warning
+        case .green:  .success
+        case .blue:   .accent
+        case .gray:   .secondaryText
+        }
+    }
 }
 
 /// Trailing badge on a rail row.

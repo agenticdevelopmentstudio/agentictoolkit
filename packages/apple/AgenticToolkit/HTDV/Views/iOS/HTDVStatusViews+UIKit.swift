@@ -1,18 +1,6 @@
 #if canImport(UIKit)
+import AgenticDeveloperToolkitUI
 import UIKit
-
-public enum HTDVBadgeColorMapping {
-    public static func uiColor(_ color: HTDVBadgeColor) -> UIColor {
-        switch color {
-        case .red: .systemRed
-        case .orange: .systemOrange
-        case .yellow: .systemYellow
-        case .green: .systemGreen
-        case .blue: .systemBlue
-        case .gray: .systemGray
-        }
-    }
-}
 
 /// Centered message + Retry button.
 public final class HTDVErrorView: UIView {
@@ -24,8 +12,17 @@ public final class HTDVErrorView: UIView {
         super.init(frame: frame)
         messageLabel.textAlignment = .center
         messageLabel.numberOfLines = 0
-        messageLabel.textColor = .secondaryLabel
+        // A wrapping label is the one thing `ThemedLabel` is not, so it takes
+        // its colour and font from the palette directly.
+        messageLabel.observeTheme { label, palette in
+            label.textColor = palette.secondaryTextColor
+            label.font = palette.font(.body)
+        }
         retryButton.setTitle("Retry", for: .normal)
+        retryButton.observeTheme { button, palette in
+            button.tintColor = palette.accentColor
+            button.titleLabel?.font = palette.font(.button)
+        }
         retryButton.addAction(UIAction { [weak self] _ in self?.onRetry() }, for: .touchUpInside)
         let stack = UIStackView(arrangedSubviews: [messageLabel, retryButton])
         stack.axis = .vertical
@@ -52,6 +49,7 @@ public final class HTDVLoadingView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.observeTheme { spinner, palette in spinner.color = palette.accentColor }
         addSubview(spinner)
         NSLayoutConstraint.activate([
             spinner.centerXAnchor.constraint(equalTo: centerXAnchor),

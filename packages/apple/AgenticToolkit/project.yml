@@ -639,17 +639,45 @@ targets:
       - package: GRDB
         product: GRDB
 
-  AgenticToolkitHTDV:
+  # A per-platform pair rather than one `supportedDestinations: [macOS, iOS]`
+  # target, for the reason spelled out above AgenticToolkitMarkdown: this
+  # framework depends on AgenticDeveloperToolkitUI, which exposes only
+  # platform-specific targets, and a multi-destination target cannot depend on a
+  # single-platform one. Both halves build the same `HTDV` sources under the same
+  # product name, so consumers still see one framework called AgenticToolkitHTDV.
+  #
+  # The dependency is what makes these views themeable: SemanticPalette,
+  # ThemeRole, Themeable and ThemePaletteObserver all live in
+  # AgenticDeveloperToolkitUI. Before it, HTDV had no dependencies at all and so
+  # had no vocabulary but NSColor's system colors, which is why every view in it
+  # ignored the user's theme.
+  AgenticToolkitHTDV-macOS:
     type: framework
-    supportedDestinations: [macOS, iOS]
+    platform: macOS
     templates: [SwiftLint]
     sources:
       - HTDV
+    dependencies:
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
     settings:
       base:
-        SDKROOT: auto
+        PRODUCT_NAME: AgenticToolkitHTDV
         MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+  AgenticToolkitHTDV-iOS:
+    type: framework
+    platform: iOS
+    templates: [SwiftLint]
+    sources:
+      - HTDV
+    dependencies:
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-iOS
+    settings:
+      base:
+        SDKROOT: iphoneos
+        PRODUCT_NAME: AgenticToolkitHTDV
         IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
 
   AgenticToolkitHTDVTests:
     type: bundle.unit-test
@@ -658,23 +686,38 @@ targets:
     sources:
       - Tests/AgenticToolkitHTDVTests
     dependencies:
-      - target: AgenticToolkitHTDV
+      - target: AgenticToolkitHTDV-macOS
         embed: true
         codeSign: true
 
-  AgenticToolkitHub:
+  # Split for the same reason as HTDV, which it depends on.
+  AgenticToolkitHub-macOS:
     type: framework
-    supportedDestinations: [macOS, iOS]
+    platform: macOS
     templates: [SwiftLint]
     sources:
       - Hub
     dependencies:
-      - target: AgenticToolkitHTDV
+      - target: AgenticToolkitHTDV-macOS
     settings:
       base:
-        SDKROOT: auto
+        PRODUCT_NAME: AgenticToolkitHub
         MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+  AgenticToolkitHub-iOS:
+    type: framework
+    platform: iOS
+    templates: [SwiftLint]
+    sources:
+      - Hub
+    dependencies:
+      - target: AgenticToolkitHTDV-iOS
+    settings:
+      base:
+        SDKROOT: iphoneos
+        PRODUCT_NAME: AgenticToolkitHub
         IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
 
   AgenticToolkitHubTests:
     type: bundle.unit-test
@@ -683,10 +726,10 @@ targets:
     sources:
       - Tests/AgenticToolkitHubTests
     dependencies:
-      - target: AgenticToolkitHub
+      - target: AgenticToolkitHub-macOS
         embed: true
         codeSign: true
-      - target: AgenticToolkitHTDV
+      - target: AgenticToolkitHTDV-macOS
         embed: true
         codeSign: true
 
@@ -706,8 +749,8 @@ aggregateTargets:
       - AgenticToolkitSync
       - AgenticToolkitSyncGRDB
       - AgenticToolkitMarkdown-macOS
-      - AgenticToolkitHTDV
-      - AgenticToolkitHub
+      - AgenticToolkitHTDV-macOS
+      - AgenticToolkitHub-macOS
 
   # The spec files this store under "macOS, iOS", and `AgenticToolkitMarkdown-iOS`
   # existed but was reachable from no aggregate and no scheme — so nothing ever
@@ -722,8 +765,8 @@ aggregateTargets:
       - AgenticToolkitSync
       - AgenticToolkitSyncGRDB
       - AgenticToolkitMarkdown-iOS
-      - AgenticToolkitHTDV
-      - AgenticToolkitHub
+      - AgenticToolkitHTDV-iOS
+      - AgenticToolkitHub-iOS
 
   AgenticToolkitMacOSTestsAll:
     targets:
@@ -752,9 +795,9 @@ aggregateTargets:
       - AgenticToolkitSyncGRDBTests
       - AgenticToolkitMarkdown-macOS
       - AgenticToolkitMarkdownTests
-      - AgenticToolkitHTDV
+      - AgenticToolkitHTDV-macOS
       - AgenticToolkitHTDVTests
-      - AgenticToolkitHub
+      - AgenticToolkitHub-macOS
       - AgenticToolkitHubTests
 
 schemes:
@@ -934,7 +977,7 @@ schemes:
   AgenticToolkitHTDV:
     build:
       targets:
-        AgenticToolkitHTDV: all
+        AgenticToolkitHTDV-macOS: all
     run:
       config: Debug
     test:
@@ -951,7 +994,7 @@ schemes:
   AgenticToolkitHub:
     build:
       targets:
-        AgenticToolkitHub: all
+        AgenticToolkitHub-macOS: all
     run:
       config: Debug
     test:

@@ -1,4 +1,6 @@
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
+import AgenticDeveloperToolkit
+import AgenticDeveloperToolkitUI
 import AppKit
 
 /// Renders a `FormState` as a scrolling AppKit form with a save/revert/delete footer.
@@ -17,10 +19,10 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
     /// delete. An identity that cannot be recycled — the object's own storage — cannot collide.
     var hasHostLevelReloadAttached = false
 
-    let saveButton = NSButton(title: "Save", target: nil, action: nil)
-    let revertButton = NSButton(title: "Revert", target: nil, action: nil)
-    let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
-    let blockedLabel = NSTextField(labelWithString: "")
+    let saveButton = ThemedActionButton(title: "Save", style: .primary)
+    let revertButton = ThemedActionButton(title: "Revert")
+    let deleteButton = ThemedActionButton(title: "Delete", style: .destructive)
+    let blockedLabel = ThemedLabel(role: .secondaryText, textRole: .caption)
     let errorLabel = NSTextField(wrappingLabelWithString: "")
     /// Errors from `actions.delete` / `actions.extra`. Separate from `errorLabel` because that one is
     /// owned by `syncFromState()`, which rewrites it on every state change — so an action failure
@@ -114,9 +116,10 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         form.translatesAutoresizingMaskIntoConstraints = false
         for section in state.spec.sections {
             if let title = section.title {
-                let header = NSTextField(labelWithString: title)
-                header.font = .boldSystemFont(ofSize: NSFont.systemFontSize + 1)
-                form.addArrangedSubview(header)
+                // Was `boldSystemFont(ofSize: systemFontSize + 1)` — arithmetic
+                // on the system font, which no theme size or family reaches.
+                // `heading` is the role that means "section header".
+                form.addArrangedSubview(ThemedLabel(string: title, textRole: .heading))
             }
             for field in section.fields {
                 let row = buildRow(for: field)
@@ -128,7 +131,11 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         form.addArrangedSubview(footer)
         footer.widthAnchor.constraint(equalTo: form.widthAnchor, constant: -40).isActive = true
 
-        let scroll = NSScrollView()
+        // The form's root scroll stays transparent on purpose: a form is shown
+        // inside a detail pane or a sheet, and each of those owns a different
+        // plane (`windowBackground` vs `surface`). Drawing its own would put a
+        // seam down the one it sits in.
+        let scroll = ThemedScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         let document = NSView()
@@ -148,14 +155,16 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
     }
 
     private func buildRow(for field: FormField) -> NSView {
-        let label = NSTextField(labelWithString: field.label)
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
-        label.textColor = .secondaryLabelColor
+        let label = ThemedLabel(string: field.label, role: .secondaryText, textRole: .caption, weight: .medium)
         let control = buildControl(for: field)
         controls[field.key] = control
+        // Wrapping, so it stays an `NSTextField` — the one thing `ThemedLabel`
+        // is not — and takes its colour and font from the palette directly.
         let error = NSTextField(wrappingLabelWithString: "")
-        error.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        error.textColor = .systemRed
+        error.observeTheme { error, palette in
+            error.textColor = palette.dangerColor
+            error.font = palette.font(.caption)
+        }
         error.isHidden = true
         error.setAccessibilityIdentifier("htdv.form.error.\(field.key)")
         fieldErrorLabels[field.key] = error
@@ -177,6 +186,10 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             text.action = #selector(textFieldChanged(_:))
             text.delegate = self
             text.setAccessibilityIdentifier("htdv.form.field.\(textField.key)")
+            // Not a `ThemedTextField`: the form builds the field by kind (a
+            // secure one here) and wires target, action and delegate onto it,
+            // so the paint job arrives as an extension instead.
+            text.observeTheme { text, palette in text.applyEditableFieldTheme(palette) }
             return text
         case .number(let numberField):
             let text = NSTextField()
@@ -185,6 +198,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             text.action = #selector(textFieldChanged(_:))
             text.delegate = self
             text.setAccessibilityIdentifier("htdv.form.field.\(numberField.key)")
+            text.observeTheme { text, palette in text.applyEditableFieldTheme(palette) }
             return text
         case .stringSet(let stringSetField):
             let text = NSTextField()
@@ -194,6 +208,7 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             text.action = #selector(textFieldChanged(_:))
             text.delegate = self
             text.setAccessibilityIdentifier("htdv.form.field.\(stringSetField.key)")
+            text.observeTheme { text, palette in text.applyEditableFieldTheme(palette) }
             return text
         case .textArea(let textAreaField):
             return buildTextView(key: textAreaField.key, minLines: textAreaField.minLines, monospaced: false)
@@ -229,8 +244,13 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
             text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             text.identifier = NSUserInterfaceItemIdentifier(readOnlyField.key)
             text.setAccessibilityIdentifier("htdv.form.field.\(readOnlyField.key)")
-            if readOnlyField.isMonospaced {
-                text.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            // `code` *is* the theme's monospaced role, so a monospaced
+            // read-only value now follows the theme's code font rather than
+            // the system's.
+            let textRole: TextRole = readOnlyField.isMonospaced ? .code : .body
+            text.observeTheme { text, palette in
+                text.textColor = palette.primaryTextColor
+                text.font = palette.font(textRole)
             }
             return text
         case .markdown(let markdownField):
@@ -269,14 +289,12 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         // but these are the two real controls that stand in for the picker when the model holds no
         // date — see `applyDateRow`. Namespaced under the field's own identifier so both stay
         // discoverable from it.
-        let setButton = NSButton(title: "Set date", target: self, action: #selector(setDateTapped(_:)))
-        setButton.bezelStyle = .rounded
+        let setButton = ThemedActionButton(title: "Set date", target: self, action: #selector(setDateTapped(_:)))
         setButton.identifier = NSUserInterfaceItemIdentifier(field.key)
         setButton.setAccessibilityIdentifier("htdv.form.field.\(field.key).set")
         dateSetButtons[field.key] = setButton
 
-        let clearButton = NSButton(title: "Clear", target: self, action: #selector(clearDateTapped(_:)))
-        clearButton.bezelStyle = .rounded
+        let clearButton = ThemedActionButton(title: "Clear", target: self, action: #selector(clearDateTapped(_:)))
         clearButton.identifier = NSUserInterfaceItemIdentifier(field.key)
         clearButton.setAccessibilityIdentifier("htdv.form.field.\(field.key).clear")
         dateClearButtons[field.key] = clearButton
@@ -291,9 +309,13 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
     private func buildTextView(key: String, minLines: Int, monospaced: Bool) -> NSView {
         let textView = NSTextView()
         textView.isRichText = false
-        textView.font = monospaced
-            ? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-            : .systemFont(ofSize: NSFont.systemFontSize)
+        let textRole: TextRole = monospaced ? .code : .body
+        textView.observeTheme { textView, palette in
+            textView.backgroundColor = palette.controlBackgroundColor
+            textView.textColor = palette.primaryTextColor
+            textView.insertionPointColor = palette.cursorColor
+            textView.font = palette.font(textRole)
+        }
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.delegate = self
         textView.autoresizingMask = [.width]
@@ -301,7 +323,9 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         textView.textContainer?.widthTracksTextView = true
         textView.setAccessibilityIdentifier("htdv.form.field.\(key)")
         textViewKeys[ObjectIdentifier(textView)] = key
-        let scroll = NSScrollView()
+        // Bezel border and all: a text view is a *well*, so unlike the form's
+        // own transparent scroll this one draws its own themed plane.
+        let scroll = ThemedScrollView()
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
@@ -311,14 +335,14 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
     }
 
     private func buildFooter() -> NSView {
-        blockedLabel.textColor = .secondaryLabelColor
-        blockedLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        errorLabel.textColor = .systemRed
-        errorLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        actionErrorLabel.textColor = .systemRed
-        actionErrorLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        // Both error labels wrap, so neither can be a `ThemedLabel`.
+        for label in [errorLabel, actionErrorLabel] {
+            label.observeTheme { label, palette in
+                label.textColor = palette.dangerColor
+                label.font = palette.font(.caption)
+            }
+        }
         actionErrorLabel.isHidden = true
-        saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
         saveButton.target = self
         saveButton.action = #selector(saveTapped)
@@ -326,11 +350,11 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
         // Not named by the brief (which only calls out save/cancel), but revert and delete are real
         // footer controls too, so they get the same "<feature>.<element>" shape rather than being left
         // unaddressable.
-        revertButton.bezelStyle = .rounded
         revertButton.target = self
         revertButton.action = #selector(revertTapped)
         revertButton.setAccessibilityIdentifier("htdv.form.revert")
-        deleteButton.bezelStyle = .rounded
+        // `hasDestructiveAction` stays for assistive technologies; the red is
+        // now the palette's `danger`, not the system's.
         deleteButton.hasDestructiveAction = true
         deleteButton.target = self
         deleteButton.action = #selector(deleteTapped)
@@ -343,8 +367,11 @@ public final class FormViewController: NSViewController, HTDVDetailHosting, NSTe
 
         var views: [NSView] = [deleteButton]
         for action in state.spec.actions.extra {
-            let button = NSButton(title: action.title, target: self, action: #selector(extraTapped(_:)))
-            button.bezelStyle = .rounded
+            let button = ThemedActionButton(
+                title: action.title,
+                style: action.isDestructive ? .destructive : .secondary,
+                target: self,
+                action: #selector(extraTapped(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(action.id)
             button.hasDestructiveAction = action.isDestructive
             button.setAccessibilityIdentifier("htdv.form.action.\(action.id)")

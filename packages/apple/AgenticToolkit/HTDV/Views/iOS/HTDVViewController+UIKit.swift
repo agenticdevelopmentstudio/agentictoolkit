@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import AgenticDeveloperToolkitUI
 import UIKit
 
 /// Regular width: rails side by side in a horizontal scroll view with the detail pane on the right.
@@ -48,7 +49,9 @@ public final class HTDVViewController: UIViewController, UINavigationControllerD
 
     override public func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
+        // The HTDV host *is* the window's plane; its rails and detail panes
+        // put their own surfaces on top of it.
+        view.observeTheme { view, palette in view.backgroundColor = palette.windowBackgroundColor }
         railStack.axis = .horizontal
         railStack.spacing = 0
         railStack.translatesAutoresizingMaskIntoConstraints = false

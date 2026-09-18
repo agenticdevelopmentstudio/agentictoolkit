@@ -1,4 +1,6 @@
 #if canImport(UIKit)
+import AgenticDeveloperToolkit
+import AgenticDeveloperToolkitUI
 import UIKit
 
 /// Renders a `FormState` as a scrolling UIKit form with a save/revert/delete footer.
@@ -95,7 +97,10 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
 
     override public func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
+        // A form is presented inside a detail pane or pushed onto a navigation
+        // stack, and `surface` is the plane the palette gives to a thing on top
+        // of the window.
+        view.observeTheme { view, palette in view.backgroundColor = palette.surfaceColor }
         let form = UIStackView()
         form.axis = .vertical
         form.spacing = 12
@@ -104,10 +109,9 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
         form.translatesAutoresizingMaskIntoConstraints = false
         for section in state.spec.sections {
             if let title = section.title {
-                let header = UILabel()
-                header.text = title
-                header.font = .preferredFont(forTextStyle: .headline)
-                form.addArrangedSubview(header)
+                // `preferredFont(forTextStyle:)` is the system's type ramp, not
+                // the theme's — `heading` is the role that means this.
+                form.addArrangedSubview(ThemedLabel(string: title, textRole: .heading))
             }
             for field in section.fields {
                 form.addArrangedSubview(buildRow(for: field))
@@ -147,12 +151,14 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
         syncFromState()
     }
 
-    /// `UIColor.separator` is dynamic; `.cgColor` is not. Converting once at build time froze the
+    /// A palette colour can be dynamic; `.cgColor` is not. Converting once at build time froze the
     /// border at whatever the interface style happened to be then, leaving a light-mode hairline
-    /// drawn over a dark-mode form (M4).
+    /// drawn over a dark-mode form (M4). The trait registration in `viewDidLoad` is what re-runs
+    /// this; a theme *change* re-runs it through each text view's own theme observer.
     private func applyTextViewBorderColors() {
+        let palette = view.resolvedThemeScope.palette
         for textView in borderedTextViews {
-            textView.layer.borderColor = UIColor.separator.resolvedColor(with: traitCollection).cgColor
+            textView.layer.borderColor = palette.borderColor.resolvedColor(with: traitCollection).cgColor
         }
     }
 
@@ -198,15 +204,14 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
     }
 
     private func buildRow(for field: FormField) -> UIView {
-        let label = UILabel()
-        label.text = field.label
-        label.font = .preferredFont(forTextStyle: .caption1)
-        label.textColor = .secondaryLabel
+        let label = ThemedLabel(string: field.label, role: .secondaryText, textRole: .caption)
         let control = buildControl(for: field)
         controls[field.key] = control
         let error = UILabel()
-        error.font = .preferredFont(forTextStyle: .caption2)
-        error.textColor = .systemRed
+        error.observeTheme { error, palette in
+            error.textColor = palette.dangerColor
+            error.font = palette.font(.caption)
+        }
         error.numberOfLines = 0
         error.isHidden = true
         fieldErrorLabels[field.key] = error
@@ -217,7 +222,7 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
     }
 
     private func makeTextField(key: String, placeholder: String?, secure: Bool = false) -> UITextField {
-        let text = UITextField()
+        let text = ThemedTextField()
         text.borderStyle = .roundedRect
         text.placeholder = placeholder
         text.isSecureTextEntry = secure
@@ -264,7 +269,11 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
             wrapper.accessibilityIdentifier = toggleField.key
             return wrapper
         case .select(let selectField):
+            // Stays a system pull-down button — the menu, the chevron and the
+            // selection behaviour are all UIKit's (`native-controls`); only its
+            // colour and font come from the palette.
             let button = UIButton(type: .system)
+            button.applyThemedTint()
             button.accessibilityIdentifier = selectField.key
             button.showsMenuAsPrimaryAction = true
             button.changesSelectionAsPrimaryAction = true
@@ -291,8 +300,11 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
             let label = UILabel()
             label.numberOfLines = 0
             label.accessibilityIdentifier = readOnlyField.key
-            if readOnlyField.isMonospaced {
-                label.font = .monospacedSystemFont(ofSize: UIFont.systemFontSize, weight: .regular)
+            // `code` *is* the theme's monospaced role.
+            let textRole: TextRole = readOnlyField.isMonospaced ? .code : .body
+            label.observeTheme { label, palette in
+                label.textColor = palette.primaryTextColor
+                label.font = palette.font(textRole)
             }
             return label
         case .markdown(let markdownField):
@@ -327,6 +339,7 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
         datePickers[key] = picker
 
         let setButton = UIButton(type: .system)
+        setButton.applyThemedTint()
         setButton.setTitle("Set date", for: .normal)
         setButton.accessibilityIdentifier = key
         // Commits today's date immediately rather than just revealing the picker, so the value the row
@@ -337,6 +350,7 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
         dateSetButtons[key] = setButton
 
         let clearButton = UIButton(type: .system)
+        clearButton.applyThemedTint()
         clearButton.setTitle("Clear", for: .normal)
         clearButton.accessibilityIdentifier = key
         clearButton.addAction(UIAction { [weak self] _ in
@@ -354,9 +368,17 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
 
     private func buildTextView(key: String, minLines: Int, monospaced: Bool) -> UIView {
         let textView = UITextView()
-        textView.font = monospaced
-            ? .monospacedSystemFont(ofSize: UIFont.systemFontSize, weight: .regular)
-            : .preferredFont(forTextStyle: .body)
+        let textRole: TextRole = monospaced ? .code : .body
+        textView.observeTheme { textView, palette in
+            textView.backgroundColor = palette.controlBackgroundColor
+            textView.textColor = palette.primaryTextColor
+            textView.tintColor = palette.cursorColor
+            textView.font = palette.font(textRole)
+            // Re-resolved on every apply, because a `CGColor` is a colour
+            // already resolved — see `applyTextViewBorderColors`.
+            textView.layer.borderColor = palette.borderColor
+                .resolvedColor(with: textView.traitCollection).cgColor
+        }
         textView.autocorrectionType = monospaced ? .no : .default
         borderedTextViews.append(textView)
         textView.layer.borderWidth = 1
@@ -369,21 +391,26 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
     }
 
     private func buildFooter() -> UIView {
-        blockedLabel.font = .preferredFont(forTextStyle: .caption1)
-        blockedLabel.textColor = .secondaryLabel
-        errorLabel.font = .preferredFont(forTextStyle: .caption1)
-        errorLabel.textColor = .systemRed
-        errorLabel.numberOfLines = 0
-        actionErrorLabel.font = .preferredFont(forTextStyle: .caption1)
-        actionErrorLabel.textColor = .systemRed
-        actionErrorLabel.numberOfLines = 0
+        blockedLabel.observeTheme { label, palette in
+            label.textColor = palette.secondaryTextColor
+            label.font = palette.font(.caption)
+        }
+        for label in [errorLabel, actionErrorLabel] {
+            label.observeTheme { label, palette in
+                label.textColor = palette.dangerColor
+                label.font = palette.font(.caption)
+            }
+            label.numberOfLines = 0
+        }
         actionErrorLabel.isHidden = true
+        saveButton.applyThemedTint()
+        revertButton.applyThemedTint()
         saveButton.setTitle(state.spec.actions.save?.title ?? "Save", for: .normal)
         saveButton.addAction(UIAction { [weak self] _ in Task { await self?.performSave() } }, for: .touchUpInside)
         revertButton.setTitle("Revert", for: .normal)
         revertButton.addAction(UIAction { [weak self] _ in self?.revertTapped() }, for: .touchUpInside)
         deleteButton.setTitle(state.spec.actions.delete?.title ?? "Delete", for: .normal)
-        deleteButton.tintColor = .systemRed
+        deleteButton.applyThemedTint(.danger)
         deleteButton.isHidden = state.spec.actions.delete == nil
         deleteButton.addAction(UIAction { [weak self] _ in self?.deleteTapped() }, for: .touchUpInside)
         saveButton.isHidden = state.spec.actions.save == nil
@@ -392,9 +419,9 @@ public final class FormViewController: UIViewController, HTDVDetailHosting, UITe
         var views: [UIView] = [deleteButton]
         for action in state.spec.actions.extra {
             let button = UIButton(type: .system)
+            button.applyThemedTint(action.isDestructive ? .danger : .accent)
             button.setTitle(action.title, for: .normal)
             button.accessibilityIdentifier = action.id
-            if action.isDestructive { button.tintColor = .systemRed }
             button.addAction(UIAction { [weak self] _ in self?.runExtra(action) }, for: .touchUpInside)
             extraButtons[action.id] = button
             views.append(button)

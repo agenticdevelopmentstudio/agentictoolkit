@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import AgenticDeveloperToolkitUI
 import UIKit
 
 /// One level as a grouped table. Used as a column in regular width and as a pushed screen in compact width.
@@ -31,8 +32,17 @@ public final class HTDVRailViewController: UITableViewController {
         super.viewDidLoad()
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: Self.cellID)
         emptyLabel.textAlignment = .center
-        emptyLabel.textColor = .secondaryLabel
         emptyLabel.numberOfLines = 0
+        emptyLabel.observeTheme { label, palette in
+            label.textColor = palette.secondaryTextColor
+            label.font = palette.font(.body)
+        }
+        // A rail *is* the window's plane, so it takes `windowBackground` rather
+        // than a surface fill that would draw an edge that is not there.
+        tableView.observeTheme { table, palette in
+            table.backgroundColor = palette.windowBackgroundColor
+            table.separatorColor = palette.dividerColor
+        }
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             systemItem: .add, primaryAction: UIAction { [weak self] _ in self?.onCreate() }
         )
@@ -42,8 +52,11 @@ public final class HTDVRailViewController: UITableViewController {
         loadingView.isHidden = true
         // Opaque so a shown overlay fully occludes stale rows underneath it — `view` here IS the
         // table view (UITableViewController), so there is no separate scroll view to hide.
-        errorView.backgroundColor = .systemGroupedBackground
-        loadingView.backgroundColor = .systemGroupedBackground
+        for overlay in [errorView, loadingView] as [UIView] {
+            overlay.observeTheme { overlay, palette in
+                overlay.backgroundColor = palette.windowBackgroundColor
+            }
+        }
         for overlay in [errorView, loadingView] {
             overlay.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(overlay)
@@ -172,13 +185,22 @@ public final class HTDVRailViewController: UITableViewController {
         case .count(let badgeCount):
             let label = UILabel()
             label.text = String(badgeCount)
-            label.font = .monospacedDigitSystemFont(ofSize: UIFont.smallSystemFontSize, weight: .medium)
-            label.textColor = .secondaryLabel
+            // `code` is the theme's monospaced role, which is what a count
+            // badge wanted monospaced *digits* for.
+            label.observeTheme { label, palette in
+                label.textColor = palette.secondaryTextColor
+                label.font = palette.font(.code, weight: .medium)
+                label.sizeToFit()
+            }
             label.sizeToFit()
             return label
         case .dot(let badgeColor):
             let dot = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: 10))
-            dot.backgroundColor = HTDVBadgeColorMapping.uiColor(badgeColor)
+            // One mapping, in the shared model (`HTDVBadgeColor.themeRole`) —
+            // this used to be a UIKit table duplicating the AppKit one.
+            dot.observeTheme { dot, palette in
+                dot.backgroundColor = palette.uiColor(badgeColor.themeRole)
+            }
             dot.layer.cornerRadius = 5
             // Both a frame and a size: the frame sizes it when it is the bare accessory view (which
             // UIKit positions by frame), the constraints size it inside the stack below (which sizes
@@ -197,7 +219,7 @@ public final class HTDVRailViewController: UITableViewController {
     /// an explicit frame from its own fitting size rather than left at zero.
     private func makeBadgeAndChevron(_ badge: UIView) -> UIView {
         let chevron = UIImageView(image: UIImage(systemName: "chevron.right"))
-        chevron.tintColor = .tertiaryLabel
+        chevron.observeTheme { chevron, palette in chevron.tintColor = palette.tertiaryTextColor }
         chevron.contentMode = .scaleAspectFit
         let stack = UIStackView(arrangedSubviews: [badge, chevron])
         stack.axis = .horizontal

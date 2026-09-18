@@ -15,9 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "5C085A274DC03C2FEAEEEE68"
-               BuildableName = "AgenticToolkitHTDV.framework"
-               BlueprintName = "AgenticToolkitHTDV"
+               BlueprintIdentifier = "96727E11D2DD7F46C91C37AB"
+               BuildableName = "AgenticToolkitHTDV-macOS.framework"
+               BlueprintName = "AgenticToolkitHTDV-macOS"
                ReferencedContainer = "container:AgenticToolkit.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,9 +32,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5C085A274DC03C2FEAEEEE68"
-            BuildableName = "AgenticToolkitHTDV.framework"
-            BlueprintName = "AgenticToolkitHTDV"
+            BlueprintIdentifier = "96727E11D2DD7F46C91C37AB"
+            BuildableName = "AgenticToolkitHTDV-macOS.framework"
+            BlueprintName = "AgenticToolkitHTDV-macOS"
             ReferencedContainer = "container:AgenticToolkit.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -67,9 +67,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5C085A274DC03C2FEAEEEE68"
-            BuildableName = "AgenticToolkitHTDV.framework"
-            BlueprintName = "AgenticToolkitHTDV"
+            BlueprintIdentifier = "96727E11D2DD7F46C91C37AB"
+            BuildableName = "AgenticToolkitHTDV-macOS.framework"
+            BlueprintName = "AgenticToolkitHTDV-macOS"
             ReferencedContainer = "container:AgenticToolkit.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -87,9 +87,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5C085A274DC03C2FEAEEEE68"
-            BuildableName = "AgenticToolkitHTDV.framework"
-            BlueprintName = "AgenticToolkitHTDV"
+            BlueprintIdentifier = "96727E11D2DD7F46C91C37AB"
+            BuildableName = "AgenticToolkitHTDV-macOS.framework"
+            BlueprintName = "AgenticToolkitHTDV-macOS"
             ReferencedContainer = "container:AgenticToolkit.xcodeproj">
          </BuildableReference>
       </MacroExpansion>

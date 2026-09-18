@@ -1,4 +1,5 @@
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
+import AgenticDeveloperToolkitUI
 import AppKit
 
 /// Hosts the rails (in a horizontally scrolling stack) beside the detail pane, with a breadcrumb bar on top.
@@ -12,7 +13,11 @@ public final class HTDVViewController: NSViewController {
     let breadcrumbBar = HTDVBreadcrumbBar(frame: .zero)
     let railStack = NSStackView()
     let railScrollView = NSScrollView()
-    let detailContainer = NSView()
+    /// The detail pane's plane. It is `surface` where the rails are
+    /// `windowBackground`, and that one step is what draws the boundary between
+    /// them — the detail views themselves (forms especially) are transparent so
+    /// they inherit whichever plane is hosting them.
+    let detailContainer = ThemedBackgroundView(role: .surface)
     private let splitStack = NSStackView()
     private var detailWidthConstraint: NSLayoutConstraint?
     private var renderedDetailID: String?
@@ -34,7 +39,7 @@ public final class HTDVViewController: NSViewController {
     required init?(coder: NSCoder) { nil }
 
     override public func loadView() {
-        let root = NSView()
+        let root = ThemedBackgroundView(role: .windowBackground)
         root.translatesAutoresizingMaskIntoConstraints = false
 
         railStack.orientation = .horizontal

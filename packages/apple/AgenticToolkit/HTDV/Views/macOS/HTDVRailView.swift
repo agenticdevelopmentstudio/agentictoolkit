@@ -1,4 +1,5 @@
 #if canImport(AppKit) && !targetEnvironment(macCatalyst)
+import AgenticDeveloperToolkitUI
 import AppKit
 
 /// One column: header (title + "+"), a single-column table of items, and loading/error/empty overlays.
@@ -7,10 +8,13 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
     public var onSelect: (String) -> Void = { _ in }
     public var onCreate: () -> Void = {}
 
-    let titleLabel = NSTextField(labelWithString: "")
+    let titleLabel = ThemedLabel(role: .primaryText, textRole: .heading)
     let createButton = NSButton(title: "", target: nil, action: nil)
-    let tableView = NSTableView()
-    let scrollView = NSScrollView()
+    // `windowBackground` rather than the default `surface`: a rail *is* the
+    // window's plane here, sitting flush in a split view rather than floating
+    // on it, so a surface fill would draw a panel edge that is not there.
+    let tableView = ThemedTableView(role: .windowBackground)
+    let scrollView = ThemedScrollView()
     let emptyLabel = NSTextField(wrappingLabelWithString: "")
     let errorView = HTDVErrorView(frame: .zero)
     let loadingView = HTDVLoadingView(frame: .zero)
@@ -32,7 +36,13 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
 
     private func build() {
         translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        wantsLayer = true
+        // The rail's own backdrop. Without it the split view shows through
+        // between the table and the header, in whatever colour AppKit last
+        // painted there — the seam that made a themed window look half-themed.
+        observeTheme { rail, palette in
+            rail.layer?.backgroundColor = palette.windowBackgroundColor.cgColor
+        }
         titleLabel.lineBreakMode = .byTruncatingTail
         createButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add")
         createButton.bezelStyle = .accessoryBarAction
@@ -41,6 +51,9 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
         createButton.action = #selector(createTapped)
         createButton.isHidden = true
         createButton.setAccessibilityIdentifier("htdv.rail.\(levelIndex).create")
+        createButton.observeTheme { button, palette in
+            button.contentTintColor = palette.accentColor
+        }
         let header = NSStackView(views: [titleLabel, NSView(), createButton])
         header.orientation = .horizontal
         header.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 4, right: 6)
@@ -62,7 +75,11 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
         scrollView.drawsBackground = false
 
         emptyLabel.alignment = .center
-        emptyLabel.textColor = .secondaryLabelColor
+        // A wrapping label, which `ThemedLabel` deliberately is not.
+        emptyLabel.observeTheme { label, palette in
+            label.textColor = palette.secondaryTextColor
+            label.font = palette.font(.body)
+        }
         emptyLabel.isHidden = true
         emptyLabel.setAccessibilityIdentifier("htdv.rail.\(levelIndex).empty")
         errorView.isHidden = true
@@ -161,7 +178,10 @@ public final class HTDVRailView: NSView, NSTableViewDataSource, NSTableViewDeleg
     }
 
     public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let rowView = NSTableRowView()
+        // `ThemedTableRowView` so a selected row is filled with the theme's
+        // selection colour instead of the system's accent — the one piece of a
+        // list the palette most obviously owns.
+        let rowView = ThemedTableRowView(frame: .zero)
         rowView.isGroupRowStyle = false
         return rowView
     }

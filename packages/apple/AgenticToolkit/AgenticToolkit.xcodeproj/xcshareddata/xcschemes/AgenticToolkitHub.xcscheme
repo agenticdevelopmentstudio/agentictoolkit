@@ -15,9 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "367B635A0118C5F8BB57D602"
-               BuildableName = "AgenticToolkitHub.framework"
-               BlueprintName = "AgenticToolkitHub"
+               BlueprintIdentifier = "C22D53BD41CAF7FCD7C4C315"
+               BuildableName = "AgenticToolkitHub-macOS.framework"
+               BlueprintName = "AgenticToolkitHub-macOS"
                ReferencedContainer = "container:AgenticToolkit.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,9 +32,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "367B635A0118C5F8BB57D602"
-            BuildableName = "AgenticToolkitHub.framework"
-            BlueprintName = "AgenticToolkitHub"
+            BlueprintIdentifier = "C22D53BD41CAF7FCD7C4C315"
+            BuildableName = "AgenticToolkitHub-macOS.framework"
+            BlueprintName = "AgenticToolkitHub-macOS"
             ReferencedContainer = "container:AgenticToolkit.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -67,9 +67,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "367B635A0118C5F8BB57D602"
-            BuildableName = "AgenticToolkitHub.framework"
-            BlueprintName = "AgenticToolkitHub"
+            BlueprintIdentifier = "C22D53BD41CAF7FCD7C4C315"
+            BuildableName = "AgenticToolkitHub-macOS.framework"
+            BlueprintName = "AgenticToolkitHub-macOS"
             ReferencedContainer = "container:AgenticToolkit.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -87,9 +87,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "367B635A0118C5F8BB57D602"
-            BuildableName = "AgenticToolkitHub.framework"
-            BlueprintName = "AgenticToolkitHub"
+            BlueprintIdentifier = "C22D53BD41CAF7FCD7C4C315"
+            BuildableName = "AgenticToolkitHub-macOS.framework"
+            BlueprintName = "AgenticToolkitHub-macOS"
             ReferencedContainer = "container:AgenticToolkit.xcodeproj">
          </BuildableReference>
       </MacroExpansion>

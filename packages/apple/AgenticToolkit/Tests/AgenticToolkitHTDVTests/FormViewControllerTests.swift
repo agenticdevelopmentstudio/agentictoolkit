@@ -1,6 +1,8 @@
 #if canImport(AppKit)
 import AppKit
 import XCTest
+import AgenticDeveloperToolkit
+import AgenticDeveloperToolkitUI
 @testable import AgenticToolkitHTDV
 
 @MainActor
@@ -565,7 +567,12 @@ final class FormViewControllerTests: XCTestCase {
         let formViewController = makeConfigurableVC()
         guard let scroll = formViewController.control(for: "config") as? NSScrollView,
               let textView = scroll.documentView as? NSTextView else { return XCTFail("no text view") }
-        XCTAssertEqual(textView.font, .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular))
+        // The field takes the theme's `code` role rather than a hard-coded
+        // `monospacedSystemFont`, so the theme decides family and size — and a
+        // theme with a size scale would make any fixed number here wrong. What
+        // has to stay true is that the role is a monospaced one.
+        XCTAssertEqual(textView.font, ThemePaletteObserver.currentPalette.font(.code))
+        XCTAssertEqual(textView.font?.isFixedPitch, true)
         let end = NSRange(location: (textView.string as NSString).length, length: 0)
         textView.insertText("{not json", replacementRange: end)
         XCTAssertEqual(formViewController.errorLabel(for: "config"), "Config must be valid JSON")
