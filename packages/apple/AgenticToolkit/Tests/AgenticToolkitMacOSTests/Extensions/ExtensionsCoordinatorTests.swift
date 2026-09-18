@@ -553,6 +553,7 @@ struct ExtensionsCoordinatorTests {
             commandRegistry: commandRegistry,
             languageModelProvider: FakeLanguageModelProvider(modelCount: 0),
             frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+            placeWebviewPanel: { _ in nil },
             openDocumentLanguageIDs: { [] })
 
         try await settle()
@@ -603,6 +604,7 @@ struct ExtensionsCoordinatorTests {
             commandRegistry: CommandRegistry(),
             languageModelProvider: FakeLanguageModelProvider(modelCount: 0),
             frontWindow: { nil }, footers: { [footer] }, workspaceRoots: { nil },
+            placeWebviewPanel: { _ in nil },
             openDocumentLanguageIDs: { [] })
 
         try await settle()
@@ -659,6 +661,7 @@ struct ExtensionsCoordinatorTests {
             commandRegistry: commandRegistry,
             languageModelProvider: FakeLanguageModelProvider(modelCount: 3),
             frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+            placeWebviewPanel: { _ in nil },
             openDocumentLanguageIDs: { [] })
 
         try await settle()
@@ -694,6 +697,7 @@ struct ExtensionsCoordinatorTests {
                     commandRegistry: CommandRegistry(),
                     languageModelProvider: FakeLanguageModelProvider(modelCount: 0),
                     frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+                    placeWebviewPanel: { _ in nil },
                     openDocumentLanguageIDs: { [] })
 
                 // A real, later contribution change — not a direct call to

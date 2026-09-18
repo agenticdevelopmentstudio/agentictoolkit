@@ -72,6 +72,15 @@ public struct ExtensionHostSeams {
     /// open.
     public let workspaceRoots: () -> ExtensionWorkspaceRoots?
 
+    /// Where a webview panel an extension creates goes on screen, or `nil`
+    /// when there is nowhere to put one.
+    ///
+    /// A closure for `frontWindow`'s reason, one layer further in: the pane
+    /// tree belongs to the app, and this framework holds only what a webview
+    /// panel *is*. `PaneWebviewPresenter` is what turns this into the
+    /// `ExtensionWebviewPresenting` the adaptor takes.
+    public let placeWebviewPanel: PaneWebviewPresenter.Place
+
     /// The language id of every document open in an editor right now, for
     /// `onLanguage:` activation.
     ///
@@ -89,6 +98,7 @@ public struct ExtensionHostSeams {
         frontWindow: @escaping () -> NSWindow?,
         footers: @escaping () -> [WindowFooterBar],
         workspaceRoots: @escaping () -> ExtensionWorkspaceRoots?,
+        placeWebviewPanel: @escaping PaneWebviewPresenter.Place,
         openDocumentLanguageIDs: @escaping () -> [String],
         // Defaulted, because the real answer is the only answer every caller
         // outside a test wants: the app has no second file system to choose
@@ -101,11 +111,12 @@ public struct ExtensionHostSeams {
         self.frontWindow = frontWindow
         self.footers = footers
         self.workspaceRoots = workspaceRoots
+        self.placeWebviewPanel = placeWebviewPanel
         self.openDocumentLanguageIDs = openDocumentLanguageIDs
     }
 }
 
-/// One extension's `ExtensionHost`, its six `vscode` namespace adaptors, and
+/// One extension's `ExtensionHost`, its seven `vscode` namespace adaptors, and
 /// the activation that decides when its code runs.
 ///
 /// ### Why the adaptors are held
@@ -113,14 +124,14 @@ public struct ExtensionHostSeams {
 /// `ExtensionHost.defineVSCodeMember` takes `implementation: Any` — the
 /// `lazy var` block an adaptor exposes — and the host keeps only that block.
 /// Nothing in the host keeps the adaptor that vended it alive, and every one
-/// of the six owns state the block reads (a registry handle, a disposable
+/// of the seven owns state the block reads (a registry handle, a disposable
 /// table, a pending continuation). Dropping an adaptor after installing its
 /// members is the shape where an extension's first call reaches a
-/// deallocated owner, so all six are stored here for as long as the host is.
+/// deallocated owner, so all seven are stored here for as long as the host is.
 ///
 /// ### One host per extension, one set of adaptors per host
 ///
-/// The adaptors are per extension because five of the six take
+/// The adaptors are per extension because six of the seven take
 /// `extensionIdentifier` and record against it. Their *collaborators* — the
 /// stores, the diagnostic emitter, the presenters — are shared across every
 /// host by `ExtensionHostInstaller`; see its own doc for which and why.
@@ -141,6 +152,7 @@ public final class ExtensionHostInstallation {
     private let workspace: MainThreadWorkspace
     private let languageModels: MainThreadLanguageModels
     private let window: MainThreadWindow
+    private let webviews: MainThreadWebviews
     private let diagnostics: MainThreadDiagnostics
 
     private let commandRegistry: CommandRegistry
@@ -155,7 +167,7 @@ public final class ExtensionHostInstallation {
 
     // MARK: - Construction
 
-    /// Builds the host and all six adaptors over the shared collaborators
+    /// Builds the host and all seven adaptors over the shared collaborators
     /// `installer` owns, and installs every `vscode` member and enum table.
     ///
     /// - Throws: whatever `ExtensionHost.defineVSCodeMember` throws — which,
@@ -196,6 +208,12 @@ public final class ExtensionHostInstallation {
             statusBarPresenter: collaborators.statusBarPresenter,
             notImplementedLedger: notImplementedLedger,
             extensionIdentifier: identifier)
+        self.webviews = MainThreadWebviews(
+            presenter: collaborators.webviewPresenter,
+            notImplementedLedger: notImplementedLedger,
+            extensionIdentifier: identifier,
+            extensionDirectory: loadedExtension.directory,
+            workspaceRoots: collaborators.workspaceRoots)
         self.diagnostics = MainThreadDiagnostics(
             store: collaborators.diagnosticStore,
             sink: collaborators.diagnosticSink,
@@ -204,7 +222,7 @@ public final class ExtensionHostInstallation {
         try installVSCodeMembers()
     }
 
-    /// Installs all twenty members and all three enum tables.
+    /// Installs all twenty-one members and all three enum tables.
     ///
     /// **Nothing here installs `Uri`, the text-geometry classes, the
     /// diagnostic classes, the language-model vocabulary or the trampoline.**
@@ -276,6 +294,12 @@ public final class ExtensionHostInstallation {
         try host.defineVSCodeMember(
             namespacePath: "vscode.window", name: "createStatusBarItem",
             implementation: window.createStatusBarItem)
+        // Installed under `vscode.window`, implemented by a different adaptor.
+        // `MainThreadDiagnostics` under `vscode.languages` is the precedent,
+        // and `MainThreadWebviews`' own doc says why the class is separate.
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "createWebviewPanel",
+            implementation: webviews.createWebviewPanel)
 
         // The three enum tables go on **`vscode`**, the top-level namespace,
         // never on `vscode.window` — each adaptor's own table doc gives the
@@ -462,7 +486,7 @@ public final class ExtensionHostInstallation {
     ///
     /// Stubs first — a stub left in the registry outlives everything it can
     /// reach and would activate a disposed host on the next press. Then the
-    /// six adaptors, each of which withdraws what it registered elsewhere
+    /// seven adaptors, each of which withdraws what it registered elsewhere
     /// (commands, language configurations, status bar items, diagnostic
     /// collections). The host last, because disposing it first would leave
     /// those withdrawals running against a dead runtime.
@@ -478,6 +502,7 @@ public final class ExtensionHostInstallation {
         workspace.dispose()
         languageModels.dispose()
         window.dispose()
+        webviews.dispose()
         diagnostics.dispose()
         host.dispose()
     }
@@ -492,8 +517,8 @@ extension ExtensionHostInstallation: Loggable {
 ///
 /// ### What is shared, and what is not
 ///
-/// Per extension: one `ExtensionHost` and one of each adaptor, because five
-/// of the six record against an `extensionIdentifier`.
+/// Per extension: one `ExtensionHost` and one of each adaptor, because six
+/// of the seven record against an `extensionIdentifier`.
 ///
 /// Shared across every host, each for a reason its own type states:
 ///
@@ -527,6 +552,12 @@ public final class ExtensionHostInstaller {
         let messagePresenter: NSAlertMessagePresenter
         let pickerPresenter: ExtensionPickerPresenter
         let statusBarPresenter: WindowFooterStatusBarPresenter
+
+        /// Shared like the other presenters: a webview panel is a webview
+        /// panel whichever extension asked for one, and the per-extension
+        /// facts reach it on the request instead.
+        let webviewPresenter: PaneWebviewPresenter
+
         let workspaceRoots: ClosureWorkspaceRoots
 
         /// The one service every extension's `vscode.workspace.fs` runs
@@ -694,6 +725,7 @@ public final class ExtensionHostInstaller {
                             """)
                     }
                 }),
+            webviewPresenter: PaneWebviewPresenter(place: seams.placeWebviewPanel),
             workspaceRoots: workspaceRoots,
             fileSystemService: seams.fileSystemService)
     }

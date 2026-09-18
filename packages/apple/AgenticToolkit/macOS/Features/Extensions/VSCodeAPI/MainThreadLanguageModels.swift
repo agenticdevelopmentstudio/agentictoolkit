@@ -157,51 +157,6 @@ public protocol ExtensionLanguageModelProviding: AnyObject {
     ) async throws -> AsyncThrowingStream<ExtensionLanguageModelResponsePart, Error>
 }
 
-// MARK: - The onDidChangeChatModels window
-
-/// The window `onDidChangeChatModelsEmitter` (below) is built with:
-/// `ExtensionEventEmitter.window` has no default
-/// (`ExtensionEvent.swift:158-160`'s own doc explains why a default would
-/// stop the seam from being one), and `onDidChangeChatModels` has nothing
-/// for a
-/// window to coalesce — the set-identity filter in
-/// `availableChatModelsDidChange()` *is* the debounce (Ruling 63), the
-/// same division upstream draws in the one step its own constructor
-/// performs: `mainThreadLanguageModels.ts:78-86` builds the current id
-/// set, compares it to the last one, and only republishes on a real
-/// difference — no time window in that filter-and-forward step itself
-/// (commit `3addbda66f9e80c3ed1b943822ab823bb6747b02`). Those nine
-/// lines are the whole of what is pinned here; they say nothing about
-/// `onDidChangeLanguageModels`'s own emission on the line above it,
-/// which this doc does not claim to have inspected.
-///
-/// **Honest limit:** upstream's own filter reads
-/// `this._chatProviderService.getLanguageModelIds()`, one call away from the
-/// `LanguageModelChat.id` this host's `availableChatModelsDidChange()`
-/// compares — the two are only guaranteed to agree because this host has
-/// exactly one place that lists chat models (`provider.availableChatModels`),
-/// where upstream's service and its id accessor are two separate things that
-/// merely happen to agree today.
-///
-/// This closes the one window it is ever asked to open in the same call
-/// that opened it, rather than deferring to a real timer the way
-/// `ExtensionEventTimerWindow` does for `onDidChangeDiagnostics` — a window
-/// that cannot fire late, not a second event mechanism. `fire(_:)`
-/// (`ExtensionEvent.swift`) queues this call's payload *before* it opens the
-/// window, precisely so a window that closes synchronously, like this one,
-/// finds that payload already there — see `fire(_:)`'s own doc for why
-/// upstream's literal statement order (open, then queue) does not carry over
-/// to a seam that allows a synchronous conformer. The net effect is still
-/// that a listener's delivery is synchronous with the
-/// `availableChatModelsDidChange()` call that triggered it, which is what
-/// lets this file's tests assert a delivery without polling or sleeping.
-@MainActor
-private final class ChatModelsImmediateWindow: ExtensionEventWindowScheduling {
-    func openWindow(closingAfter delay: TimeInterval, onClose: @escaping @MainActor () -> Void) {
-        onClose()
-    }
-}
-
 // MARK: - vscode.lm
 
 /// Installs `vscode.lm.selectChatModels` (`vscode.d.ts:20769`) and the
@@ -295,17 +250,36 @@ public final class MainThreadLanguageModels {
     private var lastModelIdentifiers: Set<String>
 
     /// The emitter behind `vscode.lm.onDidChangeChatModels`
-    /// (`vscode.d.ts:20742`, `Event<void>`). Built with an immediate window
-    /// rather than `ExtensionEventTimerWindow` — see
-    /// `ChatModelsImmediateWindow`'s own doc for why —
-    /// because this event has nothing to coalesce (Ruling 63): the identity
-    /// filter in `availableChatModelsDidChange()` below is the whole
-    /// debounce, the same way upstream's is identity-based rather than
-    /// time-based (`mainThreadLanguageModels.ts:78-86`).
+    /// (`vscode.d.ts:20742`, `Event<void>`).
+    ///
+    /// Built with `ExtensionEventImmediateWindow` rather than
+    /// `ExtensionEventTimerWindow` because this event has nothing to coalesce
+    /// (Ruling 63): the set-identity filter in `availableChatModelsDidChange()`
+    /// below *is* the debounce, the same division upstream draws in the one
+    /// step its own constructor performs — `mainThreadLanguageModels.ts:78-86`
+    /// builds the current id set, compares it to the last one, and only
+    /// republishes on a real difference, with no time window in that
+    /// filter-and-forward step itself (commit
+    /// `3addbda66f9e80c3ed1b943822ab823bb6747b02`). Those nine lines are the
+    /// whole of what is pinned here; they say nothing about
+    /// `onDidChangeLanguageModels`'s own emission on the line above, which
+    /// this doc does not claim to have inspected.
+    ///
+    /// **Honest limit:** upstream's own filter reads
+    /// `this._chatProviderService.getLanguageModelIds()`, one call away from
+    /// the `LanguageModelChat.id` this host's `availableChatModelsDidChange()`
+    /// compares — the two are only guaranteed to agree because this host has
+    /// exactly one place that lists chat models
+    /// (`provider.availableChatModels`), where upstream's service and its id
+    /// accessor are two separate things that merely happen to agree today.
+    ///
+    /// The window closing synchronously is what lets this file's tests assert
+    /// a delivery without polling or sleeping; see
+    /// `ExtensionEventImmediateWindow` for why that holds.
     private let onDidChangeChatModelsEmitter = ExtensionEventEmitter<Void>(
         path: "vscode.lm.onDidChangeChatModels",
         delay: 0,
-        window: ChatModelsImmediateWindow(),
+        window: ExtensionEventImmediateWindow(),
         merge: { _ in () },
         map: { _, context in JSValue(undefinedIn: context) }
     )

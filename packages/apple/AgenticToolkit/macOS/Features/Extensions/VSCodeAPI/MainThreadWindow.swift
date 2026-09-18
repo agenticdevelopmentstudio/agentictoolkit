@@ -1390,7 +1390,14 @@ public final class MainThreadWindow {
     /// `setObject(_:forKeyedSubscript:)` already relies on for
     /// `VSCodeAPI.disposable(in:onDispose:)`'s `dispose` method block
     /// (`VSCodeAPI.swift:1040`: `public static func disposable(`).
-    private static func installAccessor(
+    ///
+    /// **Promoted from `private` to internal** for the reason
+    /// `installReadonlyGetter` below was: `MainThreadWebviews.swift` builds
+    /// `WebviewPanel.title` and `Webview.html` as accessor pairs of exactly
+    /// this shape, and a second copy of a four-line `defineProperty`
+    /// descriptor is a second place for the descriptor's flags to drift
+    /// (`dry`).
+    static func installAccessor(
         on object: JSValue,
         name: String,
         get: @escaping @convention(block) () -> Any?,

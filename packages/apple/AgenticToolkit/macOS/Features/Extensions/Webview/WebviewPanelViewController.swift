@@ -82,6 +82,33 @@ public final class WebviewPanelViewController: NSViewController {
     public var onTitleChanged: (() -> Void)?
     public var onStateChanged: (() -> Void)?
 
+    /// Called when the extension asks for the panel to be brought forward, with
+    /// `preserveFocus`.
+    ///
+    /// A closure installed by whoever put the panel on screen, rather than
+    /// something this class does for itself: revealing means finding this
+    /// panel's pane in a window's tree and selecting it, and the panel does not
+    /// know which tree it was put in — only the presenter that put it there
+    /// does. A second handle object to carry one verb would be a type with one
+    /// implementation (`design-for-deletion`).
+    public var onRevealRequested: ((Bool) -> Void)?
+
+    /// Called once, from `dispose()`, when the panel's pane should be taken
+    /// out of the window's tree.
+    ///
+    /// Installed by whoever placed the panel, for `onRevealRequested`'s reason:
+    /// this class does not know which tree it is in. It is deliberately a
+    /// *second* closure rather than a second listener on `onDidDispose` —
+    /// that one belongs to the extension host, which forwards it to the
+    /// extension's own `onDidDispose`, and one stored closure cannot have two
+    /// owners.
+    ///
+    /// **It fires on the user's path too.** Closing the pane runs
+    /// `paneContentWillBeDiscarded()`, which disposes, which lands here — so
+    /// the closure must tolerate being asked to remove a pane that is already
+    /// on its way out.
+    public var onRemovalRequested: (() -> Void)?
+
     public private(set) var isDisposed = false
 
     private let schemeHandler: WebviewSchemeHandler
@@ -189,6 +216,7 @@ public final class WebviewPanelViewController: NSViewController {
             forName: WebviewHostDocument.messageHandlerName)
         webView?.loadHTMLString("", baseURL: nil)
         onDidDispose?()
+        onRemovalRequested?()
     }
 
     /// What the pane stores, and what `WebviewPanelSerializer` reads back.
@@ -252,6 +280,29 @@ extension WebviewPanelViewController: WKNavigationDelegate {
             NSWorkspace.shared.open(url)
         }
         return .cancel
+    }
+}
+
+// MARK: - Being a panel an extension holds
+
+extension WebviewPanelViewController: ExtensionWebviewPanel {
+
+    /// `NSViewController.title` is `String?`, which no protocol requirement
+    /// spelled `title: String` can be satisfied by — so the protocol asks for
+    /// this name instead, and it reads and writes the same storage. The empty
+    /// string stands in for `nil`, which this class never has once its
+    /// initialiser has run.
+    public var panelTitle: String {
+        get { title ?? "" }
+        set { title = newValue }
+    }
+
+    /// Asks whoever put this panel on screen to bring it forward. A panel with
+    /// nobody listening — one whose presenter is gone — silently does nothing,
+    /// which is what VS Code does for a panel in a closed window group too.
+    public func reveal(preserveFocus: Bool) {
+        guard !isDisposed else { return }
+        onRevealRequested?(preserveFocus)
     }
 }
 

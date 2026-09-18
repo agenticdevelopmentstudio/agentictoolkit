@@ -285,6 +285,9 @@ public final class ExtensionsCoordinator: AppFeature {
     ///   - footers: every footer a status bar item renders into.
     ///   - workspaceRoots: the workspace extensions see right now, or `nil`
     ///     when no project is open. Also read through, for the same reason.
+    ///   - placeWebviewPanel: where a webview panel an extension creates goes
+    ///     in a window's pane tree, or `nil` when there is nowhere to put one.
+    ///     Placement only — the panel arrives built.
     ///   - openDocumentLanguageIDs: the language id of every document open in
     ///     an editor right now. Read once per extension installed, to give an
     ///     extension enabled mid-session the `onLanguage:` activation whose
@@ -295,6 +298,7 @@ public final class ExtensionsCoordinator: AppFeature {
         frontWindow: @escaping () -> NSWindow?,
         footers: @escaping () -> [WindowFooterBar],
         workspaceRoots: @escaping () -> ExtensionWorkspaceRoots?,
+        placeWebviewPanel: @escaping PaneWebviewPresenter.Place,
         openDocumentLanguageIDs: @escaping () -> [String]
     ) {
         guard hostInstaller == nil else {
@@ -311,6 +315,7 @@ public final class ExtensionsCoordinator: AppFeature {
                 frontWindow: frontWindow,
                 footers: footers,
                 workspaceRoots: workspaceRoots,
+                placeWebviewPanel: placeWebviewPanel,
                 openDocumentLanguageIDs: openDocumentLanguageIDs))
         hostInstaller = installer
         subscribeToContributions()
