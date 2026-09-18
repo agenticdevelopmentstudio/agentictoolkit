@@ -190,14 +190,31 @@ public struct ComposableTabLayoutSpec: Sendable {
     /// A pure function on the spec, so the host app's wiring site — which no
     /// toolkit test can reach — is not the only place this can be exercised.
     public func widened(for views: [ContributedView]) -> Self {
-        guard !views.isEmpty else { return self }
-        var widened = self
-        widened.allows += views.map { view in
+        widened(allowing: views.map { view in
             .unbounded(
                 ComposableTabsViewID(view.registryID),
                 preferredAxis: view.preferredAxisIsVertical ? .vertical : .horizontal
             )
-        }
+        })
+    }
+
+    /// This spec with `allowances` added to its root.
+    ///
+    /// The general form of the widening above, because a contributed view is
+    /// not the only thing a host lays out that its own spec cannot name: an
+    /// extension webview panel is created at runtime by an extension that is
+    /// already running, so no manifest declares it and the app's spec — written
+    /// before any extension exists — has no allowance for the identifier its
+    /// panes use. Without one, `reconcile(_:)` demotes every restored webview
+    /// pane to a placeholder on the way in, silently.
+    ///
+    /// Appends, like the rest of widening: the caller derives from a base spec
+    /// each time rather than re-widening the installed one (`idempotency` is
+    /// the caller's, not this function's).
+    public func widened(allowing allowances: [ComposableTabsViewAllowance]) -> Self {
+        guard !allowances.isEmpty else { return self }
+        var widened = self
+        widened.allows += allowances
         return widened
     }
 
