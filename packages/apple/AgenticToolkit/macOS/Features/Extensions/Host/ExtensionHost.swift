@@ -209,6 +209,19 @@ public final class ExtensionHost {
     /// no name for, and this host still can.
     private var runtime: JSValue?
 
+    /// The object handed to `activate(context)`, or `nil` for a host that never
+    /// got that far.
+    ///
+    /// Stored rather than left a local in `callActivate` because of one member:
+    /// `subscriptions` is a real array, the extension pushes its disposables
+    /// onto it, and `dispose()` is what empties it. Teardown therefore needs a
+    /// route back to the very object activation built, and a local in a
+    /// function that returned long ago is not one.
+    ///
+    /// Released in `dispose()` *before* the context is, so the disposables are
+    /// still callable at the moment they are called.
+    private var activationContext: JSValue?
+
     /// Real implementations installed over the shim's stubs, in the order they
     /// were declared.
     ///
@@ -840,15 +853,66 @@ public final class ExtensionHost {
         }
     }
 
+    /// Empties `context.subscriptions`, disposing each entry.
+    ///
+    /// The loop itself is in the shim (`disposeSubscriptions`), not here,
+    /// because the entries are JavaScript objects with a `dispose` method:
+    /// walking them from Swift would be an `invokeMethod` per entry plus a
+    /// `JSValue` round trip to read the array's length each time round — the
+    /// same walk, written in the language that cannot see it.
+    ///
+    /// Failures are logged, never thrown. The caller is `dispose()`, which has
+    /// no error channel and no caller in a position to act on one; and an
+    /// extension whose `dispose` throws must not be able to stop the host from
+    /// finishing teardown. The shim keeps going through the rest of the list
+    /// for that same reason, which is why this can receive more than one.
+    private func disposeSubscriptions() {
+        guard let runtime, let activationContext else { return }
+
+        // A nil or undefined answer means the *call* failed rather than an
+        // entry did — a context already torn down, or a shim that is not the
+        // one this host was built against. Worth a line and nothing more:
+        // teardown carries on either way.
+        guard let outcome = runtime.invokeMethod(
+                "disposeSubscriptions", withArguments: [activationContext]),
+              !outcome.isUndefined, !outcome.isNull else {
+            logger.error(
+                """
+                Extension '\(self.identifier, privacy: .public)' could not dispose \
+                its context.subscriptions.
+                """)
+            return
+        }
+
+        let failures = outcome.forProperty("failures")?.toArray() as? [String] ?? []
+        for failure in failures {
+            logger.error(
+                """
+                Extension '\(self.identifier, privacy: .public)' registered a disposable \
+                that threw while being disposed: \(failure, privacy: .public)
+                """)
+        }
+    }
+
     /// Releases the context, cancels every timer the extension scheduled, and
     /// drops the host's handle on the runtime object.
     ///
-    /// Deliberately does *not* call the extension's `deactivate`. Teardown's
-    /// contract here is that nothing can call back into the app afterwards, and
-    /// running extension JavaScript as the last act of teardown is the opposite
-    /// of that. There is also nothing yet for an extension to clean up — every
-    /// `vscode` member that would let it acquire a resource is a stub — so the
-    /// callback would be ceremony with a failure mode.
+    /// Disposes everything the extension pushed onto `context.subscriptions`,
+    /// in the order it pushed them — upstream's own teardown
+    /// (`extHostExtensionService.ts:585`, `dispose(context.subscriptions)`).
+    /// That is no longer optional here: a registered command, a webview panel
+    /// and an event subscription are all real now and all reachable from the
+    /// app after the host is gone, and the subscriptions list is the only place
+    /// an extension is asked to put them.
+    ///
+    /// Still deliberately does *not* call the extension's `deactivate`, which
+    /// upstream runs first (`:395-414`). Teardown's contract here is that
+    /// nothing can call back into the app afterwards, and `deactivate` is
+    /// arbitrary extension JavaScript — it can do anything, registering
+    /// something new included. A `dispose` block on one of this host's own
+    /// disposables is code this repository wrote and can bound. Disposing the
+    /// subscriptions is the half of upstream's teardown that costs something to
+    /// skip; `deactivate` is still the half that costs something to run.
     ///
     /// Safe to call more than once, and safe to call on a host that never
     /// activated.
@@ -877,6 +941,11 @@ public final class ExtensionHost {
         // escape.
         finishActivation(.failure(.hostDisposed(identifier: identifier)))
 
+        // After `finishActivation`, so an activation still suspended is
+        // released before its disposables are run; before the context is
+        // dropped below, because a released context cannot call them at all.
+        disposeSubscriptions()
+
         // Blocks installed into the context capture this host weakly, so there
         // is no cycle to break — but the handler is taken off anyway, because a
         // context torn down mid-evaluation would otherwise still have a route
@@ -888,6 +957,7 @@ public final class ExtensionHost {
         // still holds up — would crash the process on its next uncaught
         // exception instead of ignoring it. See `recordExceptionOnContext`.
         context?.exceptionHandler = Self.recordExceptionOnContext
+        activationContext = nil
         runtime = nil
         context = nil
 
@@ -1425,16 +1495,22 @@ public final class ExtensionHost {
     ///
     /// An extension without `activate` is legal — a manifest can ship code that
     /// only contributes through side effects — so its absence is logged and is
-    /// not an error. What it is handed *is* an error surface: the activation
-    /// context is a recorded, throwing stub like every `vscode` member, so an
-    /// extension that reaches for `context.subscriptions` today is told which
-    /// member it wanted rather than failing later on an `undefined`.
+    /// not an error. What it is handed is mostly an error surface: the
+    /// activation context is a recorded, throwing stub like every `vscode`
+    /// member, so an extension that reaches for one this host has not built is
+    /// told which member it wanted rather than failing later on an `undefined`.
+    /// `subscriptions` is the exception — a real array, emptied by `dispose()`.
+    /// See `makeActivationContext` in the shim for why that one is real.
     private func callActivate(on exports: JSValue, runtime: JSValue) async throws {
-        // Named `context`, the way the author typed it. The ledger is read by a
-        // person looking for the line they wrote, and
-        // `vscode.ExtensionContext.subscriptions` is a name that appears
+        // The shim names it `context`, the way the author typed it: the ledger
+        // is read by a person looking for the line they wrote, and
+        // `vscode.ExtensionContext.workspaceState` is a name that appears
         // nowhere in their file.
-        let activationContext = runtime.invokeMethod("makeStubNamespace", withArguments: ["context"])
+        //
+        // Assigned to the stored property rather than a local, because the
+        // array it carries is where the extension's disposables accumulate and
+        // `dispose()` is the other end of that.
+        activationContext = runtime.invokeMethod("makeActivationContext", withArguments: [])
 
         // The one window the state machine did not cover, and the last one:
         // between `performActivation`'s guards and the continuation installed

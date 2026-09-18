@@ -289,6 +289,11 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
         // A bare switch has no name of its own, so VoiceOver would announce it
         // as an unlabelled control.
         toggle.setAccessibilityTitleUIElement(label)
+        // Named because this is the only route from the UI to
+        // `ExtensionHost.dispose()`: turning an extension off makes
+        // `reconcile()` drop its installation, which is what disposes
+        // everything the extension pushed onto `context.subscriptions`.
+        toggle.accessibilityID("extensions-settings.enabled-switch")
         self.enableSwitch = toggle
 
         let row = NSView()
