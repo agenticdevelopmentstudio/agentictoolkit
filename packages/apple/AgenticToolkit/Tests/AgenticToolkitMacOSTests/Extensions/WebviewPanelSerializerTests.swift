@@ -215,6 +215,9 @@ struct WebviewPanelSerializerTests {
         }
 
         let content = makeContent(registry, nodeID: nodeID, project: project)
+        // The registry captures the serializer weakly, so this binding is the
+        // only thing keeping it alive long enough to answer — not decoration.
+        withExtendedLifetime(serializer) {}
 
         #expect(asked == [saved])
         let panel = try #require(content as? WebviewPanelViewController)
@@ -223,7 +226,10 @@ struct WebviewPanelSerializerTests {
         // Seeded before the first document load, which is what makes the
         // page's own `getState()` right on the very first render.
         #expect(panel.state == #"{"scrollTop":420}"#)
-        #expect(panel.options.enableScripts)
+        // Read back through `restorationState` rather than the stored options:
+        // that is the property a later save actually writes, so this asserts
+        // the round trip closes rather than that one ivar was assigned.
+        #expect(panel.restorationState.options.enableScripts)
     }
 
     /// The extension was uninstalled or disabled since the layout was saved.
