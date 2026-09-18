@@ -10,7 +10,8 @@ import AgenticToolkitCore
 
 // MARK: - One live panel
 
-/// Everything the host keeps about one panel an extension created.
+/// Everything the host keeps about one panel an extension created, or one
+/// contributed view its provider resolved.
 ///
 /// The per-object model `MainThreadWindow.ExtensionStatusBarItem` is for a
 /// status bar item, and held the same way: `MainThreadWebviews.panels` is the
@@ -24,6 +25,22 @@ import AgenticToolkitCore
 @MainActor
 private final class ExtensionWebviewPanelModel {
 
+    /// Which `vscode` surface this model is behind.
+    ///
+    /// A panel and a view are one thing to nearly everything here — one live
+    /// webview, one pair of emitters, one entry in `panels` — and differ in
+    /// exactly two places: the JavaScript object the extension is handed, and
+    /// what the two events are *called* in the API they belong to. A
+    /// discriminator rather than a second model class, because two classes
+    /// differing by two strings would be duplication bought with nothing
+    /// (`dry`).
+    enum Surface {
+        case panel
+        case view
+    }
+
+    let surface: Surface
+
     /// The panel on screen.
     let panel: any ExtensionWebviewPanel
 
@@ -33,13 +50,17 @@ private final class ExtensionWebviewPanelModel {
     /// `panel.viewType`.
     let viewType: String
 
-    /// `webview.onDidReceiveMessage` (`vscode.d.ts:11700`).
+    /// `webview.onDidReceiveMessage` (`vscode.d.ts:11700`). The one member
+    /// both surfaces spell identically, because `Webview` is literally the
+    /// same type inside each.
     let messages: ExtensionEventEmitter<Any>
 
-    /// `panel.onDidDispose` (`vscode.d.ts:11934`).
+    /// `panel.onDidDispose` (`vscode.d.ts:11934`), or `view.onDidDispose`
+    /// (`:11840`).
     let disposal: ExtensionEventEmitter<Void>
 
-    /// `panel.onDidChangeViewState` (`vscode.d.ts:11929`).
+    /// `panel.onDidChangeViewState` (`vscode.d.ts:11929`), or
+    /// `view.onDidChangeVisibility` (`:11835`).
     ///
     /// Real, subscribable, and **never fired**: a pane in this app does not yet
     /// report becoming visible or active, so there is no change to publish.
@@ -49,13 +70,19 @@ private final class ExtensionWebviewPanelModel {
     /// worse answer than an event that stays quiet. `MainThreadWebviews`
     /// records a `NotImplementedLedger` row the first time anyone subscribes,
     /// so the extension report says which extension is waiting on it.
+    ///
+    /// One emitter under both names rather than two, because one model is one
+    /// surface: whichever name it answers to, this is "the pane's state moved"
+    /// and no model ever has to publish both.
     let viewStateChanges: ExtensionEventEmitter<Void>
 
     private(set) var isDisposed = false
 
-    init(panel: any ExtensionWebviewPanel, viewType: String) {
+    init(panel: any ExtensionWebviewPanel, viewType: String, surface: Surface) {
         self.panel = panel
         self.viewType = viewType
+        self.surface = surface
+        let type = surface == .panel ? "WebviewPanel" : "WebviewView"
         self.messages = ExtensionEventEmitter<Any>(
             path: "vscode.Webview.onDidReceiveMessage",
             delay: 0,
@@ -72,13 +99,15 @@ private final class ExtensionWebviewPanelModel {
             merge: { $0.last ?? NSNull() },
             map: { payload, context in JSValue(object: payload, in: context) })
         self.disposal = ExtensionEventEmitter<Void>(
-            path: "vscode.WebviewPanel.onDidDispose",
+            path: "vscode.\(type).onDidDispose",
             delay: 0,
             window: ExtensionEventImmediateWindow(),
             merge: { _ in () },
             map: { _, context in JSValue(undefinedIn: context) })
         self.viewStateChanges = ExtensionEventEmitter<Void>(
-            path: "vscode.WebviewPanel.onDidChangeViewState",
+            path: surface == .panel
+                ? "vscode.WebviewPanel.onDidChangeViewState"
+                : "vscode.WebviewView.onDidChangeVisibility",
             delay: 0,
             window: ExtensionEventImmediateWindow(),
             merge: { _ in () },
@@ -129,6 +158,10 @@ public final class MainThreadWebviews {
     public static let registerWebviewPanelSerializerMemberPath =
         "vscode.window.registerWebviewPanelSerializer"
 
+    /// `vscode.window.registerWebviewViewProvider` (`vscode.d.ts:12566`).
+    public static let registerWebviewViewProviderMemberPath =
+        "vscode.window.registerWebviewViewProvider"
+
     private let presenter: any ExtensionWebviewPresenting
     private let notImplementedLedger: NotImplementedLedger
     private let extensionIdentifier: String
@@ -178,6 +211,26 @@ public final class MainThreadWebviews {
     /// context would be a reference cycle through JavaScriptCore.
     private var serializers: [String: SerializerRegistration] = [:]
 
+    /// One live `registerWebviewViewProvider` registration.
+    ///
+    /// `SerializerRegistration`'s twin, for both of that type's reasons — the
+    /// token is what keeps a re-registration from being torn out by the first
+    /// `Disposable`, and the provider object is held whole so its method is
+    /// read off it at call time with `this` bound to what its author expects.
+    private struct ViewProviderRegistration {
+        let token: UUID
+        let provider: JSValue
+    }
+
+    /// View providers by contributed view id, held for `serializers`' reason.
+    ///
+    /// Keyed by the id the manifest's `contributes.views` gave the view, which
+    /// is the same string `registerWebviewViewProvider` takes and the same one
+    /// `ContributedView.viewID` carries — the three have to agree or nothing
+    /// resolves, which is exactly why the key is not a second spelling of
+    /// anything.
+    private var viewProviders: [String: ViewProviderRegistration] = [:]
+
     private var isDisposed = false
 
     /// - Parameters:
@@ -225,6 +278,15 @@ public final class MainThreadWebviews {
         of: self,
         whenTornDown: .raisedException
     ) { $0.handleRegisterWebviewPanelSerializer() }
+
+    /// `.raisedException` for its sibling's reason: a `Disposable` comes back
+    /// synchronously (`vscode.d.ts:12566`), usually straight onto
+    /// `context.subscriptions`.
+    public private(set) lazy var registerWebviewViewProvider: Any = VSCodeAPI.member(
+        MainThreadWebviews.registerWebviewViewProviderMemberPath,
+        of: self,
+        whenTornDown: .raisedException
+    ) { $0.handleRegisterWebviewViewProvider() }
 
     // MARK: - Creating a panel
 
@@ -285,7 +347,8 @@ public final class MainThreadWebviews {
                 in: context)
         }
 
-        let model = ExtensionWebviewPanelModel(panel: panel, viewType: viewType)
+        let model = ExtensionWebviewPanelModel(
+            panel: panel, viewType: viewType, surface: .panel)
         panels[panel.panelID] = model
         wire(model)
         return MainThreadWebviews.makePanelObject(for: model, of: self, in: context)
@@ -410,7 +473,8 @@ public final class MainThreadWebviews {
             return false
         }
 
-        let model = ExtensionWebviewPanelModel(panel: panel, viewType: viewType)
+        let model = ExtensionWebviewPanelModel(
+            panel: panel, viewType: viewType, surface: .panel)
         panels[panel.panelID] = model
         wire(model)
         guard let panelObject = MainThreadWebviews.makePanelObject(for: model, of: self, in: context)
@@ -444,6 +508,198 @@ public final class MainThreadWebviews {
                 """)
             return false
         }
+    }
+
+    // MARK: - Resolving a contributed view
+
+    private func handleRegisterWebviewViewProvider() -> JSValue? {
+        guard let context = JSContext.current() else { return nil }
+        let path = MainThreadWebviews.registerWebviewViewProviderMemberPath
+        guard !isDisposed else {
+            return VSCodeAPI.raise(
+                "\(path) is unavailable: this extension's host has been torn down.", in: context)
+        }
+
+        let arguments = VSCodeAPI.currentArguments()
+        guard let viewIDArgument = arguments.first, viewIDArgument.isString,
+              let viewID = viewIDArgument.toString()
+        else {
+            return VSCodeAPI.raise(
+                "\(path)'s first argument must be a view id string.", in: context)
+        }
+        // The *method* is checked for, not just the object, for
+        // `handleRegisterWebviewPanelSerializer`'s stated reason.
+        let provider: JSValue? = arguments.count > 1 ? arguments[1] : nil
+        guard let provider, provider.isObject,
+              MainThreadWebviews.isFunction(provider.forProperty("resolveWebviewView"), in: context)
+        else {
+            return VSCodeAPI.raise(
+                """
+                \(path)'s second argument must be an object with a \
+                resolveWebviewView(webviewView, context, token) method.
+                """,
+                in: context)
+        }
+
+        // The third argument is `{ webviewOptions: { retainContextWhenHidden } }`
+        // (`vscode.d.ts:12570`), and its one field is already true of every pane
+        // here — a pane keeps its view controller whether or not it is the
+        // frontmost tab. Read and dropped in silence rather than given a ledger
+        // row, on `parseOptions`' stated rule: a row for an option this host
+        // already satisfies would report a limit that does not exist.
+
+        // Last registration wins and is logged, as a serializer's does. VS Code
+        // *throws* on a second provider for one view id; this host does not,
+        // because the registration that would be refused is the one an
+        // extension makes after a reload, and taking the app's word over the
+        // extension's would leave a live pane wired to a dead context.
+        if viewProviders[viewID] != nil {
+            Self.logger.error(
+                """
+                \(self.extensionIdentifier, privacy: .public) registered a second webview view \
+                provider for view id \(viewID, privacy: .public); the later one wins
+                """)
+        }
+        let token = UUID()
+        viewProviders[viewID] = ViewProviderRegistration(token: token, provider: provider)
+
+        return VSCodeAPI.disposable(in: context) { [weak self] in
+            guard let self, self.viewProviders[viewID]?.token == token else { return }
+            self.viewProviders.removeValue(forKey: viewID)
+        }
+    }
+
+    /// Whether this extension has a provider registered for `viewID`.
+    ///
+    /// `hasSerializer(for:)`'s twin, asked in the same place and for the same
+    /// reason: a provider is registered from `activate`, so before that the
+    /// honest answer for an awake-on-demand extension is "no."
+    public func hasViewProvider(for viewID: String) -> Bool {
+        !isDisposed && viewProviders[viewID] != nil
+    }
+
+    /// Hands a contributed view's empty webview to the provider the extension
+    /// registered for it, and adopts it as a live webview of this adaptor's.
+    ///
+    /// `restore(_:viewType:state:)`'s twin, and deliberately so: both are "a
+    /// pane is on screen and empty, its extension is awake now, let it put its
+    /// page in." What differs is only which registration was consulted and
+    /// which object the extension receives — a `WebviewView`, not a
+    /// `WebviewPanel`.
+    ///
+    /// **The webview has not loaded anything when this is called, and that is
+    /// the point.** A provider's first two lines are `webviewView.webview
+    /// .options = { enableScripts: true }` and `webviewView.webview.html = …`,
+    /// and `enableScripts` reaches `WKWebViewConfiguration`, which is read when
+    /// a navigation commits and never again. Resolving before the view
+    /// controller's view is built is what makes that first assignment free
+    /// rather than a reload — `ExtensionWebviewViewController` is what arranges
+    /// it.
+    ///
+    /// - Returns: `false` when no provider is registered for `viewID`, or when
+    ///   the registering context is gone — in which case the caller still has
+    ///   an empty pane, and the log says why.
+    @discardableResult
+    public func resolveWebviewView(_ panel: any ExtensionWebviewPanel, viewID: String) -> Bool {
+        guard !isDisposed, let registration = viewProviders[viewID] else { return false }
+        guard let context = registration.provider.context,
+              let resolve = registration.provider.forProperty("resolveWebviewView"),
+              MainThreadWebviews.isFunction(resolve, in: context)
+        else {
+            Self.logger.error(
+                """
+                \(self.extensionIdentifier, privacy: .public) has a provider for view id \
+                \(viewID, privacy: .public) but no resolveWebviewView to call
+                """)
+            return false
+        }
+
+        let model = ExtensionWebviewPanelModel(panel: panel, viewType: viewID, surface: .view)
+        panels[panel.panelID] = model
+        wire(model)
+        guard let viewObject = MainThreadWebviews.makeWebviewViewObject(
+            for: model, of: self, in: context)
+        else {
+            Self.logger.error(
+                """
+                The contributed view \(viewID, privacy: .public) could not be given a JavaScript \
+                object; it stays empty
+                """)
+            return false
+        }
+
+        let resolveContext = MainThreadWebviews.resolveContextValue(of: self, in: context)
+        let cancellation = MainThreadWebviews.uncancelledToken(in: context)
+        switch VSCodeAPI.call(resolve, thisArg: registration.provider,
+                              arguments: [viewObject, resolveContext as Any, cancellation as Any]) {
+        case .returned:
+            return true
+        case .threw(let error):
+            Self.logger.error(
+                """
+                \(self.extensionIdentifier, privacy: .public)'s resolveWebviewView threw for view \
+                id \(viewID, privacy: .public): \
+                \(error.toString() ?? "<unprintable>", privacy: .public)
+                """)
+            return false
+        case .unavailable:
+            Self.logger.error(
+                """
+                \(self.extensionIdentifier, privacy: .public)'s resolveWebviewView could not be \
+                invoked for view id \(viewID, privacy: .public)
+                """)
+            return false
+        }
+    }
+
+    /// `WebviewViewResolveContext` (`vscode.d.ts:11850`) — one member, `state`.
+    ///
+    /// Always `undefined`, and a ledger row the moment a provider reads it.
+    /// Upstream's `state` is what the view's page last passed to `setState`
+    /// **in a previous session**, and this host does not persist a contributed
+    /// view's state across a quit: a webview *panel* is a pane in a layout the
+    /// project writes down, and the serializer path exists to put it back,
+    /// whereas a contributed view is a pane the manifest declares, rebuilt from
+    /// the manifest every launch with nowhere a page's state could have been
+    /// kept. A row rather than silence because this is a capability that is
+    /// simply not built — the distinction `parseOptions` draws between the
+    /// options it reports and the ones it does not.
+    private static func resolveContextValue(
+        of webviews: MainThreadWebviews, in context: JSContext
+    ) -> JSValue? {
+        guard let object = JSValue(newObjectIn: context) else { return nil }
+        installReadonlyGetter(on: object, name: "state") { [weak webviews] in
+            webviews?.notImplementedLedger.record(
+                memberPath: "vscode.WebviewViewResolveContext.state",
+                extensionIdentifier: webviews?.extensionIdentifier ?? "")
+            return JSContext.current().map { JSValueBridge.undefinedOrNull(in: $0) }
+        }
+        return object
+    }
+
+    /// A `CancellationToken` (`vscode.d.ts:1450`) that never fires.
+    ///
+    /// Upstream cancels a resolve when the view goes away while the provider is
+    /// still working; nothing here can, because a contributed view resolves
+    /// once, synchronously, into a pane that already exists. A *degraded
+    /// argument* rather than an absent one — `parsePreserveFocus`' rule — so it
+    /// is documented here and gets no ledger row: a provider that polls
+    /// `isCancellationRequested` reads a truthful `false`, and one that
+    /// subscribes gets a real `Disposable` that is simply never called back.
+    private static func uncancelledToken(in context: JSContext) -> JSValue? {
+        guard let object = JSValue(newObjectIn: context) else { return nil }
+        installReadonlyGetter(on: object, name: "isCancellationRequested") { false }
+        let onCancellationRequested: @convention(block) () -> JSValue? = {
+            MainActor.assumeIsolated {
+                guard let context = JSContext.current() else {
+                    return UncheckedJSValueBox(value: nil)
+                }
+                return UncheckedJSValueBox(value: VSCodeAPI.disposable(in: context) {})
+            }.value
+        }
+        object.setObject(
+            onCancellationRequested, forKeyedSubscript: "onCancellationRequested" as NSString)
+        return object
     }
 
     /// The saved state as the value `deserializeWebviewPanel` receives.
@@ -619,9 +875,9 @@ public final class MainThreadWebviews {
         // wrappers behave identically; the single observable difference is that
         // `panel.webview !== panel.webview`, and nothing in the `vscode` API
         // asks that question.
-        installReadonlyGetter(on: object, name: "webview") { [weak model] in
-            guard let model, let context = JSContext.current() else { return nil }
-            return makeWebviewObject(for: model, in: context)
+        installReadonlyGetter(on: object, name: "webview") { [weak model, weak webviews] in
+            guard let model, let webviews, let context = JSContext.current() else { return nil }
+            return makeWebviewObject(for: model, of: webviews, in: context)
         }
 
         // `vscode.d.ts:11905` — the options the *panel* was created with, as
@@ -730,12 +986,130 @@ public final class MainThreadWebviews {
         return object
     }
 
+    // MARK: - The WebviewView object
+
+    /// Builds the JS-visible `WebviewView` (`vscode.d.ts:11800-11845`) a
+    /// provider is handed.
+    ///
+    /// `makePanelObject`'s no-capture contract holds here unchanged, and for
+    /// the same reason — every block below captures `model` and `webviews`
+    /// weakly, and nothing stores a `JSValue` on either.
+    ///
+    /// The two types' overlap is real but not extractable: `viewType`,
+    /// `webview`, `title` and `onDidDispose` are shared, while `description`,
+    /// `badge` and `show` exist only here, `iconPath`, `viewColumn`, `active`
+    /// and `reveal` only there, and `visible` differs in what it is paired
+    /// with. A shared builder plus two lists of exceptions would be longer than
+    /// the two builders and would have to be read twice to answer "what does an
+    /// extension see?" — so the duplication that is left is deliberate, and the
+    /// knowledge that is genuinely single (the model, the emitters, the
+    /// `Webview` object) is already shared (`dry`).
+    private static func makeWebviewViewObject(
+        for model: ExtensionWebviewPanelModel,
+        of webviews: MainThreadWebviews,
+        in context: JSContext
+    ) -> JSValue? {
+        guard let object = JSValue(newObjectIn: context) else { return nil }
+
+        installReadonlyGetter(on: object, name: "viewType") { [weak model] in model?.viewType }
+
+        installReadonlyGetter(on: object, name: "webview") { [weak model, weak webviews] in
+            guard let model, let webviews, let context = JSContext.current() else { return nil }
+            return makeWebviewObject(for: model, of: webviews, in: context)
+        }
+
+        // `vscode.d.ts:11815`. `string | undefined` upstream, where `undefined`
+        // means "use the name the manifest gave this view". The pane already
+        // shows that name, so the getter answers with it rather than with
+        // `undefined`: it is the same string the user is looking at, which is
+        // what the property is asking about.
+        installAccessor(on: object, name: "title",
+            get: { [weak model] in model?.panel.panelTitle },
+            set: { [weak model] value in
+                guard let model, let value, value.isString, let string = value.toString() else {
+                    return
+                }
+                model.panel.panelTitle = string
+            })
+
+        // `vscode.d.ts:11821` and `:11827`. A pane's chrome here is a title and
+        // nothing else — no subtitle line, no count bubble — so both are
+        // accessor pairs that record rather than drop: a plain JS object takes
+        // `view.description = …` in silence, and silence is what the ledger
+        // exists to prevent. `iconPath`'s precedent, one member up.
+        for name in ["description", "badge"] {
+            installAccessor(on: object, name: name,
+                get: { JSContext.current().map { JSValueBridge.undefinedOrNull(in: $0) } },
+                set: { [weak webviews] value in
+                    guard let webviews, let value, !value.isUndefined, !value.isNull else { return }
+                    webviews.notImplementedLedger.record(
+                        memberPath: "vscode.WebviewView.\(name)",
+                        extensionIdentifier: webviews.extensionIdentifier)
+                })
+        }
+
+        // `vscode.d.ts:11833`. "Live and rendering", which is true until
+        // disposal — `WebviewPanel.visible`'s answer, for its reason, and the
+        // ledger row `onDidChangeVisibility` records below is where the limit
+        // is written down.
+        installReadonlyGetter(on: object, name: "visible") { [weak model] in
+            model.map { !$0.isDisposed } ?? false
+        }
+
+        let onDidDispose: @convention(block) () -> JSValue? = { [weak model] in
+            MainActor.assumeIsolated {
+                guard let model, let context = JSContext.current() else {
+                    return UncheckedJSValueBox(value: nil)
+                }
+                return UncheckedJSValueBox(value: model.disposal.subscribe(
+                    arguments: VSCodeAPI.currentArguments(), in: context, owner: model))
+            }.value
+        }
+        object.setObject(onDidDispose, forKeyedSubscript: "onDidDispose" as NSString)
+
+        let onDidChangeVisibility: @convention(block) () -> JSValue? = { [weak model, weak webviews] in
+            MainActor.assumeIsolated {
+                guard let model, let context = JSContext.current() else {
+                    return UncheckedJSValueBox(value: nil)
+                }
+                webviews?.notImplementedLedger.record(
+                    memberPath: "vscode.WebviewView.onDidChangeVisibility",
+                    extensionIdentifier: webviews?.extensionIdentifier ?? "")
+                return UncheckedJSValueBox(value: model.viewStateChanges.subscribe(
+                    arguments: VSCodeAPI.currentArguments(), in: context, owner: model))
+            }.value
+        }
+        object.setObject(onDidChangeVisibility, forKeyedSubscript: "onDidChangeVisibility" as NSString)
+
+        // `vscode.d.ts:11845` — `show(preserveFocus?)`. The *first* argument
+        // here, where `reveal`'s focus flag is the second: this one takes no
+        // column, so there is nothing for it to sit behind.
+        let show: @convention(block) () -> Void = { [weak model] in
+            MainActor.assumeIsolated {
+                guard let model else { return }
+                let argument = VSCodeAPI.currentArguments().first
+                let preserveFocus = argument.map { $0.isBoolean && $0.toBool() } ?? false
+                model.panel.reveal(preserveFocus: preserveFocus)
+            }
+        }
+        object.setObject(show, forKeyedSubscript: "show" as NSString)
+
+        // No `dispose()`. `WebviewView` has none upstream (`vscode.d.ts:11800`)
+        // and the omission is the API's point: a view's lifetime belongs to the
+        // pane the manifest declared, not to the extension that draws in it.
+
+        return object
+    }
+
     // MARK: - The Webview object
 
     /// Builds the JS-visible `Webview` (`vscode.d.ts:11660-11712`) inside a
-    /// panel. Built fresh per access — see the `webview` getter above.
+    /// panel or a contributed view — the one type both surfaces share, and
+    /// share identically. Built fresh per access — see the `webview` getter
+    /// above.
     private static func makeWebviewObject(
         for model: ExtensionWebviewPanelModel,
+        of webviews: MainThreadWebviews,
         in context: JSContext
     ) -> JSValue? {
         guard let object = JSValue(newObjectIn: context) else { return nil }
@@ -808,25 +1182,48 @@ public final class MainThreadWebviews {
         }
         object.setObject(onDidReceiveMessage, forKeyedSubscript: "onDidReceiveMessage" as NSString)
 
-        // `vscode.d.ts:11667` — the options the webview is *currently* under.
-        // Read-only here: `enableScripts` is fixed when `WKWebView`'s
-        // configuration is built and cannot be changed afterwards, so a setter
-        // that accepted one would be accepting something it could not do. The
-        // one field an extension genuinely re-narrows at runtime is
-        // `localResourceRoots`, and it is settable on its own below — a
-        // narrower member that does exactly what it says, rather than a wide
-        // one that silently honours a third of itself.
-        installReadonlyGetter(on: object, name: "options") { [weak model] in
-            guard let model, let context = JSContext.current(),
-                  let options = JSValue(newObjectIn: context)
-            else { return nil }
-            options.setObject(
-                model.panel.localResourceRoots.compactMap {
-                    VSCodeAPI.uriValue(for: $0, in: context)
-                },
-                forKeyedSubscript: "localResourceRoots" as NSString)
-            return options
-        }
+        // `vscode.d.ts:11667` — the options the webview is *currently* under,
+        // and settable, because upstream's is. A contributed view has no other
+        // route: the host builds the pane and the extension's
+        // `resolveWebviewView` turns scripts on inside it, since only the
+        // extension knows whether its page runs code. A panel reaches the same
+        // setter, which is a fix as much as a widening — `panel.webview.options
+        // = …` used to be accepted by the JS object and dropped on the floor.
+        //
+        // `enableCommandUris` and `portMapping` are still only recorded, and
+        // `parseOptions` is what does the recording — one place that reads this
+        // shape, whether it arrived at creation or by assignment (`dry`).
+        installAccessor(on: object, name: "options",
+            get: { [weak model] in
+                guard let model, let context = JSContext.current(),
+                      let options = JSValue(newObjectIn: context)
+                else { return nil }
+                let current = model.panel.options
+                options.setObject(current.enableScripts, forKeyedSubscript: "enableScripts" as NSString)
+                options.setObject(current.enableForms, forKeyedSubscript: "enableForms" as NSString)
+                // The *resolved* roots, not the declared ones: this is the
+                // answer to "what may the page read", and a `localResourceRoots`
+                // the extension never wrote still has directories in it.
+                options.setObject(
+                    model.panel.localResourceRoots.compactMap {
+                        VSCodeAPI.uriValue(for: $0, in: context)
+                    },
+                    forKeyedSubscript: "localResourceRoots" as NSString)
+                return options
+            },
+            set: { [weak model, weak webviews] value in
+                guard let model, let webviews, let value, value.isObject,
+                      let context = JSContext.current()
+                else { return }
+                // Declared first, then resolved — in that order, because
+                // resolving reads the declaration. `WebviewPanelOptions`'
+                // defaults apply to an assignment exactly as they do to a
+                // creation, so `{ enableScripts: true }` with no roots grants
+                // the same directories `createWebviewPanel` would have.
+                let options = webviews.parseOptions(value, in: context)
+                model.panel.options = options
+                model.panel.localResourceRoots = webviews.resourceRoots(for: options)
+            })
 
         installAccessor(on: object, name: "localResourceRoots",
             get: { [weak model] in
@@ -895,6 +1292,10 @@ public final class MainThreadWebviews {
         // that is being torn down, and `hasSerializer(for:)` must stop
         // claiming view types this extension can no longer restore.
         serializers.removeAll()
+        // And the view providers, for the identical reason — a pane whose
+        // provider is gone has to fall back to saying so, which it can only do
+        // if `hasViewProvider(for:)` stops answering yes.
+        viewProviders.removeAll()
     }
 }
 

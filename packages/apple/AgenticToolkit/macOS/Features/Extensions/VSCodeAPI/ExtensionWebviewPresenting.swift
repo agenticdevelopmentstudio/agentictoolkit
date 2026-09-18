@@ -93,6 +93,19 @@ public protocol ExtensionWebviewPanel: AnyObject {
     /// `WebviewOptions.localResourceRoots`, re-narrowable at runtime.
     var localResourceRoots: [URL] { get set }
 
+    /// The `WebviewOptions` the page is under *now*, not the ones it was
+    /// built with. `Webview.options` (`vscode.d.ts:11667`) is a settable
+    /// property upstream, and for a contributed webview view it is the only
+    /// route there is: the host builds the view and the extension's
+    /// `resolveWebviewView` turns scripts on inside it, because only the
+    /// extension knows whether its page runs code.
+    ///
+    /// Resolved roots stay their own property. This one carries what the
+    /// extension *declared*, and turning a declaration into directories needs
+    /// the extension's install directory — see `ExtensionWebviewPanelRequest`'s
+    /// doc for why that resolution never reaches a panel.
+    var options: WebviewPanelOptions { get set }
+
     /// The JSON text the page last passed to `setState`, or `nil`. What a
     /// serializer writes down.
     var state: String? { get }

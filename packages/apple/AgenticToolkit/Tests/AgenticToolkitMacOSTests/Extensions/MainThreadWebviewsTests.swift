@@ -18,6 +18,8 @@ private final class TestWebviewPanel: ExtensionWebviewPanel {
     let panelID: String
     var panelTitle: String
     var html: String = ""
+    var options = WebviewPanelOptions(
+        enableScripts: nil, enableForms: nil, localResourceRoots: nil)
     var localResourceRoots: [URL]
     private(set) var state: String?
 

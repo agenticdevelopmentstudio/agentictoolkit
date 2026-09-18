@@ -101,8 +101,6 @@ public struct ContributedViewNote: ExtensionContributionNote, Equatable {
     public enum Kind: String, Sendable, Equatable {
         /// A `when` clause was declared. It is stored and never evaluated.
         case whenNotEvaluated
-        /// `"type": "webview"` — the content is the extension's own code.
-        case webviewNeedsHost
         /// A `$(codicon)` reference with no SF Symbol equivalent.
         case unmappedIcon
         /// The icon was a file inside the extension, which nothing here reads.
@@ -331,17 +329,14 @@ public enum ContributedViewsBuilder {
                 ))
             }
 
+            // No note for either kind, and for opposite reasons. A webview
+            // view is fully supported — `registerWebviewViewProvider` resolves
+            // it — so there is no compromise to report. A tree view is not, and
+            // still gets none, because every view in the overwhelming majority
+            // is one: a note per tree view would be a second copy of a sentence
+            // the Views group already states once, over its whole list, and the
+            // pane itself says on its face.
             let kind: ContributedView.Kind = declared.type == "webview" ? .webview : .tree
-            if kind == .webview {
-                notes.append(ContributedViewNote(
-                    extensionIdentifier: identifier,
-                    viewID: declared.id,
-                    kind: .webviewNeedsHost,
-                    detail: "is a webview: its content is drawn by the extension's own code, "
-                        + "through a registerWebviewViewProvider call the extension host does "
-                        + "not implement yet. Webview panels an extension opens itself do work."
-                ))
-            }
 
             let icon = resolveIcon(
                 declared.icon, viewID: declared.id, identifier: identifier, notes: &notes)

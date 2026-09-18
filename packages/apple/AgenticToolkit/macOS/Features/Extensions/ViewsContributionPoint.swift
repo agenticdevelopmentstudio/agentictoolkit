@@ -17,9 +17,12 @@ import Foundation
 /// result into a registry and hands back a placeholder pane.
 ///
 /// A view entry is an id, a name and a placement; the content arrives at
-/// runtime from `registerTreeDataProvider` or `createTreeView`. So what is
-/// registered here is honestly a labelled empty pane, and it says so on its
-/// face. That registry is the seam an extension host fills in later.
+/// runtime, and where from depends on the kind. A **webview** view is resolved
+/// by `registerWebviewViewProvider`, which this host implements — so those
+/// panes get the extension's own page as soon as its provider runs, through
+/// `resolveWebview`. A **tree** view waits on `registerTreeDataProvider` or
+/// `createTreeView`, neither of which exists yet, so those panes stay the
+/// labelled empty pane that says so on its face.
 @MainActor
 public final class ViewsContributionPoint: ContributionPoint {
 
@@ -44,6 +47,33 @@ public final class ViewsContributionPoint: ContributionPoint {
     /// instance, because a demo project and a real project need different view
     /// sets in one process (`dependency-injection`).
     private let registry: ComposableTabsViewRegistry
+
+    /// Builds the live webview for a contributed webview view, or `nil` when
+    /// nothing can — see `ContributedWebviewResolving`.
+    ///
+    /// **Settable and late-bound, deliberately.** This point is constructed
+    /// with the window's registry, long before any extension host exists;
+    /// `ExtensionsCoordinator` assigns this once it has built the installer.
+    /// `WebviewPanelSerializer`'s restore closure is the precedent and the
+    /// reason — the same ordering, solved the same way, rather than a second
+    /// answer to it.
+    ///
+    /// `nil` until then, and a pane built in that window shows its placeholder.
+    /// That is the honest answer for a pane built before the hosts are up, and
+    /// it is not a state a user can reach: the panes are registered by `apply`,
+    /// which the installer's own pass is what runs.
+    public var resolveWebview: ContributedWebviewResolving?
+
+    /// Called when a pane for a contributed view is built, whatever its kind —
+    /// the `onView:<id>` activation event's trigger.
+    ///
+    /// `resolveWebview`'s pair, late-bound for the same reason and separate for
+    /// the reason `ExtensionHostInstaller` gives at the two methods it stands
+    /// in front of: resolving asks *the one extension that declared the view*
+    /// for its page, while this is news any extension may have asked to hear,
+    /// including about someone else's view. A tree view has no page to ask for
+    /// and still fires this.
+    public var onViewWillAppear: ((ContributedView) -> Void)?
 
     public init(registry: ComposableTabsViewRegistry) {
         self.registry = registry
@@ -92,9 +122,24 @@ public final class ViewsContributionPoint: ContributionPoint {
                     // function without, and none of these is that.
                     isCollapsible: true
                 )
-            ) { _ in
-                ExtensionViewPlaceholderViewController(
-                    view: view, extensionDisplayName: displayName)
+            ) { [weak self] _ in
+                // Read at pane-build time, not captured: a window may build
+                // this pane before or after the hosts come up, and the factory
+                // outlives both. `self` weakly for the same reason the closure
+                // exists at all — the registry holds it, and this point is
+                // owned by a coordinator that can go first.
+                //
+                // The broadcast goes first, and unconditionally: an extension
+                // woken by `onView:` may be the one that then registers the
+                // provider the line below looks for, and a tree view — which
+                // never reaches that line — is just as much a pane appearing.
+                self?.onViewWillAppear?(view)
+                guard view.kind == .webview, let resolve = self?.resolveWebview else {
+                    return ExtensionViewPlaceholderViewController(
+                        view: view, extensionDisplayName: displayName)
+                }
+                return ExtensionWebviewViewController(
+                    view: view, extensionDisplayName: displayName, resolve: resolve)
             }
         }
 
@@ -133,8 +178,13 @@ public final class ViewsContributionPoint: ContributionPoint {
 /// (`design-for-deletion`).
 ///
 /// No spinner, no empty outline, no fake tree. An empty outline would be a
-/// lie: the extension ships the code that fills it, and this host does not run
-/// that code yet.
+/// lie: the extension ships the code that fills a tree, and this host does not
+/// run that code yet.
+///
+/// A **webview** view shows this too, but only until its provider resolves —
+/// see `ExtensionWebviewViewController`, which is what swaps it out. The
+/// sentence differs between the two because the situations do: one is waiting
+/// on this host, the other on the extension.
 @MainActor
 public final class ExtensionViewPlaceholderViewController: NSViewController {
 
@@ -147,6 +197,22 @@ public final class ExtensionViewPlaceholderViewController: NSViewController {
     /// Inset from each side of the pane, matching the stack's own leading and
     /// trailing constraints below.
     private static let explanationInset: CGFloat = 16
+
+    /// Why this pane is empty, in the one sentence a person reads.
+    ///
+    /// Two sentences because there are two reasons, and telling a user their
+    /// extension's webview needs a host feature that in fact exists would send
+    /// them looking in the wrong place (`fail-fast`, applied to a person).
+    private static func explanation(for kind: ContributedView.Kind) -> String {
+        switch kind {
+        case .tree:
+            return "This view's content is provided by the extension, through a tree data "
+                + "provider API the extension host does not implement yet."
+        case .webview:
+            return "This view's content is drawn by the extension, and it has not drawn any "
+                + "yet — its webview view provider has not run."
+        }
+    }
 
     private let contributedView: ContributedView
     private let extensionDisplayName: String
@@ -178,8 +244,7 @@ public final class ExtensionViewPlaceholderViewController: NSViewController {
         let attribution = ThemedLabel(
             string: extensionDisplayName, role: .secondaryText, textRole: .body)
         let explanation = ThemedLabel(
-            string: "This view's content is provided by the extension, through a view "
-                + "provider API the extension host does not implement yet.",
+            string: Self.explanation(for: contributedView.kind),
             role: .tertiaryText,
             textRole: .caption)
         // `ThemedLabel` is built as a single-line caption, which is right for

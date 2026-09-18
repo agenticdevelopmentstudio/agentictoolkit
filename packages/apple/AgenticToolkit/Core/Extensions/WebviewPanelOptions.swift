@@ -29,11 +29,19 @@ import Foundation
 ///   * `iconPath` is pane chrome, and `WebviewPanelViewController` answers its
 ///     pane's title, not its icon.
 ///
-/// Immutable, because an option is what the panel was *created* with. VS Code
-/// lets `webview.options` be reassigned; the one field an extension genuinely
-/// re-narrows at runtime is `localResourceRoots`, and that is a settable
-/// property on the panel itself (see `WebviewPanelViewController`), not a
-/// second copy of this struct.
+/// A value, and reassigned as one. `webview.options = { enableScripts: true }`
+/// is how an extension turns scripts on, and a webview *view* provider has no
+/// other way to — its panel is handed to it already built — so
+/// `ExtensionWebviewPanel.options` is settable and the panel re-applies itself
+/// on the change. Re-applying means a reload, because `enableScripts` is baked
+/// into a `WKWebViewConfiguration` that cannot be edited in place; it costs
+/// nothing in the case that matters, since options are assigned before the
+/// first `html` and a panel with no document loaded has nothing to lose.
+///
+/// `localResourceRoots` is the one field this struct still does not hold the
+/// last word on: the resolved roots are a settable property on the panel
+/// itself (see `WebviewPanelViewController`), because resolving them needs the
+/// owning extension's directory, which no struct here knows.
 public struct WebviewPanelOptions: Codable, Equatable, Sendable {
 
     /// `WebviewOptions.enableScripts`. Off unless asked for, matching both

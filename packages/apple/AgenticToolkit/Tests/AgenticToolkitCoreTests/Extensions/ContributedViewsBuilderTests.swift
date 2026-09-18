@@ -89,19 +89,21 @@ struct ContributedViewsBuilderTests {
         let built = try build(views: #"{ "explorer": [{ "id": "acme.tree", "name": "Tree" }] }"#)
         try #require(built.views.count == 1)
         #expect(built.views[0].kind == .tree)
-        #expect(!built.notes.contains { $0.kind == .webviewNeedsHost })
+        #expect(built.notes.isEmpty)
     }
 
-    @Test("a webview is registered all the same, with a note saying why it is empty")
-    func webviewIsRegisteredWithANote() throws {
+    /// The kind is the whole of what a webview declaration changes here, and
+    /// the assertion that it produces **no** note is the load-bearing half:
+    /// a webview view is resolved by `registerWebviewViewProvider`, so telling
+    /// the reader it needs a host feature would send them looking for something
+    /// that exists.
+    @Test("a webview is registered as one, and reports no compromise")
+    func webviewIsRegisteredWithoutANote() throws {
         let built = try build(
             views: #"{ "explorer": [{ "id": "acme.web", "name": "Web", "type": "webview" }] }"#)
         try #require(built.views.count == 1)
         #expect(built.views[0].kind == .webview)
-
-        let note = try #require(built.notes.first { $0.kind == .webviewNeedsHost })
-        #expect(note.viewID == "acme.web")
-        #expect(note.extensionIdentifier == "acme.sample")
+        #expect(built.notes.isEmpty)
     }
 
     // MARK: - 3, 4, 5 — Ruling FA, icons

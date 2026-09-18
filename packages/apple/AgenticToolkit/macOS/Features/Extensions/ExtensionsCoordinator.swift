@@ -427,6 +427,37 @@ public final class ExtensionsCoordinator: AppFeature {
                 },
                 openDocumentLanguageIDs: openDocumentLanguageIDs))
         hostInstaller = installer
+        // The two contributed-view seams, wired here rather than at
+        // construction for the serializer's reason directly above: `viewsPoint`
+        // is built in `init`, and both of these need the installer. Each reads
+        // `hostInstaller` back through `self` at call time, which is a pane
+        // build later.
+        viewsPoint?.onViewWillAppear = { [weak self] view in
+            self?.hostInstaller?.contributedViewWillAppear(viewID: view.viewID)
+        }
+        viewsPoint?.resolveWebview = { [weak self] view, didResolve in
+            self?.hostInstaller?.resolveWebviewView(
+                view: view,
+                makePanel: { roots in
+                    // `registryID` as the view type, not `viewID`: this panel
+                    // is never restored through `WebviewPanelSerializer` — its
+                    // pane is the manifest's, rebuilt from the manifest — so
+                    // the string is read only by people, in logs, where the
+                    // namespaced form is the one that says which extension it
+                    // belongs to.
+                    WebviewPanelViewController(
+                        viewType: view.registryID,
+                        title: view.name,
+                        // What the provider will overwrite from inside its
+                        // `resolveWebviewView`, and the only safe starting
+                        // point: scripts off until an extension says its page
+                        // runs code.
+                        options: WebviewPanelOptions(
+                            enableScripts: nil, enableForms: nil, localResourceRoots: nil),
+                        localResourceRoots: roots)
+                },
+                didResolve: didResolve)
+        }
         subscribeToContributions()
         installer.reconcile()
     }
