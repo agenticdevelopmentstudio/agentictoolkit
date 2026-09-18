@@ -29,7 +29,23 @@ public final class ExtensionRegistry {
     /// The VS Code API version this host claims to implement. Extensions
     /// whose `engines.vscode` rejects this version fail to load — see
     /// `ExtensionLoadError.engineIncompatible`.
-    public static let declaredVSCodeVersion = SemanticVersion(major: 1, minor: 95, patch: 0)
+    ///
+    /// 1.138.0 is derived, not chosen. The `vscode.d.ts` every adaptor in
+    /// `VSCodeAPI/` was written against is the one at the upstream commit
+    /// pinned in `docs/planning/vsc-extensions-upstream-pin-manifest.md`,
+    /// which is `main` at 1.139.0 — i.e. past the 1.138.0 tag cut, and so
+    /// containing the whole of 1.138.0's stable API and none of 1.139.0's
+    /// guarantees. Declaring the last version whose surface we have actually
+    /// read is the honest claim.
+    ///
+    /// Claiming low is not the safe direction it looks like. This gate only
+    /// ever *refuses* extensions; it cannot make an unimplemented API appear,
+    /// because an extension that calls one gets the `NotImplementedLedger`'s
+    /// thrown member either way. The previous 1.95.0 bought nothing for that
+    /// and cost 13.7% of the floored web extensions in the Open VSX survey
+    /// (`Scripts/openvsx_engine_survey.py`) — refused before they could report
+    /// what they actually needed.
+    public static let declaredVSCodeVersion = SemanticVersion(major: 1, minor: 138, patch: 0)
 
     public private(set) var extensions: [LoadedExtension] = []
 
