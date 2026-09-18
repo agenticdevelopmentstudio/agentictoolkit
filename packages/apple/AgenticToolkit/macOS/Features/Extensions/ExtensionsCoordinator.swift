@@ -138,6 +138,48 @@ public final class ExtensionsCoordinator: AppFeature {
         ExtensionsSettingsPanelViewController(coordinator: self)
     }
 
+    // MARK: - Installing from a registry
+
+    /// Where an extension installed from inside the app lands.
+    ///
+    /// The **first** search path, not a path of its own. The registry scans
+    /// the search paths in order and an installer writing somewhere else would
+    /// produce an extension that installs and never loads. `nil` only for a
+    /// host constructed with no search paths at all — headless, or a test —
+    /// and the browse UI reads it as "installing is not available here"
+    /// rather than inventing a directory.
+    public var installDirectory: URL? { searchPaths.first }
+
+    /// Downloads, verifies and installs `detail`, then rescans so the new
+    /// extension is live without a relaunch.
+    ///
+    /// The rescan is a full `loadAll()`: every contribution is withdrawn and
+    /// re-applied from what is on disk now. That is heavier than applying the
+    /// one new extension, and it is the only version that is *correct* — an
+    /// install can supersede a directory (a newer version replacing an older
+    /// one), and applying the new contributions without withdrawing the old
+    /// ones would leave the superseded version's themes and snippets in place
+    /// with nothing left on disk to withdraw them later *(idempotency)*.
+    ///
+    /// The download and the archive work happen off the main actor: every
+    /// method they go through is `nonisolated async`, so `await` here does not
+    /// pin a multi-megabyte download and an Ed25519 verification to the actor
+    /// drawing the window.
+    public func installFromRegistry(
+        _ detail: OpenVSXExtensionDetail,
+        using client: OpenVSXClient
+    ) async throws -> VSIXInstallation {
+        guard let installDirectory else {
+            throw ExtensionInstallUnavailable.noSearchPath
+        }
+        let installer = VSIXInstaller(
+            installDirectory: installDirectory,
+            hostVersion: ExtensionRegistry.declaredVSCodeVersion)
+        let installation = try await installer.install(detail, using: client)
+        registry.loadAll()
+        return installation
+    }
+
     /// Every view the extensions registered, across every loaded extension.
     ///
     /// Registration alone puts nothing in front of the user: a spec's `allows`
@@ -433,4 +475,17 @@ public final class ExtensionsCoordinator: AppFeature {
 
 extension ExtensionsCoordinator: Loggable {
     public static nonisolated let logger = makeLogger()
+}
+
+/// Why installing from a registry is not possible at all, as distinct from an
+/// install that was tried and failed.
+///
+/// Separate from `VSIXInstallError` on purpose: every case there describes a
+/// particular extension that could not be installed, and a UI showing one
+/// beside a Retry button is right to. This is the other kind — nothing about
+/// the extension is wrong and retrying it changes nothing.
+public enum ExtensionInstallUnavailable: Error, Sendable, Equatable {
+    /// This host was built with no extension search paths, so there is nowhere
+    /// an installed extension could be found again.
+    case noSearchPath
 }

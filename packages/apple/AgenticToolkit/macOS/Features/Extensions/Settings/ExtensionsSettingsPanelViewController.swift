@@ -48,10 +48,12 @@ public final class ExtensionsSettingsPanelViewController: ComposableSettings.Set
             ),
             .init(
                 title: "Installing One",
-                body: "Unpack the extension (a .vsix file is a zip) into one of the folders "
-                    + "listed under Extensions, then relaunch: extensions are read once at "
-                    + "startup. Installing from inside the app, and a marketplace to install "
-                    + "from, are not built yet."
+                body: "Browse & Install, at the bottom of this list, searches Open VSX and "
+                    + "installs from it — verified against the digest and signature the "
+                    + "publisher published, and live immediately, with no relaunch. An "
+                    + "extension can also be unpacked by hand (a .vsix file is a zip) into "
+                    + "one of the folders listed under Extensions; those are read at startup, "
+                    + "so that route does need a relaunch."
             ),
             .init(
                 title: "Turning One Off",
@@ -77,6 +79,20 @@ public final class ExtensionsSettingsPanelViewController: ComposableSettings.Set
     var extensionPanels: [ExtensionDetailPanel] {
         panels.compactMap { $0 as? ExtensionDetailPanel }
     }
+
+    /// The registry browser — **one instance for the life of this panel**.
+    ///
+    /// Every rebuild replaces the whole sidebar, and an install is what triggers
+    /// a rebuild. A freshly built browse panel each time would clear the search
+    /// the reader typed, the results it found and the extension they had
+    /// selected, at exactly the moment they installed one of them and are most
+    /// likely to want another. The per-extension panels are rebuilt because
+    /// their content *is* the registry; this one's content is the reader's own
+    /// place in someone else's catalogue, and nothing on disk speaks for it.
+    private lazy var browsePanel: ExtensionsBrowsePanel = ExtensionsBrowsePanel(
+        coordinator: coordinator,
+        onInstalled: { [weak self] in self?.rebuildPanelsStayingOnBrowse() }
+    )
 
     public override func viewDidLoad() {
         super.viewDidLoad()
@@ -124,8 +140,23 @@ public final class ExtensionsSettingsPanelViewController: ComposableSettings.Set
             ))
         }
 
+        // Last, so every index above it is the one it was before — the
+        // positional restore in `onUninstalled` counts from the top and would
+        // land a row off otherwise.
+        built.append(browsePanel)
+
         setPanels(built)
         selectPanel(at: min(max(index, 0), built.count - 1))
+    }
+
+    /// Rebuilds after an install without moving the reader off the browser.
+    ///
+    /// `Int.max` rather than a computed index: the browser is appended last and
+    /// the clamp in `rebuildPanels` turns "past the end" into "the last one",
+    /// which is the same panel by construction. Counting the built panels here
+    /// would be a second copy of the list's shape, kept in step by hand.
+    private func rebuildPanelsStayingOnBrowse() {
+        rebuildPanels(selecting: .max)
     }
 }
 
@@ -646,9 +677,10 @@ final class ExtensionsEmptyStatePanel: ComposableSettings.SettingsPanelViewContr
         }
         group.addSettingSubview(
             ComposableSettings.ExplanationView(
-                withText: "Unpack a VS Code extension folder into either place and relaunch — "
-                    + "extensions are read once at startup. Installing one from inside the app "
-                    + "is not possible yet, and there is no marketplace to install from."),
+                withText: "Browse & Install, at the bottom of this list, searches the Open "
+                    + "VSX registry and installs into the first of these folders — no "
+                    + "relaunch needed. A folder unpacked here by hand works too, but is "
+                    + "only read at startup."),
             style: .continuation)
         addGroup(group)
     }

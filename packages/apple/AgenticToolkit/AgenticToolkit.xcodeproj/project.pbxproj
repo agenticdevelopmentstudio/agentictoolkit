@@ -822,6 +822,7 @@
 		8E61381F93F461A067CEAA82 /* ProjectDatabaseWorkingDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754077B055C5961C7199C040 /* ProjectDatabaseWorkingDirectoryTests.swift */; };
 		8E7E649B31BF4F6C4E510E77 /* WebviewResourceURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA314B65F592338BBB627E50 /* WebviewResourceURLTests.swift */; };
 		8E8520D8EB6F3546474291B4 /* AgenticToolkitSync.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 085D01FE73EBFAD731A18864 /* AgenticToolkitSync.framework */; };
+		8E88CF8788DDBC7CEA1CAF20 /* ExtensionsBrowsePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EE8B49BDB77A27EA20270BE /* ExtensionsBrowsePanel.swift */; };
 		8E97F6967524F3C811A5BF2A /* ThemedTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36891551371F0B380FD52A1D /* ThemedTerminalView.swift */; };
 		8F411DCA533FDCFB8B6D0AB7 /* PluginLoadFailuresPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F2D8CD502813330AE5AEC77 /* PluginLoadFailuresPanel.swift */; };
 		8FC6058DE13D71FBE42DCF61 /* LogViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07014813B693D6B7CA357C8C /* LogViewTests.swift */; };
@@ -2974,6 +2975,7 @@
 		6C768913C2E67B08FB03FB83 /* LocalModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelCatalog.swift; sourceTree = "<group>"; };
 		6CBC256AD954EA9FBF3877BF /* ApiTokensRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApiTokensRail.swift; sourceTree = "<group>"; };
 		6EA98FE84B8447FA9DB6F211 /* SettingsPanelDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelDescriptor.swift; sourceTree = "<group>"; };
+		6EE8B49BDB77A27EA20270BE /* ExtensionsBrowsePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionsBrowsePanel.swift; sourceTree = "<group>"; };
 		6F1359F4EFEE6B599DA233A3 /* ArtificialAnalysisStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtificialAnalysisStore.swift; sourceTree = "<group>"; };
 		6F3F977105890D47BB212F99 /* ProjectsMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsMenuTests.swift; sourceTree = "<group>"; };
 		6FB67710A58983A309EF5411 /* ModelUseFacetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelUseFacetTests.swift; sourceTree = "<group>"; };
@@ -6253,6 +6255,7 @@
 		D7D48D64736242B3DE551C0D /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				6EE8B49BDB77A27EA20270BE /* ExtensionsBrowsePanel.swift */,
 				FB4472AB4265BF6DAA7843F7 /* ExtensionsSettingsPanelViewController.swift */,
 			);
 			path = Settings;
@@ -8282,6 +8285,7 @@
 				B013742EE7D4C53DA83108DF /* ExtensionStatusBarPresenting.swift in Sources */,
 				A264F5451328D0CFEBB67C92 /* ExtensionWebviewPanePlacer.swift in Sources */,
 				C1258494C632DA29257AACE1 /* ExtensionWebviewPresenting.swift in Sources */,
+				8E88CF8788DDBC7CEA1CAF20 /* ExtensionsBrowsePanel.swift in Sources */,
 				1F8C1D3FE8481FEB3D86F25D /* ExtensionsCoordinator.swift in Sources */,
 				71789777072271560E44DE3D /* ExtensionsSettingsPanelViewController.swift in Sources */,
 				08819CF337A91D3D71507377 /* FileBrowserDirectories.swift in Sources */,
