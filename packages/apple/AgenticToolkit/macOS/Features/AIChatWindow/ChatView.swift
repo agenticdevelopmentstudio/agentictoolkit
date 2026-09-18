@@ -14,6 +14,17 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     private let sendButton = NSButton()
     private var isAtBottom = true
 
+    /// True from the start of a transcript rebuild until the scroll that follows
+    /// it has landed, so ``transcriptDidScroll`` can tell the reader's scrolling
+    /// apart from the view's own.
+    ///
+    /// A rebuild empties the stack and refills it, which collapses the content
+    /// height and pins the clip view at the top. Read as a scroll, that says the
+    /// reader is now far from the bottom — and `isAtBottom` latches false for
+    /// good. A watched feed that replaces its whole transcript every few seconds
+    /// then never follows the newest message again: it sits on the oldest one.
+    private var isRebuilding = false
+
     /// The transcript width the bubbles were last laid out for. Bubbles bake in a
     /// fixed width at build time (their text is pre-measured), so we rebuild them
     /// when the width changes — see `layout()` — to keep them proportional on resize.
@@ -182,6 +193,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     // MARK: - Transcript
 
     private func rebuildTranscript() {
+        isRebuilding = true
         transcriptStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         let scrollWidth = transcriptScroll.contentView.bounds.width
@@ -249,8 +261,13 @@ public final class ChatView: NSView, NSTextFieldDelegate {
 
         applyComposerEnablement()
 
-        if isAtBottom {
-            DispatchQueue.main.async { [weak self] in self?.scrollToBottom() }
+        // The scroll waits a turn because the rows were only just added: their
+        // heights come out of the next layout pass, not this one.
+        let followNewest = isAtBottom
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if followNewest { self.scrollToBottom() }
+            self.isRebuilding = false
         }
     }
 
@@ -275,18 +292,40 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     // MARK: - Scroll
 
     @objc private func transcriptDidScroll() {
-        guard let docView = transcriptScroll.documentView else { return }
-        let clip = transcriptScroll.contentView
-        let visibleBottom = clip.bounds.origin.y + clip.bounds.height
-        let contentHeight = docView.bounds.height
-        isAtBottom = contentHeight - visibleBottom < 30
+        guard !isRebuilding else { return }
+        isAtBottom = distanceFromNewest() < 30
     }
 
     private func scrollToBottom() {
         guard let docView = transcriptScroll.documentView else { return }
-        let maxScroll = max(docView.bounds.height - transcriptScroll.contentView.bounds.height, 0)
-        transcriptScroll.contentView.scroll(to: NSPoint(x: 0, y: maxScroll))
+        // Solve the constraints the rebuild just added before measuring: until
+        // that happens `bounds.height` is the height of the transcript that was
+        // there *before* — nothing at all on a first load — and every offset
+        // computed from it is wrong.
+        docView.layoutSubtreeIfNeeded()
+        transcriptScroll.contentView.scroll(to: NSPoint(x: 0, y: newestScrollOffset()))
         transcriptScroll.reflectScrolledClipView(transcriptScroll.contentView)
+    }
+
+    /// The clip-view offset that shows the newest message.
+    ///
+    /// The transcript stack is a plain `NSStackView`, which is **not** flipped:
+    /// its y axis grows upward, so the newest message — visually the bottom one
+    /// — sits at `y == 0`, and the largest offset shows the *oldest*. A flipped
+    /// document view is the other way round, and both are asked here rather
+    /// than assumed, because getting it backwards is not a visible glitch: the
+    /// window simply opens on the oldest message it has and stays there.
+    private func newestScrollOffset() -> CGFloat {
+        guard let docView = transcriptScroll.documentView, docView.isFlipped else { return 0 }
+        return max(docView.bounds.height - transcriptScroll.contentView.bounds.height, 0)
+    }
+
+    /// How far the visible region is from the newest message, in points.
+    private func distanceFromNewest() -> CGFloat {
+        guard let docView = transcriptScroll.documentView else { return 0 }
+        let clip = transcriptScroll.contentView
+        guard docView.isFlipped else { return clip.bounds.origin.y }
+        return docView.bounds.height - (clip.bounds.origin.y + clip.bounds.height)
     }
 
     // MARK: - Input
