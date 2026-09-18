@@ -178,8 +178,8 @@ public final class ExtensionViewPlaceholderViewController: NSViewController {
         let attribution = ThemedLabel(
             string: extensionDisplayName, role: .secondaryText, textRole: .body)
         let explanation = ThemedLabel(
-            string: "This view's content is provided by the extension, "
-                + "which needs an extension host this app does not run yet.",
+            string: "This view's content is provided by the extension, through a view "
+                + "provider API the extension host does not implement yet.",
             role: .tertiaryText,
             textRole: .caption)
         // `ThemedLabel` is built as a single-line caption, which is right for

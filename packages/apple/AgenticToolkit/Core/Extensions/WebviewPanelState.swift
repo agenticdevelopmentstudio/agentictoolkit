@@ -44,10 +44,27 @@ public struct WebviewPanelState: Codable, Equatable, Sendable {
     /// layer that has no business reading it at all.
     public let state: String?
 
-    public init(viewType: String, title: String, state: String?) {
+    /// What the panel was created with.
+    ///
+    /// Stored because `WKWebViewConfiguration` is built once, in
+    /// `WebviewPanelViewController.loadView()`, and `enableScripts` is baked
+    /// into it there: a restored panel that guessed `false` would come back
+    /// unable to run the page its extension is about to hand it, and nothing
+    /// the extension could do afterwards would fix it. The declared resource
+    /// roots are in here for the same reason in reverse — a panel that
+    /// renounced file access must not get it back by being restored.
+    public let options: WebviewPanelOptions
+
+    public init(
+        viewType: String,
+        title: String,
+        state: String?,
+        options: WebviewPanelOptions
+    ) {
         self.viewType = viewType
         self.title = title
         self.state = state
+        self.options = options
     }
 
     /// The single string the pane-state store holds.
@@ -73,7 +90,7 @@ public struct WebviewPanelState: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case viewType, title, state
+        case viewType, title, state, options
     }
 
     public init(from decoder: any Decoder) throws {
@@ -85,6 +102,13 @@ public struct WebviewPanelState: Codable, Equatable, Sendable {
         viewType = try container.decode(String.self, forKey: .viewType)
         title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
         state = try container.decodeIfPresent(String.self, forKey: .state)
+        // Absent options decode to the safe posture — no scripts, no forms,
+        // and the default roots — rather than throwing. An entry written
+        // before options were stored is still a panel the user had open, and
+        // the extension re-renders into it either way; what it must not do is
+        // come back with capabilities nobody recorded it having.
+        options = try container.decodeIfPresent(WebviewPanelOptions.self, forKey: .options)
+            ?? WebviewPanelOptions(enableScripts: nil, enableForms: nil, localResourceRoots: nil)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -92,5 +116,6 @@ public struct WebviewPanelState: Codable, Equatable, Sendable {
         try container.encode(viewType, forKey: .viewType)
         try container.encode(title, forKey: .title)
         try container.encodeIfPresent(state, forKey: .state)
+        try container.encode(options, forKey: .options)
     }
 }

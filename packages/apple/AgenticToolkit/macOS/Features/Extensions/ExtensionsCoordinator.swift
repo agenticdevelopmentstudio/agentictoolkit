@@ -46,6 +46,22 @@ public final class ExtensionsCoordinator: AppFeature {
     /// installed. The other four points do not depend on the window layout.
     public let viewsPoint: ViewsContributionPoint?
 
+    /// The registry `viewsPoint` registers contributed panes into, kept
+    /// alongside it because webview panels need the same registry and are not
+    /// a contribution — a panel is created at runtime by an extension that is
+    /// already running, never declared in a manifest.
+    private let viewRegistry: ComposableTabsViewRegistry?
+
+    /// Owns the one registered pane identifier every extension webview panel
+    /// is laid out under, and puts panels back after a quit.
+    ///
+    /// Built by `installExtensionHosts(...)` rather than in `init`, and `nil`
+    /// until then, because restoring a panel means handing it to the extension
+    /// that claims its view type — which is a question only an
+    /// `ExtensionHostInstaller` can answer. A host that never installs one has
+    /// no extensions running and therefore no panels to put back.
+    public private(set) var webviewPanelSerializer: WebviewPanelSerializer?
+
     /// Where an extension's reach for an unimplemented API member is
     /// recorded, held here rather than on any one `ExtensionHost` so the
     /// settings panel can read it long after the host that wrote a row was
@@ -81,6 +97,7 @@ public final class ExtensionsCoordinator: AppFeature {
         self.snippetStore = SnippetStore()
         self.languagePoint = LanguageContributionPoint()
         self.configurationPoint = ConfigurationContributionPoint()
+        self.viewRegistry = viewRegistry
         self.viewsPoint = viewRegistry.map { ViewsContributionPoint(registry: $0) }
         self.notImplementedLedger = NotImplementedLedger()
 
@@ -285,26 +302,41 @@ public final class ExtensionsCoordinator: AppFeature {
     ///   - footers: every footer a status bar item renders into.
     ///   - workspaceRoots: the workspace extensions see right now, or `nil`
     ///     when no project is open. Also read through, for the same reason.
-    ///   - placeWebviewPanel: where a webview panel an extension creates goes
-    ///     in a window's pane tree, or `nil` when there is nowhere to put one.
-    ///     Placement only — the panel arrives built.
     ///   - openDocumentLanguageIDs: the language id of every document open in
     ///     an editor right now. Read once per extension installed, to give an
     ///     extension enabled mid-session the `onLanguage:` activation whose
     ///     `.opened` event was delivered before it existed.
+    ///
+    /// Webview panels are **not** a parameter: where one goes is this
+    /// framework's own `ExtensionWebviewPanePlacer`, and putting one back after
+    /// a quit needs both the view registry this coordinator was built with and
+    /// the installer this method builds. A caller that supplied the placement
+    /// would be handing us back something assembled out of two things we
+    /// already hold (`dry`).
     public func installExtensionHosts(
         commandRegistry: CommandRegistry,
         languageModelProvider: ExtensionLanguageModelProviding,
         frontWindow: @escaping () -> NSWindow?,
         footers: @escaping () -> [WindowFooterBar],
         workspaceRoots: @escaping () -> ExtensionWorkspaceRoots?,
-        placeWebviewPanel: @escaping PaneWebviewPresenter.Place,
         openDocumentLanguageIDs: @escaping () -> [String]
     ) {
         guard hostInstaller == nil else {
             logger.error("Extension hosts are already installed — ignoring a second install.")
             return
         }
+        // Before the installer, because the installer's seams place panels
+        // through it. Its own `restore` reaches back for `hostInstaller`
+        // through `self` at call time, which is a turn or more later — by then
+        // the assignment below has happened.
+        let serializer = viewRegistry.map { registry in
+            WebviewPanelSerializer(registry: registry) { [weak self] state in
+                self?.hostInstaller?.restoreWebviewPanel(state: state) { roots in
+                    WebviewPanelViewController(restoring: state, localResourceRoots: roots)
+                }
+            }
+        }
+        webviewPanelSerializer = serializer
         let installer = ExtensionHostInstaller(
             registry: registry,
             notImplementedLedger: notImplementedLedger,
@@ -315,7 +347,14 @@ public final class ExtensionsCoordinator: AppFeature {
                 frontWindow: frontWindow,
                 footers: footers,
                 workspaceRoots: workspaceRoots,
-                placeWebviewPanel: placeWebviewPanel,
+                // `nil` for a coordinator built without a view registry: a host
+                // with nowhere to lay out a pane has nowhere to put a panel,
+                // and `MainThreadWebviews` turns that into a JavaScript
+                // exception naming the reason rather than a silent no-op.
+                placeWebviewPanel: { panel in
+                    guard let serializer else { return nil }
+                    return ExtensionWebviewPanePlacer.place(panel, using: serializer)
+                },
                 openDocumentLanguageIDs: openDocumentLanguageIDs))
         hostInstaller = installer
         subscribeToContributions()

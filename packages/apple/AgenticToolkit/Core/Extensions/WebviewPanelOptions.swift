@@ -34,7 +34,7 @@ import Foundation
 /// re-narrows at runtime is `localResourceRoots`, and that is a settable
 /// property on the panel itself (see `WebviewPanelViewController`), not a
 /// second copy of this struct.
-public struct WebviewPanelOptions: Equatable, Sendable {
+public struct WebviewPanelOptions: Codable, Equatable, Sendable {
 
     /// `WebviewOptions.enableScripts`. Off unless asked for, matching both
     /// upstream's default and the only safe posture: a panel that never said
@@ -69,6 +69,51 @@ public struct WebviewPanelOptions: Equatable, Sendable {
         self.enableScripts = scripts
         self.enableForms = enableForms ?? scripts
         self.declaredLocalResourceRoots = localResourceRoots
+    }
+
+    // MARK: - Persistence
+
+    /// The options as *resolved*, not as written.
+    ///
+    /// `init(enableScripts:enableForms:localResourceRoots:)` turns "absent"
+    /// into a value — `enableForms` follows `enableScripts` — and that
+    /// derivation happens once, when the extension called
+    /// `createWebviewPanel`. A restored panel must come back with the answer
+    /// the panel actually had, so this stores both booleans outright and
+    /// decodes straight into the stored properties rather than back through
+    /// that initialiser. The distinction that *is* meaningful at rest —
+    /// declared-nothing versus declared-none — survives, because
+    /// `declaredLocalResourceRoots` stays optional here too.
+    private enum CodingKeys: String, CodingKey {
+        case enableScripts, enableForms, localResourceRoots
+    }
+
+    /// The resolved form, for decoding and for tests. Everything else builds
+    /// options from what the extension wrote.
+    public init(enableScripts: Bool, enableForms: Bool, declaredLocalResourceRoots: [URL]?) {
+        self.enableScripts = enableScripts
+        self.enableForms = enableForms
+        self.declaredLocalResourceRoots = declaredLocalResourceRoots
+    }
+
+    /// Roots are stored as plain paths rather than as `URL`s: `URL`'s own
+    /// `Codable` form is a keyed container that records whether the URL was
+    /// relative and to what, and none of that means anything for a directory
+    /// on this machine. A path is what the scheme handler compares anyway.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enableScripts = try container.decodeIfPresent(Bool.self, forKey: .enableScripts) ?? false
+        enableForms = try container.decodeIfPresent(Bool.self, forKey: .enableForms) ?? enableScripts
+        let paths = try container.decodeIfPresent([String].self, forKey: .localResourceRoots)
+        declaredLocalResourceRoots = paths?.map { URL(fileURLWithPath: $0) }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enableScripts, forKey: .enableScripts)
+        try container.encode(enableForms, forKey: .enableForms)
+        try container.encodeIfPresent(
+            declaredLocalResourceRoots?.map(\.path), forKey: .localResourceRoots)
     }
 
     // MARK: - Where the panel may read from

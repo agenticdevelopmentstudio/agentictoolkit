@@ -19,6 +19,7 @@ public struct ActivationEvent: Sendable, Equatable {
         case language(String)           // "onLanguage:swift"      -> "swift"
         case command(String)            // "onCommand:foo.bar"     -> "foo.bar"
         case workspaceContains(String)  // "workspaceContains:**/*.csproj" -> the glob
+        case webviewPanel(String)       // "onWebviewPanel:markdown.preview" -> the view type
     }
 
     public let kind: Kind
@@ -55,6 +56,8 @@ public struct ActivationEvent: Sendable, Equatable {
             kind = .command(payload)
         } else if let payload = Self.payload(afterPrefix: "workspaceContains:", in: trimmed) {
             kind = .workspaceContains(payload)
+        } else if let payload = Self.payload(afterPrefix: "onWebviewPanel:", in: trimmed) {
+            kind = .webviewPanel(payload)
         } else {
             return nil
         }
@@ -77,6 +80,15 @@ public enum ActivationTrigger: Sendable, Equatable {
     case startupFinished
     case documentOpened(languageID: String)
     case commandInvoked(String)
+
+    /// A webview panel of this view type is being restored from a persisted
+    /// layout, and the extension that owns it has to be awake before it can be
+    /// handed back — the trigger `onWebviewPanel:<viewType>` exists for.
+    ///
+    /// Unlike every other trigger here, the restore is *waiting* on the
+    /// activation: the panel is already on screen, blank, until its extension
+    /// deserializes it.
+    case webviewPanelRestored(viewType: String)
 
     /// The workspace's contents, as paths relative to the workspace root, with
     /// `/` separators and no leading slash. The caller does the directory walk;
@@ -181,6 +193,21 @@ public struct ActivationEventMatcher: Sendable, Equatable {
         events.contains { $0.kind == .any }
     }
 
+    /// Whether this manifest declares `onWebviewPanel:<viewType>`.
+    ///
+    /// Deliberately *not* `matches(.webviewPanelRestored(viewType:))`: that
+    /// question is "does this wake the extension," and `"*"` answers yes to
+    /// all of them. Restoring a panel asks a different question — "whose panel
+    /// is this" — and an extension that merely activates eagerly has made no
+    /// claim on any view type. Handing it someone else's panel would be a
+    /// silent mis-delivery, so the claim reads the declaration itself.
+    public func declaresWebviewPanel(viewType: String) -> Bool {
+        events.contains {
+            if case .webviewPanel(let declared) = $0.kind { return declared == viewType }
+            return false
+        }
+    }
+
     /// The VS Code version, as a `SemanticVersion`, from which a declared
     /// command activates its extension without an explicit `onCommand:`
     /// entry — see the "Implicit activation from contributions.commands"
@@ -265,6 +292,12 @@ public struct ActivationEventMatcher: Sendable, Equatable {
             if implicitlyActivatingCommands.contains(commandID) { return true }
             return events.contains {
                 if case .command(let declared) = $0.kind { return declared == commandID }
+                return false
+            }
+
+        case .webviewPanelRestored(let viewType):
+            return events.contains {
+                if case .webviewPanel(let declared) = $0.kind { return declared == viewType }
                 return false
             }
 

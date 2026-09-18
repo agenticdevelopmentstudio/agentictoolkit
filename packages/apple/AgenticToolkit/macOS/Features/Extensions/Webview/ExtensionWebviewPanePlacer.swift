@@ -15,37 +15,31 @@ import AgenticToolkitCore
 /// `ExtensionHostSeams.placeWebviewPanel` is wired to in production. It is
 /// here rather than in the app because everything it touches is this
 /// framework's: `ProjectWindowManager`, the pane tree, and the view registry
-/// the tree resolves content through. The app supplies it as a one-line
-/// closure, exactly as it supplies `frontWindow` and `footers`.
+/// the tree resolves content through.
 ///
-/// ### The one-off view identifier
+/// ### Where the panel actually comes from
 ///
 /// A pane never holds a view controller directly — it holds a
-/// `ComposableTabsViewID` and asks the registry to build the content. So a
-/// panel that already exists is placed by registering an identifier unique to
-/// it (`extension.webview.<panelID>`) whose factory hands back that very
-/// instance, splitting a pane on it, and unregistering when the panel is
-/// disposed. Handing back one instance rather than building a fresh one per
-/// call is deliberate: a webview holds page state, and a tab switch that
-/// rebuilt the pane's content would silently reload the extension's page.
-///
-/// **Honest limit, and where it is fixed:** the layout the window persists
-/// records that identifier, and nothing re-registers it at the next launch, so
-/// a panel left open at quit comes back as a placeholder pane. Restoring it
-/// properly is `WebviewPanelSerializer`'s job — `vscode.window.registerWebviewPanelSerializer`
-/// exists precisely because upstream has the same problem — and this comment is
-/// the note that the two belong together.
+/// `ComposableTabsViewID` and asks the registry to build the content. So
+/// placing a panel that *already exists* means handing it to something the
+/// registry will ask, and that something is `WebviewPanelSerializer`: it owns
+/// the one registered identifier every extension webview pane is laid out
+/// under, it hands this panel back when the pane for it is built, and it is
+/// what puts the panel back after a quit. All this half knows is where to put
+/// the pane.
 @MainActor
 public enum ExtensionWebviewPanePlacer {
 
-    /// The `PaneWebviewPresenter.Place` the app installs.
+    /// The `PaneWebviewPresenter.Place` the app installs, bound to the
+    /// serializer that will vend the panel to the pane.
     ///
     /// `nil` when there is no project window open — which is a real state, not
     /// a failure: this app's windows belong to projects, and an extension can
     /// activate (on `*`, on a command) with none open. `MainThreadWebviews`
     /// turns that `nil` into a JavaScript exception naming the reason.
     public static func place(
-        _ panel: WebviewPanelViewController
+        _ panel: WebviewPanelViewController,
+        using serializer: WebviewPanelSerializer
     ) -> ExtensionWebviewPlacement? {
         guard let controller = ProjectWindowManager.shared.frontWindowController else {
             return nil
@@ -61,66 +55,83 @@ public enum ExtensionWebviewPanePlacer {
               let split = anchor.host as? ComposableTabsViewController
         else { return nil }
 
-        let registry = controller.project.layout.registry
-        let viewID = ComposableTabsViewID("extension.webview.\(panel.panelID)")
-        registry.register(
-            viewID,
-            descriptor: ComposableTabsViewDescriptor(
-                displayName: panel.paneTitle,
-                symbolName: "globe",
-                isCollapsible: true)
-        ) { _ in
-            // Strongly captured, and that is the ownership: between this
-            // registration and the split below, the registry is the only thing
-            // holding the panel. `remove` unregisters, which is what lets it
-            // go.
-            panel
-        }
+        // Before the split, not after: the pane tree builds content lazily, but
+        // "lazily" includes "during this very call" — `PaneViewController`
+        // calls the factory from `loadView()`, and a split that lays out
+        // immediately reaches it before `split(_:adding:direction:)` returns.
+        serializer.prepareToPlace(panel)
 
         // The pane the split just made, found by difference, exactly as
         // `DocumentTabsViewController.openToTheSide(_:)` finds its editor: the
         // split lands beside the *anchor*, so "the last pane" would be the
         // wrong pane as soon as the anchor is not the last one.
         let before = Set(panes.map(ObjectIdentifier.init))
-        split.split(anchor, adding: viewID, direction: .right)
+        split.split(anchor, adding: WebviewPanelSerializer.viewID, direction: .right)
         guard let pane = controller.allPanes().first(where: {
             !before.contains(ObjectIdentifier($0))
         }) else {
-            registry.unregister(viewID)
-            Self.logger.error(
-                """
-                A webview panel was registered as \(viewID.rawValue, privacy: .public) but the \
-                split produced no pane to put it in
-                """)
+            serializer.cancelPlacement(of: panel)
+            Self.logger.error("A webview panel was placed but the split produced no pane to put it in")
             return nil
         }
+        serializer.didPlace(panel, in: pane.nodeID)
 
+        let nodeID = pane.nodeID
         return ExtensionWebviewPlacement(
-            reveal: { [weak pane] preserveFocus in
-                guard let pane, let window = pane.view.window else { return }
-                ComposableTabsActivePane.shared.activate(nodeID: pane.nodeID, in: window)
-                // Never `makeKeyAndOrderFront` — revealing a pane is a change
-                // *within* a window, and a window that came forward on an
-                // extension's say-so would take the user's next keystrokes.
-                // See the project's "never take the screen" rule.
-                if !preserveFocus {
-                    window.makeFirstResponder(pane.view)
-                }
+            reveal: { preserveFocus in
+                reveal(nodeID: nodeID, preserveFocus: preserveFocus)
             },
-            remove: { [weak pane] in
-                // Unregistering first: it is the half that must happen whether
-                // or not the pane is still findable, and it is what releases
-                // the panel this closure's sibling captured.
-                registry.unregister(viewID)
-                guard let pane, let host = pane.host as? ComposableTabsViewController else {
-                    return
-                }
-                // `remove(_:)` is a no-op for a pane this split no longer
-                // holds, so the user's own close — which reaches here through
-                // `paneContentWillBeDiscarded()` → `dispose()` — costs a
-                // failed lookup rather than a second removal (`idempotency`).
-                host.remove(pane)
+            remove: {
+                remove(nodeID: nodeID)
             })
+    }
+
+    // MARK: - The two verbs, by node id
+
+    /// Brings the pane holding a panel to the front of its tab.
+    ///
+    /// By node id rather than a captured pane, because the restore path has no
+    /// pane to capture when it installs this — the pane is being built at that
+    /// moment — and because a pane can outlive the window this closure was
+    /// made in only by not existing any more, which the lookup answers.
+    static func reveal(nodeID: UUID, preserveFocus: Bool) {
+        guard let pane = pane(withNodeID: nodeID), let window = pane.view.window else { return }
+        ComposableTabsActivePane.shared.activate(nodeID: nodeID, in: window)
+        // Never `makeKeyAndOrderFront` — revealing a pane is a change *within*
+        // a window, and a window that came forward on an extension's say-so
+        // would take the user's next keystrokes. See the project's "never take
+        // the screen" rule.
+        if !preserveFocus {
+            window.makeFirstResponder(pane.view)
+        }
+    }
+
+    /// Closes the pane holding a panel.
+    ///
+    /// `remove(_:)` is a no-op for a pane its split no longer holds, so the
+    /// user's own close — which reaches here through
+    /// `paneContentWillBeDiscarded()` → `dispose()` — costs a failed lookup
+    /// rather than a second removal (`idempotency`).
+    static func remove(nodeID: UUID) {
+        guard let pane = pane(withNodeID: nodeID),
+              let host = pane.host as? ComposableTabsViewController
+        else { return }
+        host.remove(pane)
+    }
+
+    /// Finds a pane by its layout node id across every open project window.
+    ///
+    /// Every window, not just the front one: by the time an extension reveals
+    /// or disposes a panel the user may well be looking at another project.
+    /// Node ids are minted per tab through `LayoutNode.inFreshIDs()` and never
+    /// reused, so at most one pane anywhere answers to one.
+    static func pane(withNodeID nodeID: UUID) -> ComposableTabsPaneViewController? {
+        for controller in ProjectWindowManager.shared.openWindowControllers {
+            if let pane = controller.allPanes().first(where: { $0.nodeID == nodeID }) {
+                return pane
+            }
+        }
+        return nil
     }
 }
 
