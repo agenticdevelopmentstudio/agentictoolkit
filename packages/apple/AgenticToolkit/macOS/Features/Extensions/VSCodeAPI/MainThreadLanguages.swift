@@ -478,14 +478,31 @@ public struct LanguageConfiguration: Sendable, Equatable {
     /// `CharacterPair.makeArray(from:)`.
     @MainActor
     static func make(from configurationValue: JSValue?) -> LanguageConfiguration {
-        LanguageConfiguration(
-            comments: CommentRule.make(from: configurationValue?.forProperty("comments")),
-            brackets: CharacterPair.makeArray(from: configurationValue?.forProperty("brackets")),
-            wordPattern: SerializedRegExp.make(from: configurationValue?.forProperty("wordPattern")),
-            indentationRules: IndentationRule.make(from: configurationValue?.forProperty("indentationRules")),
-            onEnterRules: OnEnterRule.makeArray(from: configurationValue?.forProperty("onEnterRules")),
+        // The same guard every nested decoder in this file opens with, applied
+        // here too: `forProperty` on a JS `null` or `undefined` throws a
+        // TypeError and arms `context.exception`, so
+        // `setLanguageConfiguration('swift', null)` would register the language
+        // and *also* throw at the extension, which then never receives the
+        // `Disposable` for a registration it now owns forever. An unusable
+        // argument is the all-`nil` configuration this type already documents,
+        // not an exception.
+        guard let configurationValue, !configurationValue.isUndefined,
+              !configurationValue.isNull, configurationValue.isObject
+        else {
+            return LanguageConfiguration(
+                comments: nil, brackets: nil, wordPattern: nil, indentationRules: nil,
+                onEnterRules: nil, autoClosingPairs: nil)
+        }
+
+        return LanguageConfiguration(
+            comments: CommentRule.make(from: configurationValue.forProperty("comments")),
+            brackets: CharacterPair.makeArray(from: configurationValue.forProperty("brackets")),
+            wordPattern: SerializedRegExp.make(from: configurationValue.forProperty("wordPattern")),
+            indentationRules: IndentationRule.make(
+                from: configurationValue.forProperty("indentationRules")),
+            onEnterRules: OnEnterRule.makeArray(from: configurationValue.forProperty("onEnterRules")),
             autoClosingPairs: AutoClosingPair.makeArray(
-                from: configurationValue?.forProperty("autoClosingPairs")))
+                from: configurationValue.forProperty("autoClosingPairs")))
     }
 }
 

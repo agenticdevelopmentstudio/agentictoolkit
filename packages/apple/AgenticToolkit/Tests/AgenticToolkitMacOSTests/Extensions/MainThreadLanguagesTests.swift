@@ -727,4 +727,63 @@ struct MainThreadLanguagesTests {
             == "setLanguageConfiguration requires a string language id.")
         #expect(store.count == 0)
     }
+
+    // MARK: - An unusable configuration argument is absence, not an exception
+
+    /// `null`, `undefined` and a primitive all read as "every member absent",
+    /// and none of them raises. `JSValue.forProperty` on a JS `null` or
+    /// `undefined` throws a `TypeError` and arms `context.exception`, so
+    /// without the guard at the top of `LanguageConfiguration.make(from:)`
+    /// this call would register the language *and* throw at the extension —
+    /// which then never receives the `Disposable` for a registration it now
+    /// owns for the life of the host. Kills the mutant that drops that guard:
+    /// `store.count` alone would stay green, because the registration always
+    /// happened.
+    @Test
+    func anUnusableConfigurationArgumentRegistersEveryMemberNilWithoutRaising() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LanguageConfigurationStore()
+        let languages = MainThreadLanguages(store: store, vocabulary: TestLanguageVocabulary())
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.err = null;
+                globalThis.disposed = 0;
+                try {
+                    var a = vscode.languages.setLanguageConfiguration('lang-null', null);
+                    var b = vscode.languages.setLanguageConfiguration('lang-undefined');
+                    var c = vscode.languages.setLanguageConfiguration('lang-primitive', 'nope');
+                    [a, b, c].forEach(function (one) {
+                        if (one && typeof one.dispose === 'function') {
+                            globalThis.disposed += 1;
+                        }
+                    });
+                } catch (error) {
+                    globalThis.err = error.message;
+                }
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(languages, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.err")?.isNull == true)
+        // The Disposable the extension needs in order to ever unregister.
+        #expect(context.evaluateScript("globalThis.disposed")?.toInt32() == 3)
+
+        for languageId in ["lang-null", "lang-undefined", "lang-primitive"] {
+            let configuration = try #require(store.configurations(forLanguage: languageId).first)
+            #expect(configuration.comments == nil)
+            #expect(configuration.brackets == nil)
+            #expect(configuration.wordPattern == nil)
+            #expect(configuration.indentationRules == nil)
+            #expect(configuration.onEnterRules == nil)
+            #expect(configuration.autoClosingPairs == nil)
+        }
+    }
 }
