@@ -87,17 +87,36 @@ public final class WebviewPanelViewController: NSViewController {
     private let schemeHandler: WebviewSchemeHandler
     private let relay = WebviewMessageRelay()
     private var webView: WKWebView?
-    private let enableScripts: Bool
 
-    public init(viewType: String, title: String, enableScripts: Bool) {
+    /// What the panel was created with. Held whole rather than unpicked into
+    /// stored properties: `loadView()` is where most of it is read, and that
+    /// runs long after this initialiser (`dry`).
+    private let options: WebviewPanelOptions
+
+    /// - Parameters:
+    ///   - viewType: The type this panel was created under.
+    ///   - title: What the pane's chrome calls it to begin with.
+    ///   - options: What the extension asked for.
+    ///   - localResourceRoots: The directories this panel may read, already
+    ///     resolved. `WebviewPanelOptions.resourceRoots(extensionDirectory:workspaceRoots:)`
+    ///     is what resolves them, and it needs to know where the extension is
+    ///     installed — which a view controller has no business knowing.
+    public init(
+        viewType: String,
+        title: String,
+        options: WebviewPanelOptions,
+        localResourceRoots: [URL]
+    ) {
         let panelID = UUID().uuidString
         self.panelID = panelID
         self.viewType = viewType
         self.html = ""
-        self.enableScripts = enableScripts
+        self.options = options
         self.schemeHandler = WebviewSchemeHandler(panelID: panelID)
         super.init(nibName: nil, bundle: nil)
         self.title = title
+        schemeHandler.localResourceRoots = localResourceRoots
+        schemeHandler.contentSecurityPolicy = options.contentSecurityPolicy
         relay.delegate = self
     }
 
@@ -113,7 +132,7 @@ public final class WebviewPanelViewController: NSViewController {
         configuration.setURLSchemeHandler(schemeHandler, forURLScheme: WebviewResourceURL.scheme)
         configuration.userContentController.add(
             relay, name: WebviewHostDocument.messageHandlerName)
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = enableScripts
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = options.enableScripts
         // Nothing a panel stores in `localStorage` survives a quit, on purpose:
         // `setState` is the documented way for a webview to persist, it is the
         // one this app actually restores from, and a second persistence

@@ -42,6 +42,15 @@ final class WebviewSchemeHandler: NSObject, WKURLSchemeHandler {
     /// root gets no file access at all.
     var localResourceRoots: [URL] = []
 
+    /// The `Content-Security-Policy` every response carries — see
+    /// `WebviewPanelOptions.contentSecurityPolicy(allowingForms:)`, which is
+    /// where the policy is decided and why.
+    ///
+    /// Stored rather than computed from the panel's options, for
+    /// `localResourceRoots`' reason: the panel writes it, and a handler with no
+    /// panel yet serves the closed form.
+    var contentSecurityPolicy = WebviewPanelOptions.contentSecurityPolicy(allowingForms: false)
+
     /// Tasks WebKit has started and not yet stopped.
     ///
     /// Required, not defensive: sending anything to a `WKURLSchemeTask` after
@@ -124,7 +133,7 @@ final class WebviewSchemeHandler: NSObject, WKURLSchemeHandler {
         guard liveTasks.remove(identifier) != nil else { return }
         guard let response = HTTPURLResponse(
             url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-            headerFields: Self.headers(mimeType: mimeType, length: data.count)
+            headerFields: headers(mimeType: mimeType, length: data.count)
         ) else {
             task.didFailWithError(URLError(.cannotParseResponse))
             return
@@ -151,7 +160,7 @@ final class WebviewSchemeHandler: NSObject, WKURLSchemeHandler {
 
     /// An `HTTPURLResponse` rather than a bare `URLResponse` so these can be
     /// sent at all — a custom scheme gets no headers otherwise.
-    private static func headers(mimeType: String, length: Int) -> [String: String] {
+    private func headers(mimeType: String, length: Int) -> [String: String] {
         [
             "Content-Type": mimeType,
             "Content-Length": String(length),
@@ -166,34 +175,6 @@ final class WebviewSchemeHandler: NSObject, WKURLSchemeHandler {
             "Content-Security-Policy": contentSecurityPolicy
         ]
     }
-
-    /// The floor under every webview, deliberately naming only directives no
-    /// webview legitimately uses.
-    ///
-    /// It is tempting to send a real policy here, and wrong. A meta CSP an
-    /// extension declares *intersects* with this one, so anything said about
-    /// `script-src`, `style-src`, `img-src` or `connect-src` either has to be
-    /// permissive enough to be theatre — `'unsafe-inline'`, which is the whole
-    /// hole — or strict enough to break the extensions this stage exists to
-    /// run, since an extension's own nonce is not in our policy and never can
-    /// be. VS Code makes the same call: the content policy is the extension's
-    /// to declare, and the containment this app provides is the custom scheme
-    /// plus `localResourceRoots`, both of which hold whatever the page's CSP
-    /// says.
-    ///
-    /// What is left is the set no webview gives up anything by losing:
-    ///
-    ///   * `object-src 'none'` — no plugin content.
-    ///   * `base-uri 'none'` — a `<base>` element injected through whatever
-    ///     the extension renders cannot re-point every relative URL in the
-    ///     document at somewhere else.
-    ///   * `form-action 'none'` — a form POST out of a webview is exfiltration
-    ///     wearing a form; extensions talk to their host through
-    ///     `postMessage`.
-    ///   * `frame-ancestors 'none'` — nothing embeds a panel, and saying so
-    ///     costs nothing.
-    private static let contentSecurityPolicy =
-        "object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
     /// The type WebKit is told a file is.
     ///

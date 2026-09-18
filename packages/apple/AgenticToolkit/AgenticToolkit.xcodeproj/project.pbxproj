@@ -107,6 +107,7 @@
 		012DD02876D159608328D05C /* SystemWindowObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3993E448E21F5D13A0ECCEB /* SystemWindowObserver.swift */; };
 		0140756863045D57212786E6 /* SwatchGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05BD9A0A3BC969FF0031625D /* SwatchGridView.swift */; };
 		018BAA3BEC7E81B1EC6A6B06 /* NotesListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36B79F54E44FA17A32F10648 /* NotesListViewController.swift */; };
+		01E2A879A5C854C48424576B /* WebviewPanelOptionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF61C57DC9B8AA565309795 /* WebviewPanelOptionsTests.swift */; };
 		01E5B036BF1837E180CA5965 /* LLMChatWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398A9B344340B4AD545F6925 /* LLMChatWindowController.swift */; };
 		0278D7F4A7E60DF7788A2F43 /* AIChatCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE4D7CD70F49720EA92F1B42 /* AIChatCommands.swift */; };
 		02B1889F8EE4558D4F7B1427 /* AgenticToolkitSync.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 085D01FE73EBFAD731A18864 /* AgenticToolkitSync.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -878,6 +879,7 @@
 		A8015051FAA788EF06396405 /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EABE94D62696BD3C3A96CAA /* PanelView.swift */; };
 		A8131001FE8A2C6C735B22DB /* PermissionWalkthrough.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16653F3A8F1A643FEE6DC728 /* PermissionWalkthrough.swift */; };
 		A87FCEC1A019DB36666D4868 /* ProjectWindowManagerControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1BEF8DACE4C40E68F346330 /* ProjectWindowManagerControllerTests.swift */; };
+		A88A9B10D99A2014ECBA2FE5 /* WebviewPanelOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D909A27270BF1A25E0EE5C2C /* WebviewPanelOptions.swift */; };
 		A8B81D65929971EF934C04E7 /* AIPluginKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FD467D736FA5B431DD30B091 /* AIPluginKit.framework */; };
 		A8F5EEEF828828F406157A6B /* CommandPaletteCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 134E91F1CB494E769C77F1A6 /* CommandPaletteCoordinator.swift */; };
 		A9A2D08E18BB7F9E87F84AF5 /* ComposableTabLayoutSpecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F3B15D40C11A39F8FA044E4 /* ComposableTabLayoutSpecTests.swift */; };
@@ -2962,6 +2964,7 @@
 		8F32D28A8E0199C82E8216B0 /* WindowManagerRecentsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManagerRecentsTests.swift; sourceTree = "<group>"; };
 		8F3E1250C6037CC4B42743C2 /* TabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarView.swift; sourceTree = "<group>"; };
 		8F6CE4270FD855B12EA44D5C /* MarkdownTaxonomyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTaxonomyTests.swift; sourceTree = "<group>"; };
+		8FF61C57DC9B8AA565309795 /* WebviewPanelOptionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewPanelOptionsTests.swift; sourceTree = "<group>"; };
 		9060636F5AE8DED3C3E1405E /* EditorSettingsPanelViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSettingsPanelViewControllerTests.swift; sourceTree = "<group>"; };
 		90627AC37DA4BFBF6C32C07D /* NoteStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteStorage.swift; sourceTree = "<group>"; };
 		9062F785C82CCA723737F06F /* FormSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormSheet.swift; sourceTree = "<group>"; };
@@ -3257,6 +3260,7 @@
 		D8BFA956ECF26D7CD7AFD93E /* SyncGRDBSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncGRDBSmokeTests.swift; sourceTree = "<group>"; };
 		D8C2D2F51BD87927C2D3FAD4 /* ModelCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCapability.swift; sourceTree = "<group>"; };
 		D8F3EAE6ED87E957C4150D19 /* FrameCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameCalculatorTests.swift; sourceTree = "<group>"; };
+		D909A27270BF1A25E0EE5C2C /* WebviewPanelOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewPanelOptions.swift; sourceTree = "<group>"; };
 		D9880737F7060E9B047C7A98 /* LogLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogLine.swift; sourceTree = "<group>"; };
 		D9FED81E6FA52B0393AD09BD /* WindowStateNamespaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowStateNamespaceTests.swift; sourceTree = "<group>"; };
 		DA0470344B9A5D9015F0237F /* CommandPaletteModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteModel.swift; sourceTree = "<group>"; };
@@ -4195,6 +4199,7 @@
 				EEFC09C8D87E5FB45D2D6697 /* TextFoldingTests.swift */,
 				63BCF1C2FD81F3929B7F4241 /* VSCodeEngineRangeTests.swift */,
 				76A9B9E1E87D319A286B174E /* WebviewHostDocumentTests.swift */,
+				8FF61C57DC9B8AA565309795 /* WebviewPanelOptionsTests.swift */,
 				B5D1DF1E3D6483F6AF63CAE3 /* WebviewPanelStateTests.swift */,
 				FA314B65F592338BBB627E50 /* WebviewResourceURLTests.swift */,
 			);
@@ -5323,6 +5328,7 @@
 				9B8CE30BD70C9561F5ED16DD /* ExtensionSettings.swift */,
 				EB21E8996E68AC79FCB360EE /* VSCodeEngineRange.swift */,
 				5A8FD9AFFEBBCE6635F75C66 /* WebviewHostDocument.swift */,
+				D909A27270BF1A25E0EE5C2C /* WebviewPanelOptions.swift */,
 				225E1D82840A50CAA129BE7A /* WebviewPanelState.swift */,
 				3BD26E906899FA659B9F3FB1 /* WebviewResourceURL.swift */,
 			);
@@ -7803,6 +7809,7 @@
 				4566BDB02A3EA4F6D77AFA24 /* VSCodeThemeImporterTests.swift in Sources */,
 				2E502A3D8E63420790F6C73B /* WallClockBudgetTests.swift in Sources */,
 				B35A593CD18E016A41534DD9 /* WebviewHostDocumentTests.swift in Sources */,
+				01E2A879A5C854C48424576B /* WebviewPanelOptionsTests.swift in Sources */,
 				C0983ED5A634B98CBC5C4C0B /* WebviewPanelStateTests.swift in Sources */,
 				8E7E649B31BF4F6C4E510E77 /* WebviewResourceURLTests.swift in Sources */,
 			);
@@ -8433,6 +8440,7 @@
 				8586B32158522BDA9FE0F5DD /* WallClockBudget.swift in Sources */,
 				09850732077655840883CDBB /* WarpHeuristic.swift in Sources */,
 				EC306833EADEA5FE34D0E882 /* WebviewHostDocument.swift in Sources */,
+				A88A9B10D99A2014ECBA2FE5 /* WebviewPanelOptions.swift in Sources */,
 				74A3FF2B4E0FB0AC265DB6BA /* WebviewPanelState.swift in Sources */,
 				4A5D293FC9984A16ED9D16B0 /* WebviewResourceURL.swift in Sources */,
 				282C238B07C73C6080DEF653 /* XcodeHeuristic.swift in Sources */,
