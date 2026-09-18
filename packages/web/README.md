@@ -57,7 +57,6 @@ Features (`packages/features/*`) — one package per product area:
 | `@agentic-toolkit/dashboards` | `auth`, `data`, `resource`, `ui` |
 | `@agentic-toolkit/ecosystems` | `auth`, `data`, `resource`, `ui` |
 | `@agentic-toolkit/knowledgebases` | `auth`, `crud`, `data`, `resource`, `ui` |
-| `@agentic-toolkit/narratives` | `auth`, `data`, `resource`, `ui` |
 | `@agentic-toolkit/personas` | `auth`, `crud`, `data`, `resource`, `teams`, `ui` |
 | `@agentic-toolkit/projects` | `auth`, `data`, `resource`, `teams`, `ui` |
 | `@agentic-toolkit/research` | `auth`, `crud`, `data`, `resource`, `ui` |

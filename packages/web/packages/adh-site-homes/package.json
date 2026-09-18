@@ -283,7 +283,6 @@
     "@agentic-toolkit/gamification": "workspace:*",
     "@agentic-toolkit/integrations": "workspace:*",
     "@agentic-toolkit/knowledgebases": "workspace:*",
-    "@agentic-toolkit/narratives": "workspace:*",
     "@agentic-toolkit/notebook": "workspace:*",
     "@agentic-toolkit/organizations": "workspace:*",
     "@agentic-toolkit/personas": "workspace:*",

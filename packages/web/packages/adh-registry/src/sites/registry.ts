@@ -224,10 +224,14 @@ export const SITES: SiteDef[] = [
   { id: 'projects', label: 'Projects', fullLabel: 'Agentic Developer Projects', description: 'Project planning', prodHost: 'agenticdeveloperprojects.com', hasStaging: true, hasTesting: true, hasHome: true, workspaceRoute: 'root' },
   // narratives: the ecosystem-story site at agenticdevelopernarratives.com
   // (deployed in a later phase). It's ALSO an in-hub feature workspace at
-  // /<slug>/narratives (see HUB_FEATURE_SEGMENT + the [slug]/(workspace)/narratives
-  // route, which auth-gates an iframe of the published static bundle) — a temporary bridge
-  // until it's backed by the adh backend. Has testing+staging+production Vercel
-  // tiers (hasTesting:true) so cross-site SSO allows testing.<domain>.
+  // /<slug>/narratives (see HUB_FEATURE_SEGMENT), and until 2026-09-18 both that route
+  // and this site's own workspace auth-gated an iframe of the published static bundle.
+  // That bridge is gone: the bundle is one artifact, identical for every user and every
+  // organization, so a workspace-scoped route rendering it promised a scoping it did not
+  // have. Both surfaces now render the family's placeholder (adh-site-homes/sites/narratives)
+  // until the feature is backed by the adh backend and actually scoped. Has
+  // testing+staging+production Vercel tiers (hasTesting:true) so cross-site SSO allows
+  // testing.<domain>.
   // Its prod domain is live now, so it is crawlable (the default) and carries a
   // real description rather than its own host — it is a footer interlink like
   // every other content site.
