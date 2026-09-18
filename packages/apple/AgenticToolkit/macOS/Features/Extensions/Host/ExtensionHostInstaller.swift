@@ -303,6 +303,9 @@ public final class ExtensionHostInstallation {
         try host.defineVSCodeMember(
             namespacePath: "vscode.window", name: "registerWebviewPanelSerializer",
             implementation: webviews.registerWebviewPanelSerializer)
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "registerWebviewViewProvider",
+            implementation: webviews.registerWebviewViewProvider)
 
         // The three enum tables go on **`vscode`**, the top-level namespace,
         // never on `vscode.window` — each adaptor's own table doc gives the
@@ -373,6 +376,51 @@ public final class ExtensionHostInstallation {
         activate { [weak self] in
             self?.handOver(panel, state: state)
         }
+    }
+
+    /// Activates this extension if it is not awake yet, then hands it the
+    /// empty webview of a contributed view it declared.
+    ///
+    /// `restoreWebviewPanel(_:state:)`'s twin, down to the shape: resolve now
+    /// if the provider is already registered, otherwise activate and resolve on
+    /// the way back. The pane is on screen and empty throughout, which is what
+    /// makes the asynchronous case merely late rather than wrong.
+    fileprivate func resolveWebviewView(
+        _ panel: any ExtensionWebviewPanel,
+        viewID: String,
+        then didResolve: @escaping () -> Void
+    ) {
+        guard !isDisposed else { return }
+        if webviews.hasViewProvider(for: viewID) {
+            handOver(panel, viewID: viewID, then: didResolve)
+            return
+        }
+        activate { [weak self] in
+            self?.handOver(panel, viewID: viewID, then: didResolve)
+        }
+    }
+
+    private func handOver(
+        _ panel: any ExtensionWebviewPanel,
+        viewID: String,
+        then didResolve: @escaping () -> Void
+    ) {
+        guard !isDisposed else { return }
+        guard webviews.resolveWebviewView(panel, viewID: viewID) else {
+            // The pane stays, showing the explanation its placeholder carries,
+            // rather than an empty white rectangle. An extension that declares
+            // a webview view in its manifest and never registers a provider for
+            // it is a real and common state — a `when` clause the view is
+            // behind, a provider registered only on a later activation event —
+            // and the pane is the manifest's, not the provider's.
+            Self.logger.error(
+                """
+                Extension '\(self.identifier, privacy: .public)' contributes the webview view \
+                '\(viewID, privacy: .public)' but registered no provider that resolved it
+                """)
+            return
+        }
+        didResolve()
     }
 
     private func handOver(_ panel: any ExtensionWebviewPanel, state: WebviewPanelState) {
@@ -954,6 +1002,79 @@ public final class ExtensionHostInstaller {
         let panel = makePanel(owner.resourceRoots(for: state.options))
         owner.restoreWebviewPanel(panel, state: state)
         return panel
+    }
+
+    /// Builds the webview a contributed view of `view` is supposed to hold,
+    /// and hands it to the extension whose manifest contributed it.
+    ///
+    /// `restoreWebviewPanel(state:makePanel:)`'s twin, and different in exactly
+    /// one way that matters: **there is no claim contest here.** A restored
+    /// panel is a view type with no owner written down anywhere, so ownership
+    /// has to be inferred from who claims it; a contributed view was *declared*
+    /// by a named extension, and `ContributedView.extensionIdentifier` is that
+    /// name. Asking every installation whether it claims the id would invite
+    /// exactly the ambiguity the manifest already settled.
+    ///
+    /// `makePanel` receives the resolved roots and builds the panel, for the
+    /// sibling's reason — the roots resolve against the owning extension's
+    /// directory, which only this type knows. It is not called when the
+    /// extension is not installed, so nothing is built for a view with nobody
+    /// to draw it.
+    ///
+    /// The broadcast half of the same moment is
+    /// `contributedViewWillAppear(viewID:)`, which is separate on purpose: this
+    /// resolves *the owner's* view, while `onView:` is an activation event any
+    /// extension may declare against any view id, including someone else's.
+    ///
+    /// - Returns: The panel `makePanel` built, or `nil` when the contributing
+    ///   extension is not installed — a real state (disabled since the layout
+    ///   was last read) whose pane keeps its placeholder.
+    /// - Parameter didResolve: Called once the extension's provider has taken
+    ///   the panel — synchronously when it is already awake, a turn or two
+    ///   later when it had to be activated first, and never when it registers
+    ///   no provider. It is what tells the pane to stop explaining itself and
+    ///   show the page, so a provider that never runs leaves the explanation
+    ///   up, which is the truthful outcome.
+    public func resolveWebviewView<Panel: ExtensionWebviewPanel>(
+        view: ContributedView,
+        makePanel: (_ localResourceRoots: [URL]) -> Panel,
+        didResolve: @escaping () -> Void
+    ) -> Panel? {
+        guard let owner = installed[view.extensionIdentifier]?.installation else {
+            Self.logger.notice(
+                """
+                The contributed webview view '\(view.viewID, privacy: .public)' names extension \
+                '\(view.extensionIdentifier, privacy: .public)', which is not installed; its pane \
+                keeps its placeholder
+                """)
+            return nil
+        }
+        // No declared options to resolve against: a contributed view's manifest
+        // entry carries no `webviewOptions`, and the provider sets them from
+        // inside `resolveWebviewView`. So the roots start at the defaults —
+        // the extension's own directory and the open workspace — which is what
+        // `WebviewPanelOptions` yields for a panel that declared none either.
+        let panel = makePanel(owner.resourceRoots(
+            for: WebviewPanelOptions(
+                enableScripts: nil, enableForms: nil, localResourceRoots: nil)))
+        owner.resolveWebviewView(panel, viewID: view.viewID, then: didResolve)
+        return panel
+    }
+
+    /// Tells every installed extension that a pane showing the contributed view
+    /// `viewID` has just been built, which is what `onView:<id>` activates on.
+    ///
+    /// A broadcast, unlike `resolveWebviewView(view:makePanel:)` directly
+    /// above, and the pairing is the point. Upstream lets any extension declare
+    /// `onView:` against any view id — including one another extension
+    /// contributed, which is how an extension that *adds* to someone else's
+    /// tree gets woken — so an ownership lookup would never find it. Both run
+    /// for a webview view; only this one runs for a tree view, which has no
+    /// provider to resolve.
+    public func contributedViewWillAppear(viewID: String) {
+        for entry in installed.values {
+            entry.installation.activateIfTriggered(by: .viewShown(viewID: viewID))
+        }
     }
 
     /// Tells every running extension that the configured chat models moved.

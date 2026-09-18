@@ -329,14 +329,15 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
 
         let group = ComposableSettings.GroupView(withTitle: "Views")
         // Stated unconditionally, as a property of the group rather than a
-        // rendering of the notes: a tree view — the overwhelming majority —
-        // produces no note at all, so a sentence derived from the notes would
-        // say "webviews are unsupported" beside a silent list of tree views and
-        // leave the reader concluding those work.
+        // rendering of the notes: neither kind produces a note of its own —
+        // see `ContributedViewsBuilder` — so a sentence derived from the notes
+        // would be no sentence at all, beside a silent list of tree views that
+        // leaves the reader concluding those draw something.
         group.addSettingSubview(ComposableSettings.ExplanationView(
-            withText: "These panes are registered and can be opened. What they show is not "
-                + "implemented yet: a view's content is drawn by the extension's own code, "
-                + "through view provider APIs the extension host does not implement yet."))
+            withText: "These panes are registered and can be opened. What they show comes "
+                + "from the extension's own code: a webview view appears as soon as the "
+                + "extension registers a provider and draws it, while a tree view stays "
+                + "empty — tree data provider APIs are not implemented yet."))
         for view in views {
             group.addSettingSubview(
                 ComposableSettings.ExplanationView(withText: "\(view.name) (\(view.viewID))"))

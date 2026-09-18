@@ -20,6 +20,7 @@ public struct ActivationEvent: Sendable, Equatable {
         case command(String)            // "onCommand:foo.bar"     -> "foo.bar"
         case workspaceContains(String)  // "workspaceContains:**/*.csproj" -> the glob
         case webviewPanel(String)       // "onWebviewPanel:markdown.preview" -> the view type
+        case view(String)               // "onView:package-explorer" -> the view id
     }
 
     public let kind: Kind
@@ -58,6 +59,8 @@ public struct ActivationEvent: Sendable, Equatable {
             kind = .workspaceContains(payload)
         } else if let payload = Self.payload(afterPrefix: "onWebviewPanel:", in: trimmed) {
             kind = .webviewPanel(payload)
+        } else if let payload = Self.payload(afterPrefix: "onView:", in: trimmed) {
+            kind = .view(payload)
         } else {
             return nil
         }
@@ -89,6 +92,20 @@ public enum ActivationTrigger: Sendable, Equatable {
     /// activation: the panel is already on screen, blank, until its extension
     /// deserializes it.
     case webviewPanelRestored(viewType: String)
+
+    /// A pane showing a contributed view of this id has just been built,
+    /// and the extension that draws it has to be awake before it can —
+    /// the trigger `onView:<viewID>` exists for.
+    ///
+    /// `webviewPanelRestored`'s sibling, and waiting in the same way: the
+    /// pane is on screen, empty, until its provider resolves it. The
+    /// difference is who is asked. A restored panel is *claimed* — nothing
+    /// says whose it is but the claim — whereas a contributed view names
+    /// its extension in the manifest that declared it, so this trigger is
+    /// a broadcast: it exists for the extension that declares
+    /// `onView:` against **someone else's** view, which VS Code permits
+    /// and which no ownership lookup would ever wake.
+    case viewShown(viewID: String)
 
     /// The workspace's contents, as paths relative to the workspace root, with
     /// `/` separators and no leading slash. The caller does the directory walk;
@@ -298,6 +315,12 @@ public struct ActivationEventMatcher: Sendable, Equatable {
         case .webviewPanelRestored(let viewType):
             return events.contains {
                 if case .webviewPanel(let declared) = $0.kind { return declared == viewType }
+                return false
+            }
+
+        case .viewShown(let viewID):
+            return events.contains {
+                if case .view(let declared) = $0.kind { return declared == viewID }
                 return false
             }
 

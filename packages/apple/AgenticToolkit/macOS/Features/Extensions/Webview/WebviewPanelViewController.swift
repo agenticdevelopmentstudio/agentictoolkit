@@ -128,10 +128,36 @@ public final class WebviewPanelViewController: NSViewController {
     private let relay = WebviewMessageRelay()
     private var webView: WKWebView?
 
-    /// What the panel was created with. Held whole rather than unpicked into
+    /// What the panel is under now. Held whole rather than unpicked into
     /// stored properties: `loadView()` is where most of it is read, and that
     /// runs long after this initialiser (`dry`).
-    private let options: WebviewPanelOptions
+    ///
+    /// Assignable, because `webview.options = …` is — see
+    /// `ExtensionWebviewPanel.options`. Two of the three effects the
+    /// initialiser applies have to be re-applied here, and they are not the
+    /// same kind of thing. The content security policy is the scheme handler's,
+    /// and it serves the *next* request, so assigning it is enough. Scripts are
+    /// `WKWebViewConfiguration`'s, which is consulted when a navigation
+    /// commits and never afterwards — so the page is reloaded, which is what
+    /// upstream does for the same reason (`mainThreadWebviews.ts` reloads a
+    /// webview whose options changed). Reloading is free before `loadView()`
+    /// has run, which is the case a view provider is in.
+    ///
+    /// The third effect — the roots — is deliberately *not* here:
+    /// `declaredLocalResourceRoots` is what the extension wrote and
+    /// `localResourceRoots` is where that resolves to, and resolving needs the
+    /// extension's install directory, which a view controller has no business
+    /// knowing. `MainThreadWebviews` sets both, in that order.
+    public var options: WebviewPanelOptions {
+        didSet {
+            guard options != oldValue else { return }
+            schemeHandler.contentSecurityPolicy = options.contentSecurityPolicy
+            guard let webView, !isDisposed else { return }
+            webView.configuration.defaultWebpagePreferences
+                .allowsContentJavaScript = options.enableScripts
+            loadHostDocument()
+        }
+    }
 
     /// - Parameters:
     ///   - viewType: The type this panel was created under.
