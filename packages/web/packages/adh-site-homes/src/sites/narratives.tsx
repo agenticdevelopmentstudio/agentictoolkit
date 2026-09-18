@@ -36,7 +36,14 @@ import { SiteHomePlaceholder } from "@agentic-toolkit/adh/layout";
  *
  * Auth: both mounts sit under a HomeGate layout.
  */
-const NARRATIVES_UNSCOPED_BLURB =
+/**
+ * Why it is not here, in one sentence — EXPORTED for the same reason
+ * `MESSAGES_PAUSED_BLURB` is: the hub mounts this feature twice, once as the route above and
+ * once as an embedded pane in its workspace launcher, and a pane is not a route, so it cannot
+ * reach `render`. A shared STRING rather than a shared component, because the pane and the
+ * page frame their placeholder differently; what they must not disagree about is the reason.
+ */
+export const NARRATIVES_UNSCOPED_BLURB =
   "Narratives is being rebuilt to be scoped to the workspace you're in — the view here was a " +
   "single published bundle that showed every visitor the same stories, whichever user or " +
   "organization they opened it as.";
