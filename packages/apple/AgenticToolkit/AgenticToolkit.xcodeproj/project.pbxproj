@@ -138,6 +138,7 @@
 		094850177B35709522A4A913 /* ComposableTabsArrangeOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDAC41ECF23C8FFA267A474 /* ComposableTabsArrangeOverlayView.swift */; };
 		097249F96A3BAEDE1E7D11F8 /* FrameCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCD4ADABC33A32ACE6641188 /* FrameCalculator.swift */; };
 		09850732077655840883CDBB /* WarpHeuristic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 866E7DF1463F73D4AF3F6741 /* WarpHeuristic.swift */; };
+		09F33AD6CD9C35E244AD1B8F /* ChatViewScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F83AC9153D7D827D4041DD92 /* ChatViewScrollTests.swift */; };
 		0A8394F21EA693480E1F3E63 /* TerminalHeuristic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05F82891A90D7A00681DE294 /* TerminalHeuristic.swift */; };
 		0AA7EC3695C61BB3449125B4 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5AB7B995521327485428570 /* SettingsStore.swift */; };
 		0AFF0852BB6191797F3F6795 /* TopicListViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62FE1E6B9845CD68F2E7DEE9 /* TopicListViewControllerTests.swift */; };
@@ -3064,6 +3065,7 @@
 		F7B4441E5FCF1AE9454254BF /* NotesManagerMarkdownStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesManagerMarkdownStoreTests.swift; sourceTree = "<group>"; };
 		F7D1B477544576902F376315 /* SecureStoredSettingsStorageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureStoredSettingsStorageProvider.swift; sourceTree = "<group>"; };
 		F801935FF47FB37D7B8EB930 /* TerminalSessionLayoutState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionLayoutState.swift; sourceTree = "<group>"; };
+		F83AC9153D7D827D4041DD92 /* ChatViewScrollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewScrollTests.swift; sourceTree = "<group>"; };
 		F85EA336747D7E8F9247E422 /* FormSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormSpec.swift; sourceTree = "<group>"; };
 		F864B610757469F2C3618288 /* LayoutNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutNode.swift; sourceTree = "<group>"; };
 		F8DF73562F63FB72F77D4CD9 /* UserSettings+ComposableSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserSettings+ComposableSettings.swift"; sourceTree = "<group>"; };
@@ -5901,6 +5903,7 @@
 				368B098E9316C0BC6A1C425B /* AIChatViewModelTests.swift */,
 				D09D1BB62899DF2C5823CBDC /* ChatErrorTests.swift */,
 				EF847AA872058013C029CFD7 /* ChatViewFocusTests.swift */,
+				F83AC9153D7D827D4041DD92 /* ChatViewScrollTests.swift */,
 				7FB8AA1B5100D85B75A9E4A0 /* LocalChatSessionTests.swift */,
 			);
 			path = Chat;
@@ -8097,6 +8100,7 @@
 				9BD38BA67637339146FAAC08 /* BreadcrumbViewTests.swift in Sources */,
 				5ACB1C9591DDEC3535B45E35 /* ChatErrorTests.swift in Sources */,
 				7E3D59A2283D3441B672E851 /* ChatViewFocusTests.swift in Sources */,
+				09F33AD6CD9C35E244AD1B8F /* ChatViewScrollTests.swift in Sources */,
 				63B7B63B831EC39F3594DA6C /* CommandPaletteCoordinatorTests.swift in Sources */,
 				9DBE75DBDADCD9AC90144112 /* CommandPaletteModelTests.swift in Sources */,
 				B9FE64F11B0D2458D218763F /* CommandRegistryTests.swift in Sources */,
