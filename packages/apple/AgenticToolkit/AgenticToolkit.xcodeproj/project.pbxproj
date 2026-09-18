@@ -187,6 +187,7 @@
 		14D93023DECA76AF9EAB927C /* AIProviderMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01DA1274B94A6E335F136DF5 /* AIProviderMigrationTests.swift */; };
 		14F3ADC5E345E55F2BBB044F /* AgenticDeveloperToolkitUI-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 12692636CB83EBEA82DE2F7C /* AgenticDeveloperToolkitUI-macOS.framework */; };
 		153B694A518D19E7B26B4BF7 /* TabPaneDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BA783771EDC46AC1AE4C5AD /* TabPaneDataSource.swift */; };
+		154CD4D56EA361BF8DE09E79 /* ExtensionUpdateCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B760D5B518B3CB89A037BEA /* ExtensionUpdateCheck.swift */; };
 		1599CCB7CB36173D05459F5D /* AgenticToolkitMacOS.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = F03FB5CC81FF718A106A6513 /* AgenticToolkitMacOS.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		15AF44EC957517246EF1186A /* SettingsSearchIndexTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AAEE0ADB8A5C6F599688D42 /* SettingsSearchIndexTests.swift */; };
 		15BC2473D72A198F8FC2D6B9 /* CustomersTopic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EC6ABA2F0F18488A44D7EAB /* CustomersTopic.swift */; };
@@ -391,6 +392,7 @@
 		44A57C73AD49D4B30AA8482A /* SystemWindowShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C48F7CD91D0F1AE1F9CB1C72 /* SystemWindowShortcutManager.swift */; };
 		44A60AFC53E8ABF3A204D122 /* MainThreadWindowInputBoxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 575D735F6F0010C7C2D480C2 /* MainThreadWindowInputBoxTests.swift */; };
 		450F94C2448538A9F7EDA245 /* AgenticToolkitPermissionsUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FB251437E922B5A8689625BF /* AgenticToolkitPermissionsUI.framework */; };
+		452FB9DBC60C6E981B9A6DFF /* VSIXInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D235299091F97CF9045DAD0 /* VSIXInstaller.swift */; };
 		4566BDB02A3EA4F6D77AFA24 /* VSCodeThemeImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15D5670058AD11006F261292 /* VSCodeThemeImporterTests.swift */; };
 		45A7AA4CCC03064EB764BD36 /* AgenticToolkitPermissions.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BF04ADB42980B9D5DE44BF46 /* AgenticToolkitPermissions.framework */; };
 		45AF6FD7AC66750F9ED6050C /* AgenticToolkitSyncGRDB.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2811A57B61C48C21BD8A4995 /* AgenticToolkitSyncGRDB.framework */; };
@@ -745,6 +747,7 @@
 		8C9847BC349C6EAF540B3C17 /* LanguageServerDocumentSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AF85868198DDB4610027CC /* LanguageServerDocumentSync.swift */; };
 		8C9C0178B17C177BBF9B6B07 /* SystemWindowDiscoveryWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5DC328EE579D93F8F566A10 /* SystemWindowDiscoveryWindowController.swift */; };
 		8CBCF3512946894FCE5C1A5B /* DaemonAIChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E80B41DFA14413F6CD071CF /* DaemonAIChat.swift */; };
+		8CC14408BD0249F9D5793F86 /* VSIXArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 888766E929BF423C81D662B0 /* VSIXArchive.swift */; };
 		8CD58123376A11DE005A6259 /* ExtensionQuickPickViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91F6F1D1CFBA00A1E2283211 /* ExtensionQuickPickViewController.swift */; };
 		8CEDF2EED81DBB13E20232A2 /* AppStorageLocationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35F6E8E07AAF01ED95F11BDC /* AppStorageLocationTests.swift */; };
 		8DBC5D3194BA4FB5C28C66CA /* AgenticToolkitMarkdown-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9BE5AA37E98B6801FE1D1948 /* AgenticToolkitMarkdown-macOS.framework */; };
@@ -770,7 +773,9 @@
 		917ED099271216F4F28E38F7 /* GitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59AA2DB0B9F43DA04BD8316B /* GitStatus.swift */; };
 		9181ECADF06325D7020A1D0F /* MessagingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D88402C03F2D0E9F000FFEB /* MessagingModels.swift */; };
 		91910DAD180C2CA4394D497F /* AgenticToolkitCoreUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7A6A6F1AF7704D404EE128D5 /* AgenticToolkitCoreUI.framework */; };
+		91A24E26ECBADCAF3585FB85 /* OpenVSXClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B6A4882DA2E90AF1FED7672 /* OpenVSXClient.swift */; };
 		91A927D6EBCAC62F43D614E1 /* ProjectTabSelectionMemoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC940E761A2C9BE35285A0A1 /* ProjectTabSelectionMemoryTests.swift */; };
+		91BEEBE1E2D9BA94D526CBBF /* OpenVSXCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2037F1C750A20432C5F6B44 /* OpenVSXCatalog.swift */; };
 		922D960398677342DCD44C4F /* AgenticToolkitCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF857DF2BB3D2BE006BBA101 /* AgenticToolkitCore.framework */; };
 		927C7948223EC5B92D013DF8 /* PersonasModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D45F6199D685AD4EA924E006 /* PersonasModels.swift */; };
 		92E87614166B5D8131A29749 /* NotesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BEECDBE30F93A0D0C750E3B /* NotesManager.swift */; };
@@ -2430,6 +2435,7 @@
 		0A772B2A0F39CC6E0A4D12FB /* PluginTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginTransport.swift; sourceTree = "<group>"; };
 		0AA9EC2686794F2DDE4DABB9 /* SystemWindowControlError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowControlError.swift; sourceTree = "<group>"; };
 		0B271658C1E0CC8ADBD4006A /* VSCodeHeuristic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeHeuristic.swift; sourceTree = "<group>"; };
+		0B760D5B518B3CB89A037BEA /* ExtensionUpdateCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionUpdateCheck.swift; sourceTree = "<group>"; };
 		0B774952393631C1EBDB56CD /* ProjectLanguageServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLanguageServices.swift; sourceTree = "<group>"; };
 		0BA4DB58F341D40ECD870600 /* SessionLayoutStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLayoutStateTests.swift; sourceTree = "<group>"; };
 		0BA783771EDC46AC1AE4C5AD /* TabPaneDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabPaneDataSource.swift; sourceTree = "<group>"; };
@@ -2620,6 +2626,7 @@
 		39E42B65AECE7EFEA631F88B /* FileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileEditorView.swift; sourceTree = "<group>"; };
 		3AEE901D7CE34AA402DD5961 /* AIModelCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelCatalogTests.swift; sourceTree = "<group>"; };
 		3B4163D316F49BFD85860157 /* ComposableSettingsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableSettingsPanel.swift; sourceTree = "<group>"; };
+		3B6A4882DA2E90AF1FED7672 /* OpenVSXClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVSXClient.swift; sourceTree = "<group>"; };
 		3BD26E906899FA659B9F3FB1 /* WebviewResourceURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewResourceURL.swift; sourceTree = "<group>"; };
 		3BD401940C45BB508A51A029 /* BraveHeuristic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveHeuristic.swift; sourceTree = "<group>"; };
 		3BD8F8CA7B88AC3A53AB9785 /* DaemonAIChatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonAIChatTests.swift; sourceTree = "<group>"; };
@@ -2903,6 +2910,7 @@
 		7C887AC975CC1D90F45A725F /* VSCodeAPIDisposableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSCodeAPIDisposableTests.swift; sourceTree = "<group>"; };
 		7CD6447B79EC42AD561B9ACA /* ExtensionInputBoxModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionInputBoxModel.swift; sourceTree = "<group>"; };
 		7CD984745AB88163C81CFC8D /* SqliteStorageProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SqliteStorageProviderTests.swift; sourceTree = "<group>"; };
+		7D235299091F97CF9045DAD0 /* VSIXInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSIXInstaller.swift; sourceTree = "<group>"; };
 		7D845926CC608BB529374532 /* NSWindow+TestHostVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSWindow+TestHostVisibility.swift"; sourceTree = "<group>"; };
 		7E1C2B0EA16A48550F5B15EA /* ThemedSplitViewOrientationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemedSplitViewOrientationTests.swift; sourceTree = "<group>"; };
 		7EC6ABA2F0F18488A44D7EAB /* CustomersTopic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomersTopic.swift; sourceTree = "<group>"; };
@@ -2940,6 +2948,7 @@
 		86F5AC3965B9A592CCB3A80A /* MainThreadDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadDiagnostics.swift; sourceTree = "<group>"; };
 		86FEFB54F5560AB6533F4379 /* NotesCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesCommands.swift; sourceTree = "<group>"; };
 		87FACF75C8B5C9FB431A189E /* SubprocessTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubprocessTransportTests.swift; sourceTree = "<group>"; };
+		888766E929BF423C81D662B0 /* VSIXArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSIXArchive.swift; sourceTree = "<group>"; };
 		88CC81802D37F9BE7A21B1E7 /* AIPluginDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPluginDescriptor.swift; sourceTree = "<group>"; };
 		88FAED5D8E9BC07D386D1AF1 /* ComposableTabsPaneHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsPaneHost.swift; sourceTree = "<group>"; };
 		891D2F21BE29CCE600FB6473 /* NoteEditorViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorViewControllerTests.swift; sourceTree = "<group>"; };
@@ -3035,6 +3044,7 @@
 		A1576A882380D4CD1D63CAB3 /* SyntaxRoleOverridesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyntaxRoleOverridesTests.swift; sourceTree = "<group>"; };
 		A19BA6BE5E86944D518E0583 /* ThemeEditorContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeEditorContext.swift; sourceTree = "<group>"; };
 		A1A2E8A29E2F1C824D79827D /* LocalProviderModelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalProviderModelStore.swift; sourceTree = "<group>"; };
+		A2037F1C750A20432C5F6B44 /* OpenVSXCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVSXCatalog.swift; sourceTree = "<group>"; };
 		A2F76D78C482EE5E8A3A35B9 /* MessageFramingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramingTests.swift; sourceTree = "<group>"; };
 		A3909CE4FC6CB7A86865DFF0 /* PaneArranger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneArranger.swift; sourceTree = "<group>"; };
 		A447FFBF16260DA6B05B3CB0 /* LSPCompletionEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LSPCompletionEntry.swift; sourceTree = "<group>"; };
@@ -5345,7 +5355,12 @@
 				156797041CCFC6775B8D556D /* ExtensionRegistry.swift */,
 				50D06189F63A66ACD4BA92D5 /* ExtensionResourcePath.swift */,
 				9B8CE30BD70C9561F5ED16DD /* ExtensionSettings.swift */,
+				0B760D5B518B3CB89A037BEA /* ExtensionUpdateCheck.swift */,
+				A2037F1C750A20432C5F6B44 /* OpenVSXCatalog.swift */,
+				3B6A4882DA2E90AF1FED7672 /* OpenVSXClient.swift */,
 				EB21E8996E68AC79FCB360EE /* VSCodeEngineRange.swift */,
+				888766E929BF423C81D662B0 /* VSIXArchive.swift */,
+				7D235299091F97CF9045DAD0 /* VSIXInstaller.swift */,
 				5A8FD9AFFEBBCE6635F75C66 /* WebviewHostDocument.swift */,
 				D909A27270BF1A25E0EE5C2C /* WebviewPanelOptions.swift */,
 				225E1D82840A50CAA129BE7A /* WebviewPanelState.swift */,
@@ -8394,6 +8409,7 @@
 				BDEC2E0713CC1122C4511257 /* ExtensionRegistry.swift in Sources */,
 				57FB95BDA9DDFFBF7AE4285B /* ExtensionResourcePath.swift in Sources */,
 				16BFC33B6B2D54930312F61C /* ExtensionSettings.swift in Sources */,
+				154CD4D56EA361BF8DE09E79 /* ExtensionUpdateCheck.swift in Sources */,
 				5FD6C0863F26159117F89402 /* FeedChatSession.swift in Sources */,
 				47CCFA92B7AB62C35C7C46F7 /* FileSystemService.swift in Sources */,
 				61A6F8A8971519975AFE72E0 /* FileSystemServicing.swift in Sources */,
@@ -8427,6 +8443,8 @@
 				1B4BE17C6BCEB181F7C791E9 /* OllamaModelMetadata.swift in Sources */,
 				AE31194AB4F130B9098319A4 /* OllamaModelPageStore.swift in Sources */,
 				9D0EDE5E4875C66A08E1FEDD /* OpenAIModelCatalog.swift in Sources */,
+				91BEEBE1E2D9BA94D526CBBF /* OpenVSXCatalog.swift in Sources */,
+				91A24E26ECBADCAF3585FB85 /* OpenVSXClient.swift in Sources */,
 				C00A5236F047A81A0F0166B0 /* PendingTeardowns.swift in Sources */,
 				0835008AB689912EB0E6E1E8 /* ReconcileModels.swift in Sources */,
 				E5E64A21285D19829D23FD95 /* SecureStoredSettingsStorageProvider.swift in Sources */,
@@ -8463,6 +8481,8 @@
 				E7A14B0946F7D6C09AD0D791 /* VSCodeEngineRange.swift in Sources */,
 				DB4DA3A8B749076403865BC5 /* VSCodeHeuristic.swift in Sources */,
 				3C1C7AC8334B182786140849 /* VSCodeThemeImporter.swift in Sources */,
+				8CC14408BD0249F9D5793F86 /* VSIXArchive.swift in Sources */,
+				452FB9DBC60C6E981B9A6DFF /* VSIXInstaller.swift in Sources */,
 				8586B32158522BDA9FE0F5DD /* WallClockBudget.swift in Sources */,
 				09850732077655840883CDBB /* WarpHeuristic.swift in Sources */,
 				EC306833EADEA5FE34D0E882 /* WebviewHostDocument.swift in Sources */,
