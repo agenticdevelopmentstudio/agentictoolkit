@@ -993,6 +993,7 @@
 		B22F9F0D71BDA6C099A16F01 /* SystemAutomationProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56074482149B595614C7938 /* SystemAutomationProbe.swift */; };
 		B26352730B36119D418BB090 /* SystemWindowMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 383E9D7881E3F86C735105DC /* SystemWindowMatcher.swift */; };
 		B28CBB07C3454B26A3E5DF03 /* AIProviderResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754CFEB31E6960AC89F45BF4 /* AIProviderResolver.swift */; };
+		B35A593CD18E016A41534DD9 /* WebviewHostDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A9B9E1E87D319A286B174E /* WebviewHostDocumentTests.swift */; };
 		B3A91CE8818A26FBF42AEDBE /* ProjectFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 354720009B7C806A03318365 /* ProjectFilter.swift */; };
 		B3AA9AAE1B48E5C1ED528741 /* EcosystemTopic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A1902EDFDE70A886116262E /* EcosystemTopic.swift */; };
 		B4AEC769B96C6C251421E268 /* PlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49DA107C1349C84D6E1DF632 /* PlaceholderTests.swift */; };
@@ -1242,6 +1243,7 @@
 		EB5C9C4C5E35B4240F0DC0AD /* AgenticToolkitSyncGRDB.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2811A57B61C48C21BD8A4995 /* AgenticToolkitSyncGRDB.framework */; };
 		EBD537FE6BF95A76AC879B23 /* NSWindowFitWidthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BBA4688BC9F1C5415C1D4D4 /* NSWindowFitWidthTests.swift */; };
 		EC221B6D012B46F1E7117C14 /* PluginTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B75EC491BA90C48F8362405 /* PluginTransportTests.swift */; };
+		EC306833EADEA5FE34D0E882 /* WebviewHostDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A8FD9AFFEBBCE6635F75C66 /* WebviewHostDocument.swift */; };
 		EC8019B4198DE72AC5C44E4C /* AgenticFileBrowserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C03AD574FD3DA32B4B18C3 /* AgenticFileBrowserTests.swift */; };
 		EC83FFCF1C7278859701B770 /* LSPCompletionSnippetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A031E2659A5156AD183687C7 /* LSPCompletionSnippetTests.swift */; };
 		EC90898BD620BDB6F23584C0 /* ColorPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57011263424E4AA2CE87F54 /* ColorPickerView.swift */; };
@@ -2858,6 +2860,7 @@
 		59AA2DB0B9F43DA04BD8316B /* GitStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatus.swift; sourceTree = "<group>"; };
 		59CBBE68BA85449BAECFA075 /* ScreenSet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSet.swift; sourceTree = "<group>"; };
 		5A434D0DF608A6D2C0E5237A /* GitStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatusProvider.swift; sourceTree = "<group>"; };
+		5A8FD9AFFEBBCE6635F75C66 /* WebviewHostDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewHostDocument.swift; sourceTree = "<group>"; };
 		5AAEE0ADB8A5C6F599688D42 /* SettingsSearchIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSearchIndexTests.swift; sourceTree = "<group>"; };
 		5AF7F75A828C35BB97C877D0 /* TextDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentStore.swift; sourceTree = "<group>"; };
 		5B5FFC62731DADB19C5D55C4 /* ToolDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolDefinition.swift; sourceTree = "<group>"; };
@@ -2987,6 +2990,7 @@
 		7615EF17189A8626BE0FE04F /* TerminalAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearance.swift; sourceTree = "<group>"; };
 		761ECEB86250F372D3ECAB3A /* ProjectDatabase+Layout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProjectDatabase+Layout.swift"; sourceTree = "<group>"; };
 		768F7C74EBACCA21B475C0B6 /* PlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceholderTests.swift; sourceTree = "<group>"; };
+		76A9B9E1E87D319A286B174E /* WebviewHostDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewHostDocumentTests.swift; sourceTree = "<group>"; };
 		77056A8F13FFC28E2E59D2E0 /* SubprocessChannelRunTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubprocessChannelRunTests.swift; sourceTree = "<group>"; };
 		77245D9492D343EBE3CCBF00 /* MarkdownProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownProjection.swift; sourceTree = "<group>"; };
 		77597ACD52332EF3CEE84240 /* DiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryView.swift; sourceTree = "<group>"; };
@@ -4351,6 +4355,7 @@
 				69DC46D4A5E4C909C1E2591F /* SemanticVersionTests.swift */,
 				EEFC09C8D87E5FB45D2D6697 /* TextFoldingTests.swift */,
 				63BCF1C2FD81F3929B7F4241 /* VSCodeEngineRangeTests.swift */,
+				76A9B9E1E87D319A286B174E /* WebviewHostDocumentTests.swift */,
 				FA314B65F592338BBB627E50 /* WebviewResourceURLTests.swift */,
 			);
 			path = Extensions;
@@ -5472,6 +5477,7 @@
 				50D06189F63A66ACD4BA92D5 /* ExtensionResourcePath.swift */,
 				9B8CE30BD70C9561F5ED16DD /* ExtensionSettings.swift */,
 				EB21E8996E68AC79FCB360EE /* VSCodeEngineRange.swift */,
+				5A8FD9AFFEBBCE6635F75C66 /* WebviewHostDocument.swift */,
 				3BD26E906899FA659B9F3FB1 /* WebviewResourceURL.swift */,
 			);
 			path = Extensions;
@@ -8049,6 +8055,7 @@
 				9D58667B3FCF530A95E6FA0E /* VSCodeEngineRangeTests.swift in Sources */,
 				4566BDB02A3EA4F6D77AFA24 /* VSCodeThemeImporterTests.swift in Sources */,
 				2E502A3D8E63420790F6C73B /* WallClockBudgetTests.swift in Sources */,
+				B35A593CD18E016A41534DD9 /* WebviewHostDocumentTests.swift in Sources */,
 				8E7E649B31BF4F6C4E510E77 /* WebviewResourceURLTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -8659,6 +8666,7 @@
 				3C1C7AC8334B182786140849 /* VSCodeThemeImporter.swift in Sources */,
 				8586B32158522BDA9FE0F5DD /* WallClockBudget.swift in Sources */,
 				09850732077655840883CDBB /* WarpHeuristic.swift in Sources */,
+				EC306833EADEA5FE34D0E882 /* WebviewHostDocument.swift in Sources */,
 				4A5D293FC9984A16ED9D16B0 /* WebviewResourceURL.swift in Sources */,
 				282C238B07C73C6080DEF653 /* XcodeHeuristic.swift in Sources */,
 				59E43A4E6C0F53FCB2E92194 /* iCloudSettingsStorageProvider.swift in Sources */,
