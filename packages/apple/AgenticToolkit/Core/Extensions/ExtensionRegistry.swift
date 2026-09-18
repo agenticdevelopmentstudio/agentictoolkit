@@ -45,7 +45,12 @@ public final class ExtensionRegistry {
     /// and cost 13.7% of the floored web extensions in the Open VSX survey
     /// (`Scripts/openvsx_engine_survey.py`) — refused before they could report
     /// what they actually needed.
-    public static let declaredVSCodeVersion = SemanticVersion(major: 1, minor: 138, patch: 0)
+    /// `nonisolated` because it is a constant, not state: the enclosing class
+    /// is `@MainActor` for the mutable registry it holds, and inheriting that
+    /// here would mean a caller has to hop to the main actor to read a number
+    /// that never changes.
+    public nonisolated static let declaredVSCodeVersion =
+        SemanticVersion(major: 1, minor: 138, patch: 0)
 
     public private(set) var extensions: [LoadedExtension] = []
 
