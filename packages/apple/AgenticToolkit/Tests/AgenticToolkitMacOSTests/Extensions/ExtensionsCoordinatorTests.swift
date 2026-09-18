@@ -478,6 +478,44 @@ struct ExtensionsCoordinatorTests {
         }
     }
 
+    /// How many allowances in the installed layout's root name the identifier
+    /// every extension webview pane is laid out under.
+    private func installedAllowancesForWebviewPanes() -> Int {
+        (ComposableTabsLayout.current?.spec.allows ?? [])
+            .filter { $0.viewID == WebviewPanelSerializer.viewID }
+            .count
+    }
+
+    /// A webview panel is created at runtime by an extension that is already
+    /// running, so no manifest declares it and `widened(for:)` — which reads
+    /// contributions — can never name it. Without an allowance of its own, a
+    /// stored webview pane comes back as a leaf whose view id the spec does not
+    /// allow, and `ComposableTabLayoutSpec.reconcile(_:)` rewrites it to a
+    /// placeholder on the way in: no log line, no error, the panel simply gone.
+    @Test("installing the hosts makes an extension webview pane placeable")
+    func installingTheHostsWidensTheLayoutForWebviewPanes() throws {
+        try withMaintainedLayout { coordinator in
+            // Nothing has registered the identifier yet, so an allowance here
+            // would name an unregistered view and fail validation.
+            try #require(installedAllowancesForWebviewPanes() == 0)
+
+            coordinator.installExtensionHosts(
+                commandRegistry: CommandRegistry(),
+                languageModelProvider: FakeLanguageModelProvider(modelCount: 0),
+                frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+                openDocumentLanguageIDs: { [] })
+
+            #expect(installedAllowancesForWebviewPanes() == 1)
+
+            // Every later rebuild derives from the base spec again, so the
+            // allowance has to be re-added rather than survive — and exactly
+            // once, for `aDisableEnableCycleDoesNotAccumulateAllowances`' reason.
+            coordinator.registry.setEnabled(false, for: "test.everything")
+            coordinator.registry.setEnabled(true, for: "test.everything")
+            #expect(installedAllowancesForWebviewPanes() == 1)
+        }
+    }
+
     // MARK: - installExtensionHosts
 
     /// An eagerly-activating (`"*"`) extension with a `browser` entry point,

@@ -159,6 +159,11 @@ public final class ExtensionsCoordinator: AppFeature {
     /// a `loadAll()` that found the same set — reinstalls nothing.
     private var installedContributedViewIDs: [String] = []
 
+    /// Whether the installed layout carries the allowance every extension
+    /// webview pane is laid out under, so a rebuild that moves no contributed
+    /// view still notices that the serializer has since appeared.
+    private var installedWebviewPaneAllowance = false
+
     /// Keeps the installed document layout in step with the views extensions
     /// contribute, for as long as this coordinator lives.
     ///
@@ -187,8 +192,9 @@ public final class ExtensionsCoordinator: AppFeature {
         guard let base else { return }
         baseDocumentLayout = base
         // A second call with a different base has to rebuild even if the same
-        // views are contributed, so the recorded set cannot short-circuit it.
+        // views are contributed, so neither record can short-circuit it.
         installedContributedViewIDs = []
+        installedWebviewPaneAllowance = false
         subscribeToContributions()
         refreshDocumentLayout()
     }
@@ -245,14 +251,29 @@ public final class ExtensionsCoordinator: AppFeature {
         guard let baseDocumentLayout else { return }
         let views = contributedViews
         let viewIDs = views.map(\.registryID)
-        guard viewIDs != installedContributedViewIDs else { return }
+        // The serializer registers the webview pane identifier in its `init`,
+        // so its existence is exactly the question "may a pane hold a webview
+        // panel yet" — before it there is nothing registered to allow, and an
+        // allowance naming an unregistered view fails validation.
+        let allowsWebviewPanes = webviewPanelSerializer != nil
+        guard viewIDs != installedContributedViewIDs
+                || allowsWebviewPanes != installedWebviewPaneAllowance else { return }
         do {
+            var spec = baseDocumentLayout.spec.widened(for: views)
+            if allowsWebviewPanes {
+                // Unbounded and horizontal for a contributed view's reasons: a
+                // panel is auxiliary, and an extension may open a second one
+                // while the first is on screen.
+                spec = spec.widened(
+                    allowing: [.unbounded(WebviewPanelSerializer.viewID, preferredAxis: .horizontal)])
+            }
             let widened = try ComposableTabsLayout(
                 registry: baseDocumentLayout.registry,
-                spec: baseDocumentLayout.spec.widened(for: views)
+                spec: spec
             )
             ComposableTabsLayout.install(widened)
             installedContributedViewIDs = viewIDs
+            installedWebviewPaneAllowance = allowsWebviewPanes
         } catch {
             logger.error(
                 """
@@ -337,6 +358,13 @@ public final class ExtensionsCoordinator: AppFeature {
             }
         }
         webviewPanelSerializer = serializer
+        // The serializer has just registered the identifier webview panes are
+        // laid out under; the spec the app installed names every pane type it
+        // knew about, which cannot include this one. Widening here — before any
+        // host runs, and before the first project window is restored — is what
+        // keeps `ComposableTabLayoutSpec.reconcile(_:)` from demoting a stored
+        // webview pane to a placeholder as the window loads.
+        refreshDocumentLayout()
         let installer = ExtensionHostInstaller(
             registry: registry,
             notImplementedLedger: notImplementedLedger,
