@@ -621,6 +621,7 @@
 		7285E6F06AFDD2885258B86D /* LocalChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83D3EA6FFFEFD6FE486B378C /* LocalChatSession.swift */; };
 		73FCC775C3A5BFDA330DC49D /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 77B3FF72F2C2ABA1BEDBF240 /* GRDB */; };
 		7447E333BF884B0A86BDD60F /* ThemePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9D78EBD9C75F8215D809DC3 /* ThemePickerView.swift */; };
+		74A3FF2B4E0FB0AC265DB6BA /* WebviewPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 225E1D82840A50CAA129BE7A /* WebviewPanelState.swift */; };
 		74B43DC8201AF6E7AC1ED284 /* ExtensionPickerWindowControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24BB79DE16FFFAD19AF52CD /* ExtensionPickerWindowControllerTests.swift */; };
 		74E21A19BA2BCD7AD0BCBF57 /* BucketsTopicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E6A80E475DF288D144C169 /* BucketsTopicTests.swift */; };
 		74E9D90C9E0B31C5A0832D92 /* MessagingTopicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF79C0E78583A9A3A7A27053 /* MessagingTopicTests.swift */; };
@@ -966,6 +967,7 @@
 		BF20A76DC148DAD42C20928F /* HubModules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9F5B7C2EE1D677B72592A3 /* HubModules.swift */; };
 		BFA5C197382FA80A40BFFD08 /* AppFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69AFB996C8722DACDFC54FE8 /* AppFeature.swift */; };
 		C00A5236F047A81A0F0166B0 /* PendingTeardowns.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C718AACBEAD7CD41B234539 /* PendingTeardowns.swift */; };
+		C0983ED5A634B98CBC5C4C0B /* WebviewPanelStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5D1DF1E3D6483F6AF63CAE3 /* WebviewPanelStateTests.swift */; };
 		C0A848CB626BBF8B80E6FDAA /* TerminalTextInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03EEC3A2E6215C4FE7F2F56D /* TerminalTextInjector.swift */; };
 		C0E8AA1DAA66591DD3BE0EAE /* ThemeEditorContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A19BA6BE5E86944D518E0583 /* ThemeEditorContext.swift */; };
 		C0EA5ACD7CA9175BC9747A60 /* ViewsContributionPointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36716DA518F69F5E1CD6D80C /* ViewsContributionPointTests.swift */; };
@@ -2511,6 +2513,7 @@
 		211847C4BA1ACD45DE6AF55A /* EcosystemsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcosystemsModels.swift; sourceTree = "<group>"; };
 		211A3E3EDFCDC7EDA2F4601C /* MockChatSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockChatSessionTests.swift; sourceTree = "<group>"; };
 		21632D2A100D8B2EAEE30D47 /* SettingsKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsKeyTests.swift; sourceTree = "<group>"; };
+		225E1D82840A50CAA129BE7A /* WebviewPanelState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewPanelState.swift; sourceTree = "<group>"; };
 		22AF47A752273B94A3878209 /* TerminalSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionManager.swift; sourceTree = "<group>"; };
 		22BE99B602CA4D3F055AA197 /* ProgressViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressViewModel.swift; sourceTree = "<group>"; };
 		234428AD995F284FF4451931 /* XcodeHeuristic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeHeuristic.swift; sourceTree = "<group>"; };
@@ -3084,6 +3087,7 @@
 		B4C87939516A070CC66803F4 /* Placeholder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Placeholder.swift; sourceTree = "<group>"; };
 		B4F9763F07304F419E1D5933 /* TextDocumentStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentStoreTests.swift; sourceTree = "<group>"; };
 		B5BB28294B4FC8F45F42DBEF /* WindowFrameManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowFrameManager.swift; sourceTree = "<group>"; };
+		B5D1DF1E3D6483F6AF63CAE3 /* WebviewPanelStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewPanelStateTests.swift; sourceTree = "<group>"; };
 		B6158481EA0FDB6CCE26EFEC /* ExtensionStatusBarPresenting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionStatusBarPresenting.swift; sourceTree = "<group>"; };
 		B63A7672A8B7D30684626C37 /* HubModulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubModulesTests.swift; sourceTree = "<group>"; };
 		B6482AAB006B499689718564 /* TerminalSessionContentViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionContentViewController.swift; sourceTree = "<group>"; };
@@ -4187,6 +4191,7 @@
 				EEFC09C8D87E5FB45D2D6697 /* TextFoldingTests.swift */,
 				63BCF1C2FD81F3929B7F4241 /* VSCodeEngineRangeTests.swift */,
 				76A9B9E1E87D319A286B174E /* WebviewHostDocumentTests.swift */,
+				B5D1DF1E3D6483F6AF63CAE3 /* WebviewPanelStateTests.swift */,
 				FA314B65F592338BBB627E50 /* WebviewResourceURLTests.swift */,
 			);
 			path = Extensions;
@@ -5305,6 +5310,7 @@
 				9B8CE30BD70C9561F5ED16DD /* ExtensionSettings.swift */,
 				EB21E8996E68AC79FCB360EE /* VSCodeEngineRange.swift */,
 				5A8FD9AFFEBBCE6635F75C66 /* WebviewHostDocument.swift */,
+				225E1D82840A50CAA129BE7A /* WebviewPanelState.swift */,
 				3BD26E906899FA659B9F3FB1 /* WebviewResourceURL.swift */,
 			);
 			path = Extensions;
@@ -7783,6 +7789,7 @@
 				4566BDB02A3EA4F6D77AFA24 /* VSCodeThemeImporterTests.swift in Sources */,
 				2E502A3D8E63420790F6C73B /* WallClockBudgetTests.swift in Sources */,
 				B35A593CD18E016A41534DD9 /* WebviewHostDocumentTests.swift in Sources */,
+				C0983ED5A634B98CBC5C4C0B /* WebviewPanelStateTests.swift in Sources */,
 				8E7E649B31BF4F6C4E510E77 /* WebviewResourceURLTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -8410,6 +8417,7 @@
 				8586B32158522BDA9FE0F5DD /* WallClockBudget.swift in Sources */,
 				09850732077655840883CDBB /* WarpHeuristic.swift in Sources */,
 				EC306833EADEA5FE34D0E882 /* WebviewHostDocument.swift in Sources */,
+				74A3FF2B4E0FB0AC265DB6BA /* WebviewPanelState.swift in Sources */,
 				4A5D293FC9984A16ED9D16B0 /* WebviewResourceURL.swift in Sources */,
 				282C238B07C73C6080DEF653 /* XcodeHeuristic.swift in Sources */,
 				59E43A4E6C0F53FCB2E92194 /* iCloudSettingsStorageProvider.swift in Sources */,
