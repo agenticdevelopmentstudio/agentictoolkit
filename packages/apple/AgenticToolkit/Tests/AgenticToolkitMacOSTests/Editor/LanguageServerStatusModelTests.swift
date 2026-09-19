@@ -297,7 +297,8 @@ struct LanguageServerStatusModelTests {
 
         let help = try #require(panel.helpContent)
         #expect(help.topics.map(\.title) == [
-            "Language Servers", "Command and Environment", "Root Markers", "Status"
+            "Language Servers", "Command and Environment", "Root Markers", "Status",
+            "Known Differences from VS Code"
         ])
         // The topic this task adds, and the one the panel would be lying
         // without: it is the only place the five states are named.
