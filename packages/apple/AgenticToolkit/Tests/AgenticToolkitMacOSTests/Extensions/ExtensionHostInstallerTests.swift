@@ -111,9 +111,17 @@ struct ExtensionHostInstallerTests {
     /// `globalThis.__activated` — the same "read a JS global back out"
     /// idiom `MainThreadLanguageModelsTests` uses, applied directly rather
     /// than through that file's private `waitForGlobal` helper.
+    ///
+    /// **No context is an answer, not a missing one.** `ExtensionHost` builds
+    /// its `JSContext` inside `performActivation()`, so a host whose
+    /// activation was never started has none — which is the strongest form of
+    /// "did not activate" there is. Requiring one here would have turned the
+    /// negative cases into failures reading `Expectation failed:
+    /// installation.host.javaScriptContext`, which says nothing about the
+    /// behaviour under test.
     private func activated(_ installer: ExtensionHostInstaller, _ identifier: String) throws -> Bool {
         let installation = try #require(installer.installations[identifier])
-        let context = try #require(installation.host.javaScriptContext)
+        guard let context = installation.host.javaScriptContext else { return false }
         return context.evaluateScript("globalThis.__activated")?.toBool() ?? false
     }
 

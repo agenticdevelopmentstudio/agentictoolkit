@@ -60,8 +60,8 @@ struct ActivationEventMatcherTests {
     @Test(
         "empty payloads, blank entries and gibberish are unrecognized",
         arguments: [
-            "onLanguage:", "onCommand:", "workspaceContains:", "onWebviewPanel:",
-            "", "   ", "onDebug", "onView:explorer"
+            "onLanguage:", "onCommand:", "workspaceContains:", "onWebviewPanel:", "onView:",
+            "", "   ", "onDebug"
         ]
     )
     func unrecognizedEntries(_ raw: String) {
@@ -81,8 +81,10 @@ struct ActivationEventMatcherTests {
         ])
         let matcher = ActivationEventMatcher(manifest: manifest)
 
-        #expect(matcher.events.map(\.rawValue) == ["onStartupFinished", "onLanguage:swift", "onCommand:x.y"])
-        #expect(matcher.unrecognizedEvents == ["onDebug", "onView:explorer"])
+        #expect(matcher.events.map(\.rawValue) == [
+            "onStartupFinished", "onLanguage:swift", "onView:explorer", "onCommand:x.y"
+        ])
+        #expect(matcher.unrecognizedEvents == ["onDebug"])
     }
 
     // MARK: - Matching

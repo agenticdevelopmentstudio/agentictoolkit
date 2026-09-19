@@ -133,9 +133,10 @@ struct ExtensionsSettingsPanelTests {
                 try #require(coordinator.registry.extensions.count == 2)
                 let identifiers = Set(panel.extensionPanels.map(\.extensionIdentifier))
                 #expect(identifiers == ["test.alpha", "test.beta"])
-                // No failures and no empty state, so the sidebar is exactly the
-                // two extensions.
-                #expect(panel.panels.count == 2)
+                // No failures and no empty state, so the sidebar is the two
+                // extensions and the Browse & Install panel appended after
+                // them.
+                #expect(panel.panels.count == 3)
             }
         }
     }
@@ -338,10 +339,16 @@ struct ExtensionsSettingsPanelTests {
                 let mixedText = labels(in: mixed.view)
                 #expect(mixedText.contains("Tree (test.tree)"))
                 #expect(mixedText.contains("Web (test.web)"))
-                // Exactly once, not at least once: the note is rendered under
-                // the view it is about, and the Decisions group deliberately
-                // does not repeat it (Ruling FW). Twice is the regression.
-                #expect(mixedText.filter { $0.contains("is a webview") }.count == 1)
+                // The same one sentence as the tree-only extension above, and
+                // no per-view note of any kind: since both kinds draw what
+                // their extension registers, neither earns a note that
+                // distinguishes it (see `ContributedViewsBuilder`). A note
+                // naming a kind is the regression.
+                #expect(
+                    mixedText.filter {
+                        $0.contains("These panes are registered and can be opened")
+                    }.count == 1)
+                #expect(!mixedText.contains { $0.contains("is a webview") })
             }
         }
     }
