@@ -32,8 +32,9 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
     ///     the overlay fades in holding the conversation rather than filling in
     ///     after it has arrived.
     ///   - lineLimit: how many lines of a message a row shows before offering
-    ///     the rest — see ``ChatView/bubbleLineLimit``. The same cap as the feed,
-    ///     so a message does not change length on the way into the overlay.
+    ///     the rest — see ``ChatView/bubbleLineLimit``. Nil for the reader who
+    ///     came here to read one of them whole, which is what a feed that caps
+    ///     its rows sends them here for.
     ///   - send: types a line into the session this conversation belongs to, as
     ///     if it had been typed at its own terminal. Nil leaves the composer
     ///     disabled, which is what a session nothing can be written to looks
@@ -80,6 +81,18 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
             chatView.trailingAnchor.constraint(equalTo: trailingAnchor),
             chatView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+    }
+
+    /// Presented, and handed the keys when there is anywhere for them to go.
+    ///
+    /// A reader who opened one conversation to answer it should not have to
+    /// click the composer first, and the overlay covers the whole window, so
+    /// nothing else here is competing for them. An overlay over a session that
+    /// cannot be written to leaves the keys where they were, because its
+    /// composer is disabled and would only swallow them.
+    public override func present(in host: NSView) {
+        super.present(in: host)
+        if session.canSend { chatView.focusInput() }
     }
 
     /// Return is the composer's while the composer has the keys.
