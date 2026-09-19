@@ -27,25 +27,34 @@ final class ConversationFocusTests: XCTestCase {
 
     // MARK: - The jump control
 
-    func testTheJumpControlSitsTenPointsOffAnAssistantBubblesInsideEdge() throws {
+    /// The control straddles the corner rather than standing beside it: half
+    /// of it is over the bubble and half in the gutter, which is why the row
+    /// holds back no width of its own for it.
+    func testTheJumpControlIsCentredOnAnAssistantBubblesUpperInsideCorner() throws {
         let (_, bubble, button) = try laidOutRow(role: .assistant, text: "a short reply")
         XCTAssertEqual(
-            button.frame.minX - bubble.frame.maxX, 10, accuracy: 0.5,
+            aligned(button).midX, aligned(bubble).maxX, accuracy: 0.5,
             "the agent's column runs left, so its bubble's inside edge is the trailing one")
+        XCTAssertEqual(
+            aligned(button).midY, aligned(bubble).maxY, accuracy: 0.5,
+            "the control is not centred on the bubble's top edge")
     }
 
-    func testTheJumpControlSitsTenPointsOffAUserBubblesInsideEdge() throws {
+    func testTheJumpControlIsCentredOnAUserBubblesUpperInsideCorner() throws {
         let (_, bubble, button) = try laidOutRow(role: .user, text: "a short prompt")
         XCTAssertEqual(
-            bubble.frame.minX - button.frame.maxX, 10, accuracy: 0.5,
+            aligned(button).midX, aligned(bubble).minX, accuracy: 0.5,
             "the human's column runs right, so its bubble's inside edge is the leading one")
+        XCTAssertEqual(
+            aligned(button).midY, aligned(bubble).maxY, accuracy: 0.5,
+            "the control is not centred on the bubble's top edge")
     }
 
-    /// "Level with the bubble's top" only differs from "centred on the bubble"
-    /// once a bubble is more than one line tall — so the test is that a one-line
-    /// bubble and a forty-line one put the control the same distance below their
-    /// own top edge.
-    func testTheJumpControlSitsLevelWithTheBubblesTopHoweverTallTheBubbleIs() throws {
+    /// The corner is the one point that is in the same place on every row: a
+    /// bubble is as tall as its text, so a control measured from its middle
+    /// moves about. A one-line bubble and a forty-line one have to put it at
+    /// the same height above their own top edge — which is none.
+    func testTheJumpControlStaysOnTheCornerHoweverTallTheBubbleIs() throws {
         let (_, shortBubble, shortButton) = try laidOutRow(role: .assistant, text: "one line")
         let paragraph = (0..<40).map { "line \($0) of a long reply" }.joined(separator: "\n")
         let (_, tallBubble, tallButton) = try laidOutRow(role: .assistant, text: paragraph)
@@ -54,33 +63,80 @@ final class ConversationFocusTests: XCTestCase {
             tallBubble.frame.height, shortBubble.frame.height * 4,
             "the fixture is wrong: the bubbles have to differ in height for this to mean anything")
 
-        // Compared on alignment rects, not frames: a bezelled control's frame
-        // carries a couple of points of slack its constraints never see, and
-        // the constraint is what this is about. Neither view is flipped, so a
-        // top edge is a `maxY`.
-        func alignedTop(_ view: NSView) -> CGFloat {
-            view.alignmentRect(forFrame: view.frame).maxY
-        }
-        let shortDrop = alignedTop(shortBubble) - alignedTop(shortButton)
-        let tallDrop = alignedTop(tallBubble) - alignedTop(tallButton)
+        let shortDrop = aligned(shortBubble).maxY - aligned(shortButton).midY
+        let tallDrop = aligned(tallBubble).maxY - aligned(tallButton).midY
         XCTAssertEqual(
             shortDrop, 0, accuracy: 0.5,
-            "the control hangs off the bubble's top edge, not its centre")
+            "the control is not on the bubble's top edge")
         XCTAssertEqual(
             shortDrop, tallDrop, accuracy: 0.5,
-            "the control follows the bubble's centre, not its top: \(shortDrop) vs \(tallDrop)")
+            "the control follows the bubble's centre, not its corner: \(shortDrop) vs \(tallDrop)")
     }
 
-    /// A 44pt control beside a one-line bubble is taller than the row's own
-    /// content — and a row's ``ChatTranscriptRowView/hitTest(_:)`` refuses
-    /// anything outside its bounds, so a control hanging past the bottom edge
-    /// would be drawn and unclickable.
+    /// Compared on alignment rects, not frames: a control's frame carries a
+    /// couple of points of slack its constraints never see, and the constraint
+    /// is what these are about. Neither view is flipped, so a top edge is a
+    /// `maxY`.
+    private func aligned(_ view: NSView) -> NSRect {
+        view.alignmentRect(forFrame: view.frame)
+    }
+
+    /// Half the control is above the bubble it is pinned to, in the band the
+    /// header occupies — and a row's ``ChatTranscriptRowView/hitTest(_:)``
+    /// refuses anything outside its bounds, so a control hanging past either
+    /// edge would be drawn and unclickable.
     func testTheRowIsTallEnoughToHoldTheJumpControl() throws {
         let (_, _, button) = try laidOutRow(role: .assistant, text: "one line")
         let row = try XCTUnwrap(button.superview as? ChatTranscriptRowView)
         XCTAssertTrue(
             row.bounds.contains(button.frame),
             "the jump control hangs outside the row: \(button.frame) in \(row.bounds)")
+    }
+
+    // MARK: - How wide a bubble may grow
+
+    /// The rule, in the words it was asked for in: a bubble stops ten points
+    /// short of the *outside* edge of the facing column — where the other
+    /// side's bubbles begin — rather than at a fraction of the row. A merged
+    /// feed is read down one column at a time, and a bubble that stopped two
+    /// thirds of the way across would waste the third that was left.
+    func testABubbleStopsTenPointsShortOfTheFacingColumnsOutsideEdge() throws {
+        let agent = try laidOutFeedRow(role: .assistant, text: Self.wideText)
+        let human = try laidOutFeedRow(role: .user, text: Self.wideText)
+
+        // Where each column's bubbles begin, which is pinned whatever the text
+        // inside them does: the agent's to its avatar's inside edge, the
+        // human's to the row's own trailing inset.
+        let agentOutsideEdge = agent.bubble.frame.minX
+        let humanOutsideEdge = human.bubble.frame.maxX
+        let cap = ChatTranscriptRowView.maxBubbleWidth(forRowWidth: Self.feedRowWidth)
+
+        XCTAssertEqual(
+            agentOutsideEdge + cap, humanOutsideEdge - 10, accuracy: 0.5,
+            "the agent's bubble may grow past ten points short of where the human's end")
+        XCTAssertEqual(
+            humanOutsideEdge - cap, agentOutsideEdge + 10, accuracy: 0.5,
+            "the human's bubble may grow past ten points short of where the agent's begin")
+
+        // And a message that wants the whole of it gets the whole of it, to
+        // within the glyph the last line broke on.
+        XCTAssertEqual(agent.bubble.frame.width, cap, accuracy: 12,
+                       "the agent's bubble left room it was allowed to use")
+        XCTAssertEqual(human.bubble.frame.width, cap, accuracy: 12,
+                       "the human's bubble left room it was allowed to use")
+    }
+
+    /// The other half of the rule: the cap is a *limit*, not a width. A message
+    /// that does not fill it is drawn at the size of what it says, so a feed of
+    /// short lines reads as a conversation rather than as two columns of
+    /// full-width blocks.
+    func testAShortMessageIsOnlyAsWideAsItself() throws {
+        let short = try laidOutFeedRow(role: .assistant, text: "yes")
+        let cap = ChatTranscriptRowView.maxBubbleWidth(forRowWidth: Self.feedRowWidth)
+
+        XCTAssertLessThan(
+            short.bubble.frame.width, cap / 2,
+            "a three-letter message was drawn as wide as a paragraph")
     }
 
     func testARowWithNoJumpActionShowsNoJumpControl() throws {
@@ -371,21 +427,48 @@ final class ConversationFocusTests: XCTestCase {
         XCTAssertNil(focusOverlay(in: controller), "Shift-Return opened the overlay as well as leaving")
     }
 
-    /// A feed throws away every row and builds it again on each poll, so a
-    /// selection held as a view would last until the next read. It is held by
-    /// message id for exactly this.
-    func testThePickSurvivesTheNextPoll() async throws {
-        let (controller, _) = try await loadedFeed()
+    /// A read that brings something new throws away every row and builds them
+    /// again, so a selection held as a view would last until the next poll. It
+    /// is held by message id for exactly this.
+    func testThePickSurvivesAPollThatBringsSomethingNew() async throws {
+        let source = FeedSource(feedMessages)
+        let (controller, _) = try await loadedFeed(source: source)
         let picked = try firstRow(of: controller)
         click(picked)
         let id = picked.shownMessage.id
 
+        source.append(message(role: .assistant, text: "s1 third", sourceID: "s1"))
         controller.refresh()
-        try await waitUntil("the feed was rebuilt") { self.rows(in: controller).first !== picked }
+        try await waitUntil("the feed was rebuilt") { self.rows(in: controller).count == 4 }
         await settle()
 
+        XCTAssertFalse(rows(in: controller).contains { $0 === picked },
+                       "the fixture is wrong: nothing was rebuilt, so nothing was survived")
         let row = try XCTUnwrap(rows(in: controller).first { $0.shownMessage.id == id })
         XCTAssertTrue(row.isSelected, "the poll dropped the reader's selection")
+    }
+
+    /// And a read that brings nothing new rebuilds nothing at all.
+    ///
+    /// A feed re-reads every few seconds and usually has the same transcript it
+    /// had last time. Emptying the stack and refilling it with the same rows is
+    /// a visible blink, it drops whatever the reader had selected in a bubble
+    /// mid-drag, and — in the overlay, which renders once for its own
+    /// construction and again when its bindings deliver the messages it was
+    /// built holding — it was most of what a reader saw on the way in.
+    func testAPollWithNothingNewLeavesTheRowsWhereTheyAre() async throws {
+        let (controller, _) = try await loadedFeed()
+        let before = rows(in: controller)
+        XCTAssertFalse(before.isEmpty, "the fixture is wrong: there are no rows to leave alone")
+
+        controller.refresh()
+        try await Task.sleep(for: .milliseconds(300))
+        await settle()
+
+        let after = rows(in: controller)
+        XCTAssertEqual(after.count, before.count)
+        XCTAssertTrue(zip(before, after).allSatisfy { $0 === $1 },
+                      "an unchanged read rebuilt the transcript, which the reader sees as a blink")
     }
 
     /// Inside one conversation there is nothing for Return to open and nowhere
@@ -398,6 +481,96 @@ final class ConversationFocusTests: XCTestCase {
 
         let chat = try XCTUnwrap(overlay.subviews.compactMap { $0 as? ChatView }.first)
         XCTAssertFalse(chat.isRowSelectionEnabled)
+    }
+
+    /// The app icon says which application a row is running in — a question a
+    /// *merged* feed asks and this view has already answered, since every row
+    /// in it is the same session.
+    func testTheOverlayShowsNoAppIconOnItsRows() async throws {
+        let (controller, _) = try await loadedFeed()
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+        try await waitUntil("the overlay's transcript loaded") { !self.rowTexts(in: overlay).isEmpty }
+        await settle()
+
+        let chat = try XCTUnwrap(overlayChat(in: overlay))
+        let rows = transcriptRows(of: chat)
+        XCTAssertFalse(rows.isEmpty, "the fixture is wrong: the overlay has no rows to check")
+        for row in rows {
+            XCTAssertTrue(try jumpButton(in: row).isHidden,
+                          "a row inside one conversation still offers to go to it")
+        }
+    }
+
+    // MARK: - The letters a picked row answers to
+
+    func testCOnAPickedRowOpensTheOverlay() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+
+        click(try firstRow(of: controller))
+        feed.keyDown(with: letter("c"))
+
+        let overlay = try XCTUnwrap(focusOverlay(in: controller), "c opened nothing")
+        try await waitUntil("the overlay's transcript loaded") { !self.rowTexts(in: overlay).isEmpty }
+        XCTAssertEqual(rowTexts(in: overlay), ["s1 first", "s1 second"])
+    }
+
+    func testGOnAPickedRowLeavesForTheSession() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+        let went = Box()
+        controller.onGoToSource = { went.values.append($0.attribution?.sourceID ?? "") }
+
+        click(try firstRow(of: controller))
+        feed.keyDown(with: letter("g"))
+
+        XCTAssertEqual(went.values, ["s1"])
+        XCTAssertNil(focusOverlay(in: controller), "g opened the overlay as well as leaving")
+    }
+
+    func testMOnAPickedRowOpensACappedMessageOut() async throws {
+        let (controller, _) = try await loadedFeed(source: FeedSource([longMessage(sourceID: "s1")]))
+        let feed = try feedChat(of: controller)
+        let row = try firstRow(of: controller)
+        XCTAssertTrue(row.isTruncated,
+                      "the fixture is wrong: the message has to be capped for m to mean anything")
+
+        click(row)
+        feed.keyDown(with: letter("m"))
+
+        XCTAssertNotNil(expansion(in: feed), "m left a capped message capped")
+    }
+
+    /// On a message already whole the key means nothing: an overlay that opened
+    /// to say "here it is again" would answer a question nobody asked.
+    func testMOnAMessageThatIsAlreadyWholeOpensNothing() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+
+        click(try firstRow(of: controller))
+        feed.keyDown(with: letter("m"))
+
+        XCTAssertNil(expansion(in: feed), "m opened a message that was not cut off")
+    }
+
+    /// ⌘C is a copy and ⌥G is a character — neither is this view's to take.
+    func testALetterWithAModifierIsNotTheRowsToTake() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+        let went = Box()
+        controller.onGoToSource = { went.values.append($0.attribution?.sourceID ?? "") }
+
+        click(try firstRow(of: controller))
+        feed.keyDown(with: letter("c", modifiers: .command))
+        feed.keyDown(with: letter("g", modifiers: .option))
+
+        XCTAssertNil(focusOverlay(in: controller), "⌘C opened the conversation instead of copying")
+        XCTAssertEqual(went.values, [], "⌥G left the window instead of typing a character")
+    }
+
+    private func expansion(in chat: ChatView) -> BubbleExpansionOverlay? {
+        chat.subviews.compactMap { $0 as? BubbleExpansionOverlay }.first
     }
 
     private func feedChat(of controller: ConversationsViewController) throws -> ChatView {
@@ -799,17 +972,49 @@ final class ConversationFocusTests: XCTestCase {
         )
     }
 
-    /// A `ConversationsViewController` in a window over a two-session feed whose
-    /// loader records every `sourceID` it is asked for.
-    private func loadedFeed() async throws -> (ConversationsViewController, SourceLog) {
-        let asked = SourceLog()
-        let all = [
+    /// What a fixture feed is reading. Changeable from the test, so a poll can
+    /// bring back something the last one did not have; read from the loader,
+    /// which does not run on the main actor, hence the lock.
+    private final class FeedSource: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [ChatMessage]
+        init(_ messages: [ChatMessage]) { stored = messages }
+        var values: [ChatMessage] {
+            lock.lock(); defer { lock.unlock() }; return stored
+        }
+        func append(_ message: ChatMessage) {
+            lock.lock(); stored.append(message); lock.unlock()
+        }
+    }
+
+    /// The two-session feed every test here reads, oldest first.
+    private var feedMessages: [ChatMessage] {
+        [
             message(role: .assistant, text: "s1 first", sourceID: "s1"),
             message(role: .user, text: "s2 first", sourceID: "s2"),
             message(role: .user, text: "s1 second", sourceID: "s1")
         ]
+    }
+
+    /// A message long enough that a feed's eight-line cap cuts it off, which is
+    /// what makes "open it out" mean anything.
+    private func longMessage(sourceID: String) -> ChatMessage {
+        message(
+            role: .assistant,
+            text: (0..<40).map { "line \($0) of a long reply" }.joined(separator: "\n"),
+            sourceID: sourceID)
+    }
+
+    /// A `ConversationsViewController` in a window over a two-session feed whose
+    /// loader records every `sourceID` it is asked for.
+    private func loadedFeed(
+        source: FeedSource? = nil
+    ) async throws -> (ConversationsViewController, SourceLog) {
+        let asked = SourceLog()
+        let feed = source ?? FeedSource(feedMessages)
         // An hour's refresh: the first read is the whole of what these tests want.
         let controller = ConversationsViewController(refreshInterval: .seconds(3600)) { _, sourceID in
+            let all = feed.values
             guard let sourceID else { return all }
             asked.note(sourceID)
             return all.filter { $0.attribution?.sourceID == sourceID }
@@ -855,6 +1060,45 @@ final class ConversationFocusTests: XCTestCase {
 
         let bubble = try XCTUnwrap(row.subviews.compactMap { $0 as? AIChatBubbleView }.first)
         return (row, bubble, try jumpButton(in: row))
+    }
+
+    /// The width a fixture row is laid out at — a number rather than the
+    /// window's, because the rule these tests are about is arithmetic on it.
+    private static let feedRowWidth: CGFloat = 420
+
+    /// A message with no spaces in it, so it fills every line it is given
+    /// rather than stopping at the last word that fitted. That is what makes
+    /// "as wide as it is allowed to be" a number a test can check.
+    private static let wideText = String(repeating: "wrapping", count: 120)
+
+    /// One row at the width a feed would give it, with its bubble sized by the
+    /// row's own rule rather than by a number the test picked.
+    private func laidOutFeedRow(
+        role: ChatMessage.Role, text: String
+    ) throws -> (row: ChatTranscriptRowView, bubble: AIChatBubbleView) {
+        let row = ChatTranscriptRowView(
+            message: message(role: role, text: text, sourceID: "s1"),
+            maxBubbleWidth: ChatTranscriptRowView.maxBubbleWidth(forRowWidth: Self.feedRowWidth),
+            actions: .init(onJump: { _ in })
+        )
+        let host = NSView()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: Self.feedRowWidth, height: 600),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = host
+        windows.append(window)
+
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let bubble = try XCTUnwrap(row.subviews.compactMap { $0 as? AIChatBubbleView }.first)
+        return (row, bubble)
     }
 
     private func jumpButton(in row: ChatTranscriptRowView) throws -> NSButton {
@@ -981,6 +1225,23 @@ final class ConversationFocusTests: XCTestCase {
             charactersIgnoringModifiers: "",
             isARepeat: false,
             keyCode: code
+        )!
+    }
+
+    /// A letter, as a keyboard sends it: the character matters and the key code
+    /// does not, which is the opposite way round from the arrows and Return.
+    private func letter(_ character: String, modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: windows.last?.windowNumber ?? 0,
+            context: nil,
+            characters: character,
+            charactersIgnoringModifiers: character,
+            isARepeat: false,
+            keyCode: 0
         )!
     }
 

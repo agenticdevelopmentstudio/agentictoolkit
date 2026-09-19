@@ -195,13 +195,6 @@ public final class ConversationsViewController: NSViewController {
             lineLimit: nil,
             send: onSendToSource.map { send in
                 { @Sendable text in await send(sourceID, text) }
-            },
-            onJump: { [weak self] message in
-                // Leaving for the session makes the overlay's job moot — going
-                // there is a stronger answer to "show me this" than the overlay
-                // was, so it gets out of the way rather than waiting behind.
-                self?.dismissFocus()
-                self?.onGoToSource?(message)
             }
         )
         overlay.onDismissed = { [weak self, weak overlay] in

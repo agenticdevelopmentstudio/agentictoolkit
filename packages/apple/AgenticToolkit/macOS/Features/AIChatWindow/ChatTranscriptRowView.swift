@@ -8,15 +8,15 @@ import AgenticToolkitCoreMacOS
 ///
 /// ```
 /// [icon] project » branch » session name
-///        ╭──────────────────────────╮ [app]
+///        ╭──────────────────────────[app]
 ///        │ what the agent said      │
 ///        ╰──────────────────────────╯
 ///        09:41
 ///
 ///                 project » branch » session name
-///          [app] ╭──────────────────────────╮
-///                │ what the human said      │
-///                ╰──────────────────────────╯
+///                [app]──────────────────────────╮
+///                │ what the human said          │
+///                ╰──────────────────────────────╯
 ///                                            09:41
 /// ```
 ///
@@ -112,6 +112,11 @@ public final class ChatTranscriptRowView: NSView {
     /// selection moves by keyboard rather than by a press on a particular row.
     public var shownMessage: ChatMessage { message }
 
+    /// Whether the row is showing less than the message holds — the question a
+    /// keyboard asks before offering to open it out, since the **More…** control
+    /// that would answer it with a click is drawn only when it is true.
+    public var isTruncated: Bool { bubble.isTruncated }
+
     /// Thick enough to read as a frame at a glance across a busy feed, thin
     /// enough not to shift the row's content when it appears — it is drawn
     /// inside the row's own bounds.
@@ -124,14 +129,38 @@ public final class ChatTranscriptRowView: NSView {
     private static let iconSize: CGFloat = 24
     private static let iconGap: CGFloat = 8
 
-    /// The jump control's size, and its gap from the bubble's inside edge.
+    /// The jump control's size.
     ///
-    /// The same 44pt the Sessions window gives the identical control, because it
-    /// *is* the identical control — the application the conversation is running
-    /// in, clicked to go there. A reader who has learned that icon in one window
-    /// should not have to learn a smaller one here.
-    private static let jumpSize: CGFloat = 44
-    private static let jumpGap: CGFloat = 10
+    /// Two thirds of the 44pt the Sessions window gives the identical control.
+    /// There it is the row's subject; here it is a badge pinned to the corner of
+    /// a bubble, and at full size it was the loudest thing on a timeline whose
+    /// subject is what was said.
+    private static let jumpSize: CGFloat = 30
+
+    /// The gap a bubble leaves in front of the outside edge of the *facing*
+    /// column — where the other side's bubbles begin.
+    ///
+    /// A message wraps at the width of the window rather than at a fraction of
+    /// it, because a merged feed is read down one column at a time and a bubble
+    /// that stops two thirds of the way across wastes the third that is left.
+    /// Ten points is what keeps the two columns from reading as one: enough to
+    /// see the edge, not enough to be a margin.
+    private static let facingGutter: CGFloat = 10
+
+    /// How far in from the row's leading edge the agent's bubbles start — their
+    /// avatar column — and how far in from the trailing edge the human's do.
+    private static let agentOuterInset = hInset + iconSize + iconGap
+    private static let userOuterInset = hInset
+
+    /// How wide a bubble may grow in a row this wide.
+    ///
+    /// Both sides get the same answer, which is the point: each stops
+    /// ``facingGutter`` short of where the *other* side's bubbles start, and the
+    /// avatar column the agent's side spends is exactly what the human's side
+    /// spends on the gutter being measured from further in.
+    public static func maxBubbleWidth(forRowWidth width: CGFloat) -> CGFloat {
+        max(width - agentOuterInset - userOuterInset - facingGutter, 80)
+    }
 
     /// - Parameters:
     ///   - lineLimit: how many lines of the message the bubble shows before it
@@ -146,16 +175,15 @@ public final class ChatTranscriptRowView: NSView {
         self.attribution = message.attribution
             ?? .init(sourceID: "", context: [], name: "", iconSymbol: "")
         self.actions = actions
-        // The jump control sits *outside* the bubble, so the room it needs comes
-        // out of the width the bubble may grow to. Charging it to the bubble
-        // here — rather than asking every caller to subtract it — is what keeps
-        // the control on screen in a narrow window, where a full-width bubble
-        // would otherwise push it past the row's own edge.
-        let reserved = actions.onJump == nil ? 0 : Self.jumpGap + Self.jumpSize
         // The timestamp gets its own line here, so the bubble renders none.
+        //
+        // Nothing is held back for the jump control: it straddles the bubble's
+        // corner rather than standing beside it, so half of it is over the
+        // bubble and the other half is in the gutter the width rule already
+        // leaves — see ``maxBubbleWidth(forRowWidth:)``.
         self.bubble = AIChatBubbleView(
             message: message,
-            maxWidth: max(maxBubbleWidth - reserved, 80),
+            maxWidth: max(maxBubbleWidth, 80),
             showsInlineTimestamp: false,
             // Selectable, always: the text of a transcript is the thing a reader
             // most wants out of it, and a row that swallowed the drag to keep a
@@ -272,7 +300,8 @@ public final class ChatTranscriptRowView: NSView {
         // The application the conversation is running in, not a generic arrow:
         // a reader scanning a merged feed is looking for *their* window, and the
         // icon they would find it by on the Dock is the fastest way to say which
-        // row is it. Same control, same size, same mapping as the Sessions list.
+        // row is it. Same control and same mapping as the Sessions list, drawn
+        // smaller here because there it is the row and here it is a badge.
         jumpButton.translatesAutoresizingMaskIntoConstraints = false
         jumpButton.image = TerminalAppIcon.image(forTermProgram: attribution.appIdentity)
         jumpButton.imagePosition = .imageOnly
@@ -354,38 +383,41 @@ public final class ChatTranscriptRowView: NSView {
             constraints.append(contentEdge.constraint(equalTo: outerEdge, constant: inset))
         }
 
-        // The jump control hangs off the bubble's *inside* edge — the one facing
-        // the middle of the window, which is the side with room on it, and the
-        // side a reader's eye is already on. Level with the bubble's **top**
-        // rather than its centre: a bubble is as tall as its text, and centring
-        // would put the control halfway down a paragraph and at a different
-        // height on every row.
-        let jumpEdge = isFromUser ? jumpButton.trailingAnchor : jumpButton.leadingAnchor
+        // The jump control is centred on the bubble's *upper inside* corner —
+        // the corner facing the middle of the window, which is the side with
+        // room on it and the side a reader's eye is already on. Sitting on the
+        // corner rather than beside it ties the icon to the bubble it belongs
+        // to, costs the row no width of its own, and pins it to the one point
+        // that is in the same place on every row: a bubble is as tall as its
+        // text, so anything measured from its middle moves about.
         let bubbleInnerEdge = isFromUser ? bubble.leadingAnchor : bubble.trailingAnchor
         constraints += [
-            jumpEdge.constraint(equalTo: bubbleInnerEdge,
-                                constant: isFromUser ? -Self.jumpGap : Self.jumpGap),
-            jumpButton.topAnchor.constraint(equalTo: bubble.topAnchor),
+            jumpButton.centerXAnchor.constraint(equalTo: bubbleInnerEdge),
+            jumpButton.centerYAnchor.constraint(equalTo: bubble.topAnchor),
             jumpButton.widthAnchor.constraint(equalToConstant: Self.jumpSize),
             jumpButton.heightAnchor.constraint(equalToConstant: Self.jumpSize),
-            // A 44pt control beside a one-line bubble is taller than the rest of
-            // the row; the row grows to hold it rather than letting it hang out
-            // past its own bounds, where ``hitTest(_:)`` would stop answering
-            // for it.
+            // Half the control is above the bubble, in the band the header
+            // occupies; the row grows if it has to rather than letting the
+            // control hang out past its own bounds, where ``hitTest(_:)`` would
+            // stop answering for it.
             bottomAnchor.constraint(greaterThanOrEqualTo: jumpButton.bottomAnchor,
                                     constant: Self.vInset)
         ]
 
         // The bubble and the time align with the header on the speaker's side;
-        // on the far side they only have to stay inside the row.
+        // on the far side the bubble stops where the facing column's bubbles
+        // begin, less the gutter — the same limit ``maxBubbleWidth(forRowWidth:)``
+        // measured, said again as a constraint so a row narrower than the width
+        // it was built for still honours it.
         if isFromUser {
             constraints += [
                 bubble.trailingAnchor.constraint(equalTo: header.trailingAnchor),
                 timeLabel.trailingAnchor.constraint(equalTo: header.trailingAnchor),
                 header.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
                                                 constant: Self.hInset),
-                bubble.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
-                                                constant: Self.hInset)
+                bubble.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: leadingAnchor,
+                    constant: Self.agentOuterInset + Self.facingGutter)
             ]
         } else {
             constraints += [
@@ -393,8 +425,9 @@ public final class ChatTranscriptRowView: NSView {
                 timeLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor),
                 header.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
                                                  constant: -Self.hInset),
-                bubble.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
-                                                 constant: -Self.hInset)
+                bubble.trailingAnchor.constraint(
+                    lessThanOrEqualTo: trailingAnchor,
+                    constant: -(Self.userOuterInset + Self.facingGutter))
             ]
         }
         NSLayoutConstraint.activate(constraints)
