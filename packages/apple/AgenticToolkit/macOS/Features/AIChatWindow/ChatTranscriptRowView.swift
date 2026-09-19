@@ -8,15 +8,15 @@ import AgenticToolkitCoreMacOS
 ///
 /// ```
 /// [icon] project » branch » session name
-///        ╭──────────────────────────[app]
+///        ╭──────────────────────────╮
 ///        │ what the agent said      │
-///        ╰──────────────────────────╯
+///        ╰──────────────────────────[app]
 ///        09:41
 ///
 ///                 project » branch » session name
-///                [app]──────────────────────────╮
+///                ╭──────────────────────────────╮
 ///                │ what the human said          │
-///                ╰──────────────────────────────╯
+///                [app]──────────────────────────╯
 ///                                            09:41
 /// ```
 ///
@@ -190,7 +190,13 @@ public final class ChatTranscriptRowView: NSView {
             // click for itself would be trading the message for the gesture.
             // That is what moved opening to a double click.
             isTextSelectable: true,
-            lineLimit: lineLimit
+            lineLimit: lineLimit,
+            // Every row's bubble is the same width. A merged feed is read down
+            // one column, and bubbles cut to their own text give that column a
+            // ragged inside edge that means nothing — "this reply was short" is
+            // already in the height. The edge that carries meaning is the
+            // outside one, which says who is talking, and it does not move.
+            fillsAvailableWidth: true
         )
         switch message.delivery {
         case .settled:
@@ -383,23 +389,28 @@ public final class ChatTranscriptRowView: NSView {
             constraints.append(contentEdge.constraint(equalTo: outerEdge, constant: inset))
         }
 
-        // The jump control is centred on the bubble's *upper inside* corner —
+        // The jump control is centred on the bubble's *lower inside* corner —
         // the corner facing the middle of the window, which is the side with
         // room on it and the side a reader's eye is already on. Sitting on the
         // corner rather than beside it ties the icon to the bubble it belongs
         // to, costs the row no width of its own, and pins it to the one point
         // that is in the same place on every row: a bubble is as tall as its
         // text, so anything measured from its middle moves about.
+        //
+        // The *lower* corner and not the upper one because the top of a bubble
+        // is where its first line is, and a 30pt control sitting on it lands
+        // beside the words a reader starts on. The bottom is where they finish,
+        // which is also when going to the session is the thing they might want.
         let bubbleInnerEdge = isFromUser ? bubble.leadingAnchor : bubble.trailingAnchor
         constraints += [
             jumpButton.centerXAnchor.constraint(equalTo: bubbleInnerEdge),
-            jumpButton.centerYAnchor.constraint(equalTo: bubble.topAnchor),
+            jumpButton.centerYAnchor.constraint(equalTo: bubble.bottomAnchor),
             jumpButton.widthAnchor.constraint(equalToConstant: Self.jumpSize),
             jumpButton.heightAnchor.constraint(equalToConstant: Self.jumpSize),
-            // Half the control is above the bubble, in the band the header
-            // occupies; the row grows if it has to rather than letting the
-            // control hang out past its own bounds, where ``hitTest(_:)`` would
-            // stop answering for it.
+            // Half the control is below the bubble, in the band the delivery
+            // mark and the timestamp occupy; the row grows if it has to rather
+            // than letting the control hang out past its own bounds, where
+            // ``hitTest(_:)`` would stop answering for it.
             bottomAnchor.constraint(greaterThanOrEqualTo: jumpButton.bottomAnchor,
                                     constant: Self.vInset)
         ]

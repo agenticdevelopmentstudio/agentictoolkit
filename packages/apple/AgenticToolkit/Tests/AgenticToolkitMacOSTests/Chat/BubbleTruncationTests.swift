@@ -103,6 +103,59 @@ final class BubbleTruncationTests: XCTestCase {
             "the bubble is narrower than the control it is showing, so More… is clipped")
     }
 
+    /// The control follows the ellipsis on the same line: that is where the
+    /// sentence stopped, so it is where "what else did it say" gets asked.
+    func testTheMoreControlFollowsTheEllipsisOnTheLastLine() throws {
+        let bubble = try laidOutBubble(text: paragraph(of: 40), lineLimit: 8)
+        XCTAssertTrue(bubble.isTruncated)
+        let more = try moreButton(in: bubble)
+        let lastLine = try lastLineRect(of: bubble)
+
+        XCTAssertGreaterThanOrEqual(
+            more.frame.minX, lastLine.maxX,
+            "the control is drawn over the text it is offering to complete")
+        XCTAssertEqual(
+            more.frame.minX, lastLine.maxX + 4, accuracy: 1,
+            "the control is not right after the ellipsis")
+        XCTAssertEqual(
+            more.frame.midY, lastLine.midY, accuracy: 1,
+            "the control is not on the last line — it is above or below it")
+    }
+
+    /// Being on the line rather than under it is also what makes a truncated row
+    /// cost no more height than a full one: the control used to add a line that
+    /// carried no words, on every truncated row in the feed.
+    func testATruncatedBubbleIsNoTallerThanAFullOne() throws {
+        let truncated = try laidOutBubble(text: paragraph(of: 40), lineLimit: 8)
+        let whole = try laidOutBubble(text: paragraph(of: 8), lineLimit: 8)
+
+        XCTAssertTrue(truncated.isTruncated)
+        XCTAssertFalse(whole.isTruncated)
+        XCTAssertEqual(
+            truncated.frame.height, whole.frame.height, accuracy: 0.5,
+            "the More… control is still costing the row a line of its own")
+    }
+
+    /// The cut lands where the text wrapped, so the last line normally ends at
+    /// the far edge — with the ellipsis standing in for the space that wrapped
+    /// it. Something has to give for the control to follow it, and it is the
+    /// text: a couple of characters, not the bubble's edge.
+    func testTheCutLeavesRoomOnTheLastLineForTheControl() throws {
+        let wrapped = String(repeating: "a long unbroken sentence that has to wrap. ", count: 40)
+        let bubble = try laidOutBubble(text: wrapped, lineLimit: 8, fillsAvailableWidth: true)
+        XCTAssertTrue(bubble.isTruncated)
+        let more = try moreButton(in: bubble)
+
+        XCTAssertLessThanOrEqual(
+            more.frame.maxX, bubble.frame.width - 12 + 0.5,
+            "the control ran out through the bubble's own padding")
+        XCTAssertGreaterThanOrEqual(
+            more.frame.minX, try lastLineRect(of: bubble).maxX,
+            "the control slid back over the ellipsis instead of the text making room")
+        XCTAssertTrue(try text(of: bubble).hasSuffix("…"),
+                      "making room cost the ellipsis")
+    }
+
     // MARK: - The expansion overlay
 
     func testMoreOpensAnOverlayShowingTheWholeMessage() async throws {
@@ -271,14 +324,16 @@ final class BubbleTruncationTests: XCTestCase {
     /// A bubble on its own, in a window, laid out — the state it measures itself
     /// in, since the measurement is redone on every theme application.
     private func laidOutBubble(
-        text: String, lineLimit: Int?, maxWidth: CGFloat = 300
+        text: String, lineLimit: Int?, maxWidth: CGFloat = 300,
+        fillsAvailableWidth: Bool = false
     ) throws -> AIChatBubbleView {
         let bubble = AIChatBubbleView(
             message: ChatMessage(id: "m", role: .assistant, text: text),
             maxWidth: maxWidth,
             showsInlineTimestamp: false,
             isTextSelectable: true,
-            lineLimit: lineLimit
+            lineLimit: lineLimit,
+            fillsAvailableWidth: fillsAvailableWidth
         )
         let host = NSView()
         let window = NSWindow(
@@ -388,6 +443,27 @@ final class BubbleTruncationTests: XCTestCase {
 
     private func text(of bubble: AIChatBubbleView) throws -> String {
         try textView(of: bubble).string
+    }
+
+    /// Where the last laid-out line ends, in the bubble's own coordinates —
+    /// which is where the ellipsis is, and so where anything following it has
+    /// to start. Converted rather than compared raw: a text view is flipped and
+    /// a bubble is not.
+    private func lastLineRect(of bubble: AIChatBubbleView) throws -> NSRect {
+        let view = try textView(of: bubble)
+        let layoutManager = try XCTUnwrap(view.layoutManager)
+        let container = try XCTUnwrap(view.textContainer)
+        layoutManager.ensureLayout(for: container)
+
+        var rect = NSRect.zero
+        var glyph = 0
+        while glyph < layoutManager.numberOfGlyphs {
+            var range = NSRange()
+            rect = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: &range)
+            guard range.length > 0 else { break }
+            glyph = NSMaxRange(range)
+        }
+        return bubble.convert(rect, from: view)
     }
 
     /// What the bubble is *showing*, counted off its own laid-out fragments —

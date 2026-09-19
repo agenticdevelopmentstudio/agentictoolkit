@@ -34,6 +34,19 @@ public final class AIChatBubbleView: NSView {
     private let showsInlineTimestamp: Bool
     private let isTextSelectable: Bool
 
+    /// Whether the bubble is always as wide as it is allowed to be, rather than
+    /// as wide as its text.
+    ///
+    /// A one-to-one chat shrinks each bubble to its content: two shapes reading
+    /// down one column are what tells "ok" from a paragraph at a glance. A
+    /// merged feed cannot afford that — there the ragged inside edges of a
+    /// hundred rows are a second, meaningless column of noise running down the
+    /// middle of the window, and the edge that says who is talking is the
+    /// *outside* one, which never moved. One width also makes the row furniture
+    /// pinned to that edge — the jump control, the truncation control — land in
+    /// the same place on every row instead of tracking the text.
+    private let fillsAvailableWidth: Bool
+
     /// How many lines the bubble shows before it stops and offers the rest, or
     /// nil for a bubble that shows whatever it holds.
     ///
@@ -82,7 +95,9 @@ public final class AIChatBubbleView: NSView {
     private let textHeightConstraint: NSLayoutConstraint
     private var bubbleWidthConstraint: NSLayoutConstraint!
     private var moreHeightConstraint: NSLayoutConstraint!
-    private var moreGapConstraint: NSLayoutConstraint!
+    private var moreWidthConstraint: NSLayoutConstraint!
+    private var moreLeadingConstraint: NSLayoutConstraint!
+    private var moreTopConstraint: NSLayoutConstraint!
 
     /// The **More…** control, for a container that has taken over hit-testing
     /// for its whole subtree and has to name the parts that still take a click.
@@ -99,8 +114,15 @@ public final class AIChatBubbleView: NSView {
     /// recognised, and at this size it is a target a reader hits without aiming.
     private static let moreSymbol = "ellipsis.circle.fill"
     private static let moreSymbolPointSize: CGFloat = 17
-    private static let moreHeight: CGFloat = 22
-    private static let moreGap: CGFloat = 2
+    private static let moreSize: CGFloat = 22
+
+    /// How far the control sits behind the ellipsis it follows.
+    ///
+    /// It goes *on the last line*, right after the "…", because that is where
+    /// the sentence stopped and so where the question "what else did it say"
+    /// gets asked. Under the text it was a second thing to notice, and it cost
+    /// every truncated row a line of height that carried no words.
+    private static let moreInlineGap: CGFloat = 4
 
     /// - Parameters:
     ///   - showsInlineTimestamp: whether the time trails the text inside the
@@ -113,24 +135,38 @@ public final class AIChatBubbleView: NSView {
     ///     to be clicked through.
     ///   - lineLimit: the most lines to show before truncating — see
     ///     ``lineLimit``.
+    ///   - fillsAvailableWidth: whether every bubble is `maxWidth` wide
+    ///     whatever it holds — see ``fillsAvailableWidth``.
     public init(
         message: ChatMessage,
         maxWidth: CGFloat,
         showsInlineTimestamp: Bool = true,
         isTextSelectable: Bool = true,
-        lineLimit: Int? = nil
+        lineLimit: Int? = nil,
+        fillsAvailableWidth: Bool = false
     ) {
         self.message = message
         self.maxWidth = maxWidth
         self.showsInlineTimestamp = showsInlineTimestamp
         self.isTextSelectable = isTextSelectable
         self.lineLimit = lineLimit
+        self.fillsAvailableWidth = fillsAvailableWidth
         self.textView = BubbleTextView(frame: .zero)
         self.textWidthConstraint = textView.widthAnchor.constraint(equalToConstant: 0)
         self.textHeightConstraint = textView.heightAnchor.constraint(equalToConstant: 0)
 
         super.init(frame: .zero)
         self.bubbleWidthConstraint = widthAnchor.constraint(equalToConstant: maxWidth)
+
+        if fillsAvailableWidth {
+            // A row can be laid out narrower than the width its bubbles were
+            // built for, for the moment between a live resize and the rebuild
+            // that follows it. A width that outranked the row's own edges would
+            // be an unsatisfiable-constraint report for that moment; one point
+            // under required, the edges win and the bubble gives.
+            bubbleWidthConstraint.priority = .required - 1
+            textWidthConstraint.priority = .required - 1
+        }
 
         wantsLayer = true
         layer?.cornerRadius = 12
@@ -165,25 +201,35 @@ public final class AIChatBubbleView: NSView {
         addSubview(textView)
         addSubview(moreButton)
         self.moreHeightConstraint = moreButton.heightAnchor.constraint(equalToConstant: 0)
-        self.moreGapConstraint = moreButton.topAnchor.constraint(
-            equalTo: textView.bottomAnchor, constant: 0)
+        self.moreWidthConstraint = moreButton.widthAnchor.constraint(equalToConstant: 0)
+        // Placed off the laid-out last line rather than off an edge, so both
+        // constants are written by ``apply(_:)`` once the text has been measured.
+        self.moreLeadingConstraint = moreButton.leadingAnchor.constraint(
+            equalTo: textView.leadingAnchor, constant: 0)
+        self.moreTopConstraint = moreButton.topAnchor.constraint(
+            equalTo: textView.topAnchor, constant: 0)
+
+        // The truncation pass keeps the last line short enough for the control
+        // to follow it, so this normally has nothing to do. It is here for the
+        // bubble too narrow to hold both: the control slides back over the
+        // ellipsis instead of out through the bubble's own edge.
+        moreLeadingConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: topAnchor, constant: Self.vPad),
             textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.hPad),
             textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.hPad),
+            bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: Self.vPad),
             textWidthConstraint,
             textHeightConstraint,
             bubbleWidthConstraint,
 
-            // The control goes under the text rather than over it: a "More…"
-            // floated on the last line covers the words it is offering to show.
-            moreGapConstraint,
+            moreLeadingConstraint,
+            moreTopConstraint,
             moreHeightConstraint,
-            moreButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.hPad),
-            moreButton.leadingAnchor.constraint(
-                greaterThanOrEqualTo: leadingAnchor, constant: Self.hPad),
-            moreButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.vPad)
+            moreWidthConstraint,
+            moreButton.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor, constant: -Self.hPad)
         ])
 
         observeTheme { bubble, palette in bubble.apply(palette) }
@@ -281,33 +327,52 @@ public final class AIChatBubbleView: NSView {
         var measured = measure(full, width: textMaxWidth)
         if let lineLimit, measured.lineCount > lineLimit,
            let cut = truncating(full, to: lineLimit, using: measured) {
-            shown = cut
-            measured = measure(cut, width: textMaxWidth)
+            // The control follows the ellipsis on the same line, so the last
+            // line has to end early enough to leave room for it.
+            (shown, measured) = trimming(
+                cut, toLeave: Self.moreInlineGap + Self.moreSize,
+                within: lineLimit, width: textMaxWidth)
             isTruncated = true
         } else {
             isTruncated = false
         }
 
+        // The control has to fit as well as the text: a one-word message
+        // followed by a control wider than it is would clip the offer.
+        let contentWidth = isTruncated
+            ? max(measured.width, measured.lastLine.maxX + Self.moreInlineGap + Self.moreSize)
+            : measured.width
+
+        // The text view is exactly as wide as the bubble's content box, not as
+        // wide as its longest line: it is pinned to both of the bubble's inside
+        // edges, so a width constraint disagreeing with them is a conflict.
+        let shownWidth = fillsAvailableWidth ? textMaxWidth : min(contentWidth, textMaxWidth)
         textView.textContainer?.size = NSSize(
-            width: measured.width, height: .greatestFiniteMagnitude)
+            width: shownWidth, height: .greatestFiniteMagnitude)
         textView.textStorage?.setAttributedString(shown)
 
-        textWidthConstraint.constant = measured.width
+        textWidthConstraint.constant = shownWidth
         textHeightConstraint.constant = measured.height
 
         moreButton.isHidden = !isTruncated
         // Tinted with the bubble's own text colour: it belongs to this message,
         // and an accent here would read as a different kind of thing entirely.
         moreButton.contentTintColor = text
-        moreHeightConstraint.constant = isTruncated ? Self.moreHeight : 0
-        moreGapConstraint.constant = isTruncated ? Self.moreGap : 0
+        moreHeightConstraint.constant = isTruncated ? Self.moreSize : 0
+        moreWidthConstraint.constant = isTruncated ? Self.moreSize : 0
+        moreLeadingConstraint.constant = isTruncated
+            ? measured.lastLine.maxX + Self.moreInlineGap
+            : 0
+        // Centred on the line it follows, not on its baseline: a 22pt control
+        // beside a 13pt line hangs a few points either side of it, which the
+        // bubble's own padding already has room for.
+        moreTopConstraint.constant = isTruncated
+            ? measured.lastLine.midY - Self.moreSize / 2
+            : 0
 
-        // The control has to fit as well as the text: a one-word message under a
-        // "More…" it is narrower than would clip the offer rather than the text.
-        let contentWidth = isTruncated
-            ? max(measured.width, ceil(moreButton.intrinsicContentSize.width))
-            : measured.width
-        bubbleWidthConstraint.constant = min(contentWidth + Self.hPad * 2, maxWidth)
+        bubbleWidthConstraint.constant = fillsAvailableWidth
+            ? maxWidth
+            : min(contentWidth + Self.hPad * 2, maxWidth)
 
         textView.insertionPointColor = palette.nsColor(.cursor)
         textView.selectedTextAttributes = [
@@ -329,6 +394,10 @@ public final class AIChatBubbleView: NSView {
         let width: CGFloat
         let height: CGFloat
         let lineCount: Int
+        /// The used rect of the final line fragment, in the container's own
+        /// coordinates — where the text actually stops, which is where anything
+        /// that follows it has to start.
+        let lastLine: NSRect
     }
 
     /// Measured off-screen in a throwaway layout stack rather than by asking the
@@ -347,9 +416,11 @@ public final class AIChatBubbleView: NSView {
         let used = layoutManager.usedRect(for: container)
         var lineCount = 0
         var glyph = 0
+        var lastLine = NSRect.zero
         while glyph < layoutManager.numberOfGlyphs {
             var range = NSRange()
-            _ = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: &range)
+            lastLine = layoutManager.lineFragmentUsedRect(
+                forGlyphAt: glyph, effectiveRange: &range)
             lineCount += 1
             // A zero-length effective range would leave the walk standing still;
             // stopping is the honest answer, an infinite loop is not.
@@ -359,7 +430,8 @@ public final class AIChatBubbleView: NSView {
 
         return Measurement(
             storage: storage, layoutManager: layoutManager,
-            width: ceil(used.width), height: ceil(used.height), lineCount: lineCount
+            width: ceil(used.width), height: ceil(used.height), lineCount: lineCount,
+            lastLine: lastLine
         )
     }
 
@@ -405,6 +477,44 @@ public final class AIChatBubbleView: NSView {
             string: Self.ellipsis,
             attributes: head.attributes(at: head.length - 1, effectiveRange: nil)))
         return head
+    }
+
+    /// `attributed` — a string ``truncating(_:to:using:)`` has already ended in
+    /// an ellipsis — shortened until it is `limit` lines with `reserve` points
+    /// free after the last of them, with what it measured to.
+    ///
+    /// Two things are being fixed, and they are the same fix. The cut is by
+    /// laid-out lines, so the last one can stop anywhere from the far edge to a
+    /// couple of glyphs in — and where it stopped flush, the appended ellipsis
+    /// wrapped onto a line of its own, which is both a line over the limit and
+    /// a "…" with nothing in front of it. Where it stopped just short, there is
+    /// no room after it for the control that follows it. Characters come off one
+    /// at a time from in front of the ellipsis, because a word at a time would
+    /// take the reader's sentence apart to make room for a button.
+    ///
+    /// Only the last line can change, since removing from the end cannot re-wrap
+    /// what came before it, and the string strictly shrinks, so this ends.
+    private func trimming(
+        _ attributed: NSAttributedString, toLeave reserve: CGFloat,
+        within limit: Int, width: CGFloat
+    ) -> (NSAttributedString, Measurement) {
+        let ellipsisLength = (Self.ellipsis as NSString).length
+        var candidate = attributed
+        var measurement = measure(candidate, width: width)
+
+        while measurement.lineCount > limit || measurement.lastLine.maxX + reserve > width {
+            let string = candidate.string as NSString
+            guard string.length > ellipsisLength else { break }
+            // The character before the ellipsis, taken whole: a surrogate pair
+            // or a combining sequence cut in half is a replacement glyph.
+            let composed = string.rangeOfComposedCharacterSequence(
+                at: string.length - ellipsisLength - 1)
+            let mutable = NSMutableAttributedString(attributedString: candidate)
+            mutable.deleteCharacters(in: composed)
+            candidate = mutable
+            measurement = measure(candidate, width: width)
+        }
+        return (candidate, measurement)
     }
 
     // MARK: - Mouse

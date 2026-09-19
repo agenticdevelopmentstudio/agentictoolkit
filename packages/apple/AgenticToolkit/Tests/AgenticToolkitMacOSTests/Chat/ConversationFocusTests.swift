@@ -30,30 +30,30 @@ final class ConversationFocusTests: XCTestCase {
     /// The control straddles the corner rather than standing beside it: half
     /// of it is over the bubble and half in the gutter, which is why the row
     /// holds back no width of its own for it.
-    func testTheJumpControlIsCentredOnAnAssistantBubblesUpperInsideCorner() throws {
+    func testTheJumpControlIsCentredOnAnAssistantBubblesLowerInsideCorner() throws {
         let (_, bubble, button) = try laidOutRow(role: .assistant, text: "a short reply")
         XCTAssertEqual(
             aligned(button).midX, aligned(bubble).maxX, accuracy: 0.5,
             "the agent's column runs left, so its bubble's inside edge is the trailing one")
         XCTAssertEqual(
-            aligned(button).midY, aligned(bubble).maxY, accuracy: 0.5,
-            "the control is not centred on the bubble's top edge")
+            aligned(button).midY, aligned(bubble).minY, accuracy: 0.5,
+            "the control is not centred on the bubble's bottom edge")
     }
 
-    func testTheJumpControlIsCentredOnAUserBubblesUpperInsideCorner() throws {
+    func testTheJumpControlIsCentredOnAUserBubblesLowerInsideCorner() throws {
         let (_, bubble, button) = try laidOutRow(role: .user, text: "a short prompt")
         XCTAssertEqual(
             aligned(button).midX, aligned(bubble).minX, accuracy: 0.5,
             "the human's column runs right, so its bubble's inside edge is the leading one")
         XCTAssertEqual(
-            aligned(button).midY, aligned(bubble).maxY, accuracy: 0.5,
-            "the control is not centred on the bubble's top edge")
+            aligned(button).midY, aligned(bubble).minY, accuracy: 0.5,
+            "the control is not centred on the bubble's bottom edge")
     }
 
     /// The corner is the one point that is in the same place on every row: a
     /// bubble is as tall as its text, so a control measured from its middle
     /// moves about. A one-line bubble and a forty-line one have to put it at
-    /// the same height above their own top edge — which is none.
+    /// the same height above their own bottom edge — which is none.
     func testTheJumpControlStaysOnTheCornerHoweverTallTheBubbleIs() throws {
         let (_, shortBubble, shortButton) = try laidOutRow(role: .assistant, text: "one line")
         let paragraph = (0..<40).map { "line \($0) of a long reply" }.joined(separator: "\n")
@@ -63,26 +63,26 @@ final class ConversationFocusTests: XCTestCase {
             tallBubble.frame.height, shortBubble.frame.height * 4,
             "the fixture is wrong: the bubbles have to differ in height for this to mean anything")
 
-        let shortDrop = aligned(shortBubble).maxY - aligned(shortButton).midY
-        let tallDrop = aligned(tallBubble).maxY - aligned(tallButton).midY
+        let shortRise = aligned(shortButton).midY - aligned(shortBubble).minY
+        let tallRise = aligned(tallButton).midY - aligned(tallBubble).minY
         XCTAssertEqual(
-            shortDrop, 0, accuracy: 0.5,
-            "the control is not on the bubble's top edge")
+            shortRise, 0, accuracy: 0.5,
+            "the control is not on the bubble's bottom edge")
         XCTAssertEqual(
-            shortDrop, tallDrop, accuracy: 0.5,
-            "the control follows the bubble's centre, not its corner: \(shortDrop) vs \(tallDrop)")
+            shortRise, tallRise, accuracy: 0.5,
+            "the control follows the bubble's centre, not its corner: \(shortRise) vs \(tallRise)")
     }
 
     /// Compared on alignment rects, not frames: a control's frame carries a
     /// couple of points of slack its constraints never see, and the constraint
-    /// is what these are about. Neither view is flipped, so a top edge is a
-    /// `maxY`.
+    /// is what these are about. Neither view is flipped, so a bottom edge is a
+    /// `minY`.
     private func aligned(_ view: NSView) -> NSRect {
         view.alignmentRect(forFrame: view.frame)
     }
 
-    /// Half the control is above the bubble it is pinned to, in the band the
-    /// header occupies — and a row's ``ChatTranscriptRowView/hitTest(_:)``
+    /// Half the control is below the bubble it is pinned to, in the band the
+    /// timestamp occupies — and a row's ``ChatTranscriptRowView/hitTest(_:)``
     /// refuses anything outside its bounds, so a control hanging past either
     /// edge would be drawn and unclickable.
     func testTheRowIsTallEnoughToHoldTheJumpControl() throws {
@@ -126,17 +126,22 @@ final class ConversationFocusTests: XCTestCase {
                        "the human's bubble left room it was allowed to use")
     }
 
-    /// The other half of the rule: the cap is a *limit*, not a width. A message
-    /// that does not fill it is drawn at the size of what it says, so a feed of
-    /// short lines reads as a conversation rather than as two columns of
-    /// full-width blocks.
-    func testAShortMessageIsOnlyAsWideAsItself() throws {
+    /// The other half of the rule: in a merged feed the cap is the width, not a
+    /// limit. Bubbles cut to their own text give the column a ragged inside
+    /// edge that says nothing a reader needs — how much was said is already in
+    /// the height — while the outside edge, which says *who* is talking, is the
+    /// one that has to stay still.
+    func testEveryBubbleIsTheSameWidthHoweverLittleItSays() throws {
         let short = try laidOutFeedRow(role: .assistant, text: "yes")
+        let wide = try laidOutFeedRow(role: .assistant, text: Self.wideText)
+        let human = try laidOutFeedRow(role: .user, text: "ok")
         let cap = ChatTranscriptRowView.maxBubbleWidth(forRowWidth: Self.feedRowWidth)
 
-        XCTAssertLessThan(
-            short.bubble.frame.width, cap / 2,
-            "a three-letter message was drawn as wide as a paragraph")
+        XCTAssertEqual(short.bubble.frame.width, cap, accuracy: 0.5,
+                       "a three-word message was drawn narrower than the column")
+        XCTAssertEqual(wide.bubble.frame.width, cap, accuracy: 0.5)
+        XCTAssertEqual(human.bubble.frame.width, cap, accuracy: 0.5,
+                       "the human's column is a different width from the agent's")
     }
 
     func testARowWithNoJumpActionShowsNoJumpControl() throws {
