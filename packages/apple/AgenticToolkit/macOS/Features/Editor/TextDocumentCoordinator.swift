@@ -23,6 +23,14 @@ public final class TextDocumentCoordinator: AppFeature {
     public let store: TextDocumentStore
     public let saveScheduler: TextDocumentSaveScheduler
 
+    /// Keeps open buffers in step with the files behind them.
+    ///
+    /// Here rather than in an editor pane because the store is here: the
+    /// reload has to happen once per *document*, and a pane-owned reloader
+    /// would run once per pane — two panes on one file reloading each other's
+    /// buffer, which is the same document twice.
+    public let reloader: OpenDocumentReloader
+
     /// - Parameter write: Persists one document's current text to disk.
     ///   Callers should preserve their own prior save semantics (atomic
     ///   write, encoding, success/failure logging) — this coordinator does
@@ -37,9 +45,12 @@ public final class TextDocumentCoordinator: AppFeature {
         debounce: Duration = .seconds(1),
         write: @escaping TextDocumentSaveScheduler.Write
     ) {
-        self.store = TextDocumentStore()
+        let store = TextDocumentStore()
+        self.store = store
         self.saveScheduler = TextDocumentSaveScheduler(debounce: debounce, write: write)
+        self.reloader = OpenDocumentReloader(store: store)
         super.init()
+        reloader.start()
     }
 
     /// Wait for any debounced saves before the app exits, exactly like
@@ -49,6 +60,9 @@ public final class TextDocumentCoordinator: AppFeature {
     /// the scheduler keeps a failed write pending rather than dropping it —
     /// and the last thing this process can usefully do about it is say so.
     public override func terminate() async {
+        // Before the flush, not after: a reload landing between the flush and
+        // the process exiting would rewrite a buffer nothing will save again.
+        reloader.stop()
         let unsaved = await saveScheduler.flushPendingSaves()
         guard !unsaved.isEmpty else { return }
         let list = unsaved.joined(separator: ", ")

@@ -1117,6 +1117,23 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
         case .idle, .stopped, .failed: return
         case .starting, .running: break
         }
+
+        // `InitializingServer` keeps its own handshake state, and nothing in
+        // it watches the transport: after a stream end it still believes it is
+        // `.initialized`. That is not merely stale bookkeeping.
+        // `shutdownAndExit()` is guarded on `case .initialized`, so a session
+        // that died on its own makes `teardown()` send a `shutdown` *request*
+        // over a channel whose read sequence has already finished — a
+        // continuation nothing will ever resume, so `stop()` blocks for the
+        // whole of `shutdownBudgetSeconds` before the budget rescues it.
+        // Telling the server here costs nothing and makes that teardown
+        // immediate.
+        //
+        // Before the `exitStatus()` suspension below, deliberately: that
+        // suspension is a window in which a `stop()` can arrive, and the point
+        // is for the flag to be down by the time one does.
+        await server?.connectionInvalidated()
+
         let cause: any Error
         if let recorded = streamEnd.value.error {
             cause = recorded

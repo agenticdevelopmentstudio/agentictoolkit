@@ -1814,6 +1814,119 @@ struct MainThreadLanguageModelsTests {
         continuation.finish()
     }
 
+    /// A provider that carries on yielding after the token fires must not get
+    /// a single further part through to the extension.
+    ///
+    /// **This is the one the other six cancellation tests cannot fail.** Every
+    /// one of them holds a source that either never yields again or is dropped
+    /// at cancellation, so each proves that *the adaptor* reacted to the token
+    /// — none of them proves anything about a source that does not. A real
+    /// provider is a network call: aborting one is best-effort, the bytes
+    /// already in flight still arrive, and a server that ignores the abort
+    /// entirely is an ordinary failure rather than an exotic one. The
+    /// cancellation contract has to hold on this side of the seam regardless,
+    /// and nothing said whether it did.
+    ///
+    /// The defiance here is deliberately issued *after* JS has observed the
+    /// cancellation, so the ordering the assertion depends on is established
+    /// rather than raced for: what is under test is the state the adaptor is
+    /// left in, not which of two concurrent events wins.
+    @Test
+    func partsYieldedAfterCancellationNeverReachTheExtension() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let provider = TestLanguageModelProvider([Self.alpha])
+        var heldContinuation:
+            AsyncThrowingStream<ExtensionLanguageModelResponsePart, Error>.Continuation?
+        provider.streamResponseHandler = { _, _, _, _ in
+            AsyncThrowingStream { continuation in heldContinuation = continuation }
+        }
+        let languageModels = MainThreadLanguageModels(
+            provider: provider, notImplementedLedger: NotImplementedLedger(),
+            extensionIdentifier: "unused")
+        let host = try makeHost(
+            source: """
+            var vscode = require('vscode');
+            exports.activate = function () {
+                globalThis.__seenFirst = null;
+                globalThis.__first = null;
+                globalThis.__second = null;
+                \(Self.tokenSource(alreadyCancelled: false))
+                vscode.lm.selectChatModels().then(function (models) {
+                    return models[0].sendRequest([], {}, globalThis.__token);
+                }).then(function (response) {
+                    var texts = [];
+                    (async function () {
+                        try {
+                            for await (const t of response.text) {
+                                texts.push(t);
+                                globalThis.__seenFirst = true;
+                            }
+                            globalThis.__first = { outcome: 'done', texts: texts };
+                        } catch (error) {
+                            globalThis.__first = {
+                                outcome: 'rejected', message: error.message, texts: texts
+                            };
+                        }
+                    })();
+                    // Asking again *after* the cursor has already failed is
+                    // how a part yielded later would show itself: a cancelled
+                    // cursor that went back to delivering would resolve here.
+                    globalThis.__askAgain = function () {
+                        response.text.next().then(
+                            function (result) {
+                                globalThis.__second = {
+                                    outcome: 'resolved', value: String(result.value)
+                                };
+                            },
+                            function (error) {
+                                globalThis.__second = {
+                                    outcome: 'rejected', message: error.message
+                                };
+                            }
+                        );
+                    };
+                });
+            };
+            """,
+            in: directory
+        )
+        defer { host.dispose() }
+        try install(languageModels, on: host)
+        try await host.activate()
+
+        let context = try #require(host.javaScriptContext)
+        for _ in 0..<200 where heldContinuation == nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let continuation = try #require(heldContinuation)
+        continuation.yield(.text("before"))
+        _ = try #require(await waitForGlobal(context, "globalThis.__seenFirst"))
+
+        context.evaluateScript("globalThis.__fire();")
+
+        let cancelled = "vscode.LanguageModelChat.sendRequest failed: "
+            + "the CancellationToken passed to sendRequest was cancelled"
+        let first = try #require(await waitForGlobal(context, "globalThis.__first"))
+        #expect(first.forProperty("outcome")?.toString() == "rejected")
+        #expect(first.forProperty("message")?.toString() == cancelled)
+        #expect((first.forProperty("texts")?.toArray() as? [String]) == ["before"])
+
+        // The provider ignoring the abort, in the two shapes it comes in: more
+        // parts, and then a source that ends of its own accord as though the
+        // request had run to completion.
+        continuation.yield(.text("after"))
+        continuation.yield(.end(stopReason: "stop"))
+        continuation.finish()
+
+        context.evaluateScript("globalThis.__askAgain();")
+        let second = try #require(await waitForGlobal(context, "globalThis.__second"))
+        // Rejected, not resolved -- and specifically not resolved with
+        // "after", which is what a cursor that resumed delivering would say.
+        #expect(second.forProperty("outcome")?.toString() == "rejected")
+        #expect(second.forProperty("message")?.toString() == cancelled)
+    }
+
     /// A token that fires after the source has already finished leaves the
     /// completed response completed: there is nothing left to cancel, and
     /// overwriting the outcome would turn a response the extension

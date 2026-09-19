@@ -81,7 +81,10 @@ struct LanguageServerSessionTests {
 
     // MARK: - Helpers
 
-    private func makeSession(script: String) -> LanguageServerSession {
+    private func makeSession(
+        script: String,
+        shutdownBudget: TimeInterval = LanguageServerSessionTests.shutdownBudget
+    ) -> LanguageServerSession {
         LanguageServerSession(configuration: .init(
             name: "Scripted",
             languageIds: ["swift"],
@@ -89,7 +92,7 @@ struct LanguageServerSessionTests {
             arguments: ["-c", script],
             rootURL: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true),
             initializeBudgetSeconds: Self.initializeBudget,
-            shutdownBudgetSeconds: Self.shutdownBudget
+            shutdownBudgetSeconds: shutdownBudget
         ))
     }
 
@@ -349,6 +352,40 @@ struct LanguageServerSessionTests {
         #expect(afterCrash == nil)
 
         await session.stop()
+    }
+
+    /// Tearing down a session whose server already died must not spend the
+    /// shutdown budget discovering that.
+    ///
+    /// What it catches: `publishStreamEnd()` not telling `InitializingServer`
+    /// its connection is gone. That type keeps its own handshake state and
+    /// nothing in it watches the transport, so after a spontaneous exit it
+    /// still believes it is `.initialized` — and `shutdownAndExit()` is
+    /// guarded on exactly that. `teardown()` therefore sends a `shutdown`
+    /// *request* down a channel whose read sequence has already finished, and
+    /// the continuation waiting for the reply is never resumed: `stop()` hangs
+    /// until `withWallClockBudget` cuts it loose, on every crashed server, for
+    /// the whole budget.
+    ///
+    /// **The budget here is ten seconds and the assertion is one**, which is
+    /// what makes the measurement a measurement. A budget near the assertion
+    /// would pass or fail on machine load; a tenfold gap cannot. The budget is
+    /// never reached on a healthy run, so the long value costs nothing.
+    @Test("stop() after a server has died on its own returns without spending the shutdown budget")
+    func stopAfterASpontaneousDeathDoesNotWaitOutTheBudget() async throws {
+        let session = makeSession(script: Self.exitingServerScript, shutdownBudget: 10)
+        try await session.start()
+
+        // The death has to have been noticed first: this is about tearing down
+        // an already-dead session, not about racing the death itself.
+        let failed = await poll { await session.state.failure != nil }
+        #expect(failed)
+
+        let started = Date()
+        await session.stop()
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(elapsed < 1)
     }
 
     /// `stop()` is terminal: `SubprocessChannel` is single-launch, so a

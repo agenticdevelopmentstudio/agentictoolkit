@@ -3,6 +3,7 @@
 //  AgenticToolkit
 //
 
+import AgenticToolkitCore
 import Combine
 import Foundation
 import LanguageServerProtocol
@@ -46,6 +47,14 @@ public final class LanguageServerDocumentSync {
     private let store: TextDocumentStore
     private let registry: LanguageServerRegistry
 
+    /// Where documents this sync refuses are counted.
+    ///
+    /// Injected rather than reached for as `.shared`, because the shared
+    /// ledger is process-wide: a test that asserted on it would see every
+    /// other test's hits, and the order they ran in would decide the
+    /// number.
+    private let ledger: UpstreamDivergenceLedger
+
     /// Keyed by configuration id, which is what `registry.sessions` is keyed by.
     private var pipelines: [UUID: PipelineEntry] = [:]
 
@@ -69,9 +78,14 @@ public final class LanguageServerDocumentSync {
     private var isStarted = false
     private var isShutDown = false
 
-    public init(store: TextDocumentStore, registry: LanguageServerRegistry) {
+    public init(
+        store: TextDocumentStore,
+        registry: LanguageServerRegistry,
+        ledger: UpstreamDivergenceLedger = .shared
+    ) {
         self.store = store
         self.registry = registry
+        self.ledger = ledger
     }
 
     // MARK: - Lifecycle
@@ -358,19 +372,53 @@ public final class LanguageServerDocumentSync {
     /// Narrowing this to the session's own root would mean asking each session
     /// for its root — an `await` per event on the synchronous store-callback
     /// path — which is not a trade worth making here.
+    ///
+    /// **The gap is counted now, not only described.** Every document this
+    /// method turns away is recorded against
+    /// `UpstreamDivergence.documentOutsideWorkspaceScope`, so the Language
+    /// Servers panel can say how often the accepted gap is actually reached.
+    /// That is the difference between a narrowing nobody trips over and one
+    /// that is costing a user their completions every day, and it is not
+    /// derivable from this source.
     private func isInWorkspaceScope(_ uri: DocumentUri) -> Bool {
-        // Not a file URL — a `untitled:` buffer, or something unparseable. The
-        // servers this layer drives are all filesystem-backed, so out of scope.
-        guard let url = URL(string: uri), url.isFileURL else { return false }
-
+        // Defensive, and first so that no refusal is counted behind it: a
+        // sync with no root has no gap to be outside of, and a row saying
+        // "every document was rejected" would report the absence of a project
+        // as a narrowing of VS Code. `URL.pathComponents` on a file URL is
+        // never actually empty, which is why nothing below pins this line.
         let root = workspaceScopeComponents
         guard !root.isEmpty else { return false }
+
+        // Not a file URL — an `untitled:` buffer, or something unparseable. The
+        // servers this layer drives are all filesystem-backed, so out of scope.
+        guard let url = URL(string: uri), url.isFileURL else {
+            recordOutOfScope()
+            return false
+        }
 
         // Path *components*, never a string prefix: `/Users/me/proj-old` has
         // `/Users/me/proj` as a string prefix but is a different directory.
         let components = Self.scopeComponents(of: url)
-        guard components.count >= root.count else { return false }
-        return Array(components.prefix(root.count)) == root
+        guard components.count >= root.count,
+              Array(components.prefix(root.count)) == root
+        else {
+            recordOutOfScope()
+            return false
+        }
+        return true
+    }
+
+    /// Counts one document this filter refused.
+    ///
+    /// Keyed by the workspace rather than by the document — hence no URI
+    /// parameter — so the row reads as "this project turned away N files",
+    /// one line per window, instead of growing a row per file and burying the
+    /// total it exists to show.
+    private func recordOutOfScope() {
+        ledger.record(
+            .documentOutsideWorkspaceScope,
+            detail: registry.workspaceURL.path
+        )
     }
 
     /// Resolved, standardized path components for one URL.

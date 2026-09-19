@@ -328,4 +328,71 @@ struct LanguageServerDocumentSyncScopeTests {
         let session = try fake(registry, for: configuration.id)
         #expect(openedURIs(in: log.calls(forInstance: session.instanceID)) == [uri])
     }
+
+    // MARK: - 7. The accepted gap, counted
+
+    /// This filter is the one Stage 3 recorded as the "D4 filter" — a
+    /// deliberate narrowing of VS Code, which matches a document against each
+    /// extension's `documentSelector` and opens it on every server that claims
+    /// the language, wherever the file lives. The ruling that accepted the
+    /// narrowing is gone; what replaces it is a number, so the size of the gap
+    /// is a measurement rather than an argument.
+    ///
+    /// What it catches: the counting being wired to the wrong branch — the
+    /// easy mistake is to record on every call rather than on the refusals,
+    /// which is why the in-scope document is asserted to leave no trace.
+    @Test("a refused document is counted against the divergence catalogue")
+    func refusedDocumentIsCounted() async throws {
+        let parent = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appendingPathComponent("root", isDirectory: true)
+        let elsewhere = parent.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+
+        let settings = makeSettingsStore()
+        let log = SessionLog()
+        let documents = TextDocumentStore()
+        let registry = makeRegistry(settings: settings, log: log, workspaceURL: root)
+        // Its own ledger, never `.shared`: the shared one is process-wide, so
+        // an assertion against it would count every other suite's hits and the
+        // order the suites ran in would decide the number.
+        let ledger = UpstreamDivergenceLedger()
+        let sync = LanguageServerDocumentSync(
+            store: documents,
+            registry: registry,
+            ledger: ledger
+        )
+        sync.start()
+
+        let configuration = makeConfiguration()
+        settings.set([configuration], for: UserSettings.languageServerConfigurations)
+
+        _ = documents.open(
+            uri: elsewhere.appendingPathComponent("Outside.swift").documentUri,
+            languageId: "swift",
+            text: "abcdef"
+        )
+        _ = documents.open(
+            uri: elsewhere.appendingPathComponent("AlsoOutside.swift").documentUri,
+            languageId: "swift",
+            text: "abcdef"
+        )
+        _ = documents.open(uri: "untitled:Untitled-1", languageId: "swift", text: "abcdef")
+        _ = documents.open(
+            uri: root.appendingPathComponent("Inside.swift").documentUri,
+            languageId: "swift",
+            text: "abcdef"
+        )
+
+        await sync.shutdown()
+
+        let hits = ledger.hits(for: .documentOutsideWorkspaceScope)
+        // One row, not one per file: the row is keyed by the workspace, so it
+        // reads as "this project turned away N files" instead of growing a row
+        // per document and burying the total it exists to show.
+        #expect(hits.count == 1)
+        #expect(hits.first?.count == 3)
+        #expect(hits.first?.detail == root.path)
+    }
 }

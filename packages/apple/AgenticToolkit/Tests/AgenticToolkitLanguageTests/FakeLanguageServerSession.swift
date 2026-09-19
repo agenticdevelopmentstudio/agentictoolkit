@@ -176,7 +176,20 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     /// order-independent: a test that releases before the stop has arrived
     /// would otherwise park it forever.
     private var heldStops: [CheckedContinuation<Void, Never>] = []
+    /// Set at the top of `stop()`, before any suspension.
+    ///
+    /// The real `LanguageServerSession` does exactly this and consults it in
+    /// `runningServer()`, so a request that arrives after `stop()` has begun
+    /// but before the server is gone is refused. Without the flag a fake held
+    /// in `stop()` keeps answering, and a fake that is more permissive than
+    /// the thing it stands in for cannot fail a test the real session would.
+    private var isStopped = false
+
     private var stopWasReleased = false
+
+    /// Resumed the instant a `stop()` parks, so a test can send traffic into
+    /// the held window without polling for it or sleeping past it.
+    private var stopEntryWaiters: [CheckedContinuation<Void, Never>] = []
     private let log: SessionLog
     private let behavior: FakeSessionBehavior
     private var didOpenCount = 0
@@ -233,6 +246,18 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
         setState(.running)
     }
 
+    /// Returns once a `stop()` has parked — immediately, if one already has.
+    ///
+    /// The point of the window this opens is that the session is mid-teardown
+    /// while its `state` still says `.running`, which is the only moment the
+    /// fake's gate can be told apart from a plain state check.
+    func waitForHeldStop() async {
+        guard heldStops.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            stopEntryWaiters.append(continuation)
+        }
+    }
+
     /// Resumes every `stop()` parked by `behavior.holdsStop`, and lets any
     /// later one through without parking.
     func releaseHeldStop() {
@@ -254,9 +279,15 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     }
 
     func stop() async {
+        isStopped = true
         if behavior.holdsStop && !stopWasReleased {
             await withCheckedContinuation { continuation in
                 heldStops.append(continuation)
+                let waiters = stopEntryWaiters
+                stopEntryWaiters = []
+                for waiter in waiters {
+                    waiter.resume()
+                }
             }
         }
         setState(.stopped)
@@ -326,7 +357,9 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     // half of the contract they have to handle.
 
     private func requireRunning() throws {
-        guard case .running = state else { throw LanguageServerSessionError.notRunning }
+        guard !isStopped, case .running = state else {
+            throw LanguageServerSessionError.notRunning
+        }
     }
 
     private func record(_ call: RecordedCall) {
@@ -340,9 +373,10 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     }
 
     func capabilities() async -> ServerCapabilities? {
-        // Gated on `.running` the way the real session is: it has no
-        // `InitializingServer` to ask until the handshake has completed.
-        guard case .running = state else { return nil }
+        // Gated the way the real session is, on both halves: it has no
+        // `InitializingServer` to ask until the handshake has completed, and
+        // none to ask once `stop()` has begun either.
+        guard !isStopped, case .running = state else { return nil }
         return behavior.capabilities
     }
 

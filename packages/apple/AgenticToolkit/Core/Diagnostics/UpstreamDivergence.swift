@@ -78,6 +78,44 @@ public struct UpstreamDivergence: Sendable, Hashable, Identifiable, Codable {
 
 extension UpstreamDivergence {
 
+    /// A document outside the project window's workspace root is never
+    /// announced to any language server.
+    ///
+    /// This is Stage 3's "D4 filter" — `LanguageServerDocumentSync`'s
+    /// `isInWorkspaceScope(_:)`, whose own doc comment calls it an **accepted
+    /// gap**. The ledger entry that recorded the ruling behind it is gone; the
+    /// row below is what replaces it, and unlike the ruling it can be measured.
+    public static let documentOutsideWorkspaceScope = UpstreamDivergence(
+        id: "language-servers.document-outside-workspace",
+        area: "Language servers",
+        upstreamBehaviour: """
+            VS Code matches a document against each extension's \
+            `documentSelector` and opens it on every server that claims the \
+            language, wherever the file happens to live. A file opened from \
+            outside the workspace still gets completions, diagnostics and \
+            hovers.
+            """,
+        ourBehaviour: """
+            Only documents under the project window's own workspace root are \
+            announced. A file outside it is never sent `didOpen`, so it has \
+            no language intelligence at all — and because the notifications \
+            that follow are gated on having been opened, it never acquires \
+            any later either.
+            """,
+        rationale: """
+            The document store is app-wide while a language server belongs to \
+            one project window, so an unscoped sync would feed every server \
+            every window's files. The scope test is the workspace URL rather \
+            than the server's own root — which is found by walking up for a \
+            root marker and can therefore be an ancestor of it — so the \
+            filter also turns away some documents the server itself would \
+            have accepted. That is the conservative side of the error, and \
+            narrowing it would cost an `await` per document event on the \
+            synchronous store-callback path.
+            """,
+        detection: .counted
+    )
+
     /// Semantic tokens that overlap a token already emitted are dropped.
     public static let semanticTokenOverlapDropped = UpstreamDivergence(
         id: "semantic-tokens.overlapping-dropped",
@@ -189,6 +227,7 @@ extension UpstreamDivergence {
     /// is absent from the settings panel and from `citations`-style audits.
     /// The catalogue is the list, not the namespace.
     public static let known: [UpstreamDivergence] = [
+        documentOutsideWorkspaceScope,
         semanticTokenLineOutOfRange,
         semanticTokenModifiersIgnored,
         semanticTokenMultilineUnsupported,

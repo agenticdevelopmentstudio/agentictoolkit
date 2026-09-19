@@ -130,6 +130,16 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     /// `start()` calls parked by `behavior.holdsStart`.
     private var heldStarts: [CheckedContinuation<Void, Never>] = []
 
+    /// Set at the top of `stop()`, before anything that could suspend.
+    ///
+    /// The real `LanguageServerSession` sets this before its first `await` and
+    /// consults it in `runningServer()`. This fake's `stop()` happens not to
+    /// suspend today, so the flag changes nothing yet — it is here so that
+    /// giving the fake a held stop (the shape the Language-tier fake already
+    /// has) cannot silently reopen a window in which the fake answers requests
+    /// the real session refuses.
+    private var isStopped = false
+
     private let behavior: FakeEditorSessionBehavior
     private let log: EditorSessionLog
 
@@ -229,6 +239,7 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     }
 
     func stop() async {
+        isStopped = true
         setState(.stopped)
         log.record("stop")
         diagnosticsContinuation.finish()
@@ -293,7 +304,7 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
         // when the real session would still hand back stale, pre-crash
         // capabilities. Whoever relaxes one of these two gates should check
         // the other.
-        guard case .running = state else { return nil }
+        guard !isStopped, case .running = state else { return nil }
         // Chosen before parking, so the answer belongs to this call rather than
         // to whichever call happens to resume first.
         let answer = queuedCapabilities.isEmpty ? behavior.capabilities : queuedCapabilities.removeFirst()
@@ -311,7 +322,9 @@ actor FakeEditorLanguageServerSession: LanguageServerSessionProtocol {
     /// The gate every traffic method goes through, as the real session does:
     /// nothing reaches a server that is not running.
     private func requireRunning() throws {
-        guard case .running = state else { throw LanguageServerSessionError.notRunning }
+        guard !isStopped, case .running = state else {
+            throw LanguageServerSessionError.notRunning
+        }
     }
 
     func didOpen(_ params: DidOpenTextDocumentParams) async throws {
