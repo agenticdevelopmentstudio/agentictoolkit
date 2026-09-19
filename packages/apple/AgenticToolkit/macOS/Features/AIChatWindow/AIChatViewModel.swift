@@ -28,8 +28,18 @@ public final class AIChatViewModel: ObservableObject {
     private let session: any ChatSession
     private var pump: Task<Void, Never>?
 
-    public init(session: any ChatSession) {
+    /// - Parameters:
+    ///   - session: what the transcript is folded from.
+    ///   - initial: the rows to open on, before the session has said anything.
+    ///     A stream is asynchronous by nature — its first event arrives a turn
+    ///     later at the earliest — so a view built from a session alone is
+    ///     necessarily empty for its first frame. Where the caller already
+    ///     *has* the conversation, that frame reads as a flash, and this is how
+    ///     it is avoided: state at construction rather than an event chasing
+    ///     the view. The session's first real load replaces it wholesale.
+    public init(session: any ChatSession, initial: [ChatMessage] = []) {
         self.session = session
+        self.messages = initial
         pump = Task { [weak self] in
             guard let stream = self?.session.events() else { return }
             for await event in stream {

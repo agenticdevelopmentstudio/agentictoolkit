@@ -1,9 +1,8 @@
 // Core/Chat/FeedChatSession.swift
 import Foundation
 
-/// A read-only `ChatSession` that renders something already being said
-/// elsewhere: a log, an activity feed, several conversations merged onto one
-/// timeline. It never sends anything — the transcript is the whole of it.
+/// A `ChatSession` over something already being said elsewhere: a log, an
+/// activity feed, several conversations merged onto one timeline.
 ///
 /// This exists so a feed window is a `ChatView` rather than a bespoke list.
 /// `ChatView` is bound to `AIChatViewModel(session:)`, so "host a feed in the
@@ -15,6 +14,13 @@ import Foundation
 /// or filtered out between polls — so replacing the transcript wholesale is both
 /// simpler and the only thing that stays correct. `ChatEvent.transcriptLoaded`
 /// already means exactly that.
+///
+/// It can also be *written to*, where the host supplies a ``Sender``. That is a
+/// different shape from an ordinary chat: what is typed here does not enter the
+/// transcript, it enters whatever the transcript is a record of, and comes back
+/// round only when that record is next read. The gap is seconds, so the message
+/// is held in front of the transcript as pending until the source says it back
+/// — and if it never does, it is marked failed rather than left looking sent.
 public final class FeedChatSession: ChatSession, @unchecked Sendable {
 
     /// Produces the transcript as it stands, oldest first. Returning nil means
@@ -22,21 +28,54 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// blanked, because a momentarily unreachable source is not an empty feed.
     public typealias Loader = @Sendable () async -> [ChatMessage]?
 
+    /// Writes a line into whatever the feed is reading. Returns nil when the
+    /// line was handed over, or the reason it could not be — which the reader
+    /// sees under the message they typed.
+    ///
+    /// "Handed over" is deliberately weaker than "arrived": the source is
+    /// something else's to write, so the only proof of arrival is reading it
+    /// back, which is what ``ChatMessage/Delivery/sending`` waits for.
+    public typealias Sender = @Sendable (String) async -> String?
+
     private let load: Loader
+    private let send: Sender?
     private let refreshInterval: Duration
+    private let sendTimeout: Duration
 
     private let lock = NSLock()
     private var continuation: AsyncStream<ChatEvent>.Continuation?
     private var pump: Task<Void, Never>?
 
+    /// The last transcript read, and the messages written since that are not in
+    /// it yet. What the view sees is the two, in that order.
+    private var loaded: [ChatMessage] = []
+    private var pending: [ChatMessage] = []
+    private var timeouts: [String: Task<Void, Never>] = [:]
+
     /// - Parameters:
     ///   - refreshInterval: how often to re-read. A feed has no push channel, so
     ///     this is the whole of its liveness.
+    ///   - sendTimeout: how long a written line waits to be read back before it
+    ///     is called failed. Generous by chat standards because the round trip
+    ///     is not a network one: an agent that is mid-turn when the line arrives
+    ///     answers it when it is finished, not when it is sent.
+    ///   - send: writes a line into the source. Nil for a feed that is only
+    ///     watched, which is what leaves the composer disabled.
     ///   - load: reads the transcript.
-    public init(refreshInterval: Duration = .seconds(5), load: @escaping Loader) {
+    public init(
+        refreshInterval: Duration = .seconds(5),
+        sendTimeout: Duration = .seconds(60),
+        send: Sender? = nil,
+        load: @escaping Loader
+    ) {
         self.refreshInterval = refreshInterval
+        self.sendTimeout = sendTimeout
+        self.send = send
         self.load = load
     }
+
+    /// Whether anything typed here has somewhere to go.
+    public var canSend: Bool { send != nil }
 
     public func events() -> AsyncStream<ChatEvent> {
         AsyncStream { continuation in
@@ -50,16 +89,101 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// or an explicit refresh — anything where waiting would look broken.
     public func refresh() { start() }
 
-    /// No-op: a feed is something being watched, not something being talked to.
-    /// The composer is left in the window and disabled rather than removed, so
-    /// the shape of the thing stays honest about what it is.
-    public func send(_ text: String) {}
+    /// Writes `text` into the source, and shows it here as pending until the
+    /// source reads back.
+    ///
+    /// The message is shown before the write is attempted, not after it
+    /// succeeds: the write is a round trip through another application, and a
+    /// composer that empties into nothing for a second reads as a dropped
+    /// keystroke. A write that fails turns the same bubble into a failed one,
+    /// which is a stronger thing to see than a message that was never drawn.
+    public func send(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let send else { return }
+
+        let message = ChatMessage(
+            id: "pending-\(UUID().uuidString)",
+            role: .user,
+            text: trimmed,
+            // Borrowed from the transcript it is joining, so a written line is
+            // headed by the same session as everything around it rather than
+            // appearing as a row from nowhere.
+            attribution: withLock { loaded.last?.attribution },
+            delivery: .sending
+        )
+        withLock { pending.append(message) }
+        publish()
+
+        let id = message.id
+        withLock {
+            timeouts[id] = Task { [weak self] in
+                try? await Task.sleep(for: self?.sendTimeout ?? .seconds(60))
+                guard !Task.isCancelled else { return }
+                self?.fail(id, reason: "No answer yet — the session may not have taken it.")
+            }
+        }
+        Task { [weak self] in
+            if let reason = await send(trimmed) {
+                self?.fail(id, reason: reason)
+            }
+        }
+    }
 
     public func interrupt() {}
 
     public func close() {
         pump?.cancel()
+        withLock {
+            timeouts.values.forEach { $0.cancel() }
+            timeouts.removeAll()
+        }
         withLock { continuation }?.finish()
+    }
+
+    // MARK: - Pending writes
+
+    /// Marks a written line failed, unless the source has already said it back.
+    private func fail(_ id: String, reason: String) {
+        let changed = withLock { () -> Bool in
+            guard let index = pending.firstIndex(where: { $0.id == id }) else { return false }
+            timeouts.removeValue(forKey: id)?.cancel()
+            pending[index].delivery = .failed(reason)
+            return true
+        }
+        if changed { publish() }
+    }
+
+    /// Drops the written lines the source has now read back.
+    ///
+    /// Matched on text rather than on id because the two are different
+    /// messages: one was typed here, the other was recorded over there, and
+    /// nothing carries an identifier across a terminal. The timestamp is what
+    /// keeps an identical line sent an hour ago from answering for this one —
+    /// with a few seconds of slack, because the two clocks are not the same one.
+    private func reconcile(_ transcript: [ChatMessage]) {
+        withLock {
+            pending.removeAll { message in
+                guard case .sending = message.delivery else { return false }
+                let arrived = transcript.contains { candidate in
+                    candidate.role == .user
+                        && candidate.text == message.text
+                        && candidate.timestamp >= message.timestamp.addingTimeInterval(-Self.clockSlack)
+                }
+                if arrived { timeouts.removeValue(forKey: message.id)?.cancel() }
+                return arrived
+            }
+        }
+    }
+
+    /// How far a source's clock may run behind this one before a line read back
+    /// stops being recognised as the line that was just written.
+    private static let clockSlack: TimeInterval = 5
+
+    /// Re-publishes the transcript as it now stands: what was read, then what
+    /// has been written since and not read back.
+    private func publish() {
+        let (transcript, outstanding, cont) = withLock { (loaded, pending, continuation) }
+        cont?.yield(.transcriptLoaded(transcript + outstanding))
     }
 
     // MARK: - Pump
@@ -77,7 +201,9 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
                 let cont = self.withLock { self.continuation }
                 guard let cont else { return }
                 if let messages {
-                    cont.yield(.transcriptLoaded(messages))
+                    self.reconcile(messages)
+                    self.withLock { self.loaded = messages }
+                    self.publish()
                 }
                 cont.yield(.stateChanged(.ready))
                 try? await Task.sleep(for: self.refreshInterval)

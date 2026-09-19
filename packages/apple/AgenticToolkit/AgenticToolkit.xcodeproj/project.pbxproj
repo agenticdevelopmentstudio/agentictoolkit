@@ -619,6 +619,7 @@
 		7D5F96ED90E05AE4171C33CA /* ChatTranscriptReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAA6F1867906CCB1C562F3E9 /* ChatTranscriptReducerTests.swift */; };
 		7DAEA5AB2FA48ABD09ADB23B /* HubWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86397BF91BE25B91BE94C360 /* HubWorkspaceTests.swift */; };
 		7E06A61532A711063DA6EC4D /* SessionListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D32DB64D049628A66B23446A /* SessionListViewController.swift */; };
+		7E171786A9DCC866DAA32F54 /* SessionBreadcrumbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 075F7B05F5991A77DC055B40 /* SessionBreadcrumbView.swift */; };
 		7E192BF6B4D003D99C6E968E /* MessageFramingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F76D78C482EE5E8A3A35B9 /* MessageFramingTests.swift */; };
 		7E3D59A2283D3441B672E851 /* ChatViewFocusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF847AA872058013C029CFD7 /* ChatViewFocusTests.swift */; };
 		7EBBE56D00F7FC851114A7E7 /* PermissionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 929134DCCD09CD27C3271504 /* PermissionStatus.swift */; };
@@ -721,6 +722,7 @@
 		94DE8A75AB403AFD6B253541 /* SystemWindowControlError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AA9EC2686794F2DDE4DABB9 /* SystemWindowControlError.swift */; };
 		95657C1C5367A92F48264057 /* LanguageServerProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = B34D83F0409157F2341DFEC8 /* LanguageServerProtocol */; };
 		956673336C906CF1234B52E9 /* SystemWindowContextsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CB4DD7F9E79CBD2FF2D70E /* SystemWindowContextsModel.swift */; };
+		956DF0EE4268AC9C50804CCB /* SessionBreadcrumbViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 795528B73B6C95474173DCF9 /* SessionBreadcrumbViewTests.swift */; };
 		9579A25455361401804EC20D /* SessionWatcherActivityIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34F1ACC30C69A6911D5738F3 /* SessionWatcherActivityIconView.swift */; };
 		959B7EF3B0A0AE2A602DB396 /* ProjectTabReconcilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E393284AD4F968CB29C9A27C /* ProjectTabReconcilerTests.swift */; };
 		95EDBFDADFA6BA4D21D4899A /* SystemWindowFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0943720365027F131F29F4 /* SystemWindowFingerprint.swift */; };
@@ -2169,6 +2171,7 @@
 		0702A9914B6DAC7910A7B156 /* AIStreamEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIStreamEvent.swift; sourceTree = "<group>"; };
 		07210A2531869F6AC3309BD0 /* IntegerFieldView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegerFieldView.swift; sourceTree = "<group>"; };
 		0721AF2482B9A583B0C2537D /* ComposableTabsViewRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsViewRegistry.swift; sourceTree = "<group>"; };
+		075F7B05F5991A77DC055B40 /* SessionBreadcrumbView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionBreadcrumbView.swift; sourceTree = "<group>"; };
 		0776A98E3E586B49F40101B0 /* MockScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockScreen.swift; sourceTree = "<group>"; };
 		07BDE2E23C219E9E12E3C6C7 /* ProjectWorkspaceTabsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWorkspaceTabsTests.swift; sourceTree = "<group>"; };
 		07D644A01CEF461325F44321 /* FormValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormValidator.swift; sourceTree = "<group>"; };
@@ -2616,6 +2619,7 @@
 		7874C8ED2FF45D39236DB0CA /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
 		78A45D1BC3FE8C242E68D885 /* LanguageServerConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageServerConfiguration.swift; sourceTree = "<group>"; };
 		7948E48391DD309B84C90430 /* Edge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Edge.swift; sourceTree = "<group>"; };
+		795528B73B6C95474173DCF9 /* SessionBreadcrumbViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionBreadcrumbViewTests.swift; sourceTree = "<group>"; };
 		795C17464A3E6EFE9B6E6EF9 /* SessionWatcherClickAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWatcherClickAction.swift; sourceTree = "<group>"; };
 		79EFA06943B614849BDDA6A6 /* NumberFieldView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumberFieldView.swift; sourceTree = "<group>"; };
 		7A2C5B0FD9C0DEDA914911A2 /* GitConfigEntryParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitConfigEntryParserTests.swift; sourceTree = "<group>"; };
@@ -3697,6 +3701,7 @@
 				1DEA082A99F50D1B52F25FA0 /* Theme */,
 				B4C87939516A070CC66803F4 /* Placeholder.swift */,
 				6804416B0D2AB235CA39ED14 /* RGBAColor+NSColor.swift */,
+				075F7B05F5991A77DC055B40 /* SessionBreadcrumbView.swift */,
 				14A12FAD7FB557E5CE6CE800 /* TerminalAppIcon.swift */,
 			);
 			path = CoreMacOS;
@@ -5847,6 +5852,7 @@
 			isa = PBXGroup;
 			children = (
 				768F7C74EBACCA21B475C0B6 /* PlaceholderTests.swift */,
+				795528B73B6C95474173DCF9 /* SessionBreadcrumbViewTests.swift */,
 			);
 			name = AgenticToolkitCoreMacOSTests;
 			path = Tests/AgenticToolkitCoreMacOSTests;
@@ -8011,6 +8017,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CE77BFF484BE837D14389B6A /* PlaceholderTests.swift in Sources */,
+				956DF0EE4268AC9C50804CCB /* SessionBreadcrumbViewTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -8321,6 +8328,7 @@
 				90FE61ED333010F1B933C4FF /* QuietWindowPresentation.swift in Sources */,
 				9B04CDC955CED31768F4E7FE /* RGBAColor+NSColor.swift in Sources */,
 				6BB4F6E73F21E0104231BB26 /* SemanticPalette+SwiftUI.swift in Sources */,
+				7E171786A9DCC866DAA32F54 /* SessionBreadcrumbView.swift in Sources */,
 				147D81ADF8BEFA3096888A41 /* SystemAccessibilityPermission.swift in Sources */,
 				E5090C6BD300CC12A4D8E203 /* SystemWindowAXHelper.swift in Sources */,
 				5E8B6B3AE4FCA0E36A375CFC /* SystemWindowContextError.swift in Sources */,

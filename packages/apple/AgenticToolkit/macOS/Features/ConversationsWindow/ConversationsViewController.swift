@@ -74,6 +74,18 @@ public final class ConversationsViewController: NSViewController {
     /// answers without moving.
     public var onGoToSource: ((ChatMessage) -> Void)?
 
+    /// Types a line into one observed session, as if it had been typed at that
+    /// session's own terminal. Given the session's
+    /// ``ChatMessage/Attribution/sourceID`` and the text; returns nil when the
+    /// line was handed over, or the reason it could not be, which the reader
+    /// sees under the message they typed.
+    ///
+    /// Only the focus overlay offers it: the merged feed has no single session
+    /// a line would belong to, so its composer stays disabled however this is
+    /// set. Left nil — a host with no way to reach a terminal — the overlay's
+    /// composer is disabled too.
+    public var onSendToSource: (@Sendable (String, String) async -> String?)?
+
     private let session: FeedChatSession
     private let viewModel: AIChatViewModel
     private let workOutputFlag: WorkOutputFlag
@@ -125,6 +137,10 @@ public final class ConversationsViewController: NSViewController {
         // different kind of window rather than a read-only one.
         chatView.isComposerEnabled = false
         chatView.bubbleLineLimit = Self.bubbleLineLimit
+        // A merged feed is a list before it is a conversation, so it behaves
+        // like one: a row can be picked, the arrows walk them, Return opens the
+        // conversation a row came from and Shift-Return leaves for it.
+        chatView.isRowSelectionEnabled = true
         chatView.rowActions = .init(
             onOpen: { [weak self] message in self?.presentFocus(on: message) },
             onJump: { [weak self] message in self?.onGoToSource?(message) }
@@ -145,7 +161,13 @@ public final class ConversationsViewController: NSViewController {
 
     /// Re-reads the feed now rather than at the next interval — for a filter
     /// change, or a host that knows something just happened.
-    public func refresh() { session.refresh() }
+    public func refresh() {
+        session.refresh()
+        // The overlay is a second reader of the same conversation, so a push
+        // that reaches the feed has to reach it too — otherwise the closer look
+        // is the *less* current of the two views, which is backwards.
+        overlay?.refresh()
+    }
 
     // MARK: - Focus overlay
 
@@ -159,7 +181,15 @@ public final class ConversationsViewController: NSViewController {
         let overlay = ConversationFocusOverlay(
             refreshInterval: refreshInterval,
             load: { await load(flag.value, sourceID) },
+            // What this session's rows already say, taken straight off the feed
+            // behind. A page of the merged feed may hold only part of the
+            // conversation, and the first read replaces it — but it is the part
+            // the reader just double-clicked, so the overlay opens on it.
+            seed: viewModel.messages.filter { $0.attribution?.sourceID == sourceID },
             lineLimit: Self.bubbleLineLimit,
+            send: onSendToSource.map { send in
+                { @Sendable text in await send(sourceID, text) }
+            },
             onJump: { [weak self] message in
                 // Leaving for the session makes the overlay's job moot — going
                 // there is a stronger answer to "show me this" than the overlay

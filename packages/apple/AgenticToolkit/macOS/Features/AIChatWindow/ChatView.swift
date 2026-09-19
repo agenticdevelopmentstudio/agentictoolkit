@@ -58,6 +58,30 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         didSet { scheduleRender() }
     }
 
+    /// Whether a row can be picked, by click or by arrow key.
+    ///
+    /// Off by default, and off inside a focused conversation: picking a row is
+    /// only worth anything where a row *leads* somewhere — the merged feed,
+    /// where Return opens the conversation a row came from and Shift-Return
+    /// leaves for the real thing. In a view that is already one conversation
+    /// both of those are where the reader is standing.
+    public var isRowSelectionEnabled = false {
+        didSet {
+            guard oldValue != isRowSelectionEnabled else { return }
+            if !isRowSelectionEnabled { selectedMessageID = nil }
+            scheduleRender()
+        }
+    }
+
+    /// The picked row's message, by id rather than by view: a feed rebuilds its
+    /// whole transcript every few seconds, so the view a reader clicked is gone
+    /// by the next poll and only the id survives it.
+    public private(set) var selectedMessageID: String?
+
+    /// The rows a selection can land on, newest last — the order the arrow keys
+    /// walk. Rebuilt with the transcript, which is what keeps the two in step.
+    private var selectableRows: [ChatTranscriptRowView] = []
+
     /// How many lines of a message a transcript row shows before it truncates
     /// and offers the rest. Nil shows whatever the message holds.
     ///
@@ -84,6 +108,10 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         super.init(frame: .zero)
         setupViews()
         bindViewModel()
+        // Not left to the binding: every path through it is asynchronous, so a
+        // view model that already holds a conversation would still draw one
+        // frame without it.
+        rebuildTranscript()
     }
 
     @available(*, unavailable)
@@ -201,6 +229,17 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         window?.makeFirstResponder(inputField) ?? false
     }
 
+    /// Whether what is typed right now goes into the composer.
+    ///
+    /// Asked by hosts that also give Return a meaning of their own — an overlay
+    /// that closes on it, say. A focused `NSTextField` is not itself the first
+    /// responder: the window's shared field editor is, installed inside the
+    /// field, which is why this is two questions rather than an identity check.
+    public var isComposerFocused: Bool {
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        return responder === inputField || responder.isDescendant(of: inputField)
+    }
+
     private func bindViewModel() {
         viewModel.$messages
             .receive(on: DispatchQueue.main)
@@ -230,6 +269,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     private func rebuildTranscript() {
         isRebuilding = true
         transcriptStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        selectableRows.removeAll()
 
         let scrollWidth = transcriptScroll.contentView.bounds.width
         let maxBubbleWidth = max(scrollWidth * Self.maxBubbleWidthFraction, 200)
@@ -247,9 +287,19 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             if message.attribution != nil {
                 var actions = rowActions
                 actions.onExpand = { [weak self] message in self?.expand(message) }
+                if isRowSelectionEnabled {
+                    actions.onSelect = { [weak self] message in self?.select(message.id) }
+                }
                 let row = ChatTranscriptRowView(
                     message: message, maxBubbleWidth: maxBubbleWidth,
                     actions: actions, lineLimit: bubbleLineLimit)
+                // A rebuild is not a deselection: the reader picked a message,
+                // and the row showing it having been thrown away and built again
+                // in the meantime is this view's business, not theirs.
+                if isRowSelectionEnabled {
+                    row.isSelected = message.id == selectedMessageID
+                    selectableRows.append(row)
+                }
                 transcriptStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(
                     equalTo: transcriptStack.widthAnchor, constant: -32).isActive = true
@@ -307,6 +357,83 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             if followNewest { self.scrollToBottom() }
             self.isRebuilding = false
         }
+    }
+
+    // MARK: - Selection
+
+    /// Picks the row showing `id`, or clears the selection when it is nil.
+    ///
+    /// Applied straight to the rows rather than through a rebuild: a rebuild
+    /// throws away every bubble and measures them again, which is a visible
+    /// stutter to pay for a two-pixel frame moving one row.
+    public func select(_ id: String?) {
+        guard isRowSelectionEnabled else { return }
+        selectedMessageID = id
+        for row in selectableRows {
+            row.isSelected = row.shownMessage.id == id
+        }
+        // The keyboard follows the pick. Without this a reader who clicked a row
+        // would find the arrow keys still scrolling the transcript, which is the
+        // one thing selection is supposed to have taken over.
+        window?.makeFirstResponder(self)
+        if let id, let row = selectableRows.first(where: { $0.shownMessage.id == id }) {
+            row.scrollToVisible(row.bounds)
+        }
+    }
+
+    /// Only where there is something to pick — a read-only transcript with no
+    /// selection has no use for the focus ring it would otherwise take from the
+    /// composer.
+    public override var acceptsFirstResponder: Bool { isRowSelectionEnabled }
+
+    public override func keyDown(with event: NSEvent) {
+        guard isRowSelectionEnabled, handleSelectionKey(event) else {
+            super.keyDown(with: event)
+            return
+        }
+    }
+
+    private func handleSelectionKey(_ event: NSEvent) -> Bool {
+        switch Int(event.keyCode) {
+        case 125: moveSelection(by: 1); return true   // down
+        case 126: moveSelection(by: -1); return true  // up
+        case 36, 76:                                  // return, enter
+            guard let message = selectedMessage else { return false }
+            // Shift is "take me there", plain Return is "show me here" — the
+            // same pair the mouse has, where a double click opens the
+            // conversation in place and the row's app icon leaves for it.
+            if event.modifierFlags.contains(.shift) {
+                rowActions.onJump?(message)
+            } else {
+                rowActions.onOpen?(message)
+            }
+            return true
+        default: return false
+        }
+    }
+
+    private var selectedMessage: ChatMessage? {
+        selectableRows.first { $0.shownMessage.id == selectedMessageID }?.shownMessage
+    }
+
+    /// Moves the pick one row down (`1`) or up (`-1`).
+    ///
+    /// With nothing picked, each arrow enters from its own end: down lands on
+    /// the first row, up on the last. Walking off either end stays put rather
+    /// than wrapping — a feed is a timeline, and jumping from the newest message
+    /// to the oldest is not what "one more down" means.
+    private func moveSelection(by step: Int) {
+        guard !selectableRows.isEmpty else { return }
+        guard let current = selectableRows.firstIndex(where: {
+            $0.shownMessage.id == selectedMessageID
+        }) else {
+            select(step > 0 ? selectableRows.first?.shownMessage.id
+                            : selectableRows.last?.shownMessage.id)
+            return
+        }
+        let next = current + step
+        guard selectableRows.indices.contains(next) else { return }
+        select(selectableRows[next].shownMessage.id)
     }
 
     // MARK: - Expansion

@@ -231,7 +231,7 @@ final class SessionListViewTests: XCTestCase {
         row.frame = NSRect(x: 0, y: 0, width: row.minimumWidth, height: 200)
         row.layoutSubtreeIfNeeded()
 
-        for label in [row.projectLabel, row.branchLabel, row.sessionNameLabel].compactMap({ $0 }) {
+        for label in row.breadcrumb.segmentLabels {
             XCTAssertGreaterThanOrEqual(ceil(label.frame.width) + 0.5, ceil(label.intrinsicContentSize.width),
                                         "\(label.stringValue) was truncated at the row's minimum width")
         }
@@ -240,7 +240,7 @@ final class SessionListViewTests: XCTestCase {
     /// Every breadcrumb segment is the same size, whatever its colour.
     func testBreadcrumbSegmentsShareOneFont() {
         let row = makeRow(branch: "session-window", name: "tidy")
-        let fonts = [row.projectLabel, row.branchLabel, row.sessionNameLabel].compactMap { $0?.font?.pointSize }
+        let fonts = row.breadcrumb.segmentLabels.compactMap { $0.font?.pointSize }
 
         XCTAssertEqual(fonts.count, 3)
         XCTAssertEqual(Set(fonts).count, 1)
@@ -270,8 +270,8 @@ final class SessionListViewTests: XCTestCase {
         )
 
         XCTAssertTrue(moved, "a renamed branch or session is new text, not a new shape")
-        XCTAssertEqual(row.branchLabel?.stringValue, "session-window")
-        XCTAssertEqual(row.sessionNameLabel?.stringValue, "second name")
+        XCTAssertEqual(row.breadcrumb.contextLabels.last?.stringValue, "session-window")
+        XCTAssertEqual(row.breadcrumb.nameLabel?.stringValue, "second name")
     }
 
     /// A segment that appears or vanishes *is* a shape change: the row has no label

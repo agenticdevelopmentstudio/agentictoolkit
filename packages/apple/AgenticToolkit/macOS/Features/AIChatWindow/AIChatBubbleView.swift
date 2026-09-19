@@ -62,6 +62,16 @@ public final class AIChatBubbleView: NSView {
         didSet { textView.onDoubleClick = onDoubleClick }
     }
 
+    /// Fired by a single click anywhere on the bubble, text included.
+    ///
+    /// Unlike ``onDoubleClick`` this does not *take* the gesture: the text view
+    /// still starts its selection drag on the same press. A click on a bubble in
+    /// a feed means two things at once — select this row, and begin selecting
+    /// this text — and neither one is worth taking from the other.
+    public var onSingleClick: (() -> Void)? {
+        didSet { textView.onSingleClick = onSingleClick }
+    }
+
     /// Whether the text ran past ``lineLimit`` and is showing an ellipsis.
     public private(set) var isTruncated = false
 
@@ -374,6 +384,7 @@ public final class AIChatBubbleView: NSView {
             onDoubleClick()
             return
         }
+        onSingleClick?()
         guard isTextSelectable else {
             super.mouseDown(with: event)
             return
@@ -395,11 +406,16 @@ public final class AIChatBubbleView: NSView {
 private final class BubbleTextView: NSTextView {
     var onDoubleClick: (() -> Void)?
 
+    /// Reported and then forgotten: the press goes on to start a selection drag
+    /// as it always did.
+    var onSingleClick: (() -> Void)?
+
     override func mouseDown(with event: NSEvent) {
         if event.clickCount >= 2, let onDoubleClick {
             onDoubleClick()
             return
         }
+        onSingleClick?()
         super.mouseDown(with: event)
     }
 }

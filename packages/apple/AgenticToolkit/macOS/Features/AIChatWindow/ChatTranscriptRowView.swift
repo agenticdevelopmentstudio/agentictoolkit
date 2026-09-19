@@ -7,18 +7,23 @@ import AgenticToolkitCoreMacOS
 /// single timeline, the way a group chat reads.
 ///
 /// ```
-/// [icon] project/branch (session name)
+/// [icon] project » branch » session name
 ///        ╭──────────────────────────╮ [app]
 ///        │ what the agent said      │
 ///        ╰──────────────────────────╯
 ///        09:41
 ///
-///                project/branch (session name)  [icon]
+///                 project » branch » session name
 ///          [app] ╭──────────────────────────╮
 ///                │ what the human said      │
 ///                ╰──────────────────────────╯
 ///                                            09:41
 /// ```
+///
+/// The human's side has no avatar: there is only ever one of them, and a badge
+/// repeated down every second row says nothing the side of the window did not
+/// already say. The agent's icon stays because it is not decoration — it is
+/// which *kind* of line this is, and with work output shown there are four.
 ///
 /// It exists because a bubble alone cannot carry a merged transcript: with more
 /// than one conversation on the timeline, "which side is it on" no longer says
@@ -47,15 +52,25 @@ public final class ChatTranscriptRowView: NSView {
         /// The bubble's **More…** control was used — this message is truncated
         /// and the reader wants all of it.
         public var onExpand: ((ChatMessage) -> Void)?
+        /// The row was clicked once: make it *the* row.
+        ///
+        /// A single click is the cheapest gesture there is and it was doing
+        /// nothing, while the keyboard had nothing to move: naming a row is what
+        /// gives the arrow keys, Return and Shift-Return something to act on.
+        /// It does not take the press — the text under it still starts its
+        /// selection drag.
+        public var onSelect: ((ChatMessage) -> Void)?
 
         public init(
             onOpen: ((ChatMessage) -> Void)? = nil,
             onJump: ((ChatMessage) -> Void)? = nil,
-            onExpand: ((ChatMessage) -> Void)? = nil
+            onExpand: ((ChatMessage) -> Void)? = nil,
+            onSelect: ((ChatMessage) -> Void)? = nil
         ) {
             self.onOpen = onOpen
             self.onJump = onJump
             self.onExpand = onExpand
+            self.onSelect = onSelect
         }
     }
 
@@ -65,13 +80,42 @@ public final class ChatTranscriptRowView: NSView {
 
     private let iconContainer = NSView()
     private let iconView = NSImageView()
-    private let headerLabel = NSTextField(labelWithString: "")
+    private let header = SessionBreadcrumbView(textRole: .caption)
     private let timeLabel = NSTextField(labelWithString: "")
     private let bubble: AIChatBubbleView
     private let jumpButton = PointingHandButton()
 
+    /// What is drawn between the bubble and its timestamp while a message this
+    /// client wrote has not been read back: thinking dots, or the reason it
+    /// never will be. Nil for everything a source said, which is every message
+    /// but the reader's own.
+    private let deliveryView: NSView?
+    private let failureLabel: NSTextField?
+
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
+
+    /// Whether this is the row the keyboard is pointing at.
+    ///
+    /// Drawn as a frame rather than a fill: the hover fill already means "the
+    /// mouse is here", and a second fill would leave a reader unable to tell a
+    /// row they are pointing at from the one they picked. A border also leaves
+    /// the bubble's own colour — which says who is talking — untouched.
+    public var isSelected = false {
+        didSet {
+            guard oldValue != isSelected else { return }
+            applySelectionFrame(resolvedThemeScope.palette)
+        }
+    }
+
+    /// The message this row is showing. What a caller gets back when the
+    /// selection moves by keyboard rather than by a press on a particular row.
+    public var shownMessage: ChatMessage { message }
+
+    /// Thick enough to read as a frame at a glance across a busy feed, thin
+    /// enough not to shift the row's content when it appears — it is drawn
+    /// inside the row's own bounds.
+    private static let selectionBorderWidth: CGFloat = 2
 
     /// Inset of the row's content from the highlight's edge, so hovering paints
     /// a band around the row rather than a rectangle flush against its text.
@@ -100,7 +144,7 @@ public final class ChatTranscriptRowView: NSView {
     ) {
         self.message = message
         self.attribution = message.attribution
-            ?? .init(sourceID: "", context: "", name: "", iconSymbol: "")
+            ?? .init(sourceID: "", context: [], name: "", iconSymbol: "")
         self.actions = actions
         // The jump control sits *outside* the bubble, so the room it needs comes
         // out of the width the bubble may grow to. Charging it to the bubble
@@ -120,6 +164,26 @@ public final class ChatTranscriptRowView: NSView {
             isTextSelectable: true,
             lineLimit: lineLimit
         )
+        switch message.delivery {
+        case .settled:
+            self.deliveryView = nil
+            self.failureLabel = nil
+        case .sending:
+            // The same dots the chat window shows while a reply is coming, for
+            // the same reason: something was said and the answer is not here
+            // yet. That it is *this* message waiting rather than the next one
+            // is said by where they are — under the bubble, not after it.
+            let indicator = TypingIndicatorView()
+            self.deliveryView = indicator
+            self.failureLabel = nil
+        case .failed(let reason):
+            let label = NSTextField(labelWithString: reason)
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.lineBreakMode = .byWordWrapping
+            label.maximumNumberOfLines = 0
+            self.deliveryView = label
+            self.failureLabel = label
+        }
         super.init(frame: .zero)
 
         translatesAutoresizingMaskIntoConstraints = false
@@ -145,27 +209,36 @@ public final class ChatTranscriptRowView: NSView {
     /// when the row is only something to read.
     private var isPressable: Bool { actions.onOpen != nil }
 
+    /// Whether the row carries an avatar. Only the agent's side does: there is
+    /// only ever one human here, so a badge repeated down every second row is a
+    /// column of the same fact. The agent's stays because it says which *kind*
+    /// of line this is.
+    private var showsIcon: Bool { !isFromUser }
+
     // MARK: - Build
 
     private func setupSubviews() {
-        iconContainer.translatesAutoresizingMaskIntoConstraints = false
-        iconContainer.wantsLayer = true
-        iconContainer.layer?.cornerRadius = Self.iconSize / 2
+        if showsIcon {
+            iconContainer.translatesAutoresizingMaskIntoConstraints = false
+            iconContainer.wantsLayer = true
+            iconContainer.layer?.cornerRadius = Self.iconSize / 2
 
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.image = NSImage(
-            systemSymbolName: attribution.iconSymbol,
-            accessibilityDescription: attribution.headerLine
-        )
-        iconView.symbolConfiguration = .init(pointSize: 12, weight: .medium)
-        iconView.imageScaling = .scaleProportionallyDown
-        iconContainer.addSubview(iconView)
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            iconView.image = NSImage(
+                systemSymbolName: attribution.iconSymbol,
+                accessibilityDescription: attribution.headerLine
+            )
+            iconView.symbolConfiguration = .init(pointSize: 12, weight: .medium)
+            iconView.imageScaling = .scaleProportionallyDown
+            iconContainer.addSubview(iconView)
+        }
 
-        headerLabel.translatesAutoresizingMaskIntoConstraints = false
-        headerLabel.stringValue = attribution.headerLine
-        headerLabel.lineBreakMode = .byTruncatingMiddle
-        headerLabel.alignment = isFromUser ? .right : .left
-        headerLabel.accessibilityID("chat-row.header")
+        // The same trail the Sessions window heads its rows with, down to the
+        // separator and the colour of each segment — the two windows are looking
+        // at the same sessions, and a reader should not have to learn it twice.
+        header.crumbs = .init(context: attribution.context, name: attribution.name)
+        header.setAccessibilityLabel(attribution.headerLine)
+        header.accessibilityID("chat-row.header")
 
         timeLabel.translatesAutoresizingMaskIntoConstraints = false
         timeLabel.stringValue = AIChatBubbleView.timeFormatter.string(from: message.timestamp)
@@ -175,6 +248,16 @@ public final class ChatTranscriptRowView: NSView {
         bubble.onExpand = { [weak self] in
             guard let self else { return }
             self.actions.onExpand?(self.message)
+        }
+        // A click anywhere in the row picks it, the bubble's own text included:
+        // hit-testing hands presses on the text to the bubble, so a row that
+        // only listened for its own margins would be selectable everywhere
+        // except where a reader actually clicks.
+        if actions.onSelect != nil {
+            bubble.onSingleClick = { [weak self] in
+                guard let self else { return }
+                self.actions.onSelect?(self.message)
+            }
         }
         // Only where opening is wired. Where it is not — inside a conversation
         // that is already open — the bubble keeps the gesture and a double click
@@ -205,8 +288,14 @@ public final class ChatTranscriptRowView: NSView {
         jumpButton.isHidden = actions.onJump == nil
         jumpButton.accessibilityID("chat-row.jump")
 
-        addSubview(iconContainer)
-        addSubview(headerLabel)
+        if let deliveryView {
+            deliveryView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(deliveryView)
+            (deliveryView as? TypingIndicatorView)?.startAnimating()
+        }
+
+        if showsIcon { addSubview(iconContainer) }
+        addSubview(header)
         addSubview(bubble)
         addSubview(timeLabel)
         addSubview(jumpButton)
@@ -217,29 +306,53 @@ public final class ChatTranscriptRowView: NSView {
     /// anchors chosen per side — where stacked views would be two hierarchies.
     private func installConstraints() {
         let outerEdge = isFromUser ? trailingAnchor : leadingAnchor
-        let iconOuter = isFromUser ? iconContainer.trailingAnchor : iconContainer.leadingAnchor
-        let iconInner = isFromUser ? iconContainer.leadingAnchor : iconContainer.trailingAnchor
-        let contentEdge = isFromUser ? headerLabel.trailingAnchor : headerLabel.leadingAnchor
+        let contentEdge = isFromUser ? header.trailingAnchor : header.leadingAnchor
         let inset = isFromUser ? -Self.hInset : Self.hInset
         let gap = isFromUser ? -Self.iconGap : Self.iconGap
 
         var constraints: [NSLayoutConstraint] = [
-            iconOuter.constraint(equalTo: outerEdge, constant: inset),
-            iconContainer.topAnchor.constraint(equalTo: topAnchor, constant: Self.vInset),
-            iconContainer.widthAnchor.constraint(equalToConstant: Self.iconSize),
-            iconContainer.heightAnchor.constraint(equalToConstant: Self.iconSize),
-            iconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
-            iconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            header.topAnchor.constraint(equalTo: topAnchor, constant: Self.vInset + 3),
 
-            contentEdge.constraint(equalTo: iconInner, constant: gap),
-            headerLabel.topAnchor.constraint(equalTo: topAnchor, constant: Self.vInset + 3),
-
-            bubble.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 4),
-            timeLabel.topAnchor.constraint(equalTo: bubble.bottomAnchor, constant: 2),
-            timeLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.vInset),
-            heightAnchor.constraint(greaterThanOrEqualTo: iconContainer.heightAnchor,
-                                    constant: Self.vInset * 2)
+            bubble.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            timeLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.vInset)
         ]
+
+        // The delivery mark takes the gap between the bubble and its timestamp,
+        // so a message that is waiting or that failed is taller than a settled
+        // one by exactly that mark — nothing else about the row moves.
+        if let deliveryView {
+            constraints += [
+                deliveryView.topAnchor.constraint(equalTo: bubble.bottomAnchor, constant: 4),
+                timeLabel.topAnchor.constraint(equalTo: deliveryView.bottomAnchor, constant: 2),
+                deliveryView.widthAnchor.constraint(lessThanOrEqualTo: bubble.widthAnchor),
+                (isFromUser ? deliveryView.trailingAnchor : deliveryView.leadingAnchor)
+                    .constraint(equalTo: contentEdge)
+            ]
+        } else {
+            constraints.append(
+                timeLabel.topAnchor.constraint(equalTo: bubble.bottomAnchor, constant: 2))
+        }
+
+        // With an icon the content hangs off its inside edge; without one — the
+        // human's side, which has no avatar — it starts at the row's own edge.
+        if showsIcon {
+            let iconOuter = isFromUser ? iconContainer.trailingAnchor : iconContainer.leadingAnchor
+            let iconInner = isFromUser ? iconContainer.leadingAnchor : iconContainer.trailingAnchor
+            constraints += [
+                iconOuter.constraint(equalTo: outerEdge, constant: inset),
+                iconContainer.topAnchor.constraint(equalTo: topAnchor, constant: Self.vInset),
+                iconContainer.widthAnchor.constraint(equalToConstant: Self.iconSize),
+                iconContainer.heightAnchor.constraint(equalToConstant: Self.iconSize),
+                iconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+                iconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+
+                contentEdge.constraint(equalTo: iconInner, constant: gap),
+                heightAnchor.constraint(greaterThanOrEqualTo: iconContainer.heightAnchor,
+                                        constant: Self.vInset * 2)
+            ]
+        } else {
+            constraints.append(contentEdge.constraint(equalTo: outerEdge, constant: inset))
+        }
 
         // The jump control hangs off the bubble's *inside* edge — the one facing
         // the middle of the window, which is the side with room on it, and the
@@ -267,19 +380,19 @@ public final class ChatTranscriptRowView: NSView {
         // on the far side they only have to stay inside the row.
         if isFromUser {
             constraints += [
-                bubble.trailingAnchor.constraint(equalTo: headerLabel.trailingAnchor),
-                timeLabel.trailingAnchor.constraint(equalTo: headerLabel.trailingAnchor),
-                headerLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
-                                                     constant: Self.hInset),
+                bubble.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+                timeLabel.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+                header.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
+                                                constant: Self.hInset),
                 bubble.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
                                                 constant: Self.hInset)
             ]
         } else {
             constraints += [
-                bubble.leadingAnchor.constraint(equalTo: headerLabel.leadingAnchor),
-                timeLabel.leadingAnchor.constraint(equalTo: headerLabel.leadingAnchor),
-                headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
-                                                      constant: -Self.hInset),
+                bubble.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+                timeLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+                header.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
+                                                 constant: -Self.hInset),
                 bubble.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
                                                  constant: -Self.hInset)
             ]
@@ -290,17 +403,26 @@ public final class ChatTranscriptRowView: NSView {
     // MARK: - Theme
 
     private func apply(_ palette: SemanticPalette) {
-        headerLabel.font = palette.font(.caption)
-        headerLabel.textColor = palette.nsColor(isFromUser ? .userName : .personaName)
+        header.applyTheme(palette)
 
         timeLabel.font = palette.font(.caption)
         timeLabel.textColor = palette.nsColor(.timestampText)
 
-        iconContainer.layer?.backgroundColor =
-            palette.nsColor(isFromUser ? .userBubble : .personaBubble).cgColor
-        iconView.contentTintColor = palette.nsColor(isFromUser ? .userName : .personaName)
+        failureLabel?.font = palette.font(.caption)
+        failureLabel?.textColor = palette.nsColor(.danger)
+
+        if showsIcon {
+            iconContainer.layer?.backgroundColor = palette.nsColor(.personaBubble).cgColor
+            iconView.contentTintColor = palette.nsColor(.personaName)
+        }
 
         applyHoverFill(palette)
+        applySelectionFrame(palette)
+    }
+
+    private func applySelectionFrame(_ palette: SemanticPalette) {
+        layer?.borderWidth = isSelected ? Self.selectionBorderWidth : 0
+        layer?.borderColor = isSelected ? palette.nsColor(.selection).cgColor : nil
     }
 
     private func applyHoverFill(_ palette: SemanticPalette) {
@@ -344,10 +466,25 @@ public final class ChatTranscriptRowView: NSView {
         trackingArea = area
     }
 
+    /// Hovering lights the row up — unless something is in front of it.
+    ///
+    /// A tracking area belongs to its view, not to what is drawn over it, so a
+    /// row under an overlay still hears the mouse cross it and still lit up:
+    /// the reader saw bubbles glowing *through* the conversation they had
+    /// opened. Hit-testing from the window's own content view is what asks the
+    /// question the tracking area cannot — is this row what the pointer is
+    /// actually on?
     public override func mouseEntered(with event: NSEvent) {
-        guard isPressable else { return }
+        guard isPressable, isFrontmostUnderPointer(event) else { return }
         isHovered = true
         applyHoverFill(resolvedThemeScope.palette)
+    }
+
+    private func isFrontmostUnderPointer(_ event: NSEvent) -> Bool {
+        guard let content = window?.contentView else { return true }
+        let point = content.convert(event.locationInWindow, from: nil)
+        guard let hit = content.hitTest(point) else { return false }
+        return hit === self || hit.isDescendant(of: self)
     }
 
     public override func mouseExited(with event: NSEvent) {
@@ -371,6 +508,17 @@ public final class ChatTranscriptRowView: NSView {
             return
         }
         onOpen(message)
+    }
+
+    /// The press that picks the row. Reported and passed on: `super` is what
+    /// lets a container behind the row — the focus overlay — still read a press
+    /// nothing else took as a press on itself.
+    public override func mouseDown(with event: NSEvent) {
+        if let onSelect = actions.onSelect,
+           bounds.contains(convert(event.locationInWindow, from: nil)) {
+            onSelect(message)
+        }
+        super.mouseDown(with: event)
     }
 
     @objc private func jumpTapped() {

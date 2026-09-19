@@ -80,6 +80,14 @@ open class DismissibleOverlayView: NSView {
         ])
 
         alphaValue = 0
+        // Laid out *and drawn* while still invisible. An overlay added and faded
+        // in the same turn starts its fade on an empty frame — its content has
+        // no size yet — so the reader watches the blur arrive first and the
+        // conversation land inside it a frame or two later, which reads as a
+        // flash. Finishing the frame first means the fade has something to fade.
+        host.layoutSubtreeIfNeeded()
+        displayIfNeeded()
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.fadeDuration
             animator().alphaValue = 1
