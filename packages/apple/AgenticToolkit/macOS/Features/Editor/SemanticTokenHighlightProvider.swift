@@ -527,6 +527,15 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
                 // also let tree-sitter's capture through — the merge is
                 // `self.capture ?? other?.capture` — but reporting a range we
                 // decline to describe is a claim we do not mean.
+                //
+                // Recorded under the token *type* rather than the document,
+                // because the actionable fact is which type went unmapped —
+                // that is the row of `SemanticTokenCaptureMapping`'s table
+                // someone would go and write.
+                UpstreamDivergenceLedger.shared.record(
+                    .semanticTokenTypeUnmapped,
+                    detail: token.tokenType
+                )
                 continue
             }
             guard let range = nsRange(for: token.range) else { continue }
@@ -558,8 +567,40 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
                 overlappingTokenSupport: false.
                 """
             )
+            UpstreamDivergenceLedger.shared.record(
+                .semanticTokenOverlapDropped,
+                detail: document.uri,
+                count: overlapping
+            )
         }
+        recordDiscardedModifiers(in: response)
         return result
+    }
+
+    /// Records how many of this response's tokens carried modifier bits we
+    /// threw away.
+    ///
+    /// Read off the wire format rather than off `representation`, because
+    /// `TokenRepresentation.makeToken` hardcodes an empty modifier set and
+    /// never touches `data[i + 4]` — by the time a token exists as a value,
+    /// the evidence is already gone. The encoding is five `UInt32`s per token
+    /// (`deltaLine`, `deltaStart`, `length`, `tokenType`, `tokenModifiers`),
+    /// so the fifth of each group is the bitmask, and a non-zero one is a
+    /// token whose styling we are declining to vary.
+    ///
+    /// A zero here is worth as much as a non-zero: it says this server sends
+    /// no modifiers, so wiring them through would change nothing for it.
+    private func recordDiscardedModifiers(in response: SemanticTokensResponse) {
+        guard let data = response?.data, data.count >= 5 else { return }
+        var discarded = 0
+        for index in stride(from: 4, to: data.count, by: 5) where data[index] != 0 {
+            discarded += 1
+        }
+        UpstreamDivergenceLedger.shared.record(
+            .semanticTokenModifiersIgnored,
+            detail: document.uri,
+            count: discarded
+        )
     }
 
     /// The text-storage range a token names, or `nil` if it names one this
@@ -609,7 +650,17 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         // of the file. It costs one round trip per token.
         // `tokensPastTheEndAreTruncatedByTheDecoder` pins the dependency half.
         let lineStart = document.utf16Offset(for: Position(line: range.start.line, character: 0))
-        guard document.position(forUTF16Offset: lineStart).line == range.start.line else { return nil }
+        guard document.position(forUTF16Offset: lineStart).line == range.start.line else {
+            // Recorded even though the paragraph above argues it cannot happen:
+            // an argument from three facts about code we do not own is exactly
+            // the kind that stops being true without anyone noticing, and a row
+            // appearing here is how we would find out.
+            UpstreamDivergenceLedger.shared.record(
+                .semanticTokenLineOutOfRange,
+                detail: document.uri
+            )
+            return nil
+        }
 
         let converted = document.nsRange(for: range)
         // A zero-length token paints nothing and would only cost the container

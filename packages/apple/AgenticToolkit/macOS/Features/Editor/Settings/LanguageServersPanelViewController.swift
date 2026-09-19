@@ -107,6 +107,20 @@ public final class LanguageServersPanelViewController: ComposableSettings.Settin
                 + "usually where a wrong command path or a missing dependency says so. "
                 + "A server whose row is switched off, or which no project has started, "
                 + "reads as not running."
+        ),
+        .init(
+            title: "Known Differences from VS Code",
+            body: "Some of what a language server sends is deliberately not used here, "
+                + "and this list is every such place, with how often each has actually "
+                + "come up since the app started. It is there because highlighting that "
+                + "looks missing is otherwise impossible to tell apart from highlighting "
+                + "that is broken: a count climbing beside a line is the app saying it "
+                + "received something and chose not to act on it, and what it chose "
+                + "instead. A line reading not observable is one where nothing can be "
+                + "counted — the app never asks for that kind of data, so a server that "
+                + "follows the protocol never sends it. Reset Counts starts the tally "
+                + "over, which is the way to see what one particular extension does. "
+                + "Nothing here is stored; the counts start empty at every launch."
         )
     ])
 
@@ -166,11 +180,38 @@ final class LanguageServersListViewModel: ObservableObject {
     @Published var statusesByConfiguration: [UUID: [LanguageServerStatusRow]] = [:]
     @Published var hasOpenProject = false
 
+    /// Observed hits, keyed by divergence id, already totalled across details.
+    ///
+    /// Totalled here rather than in the view because the panel shows one row
+    /// per catalogue entry, not one per document: "semantic token modifiers
+    /// discarded, 412 times" is the readable form, and which files contributed
+    /// is a detail the log already carries.
+    @Published var divergenceCounts: [String: Int] = [:]
+
     private let store: SettingsStore
+    private let divergences: UpstreamDivergenceLedger
     private var cancellables: Set<AnyCancellable> = []
 
-    init(store: SettingsStore, statusModel: LanguageServerStatusModel) {
+    init(
+        store: SettingsStore,
+        statusModel: LanguageServerStatusModel,
+        divergences: UpstreamDivergenceLedger = .shared
+    ) {
         self.store = store
+        self.divergences = divergences
+
+        // `receive(on:)` because the ledger is recorded into from wherever the
+        // narrowing happens — a decode loop reached from an `actor`, not the
+        // main queue — and this model is `@MainActor`.
+        divergences.hitsPublisher
+            .map { hits in
+                hits.reduce(into: [String: Int]()) { totals, hit in
+                    totals[hit.divergence.id, default: 0] += hit.count
+                }
+            }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.divergenceCounts = $0 }
+            .store(in: &cancellables)
 
         store.publisher(for: UserSettings.languageServerConfigurations)
             .sink { [weak self] in self?.configurations = $0 }
@@ -217,6 +258,12 @@ final class LanguageServersListViewModel: ObservableObject {
         current.append(configuration)
         store.set(current, for: UserSettings.languageServerConfigurations)
     }
+
+    /// Zeroes the observed counts, so the next thing tried is measured on its
+    /// own rather than against everything this launch has already done.
+    func clearDivergences() {
+        divergences.clear()
+    }
 }
 
 // MARK: - SwiftUI views
@@ -259,6 +306,14 @@ private struct LanguageServersListView: View {
                 }
             }
 
+            Divider()
+                .padding(.top, 8)
+
+            UpstreamDivergenceSection(
+                counts: viewModel.divergenceCounts,
+                onClear: { viewModel.clearDivergences() }
+            )
+
             Spacer(minLength: 0)
         }
         .padding(20)
@@ -273,6 +328,103 @@ private struct LanguageServersListView: View {
                 },
                 onCancel: { showingAdd = false }
             )
+        }
+    }
+}
+
+/// The places this app knowingly does less than VS Code, with how often each
+/// has actually been hit since launch.
+///
+/// Every catalogue entry is listed whether or not it has fired, because the
+/// list is documentation first: it is the only place a user can learn that
+/// highlighting they find missing was a decision rather than a fault. The
+/// counts are what turn it from documentation into evidence — a row that
+/// climbs while an extension is being exercised is the next thing to
+/// implement, and one that stays at zero is a narrowing nothing depends on.
+private struct UpstreamDivergenceSection: View {
+
+    let counts: [String: Int]
+    let onClear: () -> Void
+
+    @State private var isExpanded = false
+
+    @Environment(\.theme) private var theme
+
+    /// Collapsed by default: this is a settings panel about configuring
+    /// servers, and the divergences are a thing you go looking for.
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(UpstreamDivergence.known) { divergence in
+                    UpstreamDivergenceRow(
+                        divergence: divergence,
+                        count: counts[divergence.id]
+                    )
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Reset Counts", action: onClear)
+                        .accessibilityIdentifier("language-servers.divergences.reset")
+                        .disabled(counts.isEmpty)
+                }
+            }
+            .padding(.top, 8)
+        } label: {
+            HStack(spacing: 6) {
+                Text("Known Differences from VS Code")
+                    .font(theme.font(.heading))
+                if observedCount > 0 {
+                    Text("\(observedCount) seen")
+                        .font(theme.font(.caption))
+                        .foregroundStyle(theme.secondaryText)
+                }
+            }
+        }
+        .accessibilityIdentifier("language-servers.divergences")
+    }
+
+    /// How many *kinds* have been seen, not how many times — the count beside
+    /// a collapsed heading should say whether it is worth opening.
+    private var observedCount: Int {
+        counts.values.filter { $0 > 0 }.count
+    }
+}
+
+private struct UpstreamDivergenceRow: View {
+
+    let divergence: UpstreamDivergence
+    let count: Int?
+
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(divergence.area)
+                    .font(theme.font(.body))
+                Spacer()
+                Text(observation)
+                    .font(theme.font(.caption))
+                    .foregroundStyle(theme.secondaryText)
+            }
+            Text(divergence.ourBehaviour)
+                .font(theme.font(.caption))
+                .foregroundStyle(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityIdentifier("language-servers.divergence.\(divergence.id)")
+    }
+
+    /// A `.declared` divergence has no call site, so "0" would be a lie told
+    /// in the same words a real zero is told in. It says so instead.
+    private var observation: String {
+        switch divergence.detection {
+        case .declared:
+            return "not observable"
+        case .counted:
+            let count = count ?? 0
+            return count == 1 ? "1 time" : "\(count) times"
         }
     }
 }
