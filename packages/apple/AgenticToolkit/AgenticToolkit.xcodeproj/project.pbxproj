@@ -250,6 +250,7 @@
 		246E0BFA8CA1639D7CC339FA /* DisclosureCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53D3F6F3522C54ADA439E49B /* DisclosureCardTests.swift */; };
 		24B34FACDE15F9F3180FB988 /* MultiTabbedViewControllerDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AFBE61B041BDA17EFFCB3F /* MultiTabbedViewControllerDelegate.swift */; };
 		2559BF2EF2D0A59519960791 /* LSPCompletionEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475B0923234555F65C2E2E9C /* LSPCompletionEntryTests.swift */; };
+		2565BCDFCCD010CC6E98560E /* ConversationFocusOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9AD92831D3EB96B47CCB8E /* ConversationFocusOverlay.swift */; };
 		2574598DAD92C7B1127E0465 /* Placeholder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C87939516A070CC66803F4 /* Placeholder.swift */; };
 		25C77F2A07192C1AB1CE669C /* HTDVStatusViews+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2769A6482884F2716D3ED921 /* HTDVStatusViews+UIKit.swift */; };
 		267B27339E2C6E7F0EF08FF7 /* ModelCapabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7061EEA11CF025F2F72E5285 /* ModelCapabilityTests.swift */; };
@@ -770,6 +771,7 @@
 		A04C641D01BE2D44A9AE5856 /* TerminalSessionRowCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140B7E5133EF9E3212A9A543 /* TerminalSessionRowCellView.swift */; };
 		A0BDC34CB8F3F733FE5C63A7 /* NotesFolderListViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BDC7DD73089D6621690A75 /* NotesFolderListViewControllerTests.swift */; };
 		A0DC397F246D1AC1953E84EB /* HTDVModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75045910C87AC7E5A13907F2 /* HTDVModelTests.swift */; };
+		A0F8E52C5436B95F73E0BC0E /* ConversationFocusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F4CD284EE389B4F82998985 /* ConversationFocusTests.swift */; };
 		A110D72A83C87D315C47F704 /* MockChatSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211A3E3EDFCDC7EDA2F4601C /* MockChatSessionTests.swift */; };
 		A14295124F9E66E8A5533E6A /* ScriptingRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C71C9CB4C83289BC8FB988 /* ScriptingRouter.swift */; };
 		A19BFB59E574B43E29B59CEB /* ComposableTabsTabItemDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B65139F53D350B09C3FC48 /* ComposableTabsTabItemDataSource.swift */; };
@@ -2202,6 +2204,7 @@
 		0E574D92FE93D15A12138FEB /* WindowManagerSimulatedRelaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManagerSimulatedRelaunchTests.swift; sourceTree = "<group>"; };
 		0EC635036404E415CED86E37 /* TextDocumentCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentCoordinator.swift; sourceTree = "<group>"; };
 		0EC9AF6D58778C0D50626FC6 /* FileTreeNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeNodeTests.swift; sourceTree = "<group>"; };
+		0F4CD284EE389B4F82998985 /* ConversationFocusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFocusTests.swift; sourceTree = "<group>"; };
 		100B07B85D9C237535E20F8C /* PlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceholderTests.swift; sourceTree = "<group>"; };
 		101685017FD3939C6E5EED27 /* AgenticToolkitCoreMacOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgenticToolkitCoreMacOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		10C06EB2ADBF3FE51A046E3D /* AIProviderConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderConfigStoreTests.swift; sourceTree = "<group>"; };
@@ -2249,6 +2252,7 @@
 		1B1F0239679848C60E329A25 /* FileBrowserRestorationStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileBrowserRestorationStateTests.swift; sourceTree = "<group>"; };
 		1B58829FEE5D03814FD25AB0 /* InMemorySecureSettingsStorageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemorySecureSettingsStorageProvider.swift; sourceTree = "<group>"; };
 		1B5A562CCDA5EF229D01B99F /* GitStatusProviderRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatusProviderRefreshTests.swift; sourceTree = "<group>"; };
+		1B9AD92831D3EB96B47CCB8E /* ConversationFocusOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFocusOverlay.swift; sourceTree = "<group>"; };
 		1BA5D9118A1080C5EE9E8FD9 /* ScriptingHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptingHost.swift; sourceTree = "<group>"; };
 		1BC949F427908282E5CC5944 /* ThemeTopicPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeTopicPanel.swift; sourceTree = "<group>"; };
 		1C0F3C02C6C6FCFDF019FB03 /* HubText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubText.swift; sourceTree = "<group>"; };
@@ -4128,6 +4132,7 @@
 		4E020287A1B6411A66AD8BAC /* ConversationsWindow */ = {
 			isa = PBXGroup;
 			children = (
+				1B9AD92831D3EB96B47CCB8E /* ConversationFocusOverlay.swift */,
 				2B1F34069EB62EC76BD71FEB /* ConversationsViewController.swift */,
 			);
 			path = ConversationsWindow;
@@ -5904,6 +5909,7 @@
 				D09D1BB62899DF2C5823CBDC /* ChatErrorTests.swift */,
 				EF847AA872058013C029CFD7 /* ChatViewFocusTests.swift */,
 				F83AC9153D7D827D4041DD92 /* ChatViewScrollTests.swift */,
+				0F4CD284EE389B4F82998985 /* ConversationFocusTests.swift */,
 				7FB8AA1B5100D85B75A9E4A0 /* LocalChatSessionTests.swift */,
 			);
 			path = Chat;
@@ -7448,6 +7454,7 @@
 				3E0056F9234A29B727840889 /* ContextPickerView.swift in Sources */,
 				4049EAA443B39B900A0DD455 /* ContextVisualizationView.swift in Sources */,
 				0B6AE5AEB7A7D3D10F3736F3 /* ContextsSettingsTab.swift in Sources */,
+				2565BCDFCCD010CC6E98560E /* ConversationFocusOverlay.swift in Sources */,
 				84E16F89E69F89F512093019 /* ConversationsViewController.swift in Sources */,
 				31B1CEF46459C53C07621FEB /* DebugAutomationReExports.swift in Sources */,
 				CD004400699554D3764A519A /* DiagnosticOverlayView.swift in Sources */,
@@ -8114,6 +8121,7 @@
 				E43B644C0AE3FB8407383971 /* ComposableTabsViewControllerTests.swift in Sources */,
 				D85CBC876A841A89B7CDA1A8 /* ComposableTabsWorkingDirectoryTests.swift in Sources */,
 				DB8ED1B3458C9220ADD9683C /* ConfigurationContributionPointTests.swift in Sources */,
+				A0F8E52C5436B95F73E0BC0E /* ConversationFocusTests.swift in Sources */,
 				63F9D3A48B1135A10DE549B8 /* DebugLaunchSwitchTests.swift in Sources */,
 				83661684BCBC4B07761FF8E7 /* DirectoryWatchCoordinatorTests.swift in Sources */,
 				246E0BFA8CA1639D7CC339FA /* DisclosureCardTests.swift in Sources */,

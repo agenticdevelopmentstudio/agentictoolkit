@@ -45,10 +45,24 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         didSet { applyComposerEnablement() }
     }
 
-    /// Called when a transcript row is clicked. Only rows that carry a
-    /// ``ChatMessage/attribution`` are clickable — in a merged transcript a row
-    /// came from somewhere, and going there is the obvious thing to want.
-    public var onRowTap: ((ChatMessage) -> Void)?
+    /// What a transcript row does when it is pressed. Only rows that carry a
+    /// ``ChatMessage/attribution`` get them — in a merged transcript a row came
+    /// from somewhere, and going there is the obvious thing to want.
+    ///
+    /// Rows are built during a rebuild, so changing this re-renders rather than
+    /// waiting for the next poll to notice.
+    public var rowActions = ChatTranscriptRowView.Actions() {
+        didSet { scheduleRender() }
+    }
+
+    /// Whether the view paints the theme's chat surface behind the transcript.
+    ///
+    /// Off when the chat is being stacked over something that supplies its own
+    /// ground — a blurred backdrop, say. An opaque surface there would hide the
+    /// very thing the blur exists to show.
+    public var drawsBackground = true {
+        didSet { applySurfaceFill(resolvedThemeScope.palette) }
+    }
 
     public init(viewModel: AIChatViewModel) {
         self.viewModel = viewModel
@@ -116,7 +130,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
 
         observeTheme { view, palette in
             view.wantsLayer = true
-            view.layer?.backgroundColor = palette.nsColor(.chatSurface).cgColor
+            view.applySurfaceFill(palette)
         }
 
         let inputRow = NSStackView(views: [inputField, sendButton])
@@ -145,6 +159,12 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             inputRow.trailingAnchor.constraint(equalTo: trailingAnchor),
             inputRow.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+    }
+
+    private func applySurfaceFill(_ palette: SemanticPalette) {
+        layer?.backgroundColor = drawsBackground
+            ? palette.nsColor(.chatSurface).cgColor
+            : NSColor.clear.cgColor
     }
 
     /// Rebuild the transcript when the transcript width changes (window resize),
@@ -211,7 +231,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             // produces those, so an ordinary chat is untouched by this.
             if message.attribution != nil {
                 let row = ChatTranscriptRowView(
-                    message: message, maxBubbleWidth: maxBubbleWidth, onTap: onRowTap)
+                    message: message, maxBubbleWidth: maxBubbleWidth, actions: rowActions)
                 transcriptStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(
                     equalTo: transcriptStack.widthAnchor, constant: -32).isActive = true

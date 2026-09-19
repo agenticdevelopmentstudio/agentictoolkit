@@ -37,6 +37,20 @@ public final class AIChatBubbleView: NSView {
     private let textHeightConstraint: NSLayoutConstraint
     private var bubbleWidthConstraint: NSLayoutConstraint!
 
+    /// The band occupied by the bubble's **first line of text**, so a control
+    /// outside the bubble can sit level with it.
+    ///
+    /// Not the bubble's own centre: a bubble is as tall as its text, so centring
+    /// on it puts an affordance halfway down a paragraph, and a column of them
+    /// down a transcript lands at a different height on every row. The top line
+    /// is where the eye already is, and it is in the same place whether the
+    /// message is one line or forty.
+    private let firstLineGuide = NSLayoutGuide()
+    private var firstLineHeightConstraint: NSLayoutConstraint!
+
+    /// Vertical centre of the first line of text — see ``firstLineGuide``.
+    public var firstLineCenterYAnchor: NSLayoutYAxisAnchor { firstLineGuide.centerYAnchor }
+
     private static let hPad: CGFloat = 12
     private static let vPad: CGFloat = 8
 
@@ -77,6 +91,8 @@ public final class AIChatBubbleView: NSView {
         textView.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(textView)
+        addLayoutGuide(firstLineGuide)
+        self.firstLineHeightConstraint = firstLineGuide.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: topAnchor, constant: Self.vPad),
@@ -85,7 +101,12 @@ public final class AIChatBubbleView: NSView {
             textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.vPad),
             textWidthConstraint,
             textHeightConstraint,
-            bubbleWidthConstraint
+            bubbleWidthConstraint,
+
+            firstLineGuide.topAnchor.constraint(equalTo: topAnchor, constant: Self.vPad),
+            firstLineGuide.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.hPad),
+            firstLineGuide.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.hPad),
+            firstLineHeightConstraint
         ])
 
         observeTheme { bubble, palette in bubble.apply(palette) }
@@ -174,6 +195,15 @@ public final class AIChatBubbleView: NSView {
         textWidthConstraint.constant = textWidth
         textHeightConstraint.constant = textHeight
         bubbleWidthConstraint.constant = min(textWidth + Self.hPad * 2, maxWidth)
+
+        // The same throwaway layout already knows where the first line ends;
+        // asking it is what keeps ``firstLineGuide`` honest across a theme
+        // change, which can move the body font and with it the line's height.
+        // An empty message lays out no glyphs at all, and there the whole used
+        // height *is* one line.
+        firstLineHeightConstraint.constant = layoutManager.numberOfGlyphs > 0
+            ? ceil(layoutManager.lineFragmentUsedRect(forGlyphAt: 0, effectiveRange: nil).height)
+            : textHeight
 
         textView.insertionPointColor = palette.nsColor(.cursor)
         textView.selectedTextAttributes = [
