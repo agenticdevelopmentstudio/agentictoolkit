@@ -28,19 +28,28 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
     ///   - refreshInterval: how often this one conversation is re-read. The same
     ///     cadence as the feed underneath, so a reply lands in both together.
     ///   - load: reads *this* conversation, already narrowed to its session.
+    ///   - seed: the rows the feed underneath already had for this session, so
+    ///     the overlay fades in holding the conversation rather than filling in
+    ///     after it has arrived.
     ///   - lineLimit: how many lines of a message a row shows before offering
     ///     the rest — see ``ChatView/bubbleLineLimit``. The same cap as the feed,
     ///     so a message does not change length on the way into the overlay.
+    ///   - send: types a line into the session this conversation belongs to, as
+    ///     if it had been typed at its own terminal. Nil leaves the composer
+    ///     disabled, which is what a session nothing can be written to looks
+    ///     like.
     ///   - onJump: the row's app icon was used — leave for the real thing.
     public init(
         refreshInterval: Duration,
         load: @escaping FeedChatSession.Loader,
+        seed: [ChatMessage] = [],
         lineLimit: Int?,
+        send: FeedChatSession.Sender? = nil,
         onJump: ((ChatMessage) -> Void)?
     ) {
-        let session = FeedChatSession(refreshInterval: refreshInterval, load: load)
+        let session = FeedChatSession(refreshInterval: refreshInterval, send: send, load: load)
         self.session = session
-        self.viewModel = AIChatViewModel(session: session)
+        self.viewModel = AIChatViewModel(session: session, initial: seed)
         self.chatView = ChatView(viewModel: self.viewModel)
         super.init(material: .hudWindow)
 
@@ -49,10 +58,13 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
         // No surface of its own: an opaque chat painted over the blur would hide
         // exactly what the blur is there to show.
         chatView.drawsBackground = false
-        // Same reason the feed's composer is greyed rather than removed — this
-        // is a conversation being read, and a transcript with the entry field
-        // cut out reads as a different kind of view rather than a read-only one.
-        chatView.isComposerEnabled = false
+        // One conversation is the one place typing has an unambiguous
+        // destination — the merged feed behind it has no single session to write
+        // to, which is why its composer stays grey. Without a sender there is
+        // still nowhere to write, and the composer is greyed rather than removed
+        // for the same reason it is in the feed: a transcript with the entry
+        // field cut out reads as a different kind of view, not a read-only one.
+        chatView.isComposerEnabled = session.canSend
         chatView.bubbleLineLimit = lineLimit
         // No `onOpen`: this *is* the conversation, so there is nothing for a
         // double click to open — and with the handler unset the bubbles keep the
@@ -69,6 +81,31 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
             chatView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
+
+    /// Return is the composer's while the composer has the keys.
+    ///
+    /// ``DismissibleOverlayView`` takes Return as "done", which is right for a
+    /// transcript being read and wrong the moment there is something to type
+    /// into: the reader pressing Return at the end of a line means *send it*,
+    /// and an overlay that vanished instead would throw the line away. Escape
+    /// still closes from anywhere, so there is always a way out.
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if Self.sendKeyCodes.contains(event.keyCode), chatView.isComposerFocused {
+            return false
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// Return and the keypad's Enter.
+    private static let sendKeyCodes: Set<UInt16> = [36, 76]
+
+    /// Re-read this conversation now.
+    ///
+    /// The overlay polls on its own, but the feed underneath is pushed to when
+    /// the daemon says something changed; forwarding that push is what keeps
+    /// the closer look as current as the thing it was lifted out of, rather
+    /// than up to one interval behind it.
+    public func refresh() { session.refresh() }
 
     deinit { session.close() }
 

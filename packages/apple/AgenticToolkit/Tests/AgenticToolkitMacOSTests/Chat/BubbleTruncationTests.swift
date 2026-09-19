@@ -222,7 +222,7 @@ final class BubbleTruncationTests: XCTestCase {
         let messages = [
             ChatMessage(
                 id: "m1", role: .assistant, text: Self.longText,
-                attribution: .init(sourceID: "s1", context: "proj/main",
+                attribution: .init(sourceID: "s1", context: ["proj", "main"],
                                    name: "a session", iconSymbol: "sparkles")
             )
         ]

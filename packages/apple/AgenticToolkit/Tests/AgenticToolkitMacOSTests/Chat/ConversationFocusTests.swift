@@ -28,14 +28,14 @@ final class ConversationFocusTests: XCTestCase {
     // MARK: - The jump control
 
     func testTheJumpControlSitsTenPointsOffAnAssistantBubblesInsideEdge() throws {
-        let (bubble, button) = try laidOutRow(role: .assistant, text: "a short reply")
+        let (_, bubble, button) = try laidOutRow(role: .assistant, text: "a short reply")
         XCTAssertEqual(
             button.frame.minX - bubble.frame.maxX, 10, accuracy: 0.5,
             "the agent's column runs left, so its bubble's inside edge is the trailing one")
     }
 
     func testTheJumpControlSitsTenPointsOffAUserBubblesInsideEdge() throws {
-        let (bubble, button) = try laidOutRow(role: .user, text: "a short prompt")
+        let (_, bubble, button) = try laidOutRow(role: .user, text: "a short prompt")
         XCTAssertEqual(
             bubble.frame.minX - button.frame.maxX, 10, accuracy: 0.5,
             "the human's column runs right, so its bubble's inside edge is the leading one")
@@ -46,9 +46,9 @@ final class ConversationFocusTests: XCTestCase {
     /// bubble and a forty-line one put the control the same distance below their
     /// own top edge.
     func testTheJumpControlSitsLevelWithTheBubblesTopHoweverTallTheBubbleIs() throws {
-        let (shortBubble, shortButton) = try laidOutRow(role: .assistant, text: "one line")
+        let (_, shortBubble, shortButton) = try laidOutRow(role: .assistant, text: "one line")
         let paragraph = (0..<40).map { "line \($0) of a long reply" }.joined(separator: "\n")
-        let (tallBubble, tallButton) = try laidOutRow(role: .assistant, text: paragraph)
+        let (_, tallBubble, tallButton) = try laidOutRow(role: .assistant, text: paragraph)
 
         XCTAssertGreaterThan(
             tallBubble.frame.height, shortBubble.frame.height * 4,
@@ -76,7 +76,7 @@ final class ConversationFocusTests: XCTestCase {
     /// anything outside its bounds, so a control hanging past the bottom edge
     /// would be drawn and unclickable.
     func testTheRowIsTallEnoughToHoldTheJumpControl() throws {
-        let (_, button) = try laidOutRow(role: .assistant, text: "one line")
+        let (_, _, button) = try laidOutRow(role: .assistant, text: "one line")
         let row = try XCTUnwrap(button.superview as? ChatTranscriptRowView)
         XCTAssertTrue(
             row.bounds.contains(button.frame),
@@ -99,7 +99,9 @@ final class ConversationFocusTests: XCTestCase {
 
         doubleClick(try firstRow(of: controller))
         let overlay = try XCTUnwrap(focusOverlay(in: controller), "a row click did not open the overlay")
-        try await waitUntil("the overlay's transcript loaded") { !self.rowTexts(in: overlay).isEmpty }
+        // The narrowed read, not the rows: the overlay opens on what the feed
+        // behind it already had, so rows are there before anything is loaded.
+        try await waitUntil("the overlay read its session") { !asked.values.isEmpty }
 
         XCTAssertEqual(
             Set(asked.values), ["s1"],
@@ -212,6 +214,54 @@ final class ConversationFocusTests: XCTestCase {
                         "clicking a bubble closed the overlay, so the text cannot be copied")
     }
 
+    /// The flash: an overlay added and faded in the same turn began its fade on
+    /// an empty frame, so the blur arrived first and the conversation landed
+    /// inside it a moment later. By the time the fade starts the overlay is laid
+    /// out *and* already holding this session's rows.
+    func testTheOverlayIsDrawnBeforeItStartsToFadeIn() async throws {
+        let (controller, _) = try await loadedFeed()
+
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+
+        // No settle: this is the state of the overlay at the first frame of the
+        // fade, which is the frame the reader saw as a flash.
+        XCTAssertEqual(overlay.frame, controller.view.bounds,
+                       "the overlay had no size yet when its fade began")
+        let chat = try XCTUnwrap(overlay.subviews.compactMap { $0 as? ChatView }.first)
+        XCTAssertEqual(chat.frame, overlay.bounds,
+                       "the overlay's transcript had no size yet when its fade began")
+        XCTAssertEqual(rowTexts(in: overlay), ["s1 first", "s1 second"],
+                       "the overlay faded in empty and filled itself afterwards")
+    }
+
+    /// A tracking area belongs to its view and not to what is drawn over it, so
+    /// the rows under the overlay went on lighting up as the pointer crossed
+    /// them — bubbles glowing through the conversation the reader had opened.
+    func testHoveringOverTheOverlayDoesNotLightUpTheFeedBehindIt() async throws {
+        let (controller, _) = try await loadedFeed()
+        let row = try firstRow(of: controller)
+
+        row.mouseEntered(with: mouseEvent(.mouseEntered, in: row))
+        XCTAssertTrue(isHighlighted(row),
+                      "the fixture is wrong: hovering a bare row does highlight it")
+        row.mouseExited(with: mouseEvent(.mouseExited, in: row))
+
+        doubleClick(row)
+        _ = try XCTUnwrap(focusOverlay(in: controller))
+        await settle()
+
+        row.mouseEntered(with: mouseEvent(.mouseEntered, in: row))
+        XCTAssertFalse(isHighlighted(row),
+                       "a row under the overlay lit up, so the feed glows through the conversation")
+    }
+
+    /// The hover fill, read off the layer — the row keeps whether it is hovered
+    /// to itself, and what this is about is what the reader can see.
+    private func isHighlighted(_ row: ChatTranscriptRowView) -> Bool {
+        (row.layer?.backgroundColor?.alpha ?? 0) > 0
+    }
+
     func testTheJumpControlGoesToTheSourceRatherThanOpeningTheOverlay() async throws {
         let (controller, _) = try await loadedFeed()
         let went = Box()
@@ -221,6 +271,384 @@ final class ConversationFocusTests: XCTestCase {
 
         XCTAssertEqual(went.values, ["s1"])
         XCTAssertNil(focusOverlay(in: controller), "the jump control is not a row click")
+    }
+
+    // MARK: - Picking a row
+
+    func testClickingARowPicksIt() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+        let all = rows(in: controller)
+
+        click(all[1])
+
+        XCTAssertEqual(pickedTexts(in: controller), [text(of: all[1])],
+                       "a single click picked nothing, or picked more than one row")
+        XCTAssertEqual(feed.selectedMessageID, all[1].shownMessage.id)
+    }
+
+    /// The frame is the whole of what a reader sees, and it is drawn in the
+    /// theme's selection colour — the same colour every other picked thing in
+    /// the app is drawn in.
+    func testThePickedRowIsFramedInTheHighlightColour() async throws {
+        let (controller, _) = try await loadedFeed()
+        let row = try firstRow(of: controller)
+
+        click(row)
+
+        XCTAssertGreaterThan(row.layer?.borderWidth ?? 0, 0, "the picked row has no frame")
+        XCTAssertEqual(row.layer?.borderColor,
+                       ThemePaletteObserver.currentPalette.nsColor(.selection).cgColor,
+                       "the frame is not drawn in the highlight colour")
+    }
+
+    /// Each arrow enters from its own end, so the first press is never a
+    /// no-op — and never a jump to whichever end the view happened to build
+    /// first.
+    func testWithNothingPickedDownTakesTheTopRowAndUpTheBottom() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+        let all = rows(in: controller)
+
+        feed.keyDown(with: key(code: 125))
+        XCTAssertEqual(pickedTexts(in: controller), [text(of: all[0])], "down did not enter at the top")
+
+        feed.select(nil)
+        feed.keyDown(with: key(code: 126))
+        XCTAssertEqual(pickedTexts(in: controller), [text(of: all[2])], "up did not enter at the bottom")
+    }
+
+    func testTheArrowsWalkTheRows() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+        let all = rows(in: controller)
+
+        click(all[0])
+        feed.keyDown(with: key(code: 125))
+        XCTAssertEqual(pickedTexts(in: controller), [text(of: all[1])])
+        feed.keyDown(with: key(code: 126))
+        XCTAssertEqual(pickedTexts(in: controller), [text(of: all[0])])
+    }
+
+    /// A timeline has two ends and neither one wraps: "one more down" at the
+    /// newest message means there is nothing newer, not that the oldest is next.
+    func testWalkingPastEitherEndStaysPut() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+        let all = rows(in: controller)
+
+        click(all[0])
+        feed.keyDown(with: key(code: 126))
+        XCTAssertEqual(pickedTexts(in: controller), [text(of: all[0])], "up wrapped round to the bottom")
+
+        click(all[2])
+        feed.keyDown(with: key(code: 125))
+        XCTAssertEqual(pickedTexts(in: controller), [text(of: all[2])], "down wrapped round to the top")
+    }
+
+    func testReturnOnAPickedRowOpensTheOverlay() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+
+        click(try firstRow(of: controller))
+        feed.keyDown(with: key(code: 36))
+
+        let overlay = try XCTUnwrap(focusOverlay(in: controller), "Return opened nothing")
+        try await waitUntil("the overlay's transcript loaded") { !self.rowTexts(in: overlay).isEmpty }
+        XCTAssertEqual(rowTexts(in: overlay), ["s1 first", "s1 second"])
+    }
+
+    func testShiftReturnOnAPickedRowLeavesForTheSession() async throws {
+        let (controller, _) = try await loadedFeed()
+        let feed = try feedChat(of: controller)
+        let went = Box()
+        controller.onGoToSource = { went.values.append($0.attribution?.sourceID ?? "") }
+
+        click(try firstRow(of: controller))
+        feed.keyDown(with: key(code: 36, modifiers: .shift))
+
+        XCTAssertEqual(went.values, ["s1"])
+        XCTAssertNil(focusOverlay(in: controller), "Shift-Return opened the overlay as well as leaving")
+    }
+
+    /// A feed throws away every row and builds it again on each poll, so a
+    /// selection held as a view would last until the next read. It is held by
+    /// message id for exactly this.
+    func testThePickSurvivesTheNextPoll() async throws {
+        let (controller, _) = try await loadedFeed()
+        let picked = try firstRow(of: controller)
+        click(picked)
+        let id = picked.shownMessage.id
+
+        controller.refresh()
+        try await waitUntil("the feed was rebuilt") { self.rows(in: controller).first !== picked }
+        await settle()
+
+        let row = try XCTUnwrap(rows(in: controller).first { $0.shownMessage.id == id })
+        XCTAssertTrue(row.isSelected, "the poll dropped the reader's selection")
+    }
+
+    /// Inside one conversation there is nothing for Return to open and nowhere
+    /// for the arrows to go that scrolling does not already do better.
+    func testTheOverlayHasNoRowSelection() async throws {
+        let (controller, _) = try await loadedFeed()
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+        await settle()
+
+        let chat = try XCTUnwrap(overlay.subviews.compactMap { $0 as? ChatView }.first)
+        XCTAssertFalse(chat.isRowSelectionEnabled)
+    }
+
+    private func feedChat(of controller: ConversationsViewController) throws -> ChatView {
+        try XCTUnwrap(controller.view.subviews.compactMap { $0 as? ChatView }.first)
+    }
+
+    private func text(of row: ChatTranscriptRowView) -> String {
+        row.shownMessage.text
+    }
+
+    /// What is drawn as picked, read off the rows rather than out of the view's
+    /// own bookkeeping — a selection nobody can see is not a selection.
+    private func pickedTexts(in controller: ConversationsViewController) -> [String] {
+        rows(in: controller).filter(\.isSelected).map(text(of:))
+    }
+
+    // MARK: - Typing into a session
+
+    /// The feed is a merged one, so a line typed into it has no session to
+    /// belong to. The overlay is the opposite — one conversation and nothing
+    /// else — which is why the composer wakes up there and only there.
+    func testAnOverlayWithNowhereToWriteKeepsItsComposerOff() async throws {
+        let (controller, _) = try await loadedFeed()
+
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+
+        XCTAssertEqual(composerIsOn(in: overlay), false,
+                       "a host that cannot reach the session still offered to write to it")
+    }
+
+    func testAnOverlayTheHostCanWriteToOffersItsComposer() async throws {
+        let (controller, _) = try await loadedFeed()
+        controller.onSendToSource = { _, _ in nil }
+
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+
+        XCTAssertEqual(composerIsOn(in: overlay), true,
+                       "the one view with a session to write to left its composer grey")
+    }
+
+    /// The write is a round trip through another application and the read back
+    /// is a poll behind that, so "it appeared when it landed" would be seconds
+    /// of a composer emptying into nothing.
+    func testALineTypedShowsAtOnceAsPending() async throws {
+        let session = FeedChatSession(
+            refreshInterval: .seconds(3600), send: { _ in nil }, load: { [] })
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+
+        session.send("are you still on the migration?")
+
+        try await waitUntil("the typed line was shown") { !log.latest.isEmpty }
+        let message = try XCTUnwrap(log.latest.last)
+        XCTAssertEqual(message.text, "are you still on the migration?")
+        XCTAssertEqual(message.role, .user)
+        XCTAssertEqual(message.delivery, .sending,
+                       "a line nothing has read back yet is not a settled message")
+    }
+
+    /// Read back means delivered, and the row it was standing in for is the one
+    /// the source recorded — not a second copy beside it.
+    func testALineReadBackStopsBeingPendingAndIsNotDoubled() async throws {
+        let echo = SourceLog()
+        let session = FeedChatSession(
+            refreshInterval: .milliseconds(20),
+            send: { text in echo.note(text); return nil },
+            load: {
+                echo.values.map {
+                    ChatMessage(id: "recorded-\($0)", role: .user, text: $0)
+                }
+            }
+        )
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+
+        session.send("rebase it onto main")
+
+        try await waitUntil("the source said the line back") {
+            log.latest.count == 1 && log.latest[0].delivery == .settled
+        }
+        XCTAssertEqual(log.latest.map(\.text), ["rebase it onto main"],
+                       "the read-back line and the pending one are both on screen")
+    }
+
+    /// An agent that is mid-turn answers when it is finished, so waiting is
+    /// normal and silence is not — the difference is what the timeout draws.
+    func testALineTheSourceNeverSaysBackFails() async throws {
+        let session = FeedChatSession(
+            refreshInterval: .seconds(3600),
+            sendTimeout: .milliseconds(50),
+            send: { _ in nil },
+            load: { [] }
+        )
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+
+        session.send("did that land?")
+
+        try await waitUntil("the line was given up on") {
+            if case .failed = log.latest.last?.delivery { return true }
+            return false
+        }
+        guard case .failed(let reason) = try XCTUnwrap(log.latest.last).delivery else {
+            return XCTFail("the line settled after nothing ever read it back")
+        }
+        XCTAssertFalse(reason.isEmpty, "a failed line has to say what went wrong")
+    }
+
+    func testALineThatCouldNotBeHandedOverFailsWithTheReasonGiven() async throws {
+        let session = FeedChatSession(
+            refreshInterval: .seconds(3600),
+            send: { _ in "this session runs in an unknown terminal." },
+            load: { [] }
+        )
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+
+        session.send("compact")
+
+        try await waitUntil("the write was refused") {
+            if case .failed = log.latest.last?.delivery { return true }
+            return false
+        }
+        XCTAssertEqual(log.latest.last?.delivery,
+                       .failed("this session runs in an unknown terminal."),
+                       "the reader was not told why their line did not go anywhere")
+    }
+
+    /// Both marks sit between the bubble and its timestamp, on the speaker's
+    /// side: a row that is waiting is the row above the answer, not a banner
+    /// somewhere else in the window.
+    func testAWaitingRowShowsThinkingDots() throws {
+        let row = try laidOutRow(delivery: .sending)
+        let bubble = try XCTUnwrap(row.subviews.compactMap { $0 as? AIChatBubbleView }.first)
+        let dots = try XCTUnwrap(
+            row.subviews.compactMap { $0 as? TypingIndicatorView }.first,
+            "a line still waiting to be read back is drawn as a settled one")
+
+        XCTAssertLessThan(dots.frame.maxY, bubble.frame.minY + 0.5,
+                          "the dots belong under the bubble they are waiting for")
+        XCTAssertEqual(dots.frame.maxX, bubble.frame.maxX, accuracy: 0.5,
+                       "the mark is on the speaker's side, like everything else in the row")
+    }
+
+    func testAFailedRowShowsItsReasonInTheDangerColour() throws {
+        let row = try laidOutRow(delivery: .failed("no answer from that terminal"))
+        let label = try XCTUnwrap(
+            row.subviews.compactMap { $0 as? NSTextField }
+                .first { $0.stringValue == "no answer from that terminal" },
+            "a line that failed says nothing about it")
+
+        XCTAssertEqual(label.textColor,
+                       ThemePaletteObserver.currentPalette.nsColor(.danger),
+                       "the failure reads as ordinary text")
+    }
+
+    /// One row on its own, in a window, laid out — for the delivery marks,
+    /// which only exist on a message this client wrote.
+    private func laidOutRow(delivery: ChatMessage.Delivery) throws -> ChatTranscriptRowView {
+        var message = message(role: .user, text: "a line just typed", sourceID: "s1")
+        message.delivery = delivery
+        let row = ChatTranscriptRowView(
+            message: message, maxBubbleWidth: 300, actions: .init())
+        let host = NSView()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = host
+        windows.append(window)
+
+        host.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            row.topAnchor.constraint(equalTo: host.topAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+        return row
+    }
+
+    /// Whether the overlay's composer takes input. Nil when there is no chat in
+    /// it at all, which is a different failure from a disabled composer.
+    private func composerIsOn(in overlay: ConversationFocusOverlay) -> Bool? {
+        overlay.subviews.compactMap { $0 as? ChatView }.first?.isComposerEnabled
+    }
+
+    /// Every transcript a session published, newest last. Written from the
+    /// session's own task and read from the test, hence the lock.
+    private final class TranscriptLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [[ChatMessage]] = []
+        func append(_ messages: [ChatMessage]) {
+            lock.lock(); stored.append(messages); lock.unlock()
+        }
+        var latest: [ChatMessage] {
+            lock.lock(); defer { lock.unlock() }; return stored.last ?? []
+        }
+    }
+
+    private func watch(_ session: FeedChatSession) -> (TranscriptLog, Task<Void, Never>) {
+        let log = TranscriptLog()
+        let pump = Task {
+            for await event in session.events() {
+                if case .transcriptLoaded(let messages) = event { log.append(messages) }
+            }
+        }
+        return (log, pump)
+    }
+
+    // MARK: - The row's own header
+
+    /// The feed and the Sessions list are looking at the same sessions, so the
+    /// trail over a bubble is the *same view* the Sessions list heads its rows
+    /// with — not a second rendering of the same three facts that can drift from
+    /// it a separator or a colour at a time.
+    func testTheRowIsHeadedByTheSessionsWindowsBreadcrumb() throws {
+        let row = try laidOutRow(role: .assistant, text: "a short reply").row
+        let header = try XCTUnwrap(
+            row.subviews.compactMap { $0 as? SessionBreadcrumbView }.first,
+            "the row's header is not the shared breadcrumb")
+
+        XCTAssertEqual(header.segmentLabels.map(\.stringValue), ["proj", "main", "a session"])
+        XCTAssertEqual(header.nameLabel?.textColor, SessionBreadcrumbView.nameColor)
+    }
+
+    /// There is only ever one human here, so an avatar repeated down every
+    /// second row is a column of the same fact. The agent's stays: with work
+    /// output shown it is which *kind* of line this is.
+    func testTheHumansRowHasNoAvatar() throws {
+        let human = try laidOutRow(role: .user, text: "a short prompt").row
+        let agent = try laidOutRow(role: .assistant, text: "a short reply").row
+
+        XCTAssertFalse(hasAvatar(human), "the human's row still carries an avatar")
+        XCTAssertTrue(hasAvatar(agent), "the agent's row lost the icon that says which kind of line it is")
+    }
+
+    /// And the hole it left is closed: the human's header starts at the row's
+    /// own inset, not where the avatar used to end.
+    func testTheHumansRowStartsAtItsOwnEdge() throws {
+        let row = try laidOutRow(role: .user, text: "a short prompt").row
+        let header = try XCTUnwrap(row.subviews.compactMap { $0 as? SessionBreadcrumbView }.first)
+
+        XCTAssertEqual(row.bounds.maxX - header.frame.maxX, 8, accuracy: 0.5,
+                       "the human's row keeps a gap where the avatar was")
+    }
+
+    private func hasAvatar(_ row: ChatTranscriptRowView) -> Bool {
+        row.subviews.contains { $0.subviews.contains { $0 is NSImageView } }
     }
 
     // MARK: - Fixtures
@@ -250,7 +678,7 @@ final class ConversationFocusTests: XCTestCase {
             role: role,
             text: text,
             attribution: .init(
-                sourceID: sourceID, context: "proj/main", name: "a session", iconSymbol: "sparkles")
+                sourceID: sourceID, context: ["proj", "main"], name: "a session", iconSymbol: "sparkles")
         )
     }
 
@@ -286,7 +714,7 @@ final class ConversationFocusTests: XCTestCase {
     /// control picked back out.
     private func laidOutRow(
         role: ChatMessage.Role, text: String
-    ) throws -> (AIChatBubbleView, NSButton) {
+    ) throws -> (row: ChatTranscriptRowView, bubble: AIChatBubbleView, button: NSButton) {
         let row = ChatTranscriptRowView(
             message: message(role: role, text: text, sourceID: "s1"),
             maxBubbleWidth: 300,
@@ -309,7 +737,7 @@ final class ConversationFocusTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         let bubble = try XCTUnwrap(row.subviews.compactMap { $0 as? AIChatBubbleView }.first)
-        return (bubble, try jumpButton(in: row))
+        return (row, bubble, try jumpButton(in: row))
     }
 
     private func jumpButton(in row: ChatTranscriptRowView) throws -> NSButton {
@@ -402,11 +830,11 @@ final class ConversationFocusTests: XCTestCase {
         )!
     }
 
-    private func key(code: UInt16) -> NSEvent {
+    private func key(code: UInt16, modifiers: NSEvent.ModifierFlags = []) -> NSEvent {
         NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
-            modifierFlags: [],
+            modifierFlags: modifiers,
             timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: windows.last?.windowNumber ?? 0,
             context: nil,

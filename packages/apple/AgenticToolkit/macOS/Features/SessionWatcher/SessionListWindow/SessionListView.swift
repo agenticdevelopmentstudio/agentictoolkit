@@ -336,13 +336,10 @@ extension SessionWatcher {
         // Theme-sensitive subviews
         private var headerRow: NSStackView!
         private var headerSpacer: NSView!
-        private(set) var projectLabel: NSTextField!
-        /// The "»" glyphs between the header's three segments.
-        private var separatorLabels: [NSTextField] = []
-        /// The git branch, when the session has one.
-        private(set) var branchLabel: NSTextField?
-        /// The Claude session's name, when it has one.
-        private(set) var sessionNameLabel: NSTextField?
+        /// `project » branch » session name`. The Conversations feed heads its
+        /// rows with the same view, which is what keeps the two windows reading
+        /// as one description of the same sessions.
+        private(set) var breadcrumb: SessionBreadcrumbView!
         private var activityIcon: SessionWatcherActivityIconView!
         /// The inset "terminal" the agent's last output is printed into.
         private var terminalView: NSView!
@@ -371,33 +368,20 @@ extension SessionWatcher {
             static let summaryLines = 2
         }
 
-        /// Claude's brand orange, which marks the Claude session's own name.
-        static let claudeOrange = NSColor(srgbRed: 222 / 255, green: 115 / 255, blue: 86 / 255, alpha: 1)
-
         /// The terminal prompt the last output is printed after.
         static let outputPrompt = "> "
 
-        /// Horizontal compression-resistance priorities for the row's text, in the
-        /// order they give way: the agent's last output and the AI summary first
-        /// (both are arbitrarily long prose), then the session name, then the
-        /// branch, and the project name last — it is the segment that identifies
-        /// the row, so it survives longest.
+        /// Horizontal compression-resistance priorities for the row's prose, in
+        /// the order it gives way: the agent's last output first, then the AI
+        /// summary. Both sit under every segment of the breadcrumb, which is what
+        /// identifies the row (``SessionBreadcrumbView`` sets those, and its
+        /// `segmentPriority` carries the reasoning for the whole scale).
         ///
-        /// Every one of them sits **below** `.fittingSizeCompression` (50), and that
-        /// is the whole point. A label's compression resistance is not only about
-        /// what gives way inside a fixed width; it is also a vote in
-        /// `fittingSize`, which is what AppKit uses to derive a window's minimum
-        /// content width. `lineBreakMode = .byTruncatingTail` says *how* to draw a
-        /// squeezed label, never that it is willing to be squeezed — so a label at
-        /// any priority above 50 demands its full intrinsic width there, and a
-        /// single long `last_output` line dragged the Sessions window out to forty
-        /// thousand points wide. Below 50 these labels abstain from the fitting
-        /// width, the window's minimum comes from its own `minSize`, and the
-        /// truncation order above still holds at every real width.
+        /// Every one of them sits **below** `.fittingSizeCompression` (50): a
+        /// label above that demands its full intrinsic width in `fittingSize`,
+        /// and a single long `last_output` line dragged the Sessions window out
+        /// to forty thousand points wide.
         private enum TextPriority {
-            static let project = NSLayoutConstraint.Priority(rawValue: 49)
-            static let branch = NSLayoutConstraint.Priority(rawValue: 40)
-            static let sessionName = NSLayoutConstraint.Priority(rawValue: 30)
             static let output = NSLayoutConstraint.Priority(rawValue: 20)
             static let summary = NSLayoutConstraint.Priority(rawValue: 10)
         }
@@ -446,16 +430,14 @@ extension SessionWatcher {
         ) -> Bool {
             guard newSession.sessionId == session.sessionId,
                   newSummariesEnabled == summariesEnabled,
-                  Self.headerShape(for: newSession) == Self.headerShape(for: session)
+                  Self.crumbs(for: newSession).hasSameShape(as: Self.crumbs(for: session))
             else { return false }
 
             session = newSession
             isSummarizing = newIsSummarizing
             isFrontmost = newIsFrontmost
 
-            projectLabel.stringValue = newSession.projectGroupName
-            branchLabel?.stringValue = newSession.gitBranch
-            sessionNameLabel?.stringValue = newSession.sessionName
+            breadcrumb.crumbs = Self.crumbs(for: newSession)
             activityIcon.update(activity: newSession.activity, isSummarizing: newIsSummarizing)
             summaryLabel?.stringValue = summaryText()
             toolTip = Self.infoText(for: newSession)
@@ -473,28 +455,32 @@ extension SessionWatcher {
         /// after them. The Sessions window keeps itself at least this wide.
         ///
         /// Measured from the labels' own text widths rather than `fittingSize`: the
-        /// labels deliberately abstain from the fitting width (see `TextPriority`),
-        /// so a fitting size would squeeze them to nothing.
+        /// breadcrumb's labels deliberately abstain from the fitting width, so a
+        /// fitting size would squeeze them to nothing.
         public var minimumWidth: CGFloat {
-            let segments = headerRow.arrangedSubviews.filter { $0 !== headerSpacer }
-            let segmentsWidth = segments.reduce(CGFloat(0)) { total, view in
-                total + ceil(max(view.intrinsicContentSize.width, view.fittingSize.width))
-            }
+            let activityWidth = ceil(max(
+                activityIcon.intrinsicContentSize.width, activityIcon.fittingSize.width
+            ))
             // The spacer is an arranged subview too, so spacing sits on both its sides.
             let spacing = Metrics.headerSpacing * CGFloat(headerRow.arrangedSubviews.count - 1)
             return Metrics.horizontalPadding + Metrics.iconSide + Metrics.iconToText
-                + segmentsWidth + spacing + Metrics.headerToActivity
+                + breadcrumb.minimumWidth + activityWidth + spacing + Metrics.headerToActivity
                 + Metrics.horizontalPadding
         }
 
-        /// Which of the header's optional segments exist — branch, then session name,
-        /// each present only when non-empty. The row is built around exactly this,
-        /// so it is what `update(...)` compares: *presence*, never the text. A
-        /// renamed branch or session still has the label to write the new name into,
-        /// and comparing the text there sent every rename down the rebuild path the
-        /// in-place update exists to avoid.
-        private static func headerShape(for session: SessionWatcherSession) -> [Bool] {
-            [!session.gitBranch.isEmpty, !session.sessionName.isEmpty]
+        /// The session as a breadcrumb: project, branch, name — each segment
+        /// present only when the session has it.
+        ///
+        /// `update(...)` compares two of these by *shape*, never by text: a
+        /// renamed branch or session still has the label to write the new name
+        /// into, and comparing the text there sent every rename down the rebuild
+        /// path the in-place update exists to avoid.
+        private static func crumbs(for session: SessionWatcherSession) -> SessionBreadcrumbView.Crumbs {
+            .init(
+                project: session.projectGroupName,
+                branch: session.gitBranch,
+                name: session.sessionName
+            )
         }
 
         /// The row's resting background. A list row has no border of its own — the
@@ -509,21 +495,7 @@ extension SessionWatcher {
         private func applyTheme(_ palette: SemanticPalette) {
             layer?.backgroundColor = restingBackground(palette)
 
-            // Header line: every segment at one size, told apart by colour — the
-            // project in the text colour, the branch in the theme's highlight, the
-            // Claude session's name in Claude's orange.
-            let headerFont = palette.font(.body)
-            projectLabel.textColor = palette.primaryTextColor
-            projectLabel.font = headerFont
-            branchLabel?.textColor = palette.accentColor
-            branchLabel?.font = headerFont
-            sessionNameLabel?.textColor = Self.claudeOrange
-            sessionNameLabel?.font = headerFont
-            for lbl in separatorLabels {
-                lbl.textColor = palette.tertiaryTextColor
-                lbl.font = headerFont
-            }
-
+            breadcrumb.applyTheme(palette)
             activityIcon.applyTheme(palette)
 
             // The agent's last output, printed into a terminal after a prompt.
@@ -609,39 +581,15 @@ extension SessionWatcher {
             header.translatesAutoresizingMaskIntoConstraints = false
             headerRow = header
 
-            // The project *root*'s name, not the cwd's: a session run from inside a
-            // submodule or a linked worktree belongs to the tree above it, and
-            // labelling it "agentictoolkit" or "background-tests" names a directory
-            // the user never thinks of as the project.
-            let projLabel = NSTextField(labelWithString: session.projectGroupName)
-            projLabel.lineBreakMode = .byTruncatingTail
-            projLabel.maximumNumberOfLines = 1
-            projLabel.setContentCompressionResistancePriority(TextPriority.project, for: .horizontal)
-            header.addArrangedSubview(projLabel)
-            projectLabel = projLabel
-
-            // Branch and session name are both optional — a session outside a git
-            // tree has no branch, one nobody has named has no name — and each
-            // separator goes with its segment rather than leaving a dangling "»".
-            for (index, text) in [session.gitBranch, session.sessionName].enumerated() where !text.isEmpty {
-                let sep = NSTextField(labelWithString: "»")
-                sep.setContentCompressionResistancePriority(.required, for: .horizontal)
-                header.addArrangedSubview(sep)
-                separatorLabels.append(sep)
-
-                let lbl = NSTextField(labelWithString: text)
-                lbl.lineBreakMode = .byTruncatingTail
-                lbl.maximumNumberOfLines = 1
-                // The window keeps itself wide enough for the whole breadcrumb
-                // (`minimumWidth`); while it catches up, the session name gives way
-                // first, then the branch, and the project name survives.
-                lbl.setContentCompressionResistancePriority(
-                    index == 0 ? TextPriority.branch : TextPriority.sessionName,
-                    for: .horizontal
-                )
-                header.addArrangedSubview(lbl)
-                if index == 0 { branchLabel = lbl } else { sessionNameLabel = lbl }
-            }
+            // The project *root*'s name heads it, not the cwd's: a session run from
+            // inside a submodule or a linked worktree belongs to the tree above it,
+            // and labelling it "agentictoolkit" or "background-tests" names a
+            // directory the user never thinks of as the project. The window keeps
+            // itself wide enough for the whole trail (`minimumWidth`); while it
+            // catches up, the session name gives way first and the project survives.
+            let crumbs = SessionBreadcrumbView(crumbs: Self.crumbs(for: session))
+            header.addArrangedSubview(crumbs)
+            breadcrumb = crumbs
 
             let spacer = NSView()
             spacer.setContentHuggingPriority(.init(1), for: .horizontal)

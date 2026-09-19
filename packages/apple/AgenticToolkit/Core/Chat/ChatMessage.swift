@@ -15,6 +15,28 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     /// already say everything a reader needs.
     public let attribution: Attribution?
 
+    /// Whether this message is known to have arrived where it was going.
+    ///
+    /// Only ever anything but ``Delivery/settled`` for a message this client
+    /// wrote into a conversation it is *watching* — a transcript read off disk
+    /// is a record of what happened, and a record cannot be in flight. There the
+    /// round trip is long and indirect (a terminal, a shell, a hook, a file),
+    /// long enough that a message shown as if it had landed is a lie for
+    /// seconds at a stretch.
+    public var delivery: Delivery
+
+    /// Where a message is between "typed" and "seen coming back".
+    public enum Delivery: Sendable, Equatable {
+        /// It is part of the record. Everything read from a source is this.
+        case settled
+        /// Written, not yet seen in the source's own transcript.
+        case sending
+        /// It never came back, and this is why — shown under the message rather
+        /// than in an alert, because what failed is *this line* and the reader
+        /// needs to see which one while deciding whether to type it again.
+        case failed(String)
+    }
+
     /// The provenance of a message in a *merged* transcript — several
     /// conversations interleaved on one timeline, the way a group chat or an
     /// activity feed reads.
@@ -26,11 +48,18 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         /// Opaque handle to whatever produced the message. The view hands it
         /// back on a row tap; only the host knows what to do with it.
         public let sourceID: String
-        /// Where the conversation is happening — a project and branch, a room,
-        /// a channel. Shown first on the row's header line.
-        public let context: String
-        /// What the conversation is called. Shown parenthesised after
-        /// ``context``, and omitted when empty.
+        /// Where the conversation is happening, broadest first — a project then
+        /// a branch, an organisation then a room. Shown as the crumbs of the
+        /// row's header trail, in that order.
+        ///
+        /// A list rather than one string because the row draws the segments
+        /// apart from each other — each in the colour that says what kind of
+        /// fact it is — and a joined string cannot be taken back apart: a branch
+        /// name has slashes of its own.
+        public let context: [String]
+        /// What the conversation is called. The last crumb of the trail, and
+        /// omitted when empty — a live session often has no name yet, because
+        /// its title is written when it ends.
         public let name: String
         /// SF Symbol for the speaker, shown in the row's icon column.
         public let iconSymbol: String
@@ -46,7 +75,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
 
         public init(
             sourceID: String,
-            context: String,
+            context: [String],
             name: String,
             iconSymbol: String,
             appIdentity: String = ""
@@ -58,16 +87,14 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
             self.appIdentity = appIdentity
         }
 
-        /// The header line: `context (name)`, or just one of them when the other
-        /// is missing. A live session often has no name yet — its title is
-        /// written when it ends — so this has to render without one.
+        /// The whole trail as one string, for a tooltip or a screen reader —
+        /// which read a line, not a row of labels. Renders whatever segments
+        /// there are, so a nameless or context-less message still says
+        /// something.
         public var headerLine: String {
-            switch (context.isEmpty, name.isEmpty) {
-            case (true, true): return ""
-            case (false, true): return context
-            case (true, false): return name
-            case (false, false): return "\(context) (\(name))"
-            }
+            (context + (name.isEmpty ? [] : [name]))
+                .filter { !$0.isEmpty }
+                .joined(separator: " » ")
         }
     }
 
@@ -86,7 +113,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         text: String,
         isStreaming: Bool = false,
         timestamp: Date = Date(),
-        attribution: Attribution? = nil
+        attribution: Attribution? = nil,
+        delivery: Delivery = .settled
     ) {
         self.id = id
         self.role = role
@@ -94,6 +122,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         self.isStreaming = isStreaming
         self.timestamp = timestamp
         self.attribution = attribution
+        self.delivery = delivery
     }
 }
 
