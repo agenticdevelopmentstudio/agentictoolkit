@@ -220,6 +220,7 @@
 		1A4B3132C9EA6955BA9D75D2 /* StringRenderedWidth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143BB28B18F37E34CE02E2CB /* StringRenderedWidth.swift */; };
 		1A581A42A5CF674ACA0F59BE /* ProviderPickerViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B7939675F83E77AF61D9C68 /* ProviderPickerViewController.swift */; };
 		1AC1EFD9A6ED45A8731489D0 /* AgenticToolkitCoreUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7A6A6F1AF7704D404EE128D5 /* AgenticToolkitCoreUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		1AF6DBB07087C1165FD4BE4B /* FontChooserButtonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A618AF5B63FFF127DDA18A3 /* FontChooserButtonTests.swift */; };
 		1AFC4CDD75F1817A914EB009 /* AIModelCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEE901D7CE34AA402DD5961 /* AIModelCatalogTests.swift */; };
 		1B4BE17C6BCEB181F7C791E9 /* OllamaModelMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 683F534846C91FF0B094B3F1 /* OllamaModelMetadata.swift */; };
 		1BA4D8928F4584D0024ED5E6 /* UserDefaultsWindowStateStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA46CC60E98301AA82013F9D /* UserDefaultsWindowStateStorage.swift */; };
@@ -679,6 +680,7 @@
 		7822C92B3AB710EC4DAA557F /* AgenticToolkitSync.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 085D01FE73EBFAD731A18864 /* AgenticToolkitSync.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		7847162238C29E20CC2564BF /* ActivationTestLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB56D1093442AA257F42961A /* ActivationTestLog.swift */; };
 		78613EBEFD98071BB5D7BB3F /* SnippetFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31D8D0143E7409AB71A1A3B /* SnippetFileTests.swift */; };
+		787776EA5937518ADC5F11DA /* FontChooserButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9585893552485B2CC98ABCE4 /* FontChooserButton.swift */; };
 		78D7013A919D83E2D2041555 /* ScreenSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3E98FAC4584B9490DD7714 /* ScreenSnapshot.swift */; };
 		79648300B972ACD899D6471D /* PaneContainerClampTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C773416942F117D48F26C8 /* PaneContainerClampTests.swift */; };
 		79C0DFD81464062623953ED1 /* ThemeTopicPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BC949F427908282E5CC5944 /* ThemeTopicPanel.swift */; };
@@ -2760,6 +2762,7 @@
 		49DA107C1349C84D6E1DF632 /* PlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceholderTests.swift; sourceTree = "<group>"; };
 		49FD4EADD62C660974EC2111 /* ThemeDetailPanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeDetailPanelViewController.swift; sourceTree = "<group>"; };
 		4A1902EDFDE70A886116262E /* EcosystemTopic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcosystemTopic.swift; sourceTree = "<group>"; };
+		4A618AF5B63FFF127DDA18A3 /* FontChooserButtonTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontChooserButtonTests.swift; sourceTree = "<group>"; };
 		4A6EC5D09F577FF2AB7BA6E8 /* ProviderTypeFacetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderTypeFacetTests.swift; sourceTree = "<group>"; };
 		4AD74A2F95373A88478151EF /* KeyedDebouncer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyedDebouncer.swift; sourceTree = "<group>"; };
 		4AFA9E122D9EDB9BAEFEE7B1 /* UserSettings+Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserSettings+Theme.swift"; sourceTree = "<group>"; };
@@ -3072,6 +3075,7 @@
 		952C7E3DA7AB65B35021477E /* MainActorScriptCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainActorScriptCommandTests.swift; sourceTree = "<group>"; };
 		956F50EE328345009C16B24F /* LaunchAtLoginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginManager.swift; sourceTree = "<group>"; };
 		95732DFCD62666109B1A32F2 /* ProjectCheckout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCheckout.swift; sourceTree = "<group>"; };
+		9585893552485B2CC98ABCE4 /* FontChooserButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontChooserButton.swift; sourceTree = "<group>"; };
 		9592B6AFD5DDEE80D0B02789 /* AppHeuristic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHeuristic.swift; sourceTree = "<group>"; };
 		959BE3AC935A950266CFAC16 /* ProjectWindowTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindowTestSupport.swift; sourceTree = "<group>"; };
 		95AC2019B33FE811AB471B7C /* SystemAccessibilityPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAccessibilityPermission.swift; sourceTree = "<group>"; };
@@ -5342,6 +5346,7 @@
 				7AE8B31750EED92B70F56F0E /* DismissibleHintView.swift */,
 				CB783DDA1E4AB17256866125 /* DividerView.swift */,
 				31E7501A87831CAE04B1416A /* ExplanationView.swift */,
+				9585893552485B2CC98ABCE4 /* FontChooserButton.swift */,
 				A5A6CCA7870DBDB74A35168A /* FontPickerView.swift */,
 				01D6F9AF7E95A2FD23693783 /* GroupView.swift */,
 				74058B27121A2773814462AA /* HeaderView.swift */,
@@ -5984,6 +5989,7 @@
 		CF90ACA9F9E239292E9B622C /* ComposableSettings */ = {
 			isa = PBXGroup;
 			children = (
+				4A618AF5B63FFF127DDA18A3 /* FontChooserButtonTests.swift */,
 				B95836248F50BCF8124D984C /* PathViewTests.swift */,
 				546447A5E3CFAF9218D61C4B /* PopupMenuChoiceViewTests.swift */,
 				AB1A0FFC5577C5D0B4163F80 /* SettingsCardViewsTests.swift */,
@@ -8157,6 +8163,7 @@
 				9A05C9F3A94BE457552214D7 /* FileTypesSettingsPanelViewController.swift in Sources */,
 				D9B386B67255C3A6B3C62BB7 /* FileTypesSettingsView.swift in Sources */,
 				C3901AC1F5EBB281274E8BEB /* FloatingChooserPanelController.swift in Sources */,
+				787776EA5937518ADC5F11DA /* FontChooserButton.swift in Sources */,
 				664F8F60BCAC920B2BF060D3 /* FontPickerView.swift in Sources */,
 				9DA37D73639C3DA17E2A79B9 /* FontViewModel.swift in Sources */,
 				097249F96A3BAEDE1E7D11F8 /* FrameCalculator.swift in Sources */,
@@ -8922,6 +8929,7 @@
 				3BEC41579291F1833DC49EC6 /* FileTreeManagerInjectedProviderTests.swift in Sources */,
 				525C4C42F30BA720E0ABFD49 /* FileTreeNodeTests.swift in Sources */,
 				D9220B2C1EF8D7C7B2C702E2 /* FileTreeOpenOnSelectionTests.swift in Sources */,
+				1AF6DBB07087C1165FD4BE4B /* FontChooserButtonTests.swift in Sources */,
 				7671BB5439841616310DCC52 /* FrameCalculatorTests.swift in Sources */,
 				37F2D8DBE09BFFF028A3F60A /* GitGlobalConfigTableViewTests.swift in Sources */,
 				9C93997AFDF0159DCDDAC046 /* GitProcessBottleneckTests.swift in Sources */,

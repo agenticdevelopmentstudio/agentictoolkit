@@ -33,7 +33,7 @@ final class ThemeTerminalTopicPanel: ThemeTopicPanel {
 
     private var paddingFields: [Side: NSTextField] = [:]
     private var paddingSteppers: [Side: NSStepper] = [:]
-    private let fontNameField = NSTextField()
+    private let fontButton = ComposableSettings.FontChooserButton(width: 200)
     private let fontSizeField = NSTextField()
     private let shapePopup = NSPopUpButton()
     private let blinkCheckbox = NSButton(checkboxWithTitle: "Blink", target: nil, action: nil)
@@ -154,13 +154,10 @@ final class ThemeTerminalTopicPanel: ThemeTopicPanel {
         let group = ComposableSettings.GroupView(withTitle: "Font")
         let font = TerminalAppearance.resolvedFont(theme: context.theme)
 
-        fontNameField.stringValue = font.fontName
-        fontNameField.placeholderString = "Menlo-Regular"
-        fontNameField.target = self
-        fontNameField.action = #selector(fontChanged(_:))
-        fontNameField.isEditable = context.isEditable
-        fontNameField.translatesAutoresizingMaskIntoConstraints = false
-        fontNameField.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        fontButton.isEnabled = context.isEditable
+        fontButton.onChange = { [weak self] picked in self?.fontPicked(picked) }
+        fontButton.accessibilityID("theme.terminal.font")
+        showFont(font)
 
         fontSizeField.doubleValue = Double(font.pointSize)
         fontSizeField.target = self
@@ -170,10 +167,17 @@ final class ThemeTerminalTopicPanel: ThemeTopicPanel {
         fontSizeField.widthAnchor.constraint(equalToConstant: 52).isActive = true
 
         group.addSettingSubview(row([
-            rightLabel("Face", width: Self.paddingLabelWidth), fontNameField,
+            rightLabel("Face", width: Self.paddingLabelWidth), fontButton,
             rightLabel("Size"), fontSizeField
         ], spacing: 6))
         return group
+    }
+
+    /// The terminal keeps a PostScript name, not a family: telling
+    /// `FiraCodeNF-Regular` from `FiraCodeNFP-Regular` is the whole reason a
+    /// terminal font is chosen by eye, and a family name cannot.
+    private func showFont(_ font: NSFont) {
+        fontButton.show(font, title: font.displayName ?? font.fontName)
     }
 
     private func makeCursorGroup() -> ComposableSettings.GroupView {
@@ -239,8 +243,18 @@ final class ThemeTerminalTopicPanel: ThemeTopicPanel {
         refreshClearButton()
     }
 
+    /// The panel picks a face *and* a size, so a pick fills in the Size field
+    /// beside it rather than leaving the two disagreeing.
+    private func fontPicked(_ font: NSFont) {
+        fontSizeField.doubleValue = Double(font.pointSize)
+        applyFont(name: font.fontName)
+    }
+
     @objc private func fontChanged(_ sender: NSControl) {
-        let name = fontNameField.stringValue.trimmingCharacters(in: .whitespaces)
+        applyFont(name: TerminalAppearance.resolvedFont(theme: context.theme).fontName)
+    }
+
+    private func applyFont(name: String) {
         let size = max(6, min(72, fontSizeField.doubleValue))
         fontSizeField.doubleValue = size
         context.update { theme in
@@ -249,6 +263,9 @@ final class ThemeTerminalTopicPanel: ThemeTopicPanel {
                 $0.fontSize = size
             }
         }
+        // From the theme, not from what was asked for: a locked theme refuses
+        // the edit outright and the button has to keep showing what is stored.
+        showFont(TerminalAppearance.resolvedFont(theme: context.theme))
         refreshClearButton()
     }
 
@@ -277,7 +294,7 @@ final class ThemeTerminalTopicPanel: ThemeTopicPanel {
             paddingSteppers[side]?.integerValue = Int(values[side] ?? 0)
         }
         let font = TerminalAppearance.resolvedFont(theme: context.theme)
-        fontNameField.stringValue = font.fontName
+        showFont(font)
         fontSizeField.doubleValue = Double(font.pointSize)
         let cursor = TerminalAppearance.resolvedCursor(theme: context.theme)
         if let index = TerminalCursorShape.allCases.firstIndex(of: cursor.shape) {
