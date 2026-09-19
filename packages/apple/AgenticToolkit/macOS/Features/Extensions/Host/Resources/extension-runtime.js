@@ -679,6 +679,170 @@
     });
     var vscode = makeStubNamespace('vscode', vscodeMembers);
 
+    // =====================================================================
+    // MARK: - The vscode value types
+    // =====================================================================
+    //
+    // Four things an extension constructs rather than receives, and so four
+    // things no Swift adaptor can hand it: `new vscode.TreeItem(...)` is the
+    // first line of every `getTreeItem`, and `new vscode.EventEmitter()` is
+    // how a provider says its tree changed. Upstream builds all four in
+    // JavaScript too (`extHostTypes.ts`), and that is the argument for doing
+    // it here rather than minting objects from Swift: `instanceof` has to
+    // answer yes. An object built by JSValue would be an impostor with the
+    // right properties.
+    //
+    // They are installed on the `vscode` member table below rather than
+    // through `defineMember`, which refuses anything but a known *namespace*
+    // path and is the seam for the members a Swift adaptor implements. These
+    // have no Swift half to install.
+    //
+    // **Nothing here reads the host, and nothing here is a stub.** A type in
+    // this section is implemented; a type this host has not built is absent
+    // from the table and throws by name, which is the whole mechanism this
+    // file exists for.
+
+    // `vscode.TreeItemCollapsibleState` (`vscode.d.ts:11530-11543`). Plain
+    // numbers, matching the declaration, because an extension both writes
+    // `vscode.TreeItemCollapsibleState.Collapsed` and — far more often than
+    // the docs suggest — writes the literal `1`.
+    var TreeItemCollapsibleState = Object.freeze({
+        None: 0,
+        Collapsed: 1,
+        Expanded: 2
+    });
+
+    // `vscode.ThemeIcon` (`vscode.d.ts:3339`). An id and an optional colour;
+    // the colour is carried and never read, because this host resolves an
+    // icon to an SF Symbol and a symbol takes its colour from the pane.
+    //
+    // `File` and `Folder` are upstream's two static instances (`:3345`,
+    // `:3350`), and they are instances rather than ids: an extension writes
+    // `item.iconPath = vscode.ThemeIcon.Folder` and the reader downstream
+    // sees the same shape it sees for `new vscode.ThemeIcon('gear')`.
+    function ThemeIcon(id, color) {
+        if (typeof id !== 'string') {
+            throw new TypeError('vscode.ThemeIcon requires an id string.');
+        }
+        this.id = id;
+        if (color !== undefined) {
+            this.color = color;
+        }
+    }
+    ThemeIcon.File = new ThemeIcon('file');
+    ThemeIcon.Folder = new ThemeIcon('folder');
+
+    // `vscode.TreeItem` (`vscode.d.ts:11391`). Every other member — `id`,
+    // `description`, `tooltip`, `iconPath`, `command`, `contextValue`,
+    // `resourceUri`, `accessibilityInformation` — is a plain writable
+    // property an extension assigns after construction, so the constructor
+    // sets only what upstream's does.
+    //
+    // The first argument is `string | TreeItemLabel | Uri`, and which one it
+    // is decides which property it lands on: a `Uri`-shaped value is a
+    // `resourceUri` whose label the host derives from the path
+    // (`vscode.d.ts:11396-11400`). Shape rather than `instanceof` because
+    // this host has no `vscode.Uri` class to be an instance of — an
+    // extension that reached for one got the NotImplemented error, and an
+    // object carrying `fsPath` or `path` is what a bundled polyfill hands
+    // over instead.
+    function TreeItem(labelOrResourceUri, collapsibleState) {
+        if (labelOrResourceUri !== null && typeof labelOrResourceUri === 'object'
+            && (typeof labelOrResourceUri.fsPath === 'string'
+                || (typeof labelOrResourceUri.path === 'string'
+                    && typeof labelOrResourceUri.label !== 'string'))) {
+            this.resourceUri = labelOrResourceUri;
+        } else {
+            this.label = labelOrResourceUri;
+        }
+        // Upstream leaves it `undefined` when the caller omits it and reads
+        // `undefined` as `None` at use (`vscode.d.ts:11467-11471`). Written
+        // through as `None` instead, so an extension that logs its own item
+        // sees the value the host will act on rather than a hole.
+        this.collapsibleState = collapsibleState === undefined
+            ? TreeItemCollapsibleState.None
+            : collapsibleState;
+    }
+
+    // `vscode.EventEmitter` (`vscode.d.ts:1786`), and the one type in this
+    // section that is load-bearing rather than convenient: `onDidChangeTreeData`
+    // is an `Event`, an extension has no other way to make one, and without it
+    // a tree can be drawn once and never refreshed.
+    //
+    // `event` is a property holding a closure rather than a method, because
+    // that is how extensions pass it: `onDidChangeTreeData = emitter.event`
+    // is assigned to a field and called later with no receiver, so a method
+    // would lose `this`. The closure captures the listener list directly.
+    //
+    // Listeners are copied before delivery: a listener that disposes itself —
+    // or registers another — must not change the array being walked, which is
+    // upstream's own rule (`event.ts`'s `_deliveryQueue`). A listener that
+    // throws does not stop its siblings; it is reported on the console and
+    // the rest still run, because one misbehaving subscriber taking out an
+    // unrelated one is the failure that is impossible to diagnose from the
+    // outside.
+    function EventEmitter() {
+        var listeners = [];
+        var disposed = false;
+
+        this.event = function (listener, thisArgs, disposables) {
+            if (typeof listener !== 'function') {
+                throw new TypeError('An Event requires a listener function.');
+            }
+            var registration = { listener: listener, thisArgs: thisArgs };
+            if (!disposed) {
+                listeners.push(registration);
+            }
+            var subscription = {
+                dispose: function () {
+                    var at = listeners.indexOf(registration);
+                    if (at !== -1) {
+                        listeners.splice(at, 1);
+                    }
+                }
+            };
+            // `event.ts:1976-1978` — an array argument receives the
+            // disposable too, which is the `emitter.event(fn, null, context
+            // .subscriptions)` shape extensions write.
+            if (disposables && typeof disposables.push === 'function') {
+                disposables.push(subscription);
+            }
+            return subscription;
+        };
+
+        this.fire = function (data) {
+            if (disposed) {
+                return;
+            }
+            var current = listeners.slice();
+            for (var index = 0; index < current.length; index += 1) {
+                try {
+                    reflectApply(current[index].listener, current[index].thisArgs, [data]);
+                } catch (error) {
+                    console.error('An event listener threw: ' + describeThrown(error));
+                }
+            }
+        };
+
+        this.dispose = function () {
+            disposed = true;
+            listeners.length = 0;
+        };
+    }
+
+    Object.defineProperty(vscodeMembers, 'TreeItem', {
+        value: TreeItem, enumerable: true, configurable: true, writable: true
+    });
+    Object.defineProperty(vscodeMembers, 'TreeItemCollapsibleState', {
+        value: TreeItemCollapsibleState, enumerable: true, configurable: true, writable: true
+    });
+    Object.defineProperty(vscodeMembers, 'ThemeIcon', {
+        value: ThemeIcon, enumerable: true, configurable: true, writable: true
+    });
+    Object.defineProperty(vscodeMembers, 'EventEmitter', {
+        value: EventEmitter, enumerable: true, configurable: true, writable: true
+    });
+
     // Installs one real implementation over one stub. Stage 5.3 registers
     // `vscode.commands.registerCommand` by calling this with a Swift block; the
     // stub path is only ever reached for keys the table does not hold, so its

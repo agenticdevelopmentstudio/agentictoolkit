@@ -427,9 +427,9 @@ public final class ExtensionsCoordinator: AppFeature {
                 },
                 openDocumentLanguageIDs: openDocumentLanguageIDs))
         hostInstaller = installer
-        // The two contributed-view seams, wired here rather than at
+        // The three contributed-view seams, wired here rather than at
         // construction for the serializer's reason directly above: `viewsPoint`
-        // is built in `init`, and both of these need the installer. Each reads
+        // is built in `init`, and all three need the installer. Each reads
         // `hostInstaller` back through `self` at call time, which is a pane
         // build later.
         viewsPoint?.onViewWillAppear = { [weak self] view in
@@ -457,6 +457,9 @@ public final class ExtensionsCoordinator: AppFeature {
                         localResourceRoots: roots)
                 },
                 didResolve: didResolve)
+        }
+        viewsPoint?.resolveTree = { [weak self] view, didResolve in
+            self?.hostInstaller?.resolveTreeView(view: view, didResolve: didResolve)
         }
         subscribeToContributions()
         installer.reconcile()

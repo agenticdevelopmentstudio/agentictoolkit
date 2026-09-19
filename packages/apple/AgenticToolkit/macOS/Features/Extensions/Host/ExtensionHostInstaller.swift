@@ -116,7 +116,7 @@ public struct ExtensionHostSeams {
     }
 }
 
-/// One extension's `ExtensionHost`, its seven `vscode` namespace adaptors, and
+/// One extension's `ExtensionHost`, its eight `vscode` namespace adaptors, and
 /// the activation that decides when its code runs.
 ///
 /// ### Why the adaptors are held
@@ -124,14 +124,14 @@ public struct ExtensionHostSeams {
 /// `ExtensionHost.defineVSCodeMember` takes `implementation: Any` — the
 /// `lazy var` block an adaptor exposes — and the host keeps only that block.
 /// Nothing in the host keeps the adaptor that vended it alive, and every one
-/// of the seven owns state the block reads (a registry handle, a disposable
+/// of the eight owns state the block reads (a registry handle, a disposable
 /// table, a pending continuation). Dropping an adaptor after installing its
 /// members is the shape where an extension's first call reaches a
-/// deallocated owner, so all seven are stored here for as long as the host is.
+/// deallocated owner, so all eight are stored here for as long as the host is.
 ///
 /// ### One host per extension, one set of adaptors per host
 ///
-/// The adaptors are per extension because six of the seven take
+/// The adaptors are per extension because seven of the eight take
 /// `extensionIdentifier` and record against it. Their *collaborators* — the
 /// stores, the diagnostic emitter, the presenters — are shared across every
 /// host by `ExtensionHostInstaller`; see its own doc for which and why.
@@ -153,6 +153,7 @@ public final class ExtensionHostInstallation {
     private let languageModels: MainThreadLanguageModels
     private let window: MainThreadWindow
     private let webviews: MainThreadWebviews
+    private let treeViews: MainThreadTreeViews
     private let diagnostics: MainThreadDiagnostics
 
     private let commandRegistry: CommandRegistry
@@ -167,7 +168,7 @@ public final class ExtensionHostInstallation {
 
     // MARK: - Construction
 
-    /// Builds the host and all seven adaptors over the shared collaborators
+    /// Builds the host and all eight adaptors over the shared collaborators
     /// `installer` owns, and installs every `vscode` member and enum table.
     ///
     /// - Throws: whatever `ExtensionHost.defineVSCodeMember` throws — which,
@@ -214,6 +215,10 @@ public final class ExtensionHostInstallation {
             extensionIdentifier: identifier,
             extensionDirectory: loadedExtension.directory,
             workspaceRoots: collaborators.workspaceRoots)
+        self.treeViews = MainThreadTreeViews(
+            notImplementedLedger: notImplementedLedger,
+            extensionIdentifier: identifier,
+            commands: seams.commandRegistry)
         self.diagnostics = MainThreadDiagnostics(
             store: collaborators.diagnosticStore,
             sink: collaborators.diagnosticSink,
@@ -222,7 +227,7 @@ public final class ExtensionHostInstallation {
         try installVSCodeMembers()
     }
 
-    /// Installs all twenty-two members and all three enum tables.
+    /// Installs all twenty-four members and all three enum tables.
     ///
     /// **Nothing here installs `Uri`, the text-geometry classes, the
     /// diagnostic classes, the language-model vocabulary or the trampoline.**
@@ -306,6 +311,23 @@ public final class ExtensionHostInstallation {
         try host.defineVSCodeMember(
             namespacePath: "vscode.window", name: "registerWebviewViewProvider",
             implementation: webviews.registerWebviewViewProvider)
+        // `MainThreadTreeViews` is the second adaptor installed under
+        // `vscode.window`, for `MainThreadWebviews`' reason: the two tree
+        // members are one feature with one lifetime, and the window adaptor
+        // has no business owning it.
+        //
+        // **The four value types the tree API needs — `TreeItem`,
+        // `TreeItemCollapsibleState`, `ThemeIcon` and `EventEmitter` — are not
+        // installed here.** They are built in JavaScript by
+        // `extension-runtime.js`, where `new` and `instanceof` answer the way
+        // an extension expects, and a second installation from out here would
+        // replace the constructors an already-built item was made with.
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "registerTreeDataProvider",
+            implementation: treeViews.registerTreeDataProvider)
+        try host.defineVSCodeMember(
+            namespacePath: "vscode.window", name: "createTreeView",
+            implementation: treeViews.createTreeView)
 
         // The three enum tables go on **`vscode`**, the top-level namespace,
         // never on `vscode.window` — each adaptor's own table doc gives the
@@ -398,6 +420,49 @@ public final class ExtensionHostInstallation {
         activate { [weak self] in
             self?.handOver(panel, viewID: viewID, then: didResolve)
         }
+    }
+
+    /// Activates this extension if it is not awake yet, then hands the pane the
+    /// tree data provider it registered for the contributed view `viewID`.
+    ///
+    /// `resolveWebviewView(_:viewID:then:)`'s twin, with the one difference the
+    /// two APIs force: there is no object to hand over, because the provider is
+    /// the extension's and this is the pane finding it. The pane shows its
+    /// explanation throughout, which is what makes the asynchronous case merely
+    /// late rather than wrong.
+    fileprivate func resolveTreeView(
+        viewID: String,
+        then didResolve: @escaping (any ExtensionTreeDataSource) -> Void
+    ) {
+        guard !isDisposed else { return }
+        if let source = treeViews.treeDataSource(for: viewID) {
+            didResolve(source)
+            return
+        }
+        activate { [weak self] in
+            self?.handOverTree(viewID: viewID, then: didResolve)
+        }
+    }
+
+    private func handOverTree(
+        viewID: String,
+        then didResolve: @escaping (any ExtensionTreeDataSource) -> Void
+    ) {
+        guard !isDisposed else { return }
+        guard let source = treeViews.treeDataSource(for: viewID) else {
+            // The pane stays, showing its explanation. An extension that
+            // contributes a tree view and registers no provider for it is the
+            // same ordinary state its webview twin describes — a `when` clause
+            // nothing satisfied, a provider registered on a later activation
+            // event — and the pane belongs to the manifest, not the provider.
+            Self.logger.error(
+                """
+                Extension '\(self.identifier, privacy: .public)' contributes the tree view \
+                '\(viewID, privacy: .public)' but registered no tree data provider for it
+                """)
+            return
+        }
+        didResolve(source)
     }
 
     private func handOver(
@@ -596,7 +661,7 @@ public final class ExtensionHostInstallation {
     ///
     /// Stubs first — a stub left in the registry outlives everything it can
     /// reach and would activate a disposed host on the next press. Then the
-    /// seven adaptors, each of which withdraws what it registered elsewhere
+    /// eight adaptors, each of which withdraws what it registered elsewhere
     /// (commands, language configurations, status bar items, diagnostic
     /// collections). The host last, because disposing it first would leave
     /// those withdrawals running against a dead runtime.
@@ -613,6 +678,7 @@ public final class ExtensionHostInstallation {
         languageModels.dispose()
         window.dispose()
         webviews.dispose()
+        treeViews.dispose()
         diagnostics.dispose()
         host.dispose()
     }
@@ -627,8 +693,8 @@ extension ExtensionHostInstallation: Loggable {
 ///
 /// ### What is shared, and what is not
 ///
-/// Per extension: one `ExtensionHost` and one of each adaptor, because six
-/// of the seven record against an `extensionIdentifier`.
+/// Per extension: one `ExtensionHost` and one of each adaptor, because seven
+/// of the eight record against an `extensionIdentifier`.
 ///
 /// Shared across every host, each for a reason its own type states:
 ///
@@ -1059,6 +1125,35 @@ public final class ExtensionHostInstaller {
                 enableScripts: nil, enableForms: nil, localResourceRoots: nil)))
         owner.resolveWebviewView(panel, viewID: view.viewID, then: didResolve)
         return panel
+    }
+
+    /// Finds the tree data provider the contributed view `view` should draw,
+    /// waking its extension first if that is what it takes.
+    ///
+    /// `resolveWebviewView(view:makePanel:didResolve:)`'s twin, and addressed
+    /// the same way: to the one extension that declared the view, because the
+    /// provider for a view id is that extension's to register. The broadcast
+    /// an extension *adding* to someone else's view is woken by is
+    /// `contributedViewWillAppear(viewID:)` below, which runs for this pane too.
+    ///
+    /// - Parameter didResolve: Called with the data source once the extension
+    ///   has registered one — synchronously when it is already awake, a turn or
+    ///   two later when it had to be activated first, and never when it
+    ///   registers none, which leaves the pane showing its explanation.
+    public func resolveTreeView(
+        view: ContributedView,
+        didResolve: @escaping (any ExtensionTreeDataSource) -> Void
+    ) {
+        guard let owner = installed[view.extensionIdentifier]?.installation else {
+            Self.logger.notice(
+                """
+                The contributed tree view '\(view.viewID, privacy: .public)' names extension \
+                '\(view.extensionIdentifier, privacy: .public)', which is not installed; its pane \
+                keeps its placeholder
+                """)
+            return
+        }
+        owner.resolveTreeView(viewID: view.viewID, then: didResolve)
     }
 
     /// Tells every installed extension that a pane showing the contributed view
