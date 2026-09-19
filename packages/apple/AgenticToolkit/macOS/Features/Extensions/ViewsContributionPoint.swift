@@ -18,11 +18,13 @@ import Foundation
 ///
 /// A view entry is an id, a name and a placement; the content arrives at
 /// runtime, and where from depends on the kind. A **webview** view is resolved
-/// by `registerWebviewViewProvider`, which this host implements — so those
-/// panes get the extension's own page as soon as its provider runs, through
-/// `resolveWebview`. A **tree** view waits on `registerTreeDataProvider` or
-/// `createTreeView`, neither of which exists yet, so those panes stay the
-/// labelled empty pane that says so on its face.
+/// by `registerWebviewViewProvider` and gets the extension's own page through
+/// `resolveWebview`; a **tree** view is resolved by `registerTreeDataProvider`
+/// or `createTreeView` and gets the extension's own rows through
+/// `resolveTree`. Both APIs are implemented, and both panes show the same
+/// labelled explanation until the extension registers — which is an ordinary
+/// state, not a failure, and is the whole reason the explanation is a sentence
+/// rather than an empty pane.
 @MainActor
 public final class ViewsContributionPoint: ContributionPoint {
 
@@ -63,6 +65,14 @@ public final class ViewsContributionPoint: ContributionPoint {
     /// it is not a state a user can reach: the panes are registered by `apply`,
     /// which the installer's own pass is what runs.
     public var resolveWebview: ContributedWebviewResolving?
+
+    /// Finds the data source for a contributed tree view, if the extension ever
+    /// registers one — see `ContributedTreeResolving`.
+    ///
+    /// `resolveWebview`'s twin, late-bound for the same reason and assigned in
+    /// the same place. `nil` until then, and a pane built in that window shows
+    /// its placeholder.
+    public var resolveTree: ContributedTreeResolving?
 
     /// Called when a pane for a contributed view is built, whatever its kind —
     /// the `onView:<id>` activation event's trigger.
@@ -134,12 +144,20 @@ public final class ViewsContributionPoint: ContributionPoint {
                 // provider the line below looks for, and a tree view — which
                 // never reaches that line — is just as much a pane appearing.
                 self?.onViewWillAppear?(view)
-                guard view.kind == .webview, let resolve = self?.resolveWebview else {
-                    return ExtensionViewPlaceholderViewController(
-                        view: view, extensionDisplayName: displayName)
+                switch view.kind {
+                case .webview:
+                    guard let resolve = self?.resolveWebview else { break }
+                    return ExtensionWebviewViewController(
+                        view: view, extensionDisplayName: displayName, resolve: resolve)
+                case .tree:
+                    guard let resolve = self?.resolveTree else { break }
+                    return ExtensionTreeViewController(
+                        view: view, extensionDisplayName: displayName, resolve: resolve)
                 }
-                return ExtensionWebviewViewController(
-                    view: view, extensionDisplayName: displayName, resolve: resolve)
+                // Both kinds fall here when the hosts are not up yet, which is
+                // the one state the seams above can be `nil` in.
+                return ExtensionViewPlaceholderViewController(
+                    view: view, extensionDisplayName: displayName)
             }
         }
 
@@ -178,13 +196,13 @@ public final class ViewsContributionPoint: ContributionPoint {
 /// (`design-for-deletion`).
 ///
 /// No spinner, no empty outline, no fake tree. An empty outline would be a
-/// lie: the extension ships the code that fills a tree, and this host does not
-/// run that code yet.
+/// lie: it would claim the extension answered "no rows" when in truth it was
+/// never asked.
 ///
-/// A **webview** view shows this too, but only until its provider resolves —
-/// see `ExtensionWebviewViewController`, which is what swaps it out. The
-/// sentence differs between the two because the situations do: one is waiting
-/// on this host, the other on the extension.
+/// Both kinds show this, and only until the extension registers — see
+/// `ExtensionWebviewViewController` and `ExtensionTreeViewController`, which
+/// are what swap it out. The sentence differs between the two only because the
+/// API that is missing does.
 @MainActor
 public final class ExtensionViewPlaceholderViewController: NSViewController {
 
@@ -200,14 +218,16 @@ public final class ExtensionViewPlaceholderViewController: NSViewController {
 
     /// Why this pane is empty, in the one sentence a person reads.
     ///
-    /// Two sentences because there are two reasons, and telling a user their
-    /// extension's webview needs a host feature that in fact exists would send
-    /// them looking in the wrong place (`fail-fast`, applied to a person).
+    /// Two sentences because the extension supplies the two kinds through two
+    /// different APIs, and naming the one that has not run is what tells a user
+    /// where to look (`fail-fast`, applied to a person). Neither sentence
+    /// blames the host any more: both APIs are implemented, and a pane that is
+    /// still explaining itself is waiting on the extension.
     private static func explanation(for kind: ContributedView.Kind) -> String {
         switch kind {
         case .tree:
-            return "This view's content is provided by the extension, through a tree data "
-                + "provider API the extension host does not implement yet."
+            return "This view's rows are provided by the extension, and it has not provided "
+                + "any yet — its tree data provider has not been registered."
         case .webview:
             return "This view's content is drawn by the extension, and it has not drawn any "
                 + "yet — its webview view provider has not run."

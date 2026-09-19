@@ -76,6 +76,25 @@ struct ViewsContributionPointTests {
         }
     }
 
+    /// Builds one registered pane, which is the only way to reach the factory
+    /// the contribution point handed the registry.
+    ///
+    /// A pane's working directory is its own — a worktree's, not always the
+    /// project's — so the registry takes it separately. This suite has one
+    /// checkout, which makes the project's directory the right answer here.
+    private func pane(
+        _ registryID: String,
+        from registry: ComposableTabsViewRegistry,
+        in workspace: ProjectWorkspace
+    ) -> NSViewController {
+        registry.makeContentViewController(
+            for: ComposableTabsViewID(registryID),
+            nodeID: UUID(),
+            project: workspace,
+            workingDirectory: workspace.directoryURL,
+            paneNumber: 1)
+    }
+
     private func textFields(in view: NSView) -> [NSTextField] {
         var found: [NSTextField] = []
         if let label = view as? NSTextField { found.append(label) }
@@ -196,16 +215,8 @@ struct ViewsContributionPointTests {
             to: point)
 
         defer { removeWorkspaceDirectories() }
-        // A pane's working directory is its own — a worktree's, not always the
-        // project's — so the registry takes it separately. This suite has one
-        // checkout, which makes the project's directory the right answer here.
         let workspace = makeWorkspace()
-        let controller = registry.makeContentViewController(
-            for: "extension.test.pane.test.pane",
-            nodeID: UUID(),
-            project: workspace,
-            workingDirectory: workspace.directoryURL,
-            paneNumber: 1)
+        let controller = pane("extension.test.pane.test.pane", from: registry, in: workspace)
 
         let placeholder = try #require(controller as? ExtensionViewPlaceholderViewController)
         placeholder.loadViewIfNeeded()
@@ -307,4 +318,231 @@ struct ViewsContributionPointTests {
             .preferredAxis == .vertical)
         #expect(point.containers(for: "test.axis").count == 1)
     }
+
+    // MARK: - The factory's two live branches
+
+    /// `resolveWebview` and `resolveTree` are `nil` until the hosts are up, and
+    /// the placeholder test above is the pane that state produces. These are
+    /// the other side: with a seam wired, each kind has to reach *its own*
+    /// wrapper, since a tree in a webview wrapper would wait forever for an
+    /// `html` nobody is going to assign.
+    @Test("a tree view reaches the tree wrapper once a resolver is wired")
+    func aTreeViewReachesTheTreeWrapper() throws {
+        let registry = ComposableTabsViewRegistry()
+        let point = ViewsContributionPoint(registry: registry)
+        var asked: [ContributedView] = []
+        point.resolveTree = { view, _ in asked.append(view) }
+        // Wired too, and deliberately: the kinds have to be told apart by the
+        // declaration, not by which seam happens to be the only one filled in.
+        point.resolveWebview = { _, _ in nil }
+        try apply(
+            try manifest(name: "pane", displayName: "Pane Extension", views: #"""
+            { "explorer": [{ "id": "test.tree", "name": "Tree View" }] }
+            """#),
+            to: point)
+
+        defer { removeWorkspaceDirectories() }
+        let workspace = makeWorkspace()
+        let wrapper = try #require(
+            pane("extension.test.pane.test.tree", from: registry, in: workspace)
+                as? ExtensionTreeViewController)
+
+        // Building the pane asks nobody: the wrapper asks in `viewDidLoad`, so
+        // a pane a window never shows never wakes the extension.
+        #expect(asked.isEmpty)
+        wrapper.loadViewIfNeeded()
+        #expect(asked.map(\.registryID) == ["extension.test.pane.test.tree"])
+        #expect(asked.map(\.kind) == [.tree])
+    }
+
+    @Test("a webview view reaches the webview wrapper once a resolver is wired")
+    func aWebviewViewReachesTheWebviewWrapper() throws {
+        let registry = ComposableTabsViewRegistry()
+        let point = ViewsContributionPoint(registry: registry)
+        var asked: [ContributedView] = []
+        // `nil` is the honest answer from a host with nobody to draw this, and
+        // it keeps a `WKWebView` out of a headless bundle.
+        point.resolveWebview = { view, _ in
+            asked.append(view)
+            return nil
+        }
+        point.resolveTree = { _, _ in }
+        try apply(
+            try manifest(name: "pane", displayName: "Pane Extension", views: #"""
+            { "explorer": [{ "id": "test.page", "name": "Page View", "type": "webview" }] }
+            """#),
+            to: point)
+
+        defer { removeWorkspaceDirectories() }
+        let workspace = makeWorkspace()
+        let wrapper = try #require(
+            pane("extension.test.pane.test.page", from: registry, in: workspace)
+                as? ExtensionWebviewViewController)
+
+        wrapper.loadViewIfNeeded()
+        #expect(asked.map(\.registryID) == ["extension.test.pane.test.page"])
+        #expect(asked.map(\.kind) == [.webview])
+    }
+
+    /// The other half of the placeholder test above, which covers a tree with
+    /// no `resolveTree`. A webview with no `resolveWebview` is the same state
+    /// through the other branch, and both fall past the `switch` to the same
+    /// return.
+    @Test("a webview view with no resolver falls back to the placeholder")
+    func aWebviewViewWithoutAResolverFallsBackToThePlaceholder() throws {
+        let registry = ComposableTabsViewRegistry()
+        let point = ViewsContributionPoint(registry: registry)
+        // Only the *tree* seam is wired, so a webview still has nobody.
+        point.resolveTree = { _, _ in }
+        try apply(
+            try manifest(name: "pane", displayName: "Pane Extension", views: #"""
+            { "explorer": [{ "id": "test.page", "name": "Page View", "type": "webview" }] }
+            """#),
+            to: point)
+
+        defer { removeWorkspaceDirectories() }
+        let workspace = makeWorkspace()
+        let placeholder = try #require(
+            pane("extension.test.pane.test.page", from: registry, in: workspace)
+                as? ExtensionViewPlaceholderViewController)
+        placeholder.loadViewIfNeeded()
+        #expect(labels(in: placeholder.view).contains("Page View"))
+    }
+
+    /// The sentence has to name the thing that did not happen, because that is
+    /// the whole point of showing a sentence rather than an empty outline: a
+    /// tree pane is waiting on a *provider registration*, and a webview pane on
+    /// a provider actually *running*.
+    @Test("the placeholder explains the kind of content that is missing")
+    func thePlaceholderNamesWhatEachKindIsWaitingFor() throws {
+        func explanation(for kind: ContributedView.Kind) throws -> String {
+            let controller = ExtensionViewPlaceholderViewController(
+                view: ContributedView(
+                    extensionIdentifier: "test.pane",
+                    viewID: "test.pane",
+                    registryID: "extension.test.pane.test.pane",
+                    targetContainerID: "explorer",
+                    name: "Pane View",
+                    kind: kind,
+                    symbolName: nil,
+                    iconPath: nil,
+                    when: nil,
+                    visibility: nil,
+                    initialSize: nil,
+                    preferredAxisIsVertical: false),
+                extensionDisplayName: "Pane Extension")
+            controller.loadViewIfNeeded()
+            return try #require(
+                labels(in: controller.view).first { $0.hasPrefix("This view's") })
+        }
+
+        #expect(try explanation(for: .tree).contains("tree data provider"))
+        #expect(try explanation(for: .webview).contains("webview view provider"))
+    }
+
+    /// The broadcast is what wakes an extension whose activation event is
+    /// `onView:`, and it goes out before the `switch` for a reason a tree makes
+    /// visible: a tree pane never reaches a seam that can wake anyone, so if
+    /// the broadcast were inside the webview branch a tree would activate
+    /// nothing and then wait for rows from an extension that is still asleep.
+    @Test("every pane appearing is broadcast, whatever kind it is and whoever can draw it")
+    func everyPaneAppearanceIsBroadcast() throws {
+        let registry = ComposableTabsViewRegistry()
+        let point = ViewsContributionPoint(registry: registry)
+        var appeared: [String] = []
+        point.onViewWillAppear = { appeared.append($0.registryID) }
+        try apply(
+            try manifest(name: "pane", displayName: "Pane Extension", views: #"""
+            {
+                "explorer": [
+                    { "id": "test.tree", "name": "Tree View" },
+                    { "id": "test.page", "name": "Page View", "type": "webview" }
+                ]
+            }
+            """#),
+            to: point)
+
+        defer { removeWorkspaceDirectories() }
+        let workspace = makeWorkspace()
+        // Both built with every seam still `nil` — the state an extension that
+        // has never been activated is in, and the one the broadcast exists for.
+        _ = pane("extension.test.pane.test.tree", from: registry, in: workspace)
+        _ = pane("extension.test.pane.test.page", from: registry, in: workspace)
+
+        #expect(appeared == [
+            "extension.test.pane.test.tree",
+            "extension.test.pane.test.page"
+        ])
+    }
+
+    /// The swap the tree wrapper exists for, in both directions a headless
+    /// bundle can see: a provider that never registers leaves the sentence up,
+    /// and one that resolves takes it down.
+    @Test("the tree wrapper shows the explanation until a data source arrives")
+    func theTreeWrapperSwapsTheExplanationForTheTree() throws {
+        let view = ContributedView(
+            extensionIdentifier: "test.pane",
+            viewID: "test.tree",
+            registryID: "extension.test.pane.test.tree",
+            targetContainerID: "explorer",
+            name: "Tree View",
+            kind: .tree,
+            symbolName: nil,
+            iconPath: nil,
+            when: nil,
+            visibility: nil,
+            initialSize: nil,
+            preferredAxisIsVertical: false)
+
+        let waiting = ExtensionTreeViewController(
+            view: view, extensionDisplayName: "Pane Extension", resolve: { _, _ in })
+        waiting.loadViewIfNeeded()
+        #expect(labels(in: waiting.view).contains { $0.hasPrefix("This view's") })
+
+        let source = StubTreeDataSource(roots: [
+            ContributedTreeItem(
+                id: "#fruit", label: "Fruit", description: nil, tooltip: nil,
+                collapsibleState: .collapsed, symbolName: nil, commandID: nil)
+        ])
+        let resolved = ExtensionTreeViewController(
+            view: view, extensionDisplayName: "Pane Extension",
+            resolve: { _, didResolve in didResolve(source) })
+        resolved.loadViewIfNeeded()
+        #expect(!labels(in: resolved.view).contains { $0.hasPrefix("This view's") })
+    }
+}
+
+/// A registered provider, as far as a pane can tell, with no JavaScript host
+/// behind it. What the adaptor makes of a *real* provider is
+/// `MainThreadTreeViewsTests`; this is only enough for the wrapper to have
+/// something to adopt.
+@MainActor
+private final class StubTreeDataSource: ExtensionTreeDataSource {
+
+    private let roots: [ContributedTreeItem]
+
+    private(set) var activated: [String] = []
+
+    var title: String?
+    var message: String?
+    var allowsMultipleSelection = false
+    var onDidChangeTreeData: ((String?) -> Void)?
+    var onDidChangeChrome: (() -> Void)?
+
+    init(roots: [ContributedTreeItem]) {
+        self.roots = roots
+    }
+
+    func children(of parent: ContributedTreeItem?) async -> [ContributedTreeItem] {
+        parent == nil ? roots : []
+    }
+
+    func activate(_ item: ContributedTreeItem) {
+        activated.append(item.id)
+    }
+
+    func selectionDidChange(to _: [ContributedTreeItem]) {}
+    func visibilityDidChange(to _: Bool) {}
+    func didExpand(_: ContributedTreeItem) {}
+    func didCollapse(_: ContributedTreeItem) {}
 }
