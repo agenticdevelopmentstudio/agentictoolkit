@@ -32,9 +32,19 @@ public final class ConversationsViewController: NSViewController {
 
     /// Reads the feed as it stands, oldest first. `includeWorkOutput` asks for
     /// the agent's narration of its own work as well as what it said to the
-    /// human. Returning nil means "couldn't read it" and keeps what is on
-    /// screen — a momentary failure is not an empty feed.
-    public typealias Load = @Sendable (_ includeWorkOutput: Bool) async -> [ChatMessage]?
+    /// human. `sourceID` narrows the read to one conversation — nil is the
+    /// merged feed, and a value is what the focus overlay asks for. Returning
+    /// nil means "couldn't read it" and keeps what is on screen — a momentary
+    /// failure is not an empty feed.
+    ///
+    /// The narrowing is a parameter rather than a filter applied to the merged
+    /// result because the merged result is a *page*: the newest few hundred
+    /// lines across every session, of which one session's share may be two. A
+    /// conversation read out of that has holes in it.
+    public typealias Load = @Sendable (
+        _ includeWorkOutput: Bool,
+        _ sourceID: String?
+    ) async -> [ChatMessage]?
 
     /// Whether the agent's work output (its narration and, where captured, its
     /// thinking) is shown alongside what it actually said to the human.
@@ -52,16 +62,25 @@ public final class ConversationsViewController: NSViewController {
         }
     }
 
-    /// Called when a row is clicked, with the message that row rendered. The
-    /// host reads ``ChatMessage/Attribution/sourceID`` to decide where to go.
-    public var onRowTap: ((ChatMessage) -> Void)? {
-        didSet { chatView?.onRowTap = onRowTap }
-    }
+    /// Called when a row's jump control is used, with the message that row
+    /// rendered. The host reads ``ChatMessage/Attribution/sourceID`` to decide
+    /// where to go.
+    ///
+    /// Named for what it does rather than for the gesture that fires it, because
+    /// the gesture moved: clicking a row now opens the focus overlay, and
+    /// leaving for the real session is what the control on the row's inside edge
+    /// is for. A click that navigates away is the wrong default in a feed you
+    /// are reading — it costs you your place to answer a question the overlay
+    /// answers without moving.
+    public var onGoToSource: ((ChatMessage) -> Void)?
 
     private let session: FeedChatSession
     private let viewModel: AIChatViewModel
     private let workOutputFlag: WorkOutputFlag
+    private let load: Load
+    private let refreshInterval: Duration
     private var chatView: ChatView?
+    private var overlay: ConversationFocusOverlay?
 
     /// - Parameters:
     ///   - refreshInterval: how often the feed is re-read. A transcript on disk
@@ -72,8 +91,10 @@ public final class ConversationsViewController: NSViewController {
         // toggling it changes the *next* read without rebuilding the session.
         let flag = WorkOutputFlag()
         self.workOutputFlag = flag
+        self.load = load
+        self.refreshInterval = refreshInterval
         let session = FeedChatSession(refreshInterval: refreshInterval) {
-            await load(flag.value)
+            await load(flag.value, nil)
         }
         self.session = session
         self.viewModel = AIChatViewModel(session: session)
@@ -85,19 +106,71 @@ public final class ConversationsViewController: NSViewController {
 
     deinit { session.close() }
 
+    /// A plain container holding the feed, so the overlay is the feed's
+    /// *sibling* rather than its subview — a chat view rebuilds its transcript
+    /// on every layout pass, and nothing else belongs inside that.
     public override func loadView() {
         let chatView = ChatView(viewModel: viewModel)
         // The composer stays, greyed: this is a conversation being watched, not
         // one being joined, and a chat with the entry field cut out reads as a
         // different kind of window rather than a read-only one.
         chatView.isComposerEnabled = false
-        chatView.onRowTap = onRowTap
+        chatView.rowActions = .init(
+            onTap: { [weak self] message in self?.presentFocus(on: message) },
+            onJump: { [weak self] message in self?.onGoToSource?(message) },
+            onPeekBegan: { [weak self] message in self?.presentFocus(on: message) },
+            onPeekEnded: { [weak self] _ in self?.dismissFocus() }
+        )
         chatView.translatesAutoresizingMaskIntoConstraints = false
         self.chatView = chatView
-        self.view = chatView
+
+        let container = NSView()
+        container.addSubview(chatView)
+        NSLayoutConstraint.activate([
+            chatView.topAnchor.constraint(equalTo: container.topAnchor),
+            chatView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            chatView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            chatView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        self.view = container
     }
 
     /// Re-reads the feed now rather than at the next interval — for a filter
     /// change, or a host that knows something just happened.
     public func refresh() { session.refresh() }
+
+    // MARK: - Focus overlay
+
+    /// Lifts one conversation out of the feed and lays it over the top. Both
+    /// gestures land here — a click, which leaves it up, and a press held, whose
+    /// release takes it down again — because they show the same thing and differ
+    /// only in what dismisses them.
+    private func presentFocus(on message: ChatMessage) {
+        guard let sourceID = message.attribution?.sourceID, !sourceID.isEmpty else { return }
+        dismissFocus()
+
+        let flag = workOutputFlag
+        let load = self.load
+        let overlay = ConversationFocusOverlay(
+            refreshInterval: refreshInterval,
+            load: { await load(flag.value, sourceID) },
+            onJump: { [weak self] message in
+                // Leaving for the session makes the overlay's job moot — going
+                // there is a stronger answer to "show me this" than the overlay
+                // was, so it gets out of the way rather than waiting behind.
+                self?.dismissFocus()
+                self?.onGoToSource?(message)
+            }
+        )
+        overlay.onDismissed = { [weak self, weak overlay] in
+            if self?.overlay === overlay { self?.overlay = nil }
+        }
+        self.overlay = overlay
+        overlay.present(in: view)
+    }
+
+    private func dismissFocus() {
+        overlay?.dismiss()
+        overlay = nil
+    }
 }
