@@ -36,7 +36,7 @@ struct OpenVSXCatalogTests {
             },
             {
               "namespace": "acme", "name": "broken", "version": "1.0.0",
-              "files": { "icon": "not a url at all, with spaces" }
+              "files": { "icon": "http://[bad" }
             }
           ]
         }
@@ -49,6 +49,11 @@ struct OpenVSXCatalogTests {
         // The whole point of decoding URL-shaped fields as `String`: the bad
         // one costs its own accessor and nothing else. Decoded as `URL` this
         // row would have thrown and taken the other one with it.
+        //
+        // An unclosed IPv6 host, not a string with spaces: `URL(string:)`
+        // percent-encodes spaces on this OS rather than refusing them, so a
+        // prose-shaped fixture stopped being malformed to Foundation and
+        // stopped testing anything.
         #expect(page.extensions[1].iconURL == nil)
         #expect(page.extensions[1].identifier == "acme.broken")
     }

@@ -2527,7 +2527,8 @@ struct ExtensionHostTests {
 
         // The third line is the pin on the whole top-level `vscode` surface,
         // in the order `ExtensionHost` installs it: the five namespaces, then
-        // `Uri`, then the language-model vocabulary, the text geometry
+        // the tree vocabulary and `EventEmitter`, then `Uri`, then the
+        // language-model vocabulary, the text geometry
         // (`Location`/`Position`/`Range`) and the four diagnostic value types,
         // each block sorted within itself by `installVSCodeMembers`. A new
         // top-level `vscode.*` member belongs in this list — that is what the
@@ -2535,7 +2536,8 @@ struct ExtensionHostTests {
         #expect(recorder.texts == [
             "false,true",
             "true",
-            "commands,workspace,window,languages,lm,Uri,"
+            "commands,workspace,window,languages,lm,"
+                + "TreeItem,TreeItemCollapsibleState,ThemeIcon,EventEmitter,Uri,"
                 + "LanguageModelChatMessage,LanguageModelChatMessageRole,"
                 + "LanguageModelDataPart,LanguageModelPromptTsxPart,"
                 + "LanguageModelTextPart,LanguageModelToolCallPart,"

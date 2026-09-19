@@ -335,9 +335,9 @@ final class ExtensionDetailPanel: ComposableSettings.SettingsPanelViewController
         // leaves the reader concluding those draw something.
         group.addSettingSubview(ComposableSettings.ExplanationView(
             withText: "These panes are registered and can be opened. What they show comes "
-                + "from the extension's own code: a webview view appears as soon as the "
-                + "extension registers a provider and draws it, while a tree view stays "
-                + "empty — tree data provider APIs are not implemented yet."))
+                + "from the extension's own code: both kinds draw as soon as the extension "
+                + "registers a provider for them. A pane whose extension registers nothing "
+                + "says so on the pane itself."))
         for view in views {
             group.addSettingSubview(
                 ComposableSettings.ExplanationView(withText: "\(view.name) (\(view.viewID))"))

@@ -34,6 +34,13 @@ struct MainThreadTreeViewsTests {
     /// into.
     ///
     /// The caller disposes the host; the directory is the caller's too.
+    ///
+    /// `commands` is returned only so the caller keeps it alive.
+    /// `VSCodeAPI.member` captures its adaptor **weakly**, so an adaptor left
+    /// as a local here deallocates the moment this returns and every
+    /// `registerCommand` the extension makes raises "this extension's host has
+    /// been torn down" — during `activate()`, which turns it into an
+    /// `activationThrew` no assertion in the test body ever reaches.
     private func makeFixture(
         source: String,
         extensionDirectory: URL
@@ -41,7 +48,8 @@ struct MainThreadTreeViewsTests {
         host: ExtensionHost,
         treeViews: MainThreadTreeViews,
         registry: CommandRegistry,
-        ledger: NotImplementedLedger
+        ledger: NotImplementedLedger,
+        commands: MainThreadCommands
     ) {
         let ledger = NotImplementedLedger()
         let registry = CommandRegistry()
@@ -60,7 +68,7 @@ struct MainThreadTreeViewsTests {
         try host.defineVSCodeMember(
             namespacePath: "vscode.commands", name: "registerCommand",
             implementation: commands.registerCommand)
-        return (host, treeViews, registry, ledger)
+        return (host, treeViews, registry, ledger, commands)
     }
 
     /// The source most tests below start from: a two-level tree whose elements

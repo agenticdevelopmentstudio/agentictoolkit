@@ -1,6 +1,7 @@
 import Testing
 import AppKit
 import Foundation
+import JavaScriptCore
 import AgenticToolkitCore
 import AgenticDeveloperToolkitUI
 @testable import AgenticToolkitMacOS
@@ -595,10 +596,15 @@ struct ExtensionsCoordinatorTests {
 
         try await settle()
 
-        let resultA = try commandRegistry.execute(id: "exta.hello", arguments: [])
-        let resultB = try commandRegistry.execute(id: "extb.hello", arguments: [])
-        #expect(resultA as? String == "real-a")
-        #expect(resultB as? String == "real-b")
+        // Read back as `JSValue`, the idiom `MainThreadCommandsTests` uses:
+        // `CommandRegistry.execute(id:arguments:)` carries an extension
+        // callback's return value **unconverted** on purpose (see its doc), so
+        // what comes back is the callback's own `JSValue` and never a bridged
+        // `String`.
+        let resultA = try #require(try commandRegistry.execute(id: "exta.hello", arguments: []) as? JSValue)
+        let resultB = try #require(try commandRegistry.execute(id: "extb.hello", arguments: []) as? JSValue)
+        #expect(resultA.toString() == "real-a")
+        #expect(resultB.toString() == "real-b")
     }
 
     /// The `footers` seam reaches a real `WindowFooterStatusBarPresenter`
@@ -686,10 +692,13 @@ struct ExtensionsCoordinatorTests {
 
         try #require(coordinator.registry.extensions.count == 1)
 
-        var reportedCount: Int?
+        var reportedCount: Int32?
         let commandRegistry = CommandRegistry()
         commandRegistry.register(AppCommand(id: "test.report", title: "Report", run: { arguments in
-            reportedCount = arguments.first as? Int
+            // A `JSValue`, not a bridged `Int`: an argument an extension passed
+            // to `executeCommand` reaches the registry unconverted, for the
+            // reason `CommandRegistry.execute(id:arguments:)` documents.
+            reportedCount = (arguments.first as? JSValue)?.toInt32()
             return nil
         }))
 

@@ -867,30 +867,41 @@ public final class ExtensionHost {
     /// finishing teardown. The shim keeps going through the rest of the list
     /// for that same reason, which is why this can receive more than one.
     private func disposeSubscriptions() {
-        guard let runtime, let activationContext else { return }
+        // Everything below is wrapped because every `JSValue` this produces —
+        // the outcome, the failures array — is **autoreleased**, and a
+        // `JSValue` holds its `JSContext` strongly. Without the drain the
+        // context outlives the `context = nil` two lines after this call
+        // returns, until whenever the enclosing pool happens to empty, which
+        // in a synchronous stretch of caller code is never. `dispose()`
+        // promises to release the largest thing this host owns *at the point
+        // it is called*, and this is what makes that true rather than
+        // approximately true.
+        autoreleasepool {
+            guard let runtime, let activationContext else { return }
 
-        // A nil or undefined answer means the *call* failed rather than an
-        // entry did — a context already torn down, or a shim that is not the
-        // one this host was built against. Worth a line and nothing more:
-        // teardown carries on either way.
-        guard let outcome = runtime.invokeMethod(
-                "disposeSubscriptions", withArguments: [activationContext]),
-              !outcome.isUndefined, !outcome.isNull else {
-            logger.error(
-                """
-                Extension '\(self.identifier, privacy: .public)' could not dispose \
-                its context.subscriptions.
-                """)
-            return
-        }
+            // A nil or undefined answer means the *call* failed rather than an
+            // entry did — a context already torn down, or a shim that is not
+            // the one this host was built against. Worth a line and nothing
+            // more: teardown carries on either way.
+            guard let outcome = runtime.invokeMethod(
+                    "disposeSubscriptions", withArguments: [activationContext]),
+                  !outcome.isUndefined, !outcome.isNull else {
+                logger.error(
+                    """
+                    Extension '\(self.identifier, privacy: .public)' could not dispose \
+                    its context.subscriptions.
+                    """)
+                return
+            }
 
-        let failures = outcome.forProperty("failures")?.toArray() as? [String] ?? []
-        for failure in failures {
-            logger.error(
-                """
-                Extension '\(self.identifier, privacy: .public)' registered a disposable \
-                that threw while being disposed: \(failure, privacy: .public)
-                """)
+            let failures = outcome.forProperty("failures")?.toArray() as? [String] ?? []
+            for failure in failures {
+                logger.error(
+                    """
+                    Extension '\(self.identifier, privacy: .public)' registered a disposable \
+                    that threw while being disposed: \(failure, privacy: .public)
+                    """)
+            }
         }
     }
 
