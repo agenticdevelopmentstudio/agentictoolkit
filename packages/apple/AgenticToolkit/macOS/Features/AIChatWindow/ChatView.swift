@@ -14,6 +14,9 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     private let sendButton = NSButton()
     private var isAtBottom = true
 
+    /// The message currently laid out in full over the transcript, if any.
+    private var expansion: BubbleExpansionOverlay?
+
     /// True from the start of a transcript rebuild until the scroll that follows
     /// it has landed, so ``transcriptDidScroll`` can tell the reader's scrolling
     /// apart from the view's own.
@@ -52,6 +55,18 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// Rows are built during a rebuild, so changing this re-renders rather than
     /// waiting for the next poll to notice.
     public var rowActions = ChatTranscriptRowView.Actions() {
+        didSet { scheduleRender() }
+    }
+
+    /// How many lines of a message a transcript row shows before it truncates
+    /// and offers the rest. Nil shows whatever the message holds.
+    ///
+    /// A feed is the case for setting it: one long reply among short ones takes
+    /// the whole window, and a reader scrolling past it has lost the thread by
+    /// the time they are out. Opening the rest is ``BubbleExpansionOverlay``'s
+    /// job, and this view wires it — a row that can truncate can always
+    /// un-truncate, so there is nothing for a caller to remember.
+    public var bubbleLineLimit: Int? {
         didSet { scheduleRender() }
     }
 
@@ -230,8 +245,11 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             // header line, timestamp underneath. Only a merged transcript
             // produces those, so an ordinary chat is untouched by this.
             if message.attribution != nil {
+                var actions = rowActions
+                actions.onExpand = { [weak self] message in self?.expand(message) }
                 let row = ChatTranscriptRowView(
-                    message: message, maxBubbleWidth: maxBubbleWidth, actions: rowActions)
+                    message: message, maxBubbleWidth: maxBubbleWidth,
+                    actions: actions, lineLimit: bubbleLineLimit)
                 transcriptStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(
                     equalTo: transcriptStack.widthAnchor, constant: -32).isActive = true
@@ -289,6 +307,24 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             if followNewest { self.scrollToBottom() }
             self.isRebuilding = false
         }
+    }
+
+    // MARK: - Expansion
+
+    /// Lays one message out in full over the transcript.
+    ///
+    /// Hosted on this view rather than on the transcript's document: a rebuild
+    /// empties that stack, and a feed rebuilds every few seconds — the overlay
+    /// would vanish mid-read. Covering the composer as well as the rows is the
+    /// right shape anyway, since the composer is not what is being read.
+    private func expand(_ message: ChatMessage) {
+        expansion?.dismiss()
+        let overlay = BubbleExpansionOverlay(message: message)
+        overlay.onDismissed = { [weak self, weak overlay] in
+            if self?.expansion === overlay { self?.expansion = nil }
+        }
+        expansion = overlay
+        overlay.present(in: self)
     }
 
     /// Disabled while a turn is in flight, so rapid sends can't overlap turns —

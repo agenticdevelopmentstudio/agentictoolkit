@@ -9,8 +9,9 @@ import XCTest
 ///
 /// Every assertion here is about something a build cannot see. A jump control
 /// constrained to the wrong edge still lays out, an overlay whose feed was
-/// sieved client-side still renders rows, and a peek that never ends still
-/// looks right in a screenshot.
+/// sieved client-side still renders rows, and an overlay that opens on the
+/// first click still looks right in a screenshot — until you try to copy a
+/// line out of it.
 @MainActor
 final class ConversationFocusTests: XCTestCase {
 
@@ -40,11 +41,11 @@ final class ConversationFocusTests: XCTestCase {
             "the human's column runs right, so its bubble's inside edge is the leading one")
     }
 
-    /// "Centred on the top line" only differs from "centred on the bubble" once
-    /// a bubble is more than one line tall — so the test is that a one-line
+    /// "Level with the bubble's top" only differs from "centred on the bubble"
+    /// once a bubble is more than one line tall — so the test is that a one-line
     /// bubble and a forty-line one put the control the same distance below their
     /// own top edge.
-    func testTheJumpControlIsCenteredOnTheFirstLineHoweverTallTheBubbleIs() throws {
+    func testTheJumpControlSitsLevelWithTheBubblesTopHoweverTallTheBubbleIs() throws {
         let (shortBubble, shortButton) = try laidOutRow(role: .assistant, text: "one line")
         let paragraph = (0..<40).map { "line \($0) of a long reply" }.joined(separator: "\n")
         let (tallBubble, tallButton) = try laidOutRow(role: .assistant, text: paragraph)
@@ -53,29 +54,50 @@ final class ConversationFocusTests: XCTestCase {
             tallBubble.frame.height, shortBubble.frame.height * 4,
             "the fixture is wrong: the bubbles have to differ in height for this to mean anything")
 
-        // Neither view is flipped, so a bubble's top edge is its `maxY`.
-        let shortDrop = shortBubble.frame.maxY - shortButton.frame.midY
-        let tallDrop = tallBubble.frame.maxY - tallButton.frame.midY
+        // Compared on alignment rects, not frames: a bezelled control's frame
+        // carries a couple of points of slack its constraints never see, and
+        // the constraint is what this is about. Neither view is flipped, so a
+        // top edge is a `maxY`.
+        func alignedTop(_ view: NSView) -> CGFloat {
+            view.alignmentRect(forFrame: view.frame).maxY
+        }
+        let shortDrop = alignedTop(shortBubble) - alignedTop(shortButton)
+        let tallDrop = alignedTop(tallBubble) - alignedTop(tallButton)
+        XCTAssertEqual(
+            shortDrop, 0, accuracy: 0.5,
+            "the control hangs off the bubble's top edge, not its centre")
         XCTAssertEqual(
             shortDrop, tallDrop, accuracy: 0.5,
-            "the control follows the bubble's centre, not its first line: \(shortDrop) vs \(tallDrop)")
+            "the control follows the bubble's centre, not its top: \(shortDrop) vs \(tallDrop)")
+    }
+
+    /// A 44pt control beside a one-line bubble is taller than the row's own
+    /// content — and a row's ``ChatTranscriptRowView/hitTest(_:)`` refuses
+    /// anything outside its bounds, so a control hanging past the bottom edge
+    /// would be drawn and unclickable.
+    func testTheRowIsTallEnoughToHoldTheJumpControl() throws {
+        let (_, button) = try laidOutRow(role: .assistant, text: "one line")
+        let row = try XCTUnwrap(button.superview as? ChatTranscriptRowView)
+        XCTAssertTrue(
+            row.bounds.contains(button.frame),
+            "the jump control hangs outside the row: \(button.frame) in \(row.bounds)")
     }
 
     func testARowWithNoJumpActionShowsNoJumpControl() throws {
         let row = ChatTranscriptRowView(
             message: message(role: .assistant, text: "hello", sourceID: "s1"),
             maxBubbleWidth: 300,
-            actions: .init(onTap: { _ in })
+            actions: .init(onOpen: { _ in })
         )
         XCTAssertTrue(try jumpButton(in: row).isHidden)
     }
 
     // MARK: - The overlay
 
-    func testClickingARowOpensAnOverlayHoldingThatSessionAlone() async throws {
+    func testDoubleClickingARowOpensAnOverlayHoldingThatSessionAlone() async throws {
         let (controller, asked) = try await loadedFeed()
 
-        click(try firstRow(of: controller))
+        doubleClick(try firstRow(of: controller))
         let overlay = try XCTUnwrap(focusOverlay(in: controller), "a row click did not open the overlay")
         try await waitUntil("the overlay's transcript loaded") { !self.rowTexts(in: overlay).isEmpty }
 
@@ -88,7 +110,7 @@ final class ConversationFocusTests: XCTestCase {
 
     func testTheOverlayCoversTheWholeFeed() async throws {
         let (controller, _) = try await loadedFeed()
-        click(try firstRow(of: controller))
+        doubleClick(try firstRow(of: controller))
         let overlay = try XCTUnwrap(focusOverlay(in: controller))
         await settle()
 
@@ -98,7 +120,7 @@ final class ConversationFocusTests: XCTestCase {
 
     func testEscapeDismissesTheOverlay() async throws {
         let (controller, _) = try await loadedFeed()
-        click(try firstRow(of: controller))
+        doubleClick(try firstRow(of: controller))
         let overlay = try XCTUnwrap(focusOverlay(in: controller))
 
         XCTAssertTrue(overlay.performKeyEquivalent(with: key(code: 53)))
@@ -107,7 +129,7 @@ final class ConversationFocusTests: XCTestCase {
 
     func testReturnDismissesTheOverlay() async throws {
         let (controller, _) = try await loadedFeed()
-        click(try firstRow(of: controller))
+        doubleClick(try firstRow(of: controller))
         let overlay = try XCTUnwrap(focusOverlay(in: controller))
 
         XCTAssertTrue(overlay.performKeyEquivalent(with: key(code: 36)))
@@ -116,7 +138,7 @@ final class ConversationFocusTests: XCTestCase {
 
     func testAnOrdinaryKeyLeavesTheOverlayUp() async throws {
         let (controller, _) = try await loadedFeed()
-        click(try firstRow(of: controller))
+        doubleClick(try firstRow(of: controller))
         let overlay = try XCTUnwrap(focusOverlay(in: controller))
 
         // Down-arrow: the transcript still has to be readable while it is up.
@@ -127,7 +149,7 @@ final class ConversationFocusTests: XCTestCase {
 
     func testAPressThatNoControlTookDismissesTheOverlay() async throws {
         let (controller, _) = try await loadedFeed()
-        click(try firstRow(of: controller))
+        doubleClick(try firstRow(of: controller))
         let overlay = try XCTUnwrap(focusOverlay(in: controller))
         await settle()
 
@@ -137,31 +159,57 @@ final class ConversationFocusTests: XCTestCase {
         try await waitForRemoval(of: overlay)
     }
 
-    func testHoldingARowPeeksAndReleasingPutsItBack() async throws {
+    /// The whole reason opening moved to the second click: a single click is
+    /// where a reader starts a drag across the text they are about to copy, and
+    /// an overlay that opened on it would take the selection away mid-drag.
+    func testASingleClickOnARowOpensNothing() async throws {
         let (controller, _) = try await loadedFeed()
-        let row = try firstRow(of: controller)
 
-        row.mouseDown(with: mouseEvent(.leftMouseDown, in: row))
-        XCTAssertNil(focusOverlay(in: controller), "a press is not a peek until it has been held")
-
-        try await waitUntil("the held press peeked") { self.focusOverlay(in: controller) != nil }
-        let overlay = try XCTUnwrap(focusOverlay(in: controller))
-
-        row.mouseUp(with: mouseEvent(.leftMouseUp, in: row))
-        try await waitForRemoval(of: overlay)
-    }
-
-    func testReleasingAPeekDoesNotAlsoCountAsAClick() async throws {
-        let (controller, _) = try await loadedFeed()
-        let row = try firstRow(of: controller)
-
-        row.mouseDown(with: mouseEvent(.leftMouseDown, in: row))
-        try await waitUntil("the held press peeked") { self.focusOverlay(in: controller) != nil }
-        row.mouseUp(with: mouseEvent(.leftMouseUp, in: row))
-        try await Task.sleep(for: .milliseconds(500))
+        click(try firstRow(of: controller))
+        try await Task.sleep(for: .milliseconds(400))
 
         XCTAssertNil(focusOverlay(in: controller),
-                     "the release fired the tap as well, so the peek came back as a stay")
+                     "one click opened the overlay, so a drag across a row can never finish")
+    }
+
+    /// A double click lands on the *bubble* in practice — the row hands its
+    /// subtree's hits to the bubble so text stays selectable — so the gesture
+    /// has to survive that hop rather than only working on the row's margins.
+    func testDoubleClickingTheBubbleOpensTheOverlay() async throws {
+        let (controller, _) = try await loadedFeed()
+        let row = try firstRow(of: controller)
+        let bubble = try XCTUnwrap(row.subviews.compactMap { $0 as? AIChatBubbleView }.first)
+
+        bubble.mouseDown(with: mouseEvent(.leftMouseDown, in: bubble, clickCount: 2))
+
+        XCTAssertNotNil(focusOverlay(in: controller),
+                        "a double click on the text itself did not open the conversation")
+    }
+
+    /// The refinement that made the overlay usable: the press that selects a
+    /// line must not also be the press that closes what the line is in. The
+    /// bubble takes it — hit-testing hands it there, and it is swallowed rather
+    /// than passed up the responder chain to the overlay's dismiss.
+    func testClickingABubbleInsideTheOverlayDoesNotDismissIt() async throws {
+        let (controller, _) = try await loadedFeed()
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+        try await waitUntil("the overlay's transcript loaded") { !self.rowTexts(in: overlay).isEmpty }
+        await settle()
+
+        let bubble = try XCTUnwrap(firstBubble(in: overlay), "the overlay has no bubbles")
+        // Inside the bubble's padding, where the text view is not: the point a
+        // reader's click lands on when they miss the first word by a hair.
+        let padding = NSPoint(x: 4, y: 4)
+        let hit = overlay.hitTest(bubble.convert(padding, to: overlay.superview))
+        XCTAssertTrue(
+            hit?.isDescendant(of: bubble) ?? false,
+            "a press on a bubble reached \(String(describing: hit)) rather than the bubble")
+
+        bubble.mouseDown(with: mouseEvent(.leftMouseDown, in: bubble))
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertNotNil(overlay.superview,
+                        "clicking a bubble closed the overlay, so the text cannot be copied")
     }
 
     func testTheJumpControlGoesToTheSourceRatherThanOpeningTheOverlay() async throws {
@@ -300,6 +348,16 @@ final class ConversationFocusTests: XCTestCase {
         controller.view.subviews.compactMap { $0 as? ConversationFocusOverlay }.first
     }
 
+    /// The first bubble in the overlay's own transcript.
+    private func firstBubble(in overlay: ConversationFocusOverlay) -> AIChatBubbleView? {
+        guard let chat = overlay.subviews.compactMap({ $0 as? ChatView }).first else { return nil }
+        return transcriptRows(of: chat)
+            .first?
+            .subviews
+            .compactMap { $0 as? AIChatBubbleView }
+            .first
+    }
+
     /// What the overlay is actually showing, oldest first.
     private func rowTexts(in overlay: ConversationFocusOverlay) -> [String] {
         guard let chat = overlay.subviews.compactMap({ $0 as? ChatView }).first else { return [] }
@@ -320,7 +378,16 @@ final class ConversationFocusTests: XCTestCase {
         row.mouseUp(with: mouseEvent(.leftMouseUp, in: row))
     }
 
-    private func mouseEvent(_ type: NSEvent.EventType, in view: NSView) -> NSEvent {
+    /// The second press of a double click, as AppKit delivers it: one event
+    /// carrying `clickCount == 2`, not two separate presses.
+    private func doubleClick(_ row: ChatTranscriptRowView) {
+        row.mouseDown(with: mouseEvent(.leftMouseDown, in: row, clickCount: 2))
+        row.mouseUp(with: mouseEvent(.leftMouseUp, in: row, clickCount: 2))
+    }
+
+    private func mouseEvent(
+        _ type: NSEvent.EventType, in view: NSView, clickCount: Int = 1
+    ) -> NSEvent {
         let centre = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
         return NSEvent.mouseEvent(
             with: type,
@@ -330,7 +397,7 @@ final class ConversationFocusTests: XCTestCase {
             windowNumber: view.window?.windowNumber ?? 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 1,
+            clickCount: clickCount,
             pressure: 1
         )!
     }
@@ -351,7 +418,7 @@ final class ConversationFocusTests: XCTestCase {
     }
 
     /// Polls `condition` for up to two seconds, laying out between tries — the
-    /// feed's read, the peek's delay and the fade are all real time.
+    /// feed's read and the overlay's fade are both real time.
     private func waitUntil(
         _ what: String,
         file: StaticString = #filePath, line: UInt = #line,

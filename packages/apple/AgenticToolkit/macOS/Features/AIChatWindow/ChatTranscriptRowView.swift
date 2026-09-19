@@ -8,15 +8,15 @@ import AgenticToolkitCoreMacOS
 ///
 /// ```
 /// [icon] project/branch (session name)
-///        ╭──────────────────────────╮
+///        ╭──────────────────────────╮ [app]
 ///        │ what the agent said      │
 ///        ╰──────────────────────────╯
 ///        09:41
 ///
 ///                project/branch (session name)  [icon]
-///                       ╭──────────────────────────╮
-///                       │ what the human said      │
-///                       ╰──────────────────────────╯
+///          [app] ╭──────────────────────────╮
+///                │ what the human said      │
+///                ╰──────────────────────────╯
 ///                                            09:41
 /// ```
 ///
@@ -32,31 +32,30 @@ import AgenticToolkitCoreMacOS
 public final class ChatTranscriptRowView: NSView {
 
     /// What a row can do when it is pressed. Grouped rather than passed one
-    /// closure at a time because they are four faces of one gesture — a click,
-    /// a press held, that press released, and a click on the row's own control —
+    /// closure at a time because they are three faces of one gesture — the row
+    /// opened, the row left for its source, the row's own message opened out —
     /// and a caller that wires one usually wires several.
     public struct Actions {
-        /// A plain click on the row.
-        public var onTap: ((ChatMessage) -> Void)?
-        /// The row's jump control was clicked: leave for wherever this came from.
+        /// The row was **double**-clicked.
+        ///
+        /// A double click and not a single one because a single click is worth
+        /// more where it is: selecting the text to copy it. Opening a
+        /// conversation is deliberate enough to be worth two.
+        public var onOpen: ((ChatMessage) -> Void)?
+        /// The row's app icon was clicked: leave for wherever this came from.
         public var onJump: ((ChatMessage) -> Void)?
-        /// The mouse has been held down on the row long enough to mean "hold
-        /// this open while I look".
-        public var onPeekBegan: ((ChatMessage) -> Void)?
-        /// That hold ended. Always paired with an ``onPeekBegan``, and a row
-        /// that peeked does **not** also fire ``onTap`` on release.
-        public var onPeekEnded: ((ChatMessage) -> Void)?
+        /// The bubble's **More…** control was used — this message is truncated
+        /// and the reader wants all of it.
+        public var onExpand: ((ChatMessage) -> Void)?
 
         public init(
-            onTap: ((ChatMessage) -> Void)? = nil,
+            onOpen: ((ChatMessage) -> Void)? = nil,
             onJump: ((ChatMessage) -> Void)? = nil,
-            onPeekBegan: ((ChatMessage) -> Void)? = nil,
-            onPeekEnded: ((ChatMessage) -> Void)? = nil
+            onExpand: ((ChatMessage) -> Void)? = nil
         ) {
-            self.onTap = onTap
+            self.onOpen = onOpen
             self.onJump = onJump
-            self.onPeekBegan = onPeekBegan
-            self.onPeekEnded = onPeekEnded
+            self.onExpand = onExpand
         }
     }
 
@@ -69,14 +68,10 @@ public final class ChatTranscriptRowView: NSView {
     private let headerLabel = NSTextField(labelWithString: "")
     private let timeLabel = NSTextField(labelWithString: "")
     private let bubble: AIChatBubbleView
-    private let jumpButton = NSButton()
+    private let jumpButton = PointingHandButton()
 
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
-
-    /// Armed on mouse-down, fired if the button is still down when it lands.
-    private var peekWorkItem: DispatchWorkItem?
-    private var isPeeking = false
 
     /// Inset of the row's content from the highlight's edge, so hovering paints
     /// a band around the row rather than a rectangle flush against its text.
@@ -86,19 +81,26 @@ public final class ChatTranscriptRowView: NSView {
     private static let iconGap: CGFloat = 8
 
     /// The jump control's size, and its gap from the bubble's inside edge.
-    private static let jumpSize: CGFloat = 16
+    ///
+    /// The same 44pt the Sessions window gives the identical control, because it
+    /// *is* the identical control — the application the conversation is running
+    /// in, clicked to go there. A reader who has learned that icon in one window
+    /// should not have to learn a smaller one here.
+    private static let jumpSize: CGFloat = 44
     private static let jumpGap: CGFloat = 10
 
-    /// How long the mouse has to stay down before the press stops being a click
-    /// and becomes a peek. Long enough not to fire on an ordinary click
-    /// (`NSEvent.doubleClickInterval` is typically 0.5s and a click is far
-    /// shorter than that), short enough that holding feels like a gesture rather
-    /// than a wait.
-    private static let peekDelay: TimeInterval = 0.3
-
-    public init(message: ChatMessage, maxBubbleWidth: CGFloat, actions: Actions) {
+    /// - Parameters:
+    ///   - lineLimit: how many lines of the message the bubble shows before it
+    ///     truncates and offers the rest — see ``AIChatBubbleView``.
+    public init(
+        message: ChatMessage,
+        maxBubbleWidth: CGFloat,
+        actions: Actions,
+        lineLimit: Int? = nil
+    ) {
         self.message = message
-        self.attribution = message.attribution ?? .init(sourceID: "", context: "", name: "", iconSymbol: "")
+        self.attribution = message.attribution
+            ?? .init(sourceID: "", context: "", name: "", iconSymbol: "")
         self.actions = actions
         // The jump control sits *outside* the bubble, so the room it needs comes
         // out of the width the bubble may grow to. Charging it to the bubble
@@ -106,13 +108,17 @@ public final class ChatTranscriptRowView: NSView {
         // the control on screen in a narrow window, where a full-width bubble
         // would otherwise push it past the row's own edge.
         let reserved = actions.onJump == nil ? 0 : Self.jumpGap + Self.jumpSize
-        // The timestamp gets its own line here, and the row — not the text —
-        // takes the click, so the bubble renders neither.
+        // The timestamp gets its own line here, so the bubble renders none.
         self.bubble = AIChatBubbleView(
             message: message,
             maxWidth: max(maxBubbleWidth - reserved, 80),
             showsInlineTimestamp: false,
-            isTextSelectable: false
+            // Selectable, always: the text of a transcript is the thing a reader
+            // most wants out of it, and a row that swallowed the drag to keep a
+            // click for itself would be trading the message for the gesture.
+            // That is what moved opening to a double click.
+            isTextSelectable: true,
+            lineLimit: lineLimit
         )
         super.init(frame: .zero)
 
@@ -137,7 +143,7 @@ public final class ChatTranscriptRowView: NSView {
     /// Whether pressing the row itself means anything. The hover fill and the
     /// pointing-hand cursor are promises that it does, so both are held back
     /// when the row is only something to read.
-    private var isPressable: Bool { actions.onTap != nil || actions.onPeekBegan != nil }
+    private var isPressable: Bool { actions.onOpen != nil }
 
     // MARK: - Build
 
@@ -166,18 +172,36 @@ public final class ChatTranscriptRowView: NSView {
         timeLabel.alignment = isFromUser ? .right : .left
 
         bubble.setContentHuggingPriority(.required, for: .horizontal)
+        bubble.onExpand = { [weak self] in
+            guard let self else { return }
+            self.actions.onExpand?(self.message)
+        }
+        // Only where opening is wired. Where it is not — inside a conversation
+        // that is already open — the bubble keeps the gesture and a double click
+        // selects a word, which is what a reader copying a line expects of it.
+        if actions.onOpen != nil {
+            bubble.onDoubleClick = { [weak self] in
+                guard let self else { return }
+                self.actions.onOpen?(self.message)
+            }
+        }
 
+        // The application the conversation is running in, not a generic arrow:
+        // a reader scanning a merged feed is looking for *their* window, and the
+        // icon they would find it by on the Dock is the fastest way to say which
+        // row is it. Same control, same size, same mapping as the Sessions list.
         jumpButton.translatesAutoresizingMaskIntoConstraints = false
-        jumpButton.image = NSImage(
-            systemSymbolName: "arrow.up.forward.app",
-            accessibilityDescription: "Go to \(attribution.headerLine)"
-        )
-        jumpButton.symbolConfiguration = .init(pointSize: 12, weight: .medium)
+        jumpButton.image = TerminalAppIcon.image(forTermProgram: attribution.appIdentity)
+        jumpButton.imagePosition = .imageOnly
+        jumpButton.imageScaling = .scaleProportionallyUpOrDown
         jumpButton.isBordered = false
-        jumpButton.imageScaling = .scaleProportionallyDown
+        jumpButton.bezelStyle = .shadowlessSquare
         jumpButton.target = self
         jumpButton.action = #selector(jumpTapped)
-        jumpButton.toolTip = "Go to this conversation"
+        jumpButton.toolTip = attribution.appIdentity.isEmpty
+            ? "Go to this conversation"
+            : "Go to this conversation in \(attribution.appIdentity)"
+        jumpButton.setAccessibilityLabel("Go to \(attribution.headerLine)")
         jumpButton.isHidden = actions.onJump == nil
         jumpButton.accessibilityID("chat-row.jump")
 
@@ -219,17 +243,24 @@ public final class ChatTranscriptRowView: NSView {
 
         // The jump control hangs off the bubble's *inside* edge — the one facing
         // the middle of the window, which is the side with room on it, and the
-        // side a reader's eye is already on. Level with the bubble's first line
-        // of text rather than with the bubble, which on a long message would put
-        // it halfway down a paragraph.
+        // side a reader's eye is already on. Level with the bubble's **top**
+        // rather than its centre: a bubble is as tall as its text, and centring
+        // would put the control halfway down a paragraph and at a different
+        // height on every row.
         let jumpEdge = isFromUser ? jumpButton.trailingAnchor : jumpButton.leadingAnchor
         let bubbleInnerEdge = isFromUser ? bubble.leadingAnchor : bubble.trailingAnchor
         constraints += [
             jumpEdge.constraint(equalTo: bubbleInnerEdge,
                                 constant: isFromUser ? -Self.jumpGap : Self.jumpGap),
-            jumpButton.centerYAnchor.constraint(equalTo: bubble.firstLineCenterYAnchor),
+            jumpButton.topAnchor.constraint(equalTo: bubble.topAnchor),
             jumpButton.widthAnchor.constraint(equalToConstant: Self.jumpSize),
-            jumpButton.heightAnchor.constraint(equalToConstant: Self.jumpSize)
+            jumpButton.heightAnchor.constraint(equalToConstant: Self.jumpSize),
+            // A 44pt control beside a one-line bubble is taller than the rest of
+            // the row; the row grows to hold it rather than letting it hang out
+            // past its own bounds, where ``hitTest(_:)`` would stop answering
+            // for it.
+            bottomAnchor.constraint(greaterThanOrEqualTo: jumpButton.bottomAnchor,
+                                    constant: Self.vInset)
         ]
 
         // The bubble and the time align with the header on the speaker's side;
@@ -280,17 +311,25 @@ public final class ChatTranscriptRowView: NSView {
 
     // MARK: - Mouse
 
-    /// The row is the target, not its parts: a click anywhere on it — the icon,
-    /// the header, the bubble's text — means the same thing.
+    /// The row is the target, not its parts — except for the parts that mean
+    /// something else.
     ///
-    /// The one exception is the jump control, which means something *else*. It
-    /// has to be named here rather than left to the normal search, because that
-    /// search never happens: this override answers for the whole subtree.
+    /// They have to be named here rather than left to the normal search, because
+    /// that search never happens: this override answers for the whole subtree.
+    /// There are three: the app icon (leave for the session), the **More…**
+    /// control (open this message out), and the bubble itself, whose text a
+    /// reader drags across to copy and whose double click this row reads as
+    /// "open".
     public override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         guard bounds.contains(local) else { return nil }
-        if !jumpButton.isHidden, jumpButton.frame.contains(local) { return jumpButton }
+        if let hit = super.hitTest(point), hit !== self, isInteractive(hit) { return hit }
         return self
+    }
+
+    private func isInteractive(_ view: NSView) -> Bool {
+        if !jumpButton.isHidden, view.isDescendant(of: jumpButton) { return true }
+        return view.isDescendant(of: bubble)
     }
 
     public override func updateTrackingAreas() {
@@ -316,41 +355,22 @@ public final class ChatTranscriptRowView: NSView {
         applyHoverFill(resolvedThemeScope.palette)
     }
 
-    /// Arms the peek. A row nobody is watching for a hold passes the press
-    /// straight up the responder chain, which is what lets a container behind it
-    /// — the focus overlay, say — treat a click on a row as a click on itself.
-    public override func mouseDown(with event: NSEvent) {
-        guard actions.onPeekBegan != nil else {
-            super.mouseDown(with: event)
-            return
-        }
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, self.peekWorkItem != nil else { return }
-            self.isPeeking = true
-            self.actions.onPeekBegan?(self.message)
-        }
-        peekWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.peekDelay, execute: work)
-    }
-
-    /// A press that became a peek ends the peek and nothing else: the reader
-    /// already saw what a tap would have shown them, and opening it again on
-    /// release is the opposite of what letting go means.
+    /// Opens on the second click and on nothing else. A single click stays worth
+    /// what it is worth everywhere else — selecting, dismissing, nothing — which
+    /// is what makes copying text out of a transcript possible.
+    ///
+    /// Everything this does not claim goes up the responder chain, which is what
+    /// lets a container behind the row — the focus overlay — read a press on a
+    /// row as a press on itself. `mouseDown` is not overridden at all for the
+    /// same reason.
     public override func mouseUp(with event: NSEvent) {
-        peekWorkItem?.cancel()
-        peekWorkItem = nil
-
-        if isPeeking {
-            isPeeking = false
-            actions.onPeekEnded?(message)
-            return
-        }
-        guard let onTap = actions.onTap,
+        guard let onOpen = actions.onOpen,
+              event.clickCount >= 2,
               bounds.contains(convert(event.locationInWindow, from: nil)) else {
             super.mouseUp(with: event)
             return
         }
-        onTap(message)
+        onOpen(message)
     }
 
     @objc private func jumpTapped() {
