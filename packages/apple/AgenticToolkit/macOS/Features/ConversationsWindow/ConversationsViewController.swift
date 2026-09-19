@@ -99,8 +99,9 @@ public final class ConversationsViewController: NSViewController {
     ///
     /// Eight is a paragraph — enough to tell what a reply is about and decide
     /// whether to open it, short enough that three long messages in a row still
-    /// leave the timeline visible. The overlay uses the same cap, so a message
-    /// is not a different length on either side of a double click.
+    /// leave the timeline visible. Deciding to open it is the point: the
+    /// overlay is uncapped, so the rest of the message is one click away rather
+    /// than nowhere.
     public static let bubbleLineLimit = 8
 
     /// - Parameters:
@@ -186,7 +187,12 @@ public final class ConversationsViewController: NSViewController {
             // conversation, and the first read replaces it — but it is the part
             // the reader just double-clicked, so the overlay opens on it.
             seed: viewModel.messages.filter { $0.attribution?.sourceID == sourceID },
-            lineLimit: Self.bubbleLineLimit,
+            // No cap here. The feed truncates because it is several
+            // conversations on one timeline, where a forty-line message would
+            // be the whole window; this is the one conversation the reader
+            // asked to see, and reading the rest of that message is most of
+            // what asking meant.
+            lineLimit: nil,
             send: onSendToSource.map { send in
                 { @Sendable text in await send(sourceID, text) }
             },

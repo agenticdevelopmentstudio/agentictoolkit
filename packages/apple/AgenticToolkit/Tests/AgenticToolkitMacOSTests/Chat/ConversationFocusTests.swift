@@ -610,6 +610,123 @@ final class ConversationFocusTests: XCTestCase {
         return (log, pump)
     }
 
+    // MARK: - The composer, once it is awake
+
+    /// The overlay is opened *to answer* as often as to read, and the keys have
+    /// nowhere else to be while it is up.
+    func testTheOverlayTakesTheKeysForItsComposer() async throws {
+        let (controller, _) = try await loadedFeed()
+        controller.onSendToSource = { _, _ in nil }
+
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+
+        XCTAssertEqual(overlayChat(in: overlay)?.isComposerFocused, true,
+                       "the reader has to click the composer before they can answer")
+    }
+
+    /// Focusing a composer that is switched off would take the keys away from
+    /// whatever had them and give them to something that ignores them.
+    func testAnOverlayWithNowhereToWriteLeavesTheKeysAlone() async throws {
+        let (controller, _) = try await loadedFeed()
+
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+
+        XCTAssertEqual(overlayChat(in: overlay)?.isComposerFocused, false,
+                       "a composer that cannot be typed into took the keys anyway")
+    }
+
+    // MARK: - The send button
+
+    func testTheSendButtonIsDeadUntilThereIsSomethingToSend() async throws {
+        let composer = try await writableComposer()
+
+        XCTAssertFalse(composer.send.isEnabled,
+                       "an empty composer offered a send that would do nothing")
+
+        type("hello", into: composer.field)
+        XCTAssertTrue(composer.send.isEnabled, "text was typed and send stayed dead")
+    }
+
+    /// Whitespace is not something to send, and a composer holding a stray
+    /// space should look as empty as it is.
+    func testSpacesAloneDoNotWakeTheSendButton() async throws {
+        let composer = try await writableComposer()
+
+        type("   ", into: composer.field)
+
+        XCTAssertFalse(composer.send.isEnabled, "whitespace counted as a message")
+    }
+
+    /// Nothing tells the delegate the field was emptied in code, so this is the
+    /// case that breaks if the button is only re-read on a keystroke.
+    func testSendingLeavesTheButtonDeadAgain() async throws {
+        let composer = try await writableComposer()
+
+        type("hello", into: composer.field)
+        composer.send.performClick(nil)
+
+        XCTAssertEqual(composer.field.stringValue, "")
+        XCTAssertFalse(composer.send.isEnabled,
+                       "the composer emptied itself and left send lit over nothing")
+    }
+
+    // MARK: - How much of a message the overlay shows
+
+    /// The feed truncates so several conversations fit on one timeline. Opening
+    /// one of them is how the rest of a message is asked for, so the overlay
+    /// that answers has no cap at all.
+    func testTheOverlayShowsAMessageWhole() async throws {
+        let (controller, _) = try await loadedFeed()
+
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+
+        XCTAssertEqual(try feedChat(of: controller).bubbleLineLimit,
+                       ConversationsViewController.bubbleLineLimit)
+        XCTAssertNil(overlayChat(in: overlay)?.bubbleLineLimit,
+                     "the closer look cut the message off at the same place the feed did")
+    }
+
+    /// An overlay whose composer is awake, with its two controls picked out.
+    private func writableComposer() async throws -> (field: NSTextField, send: NSButton) {
+        let (controller, _) = try await loadedFeed()
+        controller.onSendToSource = { _, _ in nil }
+        doubleClick(try firstRow(of: controller))
+        let overlay = try XCTUnwrap(focusOverlay(in: controller))
+        return try XCTUnwrap(composer(in: overlay), "the overlay has no composer")
+    }
+
+    /// Typed the way a person types: through the field editor, so the field
+    /// tells its delegate about the change the way it would on a keystroke.
+    /// Assigning `stringValue` sets the text and notifies nobody.
+    private func type(_ text: String, into field: NSTextField) {
+        field.window?.makeFirstResponder(field)
+        field.currentEditor()?.insertText(text)
+    }
+
+    private func overlayChat(in overlay: ConversationFocusOverlay) -> ChatView? {
+        overlay.subviews.compactMap { $0 as? ChatView }.first
+    }
+
+    private func composer(
+        in overlay: ConversationFocusOverlay
+    ) -> (field: NSTextField, send: NSButton)? {
+        guard let chat = overlayChat(in: overlay) else { return nil }
+        let views = descendants(of: chat)
+        guard let field = views.compactMap({ $0 as? NSTextField })
+                .first(where: { $0.accessibilityIdentifier() == "ai-chat.input" }),
+              let send = views.compactMap({ $0 as? NSButton })
+                .first(where: { $0.accessibilityIdentifier() == "ai-chat.send-button" })
+        else { return nil }
+        return (field, send)
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap { descendants(of: $0) }
+    }
+
     // MARK: - The row's own header
 
     /// The feed and the Sessions list are looking at the same sessions, so the
@@ -817,6 +934,12 @@ final class ConversationFocusTests: XCTestCase {
         _ type: NSEvent.EventType, in view: NSView, clickCount: Int = 1
     ) -> NSEvent {
         let centre = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
+        // Entering and leaving are not mouse events as far as this factory is
+        // concerned: handed one, it trips an AppKit assertion and takes the
+        // whole test process with it rather than returning nil.
+        if type == .mouseEntered || type == .mouseExited {
+            return enterExitEvent(type, in: view, at: centre)
+        }
         return NSEvent.mouseEvent(
             with: type,
             location: view.convert(centre, to: nil),
@@ -827,6 +950,22 @@ final class ConversationFocusTests: XCTestCase {
             eventNumber: 0,
             clickCount: clickCount,
             pressure: 1
+        )!
+    }
+
+    private func enterExitEvent(
+        _ type: NSEvent.EventType, in view: NSView, at point: NSPoint
+    ) -> NSEvent {
+        NSEvent.enterExitEvent(
+            with: type,
+            location: view.convert(point, to: nil),
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: view.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
         )!
     }
 

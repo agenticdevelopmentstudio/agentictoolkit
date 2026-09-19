@@ -456,11 +456,26 @@ public final class ChatView: NSView, NSTextFieldDelegate {
 
     /// Disabled while a turn is in flight, so rapid sends can't overlap turns —
     /// and disabled outright when the transcript is read-only.
+    ///
+    /// The button carries one condition the field does not: there has to be
+    /// something to send. A lit arrow over an empty composer offers an action
+    /// that does nothing when taken, and the greyed one says what the composer
+    /// is waiting for without a word of explanation.
     private func applyComposerEnablement() {
         let enabled = isComposerEnabled && viewModel.state != .responding
         inputField.isEnabled = enabled
-        sendButton.isEnabled = enabled
+        sendButton.isEnabled = enabled && !composerText.isEmpty
         applySendButtonTint(resolvedThemeScope.palette)
+    }
+
+    /// What is typed, with the whitespace that is not worth sending taken off.
+    private var composerText: String {
+        inputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The composer's text changed, so what can be done with it changed too.
+    public func controlTextDidChange(_ obj: Notification) {
+        applyComposerEnablement()
     }
 
     /// No tint at all when the composer is off, rather than a dimmer one: AppKit
@@ -514,10 +529,14 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     // MARK: - Input
 
     @objc private func sendTapped() {
-        let text = inputField.stringValue
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let text = composerText
+        guard !text.isEmpty else { return }
         viewModel.sendMessage(text)
         inputField.stringValue = ""
+        // Emptying the field is not a change anyone typed, so nothing tells the
+        // delegate about it — the button has to be told itself, or it stays lit
+        // over a composer with nothing left in it.
+        applyComposerEnablement()
     }
 
     public func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
