@@ -90,7 +90,16 @@ public final class AIChatBubbleView: NSView {
 
     private static let hPad: CGFloat = 12
     private static let vPad: CGFloat = 8
-    private static let moreHeight: CGFloat = 16
+
+    /// The **More…** control is a symbol rather than the words, and a big one.
+    ///
+    /// It is the one thing in a bubble that is not the message, so the words
+    /// competed with the text they sat under — three glyphs of caption type
+    /// reading as one more line of the reply. A symbol is not read at all, it is
+    /// recognised, and at this size it is a target a reader hits without aiming.
+    private static let moreSymbol = "ellipsis.circle.fill"
+    private static let moreSymbolPointSize: CGFloat = 17
+    private static let moreHeight: CGFloat = 22
     private static let moreGap: CGFloat = 2
 
     /// - Parameters:
@@ -136,7 +145,13 @@ public final class AIChatBubbleView: NSView {
         textView.isHorizontallyResizable = false
         textView.translatesAutoresizingMaskIntoConstraints = false
 
-        moreButton.title = Self.moreTitle
+        moreButton.image = NSImage(
+            systemSymbolName: Self.moreSymbol, accessibilityDescription: Self.moreTitle)
+        moreButton.symbolConfiguration = .init(
+            pointSize: Self.moreSymbolPointSize, weight: .regular)
+        moreButton.imagePosition = .imageOnly
+        moreButton.imageScaling = .scaleProportionallyDown
+        moreButton.setAccessibilityLabel(Self.moreTitle)
         moreButton.isBordered = false
         moreButton.setButtonType(.momentaryChange)
         moreButton.target = self
@@ -255,10 +270,9 @@ public final class AIChatBubbleView: NSView {
         textHeightConstraint.constant = measured.height
 
         moreButton.isHidden = !isTruncated
-        moreButton.attributedTitle = NSAttributedString(
-            string: Self.moreTitle,
-            attributes: [.font: palette.font(.caption), .foregroundColor: text]
-        )
+        // Tinted with the bubble's own text colour: it belongs to this message,
+        // and an accent here would read as a different kind of thing entirely.
+        moreButton.contentTintColor = text
         moreHeightConstraint.constant = isTruncated ? Self.moreHeight : 0
         moreGapConstraint.constant = isTruncated ? Self.moreGap : 0
 

@@ -39,14 +39,12 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
     ///     if it had been typed at its own terminal. Nil leaves the composer
     ///     disabled, which is what a session nothing can be written to looks
     ///     like.
-    ///   - onJump: the row's app icon was used — leave for the real thing.
     public init(
         refreshInterval: Duration,
         load: @escaping FeedChatSession.Loader,
         seed: [ChatMessage] = [],
         lineLimit: Int?,
-        send: FeedChatSession.Sender? = nil,
-        onJump: ((ChatMessage) -> Void)?
+        send: FeedChatSession.Sender? = nil
     ) {
         let session = FeedChatSession(refreshInterval: refreshInterval, send: send, load: load)
         self.session = session
@@ -67,11 +65,14 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
         // field cut out reads as a different kind of view, not a read-only one.
         chatView.isComposerEnabled = session.canSend
         chatView.bubbleLineLimit = lineLimit
-        // No `onOpen`: this *is* the conversation, so there is nothing for a
-        // double click to open — and with the handler unset the bubbles keep the
-        // gesture, where it means "select this word". A press that no bubble and
-        // no control took reaches this view, which reads it as "done".
-        chatView.rowActions = .init(onJump: onJump)
+        // No row actions at all. `onOpen` would open the conversation the reader
+        // is already inside, and the app icon it would draw says which
+        // application each row is running in — a question a *merged* feed asks
+        // and this view has already answered: every row here is the same session.
+        // With both unset the bubbles keep the double click, where it means
+        // "select this word", and a press that no bubble took reaches this view,
+        // which reads it as "done".
+        chatView.rowActions = .init()
         chatView.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(chatView)
