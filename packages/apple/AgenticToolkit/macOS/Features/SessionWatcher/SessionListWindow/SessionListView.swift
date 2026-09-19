@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import AgenticToolkitCore
+import AgenticToolkitCoreUI
 import AgenticToolkitCoreMacOS
 import AgenticToolkitPermissions
 
@@ -317,46 +318,6 @@ extension SessionWatcher {
         public required init?(coder: NSCoder) { fatalError() }
     }
 
-    // MARK: - App Icon Button
-
-    /// A row's app icon, which opens the session in its terminal. The pointing hand
-    /// over it is the cue that it is a link and the rest of the row is not.
-    ///
-    /// Both mechanisms are needed: a cursor rect is only honoured while the window
-    /// is key, and the Sessions window usually floats unfocused beside the terminal
-    /// the user is typing into — so hovering also sets the cursor directly.
-    public final class SessionWatcherAppIconButton: NSButton {
-        private var hoverArea: NSTrackingArea?
-
-        public override func resetCursorRects() {
-            addCursorRect(bounds, cursor: .pointingHand)
-        }
-
-        public override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            if let hoverArea { removeTrackingArea(hoverArea) }
-            let area = NSTrackingArea(
-                rect: bounds,
-                options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways],
-                owner: self, userInfo: nil
-            )
-            addTrackingArea(area)
-            hoverArea = area
-        }
-
-        public override func mouseEntered(with event: NSEvent) {
-            NSCursor.pointingHand.set()
-        }
-
-        public override func mouseMoved(with event: NSEvent) {
-            NSCursor.pointingHand.set()
-        }
-
-        public override func mouseExited(with event: NSEvent) {
-            NSCursor.arrow.set()
-        }
-    }
-
     // MARK: - SessionWatcherSession Row View
 
     public final class SessionWatcherRowAppKitView: NSView {
@@ -614,29 +575,6 @@ extension SessionWatcher {
             ceil(NSLayoutManager().defaultLineHeight(for: font) * CGFloat(lines))
         }
 
-        /// App icon for the terminal a session runs in, from its `TERM_PROGRAM`.
-        /// Prefers a running instance's icon, falls back to the installed app
-        /// bundle, then a generic terminal glyph for unknown/empty terminals.
-        private static func appIcon(forTermProgram termProgram: String) -> NSImage? {
-            let bundleIDs: [String: String] = [
-                "iTerm.app": "com.googlecode.iterm2",
-                "Apple_Terminal": "com.apple.Terminal",
-                "WarpTerminal": "dev.warp.Warp-Stable",
-                "vscode": "com.microsoft.VSCode",
-                "tmux": "com.apple.Terminal"
-            ]
-            if let bundleID = bundleIDs[termProgram] {
-                if let running = NSRunningApplication
-                    .runningApplications(withBundleIdentifier: bundleID).first?.icon {
-                    return running
-                }
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-                    return NSWorkspace.shared.icon(forFile: url.path)
-                }
-            }
-            return NSImage(systemSymbolName: "terminal", accessibilityDescription: "terminal")
-        }
-
         private func setupViews() {
             typealias Layout = Metrics
 
@@ -645,8 +583,11 @@ extension SessionWatcher {
             // text is not a shortcut for it, so a click meant for the context menu or
             // for selecting a line can't yank the user into another terminal. The
             // pointing-hand cursor over it is what says so.
-            let iconButton = SessionWatcherAppIconButton()
-            iconButton.image = Self.appIcon(forTermProgram: session.termProgram)
+            let iconButton = PointingHandButton()
+            // The mapping is ``TerminalAppIcon``'s and not this row's: the
+            // Conversations feed heads its rows with the same icon for the same
+            // session, and two copies of the table would eventually disagree.
+            iconButton.image = TerminalAppIcon.image(forTermProgram: session.termProgram)
             iconButton.imagePosition = .imageOnly
             iconButton.imageScaling = .scaleProportionallyUpOrDown
             iconButton.isBordered = false

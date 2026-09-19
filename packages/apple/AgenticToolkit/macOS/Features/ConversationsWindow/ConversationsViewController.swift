@@ -82,6 +82,15 @@ public final class ConversationsViewController: NSViewController {
     private var chatView: ChatView?
     private var overlay: ConversationFocusOverlay?
 
+    /// How many lines of a message a feed row shows before it truncates and
+    /// offers the rest.
+    ///
+    /// Eight is a paragraph — enough to tell what a reply is about and decide
+    /// whether to open it, short enough that three long messages in a row still
+    /// leave the timeline visible. The overlay uses the same cap, so a message
+    /// is not a different length on either side of a double click.
+    public static let bubbleLineLimit = 8
+
     /// - Parameters:
     ///   - refreshInterval: how often the feed is re-read. A transcript on disk
     ///     has no push channel, so this is the whole of the window's liveness.
@@ -115,11 +124,10 @@ public final class ConversationsViewController: NSViewController {
         // one being joined, and a chat with the entry field cut out reads as a
         // different kind of window rather than a read-only one.
         chatView.isComposerEnabled = false
+        chatView.bubbleLineLimit = Self.bubbleLineLimit
         chatView.rowActions = .init(
-            onTap: { [weak self] message in self?.presentFocus(on: message) },
-            onJump: { [weak self] message in self?.onGoToSource?(message) },
-            onPeekBegan: { [weak self] message in self?.presentFocus(on: message) },
-            onPeekEnded: { [weak self] _ in self?.dismissFocus() }
+            onOpen: { [weak self] message in self?.presentFocus(on: message) },
+            onJump: { [weak self] message in self?.onGoToSource?(message) }
         )
         chatView.translatesAutoresizingMaskIntoConstraints = false
         self.chatView = chatView
@@ -141,10 +149,7 @@ public final class ConversationsViewController: NSViewController {
 
     // MARK: - Focus overlay
 
-    /// Lifts one conversation out of the feed and lays it over the top. Both
-    /// gestures land here — a click, which leaves it up, and a press held, whose
-    /// release takes it down again — because they show the same thing and differ
-    /// only in what dismisses them.
+    /// Lifts one conversation out of the feed and lays it over the top.
     private func presentFocus(on message: ChatMessage) {
         guard let sourceID = message.attribution?.sourceID, !sourceID.isEmpty else { return }
         dismissFocus()
@@ -154,6 +159,7 @@ public final class ConversationsViewController: NSViewController {
         let overlay = ConversationFocusOverlay(
             refreshInterval: refreshInterval,
             load: { await load(flag.value, sourceID) },
+            lineLimit: Self.bubbleLineLimit,
             onJump: { [weak self] message in
                 // Leaving for the session makes the overlay's job moot — going
                 // there is a stronger answer to "show me this" than the overlay

@@ -34,12 +34,28 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         public let name: String
         /// SF Symbol for the speaker, shown in the row's icon column.
         public let iconSymbol: String
+        /// The application the conversation is happening in — a `TERM_PROGRAM`
+        /// value where the source is a terminal session, empty where there is
+        /// nothing to say.
+        ///
+        /// A bare string rather than an image because this layer is
+        /// Foundation-only, and because the string is the durable fact: what
+        /// icon it resolves to depends on what is installed and running on this
+        /// machine at the moment the row is drawn.
+        public let appIdentity: String
 
-        public init(sourceID: String, context: String, name: String, iconSymbol: String) {
+        public init(
+            sourceID: String,
+            context: String,
+            name: String,
+            iconSymbol: String,
+            appIdentity: String = ""
+        ) {
             self.sourceID = sourceID
             self.context = context
             self.name = name
             self.iconSymbol = iconSymbol
+            self.appIdentity = appIdentity
         }
 
         /// The header line: `context (name)`, or just one of them when the other

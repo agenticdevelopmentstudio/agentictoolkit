@@ -24,35 +24,64 @@ public final class AIChatBubbleView: NSView {
         return formatter
     }()
 
+    /// What a truncated bubble says where its text stops, and what the control
+    /// under it is called.
+    private static let ellipsis = "…"
+    private static let moreTitle = "More…"
+
     private let message: ChatMessage
     private let maxWidth: CGFloat
     private let showsInlineTimestamp: Bool
+    private let isTextSelectable: Bool
 
-    private let textView = NSTextView(frame: .zero)
+    /// How many lines the bubble shows before it stops and offers the rest, or
+    /// nil for a bubble that shows whatever it holds.
+    ///
+    /// A feed is the case for a limit: a reply that runs forty lines is not more
+    /// important than the four around it, but it takes the whole window, and a
+    /// reader scrolling past it has lost the thread by the time they are out.
+    /// A limit turns that into a fixed-cost row with a way in.
+    private let lineLimit: Int?
+
+    private let textView: BubbleTextView
+    private let moreButton = NSButton()
+
+    /// Fired by the **More…** control: the message wants showing whole, and this
+    /// view is not where that happens — a bubble that grew in place would move
+    /// everything under it and lose the reader's place.
+    public var onExpand: (() -> Void)? {
+        didSet { moreButton.isEnabled = onExpand != nil }
+    }
+
+    /// Fired by a double-click anywhere on the bubble's text.
+    ///
+    /// Set only where a double-click means something; where it is nil the text
+    /// view keeps the gesture and a double-click selects a word, which is what a
+    /// reader copying a line out of a transcript expects.
+    public var onDoubleClick: (() -> Void)? {
+        didSet { textView.onDoubleClick = onDoubleClick }
+    }
+
+    /// Whether the text ran past ``lineLimit`` and is showing an ellipsis.
+    public private(set) var isTruncated = false
 
     // The bubble sizes itself to its text, and the theme owns the font, so the
     // measurement has to be redone on every theme change rather than baked in
-    // at init. These three constraints are what that re-measurement writes.
+    // at init. These constraints are what that re-measurement writes.
     private let textWidthConstraint: NSLayoutConstraint
     private let textHeightConstraint: NSLayoutConstraint
     private var bubbleWidthConstraint: NSLayoutConstraint!
+    private var moreHeightConstraint: NSLayoutConstraint!
+    private var moreGapConstraint: NSLayoutConstraint!
 
-    /// The band occupied by the bubble's **first line of text**, so a control
-    /// outside the bubble can sit level with it.
-    ///
-    /// Not the bubble's own centre: a bubble is as tall as its text, so centring
-    /// on it puts an affordance halfway down a paragraph, and a column of them
-    /// down a transcript lands at a different height on every row. The top line
-    /// is where the eye already is, and it is in the same place whether the
-    /// message is one line or forty.
-    private let firstLineGuide = NSLayoutGuide()
-    private var firstLineHeightConstraint: NSLayoutConstraint!
-
-    /// Vertical centre of the first line of text — see ``firstLineGuide``.
-    public var firstLineCenterYAnchor: NSLayoutYAxisAnchor { firstLineGuide.centerYAnchor }
+    /// The **More…** control, for a container that has taken over hit-testing
+    /// for its whole subtree and has to name the parts that still take a click.
+    public var expandControl: NSView { moreButton }
 
     private static let hPad: CGFloat = 12
     private static let vPad: CGFloat = 8
+    private static let moreHeight: CGFloat = 16
+    private static let moreGap: CGFloat = 2
 
     /// - Parameters:
     ///   - showsInlineTimestamp: whether the time trails the text inside the
@@ -61,16 +90,23 @@ public final class AIChatBubbleView: NSView {
     ///     than printing it twice.
     ///   - isTextSelectable: whether the text takes the mouse. A selectable text
     ///     view swallows clicks, which is right for a conversation you are
-    ///     reading and wrong for a row whose whole job is to be clicked.
+    ///     reading and copying out of, and wrong for a view whose whole job is
+    ///     to be clicked through.
+    ///   - lineLimit: the most lines to show before truncating — see
+    ///     ``lineLimit``.
     public init(
         message: ChatMessage,
         maxWidth: CGFloat,
         showsInlineTimestamp: Bool = true,
-        isTextSelectable: Bool = true
+        isTextSelectable: Bool = true,
+        lineLimit: Int? = nil
     ) {
         self.message = message
         self.maxWidth = maxWidth
         self.showsInlineTimestamp = showsInlineTimestamp
+        self.isTextSelectable = isTextSelectable
+        self.lineLimit = lineLimit
+        self.textView = BubbleTextView(frame: .zero)
         self.textWidthConstraint = textView.widthAnchor.constraint(equalToConstant: 0)
         self.textHeightConstraint = textView.heightAnchor.constraint(equalToConstant: 0)
 
@@ -90,23 +126,39 @@ public final class AIChatBubbleView: NSView {
         textView.isHorizontallyResizable = false
         textView.translatesAutoresizingMaskIntoConstraints = false
 
+        moreButton.title = Self.moreTitle
+        moreButton.isBordered = false
+        moreButton.setButtonType(.momentaryChange)
+        moreButton.target = self
+        moreButton.action = #selector(moreTapped)
+        moreButton.isEnabled = false
+        moreButton.isHidden = true
+        moreButton.toolTip = "Show the whole message"
+        moreButton.accessibilityID("chat-bubble.more")
+        moreButton.translatesAutoresizingMaskIntoConstraints = false
+
         addSubview(textView)
-        addLayoutGuide(firstLineGuide)
-        self.firstLineHeightConstraint = firstLineGuide.heightAnchor.constraint(equalToConstant: 0)
+        addSubview(moreButton)
+        self.moreHeightConstraint = moreButton.heightAnchor.constraint(equalToConstant: 0)
+        self.moreGapConstraint = moreButton.topAnchor.constraint(
+            equalTo: textView.bottomAnchor, constant: 0)
 
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: topAnchor, constant: Self.vPad),
             textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.hPad),
             textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.hPad),
-            textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.vPad),
             textWidthConstraint,
             textHeightConstraint,
             bubbleWidthConstraint,
 
-            firstLineGuide.topAnchor.constraint(equalTo: topAnchor, constant: Self.vPad),
-            firstLineGuide.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.hPad),
-            firstLineGuide.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.hPad),
-            firstLineHeightConstraint
+            // The control goes under the text rather than over it: a "More…"
+            // floated on the last line covers the words it is offering to show.
+            moreGapConstraint,
+            moreHeightConstraint,
+            moreButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.hPad),
+            moreButton.leadingAnchor.constraint(
+                greaterThanOrEqualTo: leadingAnchor, constant: Self.hPad),
+            moreButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.vPad)
         ])
 
         observeTheme { bubble, palette in bubble.apply(palette) }
@@ -166,44 +218,46 @@ public final class AIChatBubbleView: NSView {
     }
 
     private func apply(_ palette: SemanticPalette) {
-        let (fill, _, border) = colors(from: palette)
+        let (fill, text, border) = colors(from: palette)
         layer?.backgroundColor = fill.cgColor
         layer?.borderColor = border?.cgColor
         layer?.borderWidth = border == nil ? 0 : 1
 
-        let attributed = attributedText(for: palette)
+        let full = attributedText(for: palette)
         let textMaxWidth = maxWidth - Self.hPad * 2
 
-        // Measure off-screen in a throwaway layout stack rather than asking the
-        // live text view, whose container is about to be resized to the answer.
-        let textStorage = NSTextStorage(attributedString: attributed)
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(
-            size: NSSize(width: textMaxWidth, height: .greatestFiniteMagnitude)
+        var shown = full
+        var measured = measure(full, width: textMaxWidth)
+        if let lineLimit, measured.lineCount > lineLimit,
+           let cut = truncating(full, to: lineLimit, using: measured) {
+            shown = cut
+            measured = measure(cut, width: textMaxWidth)
+            isTruncated = true
+        } else {
+            isTruncated = false
+        }
+
+        textView.textContainer?.size = NSSize(
+            width: measured.width, height: .greatestFiniteMagnitude)
+        textView.textStorage?.setAttributedString(shown)
+
+        textWidthConstraint.constant = measured.width
+        textHeightConstraint.constant = measured.height
+
+        moreButton.isHidden = !isTruncated
+        moreButton.attributedTitle = NSAttributedString(
+            string: Self.moreTitle,
+            attributes: [.font: palette.font(.caption), .foregroundColor: text]
         )
-        textContainer.lineFragmentPadding = 0
-        layoutManager.addTextContainer(textContainer)
-        textStorage.addLayoutManager(layoutManager)
-        layoutManager.ensureLayout(for: textContainer)
-        let usedRect = layoutManager.usedRect(for: textContainer)
-        let textWidth = ceil(usedRect.width)
-        let textHeight = ceil(usedRect.height)
+        moreHeightConstraint.constant = isTruncated ? Self.moreHeight : 0
+        moreGapConstraint.constant = isTruncated ? Self.moreGap : 0
 
-        textView.textContainer?.size = NSSize(width: textWidth, height: .greatestFiniteMagnitude)
-        textView.textStorage?.setAttributedString(attributed)
-
-        textWidthConstraint.constant = textWidth
-        textHeightConstraint.constant = textHeight
-        bubbleWidthConstraint.constant = min(textWidth + Self.hPad * 2, maxWidth)
-
-        // The same throwaway layout already knows where the first line ends;
-        // asking it is what keeps ``firstLineGuide`` honest across a theme
-        // change, which can move the body font and with it the line's height.
-        // An empty message lays out no glyphs at all, and there the whole used
-        // height *is* one line.
-        firstLineHeightConstraint.constant = layoutManager.numberOfGlyphs > 0
-            ? ceil(layoutManager.lineFragmentUsedRect(forGlyphAt: 0, effectiveRange: nil).height)
-            : textHeight
+        // The control has to fit as well as the text: a one-word message under a
+        // "More…" it is narrower than would clip the offer rather than the text.
+        let contentWidth = isTruncated
+            ? max(measured.width, ceil(moreButton.intrinsicContentSize.width))
+            : measured.width
+        bubbleWidthConstraint.constant = min(contentWidth + Self.hPad * 2, maxWidth)
 
         textView.insertionPointColor = palette.nsColor(.cursor)
         textView.selectedTextAttributes = [
@@ -212,6 +266,140 @@ public final class AIChatBubbleView: NSView {
         ]
     }
 
+    // MARK: - Measuring
+
+    /// What one attributed string comes to at a given width.
+    ///
+    /// The storage is held alongside the layout manager because it *owns* it —
+    /// a manager whose storage has gone answers nothing, and the truncation pass
+    /// below asks the same manager a second question.
+    private struct Measurement {
+        let storage: NSTextStorage
+        let layoutManager: NSLayoutManager
+        let width: CGFloat
+        let height: CGFloat
+        let lineCount: Int
+    }
+
+    /// Measured off-screen in a throwaway layout stack rather than by asking the
+    /// live text view, whose container is about to be resized to the answer.
+    private func measure(_ attributed: NSAttributedString, width: CGFloat) -> Measurement {
+        let storage = NSTextStorage(attributedString: attributed)
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer(
+            size: NSSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        container.lineFragmentPadding = 0
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: container)
+
+        let used = layoutManager.usedRect(for: container)
+        var lineCount = 0
+        var glyph = 0
+        while glyph < layoutManager.numberOfGlyphs {
+            var range = NSRange()
+            _ = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: &range)
+            lineCount += 1
+            // A zero-length effective range would leave the walk standing still;
+            // stopping is the honest answer, an infinite loop is not.
+            guard range.length > 0 else { break }
+            glyph = NSMaxRange(range)
+        }
+
+        return Measurement(
+            storage: storage, layoutManager: layoutManager,
+            width: ceil(used.width), height: ceil(used.height), lineCount: lineCount
+        )
+    }
+
+    /// The first `limit` lines of `attributed`, ending in an ellipsis, or nil if
+    /// there was nothing to cut.
+    ///
+    /// Cut on the *laid-out* lines rather than on a character count, because the
+    /// two have nothing to do with each other: eight lines of a wrapped paragraph
+    /// and eight lines of a bulleted list differ by an order of magnitude in
+    /// characters, and a character budget would give one of them two lines and
+    /// the other twenty.
+    private func truncating(
+        _ attributed: NSAttributedString, to limit: Int, using measurement: Measurement
+    ) -> NSAttributedString? {
+        let layoutManager = measurement.layoutManager
+        var glyph = 0
+        var line = 0
+        while glyph < layoutManager.numberOfGlyphs, line < limit {
+            var range = NSRange()
+            _ = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: &range)
+            guard range.length > 0 else { break }
+            line += 1
+            glyph = NSMaxRange(range)
+        }
+        guard glyph > 0, glyph < layoutManager.numberOfGlyphs else { return nil }
+
+        let characters = layoutManager.characterRange(
+            forGlyphRange: NSRange(location: 0, length: glyph), actualGlyphRange: nil)
+        let head = NSMutableAttributedString(
+            attributedString: attributed.attributedSubstring(from: characters))
+
+        // The cut lands on a line break or the space that wrapped it; leaving
+        // that in puts the ellipsis on a line of its own.
+        let lastVisible = (head.string as NSString).rangeOfCharacter(
+            from: CharacterSet.whitespacesAndNewlines.inverted, options: .backwards)
+        guard lastVisible.location != NSNotFound else { return nil }
+        let end = NSMaxRange(lastVisible)
+        if end < head.length {
+            head.deleteCharacters(in: NSRange(location: end, length: head.length - end))
+        }
+
+        head.append(NSAttributedString(
+            string: Self.ellipsis,
+            attributes: head.attributes(at: head.length - 1, effectiveRange: nil)))
+        return head
+    }
+
+    // MARK: - Mouse
+
+    @objc private func moreTapped() {
+        onExpand?()
+    }
+
+    /// A selectable bubble keeps the presses that land on its padding.
+    ///
+    /// The text view already keeps the ones on the text. Letting the gap around
+    /// it fall through would mean a click two points from a word you were about
+    /// to select dismissed the overlay you were reading in — the same press,
+    /// two different answers, decided by a couple of points.
+    public override func mouseDown(with event: NSEvent) {
+        if event.clickCount >= 2, let onDoubleClick {
+            onDoubleClick()
+            return
+        }
+        guard isTextSelectable else {
+            super.mouseDown(with: event)
+            return
+        }
+    }
+
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError() }
+}
+
+/// The bubble's text view, which hands double-clicks back when someone is
+/// waiting for one.
+///
+/// A double-click on selectable text means "select this word" and, in a feed,
+/// also means "open this conversation". Only one of them can have it: the
+/// gesture is given away where a handler is wired and kept where it is not, so
+/// a reader copying text out of an already-open conversation still gets their
+/// word.
+private final class BubbleTextView: NSTextView {
+    var onDoubleClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount >= 2, let onDoubleClick {
+            onDoubleClick()
+            return
+        }
+        super.mouseDown(with: event)
+    }
 }
