@@ -21,6 +21,10 @@ final class BubbleTruncationTests: XCTestCase {
     override func tearDown() async throws {
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
+        // The terminal font is real user state, shared with every other test in
+        // the process and with the developer running them.
+        UserSettings.terminalFontName.value = UserSettings.terminalFontName.defaultValue
+        UserSettings.terminalFontSize.value = UserSettings.terminalFontSize.defaultValue
         try await super.tearDown()
     }
 
@@ -177,6 +181,83 @@ final class BubbleTruncationTests: XCTestCase {
                         "clicking the message closed it, so none of it can be copied")
     }
 
+    // MARK: - The face
+
+    /// A bubble is set in the terminal's font, not in the theme's body role.
+    ///
+    /// Nothing about the layout says which of the two it took: a bubble in the
+    /// wrong face measures, wraps and truncates exactly as well as one in the
+    /// right face, and only a reader looking at both windows can tell.
+    func testABubbleIsSetInTheFaceTheTerminalIs() throws {
+        try requireATerminalFontThatComesFromSettings()
+        UserSettings.terminalFontName.value = "Courier"
+        UserSettings.terminalFontSize.value = 17
+
+        let font = try bodyFont(of: try laidOutBubble(text: "one short line", lineLimit: nil))
+        XCTAssertEqual(font.fontName, "Courier",
+                       "the bubble is drawn in \(font.fontName), not the terminal's face")
+        XCTAssertEqual(font.pointSize, 17, accuracy: 0.01,
+                       "the bubble is drawn at its own size rather than the terminal's")
+    }
+
+    /// The theme's terminal override wins over the Terminal settings panel —
+    /// the same precedence the terminal itself resolves by, since a reader who
+    /// gave one theme its own face meant the transcript of that theme's
+    /// sessions too.
+    func testAThemesOwnTerminalFontBeatsTheSettingsPanels() {
+        UserSettings.terminalFontName.value = "Courier"
+        UserSettings.terminalFontSize.value = 17
+
+        var theme = BuiltInThemes.dracula
+        theme.terminal = ThemeTerminalOptions(fontName: "Menlo-Bold", fontSize: 21)
+        let palette = SemanticPalette(theme: theme)
+
+        let font = AIChatBubbleView.bodyFont(for: palette)
+        XCTAssertEqual(font.fontName, "Menlo-Bold",
+                       "the settings panel outranked the theme the reader is looking at")
+        XCTAssertEqual(font.pointSize, 21, accuracy: 0.01)
+        XCTAssertNotEqual(font.fontName, palette.font(.body).fontName,
+                          "this theme cannot tell the two faces apart, so it proves nothing")
+    }
+
+    /// The timestamp trailing a message is the message's own face, smaller —
+    /// not the theme's caption face, which would put two typefaces on one line.
+    func testTheInlineTimestampIsTheBodysFaceOneStepSmaller() {
+        UserSettings.terminalFontName.value = "Courier"
+        UserSettings.terminalFontSize.value = 18
+
+        let palette = SemanticPalette(theme: BuiltInThemes.dracula)
+        let body = AIChatBubbleView.bodyFont(for: palette)
+        let time = AIChatBubbleView.timestampFont(for: palette)
+
+        XCTAssertEqual(time.familyName, body.familyName,
+                       "the time is set in a different family than the words it trails")
+        XCTAssertLessThan(time.pointSize, body.pointSize,
+                          "the time is as loud as the message")
+        // The theme says how much smaller a caption is than body text; that
+        // ratio is what the terminal's size is read through.
+        let ratio = palette.size(.caption) / palette.size(.body)
+        XCTAssertEqual(time.pointSize, body.pointSize * CGFloat(ratio), accuracy: 0.01,
+                       "the timestamp does not keep the theme's caption-to-body relationship")
+    }
+
+    /// Half the answer to "what face is this" lives in Terminal settings rather
+    /// than in the theme, and a settings change posts no theme notification —
+    /// so the bubbles, which each re-measure themselves on a theme change, would
+    /// otherwise stay in the old face until something else rebuilt the feed.
+    func testChangingTheTerminalFontRedrawsTheFeed() async throws {
+        try requireATerminalFontThatComesFromSettings()
+        UserSettings.terminalFontSize.value = 13
+
+        let (_, chat) = try await loadedFeed()
+        XCTAssertEqual(try bodyFont(of: try firstBubble(of: chat)).pointSize, 13, accuracy: 0.01)
+
+        UserSettings.terminalFontSize.value = 21
+        try await waitUntil("the feed is redrawn at the new size") {
+            ((try? self.bodyFont(of: try self.firstBubble(of: chat)).pointSize) ?? 0) == 21
+        }
+    }
+
     // MARK: - Fixtures
 
     private static let longText = (0..<40)
@@ -275,6 +356,29 @@ final class BubbleTruncationTests: XCTestCase {
                 .compactMap { $0 as? NSButton }
                 .first { $0.accessibilityIdentifier() == "chat-bubble.more" },
             "the bubble has no More… control")
+    }
+
+    /// The tests that drive the face through Terminal settings only mean
+    /// anything while the theme in effect has no font of its own — the theme
+    /// wins, so an overriding one makes them pass without testing anything.
+    /// Stated as an assertion rather than assumed: a test bundle that starts
+    /// installing a `ThemeManager` should fail here, loudly, once.
+    private func requireATerminalFontThatComesFromSettings(
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        let terminal = ThemePaletteObserver.currentPalette.theme.terminal
+        XCTAssertNil(terminal?.fontName, "the active theme names its own terminal face",
+                     file: file, line: line)
+        XCTAssertNil(terminal?.fontSize, "the active theme sets its own terminal size",
+                     file: file, line: line)
+    }
+
+    /// The face the bubble actually drew its first character in.
+    private func bodyFont(of bubble: AIChatBubbleView) throws -> NSFont {
+        let storage = try XCTUnwrap(textView(of: bubble).textStorage, "the bubble holds no text")
+        XCTAssertGreaterThan(storage.length, 0, "the bubble is empty")
+        return try XCTUnwrap(storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont,
+                             "the bubble's text carries no font")
     }
 
     private func textView(of bubble: AIChatBubbleView) throws -> NSTextView {

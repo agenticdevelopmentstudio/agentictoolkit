@@ -268,6 +268,29 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.scheduleRender() }
             .store(in: &cancellables)
+
+        // A bubble is set in the terminal's face, and half of that answer lives
+        // in Terminal settings rather than in the theme — so a theme change is
+        // not the only thing that changes what a bubble measures to. Every
+        // bubble already re-measures itself on a theme change; this is the other
+        // door into the same fact.
+        UserSettings.shared.changes
+            .filter { TerminalAppearance.fontSettingKeys.contains($0) }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.rebuildForFontChange() }
+            .store(in: &cancellables)
+    }
+
+    /// Rebuilds the transcript for something the rebuild reads but
+    /// ``TranscriptInputs`` cannot hold.
+    ///
+    /// The font is not an input the way the messages are: it is read out of a
+    /// setting the same rows would be rebuilt from unchanged. So the record of
+    /// what is on screen is dropped rather than compared — the next rebuild has
+    /// nothing to match against and goes ahead.
+    private func rebuildForFontChange() {
+        rendered = nil
+        scheduleRender()
     }
 
     /// Coalesce high-frequency delta updates into one rebuild per runloop tick.

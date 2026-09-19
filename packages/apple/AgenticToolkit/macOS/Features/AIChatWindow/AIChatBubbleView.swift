@@ -223,12 +223,38 @@ public final class AIChatBubbleView: NSView {
         }
     }
 
+    /// The face a bubble's text is set in: the terminal's.
+    ///
+    /// These bubbles are a terminal conversation written down — the feed's rows
+    /// are literally transcripts of sessions running in one — and a transcript
+    /// set in a different face than the session it came from reads as a
+    /// different program's output. So the reader picks the face once, for the
+    /// terminal, and the bubbles follow: theme override first, Terminal
+    /// settings second, exactly as ``TerminalAppearance`` resolves it for the
+    /// terminal itself.
+    static func bodyFont(for palette: SemanticPalette) -> NSFont {
+        TerminalAppearance.resolvedFont(theme: palette.theme)
+    }
+
+    /// The face the inline timestamp is set in: the body's, smaller.
+    ///
+    /// The timestamp is deliberately smaller than the text it trails, and the
+    /// theme's caption-to-body ratio is that relationship expressed once. It is
+    /// the *ratio* and not the caption font because the face is now the
+    /// terminal's — a system-font caption beside monospaced text is two
+    /// typefaces on one line.
+    static func timestampFont(for palette: SemanticPalette) -> NSFont {
+        let body = bodyFont(for: palette)
+        let bodySize = palette.size(.body)
+        guard bodySize > 0 else { return body }
+        let scaled = body.pointSize * CGFloat(palette.size(.caption) / bodySize)
+        return NSFont(descriptor: body.fontDescriptor, size: scaled) ?? body
+    }
+
     private func attributedText(for palette: SemanticPalette) -> NSAttributedString {
         let textColor = colors(from: palette).text
-        let bodyFont = palette.font(.body)
-        // The timestamp is deliberately smaller than the body it trails; the
-        // theme's caption style is that relationship expressed once.
-        let timeFont = palette.font(.caption)
+        let bodyFont = Self.bodyFont(for: palette)
+        let timeFont = Self.timestampFont(for: palette)
 
         let string = NSMutableAttributedString(
             string: message.text,

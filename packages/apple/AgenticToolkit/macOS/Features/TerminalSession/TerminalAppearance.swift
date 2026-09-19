@@ -43,18 +43,28 @@ public struct TerminalPadding: Equatable, Sendable {
 @MainActor
 public enum TerminalAppearance {
 
+    /// The two keys ``resolvedFont(theme:)`` falls back to, apart from the rest.
+    ///
+    /// Named separately because the terminal is no longer the only thing set in
+    /// the terminal's face: the chat bubbles are too, and a bubble has no
+    /// opinion about padding or caret shape. Watching the whole set there would
+    /// re-measure every bubble in a feed because somebody moved the caret one
+    /// point left.
+    public static let fontSettingKeys: Set<String> = [
+        UserSettings.terminalFontName.name,
+        UserSettings.terminalFontSize.name
+    ]
+
     /// Every `terminal_*` key, so a change to any of them can be recognized
     /// from `UserSettings.shared.changes` without one observer per setting.
-    public static let settingKeys: Set<String> = [
+    public static let settingKeys: Set<String> = fontSettingKeys.union([
         UserSettings.terminalPaddingTop.name,
         UserSettings.terminalPaddingLeading.name,
         UserSettings.terminalPaddingBottom.name,
         UserSettings.terminalPaddingTrailing.name,
-        UserSettings.terminalFontName.name,
-        UserSettings.terminalFontSize.name,
         UserSettings.terminalCursorShape.name,
         UserSettings.terminalCursorBlinks.name
-    ]
+    ])
 
     /// The terminal font: the theme's override if it has one, otherwise the
     /// Terminal settings panel's.
