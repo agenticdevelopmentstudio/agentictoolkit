@@ -130,6 +130,14 @@ public final class ExtensionsSettingsPanelViewController: ComposableSettings.Set
             built.append(ExtensionsEmptyStatePanel(searchPaths: coordinator.searchPaths))
         }
 
+        // Before the load problems, because it is not one: nothing failed to
+        // load, everything works, and the whole thing is slower than it should
+        // be. A build this is true of is broken in a way no test catches, so
+        // the panel appears whether or not any extension is installed.
+        if JITAvailability.current.isDegraded {
+            built.append(ExtensionHostDegradedPanel(availability: JITAvailability.current))
+        }
+
         if !registry.failures.isEmpty {
             built.append(ExtensionLoadProblemsPanel(
                 failures: registry.failures,
@@ -701,6 +709,55 @@ final class ExtensionsEmptyStatePanel: ComposableSettings.SettingsPanelViewContr
 /// that loaded fine and is still installed, and reporting it as a failed load
 /// would tell a user their working extension is broken.
 @MainActor
+/// Shown only when this process cannot get executable memory: extensions are
+/// all running interpreted and nothing else in the app would ever say so.
+///
+/// The condition is a build defect, not a user's mistake, and it should never
+/// be true of a shipped build. It is on screen anyway because the alternative
+/// is how it was found the last time — by noticing, eventually, that something
+/// felt slow. The log line `JITAvailability` writes covers whoever is reading
+/// logs; this covers whoever is not.
+final class ExtensionHostDegradedPanel: ComposableSettings.SettingsPanelViewController {
+
+    private let availability: JITAvailability
+
+    init(availability: JITAvailability) {
+        self.availability = availability
+        super.init(with: ComposableSettings.SettingsPanelDescriptor(
+            title: "Extensions Running Slowly",
+            icon: NSImage(systemSymbolName: "tortoise", accessibilityDescription: nil)
+        ))
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var helpContent: ComposableSettings.PanelHelp? {
+        ComposableSettings.PanelHelp(topics: [
+            .init(
+                title: "Extensions Running Slowly",
+                body: "Extension code is JavaScript, and it runs fast because the "
+                    + "JavaScript engine compiles it to machine code while the app is "
+                    + "running. Doing that needs memory the system will only grant to an "
+                    + "app signed to ask for it. When it is refused, the engine does not "
+                    + "report anything — it quietly interprets the code instead, which is "
+                    + "correct and much slower. This app checks for that at startup so "
+                    + "the difference is visible rather than merely felt."
+            )
+        ])
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        guard let diagnosis = availability.diagnosis else { return }
+        let group = ComposableSettings.GroupView(withTitle: "JavaScript Compilation Unavailable")
+        group.addSettingSubview(ComposableSettings.ExplanationView(withText: diagnosis))
+        addGroup(group)
+    }
+}
+
 final class ExtensionLoadProblemsPanel: ComposableSettings.SettingsPanelViewController {
 
     private let refused: [ExtensionLoadFailure]

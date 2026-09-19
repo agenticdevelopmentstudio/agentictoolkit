@@ -253,6 +253,7 @@
 		1F77CE0E2C404C692CA6CBE4 /* HTDVStatusViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFC94090E060D17E84BC222D /* HTDVStatusViews.swift */; };
 		1F82BB5F3A05C2EC5EA33C3E /* HelpPopoverController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA57516E7069664BACDE318E /* HelpPopoverController.swift */; };
 		1F8C1D3FE8481FEB3D86F25D /* ExtensionsCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 054EE267FE62903BB10C2434 /* ExtensionsCoordinator.swift */; };
+		2029997B36A09715A2E121CB /* JITAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33619129A89D9B7E57F49FDB /* JITAvailability.swift */; };
 		205BD734E6C71259396F2BF1 /* MessagingTopic.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B528FFEF943F3EC4358C98 /* MessagingTopic.swift */; };
 		20B18A7E439966B0B8F8527E /* HTDVStatusViews+UIKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2769A6482884F2716D3ED921 /* HTDVStatusViews+UIKit.swift */; };
 		20B8C510FDAEC77F58663E25 /* ProjectWorkspaceTabsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07BDE2E23C219E9E12E3C6C7 /* ProjectWorkspaceTabsTests.swift */; };
@@ -1193,6 +1194,7 @@
 		DB9417AEFF4BB370CB565536 /* HTDVDetailHosting.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7FFEA8A158450A9B88668AA /* HTDVDetailHosting.swift */; };
 		DBCE2ED88389823524B9D9AD /* FormSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85EA336747D7E8F9247E422 /* FormSpec.swift */; };
 		DBE9C1E3EC58F2C9984F4423 /* SyntaxRoleOverrides.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A579899BBB3EEABD4655F17 /* SyntaxRoleOverrides.swift */; };
+		DC94ABD9B91C15FF8A42B512 /* JITAvailabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A9BBC13EDD6FC1F94F155E3 /* JITAvailabilityTests.swift */; };
 		DCC59B340916DB06C420D3CD /* TerminalCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C833E2859602634DC99C02C /* TerminalCoordinator.swift */; };
 		DCE5DDE85A4BBCEC7FCD1FC7 /* ProjectCheckoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F0119CDB478A40922A5E3A /* ProjectCheckoutTests.swift */; };
 		DDA338BC278608DBF11A0319 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E72B1651E46E46D8D73340 /* JSONValue.swift */; };
@@ -2736,6 +2738,7 @@
 		318E853592964F2E3951830F /* ThemeEditorSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeEditorSplitViewController.swift; sourceTree = "<group>"; };
 		31E7501A87831CAE04B1416A /* ExplanationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplanationView.swift; sourceTree = "<group>"; };
 		31F04A00FAA3D63C0CA839A4 /* SystemWindowContextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowContextStore.swift; sourceTree = "<group>"; };
+		33619129A89D9B7E57F49FDB /* JITAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JITAvailability.swift; sourceTree = "<group>"; };
 		339250B6C2715F71635C6744 /* SessionWatcherListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWatcherListViewModel.swift; sourceTree = "<group>"; };
 		33ED62A78F2D392CAEC3AF9A /* WindowExplorerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowExplorerView.swift; sourceTree = "<group>"; };
 		33F852968686967ACD65E1B5 /* KeychainSecureSettingsStorageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecureSettingsStorageProvider.swift; sourceTree = "<group>"; };
@@ -2905,6 +2908,7 @@
 		59CBBE68BA85449BAECFA075 /* ScreenSet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSet.swift; sourceTree = "<group>"; };
 		5A434D0DF608A6D2C0E5237A /* GitStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatusProvider.swift; sourceTree = "<group>"; };
 		5A8FD9AFFEBBCE6635F75C66 /* WebviewHostDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebviewHostDocument.swift; sourceTree = "<group>"; };
+		5A9BBC13EDD6FC1F94F155E3 /* JITAvailabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JITAvailabilityTests.swift; sourceTree = "<group>"; };
 		5AAEE0ADB8A5C6F599688D42 /* SettingsSearchIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSearchIndexTests.swift; sourceTree = "<group>"; };
 		5AF7F75A828C35BB97C877D0 /* TextDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentStore.swift; sourceTree = "<group>"; };
 		5B5FFC62731DADB19C5D55C4 /* ToolDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolDefinition.swift; sourceTree = "<group>"; };
@@ -4718,6 +4722,7 @@
 		4B35ECF59F2D0D29DABE8836 /* Diagnostics */ = {
 			isa = PBXGroup;
 			children = (
+				33619129A89D9B7E57F49FDB /* JITAvailability.swift */,
 				621D5A1AE85E269317BABEDE /* UpstreamDivergence.swift */,
 				ED70B85162A49071846BF25F /* UpstreamDivergenceLedger.swift */,
 			);
@@ -6277,6 +6282,7 @@
 		D42DFF73A44521BCC549B474 /* Diagnostics */ = {
 			isa = PBXGroup;
 			children = (
+				5A9BBC13EDD6FC1F94F155E3 /* JITAvailabilityTests.swift */,
 				D6C377E6078D3A9DDBF58668 /* UpstreamDivergenceLedgerTests.swift */,
 			);
 			path = Diagnostics;
@@ -8162,6 +8168,7 @@
 				E3940941D89780C7F726F26E /* GitStatusParserTests.swift in Sources */,
 				39B4BBC3FB18F33046004ADD /* GitWorktreeParserTests.swift in Sources */,
 				16C4C0E0EA485890B97F4DEF /* InMemorySettingsStoreTests.swift in Sources */,
+				DC94ABD9B91C15FF8A42B512 /* JITAvailabilityTests.swift in Sources */,
 				49AAA88AA83E11F237F758C1 /* JSONCPreprocessorTests.swift in Sources */,
 				90F9F4DE37B2BD2D06BFE024 /* KeychainHelperTests.swift in Sources */,
 				CA269927A2C05060E0D239BB /* KeychainSecureSettingsStorageProviderTests.swift in Sources */,
@@ -8768,6 +8775,7 @@
 				06E9B71CB8F07D9332D47F1E /* HeuristicRegistry.swift in Sources */,
 				85697B9B49D973C59F7390F0 /* InMemorySecureSettingsStorageProvider.swift in Sources */,
 				7F607722ACC112ADC99CA537 /* InMemorySettingsStorageProvider.swift in Sources */,
+				2029997B36A09715A2E121CB /* JITAvailability.swift in Sources */,
 				7C4D5EE9AC433563E6099582 /* JSONCPreprocessor.swift in Sources */,
 				AF792A00075269B09E646A98 /* KeychainHelper.swift in Sources */,
 				3CC93775A0519CD6A75E67E2 /* KeychainSecureSettingsStorageProvider.swift in Sources */,

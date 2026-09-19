@@ -182,7 +182,16 @@ public final class ExtensionHost {
     /// One VM for the whole process. `JSVirtualMachine` is not `Sendable`; this
     /// static is main-actor isolated with the rest of the type, which is the
     /// same confinement every host that uses it already has.
-    private static let virtualMachine = JSVirtualMachine()
+    ///
+    /// Creating it is also the moment the JIT stops being hypothetical, so it
+    /// is where the check for executable memory goes. `JITAvailability` writes
+    /// one error line if this process cannot have any; the settings panel
+    /// reads the same value. Neither refuses to run — a host without a JIT
+    /// works, just interpreted — and that is precisely why it has to say so.
+    private static let virtualMachine: JSVirtualMachine = {
+        JITAvailability.logIfDegraded()
+        return JSVirtualMachine()
+    }()
 
     /// Read once and kept: the shim is a fixed resource in this framework's
     /// bundle, and re-reading it per extension is disk work with one possible
