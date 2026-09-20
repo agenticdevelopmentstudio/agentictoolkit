@@ -1831,6 +1831,18 @@ struct MainThreadLanguageModelsTests {
     /// cancellation, so the ordering the assertion depends on is established
     /// rather than raced for: what is under test is the state the adaptor is
     /// left in, not which of two concurrent events wins.
+    ///
+    /// **What the second `next()` answers, and why that is the assertion.**
+    /// `scan(kind:in:)` sets `cursor.isFinished` on the same pass that hands
+    /// out the failure, and its first line is `if cursor.isFinished { return
+    /// .done }` — so a later `next()` resolves `{done: true}` rather than
+    /// rejecting, which is the ordinary async-iterator contract for an
+    /// iterator that has thrown. (The `next()`-rejects contract in Ruling 81
+    /// is a different path: post-`dispose()`, not post-failure.) `done` is
+    /// therefore what this asserts, and it is a real assertion rather than a
+    /// restatement: `.text("after")` is sitting in `buffer` at the cursor's
+    /// own index, so an adaptor that had not finished the cursor would walk
+    /// straight into it and resolve with `"after"`.
     @Test
     func partsYieldedAfterCancellationNeverReachTheExtension() async throws {
         let directory = try makeTempDirectory()
@@ -1876,7 +1888,9 @@ struct MainThreadLanguageModelsTests {
                         response.text.next().then(
                             function (result) {
                                 globalThis.__second = {
-                                    outcome: 'resolved', value: String(result.value)
+                                    outcome: 'resolved',
+                                    done: result.done === true,
+                                    value: String(result.value)
                                 };
                             },
                             function (error) {
@@ -1921,10 +1935,11 @@ struct MainThreadLanguageModelsTests {
 
         context.evaluateScript("globalThis.__askAgain();")
         let second = try #require(await waitForGlobal(context, "globalThis.__second"))
-        // Rejected, not resolved -- and specifically not resolved with
-        // "after", which is what a cursor that resumed delivering would say.
-        #expect(second.forProperty("outcome")?.toString() == "rejected")
-        #expect(second.forProperty("message")?.toString() == cancelled)
+        // Exhausted, and specifically not carrying "after" -- which is what a
+        // cursor that resumed delivering would answer, since that part is in
+        // `buffer` at this cursor's own index.
+        #expect(second.forProperty("done")?.toBool() == true)
+        #expect(second.forProperty("value")?.toString() == "undefined")
     }
 
     /// A token that fires after the source has already finished leaves the

@@ -1120,14 +1120,24 @@ public actor LanguageServerSession: LanguageServerSessionProtocol {
 
         // `InitializingServer` keeps its own handshake state, and nothing in
         // it watches the transport: after a stream end it still believes it is
-        // `.initialized`. That is not merely stale bookkeeping.
-        // `shutdownAndExit()` is guarded on `case .initialized`, so a session
-        // that died on its own makes `teardown()` send a `shutdown` *request*
-        // over a channel whose read sequence has already finished — a
-        // continuation nothing will ever resume, so `stop()` blocks for the
-        // whole of `shutdownBudgetSeconds` before the budget rescues it.
-        // Telling the server here costs nothing and makes that teardown
-        // immediate.
+        // `.initialized`, and `shutdownAndExit()` is guarded on exactly that.
+        // So a session whose server has gone quiet still goes on to send a
+        // `shutdown` *request* during teardown, down a transport that has
+        // already finished.
+        //
+        // **That is a lie to correct, not a hang to prevent.** Measured, not
+        // assumed: with this line reverted, a session whose child is still
+        // alive with its stdout closed — the one shape in which a post-mortem
+        // write could in principle block on a reply — still tears down in
+        // 1.04 s against a ten-second budget.
+        // `JSONRPCSession.readSequenceFinished()` fails every pending
+        // responder with `dataStreamClosed` and latches `channelClosed`, and
+        // every send checks that flag first, so the doomed `shutdown` throws
+        // immediately. What this line buys is not time. It is that
+        // `InitializingServer` stops holding a state its own author documents
+        // as ours to clear ("we can assume that connectionInvalidated will be
+        // called"), and that a teardown stops logging a failed graceful
+        // shutdown that never had a chance.
         //
         // Before the `exitStatus()` suspension below, deliberately: that
         // suspension is a window in which a `stop()` can arrive, and the point

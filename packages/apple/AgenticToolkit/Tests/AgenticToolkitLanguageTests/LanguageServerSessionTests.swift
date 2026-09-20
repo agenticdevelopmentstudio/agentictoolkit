@@ -58,6 +58,32 @@ struct LanguageServerSessionTests {
     sleep 1
     """#
 
+    /// Answers the handshake, closes its **stdout**, and keeps running.
+    ///
+    /// A server that has gone quiet without dying. The session sees the read
+    /// sequence end and calls it a spontaneous exit, but the child is still
+    /// there with an open stdin, so anything written to it afterwards is
+    /// accepted and never answered.
+    ///
+    /// The `sleep` is the same one `exitingServerScript` carries and for the
+    /// same reason: the stream end has to arrive *after* `start()` has
+    /// returned, or `start()` itself fails with `.serverExited` and the test
+    /// never reaches the teardown it is about.
+    ///
+    /// `exitingServerScript` cannot stand in for it: a child that has actually
+    /// exited closed its stdin too, so a later write fails on the pipe before
+    /// anything in the session is reached. This script is what removes that
+    /// alternative explanation from the timing test below.
+    private static let mutedServerScript = #"""
+    CAPS='{"hoverProvider":true}'
+    BODY='{"jsonrpc":"2.0","id":1,"result":{"capabilities":'"$CAPS"'}}'
+    IFS= read -r HEADER_LINE
+    printf 'Content-Length: %s\r\n\r\n%s' "${#BODY}" "$BODY"
+    sleep 1
+    exec 1>&-
+    cat >/dev/null
+    """#
+
     /// Promises 100 body bytes, writes 16, and exits — a server that crashes
     /// mid-message.
     private static let truncatingServerScript = #"""
@@ -354,18 +380,30 @@ struct LanguageServerSessionTests {
         await session.stop()
     }
 
-    /// Tearing down a session whose server already died must not spend the
+    /// Tearing down a session whose server has gone quiet must not spend the
     /// shutdown budget discovering that.
     ///
-    /// What it catches: `publishStreamEnd()` not telling `InitializingServer`
-    /// its connection is gone. That type keeps its own handshake state and
-    /// nothing in it watches the transport, so after a spontaneous exit it
-    /// still believes it is `.initialized` — and `shutdownAndExit()` is
-    /// guarded on exactly that. `teardown()` therefore sends a `shutdown`
-    /// *request* down a channel whose read sequence has already finished, and
-    /// the continuation waiting for the reply is never resumed: `stop()` hangs
-    /// until `withWallClockBudget` cuts it loose, on every crashed server, for
-    /// the whole budget.
+    /// **This pins a property, not a fix — and the difference was measured
+    /// rather than argued.** The property is worth a guard on its own: `stop()`
+    /// on a session whose transport has ended returns in far less than the
+    /// budget it is entitled to spend. Three things hold that up at once
+    /// today — `teardown()` bounds the shutdown with `withWallClockBudget`,
+    /// `publishStreamEnd()` tells `InitializingServer` its connection is gone,
+    /// and `JSONRPCSession.readSequenceFinished()` latches `channelClosed` so
+    /// that any later send throws `dataStreamClosed` instead of waiting.
+    ///
+    /// That last one is why this test does **not** discriminate the
+    /// `connectionInvalidated()` call: with that line reverted this test still
+    /// passes, in 1.04 s, because the doomed `shutdown` throws rather than
+    /// hanging. It was run that way before this comment was written. The call
+    /// stays because `InitializingServer` otherwise goes on believing it is
+    /// `.initialized`, but a timing test is not what proves it — and a test
+    /// captioned as proof of a fix it cannot fail on is worse than no test.
+    ///
+    /// **The server is `mutedServerScript`, still alive with its stdout
+    /// closed** — the only shape in which a post-mortem write could in
+    /// principle block on a reply at all. `exitingServerScript` would make the
+    /// write fail on a dead pipe and prove strictly less.
     ///
     /// **The budget here is ten seconds and the assertion is one**, which is
     /// what makes the measurement a measurement. A budget near the assertion
@@ -373,7 +411,7 @@ struct LanguageServerSessionTests {
     /// never reached on a healthy run, so the long value costs nothing.
     @Test("stop() after a server has died on its own returns without spending the shutdown budget")
     func stopAfterASpontaneousDeathDoesNotWaitOutTheBudget() async throws {
-        let session = makeSession(script: Self.exitingServerScript, shutdownBudget: 10)
+        let session = makeSession(script: Self.mutedServerScript, shutdownBudget: 10)
         try await session.start()
 
         // The death has to have been noticed first: this is about tearing down
