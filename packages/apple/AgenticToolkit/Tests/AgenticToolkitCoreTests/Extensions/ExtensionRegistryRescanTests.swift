@@ -183,7 +183,7 @@ struct ExtensionRegistryRescanTests {
         #expect(point.applied == ["acme.good"])
 
         var changes = 0
-        registry.contributionsDidChange = { changes += 1 }
+        registry.addContributionsObserver { changes += 1 }
         await registry.reload()
 
         #expect(point.withdrawn == ["acme.good"])

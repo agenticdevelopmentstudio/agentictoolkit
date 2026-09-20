@@ -48,17 +48,17 @@ public struct ExtensionUpdateCheck: Sendable {
                 group.addTask { await self.outcome(for: extensionToCheck) }
             }
             var updates: [ExtensionUpdate] = []
-            var unavailable: [String] = []
+            var unavailable: [ExtensionUpdateUnavailable] = []
             for await outcome in group {
                 switch outcome {
                 case .update(let update): updates.append(update)
                 case .upToDate: break
-                case .notCheckable(let identifier): unavailable.append(identifier)
+                case .notCheckable(let entry): unavailable.append(entry)
                 }
             }
             return ExtensionUpdateReport(
                 updates: updates.sorted { $0.identifier < $1.identifier },
-                notCheckable: unavailable.sorted())
+                notCheckable: unavailable.sorted { $0.identifier < $1.identifier })
         }
     }
 
@@ -103,17 +103,45 @@ public struct ExtensionUpdateCheck: Sendable {
             }
             return .upToDate
         } catch {
-            let reason = String(describing: error)
+            let description = String(describing: error)
             Self.logger.debug(
-                "No update answer for \(installed.identifier, privacy: .public): \(reason, privacy: .public)")
-            return .notCheckable(installed.identifier)
+                "No update answer for \(installed.identifier, privacy: .public): \(description, privacy: .public)")
+            return .notCheckable(ExtensionUpdateUnavailable(
+                identifier: installed.identifier,
+                reason: Self.reason(for: error)))
+        }
+    }
+
+    /// Which kind of "no answer" this was.
+    ///
+    /// **A 404 and a 503 are not the same news.** A 404 is the registry saying
+    /// it has never heard of this extension — the ordinary case for a dev
+    /// checkout or a private build, and nothing is wrong. Anything else is the
+    /// registry not answering: a name that fails to resolve, a proxy, a
+    /// registry that is down. Folding them together told a user whose network
+    /// was out that eleven of their extensions do not exist.
+    ///
+    /// The two that never reach the registry at all are kept apart for the
+    /// same reason: neither is the registry's doing, and the reader can only
+    /// act on one of them.
+    private static func reason(for error: Error) -> ExtensionUpdateUnavailable.Reason {
+        switch error {
+        case let updateError as ExtensionUpdateError:
+            switch updateError {
+            case .noPublisher: return .noPublisher
+            case .versionNotComparable: return .versionNotComparable
+            }
+        case OpenVSXError.requestFailed(_, status: 404):
+            return .notPublished
+        default:
+            return .registryUnreachable
         }
     }
 
     private enum ExtensionUpdateOutcome: Sendable {
         case update(ExtensionUpdate)
         case upToDate
-        case notCheckable(String)
+        case notCheckable(ExtensionUpdateUnavailable)
     }
 }
 
@@ -136,6 +164,46 @@ public struct ExtensionUpdate: Sendable, Equatable {
     }
 }
 
+/// An extension the check could not answer for, and why not.
+///
+/// The reason is carried rather than reconstructed from the identifier,
+/// because from the outside every one of these looks identical — a name and no
+/// version — and the difference between "you installed this by hand and it was
+/// never published" and "the registry is down" is the whole of what a reader
+/// needs to know *(explicit-over-implicit)*.
+public struct ExtensionUpdateUnavailable: Sendable, Equatable {
+
+    public enum Reason: Sendable, Equatable {
+
+        /// The registry answered 404: it has no such extension. The ordinary
+        /// case for a dev checkout, a private build, or anything installed
+        /// from a `.vsix` by hand.
+        case notPublished
+
+        /// The registry did not answer, or answered something unusable — the
+        /// network, a proxy, a self-hosted registry that is down, a response
+        /// that would not decode. Nothing has been learned about the extension
+        /// either way.
+        case registryUnreachable
+
+        /// The manifest declares no `publisher`, so there is no registry
+        /// coordinate to ask about. Nothing was asked.
+        case noPublisher
+
+        /// Both versions exist and neither side can order them, so no update
+        /// can be offered without risking proposing a downgrade.
+        case versionNotComparable
+    }
+
+    public let identifier: String
+    public let reason: Reason
+
+    public init(identifier: String, reason: Reason) {
+        self.identifier = identifier
+        self.reason = reason
+    }
+}
+
 /// The result of one pass over everything installed.
 ///
 /// `notCheckable` is carried beside the updates rather than dropped, because
@@ -143,9 +211,9 @@ public struct ExtensionUpdate: Sendable, Equatable {
 /// answers and a UI that shows the first for the second is lying quietly.
 public struct ExtensionUpdateReport: Sendable, Equatable {
     public let updates: [ExtensionUpdate]
-    public let notCheckable: [String]
+    public let notCheckable: [ExtensionUpdateUnavailable]
 
-    public init(updates: [ExtensionUpdate], notCheckable: [String]) {
+    public init(updates: [ExtensionUpdate], notCheckable: [ExtensionUpdateUnavailable]) {
         self.updates = updates
         self.notCheckable = notCheckable
     }

@@ -1023,7 +1023,7 @@ struct ExtensionRegistryTests {
             // host rebuilding from the old answer, which is the defect F10 is
             // about wearing a different hat.
             var observed: [[String]] = []
-            registry.contributionsDidChange = { observed.append(point.appliedIdentifiers) }
+            registry.addContributionsObserver { observed.append(point.appliedIdentifiers) }
 
             registry.loadAll()
             #expect(observed == [["acme.good"]])
@@ -1062,7 +1062,7 @@ struct ExtensionRegistryTests {
             registry.loadAll()
 
             var observed: [[String]] = []
-            registry.contributionsDidChange = { observed.append(point.appliedIdentifiers) }
+            registry.addContributionsObserver { observed.append(point.appliedIdentifiers) }
 
             // `loadAll()` withdraws everything it applied before re-applying.
             // One notification at the end, never one per withdrawal: a host
@@ -1070,6 +1070,76 @@ struct ExtensionRegistryTests {
             // existed for the user.
             registry.loadAll()
             #expect(observed == [["acme.good"]])
+        }
+    }
+
+    // MARK: - Who is watching
+
+    /// **More than one thing watches contributions, and always did.** The
+    /// registry used to hold exactly one handler, so the second thing to want
+    /// one silently un-wired the first — and the workaround was for each
+    /// subscriber to capture whatever was there and call it, which only works
+    /// if every subscriber remembers to, forever.
+    @Test("every observer is told, not only the last one to ask")
+    func everyObserverIsTold() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(RecordingContributionPoint())
+
+            var first = 0
+            var second = 0
+            registry.addContributionsObserver { first += 1 }
+            registry.addContributionsObserver { second += 1 }
+
+            registry.loadAll()
+
+            #expect(first == 1)
+            #expect(second == 1)
+        }
+    }
+
+    @Test("an observer that is taken off stops being told, and the others do not")
+    func aRemovedObserverStopsBeingTold() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            try writeManifest(manifestJSON(name: "good"), named: "good-ext", in: root)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.register(RecordingContributionPoint())
+
+            var leaving = 0
+            var staying = 0
+            let token = registry.addContributionsObserver { leaving += 1 }
+            registry.addContributionsObserver { staying += 1 }
+            registry.loadAll()
+
+            registry.removeContributionsObserver(token)
+            registry.setEnabled(false, for: "acme.good")
+
+            #expect(leaving == 1)
+            #expect(staying == 2)
+        }
+    }
+
+    /// Removing something already gone, or never there, is not an error — the
+    /// caller is a `deinit` as often as not (`idempotency`).
+    @Test("removing an observer twice is not an error")
+    func removingAnObserverTwiceIsNotAnError() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            let token = registry.addContributionsObserver {}
+
+            registry.removeContributionsObserver(token)
+            registry.removeContributionsObserver(token)
+            registry.removeContributionsObserver(UUID())
         }
     }
 }

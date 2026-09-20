@@ -936,8 +936,8 @@ public final class ExtensionHostInstaller {
     ///
     /// **Identity, not identifier.** Keying on the identifier alone made
     /// "already installed" mean "never install again": `ExtensionRegistry
-    /// .loadAll()` re-reads every manifest from disk and fires
-    /// `contributionsDidChange`, so an extension edited and rescanned arrived
+    /// .loadAll()` re-reads every manifest from disk and tells its
+    /// contributions observers, so an extension edited and rescanned arrived
     /// here with a new `LoadedExtension` and was skipped — the running host
     /// went on executing the previous code, with the registry, the
     /// contribution points and the settings UI all showing the new manifest.

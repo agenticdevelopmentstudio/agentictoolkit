@@ -126,7 +126,7 @@ public final class ExtensionRegistry {
     /// but nothing can place it until the installed `ComposableTabLayoutSpec`
     /// also names it, and that spec belongs to the host.
     ///
-    /// One callback rather than a `@Published` set, because this tier is
+    /// A callback rather than a `@Published` set, because this tier is
     /// Foundation-only and the thing that changed is not expressible here: the
     /// registry knows contributions moved, not which of five kinds. Callers
     /// re-read whatever they care about.
@@ -134,7 +134,46 @@ public final class ExtensionRegistry {
     /// Fired after the state it describes is already in place, so a callback
     /// that reads `extensions` or asks a point what it holds sees the new
     /// answer, never the old one.
-    public var contributionsDidChange: (() -> Void)?
+    private var contributionsObservers: [(token: UUID, handler: () -> Void)] = []
+
+    /// Registers `handler`, to be called after every contribution change.
+    ///
+    /// **A list rather than the one slot this used to be.** More than one
+    /// thing watches this — the document layout has to widen before a
+    /// contributed view can be placed, and the extension hosts have to
+    /// reconcile — and a single slot meant whichever subscribed second
+    /// silently un-wired the first. The workaround was for each subscriber to
+    /// read the slot, keep what it found and call it on the way through, which
+    /// is correct only for as long as every subscriber remembers to do it, and
+    /// fails silently on the first one that does not *(explicit-over-implicit)*.
+    ///
+    /// The returned token is only needed to stop observing; a subscriber that
+    /// lives as long as the registry can discard it.
+    @discardableResult
+    public func addContributionsObserver(_ handler: @escaping () -> Void) -> UUID {
+        let token = UUID()
+        contributionsObservers.append((token: token, handler: handler))
+        return token
+    }
+
+    /// Stops calling the handler `token` was returned for. A token that is not
+    /// registered — already removed, or never was — is not an error, because
+    /// the caller is as often as not a teardown path that cannot be sure
+    /// *(idempotency)*.
+    public func removeContributionsObserver(_ token: UUID) {
+        contributionsObservers.removeAll { $0.token == token }
+    }
+
+    /// Tells every observer, in the order they subscribed.
+    ///
+    /// Over a copy, so an observer that subscribes or unsubscribes from inside
+    /// its own handler changes who is called *next* time rather than mutating
+    /// the list being walked.
+    private func notifyContributionsDidChange() {
+        for observer in contributionsObservers {
+            observer.handler()
+        }
+    }
 
     // MARK: - Initialization
 
@@ -172,14 +211,15 @@ public final class ExtensionRegistry {
     /// `loadAll()` with the disk read off the main actor.
     ///
     /// The same load in every respect a caller can observe — same order, same
-    /// failures, same `contributionsDidChange` — differing only in where the
+    /// failures, same notification to the same observers — differing only in
+    /// where the
     /// expensive half happens. The class-level rationale for a synchronous load
     /// is scoped to startup, when this runs once before any window exists; a
     /// rescan after an install runs from a button in a live settings window,
     /// and there the enumeration, the read and the JSONC decode per installed
     /// extension are a stopped run loop for as long as the user's extensions
     /// take. Only what genuinely belongs to this actor — withdrawing and
-    /// re-applying contributions, and whatever `contributionsDidChange` sets
+    /// re-applying contributions, and whatever the contributions observers set
     /// off — stays on it.
     ///
     /// Note that the old contributions stay installed for the duration of the
@@ -350,7 +390,7 @@ public final class ExtensionRegistry {
             }
         }
 
-        contributionsDidChange?()
+        notifyContributionsDidChange()
     }
 
     /// Reads a single extension directory, answering its decoded manifest or
@@ -618,7 +658,7 @@ public final class ExtensionRegistry {
         // for an identifier this registry never loaded both leave every point
         // holding exactly what it held, and a host that rebuilt its layout on
         // the strength of that would be doing it on every settings save.
-        contributionsDidChange?()
+        notifyContributionsDidChange()
     }
 
     // MARK: - Uninstall
@@ -665,7 +705,7 @@ public final class ExtensionRegistry {
         disabled = disabled.filter { $0.lowercased() != folded }
         UserSettings.disabledExtensionIdentifiers.value = disabled
 
-        contributionsDidChange?()
+        notifyContributionsDidChange()
     }
 }
 

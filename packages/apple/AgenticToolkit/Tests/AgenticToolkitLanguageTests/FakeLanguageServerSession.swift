@@ -251,8 +251,18 @@ actor FakeLanguageServerSession: LanguageServerSessionProtocol {
     /// The point of the window this opens is that the session is mid-teardown
     /// while its `state` still says `.running`, which is the only moment the
     /// fake's gate can be told apart from a plain state check.
+    ///
+    /// **Returns rather than parking when this fake will never park a stop.**
+    /// Only `stop()` resumes these waiters, and only when `behavior.holdsStop`
+    /// is set and `releaseHeldStop()` has not already been called — so on any
+    /// other fake the wait had no resumer and hung the whole suite. A caller
+    /// that meant to open the window is left asserting against a session that
+    /// has simply stopped, which fails where it is written and names itself;
+    /// a hang names nothing and takes everything after it with it
+    /// (`fail-fast`).
     func waitForHeldStop() async {
         guard heldStops.isEmpty else { return }
+        guard behavior.holdsStop, !stopWasReleased else { return }
         await withCheckedContinuation { continuation in
             stopEntryWaiters.append(continuation)
         }

@@ -141,31 +141,42 @@ public enum VSIXArchive {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
         process.arguments = ["-x", "-k", archive.path, destination.path]
-        let errors = Pipe()
-        process.standardError = errors
-        process.standardOutput = Pipe()
+
+        // `CommandRunner` rather than run-and-wait here, for both of the
+        // reasons it exists. `ditto` normally writes nothing to stdout, so the
+        // undrained pipe this used to hand it was a deadlock waiting for the
+        // one archive that makes it talkative — and nothing bounded how long
+        // an expansion could take, on bytes fetched from a third party.
+        let outcome: CommandRunner.Outcome
         do {
-            try process.run()
+            outcome = try CommandRunner.runToCompletion(process, timeout: expansionTimeout)
         } catch {
+            try? FileManager.default.removeItem(at: destination)
             throw VSIXArchiveError.expansionUnavailable(String(describing: error))
         }
-        // Read before waiting: `ditto`'s diagnostics are small, but a pipe
-        // that fills while nothing drains it deadlocks the child, and a
-        // deadlocked install is worse than a failed one.
-        let message = String(
-            data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        process.waitUntilExit()
 
-        guard process.terminationStatus == 0 else {
-            // The half-written tree is not a partial install anyone can use,
-            // and leaving it means the next attempt hits `destinationExists`
-            // and fails for the wrong reason.
+        // The half-written tree is not a partial install anyone can use, and
+        // leaving it means the next attempt hits `destinationExists` and fails
+        // for the wrong reason.
+        guard !outcome.timedOut else {
+            try? FileManager.default.removeItem(at: destination)
+            throw VSIXArchiveError.expansionTimedOut(seconds: expansionTimeout)
+        }
+        guard outcome.status == 0 else {
             try? FileManager.default.removeItem(at: destination)
             throw VSIXArchiveError.expansionFailed(
-                status: process.terminationStatus,
-                message: message.trimmingCharacters(in: .whitespacesAndNewlines))
+                status: outcome.status, message: outcome.diagnostics)
         }
     }
+
+    /// How long one archive gets to expand.
+    ///
+    /// Generous on purpose: this covers a large extension on a slow disk, and
+    /// the number is not a performance budget — it is the point at which
+    /// waiting has stopped being waiting. What it bounds is an archive crafted
+    /// so that expanding it never ends, which is a real shape (a zip bomb
+    /// expands forever, not merely large) and arrives here from the internet.
+    public static let expansionTimeout: TimeInterval = 120
 
     /// `<expanded>/extension` — the directory that becomes the installed
     /// extension. Everything beside it in the archive is packaging.
@@ -286,4 +297,10 @@ public enum VSIXArchiveError: Error, Sendable, Equatable {
     case destinationExists(URL)
     case expansionUnavailable(String)
     case expansionFailed(status: Int32, message: String)
+
+    /// The unarchiver was still going after `seconds` and was stopped. Kept
+    /// apart from `expansionFailed` because it is the one of the two that says
+    /// nothing about the archive's contents — there is no exit status and no
+    /// message, only a decision this code made.
+    case expansionTimedOut(seconds: TimeInterval)
 }

@@ -32,6 +32,17 @@ public struct ExtensionWebviewPlacement {
         self.reveal = reveal
         self.remove = remove
     }
+
+    /// Hands both verbs to the panel that will call them.
+    ///
+    /// Here rather than at each call site because *which callback takes which
+    /// verb* is one fact, and it was written out at every site that had a
+    /// placement — including the restore path, where getting it wrong shows up
+    /// only after a relaunch.
+    public func install(on panel: WebviewPanelViewController) {
+        panel.onRevealRequested = reveal
+        panel.onRemovalRequested = remove
+    }
 }
 
 /// Builds the panel `vscode.window.createWebviewPanel` asked for, and hands it
@@ -75,8 +86,7 @@ public final class PaneWebviewPresenter: ExtensionWebviewPresenting {
 
         guard let placement = place(panel) else { return nil }
 
-        panel.onRevealRequested = placement.reveal
-        panel.onRemovalRequested = placement.remove
+        placement.install(on: panel)
 
         // `preserveFocus` is honoured by revealing straight away rather than
         // by passing it down into placement: a panel is created *and* shown by

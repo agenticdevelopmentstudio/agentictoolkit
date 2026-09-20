@@ -713,13 +713,12 @@ struct ExtensionsCoordinatorTests {
         #expect(reportedCount == 3)
     }
 
-    /// `installExtensionHosts` subscribes to `registry.contributionsDidChange`
-    /// by *chaining* whatever handler was already there, not replacing it —
-    /// pinned by assigning a recorder before installing, then triggering a
-    /// real later change (`setEnabled`) and checking the recorder still ran
+    /// The coordinator's own subscription does not displace anybody else's —
+    /// pinned by adding a recorder before installing, then triggering a real
+    /// later change (`setEnabled`) and checking the recorder still ran
     /// alongside the coordinator's own handling of that change.
-    @Test("installExtensionHosts chains the previous contributionsDidChange rather than replacing it")
-    func installExtensionHostsChainsThePreviousContributionsDidChangeRatherThanReplacingIt() throws {
+    @Test("installExtensionHosts leaves an observer added before it still subscribed")
+    func installExtensionHostsLeavesAnEarlierObserverSubscribed() throws {
         try withInMemorySettings {
             let root = try makeTempDirectory()
             defer { try? FileManager.default.removeItem(at: root) }
@@ -735,7 +734,7 @@ struct ExtensionsCoordinatorTests {
                 try #require(coordinator.registry.extensions.count == 1)
 
                 var priorHandlerRuns = 0
-                coordinator.registry.contributionsDidChange = { priorHandlerRuns += 1 }
+                coordinator.registry.addContributionsObserver { priorHandlerRuns += 1 }
 
                 coordinator.installExtensionHosts(
                     commandRegistry: CommandRegistry(),

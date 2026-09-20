@@ -691,16 +691,48 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
             sentences.append(
                 "\(count) \(count == 1 ? "extension has" : "extensions have") an update.")
         }
-        if !report.notCheckable.isEmpty {
+        // One sentence per reason, in a fixed order. A check can fail in more
+        // than one way at once, and a single clause has to pick one of them to
+        // be wrong about — which it did, calling an unreachable registry a
+        // registry with no record.
+        for reason in Self.unavailableReasonOrder {
+            let named = report.notCheckable.filter { $0.reason == reason }
+            guard !named.isEmpty else { continue }
             // Named, not counted: the usual cause is an extension installed by
             // hand that the registry has never heard of, and the reader can
             // only recognise that from the name.
-            let count = report.notCheckable.count
             sentences.append(
-                "\(count) could not be checked (\(report.notCheckable.joined(separator: ", "))) "
-                    + "— the registry has no record of them.")
+                "\(named.count) could not be checked "
+                    + "(\(named.map(\.identifier).joined(separator: ", "))) "
+                    + "— \(Self.clause(for: reason, plural: named.count > 1)).")
         }
         return sentences.joined(separator: " ")
+    }
+
+    /// Worst news first: a registry that is down affects everything, and a
+    /// manifest problem affects the one extension that has it.
+    private static let unavailableReasonOrder: [ExtensionUpdateUnavailable.Reason] = [
+        .registryUnreachable, .notPublished, .noPublisher, .versionNotComparable
+    ]
+
+    private static func clause(
+        for reason: ExtensionUpdateUnavailable.Reason,
+        plural: Bool
+    ) -> String {
+        switch reason {
+        case .registryUnreachable:
+            return "the registry could not be reached"
+        case .notPublished:
+            return "the registry has no record of " + (plural ? "them" : "it")
+        case .noPublisher:
+            return plural
+                ? "their manifests name no publisher"
+                : "its manifest names no publisher"
+        case .versionNotComparable:
+            return plural
+                ? "their version numbers cannot be compared with the published ones"
+                : "its version number cannot be compared with the published one"
+        }
     }
 
     private func makeUpdateRow(_ update: ExtensionUpdate) -> NSView {
@@ -804,6 +836,9 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
                 return "\(url.lastPathComponent) is already there."
             case .expansionUnavailable, .expansionFailed:
                 return "the archive could not be expanded."
+            case .expansionTimedOut(let seconds):
+                return "the archive was still expanding after "
+                    + "\(Int(seconds)) seconds, so it was stopped."
             }
         case is ExtensionInstallUnavailable:
             return "this app has nowhere to install extensions to."

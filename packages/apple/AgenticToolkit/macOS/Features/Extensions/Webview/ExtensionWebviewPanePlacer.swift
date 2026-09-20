@@ -82,7 +82,20 @@ public enum ExtensionWebviewPanePlacer {
             return nil
         }
 
-        return ExtensionWebviewPlacement(
+        return placement(forNodeID: nodeID)
+    }
+
+    /// The two verbs, bound to one pane's node id.
+    ///
+    /// **Both paths that produce a placed panel come through here.** Creating
+    /// one lands in `place(_:using:)` above; a panel restored after a quit is
+    /// built by `WebviewPanelSerializer`, which never placed anything and so
+    /// has to install the same two verbs itself. They were written out twice,
+    /// which is one definition of what a placed panel can do in two files
+    /// (`dry`) — and the restore copy is the one nobody looks at until a
+    /// relaunch.
+    public static func placement(forNodeID nodeID: UUID) -> ExtensionWebviewPlacement {
+        ExtensionWebviewPlacement(
             reveal: { preserveFocus in
                 reveal(nodeID: nodeID, preserveFocus: preserveFocus)
             },

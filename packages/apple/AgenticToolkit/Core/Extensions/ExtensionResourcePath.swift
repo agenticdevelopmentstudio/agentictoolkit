@@ -109,6 +109,28 @@ public enum ExtensionResourcePath {
             .standardizedFileURL
     }
 
+    /// The canonical URL of a directory named `component` inside `parent`,
+    /// for a directory that does not exist yet.
+    ///
+    /// **`canonicalDirectory` cannot be used on a path that is not there.**
+    /// `resolvingSymlinksInPath()` drops a leading `/private` only when what
+    /// is left still names something that exists, so an existing parent and
+    /// the child about to be created inside it canonicalize to *different*
+    /// roots — `/tmp/…` and `/private/tmp/…` — and comparing them says the
+    /// child is outside its own parent. An extensions folder under a macOS
+    /// temporary directory, or a home on another volume, is exactly that
+    /// shape, and every install into one was refused by name.
+    ///
+    /// So the parent is canonicalized, because it exists, and the component is
+    /// appended to the answer. `standardizedFileURL` still collapses any `..`
+    /// the component carries, which is what leaves
+    /// `url(_:isContainedIn:)` a real check rather than a formality.
+    public static func canonicalChild(_ component: String, of parent: URL) -> URL {
+        canonicalDirectory(parent)
+            .appendingPathComponent(component, isDirectory: true)
+            .standardizedFileURL
+    }
+
     /// Whether `candidate` is strictly below `base`.
     ///
     /// Compares path *components*, not string prefixes: `/tmp/ext-evil` has

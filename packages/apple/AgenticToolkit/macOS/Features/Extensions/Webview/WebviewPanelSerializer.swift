@@ -223,13 +223,7 @@ public final class WebviewPanelSerializer {
         // creation path. They are the placer's, called with the node id this
         // pane is being built for — and the pane does not exist yet at this
         // moment, which is exactly why those verbs look it up at call time.
-        let nodeID = context.nodeID
-        panel.onRevealRequested = { preserveFocus in
-            ExtensionWebviewPanePlacer.reveal(nodeID: nodeID, preserveFocus: preserveFocus)
-        }
-        panel.onRemovalRequested = {
-            ExtensionWebviewPanePlacer.remove(nodeID: nodeID)
-        }
+        ExtensionWebviewPanePlacer.placement(forNodeID: context.nodeID).install(on: panel)
         persist(panel, in: context)
         return panel
     }

@@ -1325,6 +1325,29 @@ public final class MainThreadWebviews {
     /// A webview holds a whole web content process, so a panel left standing
     /// after its extension is gone is not merely untidy — hence disposing the
     /// panels rather than only forgetting them.
+    ///
+    /// ### Two callbacks are cleared and one is deliberately not
+    ///
+    /// `onDidDispose` and `onDidReceiveMessage` are the extension's own: both
+    /// end in JavaScript, and this runs while the context that JavaScript
+    /// lives in is being torn down. Clearing them is what stops a teardown
+    /// calling back into an extension that is already half gone.
+    ///
+    /// `onRemovalRequested` is the *app's*, installed by
+    /// `ExtensionWebviewPanePlacer`, and it stays installed on purpose: the
+    /// alternative is a pane left in the user's window holding a panel that
+    /// has been disposed — a blank rectangle with a stale title that no verb
+    /// can address and nothing will ever fill. The pane going with the
+    /// extension is the answer a reader can act on.
+    ///
+    /// **What that costs, stated because it is a real cost:**
+    /// `ExtensionHostInstaller.reconcile()` disposes and re-creates a host
+    /// whose `InstalledIdentity` moved — an author editing their extension and
+    /// the registry rescanning it — so their open webview panes close on the
+    /// rescan. VS Code reloads such a webview through the extension's
+    /// registered serializer; nothing here hands a surviving pane to the
+    /// replacement host, and the stored `WebviewPanelState` is only read when
+    /// a window's layout is next rebuilt.
     public func dispose() {
         guard !isDisposed else { return }
         isDisposed = true

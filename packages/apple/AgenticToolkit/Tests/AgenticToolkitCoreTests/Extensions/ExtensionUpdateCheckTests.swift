@@ -193,7 +193,63 @@ struct ExtensionUpdateCheckTests {
 
         #expect(report.updates.map(\.identifier) == ["acme.stale"])
         #expect(report.updates.first?.latestVersion == "3.0.0")
-        #expect(report.notCheckable == ["acme.private"])
+        #expect(report.notCheckable == [.init(identifier: "acme.private", reason: .notPublished)])
+    }
+
+    // MARK: - Why a check could not be made
+
+    /// A registry that answered *something other than 404* has not said the
+    /// extension is unknown — it has said nothing at all. Reporting the two as
+    /// one leaves a reader whose network is down reading that eleven of their
+    /// extensions do not exist, which is both false and alarming
+    /// (`explicit-over-implicit`).
+    @Test("a registry that fails is unreachable, not a registry with no record")
+    func aFailingRegistryIsUnreachableRatherThanUnknown() async throws {
+        let check = makeCheck()
+        StubbedRegistry.respond(to: "/acme/widget", json: "{}", status: 503)
+
+        let report = await check.check([try installed()])
+
+        #expect(report.updates.isEmpty)
+        #expect(
+            report.notCheckable == [.init(identifier: "acme.widget", reason: .registryUnreachable)])
+    }
+
+    /// Nothing was asked of the registry at all in this one: a manifest with
+    /// no `publisher` has no registry coordinate to look anything up by.
+    @Test("a manifest with no publisher says so, rather than blaming the registry")
+    func aManifestWithNoPublisherSaysSo() async throws {
+        let check = makeCheck()
+
+        let report = await check.check([try installed(publisher: nil)])
+
+        #expect(report.notCheckable.map(\.reason) == [.noPublisher])
+    }
+
+    /// Both versions exist and the registry answered; they simply cannot be
+    /// ordered, so no update can be offered without risking a downgrade.
+    @Test("a version neither side can compare says so")
+    func anIncomparableVersionSaysSo() async throws {
+        let check = makeCheck()
+        StubbedRegistry.respond(to: "/acme/widget", json: published(version: "2.0.0"))
+
+        let report = await check.check([try installed(version: "nightly")])
+
+        #expect(
+            report.notCheckable
+                == [.init(identifier: "acme.widget", reason: .versionNotComparable)])
+    }
+
+    @Test("the unavailable are sorted by identifier, like the updates")
+    func theUnavailableAreSorted() async throws {
+        let check = makeCheck()
+
+        let report = await check.check([
+            try installed(publisher: nil, name: "zebra"),
+            try installed(publisher: nil, name: "alpha")
+        ])
+
+        #expect(report.notCheckable.map(\.identifier) == ["alpha", "zebra"])
     }
 
     /// Sorted by identifier, because these lookups run concurrently and task

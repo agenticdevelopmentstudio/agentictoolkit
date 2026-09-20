@@ -41,10 +41,14 @@ public final class ExtensionsSettingsPanelViewController: ComposableSettings.Set
             .init(
                 title: "What an Extension Is",
                 body: "A VS Code extension folder — a package.json plus the files it names. "
-                    + "This app reads the parts of one that need no code to run: colour "
-                    + "themes, snippets, file-type mappings, settings and view panes. "
-                    + "Anything an extension does by *running* code needs an extension host, "
-                    + "which this app does not have yet."
+                    + "The parts that need no code to run are read straight from the "
+                    + "manifest: colour themes, snippets, file-type mappings, settings and "
+                    + "view panes. The rest is JavaScript, and it runs — an extension's "
+                    + "code is started the first time something it declared is actually "
+                    + "needed, and it can register commands, provide tree views and open "
+                    + "webview panes from there. Not everything VS Code offers an "
+                    + "extension exists here; what is missing is listed under Language "
+                    + "Servers, in Known Differences from VS Code."
             ),
             .init(
                 title: "Installing One",
@@ -702,13 +706,6 @@ final class ExtensionsEmptyStatePanel: ComposableSettings.SettingsPanelViewContr
 
 // MARK: - What went wrong
 
-/// The trailing panel listing `ExtensionRegistry.failures`.
-///
-/// Split in two, because the two kinds are not the same news: a
-/// `contributionPointFailed` names one refused contribution of an extension
-/// that loaded fine and is still installed, and reporting it as a failed load
-/// would tell a user their working extension is broken.
-@MainActor
 /// Shown only when this process cannot get executable memory: extensions are
 /// all running interpreted and nothing else in the app would ever say so.
 ///
@@ -717,6 +714,7 @@ final class ExtensionsEmptyStatePanel: ComposableSettings.SettingsPanelViewContr
 /// is how it was found the last time — by noticing, eventually, that something
 /// felt slow. The log line `JITAvailability` writes covers whoever is reading
 /// logs; this covers whoever is not.
+@MainActor
 final class ExtensionHostDegradedPanel: ComposableSettings.SettingsPanelViewController {
 
     private let availability: JITAvailability
@@ -758,6 +756,13 @@ final class ExtensionHostDegradedPanel: ComposableSettings.SettingsPanelViewCont
     }
 }
 
+/// The trailing panel listing `ExtensionRegistry.failures`.
+///
+/// Split in two, because the two kinds are not the same news: a
+/// `contributionPointFailed` names one refused contribution of an extension
+/// that loaded fine and is still installed, and reporting it as a failed load
+/// would tell a user their working extension is broken.
+@MainActor
 final class ExtensionLoadProblemsPanel: ComposableSettings.SettingsPanelViewController {
 
     private let refused: [ExtensionLoadFailure]

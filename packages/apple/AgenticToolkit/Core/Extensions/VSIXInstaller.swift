@@ -185,9 +185,10 @@ public struct VSIXInstaller: Sendable {
         try Self.requireSafeComponent(manifest.identifier, field: "identifier")
         try Self.requireSafeComponent(manifest.version, field: "version")
 
+        let directoryName = Self.directoryName(
+            identifier: manifest.identifier, version: manifest.version)
         let destination = installDirectory.appendingPathComponent(
-            Self.directoryName(identifier: manifest.identifier, version: manifest.version),
-            isDirectory: true)
+            directoryName, isDirectory: true)
 
         // Belt and braces, and not redundant: the component check is a
         // predicate over a string, this is a fact about the path that was
@@ -196,9 +197,16 @@ public struct VSIXInstaller: Sendable {
         // the first and be caught here. `moveIntoPlace` finishes with
         // `rename(2)`, which resolves `..` in the kernel rather than in
         // Foundation, so nothing downstream will catch what these two miss.
+        //
+        // `canonicalChild` rather than canonicalizing `destination`: the
+        // destination does not exist yet, and a path that does not exist
+        // canonicalizes differently from its own parent that does. See the
+        // comment on it — the version of this guard that did not know that
+        // refused every install into a `/private`-rooted folder.
         let root = ExtensionResourcePath.canonicalDirectory(installDirectory)
         guard ExtensionResourcePath.url(
-            ExtensionResourcePath.canonicalDirectory(destination), isContainedIn: root)
+            ExtensionResourcePath.canonicalChild(directoryName, of: installDirectory),
+            isContainedIn: root)
         else {
             throw VSIXInstallError.unsafeIdentity(
                 field: "identifier", value: destination.lastPathComponent)

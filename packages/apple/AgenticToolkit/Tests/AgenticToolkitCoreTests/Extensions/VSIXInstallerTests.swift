@@ -526,4 +526,72 @@ struct VSIXInstallerTests {
         #expect(installedDirectoryNames(in: installDirectory)
             == ["acme.widget-1.0.0-beta.1+build.7"])
     }
+
+    /// **The containment guard used to refuse an ordinary install whenever the
+    /// extensions folder was reached through `/private`.**
+    ///
+    /// `resolvingSymlinksInPath()` drops a leading `/private` — but only when
+    /// what is left still names something that exists. The install directory
+    /// exists, so it canonicalized to `/tmp/…`; the destination is the
+    /// directory about to be *created*, so it kept `/private/tmp/…`, and
+    /// comparing the two said the destination was outside its own parent. The
+    /// install failed with `unsafeIdentity` naming a perfectly ordinary
+    /// `<publisher>.<name>-<version>`.
+    ///
+    /// Nothing about it was hostile and nothing about it was hypothetical: it
+    /// is what a macOS temporary directory, a home on another volume, or any
+    /// `/private`-rooted path does. The fix is to canonicalize the parent —
+    /// which exists — and append to that, rather than canonicalizing a path
+    /// that does not exist yet.
+    @Test("an extensions folder reached through /private still installs")
+    func aPrivateRootedInstallDirectoryStillInstalls() throws {
+        let scratch = try makeTemporaryDirectory("private-rooted")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        // `/var/folders/…` → `/private/var/folders/…`: the same directory,
+        // named the way the guard could not cope with.
+        let installDirectory = scratch
+            .resolvingSymlinksInPath()
+            .appendingPathComponent("Extensions", isDirectory: true)
+        try #require(installDirectory.path.hasPrefix("/private/"))
+        try FileManager.default.createDirectory(
+            at: installDirectory, withIntermediateDirectories: true)
+
+        let installer = VSIXInstaller(installDirectory: installDirectory, hostVersion: Self.host)
+
+        let installation = try installer.install(
+            archive: try makeVSIX(manifest: manifestJSON(), in: scratch),
+            verification: unsigned,
+            source: .localFile(scratch))
+
+        #expect(installation.directory.lastPathComponent == "acme.widget-1.0.0")
+        #expect(installedDirectoryNames(in: installDirectory) == ["acme.widget-1.0.0"])
+    }
+
+    /// The guard is still a guard. Canonicalizing the parent rather than the
+    /// whole path must not be a way of turning the check off: a directory name
+    /// that climbs out is still refused, and from a `/private` root too.
+    @Test("a name that climbs out of a /private-rooted folder is still refused")
+    func aClimbingNameIsStillRefusedFromAPrivateRoot() throws {
+        let scratch = try makeTemporaryDirectory("private-rooted-hostile")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let installDirectory = scratch
+            .resolvingSymlinksInPath()
+            .appendingPathComponent("Extensions", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: installDirectory, withIntermediateDirectories: true)
+
+        let installer = VSIXInstaller(installDirectory: installDirectory, hostVersion: Self.host)
+
+        #expect(throws: (any Error).self) {
+            try installer.install(
+                archive: try self.makeVSIX(
+                    manifest: self.manifestJSON(name: "escape", publisher: ".."), in: scratch),
+                verification: self.unsigned,
+                source: .localFile(scratch))
+        }
+
+        #expect(installedDirectoryNames(in: installDirectory) == [])
+    }
 }

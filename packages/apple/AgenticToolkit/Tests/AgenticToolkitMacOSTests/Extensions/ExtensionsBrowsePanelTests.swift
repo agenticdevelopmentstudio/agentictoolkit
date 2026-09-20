@@ -191,6 +191,35 @@ struct ExtensionsBrowsePanelTests {
         }
     }
 
+    // MARK: - The summary line
+
+    @Test("an unreachable registry is not reported as a registry with no record")
+    func anUnreachableRegistryIsNotReportedAsNoRecord() {
+        let summary = ExtensionsBrowsePanel.updatesSummary(for: ExtensionUpdateReport(
+            updates: [],
+            notCheckable: [.init(identifier: "acme.widget", reason: .registryUnreachable)]))
+
+        #expect(summary.contains("could not be reached"))
+        #expect(!summary.contains("no record"))
+    }
+
+    /// One sentence per reason, because a check can fail in more than one way
+    /// at once and a single clause would have to pick one of them to be wrong
+    /// about.
+    @Test("each kind of unanswered check gets its own sentence, naming its own extensions")
+    func eachKindOfUnansweredCheckGetsItsOwnSentence() {
+        let summary = ExtensionsBrowsePanel.updatesSummary(for: ExtensionUpdateReport(
+            updates: [],
+            notCheckable: [
+                .init(identifier: "acme.local", reason: .notPublished),
+                .init(identifier: "acme.widget", reason: .registryUnreachable),
+                .init(identifier: "acme.other", reason: .registryUnreachable)
+            ]))
+
+        #expect(summary.contains("acme.local) — the registry has no record of it."))
+        #expect(summary.contains("acme.other, acme.widget) — the registry could not be reached."))
+    }
+
     @Test("installing the selected extension reports into the selected card")
     func installingTheSelectedExtensionReportsIntoTheSelectedCard() async throws {
         try await withPanel { panel, installer in

@@ -31,8 +31,8 @@ import AgenticToolkitLanguage
 /// `registry.reload()`, which reads the disk off this actor. A load is not a
 /// cheap thing done twice: it is an enumeration, a read and a JSONC decode per
 /// installed extension, followed by every contribution withdrawn and
-/// re-applied and `contributionsDidChange` rebuilding the document layout and
-/// reconciling every host. In a settings window the user is looking at, all of
+/// re-applied and every contributions observer rebuilding the document layout
+/// and reconciling every host. In a settings window the user is looking at, all of
 /// that on this actor is a stopped run loop.
 @MainActor
 public final class ExtensionsCoordinator: AppFeature {
@@ -256,33 +256,24 @@ public final class ExtensionsCoordinator: AppFeature {
 
     // MARK: - The one contributions subscription
 
-    /// Whatever was handling `registry.contributionsDidChange` before this
-    /// coordinator took it over, called first on every change.
+    /// This coordinator's registration with the registry, if it has one.
     ///
-    /// The registry has room for exactly one handler, and this coordinator now
-    /// has two things to do on a change — rebuild the document layout, and
-    /// reconcile the extension hosts. Assigning from each of the two public
-    /// entry points meant whichever ran second silently un-wired the first: the
-    /// wiring site calls `maintainDocumentLayout(basedOn:)` and then
-    /// `installExtensionHosts(...)`, so enabling an extension after launch
-    /// brought its host up and left its view unplaceable.
-    private var priorContributionsDidChange: (() -> Void)?
+    /// **One subscription, not one per entry point.** Both public entry points
+    /// call `subscribeToContributions()` and this coordinator has two things
+    /// to do on a change — rebuild the document layout, and reconcile the
+    /// extension hosts — but they are ordered with respect to each other, so
+    /// they belong in one handler rather than two independent observers whose
+    /// order would be whichever entry point the host happened to call first.
+    /// Holding the token is what keeps a second call from adding a second
+    /// registration that does the same work twice.
+    private var contributionsObserver: UUID?
 
-    /// Whether `subscribeToContributions()` has already taken the registry's
-    /// handler. Guards against capturing this coordinator's *own* handler as
-    /// the prior one — which a second `maintainDocumentLayout(basedOn:)` call
-    /// would otherwise do, building a chain one link longer on every call.
-    private var hasSubscribedToContributions = false
-
-    /// Takes over `registry.contributionsDidChange` once, chaining whatever
-    /// was there.
+    /// Subscribes to the registry's contribution changes, once.
     private func subscribeToContributions() {
-        guard !hasSubscribedToContributions else { return }
-        hasSubscribedToContributions = true
-        priorContributionsDidChange = registry.contributionsDidChange
+        guard contributionsObserver == nil else { return }
         // `[weak self]`: the registry is this coordinator's own property, so a
         // strong capture is a cycle that outlives `unregister()`.
-        registry.contributionsDidChange = { [weak self] in
+        contributionsObserver = registry.addContributionsObserver { [weak self] in
             self?.contributionsDidChange()
         }
     }
@@ -292,7 +283,6 @@ public final class ExtensionsCoordinator: AppFeature {
     /// in a layout with no room for it. Both are no-ops for the half that is
     /// not wired, so the order costs nothing when only one is.
     private func contributionsDidChange() {
-        priorContributionsDidChange?()
         refreshDocumentLayout()
         hostInstaller?.reconcile()
     }
