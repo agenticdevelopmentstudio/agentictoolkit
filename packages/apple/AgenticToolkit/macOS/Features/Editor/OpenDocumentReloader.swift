@@ -88,6 +88,24 @@ public final class OpenDocumentReloader {
     private struct Tracked {
         let url: URL
         let directoryPath: String
+
+        /// What the file looked like the last time its text was read, and
+        /// `nil` before there was one or after the file went away.
+        ///
+        /// This is what keeps a watcher event from costing a whole-file read.
+        /// The stream is created with `kFSEventStreamCreateFlagFileEvents`,
+        /// which reports metadata as readily as content — a chmod, an xattr
+        /// written by Spotlight or a Finder tag, an ownership change — and
+        /// coalescing turns one save into several callbacks. None of those
+        /// moves the size or the modification date, and without this every one
+        /// of them read the file from start to finish, on the actor drawing
+        /// the window, to conclude nothing had changed.
+        ///
+        /// It is taken *before* the read, not after: a writer that lands
+        /// between the stat and the read leaves a signature that does not
+        /// match what was read, so the next event reads again rather than
+        /// trusting text nobody ever saw.
+        var lastRead: FileSignature?
     }
     private var tracked: [DocumentUri: Tracked] = [:]
 
@@ -214,13 +232,37 @@ public final class OpenDocumentReloader {
     private func reloadIfNeeded(_ uri: DocumentUri) {
         guard let entry = tracked[uri], let document = store.document(for: uri) else { return }
 
+        guard let signature = FileSignature(of: entry.url) else {
+            // Deleted, renamed away, or momentarily absent between an atomic
+            // writer's unlink and rename. All three say the same thing: there
+            // is nothing to reload from, and the buffer is the better copy.
+            //
+            // Forgetting the signature is the part that matters. A file that
+            // comes back can be the same length at the same instant — a branch
+            // switched away and back restores the timestamp it recorded — and
+            // a reloader that still believed the old one would leave the
+            // buffer showing the other branch's text with no event left to
+            // correct it.
+            tracked[uri]?.lastRead = nil
+            return
+        }
+
+        // Nothing a read could tell us that this has not. Note this is not the
+        // check below in a cheaper form: that one asks whether the *buffer* is
+        // behind the file, this one asks whether the file moved at all since
+        // we last looked, and only the second can be answered without reading.
+        guard signature != entry.lastRead else { return }
+        tracked[uri]?.lastRead = signature
+
         let onDisk: String
         do {
             onDisk = try readText(entry.url)
         } catch {
-            // Deleted, renamed away, or momentarily absent between an atomic
-            // writer's unlink and rename. All three say the same thing: there
-            // is nothing to reload from, and the buffer is the better copy.
+            // Between the stat and the read — an atomic writer's window is
+            // exactly this wide. Nothing was read, so nothing is known: drop
+            // the signature so the next event does not skip on the strength of
+            // a read that never happened.
+            tracked[uri]?.lastRead = nil
             return
         }
 

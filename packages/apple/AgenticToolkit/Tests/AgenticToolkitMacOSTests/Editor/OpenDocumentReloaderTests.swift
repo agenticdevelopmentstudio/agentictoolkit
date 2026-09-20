@@ -58,6 +58,22 @@ struct OpenDocumentReloaderTests {
         }
     }
 
+    /// Counts whole-file reads, which is the cost the pre-check exists to
+    /// avoid. Not `Sendable` and not synchronised, because `TextReader` is
+    /// called on the main actor and nowhere else — if that ever stops being
+    /// true this stops compiling, which is the right failure.
+    @MainActor
+    private final class ReadCounter {
+        private(set) var count = 0
+
+        var reader: OpenDocumentReloader.TextReader {
+            { [self] url in
+                count += 1
+                return try String(contentsOf: url, encoding: .utf8)
+            }
+        }
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("reloader-\(UUID().uuidString)", isDirectory: true)
@@ -318,5 +334,114 @@ struct OpenDocumentReloaderTests {
         try write("after the stop", to: file)
         await deliver(file, to: watcher)
         #expect(document.text == "original")
+    }
+
+    // MARK: - 6. Not reading the file
+
+    /// What it catches: a reload path that answers "did the bytes change?" by
+    /// reading every byte, on the actor drawing the window.
+    ///
+    /// The watcher is created with `kFSEventStreamCreateFlagFileEvents`, which
+    /// reports metadata as readily as content — a chmod, an xattr written by
+    /// Spotlight or a Finder tag, the ownership change a restore makes — and
+    /// coalescing means one write can arrive as several callbacks. Every one
+    /// of those used to be a full synchronous read of a file that is byte for
+    /// byte what it was, and on a branch switch that is once per open document
+    /// in the tree.
+    @Test("a second event for a file that did not change reads nothing")
+    func anUnchangedFileIsNotReadTwice() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("Quiet.swift")
+        try write("original", to: file)
+
+        let store = TextDocumentStore()
+        let recorder = WatcherRecorder()
+        let counter = ReadCounter()
+        let reloader = OpenDocumentReloader(
+            store: store, makeWatcher: recorder.factory, readText: counter.reader)
+        reloader.start()
+        _ = store.open(uri: file.documentUri, languageId: "swift", text: "original")
+
+        let watcher = try recorder.watcher(forDirectoryOf: file)
+        await deliver(file, to: watcher)
+        let afterFirst = counter.count
+        await deliver(file, to: watcher)
+        await deliver(file, to: watcher)
+
+        // The first event has nothing to compare against and reads; every
+        // event after it finds the same size and the same modification date
+        // and stops there.
+        #expect(afterFirst == 1)
+        #expect(counter.count == 1)
+    }
+
+    /// And the gate is a gate, not a latch: a file that really did change is
+    /// read again and reloaded.
+    @Test("a file that changed since the last read is read again")
+    func aChangedFileIsReadAgain() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("Changing.swift")
+        try write("original", to: file)
+
+        let store = TextDocumentStore()
+        let recorder = WatcherRecorder()
+        let counter = ReadCounter()
+        let reloader = OpenDocumentReloader(
+            store: store, makeWatcher: recorder.factory, readText: counter.reader)
+        reloader.start()
+        let document = store.open(uri: file.documentUri, languageId: "swift", text: "original")
+
+        let watcher = try recorder.watcher(forDirectoryOf: file)
+        await deliver(file, to: watcher)
+
+        try write("from somewhere else, and longer", to: file)
+        await deliver(file, to: watcher)
+
+        #expect(counter.count == 2)
+        #expect(document.text == "from somewhere else, and longer")
+    }
+
+    /// What it catches: a stamp kept across a deletion. The file that comes
+    /// back may be the same length at the same second — a branch switched away
+    /// and back — and a reloader that still believed the old stamp would leave
+    /// the buffer showing the other branch's text forever.
+    @Test("a file that went away is read again when it returns")
+    func aDeletedFileForgetsItsStamp() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("Vanishing.swift")
+        try write("original", to: file)
+
+        let store = TextDocumentStore()
+        let recorder = WatcherRecorder()
+        let counter = ReadCounter()
+        let reloader = OpenDocumentReloader(
+            store: store, makeWatcher: recorder.factory, readText: counter.reader)
+        reloader.start()
+        let document = store.open(uri: file.documentUri, languageId: "swift", text: "original")
+
+        let watcher = try recorder.watcher(forDirectoryOf: file)
+        await deliver(file, to: watcher)
+        #expect(counter.count == 1)
+
+        let stampBefore = try #require(
+            FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as? Date)
+        try FileManager.default.removeItem(at: file)
+        await deliver(file, to: watcher)
+        // The buffer is the only copy now, and it keeps what it had.
+        #expect(document.text == "original")
+
+        // Restored with exactly the stamp it had before it went: "restored" is
+        // the same eight bytes long as "original", and the modification date
+        // is put back by hand. Nothing short of having noticed the deletion
+        // can tell this from the file that was there.
+        try write("restored", to: file)
+        try FileManager.default.setAttributes(
+            [.modificationDate: stampBefore], ofItemAtPath: file.path)
+        await deliver(file, to: watcher)
+        #expect(counter.count == 2)
+        #expect(document.text == "restored")
     }
 }

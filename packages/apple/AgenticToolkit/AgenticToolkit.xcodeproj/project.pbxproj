@@ -925,6 +925,7 @@
 		9F95153742FDE3319D0AE504 /* VerticalStackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83086F9AA30ABF344231CA8 /* VerticalStackView.swift */; };
 		9FCD2ABDE5A5AE4E51402734 /* RadioButtonChoiceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEDE81A0A5A28045A2DF62BF /* RadioButtonChoiceView.swift */; };
 		A014AF7FEA5FF7D75ADF7FC1 /* ConnectivityTriggerSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F9FF57A343BC690CE7EE0C /* ConnectivityTriggerSource.swift */; };
+		A044A7E4D39F5226CDDE97D2 /* FileSignature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65699705B8C7988FD1C6187B /* FileSignature.swift */; };
 		A04C641D01BE2D44A9AE5856 /* TerminalSessionRowCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140B7E5133EF9E3212A9A543 /* TerminalSessionRowCellView.swift */; };
 		A08E52246D5DABC867373681 /* MainThreadWebviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE656E55124BBCA72BDF6237 /* MainThreadWebviews.swift */; };
 		A0BDC34CB8F3F733FE5C63A7 /* NotesFolderListViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BDC7DD73089D6621690A75 /* NotesFolderListViewControllerTests.swift */; };
@@ -1063,6 +1064,7 @@
 		BC0AEA23E4EE1CF9167EF049 /* PaneCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 274BFC7290E8324BACDE5E7D /* PaneCapabilities.swift */; };
 		BC750A7A7563BE95309CD693 /* HTDVCellContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C929501A3AD95332E464035 /* HTDVCellContent.swift */; };
 		BCBC711992AA095E1F475842 /* GitClientError.swift in Sources */ = {isa = PBXBuildFile; fileRef = C868DCA4FB442325BBAA1234 /* GitClientError.swift */; };
+		BCD7D2928268CEA7A9AB4A7D /* FileSignatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72782B25A2B8702832516759 /* FileSignatureTests.swift */; };
 		BCFFAF18B8C07481D44518DC /* MCPSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02F0C1AE564F98FA8F54A978 /* MCPSettingsTests.swift */; };
 		BD38A1EB4D2CEDAB70BB1C79 /* GitRepoScannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D18988E65EE5AF1E7F27ABE4 /* GitRepoScannerTests.swift */; };
 		BD7611DC8CC9F1C6576C848B /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 098AA24D84936809E71B829A /* GRDB */; };
@@ -2969,6 +2971,7 @@
 		64A98A60FFB1917014F3BD5A /* TerminalSessionWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionWindowController.swift; sourceTree = "<group>"; };
 		64CFB7C3F73E90A169AB0F8F /* JSONCPreprocessorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONCPreprocessorTests.swift; sourceTree = "<group>"; };
 		64D9D12E6D1FA5ED6AB1483D /* HTDVLayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVLayoutEngine.swift; sourceTree = "<group>"; };
+		65699705B8C7988FD1C6187B /* FileSignature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSignature.swift; sourceTree = "<group>"; };
 		65AD1E929AB88513FB11E84F /* TerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSession.swift; sourceTree = "<group>"; };
 		65E84C2ED0A1658E6689EA0B /* InMemorySettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemorySettingsStoreTests.swift; sourceTree = "<group>"; };
 		662B67B704A33E2846E02889 /* TerminalSessionGitBranchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionGitBranchTests.swift; sourceTree = "<group>"; };
@@ -3033,6 +3036,7 @@
 		71DB9A31A6BF882E73FBA5FC /* AuthenticationModuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationModuleTests.swift; sourceTree = "<group>"; };
 		71FC0CFF8A190FE13E818A71 /* ThemeContributionPointTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeContributionPointTests.swift; sourceTree = "<group>"; };
 		72337013C6184C5FFEF921CE /* ScriptablePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptablePane.swift; sourceTree = "<group>"; };
+		72782B25A2B8702832516759 /* FileSignatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSignatureTests.swift; sourceTree = "<group>"; };
 		72F536752058A9E015395FB6 /* ComposableTabsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsWindowController.swift; sourceTree = "<group>"; };
 		73060587A0928DEA8E5E7597 /* BubbleTruncationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleTruncationTests.swift; sourceTree = "<group>"; };
 		732F83B2DC0B77B2784C7B7B /* HTDVModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVModel.swift; sourceTree = "<group>"; };
@@ -4381,6 +4385,7 @@
 		2AD45890B31CA2064FB1D5EE /* FileSystem */ = {
 			isa = PBXGroup;
 			children = (
+				65699705B8C7988FD1C6187B /* FileSignature.swift */,
 				3859A502C8ABBC4175715A1C /* FileSystemService.swift */,
 				D4AA3FA175306661C69D29FC /* FileSystemServicing.swift */,
 			);
@@ -6132,6 +6137,7 @@
 		C9F93F69760764952F6DBFFF /* FileSystem */ = {
 			isa = PBXGroup;
 			children = (
+				72782B25A2B8702832516759 /* FileSignatureTests.swift */,
 				EE5CE1385F51628013682355 /* FileSystemServiceTests.swift */,
 			);
 			path = FileSystem;
@@ -8190,6 +8196,7 @@
 				EF67FBEF3A727EF3A8F1DC47 /* ExtensionRegistryTests.swift in Sources */,
 				36B4CAE61BAEEDEC3BEB7006 /* ExtensionResourcePathTests.swift in Sources */,
 				F17A064C597B83C674A4D8BA /* ExtensionUpdateCheckTests.swift in Sources */,
+				BCD7D2928268CEA7A9AB4A7D /* FileSignatureTests.swift in Sources */,
 				E7C96D97325D74CF57DD7806 /* FileSystemServiceTests.swift in Sources */,
 				D99AB3F77295156AA916517B /* GitBranchParserTests.swift in Sources */,
 				35C6AFA3FD30EDA75D0C7869 /* GitClientConfigurationTests.swift in Sources */,
@@ -8795,6 +8802,7 @@
 				16BFC33B6B2D54930312F61C /* ExtensionSettings.swift in Sources */,
 				154CD4D56EA361BF8DE09E79 /* ExtensionUpdateCheck.swift in Sources */,
 				5FD6C0863F26159117F89402 /* FeedChatSession.swift in Sources */,
+				A044A7E4D39F5226CDDE97D2 /* FileSignature.swift in Sources */,
 				47CCFA92B7AB62C35C7C46F7 /* FileSystemService.swift in Sources */,
 				61A6F8A8971519975AFE72E0 /* FileSystemServicing.swift in Sources */,
 				D47979001F7A4B5C0D8ED51E /* GitBranch.swift in Sources */,

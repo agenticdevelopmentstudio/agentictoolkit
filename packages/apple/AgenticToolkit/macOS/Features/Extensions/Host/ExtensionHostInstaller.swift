@@ -810,7 +810,7 @@ public final class ExtensionHostInstaller {
     /// manifest byte-identical.
     private struct InstalledIdentity: Equatable {
         let loaded: LoadedExtension
-        let entryPoint: EntryPointSignature?
+        let entryPoint: FileSignature?
     }
 
     /// A cheap stand-in for "the code on disk is the code that is running":
@@ -834,22 +834,15 @@ public final class ExtensionHostInstaller {
     /// keeps the host that is already running, rather than tearing it down for
     /// a `bringUp` that would fail on the same unreadable path and leave the
     /// extension with nothing.
-    private struct EntryPointSignature: Equatable {
-        let size: Int
-        let modified: Date
-    }
-
+    ///
     /// Stats `loaded`'s entry point, or answers `nil` if there is nothing to
     /// stat — no `browser` entry point declared, a path that escapes the
     /// extension's directory, or a file that is not there.
-    private static func entryPointSignature(for loaded: LoadedExtension) -> EntryPointSignature? {
+    private static func entryPointSignature(for loaded: LoadedExtension) -> FileSignature? {
         guard let browser = loaded.manifest.browser,
-              let url = try? ExtensionResourcePath.resolve(browser, inside: loaded.directory),
-              let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
-              let size = values.fileSize,
-              let modified = values.contentModificationDate
+              let url = try? ExtensionResourcePath.resolve(browser, inside: loaded.directory)
         else { return nil }
-        return EntryPointSignature(size: size, modified: modified)
+        return FileSignature(of: url)
     }
 
     /// The last completed scan, replayed at every extension that comes up
