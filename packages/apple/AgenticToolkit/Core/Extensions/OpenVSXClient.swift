@@ -98,12 +98,22 @@ public struct OpenVSXClient: Sendable {
 
     // MARK: - Reading artifacts
 
-    /// The bytes at `url`, with a non-2xx status turned into a throw.
+    /// The bytes at `url`, with anything but a 2xx over TLS turned into a
+    /// throw.
     ///
     /// Used for the `.vsix`, the `.sigzip` and the public key alike — they
     /// differ only in what the caller does with them, and a per-artifact method
     /// each would be three copies of one download *(dry)*.
+    ///
+    /// **Every URL that arrives here was chosen by the registry**, out of the
+    /// `files` and `downloads` maps of a metadata response. `URLSession`
+    /// implements `file:`, so before the scheme was checked a registry could
+    /// answer `"download": "file:///…"` and have this method read a local file
+    /// and hand it back as the download; `http:` was a quieter version of the
+    /// same, moving the fetch to whoever is on the network path. Neither is
+    /// something a registry has any reason to ask for.
     public func data(at url: URL) async throws -> Data {
+        try Self.requireFetchable(url)
         let (data, response) = try await session.data(from: url)
         try Self.checkStatus(of: response, for: url)
         return data
@@ -135,13 +145,40 @@ public struct OpenVSXClient: Sendable {
         }
     }
 
+    /// The schemes an artifact URL may use.
+    ///
+    /// The **scheme**, not the host: Open VSX serves its artifacts from its own
+    /// host, but a self-hosted instance commonly puts them on a CDN, and a host
+    /// check would turn that into an outage. TLS is what the rule is for — it
+    /// is what makes "the registry named this" and "the registry served this"
+    /// the same statement.
+    private static let fetchableSchemes: Set<String> = ["https"]
+
+    /// `registryBase` is deliberately not held to this. It is configuration —
+    /// typed by whoever runs the instance, not supplied by a response — and an
+    /// organisation's decision to run its own registry over plain HTTP inside
+    /// its own network is theirs to make. What a registry *names* is a
+    /// different thing entirely, and is what this guards.
+    private static func requireFetchable(_ url: URL) throws {
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard fetchableSchemes.contains(scheme), url.host?.isEmpty == false else {
+            throw OpenVSXError.artifactNotFetchable(url, scheme: scheme)
+        }
+    }
+
     /// A 404 from this API means "no such extension", and a 5xx means the
     /// registry is having a bad day — both of which arrive as a perfectly
     /// valid HTTP response carrying an error document. Without this check the
     /// JSON decode fails instead, and the caller is told its model is wrong
     /// when what is wrong is the name it asked for *(fail-fast)*.
+    ///
+    /// A response that is not an HTTP response throws rather than returning.
+    /// Returning meant the status rules below silently did not run for it, and
+    /// a check that can quietly not happen is not a check.
     private static func checkStatus(of response: URLResponse, for url: URL) throws {
-        guard let http = response as? HTTPURLResponse else { return }
+        guard let http = response as? HTTPURLResponse else {
+            throw OpenVSXError.responseNotHTTP(url)
+        }
         guard (200..<300).contains(http.statusCode) else {
             throw OpenVSXError.requestFailed(url, status: http.statusCode)
         }
@@ -185,4 +222,12 @@ public enum OpenVSXError: Error, Sendable, Equatable {
     /// An artifact that must be text (the digest, the public key) was not
     /// UTF-8.
     case artifactNotText(URL)
+
+    /// An artifact URL the registry named is not one this client will fetch.
+    /// Carries the scheme, which is what makes the refusal legible: `file` is
+    /// a very different report from a typo in a self-hosted registry's config.
+    case artifactNotFetchable(URL, scheme: String)
+
+    /// The response was not an HTTP response, so no status could be checked.
+    case responseNotHTTP(URL)
 }

@@ -24,19 +24,33 @@ public enum VSIXArchive {
     /// Checks `archive` against the digest and signature the registry
     /// published for it, and returns what was actually proved.
     ///
-    /// The two checks answer different questions and both are worth making.
-    /// The digest proves the download is intact and is the file the registry's
-    /// record names — it catches a truncated transfer and a substitution by
-    /// anything that cannot also rewrite the metadata response. The signature
-    /// proves the publisher's key signed these exact bytes, which survives a
-    /// compromised or hostile registry, because the key is the publisher's and
-    /// the signature covers the archive rather than any record of it.
+    /// **Both checks are against things the registry published, and neither
+    /// establishes a publisher.** That is worth stating plainly, because the
+    /// obvious reading of "the signature verified" is the one thing it cannot
+    /// mean here: `publicKeyPEM` reaches this function from
+    /// `OpenVSXExtensionDetail.publicKeyURL`, a string in the same JSON
+    /// response that named the archive and its digest. A registry serving
+    /// altered bytes signs them with a key of its own, publishes that key at
+    /// that URL, and every check below passes. There is no anchor to compare
+    /// it against — Open VSX publishes no publisher key out of band, and this
+    /// host has pinned none — so the result is named `.registryAttested`
+    /// rather than `.verified`, and the line the settings panel shows says
+    /// "the registry published" rather than "the publisher signed".
     ///
-    /// **An absent signature is allowed; an invalid one is not.** Most of Open
-    /// VSX is unsigned, so refusing everything unsigned would refuse the
-    /// catalog. A signature that is present and does not verify is the
-    /// opposite situation — someone published a signature and these are not
-    /// the bytes it covers — and that throws *(fail-fast)*.
+    /// What the two checks do establish is still worth having, and differs
+    /// between them. The digest proves the bytes are the ones the registry's
+    /// own record names, which catches a truncated transfer and a CDN or
+    /// mirror serving something else. The signature proves the archive was not
+    /// altered between being signed and arriving here, over a path the digest
+    /// does not cover.
+    ///
+    /// **Nothing published is allowed; half of it is not.** Most of Open VSX
+    /// is unsigned, so refusing everything unsigned would refuse the catalog.
+    /// One half of the pair is a different situation: something *was*
+    /// published, and reporting that as an unsigned extension states the
+    /// opposite of what happened. A signature that is present and does not
+    /// verify is a third — someone published a signature and these are not the
+    /// bytes it covers. Both of the latter throw *(fail-fast)*.
     public static func verify(
         _ archive: Data,
         expectedDigest: String?,
@@ -45,6 +59,12 @@ public enum VSIXArchive {
     ) throws -> VSIXVerification {
 
         let actual = sha256Hex(of: archive)
+
+        // `.matched` rather than leaving the caller to infer it from `sha256`
+        // being filled in: the hash is computed either way, so its presence
+        // says only that these bytes were hashed, never that they were
+        // compared with anything *(explicit-over-implicit)*.
+        var digest = VSIXVerification.DigestResult.notPublished
         if let expectedDigest {
             let expected = expectedDigest
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -52,25 +72,39 @@ public enum VSIXArchive {
             guard expected == actual else {
                 throw VSIXVerificationError.digestMismatch(expected: expected, actual: actual)
             }
+            digest = .matched
         }
 
-        guard let signature, let publicKeyPEM else {
-            return VSIXVerification(sha256: actual, signature: .notPublished)
-        }
+        switch (signature, publicKeyPEM) {
+        case (nil, nil):
+            return VSIXVerification(sha256: actual, digest: digest, signature: .notPublished)
 
-        // The `.sigzip` is itself a zip holding `.signature.sig` (the raw
-        // 64-byte Ed25519 signature), `.signature.manifest` (a JSON listing of
-        // every entry's own digest) and an empty `.signature.p7s` left over
-        // from the Marketplace's format. The signature covers the `.vsix`
-        // bytes directly, so the manifest is redundant here: verifying it
-        // instead would prove only that the listing is authentic, and would
-        // then need every entry hashed to say anything about the archive.
-        let raw = try signatureBytes(fromSigZip: signature)
-        let key = try ed25519Key(fromPEM: publicKeyPEM)
-        guard key.isValidSignature(raw, for: archive) else {
-            throw VSIXVerificationError.signatureInvalid
+        // Half a pair proves nothing, but it is not "nothing was published"
+        // either, which is what this used to return. Whoever gets the throw
+        // can say which half is missing, which is the fact a report against
+        // the registry needs.
+        case (.some, nil):
+            throw VSIXVerificationError.signatureIncomplete(missing: "publicKey")
+        case (nil, .some):
+            throw VSIXVerificationError.signatureIncomplete(missing: "signature")
+
+        case (let signature?, let publicKeyPEM?):
+            // The `.sigzip` is itself a zip holding `.signature.sig` (the raw
+            // 64-byte Ed25519 signature), `.signature.manifest` (a JSON
+            // listing of every entry's own digest) and an empty
+            // `.signature.p7s` left over from the Marketplace's format. The
+            // signature covers the `.vsix` bytes directly, so the manifest is
+            // redundant here: verifying it instead would prove only that the
+            // listing is authentic, and would then need every entry hashed to
+            // say anything about the archive.
+            let raw = try signatureBytes(fromSigZip: signature)
+            let key = try ed25519Key(fromPEM: publicKeyPEM)
+            guard key.isValidSignature(raw, for: archive) else {
+                throw VSIXVerificationError.signatureInvalid
+            }
+            return VSIXVerification(
+                sha256: actual, digest: digest, signature: .registryAttested)
         }
-        return VSIXVerification(sha256: actual, signature: .verified)
     }
 
     public static func sha256Hex(of data: Data) -> String {
@@ -204,24 +238,45 @@ public struct VSIXVerification: Sendable, Equatable {
     /// what an install record needs to recognise these bytes again later.
     public let sha256: String
 
+    /// Whether the archive was compared with a digest the registry
+    /// published, as opposed to merely hashed.
+    public let digest: DigestResult
+
     public let signature: SignatureResult
 
-    public enum SignatureResult: Sendable, Equatable {
-        /// The publisher's key signed these exact bytes.
-        case verified
-        /// The registry published no signature for this version. Not a
-        /// failure: most of the catalog is unsigned.
+    public enum DigestResult: Sendable, Equatable {
+        /// The registry published a digest and these bytes are it.
+        case matched
+        /// The registry published no digest, so nothing was compared. Kept
+        /// distinct from `.matched` because `sha256` is filled in either way,
+        /// and a hash that was never compared with anything is not a check.
         case notPublished
     }
 
-    public init(sha256: String, signature: SignatureResult) {
+    public enum SignatureResult: Sendable, Equatable {
+        /// A signature and key the **registry** published agree with these
+        /// exact bytes. See `VSIXArchive.verify` for what that does and does
+        /// not establish — in particular, not the publisher's identity.
+        case registryAttested
+        /// The registry published neither a signature nor a key for this
+        /// version. Not a failure: most of the catalog is unsigned.
+        case notPublished
+    }
+
+    public init(sha256: String, digest: DigestResult, signature: SignatureResult) {
         self.sha256 = sha256
+        self.digest = digest
         self.signature = signature
     }
 }
 
 public enum VSIXVerificationError: Error, Sendable, Equatable {
     case digestMismatch(expected: String, actual: String)
+
+    /// The registry published one half of the signature pair and not the
+    /// other. Carries the name of the half that is missing, because that is
+    /// the fact a bug report against the registry needs.
+    case signatureIncomplete(missing: String)
     case signatureInvalid
     case signatureArchiveUnreadable(String)
     case publicKeyUnreadable

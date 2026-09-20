@@ -561,18 +561,30 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
 
     /// What an install reports when it worked.
     ///
-    /// The signature is stated rather than assumed either way. "Verified" is
-    /// the publisher's own key over these exact bytes and is worth saying;
-    /// most of the registry is unsigned, and saying *that* is what keeps the
-    /// silence from reading as a verification that happened.
+    /// **Every clause here says "the registry published", and that is the
+    /// point.** The digest and the signing key both arrive from the registry's
+    /// own metadata response, so nothing an install can check establishes who
+    /// published the extension — and this line used to say "the publisher's
+    /// signature over the download was verified", which is the one reading it
+    /// cannot support. It also claimed a digest match unconditionally, in the
+    /// branch where no digest had been published at all.
+    ///
+    /// Stated either way rather than only when something was checked: silence
+    /// about an unverified download reads as a verification that happened.
     static func installedLine(for installation: VSIXInstallation) -> String {
         var line = "Installed \(installation.version)."
-        switch installation.verification.signature {
-        case .verified:
-            line += " The publisher's signature over the download was verified."
-        case .notPublished:
-            line += " The download matched its published digest; the publisher "
-                + "signed no signature for it."
+        switch (installation.verification.digest, installation.verification.signature) {
+        case (.matched, .registryAttested):
+            line += " It matched both the digest and the signature the registry "
+                + "published for it."
+        case (.matched, .notPublished):
+            line += " It matched the digest the registry published for it, which "
+                + "published no signature."
+        case (.notPublished, .registryAttested):
+            line += " It matched the signature the registry published for it, which "
+                + "published no digest."
+        case (.notPublished, .notPublished):
+            line += " The registry published nothing to check the download against."
         }
         if !installation.supersededDirectories.isEmpty {
             let count = installation.supersededDirectories.count
@@ -699,6 +711,14 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
                 return "the registry's answer was not in the expected form."
             case .artifactNotText:
                 return "a file the registry served was not readable text."
+            case .artifactNotFetchable(_, let scheme):
+                return scheme.isEmpty
+                    ? "the registry pointed at an address with no scheme, which this "
+                        + "app will not fetch."
+                    : "the registry pointed at a \(scheme): address, which this app "
+                        + "will not fetch."
+            case .responseNotHTTP:
+                return "the registry's answer was not an HTTP response."
             }
         case let error as VSIXInstallError:
             return sentence(forInstall: error)
@@ -708,7 +728,10 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
                 return "the download did not match the digest the registry published "
                     + "for it."
             case .signatureInvalid:
-                return "the publisher's signature does not cover these bytes."
+                return "the signature the registry published does not cover these bytes."
+            case .signatureIncomplete(let missing):
+                return "the registry published only half of the signature for it — "
+                    + "no \(missing)."
             case .signatureArchiveUnreadable, .publicKeyUnreadable:
                 return "the signature the registry published could not be read."
             }
@@ -740,6 +763,18 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
             return "it needs VS Code \(declared) and this app implements \(host)."
         case .engineRangeUnreadable(let declared):
             return "its required editor version, “\(declared)”, could not be read."
+        case .verificationIncomplete(let published, let missing):
+            // Named rather than softened, for the same reason `unsafeIdentity`
+            // is below: a registry that publishes a signature and no key has
+            // either broken or removed a check, and which half is missing is
+            // exactly what a report against it needs.
+            return "the registry published a \(published) for it but no \(missing), "
+                + "so the download could not be checked."
+        case .unsafeIdentity(let field, let value):
+            // Named rather than softened: an archive whose own manifest asks
+            // to be written outside the extensions folder is not a mistake to
+            // apologise for, and the value is what someone reporting it needs.
+            return "its \(field), “\(value)”, is not a name this app will install under."
         case .couldNotInstall(let reason):
             return reason
         }

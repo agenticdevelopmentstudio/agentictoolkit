@@ -224,4 +224,83 @@ struct OpenVSXClientTests {
             _ = try await client.data(at: url)
         }
     }
+
+    // MARK: - Where an artifact may come from
+
+    /// Every artifact URL here — the `.vsix`, the digest, the signature, the
+    /// public key — is a string out of the registry's own JSON, handed
+    /// straight to `URLSession`. `file:` is a scheme `URLSession` implements,
+    /// so a registry that answered with `"download": "file:///etc/passwd"` had
+    /// this client read a local file and return it as the download.
+    ///
+    /// A real session, deliberately: `StubURLProtocol.canInit` answers *every*
+    /// request, so against a stubbed session this would be refused by the stub
+    /// table and pass for the wrong reason.
+    @Test("a file: artifact URL is refused rather than read")
+    func fileArtifactURLIsRefused() async throws {
+        let secret = FileManager.default.temporaryDirectory
+            .appendingPathComponent("openvsx-local-\(UUID().uuidString).txt")
+        try Data("the contents of a local file".utf8).write(to: secret)
+        defer { try? FileManager.default.removeItem(at: secret) }
+
+        let client = OpenVSXClient(
+            registryBase: StubbedRegistry.registryBase,
+            session: URLSession(configuration: .ephemeral))
+
+        await #expect(throws: OpenVSXError.artifactNotFetchable(secret, scheme: "file")) {
+            _ = try await client.data(at: secret)
+        }
+    }
+
+    /// The registry is reached over TLS and its artifacts are named by it, so
+    /// an artifact URL that drops to plain HTTP is a downgrade the registry
+    /// asked for — the bytes it names then arrive from whoever is on the path
+    /// rather than from the registry, and the digest that would have caught
+    /// that was named by the same response.
+    ///
+    /// The second assertion is the one that matters: refused *before* the
+    /// request, not after reading the answer.
+    @Test("a plain-http artifact URL is refused before any request is made")
+    func plainHTTPArtifactURLIsRefused() async throws {
+        let client = makeClient()
+        let url = URL(string: "http://registry.test/api/w.vsix")!
+        StubbedRegistry.respond(to: "/w.vsix", text: "bytes")
+
+        await #expect(throws: OpenVSXError.artifactNotFetchable(url, scheme: "http")) {
+            _ = try await client.data(at: url)
+        }
+        #expect(StubbedRegistry.requestedURLs.isEmpty)
+    }
+
+    /// The guard has to be narrow enough to leave a real registry working. Open
+    /// VSX names its artifacts on its own host, but a self-hosted instance
+    /// commonly puts them on a CDN — so the rule is the scheme, not the host,
+    /// and a test that did not say so would invite someone to "tighten" it into
+    /// an outage.
+    @Test("an https artifact on another host is still fetched")
+    func httpsArtifactOnAnotherHostIsFetched() async throws {
+        let client = makeClient()
+        StubbedRegistry.respond(to: "cdn.example/w.vsix", text: "bytes")
+
+        let read = try await client.data(at: URL(string: "https://cdn.example/w.vsix")!)
+        #expect(String(bytes: read, encoding: .utf8) == "bytes")
+    }
+
+    /// `checkStatus` opened with `guard let http = response as? HTTPURLResponse
+    /// else { return }` — an early return that treats "not an HTTP response" as
+    /// success. Nothing should be able to reach it now that the scheme is
+    /// checked first, which is exactly why it should fail closed: an early
+    /// return is a status check that silently does not run.
+    @Test("a response that is not an HTTP response is a failure, not a success")
+    func nonHTTPResponseIsRefused() async throws {
+        let client = makeClient()
+        let url = StubbedRegistry.registryBase.appendingPathComponent("odd.vsix")
+        StubbedRegistry.respond(
+            to: "/odd.vsix",
+            with: StubbedResponse(body: Data("bytes".utf8), isHTTP: false))
+
+        await #expect(throws: OpenVSXError.responseNotHTTP(url)) {
+            _ = try await client.data(at: url)
+        }
+    }
 }

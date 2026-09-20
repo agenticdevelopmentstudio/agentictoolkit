@@ -63,6 +63,15 @@ enum StubbedRegistry {
 struct StubbedResponse {
     var status: Int = 200
     var body: Data
+
+    /// Delivered as a bare `URLResponse` rather than an `HTTPURLResponse`.
+    ///
+    /// The one shape a stub table cannot otherwise produce, and the one the
+    /// client's status check quietly let through: `checkStatus` begins by
+    /// casting, so a response that is not HTTP skipped every status rule. A
+    /// test for that needs a session that answers a request with a non-HTTP
+    /// response, which is what this flag is for.
+    var isHTTP: Bool = true
 }
 
 /// The protocol doing the answering. Registered per-session through
@@ -96,8 +105,12 @@ final class StubURLProtocol: URLProtocol {
             client?.urlProtocolDidFinishLoading(self)
             return
         }
-        let response = HTTPURLResponse(
-            url: url, statusCode: match.status, httpVersion: nil, headerFields: nil)!
+        let response: URLResponse = match.isHTTP
+            ? HTTPURLResponse(
+                url: url, statusCode: match.status, httpVersion: nil, headerFields: nil)!
+            : URLResponse(
+                url: url, mimeType: nil, expectedContentLength: match.body.count,
+                textEncodingName: nil)
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: match.body)
         client?.urlProtocolDidFinishLoading(self)

@@ -20,11 +20,13 @@ struct VSIXInstallerTests {
 
     // MARK: - Fixtures
 
+    // The archive fixtures live in `VSIXFixtures`, which
+    // `VSIXRegistryInstallTests` shares. Forwarded rather than called through
+    // directly so that moving them did not have to rewrite every call site in
+    // this file, which would have buried the change that mattered.
+
     private func makeTemporaryDirectory(_ name: String) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("VSIXInstallerTests-\(name)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
+        try VSIXFixtures.makeTemporaryDirectory(name)
     }
 
     private func manifestJSON(
@@ -34,56 +36,29 @@ struct VSIXInstallerTests {
         engine: String = "^1.74.0",
         entryPoint: String? = nil
     ) -> String {
-        var fields = [
-            "\"name\": \"\(name)\"",
-            "\"publisher\": \"\(publisher)\"",
-            "\"version\": \"\(version)\"",
-            "\"displayName\": \"The \(name)\"",
-            "\"engines\": { \"vscode\": \"\(engine)\" }"
-        ]
-        if let entryPoint {
-            fields.append("\"\(entryPoint)\": \"./out/extension.js\"")
-        }
-        return "{ \(fields.joined(separator: ", ")) }"
+        VSIXFixtures.manifestJSON(
+            name: name,
+            publisher: publisher,
+            version: version,
+            engine: engine,
+            entryPoint: entryPoint)
     }
 
-    /// Builds a real `.vsix`: a zip whose top-level entry is `extension/`.
-    /// Real rather than faked because the installer's whole local path runs
-    /// through `ditto`, and a fixture that skipped the archive would test none
-    /// of it.
-    private func makeVSIX(manifest: String?, in scratch: URL, extraFile: String? = nil) throws -> Data {
-        let staging = scratch.appendingPathComponent("vsix-\(UUID().uuidString)", isDirectory: true)
-        let payload = staging.appendingPathComponent(
-            VSIXArchive.payloadDirectoryName, isDirectory: true)
-        if let manifest {
-            try FileManager.default.createDirectory(
-                at: payload, withIntermediateDirectories: true)
-            try Data(manifest.utf8).write(to: payload.appendingPathComponent("package.json"))
-            if let extraFile {
-                try Data("marker".utf8).write(to: payload.appendingPathComponent(extraFile))
-            }
-        } else {
-            // A zip that is not a `.vsix`: no `extension/` at all.
-            try FileManager.default.createDirectory(
-                at: staging, withIntermediateDirectories: true)
-            try Data("not an extension".utf8)
-                .write(to: staging.appendingPathComponent("readme.txt"))
-        }
-
-        let archive = scratch.appendingPathComponent("\(UUID().uuidString).vsix")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-c", "-k", staging.path, archive.path]
-        try process.run()
-        process.waitUntilExit()
-        try #require(process.terminationStatus == 0)
-        return try Data(contentsOf: archive)
+    private func makeVSIX(
+        manifest: String?,
+        in scratch: URL,
+        extraFile: String? = nil
+    ) throws -> Data {
+        try VSIXFixtures.makeVSIX(manifest: manifest, in: scratch, extraFile: extraFile)
     }
 
-    private let unsigned = VSIXVerification(sha256: "abc", signature: .notPublished)
+    /// What the local-file path hands the installer: nothing was published to
+    /// check against, because there is no registry in that flow at all.
+    private let unsigned = VSIXVerification(
+        sha256: "abc", digest: .notPublished, signature: .notPublished)
 
     private func installedDirectoryNames(in directory: URL) -> [String] {
-        ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).sorted()
+        VSIXFixtures.installedDirectoryNames(in: directory)
     }
 
     // MARK: - The happy path
@@ -426,5 +401,129 @@ struct VSIXInstallerTests {
             atPath: installDirectory
                 .appendingPathComponent("acme.widget-1.0.0")
                 .appendingPathComponent("theme.json").path))
+    }
+
+    // MARK: - Hostile identities
+
+    /// The manifest is the attacker's document on every path, and three of its
+    /// fields reach a directory name. `expectedIdentifier` guards only one of
+    /// them, only on the registry path — `version` is never compared with
+    /// anything, anywhere.
+    ///
+    /// What it catches: `directoryName(identifier:version:)` interpolating
+    /// straight into a path component, and `moveIntoPlace` finishing the job
+    /// with `rename(2)`, which resolves `..` in the kernel. A `version` of
+    /// `../../../../Library/LaunchAgents/evil` put the expanded payload
+    /// wherever the archive asked — a LaunchAgent plist there is code
+    /// execution at next login.
+    @Test("a version that climbs out of the install directory is refused")
+    func hostileVersionIsRefused() throws {
+        let scratch = try makeTemporaryDirectory("hostile-version")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let root = scratch.appendingPathComponent("root", isDirectory: true)
+        let installDirectory = root.appendingPathComponent("Extensions", isDirectory: true)
+        let installer = VSIXInstaller(installDirectory: installDirectory, hostVersion: Self.host)
+
+        #expect(throws: VSIXInstallError.unsafeIdentity(
+            field: "version", value: "../../escaped").self) {
+            try installer.install(
+                archive: try self.makeVSIX(
+                    manifest: self.manifestJSON(version: "../../escaped"), in: scratch),
+                verification: self.unsigned,
+                expectedIdentifier: "acme.widget",
+                source: .registry("acme/widget", version: "1.0.0"))
+        }
+
+        // The refusal is worth nothing if the bytes went anywhere. `root` is
+        // where a two-step climb out of `Extensions` lands.
+        #expect(installedDirectoryNames(in: root) == [])
+    }
+
+    /// The same hole through `name`, which reaches the path via `identifier`.
+    /// On the local-file path there is no `expectedIdentifier` to stop it, and
+    /// on the registry path a hostile registry supplies both sides of that
+    /// comparison anyway.
+    @Test("a name that climbs out of the install directory is refused")
+    func hostileNameIsRefused() throws {
+        let scratch = try makeTemporaryDirectory("hostile-name")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let root = scratch.appendingPathComponent("root", isDirectory: true)
+        let installDirectory = root.appendingPathComponent("Extensions", isDirectory: true)
+        let installer = VSIXInstaller(installDirectory: installDirectory, hostVersion: Self.host)
+
+        #expect(throws: VSIXInstallError.unsafeIdentity(
+            field: "identifier", value: "acme.../../escaped").self) {
+            try installer.install(
+                archive: try self.makeVSIX(
+                    manifest: self.manifestJSON(name: "../../escaped"), in: scratch),
+                verification: self.unsigned,
+                source: .localFile(scratch))
+        }
+
+        #expect(installedDirectoryNames(in: root) == [])
+    }
+
+    /// An absolute path is the other shape of the same attack, and it does not
+    /// contain `..` at all — which is why the check is containment of the
+    /// resolved destination rather than a scan for a substring.
+    @Test("an identity that names an absolute path is refused")
+    func absolutePathIdentityIsRefused() throws {
+        let scratch = try makeTemporaryDirectory("hostile-absolute")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let installDirectory = scratch.appendingPathComponent("Extensions", isDirectory: true)
+        let installer = VSIXInstaller(installDirectory: installDirectory, hostVersion: Self.host)
+
+        #expect(throws: (any Error).self) {
+            try installer.install(
+                archive: try self.makeVSIX(
+                    manifest: self.manifestJSON(version: "/tmp/absolute"), in: scratch),
+                verification: self.unsigned,
+                source: .localFile(scratch))
+        }
+
+        #expect(installedDirectoryNames(in: installDirectory) == [])
+    }
+
+    /// A `.`-leading component is hidden from every directory listing this app
+    /// makes (`skipsHiddenFiles` in `otherInstallDirectories`), so an
+    /// extension installed under one is invisible to the supersede sweep and
+    /// to anyone looking at the folder — while still being loaded.
+    @Test("an identity that hides the directory is refused")
+    func hiddenDirectoryIdentityIsRefused() throws {
+        let scratch = try makeTemporaryDirectory("hostile-hidden")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let installDirectory = scratch.appendingPathComponent("Extensions", isDirectory: true)
+        let installer = VSIXInstaller(installDirectory: installDirectory, hostVersion: Self.host)
+
+        #expect(throws: (any Error).self) {
+            try installer.install(
+                archive: try self.makeVSIX(
+                    manifest: self.manifestJSON(publisher: ".hidden"), in: scratch),
+                verification: self.unsigned,
+                source: .localFile(scratch))
+        }
+
+        #expect(installedDirectoryNames(in: installDirectory) == [])
+    }
+
+    /// The guard has to be narrow enough to leave real extensions alone. A
+    /// pre-release build number is ordinary semver and a legitimate directory
+    /// name, and a guard that refused it would break installing any nightly.
+    @Test("an unusual but safe version still installs")
+    func prereleaseVersionStillInstalls() throws {
+        let scratch = try makeTemporaryDirectory("prerelease")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let installDirectory = scratch.appendingPathComponent("Extensions", isDirectory: true)
+        let installer = VSIXInstaller(installDirectory: installDirectory, hostVersion: Self.host)
+
+        let installation = try installer.install(
+            archive: try makeVSIX(
+                manifest: manifestJSON(version: "1.0.0-beta.1+build.7"), in: scratch),
+            verification: unsigned,
+            source: .localFile(scratch))
+
+        #expect(installation.directory.lastPathComponent == "acme.widget-1.0.0-beta.1+build.7")
+        #expect(installedDirectoryNames(in: installDirectory)
+            == ["acme.widget-1.0.0-beta.1+build.7"])
     }
 }

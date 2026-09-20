@@ -59,6 +59,7 @@ struct VSIXArchiveTests {
             signature: nil,
             publicKeyPEM: nil)
         #expect(verification.sha256 == digest)
+        #expect(verification.digest == .matched)
         #expect(verification.signature == .notPublished)
     }
 
@@ -75,50 +76,31 @@ struct VSIXArchiveTests {
 
     /// Most of Open VSX publishes no digest at all. The archive's own hash is
     /// still computed, because an install record needs it to recognise these
-    /// bytes later.
-    @Test("no published digest still records the archive's own hash")
+    /// bytes later — but the record has to keep "these bytes are the ones the
+    /// registry named" apart from "the registry named nothing", or the hash's
+    /// presence reads as a check that happened *(explicit-over-implicit)*.
+    @Test("no published digest is recorded as such, and still hashes the bytes")
     func noDigestStillHashes() throws {
         let bytes = Data("the archive".utf8)
         let verification = try VSIXArchive.verify(
             bytes, expectedDigest: nil, signature: nil, publicKeyPEM: nil)
         #expect(verification.sha256 == VSIXArchive.sha256Hex(of: bytes))
+        #expect(verification.digest == .notPublished)
     }
 
     // MARK: - The signature
 
     /// Builds the registry's two artifacts for real: a PEM SPKI public key,
     /// and a `.sigzip` holding `.signature.sig`.
+    /// Shared with `VSIXRegistryInstallTests`, which needs the same artifacts
+    /// to play the part of a registry signing with its own key.
     private func makeSignatureArtifacts(
         signing bytes: Data,
         in scratch: URL,
         corruptSignature: Bool = false
     ) throws -> (sigzip: Data, publicKeyPEM: String) {
-        let key = Curve25519.Signing.PrivateKey()
-        var signature = try key.signature(for: bytes)
-        if corruptSignature {
-            // One flipped byte in an otherwise well-formed 64-byte signature:
-            // the case where someone published a signature and these are not
-            // the bytes it covers.
-            signature[0] ^= 0xFF
-        }
-
-        let staging = scratch.appendingPathComponent("sig-staging", isDirectory: true)
-        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-        try signature.write(to: staging.appendingPathComponent(".signature.sig"))
-        let sigzip = scratch.appendingPathComponent("signature.sigzip")
-        try zip(contentsOf: staging, to: sigzip)
-
-        // An Ed25519 SPKI: the fixed 12-byte algorithm header, then the key.
-        let header = Data([
-            0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00
-        ])
-        let der = header + key.publicKey.rawRepresentation
-        let pem = """
-        -----BEGIN PUBLIC KEY-----
-        \(der.base64EncodedString())
-        -----END PUBLIC KEY-----
-        """
-        return (try Data(contentsOf: sigzip), pem)
+        try VSIXFixtures.makeSignatureArtifacts(
+            signing: bytes, in: scratch, corruptSignature: corruptSignature)
     }
 
     @Test("a real signature over the real bytes verifies")
@@ -133,7 +115,10 @@ struct VSIXArchiveTests {
             expectedDigest: VSIXArchive.sha256Hex(of: bytes),
             signature: artifacts.sigzip,
             publicKeyPEM: artifacts.publicKeyPEM)
-        #expect(verification.signature == .verified)
+        // `.registryAttested`, not `.verified`: the key this was checked
+        // against arrived from the registry, in the same response that named
+        // the archive. See the type's own note.
+        #expect(verification.signature == .registryAttested)
     }
 
     @Test("a signature over different bytes is refused")
@@ -173,24 +158,32 @@ struct VSIXArchiveTests {
         }
     }
 
-    /// Half the pair is no pair. A key with no signature — or the reverse —
-    /// cannot prove anything, and reporting `.verified` off one of them would
-    /// be the exact lie this type exists to prevent.
-    @Test("a signature without its key, or a key without its signature, is unsigned")
-    func halfThePairIsNotVerified() throws {
+    /// Half the pair is no pair — but it is also not "nothing was published",
+    /// which is what this used to return. Something *was* published; what is
+    /// missing is the other half, and reporting that as an unsigned extension
+    /// tells the user the opposite of what happened.
+    ///
+    /// A refusal rather than a third result: there is no honest way to install
+    /// on half an advertisement, and the caller that can do something about it
+    /// (`VSIXInstaller`, which decides before downloading) needs to be told
+    /// *(fail-fast)*.
+    @Test("a signature without its key, or a key without its signature, is refused")
+    func halfThePairIsRefused() throws {
         let scratch = try makeTemporaryDirectory("half")
         defer { try? FileManager.default.removeItem(at: scratch) }
         let bytes = Data("the archive".utf8)
         let artifacts = try makeSignatureArtifacts(signing: bytes, in: scratch)
 
-        let noKey = try VSIXArchive.verify(
-            bytes, expectedDigest: nil, signature: artifacts.sigzip, publicKeyPEM: nil)
-        #expect(noKey.signature == .notPublished)
+        #expect(throws: VSIXVerificationError.signatureIncomplete(missing: "publicKey")) {
+            try VSIXArchive.verify(
+                bytes, expectedDigest: nil, signature: artifacts.sigzip, publicKeyPEM: nil)
+        }
 
-        let noSignature = try VSIXArchive.verify(
-            bytes, expectedDigest: nil, signature: nil,
-            publicKeyPEM: artifacts.publicKeyPEM)
-        #expect(noSignature.signature == .notPublished)
+        #expect(throws: VSIXVerificationError.signatureIncomplete(missing: "signature")) {
+            try VSIXArchive.verify(
+                bytes, expectedDigest: nil, signature: nil,
+                publicKeyPEM: artifacts.publicKeyPEM)
+        }
     }
 
     @Test("a public key that is not an Ed25519 SPKI is refused")

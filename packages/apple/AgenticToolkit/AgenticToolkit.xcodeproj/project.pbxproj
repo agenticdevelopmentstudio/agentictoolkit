@@ -711,6 +711,7 @@
 		787776EA5937518ADC5F11DA /* FontChooserButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9585893552485B2CC98ABCE4 /* FontChooserButton.swift */; };
 		78D7013A919D83E2D2041555 /* ScreenSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3E98FAC4584B9490DD7714 /* ScreenSnapshot.swift */; };
 		79648300B972ACD899D6471D /* PaneContainerClampTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C773416942F117D48F26C8 /* PaneContainerClampTests.swift */; };
+		79BF896756F7A12ED509F6E8 /* VSIXRegistryInstallTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95843458C88BEF9A87376887 /* VSIXRegistryInstallTests.swift */; };
 		79C0DFD81464062623953ED1 /* ThemeTopicPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BC949F427908282E5CC5944 /* ThemeTopicPanel.swift */; };
 		79D2AEF4B367643D27299F9B /* AgenticDeveloperToolkit-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AA33F0AF418F0DDFE05C6BF /* AgenticDeveloperToolkit-macOS.framework */; };
 		7A06EC2186A1B311412B61ED /* CustomersTopic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EC6ABA2F0F18488A44D7EAB /* CustomersTopic.swift */; };
@@ -765,6 +766,7 @@
 		81C1CEF0731A9F4884B69CB2 /* UserSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2DBBC96379BEBF4C59726ED /* UserSettings.swift */; };
 		823E04CBA2C9A90A0BF4B0A3 /* WindowFrameManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5BB28294B4FC8F45F42DBEF /* WindowFrameManager.swift */; };
 		824106A9FAA5BBA72233BDB3 /* ScreenChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA75948C3BB76100EE4877F /* ScreenChange.swift */; };
+		8254D5F3B1312DFC4206F9EC /* VSIXFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C574E4782DBB22BB4D53CCB /* VSIXFixtures.swift */; };
 		830667D24E8358B96B0B7FE6 /* ServerBagsTopic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DCC2C5C20355652428A8E5D /* ServerBagsTopic.swift */; };
 		832E291ADDD6BB7B042B2E95 /* PathView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C336FCB975F67FC73C83C7 /* PathView.swift */; };
 		832E9610AF3521DA96390CC2 /* KeyedDebouncerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B32AC9E3B91C6F8AC5ABFA51 /* KeyedDebouncerTests.swift */; };
@@ -2724,6 +2726,7 @@
 		2B5F739C92019334CA50561D /* SystemWindowAXHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemWindowAXHelper.swift; sourceTree = "<group>"; };
 		2BE0EEBE98883E7CA8730241 /* ModelChooserContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelChooserContentTests.swift; sourceTree = "<group>"; };
 		2C0881BC97904A9D6EF4A7B6 /* WindowActivationTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowActivationTester.swift; sourceTree = "<group>"; };
+		2C574E4782DBB22BB4D53CCB /* VSIXFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSIXFixtures.swift; sourceTree = "<group>"; };
 		2CC8209B3A718CFBD2C709A9 /* MCPServerRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPServerRegistry.swift; sourceTree = "<group>"; };
 		2CE8F713165AC8E94FACD702 /* NotesCoordinatorMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesCoordinatorMenuTests.swift; sourceTree = "<group>"; };
 		2D6391E1372A83A76D72944F /* TopicListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicListViewController.swift; sourceTree = "<group>"; };
@@ -3173,6 +3176,7 @@
 		952C7E3DA7AB65B35021477E /* MainActorScriptCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainActorScriptCommandTests.swift; sourceTree = "<group>"; };
 		956F50EE328345009C16B24F /* LaunchAtLoginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginManager.swift; sourceTree = "<group>"; };
 		95732DFCD62666109B1A32F2 /* ProjectCheckout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCheckout.swift; sourceTree = "<group>"; };
+		95843458C88BEF9A87376887 /* VSIXRegistryInstallTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VSIXRegistryInstallTests.swift; sourceTree = "<group>"; };
 		9585893552485B2CC98ABCE4 /* FontChooserButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontChooserButton.swift; sourceTree = "<group>"; };
 		9592B6AFD5DDEE80D0B02789 /* AppHeuristic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppHeuristic.swift; sourceTree = "<group>"; };
 		959BE3AC935A950266CFAC16 /* ProjectWindowTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindowTestSupport.swift; sourceTree = "<group>"; };
@@ -4447,7 +4451,9 @@
 				EEFC09C8D87E5FB45D2D6697 /* TextFoldingTests.swift */,
 				63BCF1C2FD81F3929B7F4241 /* VSCodeEngineRangeTests.swift */,
 				3737B4624425CEFF209B1D7D /* VSIXArchiveTests.swift */,
+				2C574E4782DBB22BB4D53CCB /* VSIXFixtures.swift */,
 				3500857E1191467CE747B6A5 /* VSIXInstallerTests.swift */,
+				95843458C88BEF9A87376887 /* VSIXRegistryInstallTests.swift */,
 				76A9B9E1E87D319A286B174E /* WebviewHostDocumentTests.swift */,
 				8FF61C57DC9B8AA565309795 /* WebviewPanelOptionsTests.swift */,
 				B5D1DF1E3D6483F6AF63CAE3 /* WebviewPanelStateTests.swift */,
@@ -8210,7 +8216,9 @@
 				9D58667B3FCF530A95E6FA0E /* VSCodeEngineRangeTests.swift in Sources */,
 				4566BDB02A3EA4F6D77AFA24 /* VSCodeThemeImporterTests.swift in Sources */,
 				8D89446D7431D02FDB715A59 /* VSIXArchiveTests.swift in Sources */,
+				8254D5F3B1312DFC4206F9EC /* VSIXFixtures.swift in Sources */,
 				35C28CB985164770FD411136 /* VSIXInstallerTests.swift in Sources */,
+				79BF896756F7A12ED509F6E8 /* VSIXRegistryInstallTests.swift in Sources */,
 				2E502A3D8E63420790F6C73B /* WallClockBudgetTests.swift in Sources */,
 				B35A593CD18E016A41534DD9 /* WebviewHostDocumentTests.swift in Sources */,
 				01E2A879A5C854C48424576B /* WebviewPanelOptionsTests.swift in Sources */,

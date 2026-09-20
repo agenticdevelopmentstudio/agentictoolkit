@@ -74,13 +74,35 @@ public struct VSIXInstaller: Sendable {
             throw VSIXInstallError.registryVersionUnusable(.noUniversalBuild)
         }
 
+        // Decided from the record, before the download, for the same reason
+        // `installability` is: a refusal the metadata already settles should
+        // not cost several megabytes.
+        //
+        // A signature and its key are one artifact in two files, and the two
+        // used to be read under a single `if let … , let …`. That made a
+        // record naming one and not the other fetch *neither* — so an
+        // extension whose record advertises a signature installed with
+        // `signature: .notPublished`, and the settings panel went on to tell
+        // the user the publisher had signed nothing for it. Dropping the key
+        // from the record was then all it took to drop the check, which is the
+        // one thing a verification step must never allow *(fail-fast)*.
+        switch (detail.signatureURL, detail.publicKeyURL) {
+        case (nil, nil), (.some, .some):
+            break
+        case (.some, nil):
+            throw VSIXInstallError.verificationIncomplete(
+                published: "signature", missing: "publicKey")
+        case (nil, .some):
+            throw VSIXInstallError.verificationIncomplete(
+                published: "publicKey", missing: "signature")
+        }
+
         let archive = try await client.data(at: download)
 
-        // Each artifact is optional and fetched only if the registry named it.
-        // A digest or key the registry advertised and then could not serve is
-        // a failure, though — it is evidence something is wrong at the
-        // registry, and quietly downgrading to an unverified install is the
-        // one thing a verification step must never do.
+        // Each artifact is fetched only if the registry named it. One it named
+        // and then could not serve is a failure, though — that is evidence
+        // something is wrong at the registry, and the throw out of `client`
+        // carries the URL that failed.
         var digest: String?
         if let sha256URL = detail.sha256URL {
             digest = try await client.text(at: sha256URL)
@@ -155,9 +177,33 @@ public struct VSIXInstaller: Sendable {
                 manifest.engines.vscode, host: hostVersion.description)
         }
 
+        // Before the directory is created, and before anything is moved: the
+        // manifest is the archive's own document, and two of its fields are
+        // about to become a path component. `expectedIdentifier` above guards
+        // one of them and only on the registry path; `version` is compared
+        // with nothing, anywhere, on any path.
+        try Self.requireSafeComponent(manifest.identifier, field: "identifier")
+        try Self.requireSafeComponent(manifest.version, field: "version")
+
         let destination = installDirectory.appendingPathComponent(
             Self.directoryName(identifier: manifest.identifier, version: manifest.version),
             isDirectory: true)
+
+        // Belt and braces, and not redundant: the component check is a
+        // predicate over a string, this is a fact about the path that was
+        // actually built. They fail for different reasons — a future change to
+        // `directoryName` that joined the parts differently would slip past
+        // the first and be caught here. `moveIntoPlace` finishes with
+        // `rename(2)`, which resolves `..` in the kernel rather than in
+        // Foundation, so nothing downstream will catch what these two miss.
+        let root = ExtensionResourcePath.canonicalDirectory(installDirectory)
+        guard ExtensionResourcePath.url(
+            ExtensionResourcePath.canonicalDirectory(destination), isContainedIn: root)
+        else {
+            throw VSIXInstallError.unsafeIdentity(
+                field: "identifier", value: destination.lastPathComponent)
+        }
+
         try fileManager.createDirectory(at: installDirectory, withIntermediateDirectories: true)
 
         // Re-installing the same version is a no-op that succeeds, not a
@@ -206,13 +252,48 @@ public struct VSIXInstaller: Sendable {
     /// writes and the one a user comparing this app's extensions directory
     /// with VS Code's will expect.
     ///
-    /// Path-unsafe characters are not escaped, they are refused: every
-    /// component here comes out of a manifest whose `name` and `publisher` npm
-    /// already constrains, and quietly rewriting an identifier would install
-    /// an extension under a name that no longer matches what the registry and
-    /// the settings list call it.
+    /// Path-unsafe characters are not escaped, they are refused — by
+    /// `requireSafeComponent(_:field:)`, which `install(...)` calls on both
+    /// halves before this runs. Rewriting them instead would install an
+    /// extension under a name that no longer matches what the registry and the
+    /// settings list call it.
+    ///
+    /// This function itself is pure string joining and guarantees nothing. It
+    /// was previously documented as safe because "npm already constrains"
+    /// `name` and `publisher` — which was wrong twice over: nothing here runs
+    /// npm, and `publisher` is not an npm field at all. The constraint is the
+    /// check, and the check is in the caller.
     public static func directoryName(identifier: String, version: String) -> String {
         "\(identifier)-\(version)"
+    }
+
+    /// Refuses a manifest field that is not a single, safe path component,
+    /// before it can become one.
+    ///
+    /// **An allowlist of shapes to reject, not of characters to accept**, and
+    /// deliberately so: extension names are internationalised, and an
+    /// allowlist of characters would refuse a legitimate publisher long before
+    /// it refused an attacker. What is rejected is what changes where the path
+    /// points — a separator, a `.` that hides the directory or climbs out of
+    /// it, a `:` that HFS still maps to `/` in some APIs, an empty component,
+    /// and the control characters that make a name unprintable in the settings
+    /// list that has to show it.
+    ///
+    /// The refusal names the field and the value rather than saying "invalid":
+    /// this is the one error here whose cause is a hostile document, and the
+    /// person reading the message is the one who needs to see what it claimed.
+    static func requireSafeComponent(_ value: String, field: String) throws {
+        func refuse() -> VSIXInstallError {
+            .unsafeIdentity(field: field, value: value)
+        }
+        guard !value.isEmpty else { throw refuse() }
+        guard !value.hasPrefix(".") else { throw refuse() }
+        guard !value.contains("/"), !value.contains("\\"), !value.contains(":") else {
+            throw refuse()
+        }
+        guard !value.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else {
+            throw refuse()
+        }
     }
 
     // MARK: - Private
@@ -378,6 +459,16 @@ public enum VSIXInstallError: Error, Sendable, Equatable {
     /// The archive's `engines.vscode` is not a range this host can read, so
     /// `ExtensionRegistry` would refuse it on every scan.
     case engineRangeUnreadable(String)
+
+    /// The registry's record names one half of the signature pair and not
+    /// the other, so the archive cannot be checked against what the registry
+    /// itself says it published.
+    case verificationIncomplete(published: String, missing: String)
+
+    /// A manifest field that reaches the install path is not a single, safe
+    /// directory component. Carries the field and the value so the message can
+    /// name what the archive actually claimed rather than say "invalid".
+    case unsafeIdentity(field: String, value: String)
 
     case couldNotInstall(String)
 }
