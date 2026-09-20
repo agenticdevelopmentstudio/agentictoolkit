@@ -86,9 +86,14 @@ public final class ConversationsViewController: NSViewController {
     /// composer is disabled too.
     public var onSendToSource: (@Sendable (String, String) async -> String?)?
 
+    /// Called when the set of sessions appearing in the feed changes, on the
+    /// main actor. The shelf beside the feed draws exactly this.
+    public var onRosterChanged: (([ConversationsSessionFilter.Session]) -> Void)?
+
     private let session: FeedChatSession
     private let viewModel: AIChatViewModel
     private let workOutputFlag: WorkOutputFlag
+    private let sessionFilter: ConversationsSessionFilter
     private let load: Load
     private let refreshInterval: Duration
     private var chatView: ChatView?
@@ -115,12 +120,39 @@ public final class ConversationsViewController: NSViewController {
         self.workOutputFlag = flag
         self.load = load
         self.refreshInterval = refreshInterval
+        // The merged page is read whole and narrowed here, never narrowed at the
+        // source: the roster is read off that page, so a read that already left
+        // a session out would also leave out the only row that could bring it
+        // back.
+        let sessionFilter = ConversationsSessionFilter()
+        self.sessionFilter = sessionFilter
         let session = FeedChatSession(refreshInterval: refreshInterval) {
-            await load(flag.value, nil)
+            guard let messages = await load(flag.value, nil) else { return nil }
+            return sessionFilter.apply(to: messages)
         }
         self.session = session
         self.viewModel = AIChatViewModel(session: session)
         super.init(nibName: nil, bundle: nil)
+
+        // The poll runs off the main actor; the shelf lives on it.
+        sessionFilter.onRosterChanged = { [weak self] roster in
+            Task { @MainActor in self?.onRosterChanged?(roster) }
+        }
+    }
+
+    /// The sessions the feed is currently not drawing, by
+    /// ``ChatMessage/Attribution/sourceID``. Setting it re-reads immediately, so
+    /// a tick in the shelf lands on the timeline rather than at the next poll.
+    public var hiddenSessions: Set<String> {
+        get { sessionFilter.hidden }
+        set { setHiddenSessions(newValue) }
+    }
+
+    /// Hides everything in `ids` and shows everything else.
+    public func setHiddenSessions(_ ids: Set<String>) {
+        guard ids != sessionFilter.hidden else { return }
+        sessionFilter.hidden = ids
+        refresh()
     }
 
     @available(*, unavailable)
@@ -152,7 +184,11 @@ public final class ConversationsViewController: NSViewController {
         let container = NSView()
         container.addSubview(chatView)
         NSLayoutConstraint.activate([
-            chatView.topAnchor.constraint(equalTo: container.topAnchor),
+            // The safe area's top, not the container's: the window's titlebar is
+            // transparent so the shelf beside this can run full height, and a
+            // transcript pinned to the container scrolls its text up behind the
+            // traffic lights with nothing to blur it.
+            chatView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             chatView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             chatView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             chatView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
