@@ -8,17 +8,21 @@ import AgenticToolkitCoreMacOS
 ///
 /// ```
 /// [icon] project » branch » session name
-///        ╭──────────────────────────╮
-///        │ what the agent said      │
-///        ╰──────────────────────────[app]
-///        09:41
+///        ╭──────────────────────────────╮
+///        │ what the agent said          │
+///        ╰──────────────────────────────╯
+///        09:41                    [app]
 ///
-///                 project » branch » session name
-///                ╭──────────────────────────────╮
-///                │ what the human said          │
-///                [app]──────────────────────────╯
-///                                            09:41
+///        project » branch » session name
+///        ╭──────────────────────────────╮
+///        │ what the human said          │
+///        ╰──────────────────────────────╯
+///           [app]                   09:41
 /// ```
+///
+/// Both sides run between the same two margins. Who is talking is said by the
+/// fill, by which side the header and the timestamp are on, and by the avatar
+/// the agent's side carries — none of which needs the column to move.
 ///
 /// The human's side has no avatar: there is only ever one of them, and a badge
 /// repeated down every second row says nothing the side of the window did not
@@ -82,6 +86,13 @@ public final class ChatTranscriptRowView: NSView {
     private let iconView = NSImageView()
     private let header = SessionBreadcrumbView(textRole: .caption)
     private let timeLabel = NSTextField(labelWithString: "")
+
+    /// The clock reading on the row's own margin, where every other row's is.
+    private var timeAtMargin: NSLayoutConstraint!
+
+    /// The clock reading moved to the far side of the jump control, for a
+    /// bubble too narrow to hold the two of them side by side.
+    private var timePastControl: NSLayoutConstraint!
     private let bubble: AIChatBubbleView
     private let jumpButton = PointingHandButton()
 
@@ -137,29 +148,43 @@ public final class ChatTranscriptRowView: NSView {
     /// subject is what was said.
     private static let jumpSize: CGFloat = 30
 
-    /// The gap a bubble leaves in front of the outside edge of the *facing*
-    /// column — where the other side's bubbles begin.
+    /// How far the jump control leans on the bubble it belongs to.
     ///
-    /// A message wraps at the width of the window rather than at a fraction of
-    /// it, because a merged feed is read down one column at a time and a bubble
-    /// that stops two thirds of the way across wastes the third that is left.
-    /// Ten points is what keeps the two columns from reading as one: enough to
-    /// see the edge, not enough to be a margin.
-    private static let facingGutter: CGFloat = 10
+    /// A few points, not half the control: the overlap is there to say *whose*
+    /// bubble this is, and any more of it puts a 30pt disc over the last line
+    /// of the message — which is the one line a truncated bubble cannot spare,
+    /// since that is where its own **More…** control lives.
+    private static let jumpOverlap: CGFloat = 4
 
-    /// How far in from the row's leading edge the agent's bubbles start — their
-    /// avatar column — and how far in from the trailing edge the human's do.
+    /// The least air between the timestamp and the jump control.
+    ///
+    /// The two share the band under the bubble from opposite ends, and on a
+    /// bubble narrow enough — "ok", "cy" — the control, which tracks the
+    /// bubble's inside edge, arrives where the timestamp already was. The
+    /// timestamp is the one that gives way: the control's position is what says
+    /// *which* bubble it belongs to, while a clock reading says the same thing
+    /// wherever in the band it sits.
+    private static let timeClearance: CGFloat = 6
+
+    /// How far in from the row's leading edge every bubble starts — the agent's
+    /// avatar column — and how far in from the trailing edge every bubble ends.
     private static let agentOuterInset = hInset + iconSize + iconGap
     private static let userOuterInset = hInset
 
     /// How wide a bubble may grow in a row this wide.
     ///
-    /// Both sides get the same answer, which is the point: each stops
-    /// ``facingGutter`` short of where the *other* side's bubbles start, and the
-    /// avatar column the agent's side spends is exactly what the human's side
-    /// spends on the gutter being measured from further in.
+    /// One column, both sides. A merged feed is read straight down, and two
+    /// columns offset by a few points give it four vertical edges where it only
+    /// ever meant to have two — noise that says nothing, since who is talking is
+    /// already said by the fill, the header's side and the avatar. So a bubble
+    /// runs from the avatar column to the far margin whichever side it is on,
+    /// and the sides of the feed line up.
+    ///
+    /// A bubble with little to say still stops at its own text — see
+    /// ``AIChatBubbleView/fillsWidthWhenWrapped``. This is the cap, not the
+    /// width.
     public static func maxBubbleWidth(forRowWidth width: CGFloat) -> CGFloat {
-        max(width - agentOuterInset - userOuterInset - facingGutter, 80)
+        max(width - agentOuterInset - userOuterInset, 80)
     }
 
     /// - Parameters:
@@ -177,10 +202,9 @@ public final class ChatTranscriptRowView: NSView {
         self.actions = actions
         // The timestamp gets its own line here, so the bubble renders none.
         //
-        // Nothing is held back for the jump control: it straddles the bubble's
-        // corner rather than standing beside it, so half of it is over the
-        // bubble and the other half is in the gutter the width rule already
-        // leaves — see ``maxBubbleWidth(forRowWidth:)``.
+        // Nothing is held back for the jump control: it hangs below the bubble
+        // in the band the timestamp occupies, inside the bubble's own column —
+        // see ``installConstraints()``.
         self.bubble = AIChatBubbleView(
             message: message,
             maxWidth: max(maxBubbleWidth, 80),
@@ -191,12 +215,13 @@ public final class ChatTranscriptRowView: NSView {
             // That is what moved opening to a double click.
             isTextSelectable: true,
             lineLimit: lineLimit,
-            // Every row's bubble is the same width. A merged feed is read down
-            // one column, and bubbles cut to their own text give that column a
-            // ragged inside edge that means nothing — "this reply was short" is
-            // already in the height. The edge that carries meaning is the
-            // outside one, which says who is talking, and it does not move.
-            fillsAvailableWidth: true
+            // Anything that wraps takes the whole column. A merged feed is read
+            // straight down, and paragraphs cut to their own longest line give
+            // that column a ragged inside edge that means nothing — "this reply
+            // was long" is already in the height. A one-liner still stops at its
+            // own words: there the short shape *is* the message, and stretching
+            // "ok" across the window would be reading weight into it.
+            fillsWidthWhenWrapped: true
         )
         switch message.delivery {
         case .settled:
@@ -389,56 +414,76 @@ public final class ChatTranscriptRowView: NSView {
             constraints.append(contentEdge.constraint(equalTo: outerEdge, constant: inset))
         }
 
-        // The jump control is centred on the bubble's *lower inside* corner —
-        // the corner facing the middle of the window, which is the side with
-        // room on it and the side a reader's eye is already on. Sitting on the
-        // corner rather than beside it ties the icon to the bubble it belongs
-        // to, costs the row no width of its own, and pins it to the one point
-        // that is in the same place on every row: a bubble is as tall as its
-        // text, so anything measured from its middle moves about.
+        // The jump control hangs off the bottom of the bubble on its *inside*
+        // edge — the side facing the middle of the window, which is the side
+        // with room on it and the side a reader's eye is already on. It leans
+        // on the bubble by ``jumpOverlap`` and no more: enough to read as
+        // belonging to that bubble rather than floating under it, little enough
+        // that it never sits over the last line of the message.
         //
-        // The *lower* corner and not the upper one because the top of a bubble
-        // is where its first line is, and a 30pt control sitting on it lands
-        // beside the words a reader starts on. The bottom is where they finish,
-        // which is also when going to the session is the thing they might want.
+        // Below the bubble and not beside it because a bubble is as tall as its
+        // text — anything measured off its middle moves from row to row — and
+        // because the bottom is where the reading finishes, which is also when
+        // going to the session is the thing a reader might want.
+        //
+        // Its inside edge lines up with the *text's* inside edge, not the
+        // bubble's: the text column is the line a reader's eye actually holds,
+        // and a control flush with the bubble's rounded corner reads as hanging
+        // past it.
+        let jumpInnerEdge = isFromUser ? jumpButton.leadingAnchor : jumpButton.trailingAnchor
         let bubbleInnerEdge = isFromUser ? bubble.leadingAnchor : bubble.trailingAnchor
+        let textEdge = isFromUser
+            ? AIChatBubbleView.textInset
+            : -AIChatBubbleView.textInset
         constraints += [
-            jumpButton.centerXAnchor.constraint(equalTo: bubbleInnerEdge),
-            jumpButton.centerYAnchor.constraint(equalTo: bubble.bottomAnchor),
+            jumpInnerEdge.constraint(equalTo: bubbleInnerEdge, constant: textEdge),
+            jumpButton.topAnchor.constraint(equalTo: bubble.bottomAnchor,
+                                            constant: -Self.jumpOverlap),
             jumpButton.widthAnchor.constraint(equalToConstant: Self.jumpSize),
             jumpButton.heightAnchor.constraint(equalToConstant: Self.jumpSize),
-            // Half the control is below the bubble, in the band the delivery
-            // mark and the timestamp occupy; the row grows if it has to rather
-            // than letting the control hang out past its own bounds, where
-            // ``hitTest(_:)`` would stop answering for it.
+            // Nearly all of the control is below the bubble, in the band the
+            // delivery mark and the timestamp occupy; the row grows if it has to
+            // rather than letting the control hang out past its own bounds,
+            // where ``hitTest(_:)`` would stop answering for it.
             bottomAnchor.constraint(greaterThanOrEqualTo: jumpButton.bottomAnchor,
                                     constant: Self.vInset)
         ]
 
         // The bubble and the time align with the header on the speaker's side;
-        // on the far side the bubble stops where the facing column's bubbles
-        // begin, less the gutter — the same limit ``maxBubbleWidth(forRowWidth:)``
-        // measured, said again as a constraint so a row narrower than the width
-        // it was built for still honours it.
+        // on the far side the bubble stops at the other side's margin — the same
+        // limit ``maxBubbleWidth(forRowWidth:)`` measured, said again as a
+        // constraint so a row narrower than the width it was built for still
+        // honours it, and so both columns end on the same two lines.
+        // The two places the clock reading can sit; ``placeTimestamp()`` picks
+        // between them once the bubble's width is known.
+        timeAtMargin = isFromUser
+            ? timeLabel.trailingAnchor.constraint(equalTo: header.trailingAnchor)
+            : timeLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor)
+        timePastControl = isFromUser
+            ? timeLabel.trailingAnchor.constraint(equalTo: jumpButton.leadingAnchor,
+                                                  constant: -Self.timeClearance)
+            : timeLabel.leadingAnchor.constraint(equalTo: jumpButton.trailingAnchor,
+                                                 constant: Self.timeClearance)
+
         if isFromUser {
             constraints += [
                 bubble.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-                timeLabel.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+                timeAtMargin,
                 header.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
                                                 constant: Self.hInset),
                 bubble.leadingAnchor.constraint(
                     greaterThanOrEqualTo: leadingAnchor,
-                    constant: Self.agentOuterInset + Self.facingGutter)
+                    constant: Self.agentOuterInset)
             ]
         } else {
             constraints += [
                 bubble.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-                timeLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+                timeAtMargin,
                 header.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
                                                  constant: -Self.hInset),
                 bubble.trailingAnchor.constraint(
                     lessThanOrEqualTo: trailingAnchor,
-                    constant: -(Self.userOuterInset + Self.facingGutter))
+                    constant: -Self.userOuterInset)
             ]
         }
         NSLayoutConstraint.activate(constraints)
@@ -462,6 +507,11 @@ public final class ChatTranscriptRowView: NSView {
 
         applyHoverFill(palette)
         applySelectionFrame(palette)
+
+        // A new face is a new width, for the bubble and for the reading both —
+        // so whether the band under the bubble still holds the two of them is
+        // a question this has just re-opened.
+        needsUpdateConstraints = true
     }
 
     private func applySelectionFrame(_ palette: SemanticPalette) {
@@ -476,6 +526,47 @@ public final class ChatTranscriptRowView: NSView {
     }
 
     // MARK: - Mouse
+
+    /// Constraints first, because where the clock reading goes is one of them.
+    public override func updateConstraints() {
+        placeTimestamp()
+        super.updateConstraints()
+    }
+
+    /// Puts the clock reading where there is room for it.
+    ///
+    /// The timestamp and the jump control come at the band under the bubble
+    /// from opposite ends — the timestamp from the row's margin, the control
+    /// from the bubble's inside edge — and on a bubble as narrow as "ok" they
+    /// arrive in the same place. The timestamp is what moves: the control's
+    /// position is what says *which* bubble it belongs to, while a clock
+    /// reading says the same thing wherever along the band it sits.
+    ///
+    /// Both widths are known here, before anything is laid out: the bubble
+    /// measures its own text, and the reading is a label with an intrinsic
+    /// size. Which is why the choice is made in the constraint pass — a view
+    /// may not rearrange itself from inside a layout pass, and one that tries
+    /// is simply ignored.
+    private func placeTimestamp() {
+        guard !jumpButton.isHidden, timeAtMargin != nil else { return }
+        // What the band needs to hold both: the control, inset from the
+        // bubble's edge by the width of the text's own inset, then air, then
+        // the reading itself.
+        let needed = AIChatBubbleView.textInset + Self.jumpSize
+            + Self.timeClearance + timeLabel.intrinsicContentSize.width
+        let crowded = bubble.measuredWidth < needed
+        guard crowded == timeAtMargin.isActive else { return }
+
+        // Deactivated first: both are required, and a moment with the two of
+        // them on is a conflict the engine would report.
+        if crowded {
+            timeAtMargin.isActive = false
+            timePastControl.isActive = true
+        } else {
+            timePastControl.isActive = false
+            timeAtMargin.isActive = true
+        }
+    }
 
     /// The row is the target, not its parts — except for the parts that mean
     /// something else.

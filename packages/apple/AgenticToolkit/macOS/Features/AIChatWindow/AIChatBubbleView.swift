@@ -16,11 +16,28 @@ import AgenticToolkitCoreMacOS
 /// was. Same reasoning renamed `ChatViewModel` to ``AIChatViewModel``.
 public final class AIChatBubbleView: NSView {
 
-    /// `HH:mm`, shared with ``ChatTranscriptRowView`` so a timestamp reads the
+    /// `9:41 AM`, shared with ``ChatTranscriptRowView`` so a timestamp reads the
     /// same whether it trails the text or sits on its own line under it.
+    ///
+    /// Twelve-hour, and spelled out rather than derived from the locale's time
+    /// style: this is a clock a person glances at beside something they said,
+    /// and "9:41 AM" is the shape that needs no arithmetic. The locale still
+    /// supplies the AM/PM words and the separator — only the dial is fixed.
     static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
+        formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
+
+    /// `Saturday, June 3 2026` — the banner a transcript puts in front of the
+    /// first message of each day.
+    ///
+    /// The whole date written out, because it is said once per day rather than
+    /// once per message: a reader who has scrolled back far enough to need it is
+    /// asking *which* day, and `06/03` answers a different, smaller question.
+    static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d yyyy"
         return formatter
     }()
 
@@ -34,18 +51,21 @@ public final class AIChatBubbleView: NSView {
     private let showsInlineTimestamp: Bool
     private let isTextSelectable: Bool
 
-    /// Whether the bubble is always as wide as it is allowed to be, rather than
-    /// as wide as its text.
+    /// Whether a bubble whose text *wraps* is as wide as it is allowed to be,
+    /// rather than as wide as its longest line.
     ///
-    /// A one-to-one chat shrinks each bubble to its content: two shapes reading
+    /// A one-to-one chat shrinks every bubble to its content: two shapes reading
     /// down one column are what tells "ok" from a paragraph at a glance. A
-    /// merged feed cannot afford that — there the ragged inside edges of a
-    /// hundred rows are a second, meaningless column of noise running down the
-    /// middle of the window, and the edge that says who is talking is the
-    /// *outside* one, which never moved. One width also makes the row furniture
-    /// pinned to that edge — the jump control, the truncation control — land in
-    /// the same place on every row instead of tracking the text.
-    private let fillsAvailableWidth: Bool
+    /// merged feed cannot afford that for paragraphs — there the ragged inside
+    /// edges of a hundred wrapped bubbles are a second, meaningless column of
+    /// noise running down the middle of the window, and where a wrapped line
+    /// happened to break says nothing about the message.
+    ///
+    /// It stops at wrapping because a bubble holding one short line is a
+    /// different case: there the small shape *is* the content, read at a glance
+    /// without being read at all, and filling the column would put the weight of
+    /// a paragraph behind "ok".
+    private let fillsWidthWhenWrapped: Bool
 
     /// How many lines the bubble shows before it stops and offers the rest, or
     /// nil for a bubble that shows whatever it holds.
@@ -99,11 +119,25 @@ public final class AIChatBubbleView: NSView {
     private var moreLeadingConstraint: NSLayoutConstraint!
     private var moreTopConstraint: NSLayoutConstraint!
 
+    /// The width this bubble came to.
+    ///
+    /// The bubble measures its own text rather than leaving its width to the
+    /// engine, which is what makes this answerable before any layout pass has
+    /// run — and a caller arranging the band *under* the bubble has to know it
+    /// while it is still deciding what to constrain.
+    public var measuredWidth: CGFloat { bubbleWidthConstraint.constant }
+
     /// The **More…** control, for a container that has taken over hit-testing
     /// for its whole subtree and has to name the parts that still take a click.
     public var expandControl: NSView { moreButton }
 
-    private static let hPad: CGFloat = 12
+    /// How far a bubble's text sits in from the bubble's own edge.
+    ///
+    /// Public because it is not only the bubble's business: a row that hangs
+    /// furniture off a bubble — ``ChatTranscriptRowView``'s jump control — lines
+    /// that furniture up with the *text*, not with the bubble's edge, and this
+    /// is how far in the text's edge is.
+    public static let textInset: CGFloat = 12
     private static let vPad: CGFloat = 8
 
     /// The **More…** control is a symbol rather than the words, and a big one.
@@ -135,22 +169,23 @@ public final class AIChatBubbleView: NSView {
     ///     to be clicked through.
     ///   - lineLimit: the most lines to show before truncating — see
     ///     ``lineLimit``.
-    ///   - fillsAvailableWidth: whether every bubble is `maxWidth` wide
-    ///     whatever it holds — see ``fillsAvailableWidth``.
+    ///   - fillsWidthWhenWrapped: whether a bubble whose text wraps is
+    ///     `maxWidth` wide however its lines break — see
+    ///     ``fillsWidthWhenWrapped``.
     public init(
         message: ChatMessage,
         maxWidth: CGFloat,
         showsInlineTimestamp: Bool = true,
         isTextSelectable: Bool = true,
         lineLimit: Int? = nil,
-        fillsAvailableWidth: Bool = false
+        fillsWidthWhenWrapped: Bool = false
     ) {
         self.message = message
         self.maxWidth = maxWidth
         self.showsInlineTimestamp = showsInlineTimestamp
         self.isTextSelectable = isTextSelectable
         self.lineLimit = lineLimit
-        self.fillsAvailableWidth = fillsAvailableWidth
+        self.fillsWidthWhenWrapped = fillsWidthWhenWrapped
         self.textView = BubbleTextView(frame: .zero)
         self.textWidthConstraint = textView.widthAnchor.constraint(equalToConstant: 0)
         self.textHeightConstraint = textView.heightAnchor.constraint(equalToConstant: 0)
@@ -158,7 +193,7 @@ public final class AIChatBubbleView: NSView {
         super.init(frame: .zero)
         self.bubbleWidthConstraint = widthAnchor.constraint(equalToConstant: maxWidth)
 
-        if fillsAvailableWidth {
+        if fillsWidthWhenWrapped {
             // A row can be laid out narrower than the width its bubbles were
             // built for, for the moment between a live resize and the rebuild
             // that follows it. A width that outranked the row's own edges would
@@ -217,8 +252,8 @@ public final class AIChatBubbleView: NSView {
 
         NSLayoutConstraint.activate([
             textView.topAnchor.constraint(equalTo: topAnchor, constant: Self.vPad),
-            textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.hPad),
-            textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.hPad),
+            textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textInset),
+            textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.textInset),
             bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: Self.vPad),
             textWidthConstraint,
             textHeightConstraint,
@@ -229,7 +264,7 @@ public final class AIChatBubbleView: NSView {
             moreHeightConstraint,
             moreWidthConstraint,
             moreButton.trailingAnchor.constraint(
-                lessThanOrEqualTo: trailingAnchor, constant: -Self.hPad)
+                lessThanOrEqualTo: trailingAnchor, constant: -Self.textInset)
         ])
 
         observeTheme { bubble, palette in bubble.apply(palette) }
@@ -321,7 +356,7 @@ public final class AIChatBubbleView: NSView {
         layer?.borderWidth = border == nil ? 0 : 1
 
         let full = attributedText(for: palette)
-        let textMaxWidth = maxWidth - Self.hPad * 2
+        let textMaxWidth = maxWidth - Self.textInset * 2
 
         var shown = full
         var measured = measure(full, width: textMaxWidth)
@@ -343,10 +378,16 @@ public final class AIChatBubbleView: NSView {
             ? max(measured.width, measured.lastLine.maxX + Self.moreInlineGap + Self.moreSize)
             : measured.width
 
+        // Whether *this* bubble takes the whole column. Measured, not declared:
+        // a message is short when its text did not wrap at the width it was
+        // given, which is a fact about the laid-out line count and nothing the
+        // caller could have known.
+        let fillsWidth = fillsWidthWhenWrapped && measured.lineCount > 1
+
         // The text view is exactly as wide as the bubble's content box, not as
         // wide as its longest line: it is pinned to both of the bubble's inside
         // edges, so a width constraint disagreeing with them is a conflict.
-        let shownWidth = fillsAvailableWidth ? textMaxWidth : min(contentWidth, textMaxWidth)
+        let shownWidth = fillsWidth ? textMaxWidth : min(contentWidth, textMaxWidth)
         textView.textContainer?.size = NSSize(
             width: shownWidth, height: .greatestFiniteMagnitude)
         textView.textStorage?.setAttributedString(shown)
@@ -370,9 +411,9 @@ public final class AIChatBubbleView: NSView {
             ? measured.lastLine.midY - Self.moreSize / 2
             : 0
 
-        bubbleWidthConstraint.constant = fillsAvailableWidth
+        bubbleWidthConstraint.constant = fillsWidth
             ? maxWidth
-            : min(contentWidth + Self.hPad * 2, maxWidth)
+            : min(contentWidth + Self.textInset * 2, maxWidth)
 
         textView.insertionPointColor = palette.nsColor(.cursor)
         textView.selectedTextAttributes = [

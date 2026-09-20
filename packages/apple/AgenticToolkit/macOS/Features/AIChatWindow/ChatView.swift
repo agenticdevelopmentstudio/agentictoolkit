@@ -46,6 +46,13 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// width the row's width minus a constant.
     private static let rowWidthInset: CGFloat = 32
 
+    /// Where a day starts and ends, for the banners that head each one.
+    ///
+    /// The reader's own calendar and time zone: a message is on the day they
+    /// were having when it arrived, not the day it was in wherever the clock
+    /// that stamped it was running.
+    private static let dayCalendar = Calendar.current
+
     /// Whether the composer accepts input at all.
     ///
     /// A transcript that is being *watched* rather than talked to (a feed, a
@@ -362,7 +369,26 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         topSpacer.setContentCompressionResistancePriority(.init(1), for: .vertical)
         transcriptStack.addArrangedSubview(topSpacer)
 
+        // Which day the rows so far belong to, so the next message can tell
+        // whether it is opening a new one. Nil until the first message, which
+        // always opens one.
+        var shownDay: Date?
+
         for message in viewModel.messages {
+            // Every message carries a clock reading; only the first of a day
+            // carries the date. A banner goes in ahead of it, spanning the
+            // transcript, because the day belongs to neither column.
+            let day = Self.dayCalendar.startOfDay(for: message.timestamp)
+            if day != shownDay {
+                shownDay = day
+                let banner = ChatDayBannerView(day: message.timestamp,
+                                               calendar: Self.dayCalendar)
+                transcriptStack.addArrangedSubview(banner)
+                banner.widthAnchor.constraint(
+                    equalTo: transcriptStack.widthAnchor,
+                    constant: -Self.rowWidthInset).isActive = true
+            }
+
             // A message that names its own speaker gets the fuller row: icon,
             // header line, timestamp underneath. Only a merged transcript
             // produces those, so an ordinary chat is untouched by this.

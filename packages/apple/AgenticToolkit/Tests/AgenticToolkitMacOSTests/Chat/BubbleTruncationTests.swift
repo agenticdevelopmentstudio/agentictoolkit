@@ -142,7 +142,7 @@ final class BubbleTruncationTests: XCTestCase {
     /// text: a couple of characters, not the bubble's edge.
     func testTheCutLeavesRoomOnTheLastLineForTheControl() throws {
         let wrapped = String(repeating: "a long unbroken sentence that has to wrap. ", count: 40)
-        let bubble = try laidOutBubble(text: wrapped, lineLimit: 8, fillsAvailableWidth: true)
+        let bubble = try laidOutBubble(text: wrapped, lineLimit: 8, fillsWidthWhenWrapped: true)
         XCTAssertTrue(bubble.isTruncated)
         let more = try moreButton(in: bubble)
 
@@ -325,7 +325,7 @@ final class BubbleTruncationTests: XCTestCase {
     /// in, since the measurement is redone on every theme application.
     private func laidOutBubble(
         text: String, lineLimit: Int?, maxWidth: CGFloat = 300,
-        fillsAvailableWidth: Bool = false
+        fillsWidthWhenWrapped: Bool = false
     ) throws -> AIChatBubbleView {
         let bubble = AIChatBubbleView(
             message: ChatMessage(id: "m", role: .assistant, text: text),
@@ -333,7 +333,7 @@ final class BubbleTruncationTests: XCTestCase {
             showsInlineTimestamp: false,
             isTextSelectable: true,
             lineLimit: lineLimit,
-            fillsAvailableWidth: fillsAvailableWidth
+            fillsWidthWhenWrapped: fillsWidthWhenWrapped
         )
         let host = NSView()
         let window = NSWindow(

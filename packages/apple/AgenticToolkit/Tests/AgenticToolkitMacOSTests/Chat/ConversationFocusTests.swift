@@ -27,34 +27,43 @@ final class ConversationFocusTests: XCTestCase {
 
     // MARK: - The jump control
 
-    /// The control straddles the corner rather than standing beside it: half
-    /// of it is over the bubble and half in the gutter, which is why the row
-    /// holds back no width of its own for it.
-    func testTheJumpControlIsCentredOnAnAssistantBubblesLowerInsideCorner() throws {
+    /// The control hangs off the bottom of the bubble, and its inside edge lines
+    /// up with the *text's* inside edge rather than the bubble's: the text
+    /// column is the line a reader's eye holds, and a control flush with a
+    /// rounded corner reads as hanging past it.
+    func testTheJumpControlLinesUpWithAnAssistantBubblesTextEdge() throws {
         let (_, bubble, button) = try laidOutRow(role: .assistant, text: "a short reply")
         XCTAssertEqual(
-            aligned(button).midX, aligned(bubble).maxX, accuracy: 0.5,
+            aligned(button).maxX,
+            aligned(bubble).maxX - AIChatBubbleView.textInset, accuracy: 0.5,
             "the agent's column runs left, so its bubble's inside edge is the trailing one")
         XCTAssertEqual(
-            aligned(button).midY, aligned(bubble).minY, accuracy: 0.5,
-            "the control is not centred on the bubble's bottom edge")
+            aligned(button).maxY, aligned(bubble).minY + Self.jumpOverlap, accuracy: 0.5,
+            "the control is not hanging off the bottom of the bubble")
     }
 
-    func testTheJumpControlIsCentredOnAUserBubblesLowerInsideCorner() throws {
+    func testTheJumpControlLinesUpWithAUserBubblesTextEdge() throws {
         let (_, bubble, button) = try laidOutRow(role: .user, text: "a short prompt")
         XCTAssertEqual(
-            aligned(button).midX, aligned(bubble).minX, accuracy: 0.5,
+            aligned(button).minX,
+            aligned(bubble).minX + AIChatBubbleView.textInset, accuracy: 0.5,
             "the human's column runs right, so its bubble's inside edge is the leading one")
         XCTAssertEqual(
-            aligned(button).midY, aligned(bubble).minY, accuracy: 0.5,
-            "the control is not centred on the bubble's bottom edge")
+            aligned(button).maxY, aligned(bubble).minY + Self.jumpOverlap, accuracy: 0.5,
+            "the control is not hanging off the bottom of the bubble")
     }
 
-    /// The corner is the one point that is in the same place on every row: a
-    /// bubble is as tall as its text, so a control measured from its middle
-    /// moves about. A one-line bubble and a forty-line one have to put it at
-    /// the same height above their own bottom edge — which is none.
-    func testTheJumpControlStaysOnTheCornerHoweverTallTheBubbleIs() throws {
+    /// How far the control leans on its bubble, in points. A few — enough to
+    /// say whose bubble it is, little enough that a 30pt disc never lands on
+    /// the last line of the message, which is where a truncated bubble keeps
+    /// its own **More…** control.
+    private static let jumpOverlap: CGFloat = 4
+
+    /// The bottom edge is the one place that is the same on every row: a bubble
+    /// is as tall as its text, so a control measured from its middle moves
+    /// about. A one-line bubble and a forty-line one have to overlap it by the
+    /// same few points.
+    func testTheJumpControlLeansOnTheBubbleByTheSameFewPointsHoweverTallItIs() throws {
         let (_, shortBubble, shortButton) = try laidOutRow(role: .assistant, text: "one line")
         let paragraph = (0..<40).map { "line \($0) of a long reply" }.joined(separator: "\n")
         let (_, tallBubble, tallButton) = try laidOutRow(role: .assistant, text: paragraph)
@@ -63,14 +72,18 @@ final class ConversationFocusTests: XCTestCase {
             tallBubble.frame.height, shortBubble.frame.height * 4,
             "the fixture is wrong: the bubbles have to differ in height for this to mean anything")
 
-        let shortRise = aligned(shortButton).midY - aligned(shortBubble).minY
-        let tallRise = aligned(tallButton).midY - aligned(tallBubble).minY
+        let shortOverlap = aligned(shortButton).maxY - aligned(shortBubble).minY
+        let tallOverlap = aligned(tallButton).maxY - aligned(tallBubble).minY
         XCTAssertEqual(
-            shortRise, 0, accuracy: 0.5,
-            "the control is not on the bubble's bottom edge")
+            shortOverlap, Self.jumpOverlap, accuracy: 0.5,
+            "the control leans on the bubble by \(shortOverlap)pt, not a few")
+        XCTAssertLessThan(
+            shortOverlap, shortBubble.frame.height,
+            "the control covers the whole of a one-line bubble")
         XCTAssertEqual(
-            shortRise, tallRise, accuracy: 0.5,
-            "the control follows the bubble's centre, not its corner: \(shortRise) vs \(tallRise)")
+            shortOverlap, tallOverlap, accuracy: 0.5,
+            "the control follows the bubble's centre, not its bottom: "
+                + "\(shortOverlap) vs \(tallOverlap)")
     }
 
     /// Compared on alignment rects, not frames: a control's frame carries a
@@ -81,8 +94,8 @@ final class ConversationFocusTests: XCTestCase {
         view.alignmentRect(forFrame: view.frame)
     }
 
-    /// Half the control is below the bubble it is pinned to, in the band the
-    /// timestamp occupies — and a row's ``ChatTranscriptRowView/hitTest(_:)``
+    /// Nearly all of the control is below the bubble it is pinned to, in the
+    /// band the timestamp occupies — and a row's ``ChatTranscriptRowView/hitTest(_:)``
     /// refuses anything outside its bounds, so a control hanging past either
     /// edge would be drawn and unclickable.
     func testTheRowIsTallEnoughToHoldTheJumpControl() throws {
@@ -95,28 +108,21 @@ final class ConversationFocusTests: XCTestCase {
 
     // MARK: - How wide a bubble may grow
 
-    /// The rule, in the words it was asked for in: a bubble stops ten points
-    /// short of the *outside* edge of the facing column — where the other
-    /// side's bubbles begin — rather than at a fraction of the row. A merged
-    /// feed is read down one column at a time, and a bubble that stopped two
-    /// thirds of the way across would waste the third that was left.
-    func testABubbleStopsTenPointsShortOfTheFacingColumnsOutsideEdge() throws {
+    /// One column, both sides. A merged feed is read straight down, and two
+    /// columns offset from each other give it four vertical edges where it
+    /// meant to have two — while who is talking is already said by the fill,
+    /// by the side the header is on, and by the avatar.
+    func testBothColumnsRunBetweenTheSameTwoMargins() throws {
         let agent = try laidOutFeedRow(role: .assistant, text: Self.wideText)
         let human = try laidOutFeedRow(role: .user, text: Self.wideText)
-
-        // Where each column's bubbles begin, which is pinned whatever the text
-        // inside them does: the agent's to its avatar's inside edge, the
-        // human's to the row's own trailing inset.
-        let agentOutsideEdge = agent.bubble.frame.minX
-        let humanOutsideEdge = human.bubble.frame.maxX
         let cap = ChatTranscriptRowView.maxBubbleWidth(forRowWidth: Self.feedRowWidth)
 
         XCTAssertEqual(
-            agentOutsideEdge + cap, humanOutsideEdge - 10, accuracy: 0.5,
-            "the agent's bubble may grow past ten points short of where the human's end")
+            agent.bubble.frame.minX, human.bubble.frame.minX, accuracy: 0.5,
+            "the two columns start on different lines")
         XCTAssertEqual(
-            humanOutsideEdge - cap, agentOutsideEdge + 10, accuracy: 0.5,
-            "the human's bubble may grow past ten points short of where the agent's begin")
+            agent.bubble.frame.maxX, human.bubble.frame.maxX, accuracy: 0.5,
+            "the two columns end on different lines")
 
         // And a message that wants the whole of it gets the whole of it, to
         // within the glyph the last line broke on.
@@ -126,22 +132,65 @@ final class ConversationFocusTests: XCTestCase {
                        "the human's bubble left room it was allowed to use")
     }
 
-    /// The other half of the rule: in a merged feed the cap is the width, not a
-    /// limit. Bubbles cut to their own text give the column a ragged inside
-    /// edge that says nothing a reader needs — how much was said is already in
-    /// the height — while the outside edge, which says *who* is talking, is the
-    /// one that has to stay still.
-    func testEveryBubbleIsTheSameWidthHoweverLittleItSays() throws {
+    /// The exception, and the reason it is one: a bubble fills the column when
+    /// its text *wrapped*, because where a wrapped line happened to break says
+    /// nothing. A bubble holding one short line keeps its own width — there the
+    /// small shape is the message, and filling the column would put the weight
+    /// of a paragraph behind "ok".
+    func testAWrappedBubbleFillsTheColumnAndAOneLinerKeepsItsOwnWidth() throws {
         let short = try laidOutFeedRow(role: .assistant, text: "yes")
         let wide = try laidOutFeedRow(role: .assistant, text: Self.wideText)
         let human = try laidOutFeedRow(role: .user, text: "ok")
+        let wideHuman = try laidOutFeedRow(role: .user, text: Self.wideText)
         let cap = ChatTranscriptRowView.maxBubbleWidth(forRowWidth: Self.feedRowWidth)
 
-        XCTAssertEqual(short.bubble.frame.width, cap, accuracy: 0.5,
-                       "a three-word message was drawn narrower than the column")
-        XCTAssertEqual(wide.bubble.frame.width, cap, accuracy: 0.5)
-        XCTAssertEqual(human.bubble.frame.width, cap, accuracy: 0.5,
-                       "the human's column is a different width from the agent's")
+        XCTAssertEqual(wide.bubble.frame.width, cap, accuracy: 0.5,
+                       "a wrapped message was drawn narrower than the column")
+        XCTAssertLessThan(short.bubble.frame.width, cap / 2,
+                          "a three-letter message was stretched across the column")
+        XCTAssertLessThan(human.bubble.frame.width, cap / 2,
+                          "a two-letter message was stretched across the column")
+
+        // A short bubble gives up the *inside* edge, never the outside one:
+        // which side it is on is the one thing its width must not blur.
+        XCTAssertEqual(short.bubble.frame.minX, wide.bubble.frame.minX, accuracy: 0.5,
+                       "a short reply started somewhere other than the agent's margin")
+        XCTAssertEqual(human.bubble.frame.maxX, wideHuman.bubble.frame.maxX, accuracy: 0.5,
+                       "a short prompt ended somewhere other than the human's margin")
+    }
+
+    /// The timestamp and the control come at the band under the bubble from
+    /// opposite ends, and a two-letter message puts both of them at the same
+    /// margin. The timestamp is what moves: a clock reading is legible anywhere
+    /// in that band, while the control's position is what says which bubble it
+    /// belongs to — and one drawn over the other is neither.
+    func testAShortBubblesTimestampStepsAsideForTheJumpControl() throws {
+        for (role, text) in [(ChatMessage.Role.user, "cy"), (.assistant, "ok")] {
+            let (row, _, button) = try laidOutRow(role: role, text: text)
+            let time = try timeLabel(in: row)
+            XCTAssertFalse(
+                time.frame.intersects(button.frame),
+                "\(role) row: the timestamp \(time.frame) is under the control \(button.frame)")
+        }
+    }
+
+    /// And it moves only when it has to — a bubble with room in it leaves the
+    /// timestamp on the margin, where every other row's is, so the column of
+    /// clock readings stays a column.
+    func testAnOrdinaryBubblesTimestampStaysOnTheMargin() throws {
+        let (userRow, _, _) = try laidOutRow(role: .user, text: "a prompt with some length to it")
+        let (agentRow, _, _) = try laidOutRow(role: .assistant, text: "a reply with some length")
+        let (shortRow, _, _) = try laidOutRow(role: .user, text: "cy")
+
+        XCTAssertEqual(
+            try timeBox(in: userRow).maxX, Self.feedRowWidth - 8, accuracy: 0.5,
+            "the human's timestamp is not on the human's margin")
+        XCTAssertEqual(
+            try timeBox(in: agentRow).minX, 40, accuracy: 0.5,
+            "the agent's timestamp is not where the agent's column starts")
+        XCTAssertLessThan(
+            try timeBox(in: shortRow).maxX, try timeBox(in: userRow).maxX,
+            "the short row's timestamp did not move at all, so it must be under the control")
     }
 
     func testARowWithNoJumpActionShowsNoJumpControl() throws {
@@ -1104,6 +1153,23 @@ final class ConversationFocusTests: XCTestCase {
 
         let bubble = try XCTUnwrap(row.subviews.compactMap { $0 as? AIChatBubbleView }.first)
         return (row, bubble)
+    }
+
+    /// The row's clock reading. The only text field the row holds directly —
+    /// the crumbs are inside the header view, which is one subview of its own.
+    private func timeLabel(in row: ChatTranscriptRowView) throws -> NSTextField {
+        try XCTUnwrap(
+            row.subviews.compactMap { $0 as? NSTextField }.first,
+            "the row has no timestamp"
+        )
+    }
+
+    /// Where the clock reading was *pinned*, which is not where its view is: a
+    /// label's frame stands a couple of points proud of its text on each side,
+    /// so a margin read off the frame misses by that much every time.
+    private func timeBox(in row: ChatTranscriptRowView) throws -> NSRect {
+        let label = try timeLabel(in: row)
+        return label.alignmentRect(forFrame: label.frame)
     }
 
     private func jumpButton(in row: ChatTranscriptRowView) throws -> NSButton {
