@@ -175,7 +175,7 @@ extension ExtensionTreeViewController: PaneContentTeardown {
 /// user had opened. The same object is therefore kept for the life of a handle
 /// and its `item` rewritten in place.
 @MainActor
-private final class ExtensionTreeRow {
+final class ExtensionTreeRow {
 
     /// `ContributedTreeItem.id` — the handle the data source mints, and the
     /// key everything in the controller below is stored under.
@@ -236,16 +236,10 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
     /// inventing a row that says it.
     private let messageLabel = ThemedLabel(string: "", role: .tertiaryText, textRole: .caption)
 
-    /// Every row ever drawn, by handle. Kept across a refresh so the outline
-    /// sees the same objects and keeps its disclosure; pruned in `adopt` when a
-    /// parent stops naming a child, which is the only way a handle can leave.
-    private var rows: [String: ExtensionTreeRow] = [:]
-
-    /// The children of each handle this pane has actually asked for, keyed by
-    /// the parent's handle and `""` for the roots. Its key set is exactly the
-    /// set of branches a refresh has to re-ask, which is what keeps a whole-tree
-    /// refresh from walking a tree nobody has opened.
-    private var childrenByHandle: [String: [ExtensionTreeRow]] = [:]
+    /// The rows this pane has drawn and how they are related — see
+    /// `ExtensionTreeRowTable`, which is the half of this controller with no
+    /// view in it.
+    private var table = ExtensionTreeRowTable()
 
     /// Handles with a `getChildren` in flight. A second ask for the same branch
     /// while the first is outstanding would be a second call into the
@@ -258,12 +252,6 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
     /// disagreeing with the extension, which is the one failure a user cannot
     /// diagnose.
     private var staleHandles: Set<String> = []
-
-    /// Rows whose `collapsibleState` was `.expanded` and which have therefore
-    /// been opened once. Once only: a default is what fills in for an answer,
-    /// never what overrules one, so a branch the user has closed stays closed
-    /// through every later refresh.
-    private var autoExpandedHandles: Set<String> = []
 
     /// Set while the outline is being reloaded, so the empty selection a reload
     /// passes through is not reported to the extension as the user letting go
@@ -422,7 +410,7 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
     /// extension takes, and reloads itself when the answer lands.
     private func children(of item: Any?) -> [ExtensionTreeRow] {
         let handle = (item as? ExtensionTreeRow)?.handle ?? ""
-        if let cached = childrenByHandle[handle] { return cached }
+        if let cached = table.children(of: handle) { return cached }
         loadChildren(of: handle)
         return []
     }
@@ -436,14 +424,15 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
         }
         // A handle whose row has been pruned names a branch that no longer
         // exists; asking for its children would resurrect it.
-        guard handle.isEmpty || rows[handle] != nil else { return }
+        guard handle.isEmpty || table.row(for: handle) != nil else { return }
         loadingHandles.insert(handle)
-        let parent = handle.isEmpty ? nil : rows[handle]?.item
+        let parent = handle.isEmpty ? nil : table.row(for: handle)?.item
         Task { [weak self] in
             guard let self else { return }
             let items = await self.dataSource.children(of: parent)
             self.loadingHandles.remove(handle)
-            guard !self.isBeingDiscarded, handle.isEmpty || self.rows[handle] != nil else {
+            guard !self.isBeingDiscarded,
+                  handle.isEmpty || self.table.row(for: handle) != nil else {
                 self.staleHandles.remove(handle)
                 return
             }
@@ -458,35 +447,8 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
     /// for every handle that survived and forgetting the subtrees of those that
     /// did not.
     private func adopt(_ items: [ContributedTreeItem], under handle: String) {
-        let previous = childrenByHandle[handle] ?? []
-        var next: [ExtensionTreeRow] = []
-        for item in items {
-            if let existing = rows[item.id] {
-                existing.item = item
-                next.append(existing)
-            } else {
-                let row = ExtensionTreeRow(item: item)
-                rows[item.id] = row
-                next.append(row)
-            }
-        }
-        childrenByHandle[handle] = next
-        let survivors = Set(next.map(\.handle))
-        for gone in previous where !survivors.contains(gone.handle) {
-            forget(gone.handle)
-        }
+        table.adopt(items, under: handle)
         redraw(handle)
-    }
-
-    /// Drops a handle and everything under it. The recursion is what keeps
-    /// `rows` from accumulating every branch an extension has ever shown: a
-    /// parent that stops naming a child is the only news that a whole subtree
-    /// is gone, and nothing else will report it.
-    private func forget(_ handle: String) {
-        for child in childrenByHandle[handle] ?? [] { forget(child.handle) }
-        childrenByHandle[handle] = nil
-        rows[handle] = nil
-        autoExpandedHandles.remove(handle)
     }
 
     private func redraw(_ handle: String) {
@@ -495,7 +457,7 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
         isSyncingExpansion = true
         if handle.isEmpty {
             outline.reloadData()
-        } else if let row = rows[handle] {
+        } else if let row = table.row(for: handle) {
             outline.reloadItem(row, reloadChildren: true)
         }
         isSyncingExpansion = false
@@ -506,9 +468,9 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
 
     /// Opens the branches the extension asked to be open, once each.
     private func expandDefaults(under handle: String) {
-        for row in childrenByHandle[handle] ?? []
-        where row.item.collapsibleState == .expanded && !autoExpandedHandles.contains(row.handle) {
-            autoExpandedHandles.insert(row.handle)
+        for row in table.children(of: handle) ?? []
+        where row.item.collapsibleState == .expanded {
+            guard table.markAutoExpanded(row.handle) else { continue }
             isSyncingExpansion = true
             outline.expandItem(row)
             isSyncingExpansion = false
@@ -529,7 +491,7 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
         guard !handles.isEmpty else { return }
         var indexes = IndexSet()
         for handle in handles {
-            guard let row = rows[handle] else { continue }
+            guard let row = table.row(for: handle) else { continue }
             let index = outline.row(forItem: row)
             if index >= 0 { indexes.insert(index) }
         }
@@ -556,14 +518,14 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
     /// is not asked for at all.
     private func providerDidChangeTreeData(_ handle: String?) {
         guard !isBeingDiscarded else { return }
-        if let handle, !handle.isEmpty, rows[handle] != nil {
+        if let handle, !handle.isEmpty, table.row(for: handle) != nil {
             loadChildren(of: handle)
             return
         }
-        for branch in childrenByHandle.keys { loadChildren(of: branch) }
+        for branch in table.loadedBranches { loadChildren(of: branch) }
         // A pane whose root load has not landed yet holds no branches at all,
         // and the change is exactly the news that it should ask again.
-        if childrenByHandle.isEmpty { loadChildren(of: "") }
+        if table.isEmpty { loadChildren(of: "") }
     }
 
     // MARK: - Activation
@@ -623,7 +585,7 @@ extension ExtensionTreeOutlineViewController: NSOutlineViewDataSource, NSOutline
 
     func outlineViewItemWillExpand(_ notification: Notification) {
         guard let row = notification.userInfo?["NSObject"] as? ExtensionTreeRow,
-              childrenByHandle[row.handle] == nil else { return }
+              !table.hasLoaded(row.handle) else { return }
         loadChildren(of: row.handle)
     }
 

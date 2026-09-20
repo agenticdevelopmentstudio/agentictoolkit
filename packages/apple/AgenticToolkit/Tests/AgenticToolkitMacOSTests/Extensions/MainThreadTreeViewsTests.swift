@@ -898,3 +898,87 @@ struct MainThreadTreeViewsTests {
         #expect(context.evaluateScript("globalThis.__register()")?.toString() == "threw")
     }
 }
+
+/// A flag an `AppCommand` can set from wherever `CommandRegistry` runs it.
+///
+/// `AppCommand.run` is a plain escaping closure, so what it captures has to be
+/// `Sendable`; a lock around one `Bool` is the whole of it.
+private final class CommandMarker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var wasPressed: Bool { lock.withLock { value } }
+    func press() { lock.withLock { value = true } }
+}
+
+extension MainThreadTreeViewsTests {
+    // MARK: - What a shrinking branch leaves behind
+
+    /// A row that leaves the tree stops being a row, including its command.
+    ///
+    /// Handles come in two spaces — `#id` when the item declared one, and
+    /// `parent/index` when it did not — and only the second was ever swept.
+    /// `forgetDescendants(of:)` dropped every handle with the parent's path as
+    /// a prefix, which a declared handle never has: `#apple` is not under
+    /// `#fruit` by string and there was nothing else that said it was.
+    ///
+    /// So the entry outlived the row. Two things followed, and the second is
+    /// the one a user meets: the tables grew by every row an extension had ever
+    /// shown, and `activate` still found a command filed under a handle whose
+    /// row was gone — a double-click on a row that happened to reuse the
+    /// handle ran the vanished row's command.
+    ///
+    /// Pinned on the command, because that is the half with a consequence.
+    @Test("a declared-id row that leaves the tree takes its command with it")
+    func aDeclaredHandleIsForgottenWithItsBranch() async throws {
+        let extensionDirectory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: extensionDirectory) }
+
+        let fixture = try makeFixture(
+            source: """
+                var vscode = require('vscode');
+                globalThis.__kids = [{ key: 'apple', label: 'Apple' }];
+                exports.activate = function () {
+                    vscode.window.registerTreeDataProvider('acme.tree', {
+                        getChildren: function (element) {
+                            return element
+                                ? globalThis.__kids
+                                : [{ key: 'fruit', label: 'Fruit', isRoot: true }];
+                        },
+                        getTreeItem: function (element) {
+                            var item = new vscode.TreeItem(
+                                element.label,
+                                element.isRoot
+                                    ? vscode.TreeItemCollapsibleState.Collapsed
+                                    : vscode.TreeItemCollapsibleState.None);
+                            item.id = element.key;
+                            if (!element.isRoot) {
+                                item.command = { command: 'test.stale', title: 'Stale' };
+                            }
+                            return item;
+                        }
+                    });
+                };
+                """,
+            extensionDirectory: extensionDirectory)
+        try await fixture.host.activate()
+
+        let marker = CommandMarker()
+        _ = fixture.registry.register(
+            AppCommand(id: "test.stale", title: "Stale") { marker.press() })
+
+        let source = try dataSource(fixture.treeViews)
+        let roots = await source.children(of: nil)
+        let fruit = try #require(roots.first)
+        let apple = try #require(await source.children(of: fruit).first)
+
+        // The branch shrinks: the extension drops its only child and the pane
+        // asks again, which is the whole of how a row leaves a tree.
+        try #require(fixture.host.javaScriptContext)
+            .evaluateScript("globalThis.__kids = [];")
+        #expect(await source.children(of: fruit).isEmpty)
+
+        source.activate(apple)
+        #expect(!marker.wasPressed)
+    }
+}

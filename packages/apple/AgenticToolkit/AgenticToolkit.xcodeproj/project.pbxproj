@@ -468,6 +468,7 @@
 		49FEE176F3D4D3FCBA16F282 /* LayoutNodeReshapeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7BAD6F54F9CD05E12048E2B /* LayoutNodeReshapeTests.swift */; };
 		4A5D293FC9984A16ED9D16B0 /* WebviewResourceURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD26E906899FA659B9F3FB1 /* WebviewResourceURL.swift */; };
 		4AA27500B4AB249FD6F90F9C /* ExtensionHostInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A5AB8403FDA633F51EC81F /* ExtensionHostInstaller.swift */; };
+		4AE9D0D1AB1FA9C7889F2ED0 /* ExtensionTreeRowTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946D33214CD0DD52306CA22A /* ExtensionTreeRowTable.swift */; };
 		4B205E8F61AFA1AF202A569D /* CommandPaletteModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA0470344B9A5D9015F0237F /* CommandPaletteModel.swift */; };
 		4B23C87D2F4AD2C44D469115 /* AgenticToolkitCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FF857DF2BB3D2BE006BBA101 /* AgenticToolkitCore.framework */; };
 		4B556CFC5B14E9A9811F54F9 /* ProviderPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0904313AC1BEE6662DBB5BC /* ProviderPickerTests.swift */; };
@@ -863,6 +864,7 @@
 		93907F7F5989C86FAD02290D /* DocumentSyncPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C6121FBD298FCD00FFC3E5E /* DocumentSyncPipeline.swift */; };
 		94539FF2325B52E1D236F6F9 /* ThemeSettingsPanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210FF8F3EA592C33DF538AF8 /* ThemeSettingsPanelViewController.swift */; };
 		94DE8A75AB403AFD6B253541 /* SystemWindowControlError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AA9EC2686794F2DDE4DABB9 /* SystemWindowControlError.swift */; };
+		94EF6B4D61F9576B62B7F5DC /* ExtensionTreeRowTableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67C68D14AE15472DB467E3D /* ExtensionTreeRowTableTests.swift */; };
 		95657C1C5367A92F48264057 /* LanguageServerProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = B34D83F0409157F2341DFEC8 /* LanguageServerProtocol */; };
 		956673336C906CF1234B52E9 /* SystemWindowContextsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CB4DD7F9E79CBD2FF2D70E /* SystemWindowContextsModel.swift */; };
 		956A56A47BFF232AF890B401 /* BucketsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAABC8B755C9D3DCA18CB84D /* BucketsModels.swift */; };
@@ -3172,6 +3174,7 @@
 		935E6D6BD290281F72BFF2AC /* AIPluginChatBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPluginChatBackend.swift; sourceTree = "<group>"; };
 		93E5BDE4C30A4CBC805A5B01 /* SliderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SliderView.swift; sourceTree = "<group>"; };
 		944BB6AD2BBDC051ACB3D867 /* TabPaneViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabPaneViewControllerTests.swift; sourceTree = "<group>"; };
+		946D33214CD0DD52306CA22A /* ExtensionTreeRowTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionTreeRowTable.swift; sourceTree = "<group>"; };
 		94A21990F17A44C7EC18B9DD /* EcosystemConfigModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcosystemConfigModels.swift; sourceTree = "<group>"; };
 		94EF1E82A9102CD12ED9E76B /* MarkdownStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownStore.swift; sourceTree = "<group>"; };
 		94F95FABD4C3468E4FDE16AC /* BranchControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BranchControllerTests.swift; sourceTree = "<group>"; };
@@ -3444,6 +3447,7 @@
 		D61EDC72746D39E4CA29E2A6 /* TabPaneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabPaneDelegate.swift; sourceTree = "<group>"; };
 		D63891B9A5DC2B1BE484BB0A /* SessionSources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSources.swift; sourceTree = "<group>"; };
 		D64B53CE7101F3A6779359B2 /* BucketsTopic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BucketsTopic.swift; sourceTree = "<group>"; };
+		D67C68D14AE15472DB467E3D /* ExtensionTreeRowTableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionTreeRowTableTests.swift; sourceTree = "<group>"; };
 		D6C377E6078D3A9DDBF58668 /* UpstreamDivergenceLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamDivergenceLedgerTests.swift; sourceTree = "<group>"; };
 		D6FBD9C5A388D4D279EEFD67 /* LanguageModelMessageVocabulary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageModelMessageVocabulary.swift; sourceTree = "<group>"; };
 		D713796FE212AB499F815BCD /* SessionListViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListViewTests.swift; sourceTree = "<group>"; };
@@ -4154,6 +4158,7 @@
 			isa = PBXGroup;
 			children = (
 				46489813647C578460B97676 /* ContributedTreeItem.swift */,
+				946D33214CD0DD52306CA22A /* ExtensionTreeRowTable.swift */,
 				E5A54F0F7C4E2CE2C6EC82BE /* ExtensionTreeViewController.swift */,
 			);
 			path = Tree;
@@ -5855,6 +5860,7 @@
 				05E171B3D85980BBE009C932 /* ExtensionsCoordinatorTests.swift */,
 				10E049AAB6E2BE856E39C363 /* ExtensionsSettingsPanelTests.swift */,
 				5101D349833A9CC10839DF2C /* ExtensionTestSupport.swift */,
+				D67C68D14AE15472DB467E3D /* ExtensionTreeRowTableTests.swift */,
 				E2E872F8042F0C5864570DA2 /* LanguageContributionPointTests.swift */,
 				8A4F6C85E90F51FD671515C3 /* LanguageModelMessageVocabularyTests.swift */,
 				5248181B856F366132B0FE86 /* MainThreadCommandsTests.swift */,
@@ -8388,6 +8394,7 @@
 				8CD58123376A11DE005A6259 /* ExtensionQuickPickViewController.swift in Sources */,
 				B013742EE7D4C53DA83108DF /* ExtensionStatusBarPresenting.swift in Sources */,
 				8BAD2670C7CCFDA5038A4675 /* ExtensionTreeDataSource.swift in Sources */,
+				4AE9D0D1AB1FA9C7889F2ED0 /* ExtensionTreeRowTable.swift in Sources */,
 				6949FF1B05062704A71EE39B /* ExtensionTreeViewController.swift in Sources */,
 				A264F5451328D0CFEBB67C92 /* ExtensionWebviewPanePlacer.swift in Sources */,
 				C1258494C632DA29257AACE1 /* ExtensionWebviewPresenting.swift in Sources */,
@@ -9189,6 +9196,7 @@
 				F9A5C47D13730880EC6B484C /* ExtensionQuickPickModelTests.swift in Sources */,
 				3C46C1E15A56F8640F8FA7D7 /* ExtensionQuickPickViewControllerTests.swift in Sources */,
 				6E56A75DE4AE7CA1D02874E5 /* ExtensionTestSupport.swift in Sources */,
+				94EF6B4D61F9576B62B7F5DC /* ExtensionTreeRowTableTests.swift in Sources */,
 				0EF1CFD3DCE7F3378B0F752D /* ExtensionsCoordinatorTests.swift in Sources */,
 				AA530745FD6D0D999EA78E1C /* ExtensionsSettingsPanelTests.swift in Sources */,
 				86C059559735234119EBF2CB /* ExternalThemeChangeObservationTests.swift in Sources */,

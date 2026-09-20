@@ -60,6 +60,18 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
     /// have no Swift form (`ContributedTreeItem.commandID`'s stated split).
     private var commandsByHandle: [String: (id: String, arguments: [JSValue])] = [:]
 
+    /// Which handle each handle was last issued under, and the reverse.
+    ///
+    /// Recorded rather than read off the handle, because only one of the two
+    /// handle spaces carries its parent in its text. `parent/index` does;
+    /// `#declaredID` does not, and cannot — a declared id is the extension's
+    /// word for a row wherever that row appears. Without this the sweep below
+    /// had nothing to go on for a declared handle and silently skipped it, so
+    /// the tables grew by every row an extension had ever shown and `activate`
+    /// could still find the command of a row that had left the tree.
+    private var parentByHandle: [String: String] = [:]
+    private var childHandles: [String: [String]] = [:]
+
     /// The pane's current selection, as handles. The `TreeView` object turns
     /// these back into elements on the way out.
     private var selectedHandles: [String] = []
@@ -260,6 +272,7 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
                 forDeclaredID: Self.string(treeItem.forProperty("id")),
                 parent: parentHandle, index: index)
             elements[handle] = element
+            file(handle, under: parentHandle)
             rows.append(read(treeItem, element: element, handle: handle, in: context))
         }
         return rows
@@ -446,13 +459,38 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
         return "\(parent)/\(index)"
     }
 
-    /// Drops every positional handle beneath `parent`, and the commands that
+    /// Files `handle` as a child of `parent`, taking it off whatever parent
+    /// last claimed it.
+    ///
+    /// The second half is only ever about declared handles. A positional
+    /// handle names one place by construction, so it cannot move; a declared
+    /// one is the same id wherever the extension puts it, and an extension that
+    /// moves a row between branches would otherwise leave it listed under both
+    /// — which is a cycle waiting to be walked.
+    private func file(_ handle: String, under parent: String) {
+        if let previous = parentByHandle[handle], previous != parent {
+            childHandles[previous]?.removeAll { $0 == handle }
+        }
+        parentByHandle[handle] = parent
+        childHandles[parent, default: []].append(handle)
+    }
+
+    /// Drops every handle beneath `parent`, at any depth, and the commands that
     /// went with them.
+    ///
+    /// Walks the recorded parentage rather than matching handle text, which is
+    /// what makes it see a declared handle at all. Iterative, and each parent's
+    /// child list is *removed* as it is visited rather than read: an extension
+    /// that declares the same `id` for a row and one of its own descendants
+    /// describes a cycle, and taking the list away on the way past is what
+    /// makes the walk finish instead of running until the stack does.
     private func forgetDescendants(of parent: String) {
-        let prefix = "\(parent)/"
-        for handle in elements.keys where handle.hasPrefix(prefix) {
+        var doomed = childHandles.removeValue(forKey: parent) ?? []
+        while let handle = doomed.popLast() {
             elements.removeValue(forKey: handle)
             commandsByHandle.removeValue(forKey: handle)
+            parentByHandle.removeValue(forKey: handle)
+            doomed.append(contentsOf: childHandles.removeValue(forKey: handle) ?? [])
         }
     }
 
