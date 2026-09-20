@@ -10,6 +10,18 @@ import JavaScriptCore
 @testable import AgenticToolkitCore
 @testable import AgenticToolkitMacOS
 
+/// A flag a command can set from wherever `CommandRegistry` runs it.
+///
+/// `AppCommand.run` is a plain escaping closure, so what it captures has to be
+/// `Sendable`; a lock around one `Bool` is the whole of it.
+private final class DisposalMarker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var wasPressed: Bool { lock.withLock { value } }
+    func press() { lock.withLock { value = true } }
+}
+
 /// A mutable `ExtensionWorkspaceRoots` double, so a test can move the
 /// "open project" out from under a running installer the way a real project
 /// switch does — synchronously, with no notification of its own.
@@ -467,5 +479,101 @@ struct ExtensionHostInstallerTests {
         probe.window = second
         #expect(presenter.sheetWindow() === second)
         #expect(probe.asked == 2)
+    }
+    // MARK: - The order teardown runs in
+
+    /// What an extension pushes onto `context.subscriptions` is, by design,
+    /// the things that reach back into the app, and they can only do anything
+    /// while the adaptors they reach through are still standing.
+    ///
+    /// `ExtensionHost.dispose()` is what runs them — upstream's
+    /// `dispose(context.subscriptions)` — and it was called **last**, after all
+    /// eight adaptors had already been swept. So every one of those `dispose`
+    /// blocks ran against an adaptor that had finished tearing down, and the
+    /// work in them was dropped.
+    ///
+    /// Pinned on the one withdrawal that is observable from here: a command the
+    /// extension registered through `vscode.commands.registerCommand`. That is
+    /// exactly what `MainThreadCommands.dispose()` withdraws, so an extension
+    /// whose teardown calls its own command — a "flush my state" command, which
+    /// is the ordinary shape of this — finds it already gone and its flush
+    /// never runs. Nothing reports that: `executeCommand` on an id nobody
+    /// answers is a rejected promise, and a `dispose` block does not await.
+    ///
+    /// The extension's command reaches back out through a second command the
+    /// *test* registered on `CommandRegistry` directly. That one is not the
+    /// extension's, so no adaptor withdraws it, and it is the marker that says
+    /// the extension's own command was still live when its teardown ran.
+    @Test("an extension's context.subscriptions are disposed while the adaptors still work")
+    func subscriptionsAreDisposedBeforeTheAdaptors() async throws {
+        let previousSettings = UserSettings.shared
+        UserSettings.shared = UserSettings(with: InMemorySettingsStorageProvider())
+        defer { UserSettings.shared = previousSettings }
+
+        let extensionsRoot = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: extensionsRoot) }
+
+        let directory = extensionsRoot.appendingPathComponent("teardown-1.0.0")
+        try write(
+            """
+            {
+                "name": "teardown", "publisher": "test", "version": "1.0.0",
+                "displayName": "Teardown", "engines": { "vscode": "^1.74.0" },
+                "activationEvents": ["*"], "browser": "dist/web.js"
+            }
+            """,
+            to: "package.json", in: directory)
+        try write(
+            """
+            var vscode = require('vscode');
+            exports.activate = function (context) {
+                // Pushed before the registration it calls: subscriptions are
+                // disposed in push order, so an extension whose cleanup uses
+                // its own command has to put the cleanup first or unregister
+                // the command out from under itself. That is the extension's
+                // rule to follow, and this one follows it.
+                context.subscriptions.push({
+                    dispose: function () {
+                        vscode.commands.executeCommand('test.teardown.flush');
+                    }
+                });
+                context.subscriptions.push(
+                    vscode.commands.registerCommand('test.teardown.flush', function () {
+                        vscode.commands.executeCommand('test.disposal-marker');
+                    }));
+                globalThis.__activated = true;
+            };
+            """,
+            to: "dist/web.js", in: directory)
+
+        let registry = ExtensionRegistry(
+            searchPaths: [extensionsRoot], hostVersion: ExtensionRegistry.declaredVSCodeVersion)
+        registry.loadAll()
+        try #require(registry.extensions.count == 1)
+
+        let marker = DisposalMarker()
+        let commandRegistry = CommandRegistry()
+        _ = commandRegistry.register(
+            AppCommand(id: "test.disposal-marker", title: "Disposal marker") {
+                marker.press()
+            })
+
+        let seams = ExtensionHostSeams(
+            commandRegistry: commandRegistry, languageModelProvider: NullLanguageModelProvider(),
+            frontWindow: { nil }, footers: { [] }, workspaceRoots: { nil },
+            placeWebviewPanel: { _ in nil },
+            openDocumentLanguageIDs: { [] })
+        let installer = ExtensionHostInstaller(
+            registry: registry, notImplementedLedger: NotImplementedLedger(),
+            languagePoint: LanguageContributionPoint(), seams: seams)
+
+        installer.reconcile()
+        try await settle()
+        try #require(try activated(installer, "test.teardown"))
+        try #require(!marker.wasPressed)
+
+        installer.disposeAll()
+        try await settle()
+        #expect(marker.wasPressed)
     }
 }

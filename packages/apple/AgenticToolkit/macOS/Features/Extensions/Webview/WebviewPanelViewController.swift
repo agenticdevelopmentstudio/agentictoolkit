@@ -137,11 +137,17 @@ public final class WebviewPanelViewController: NSViewController {
     /// initialiser applies have to be re-applied here, and they are not the
     /// same kind of thing. The content security policy is the scheme handler's,
     /// and it serves the *next* request, so assigning it is enough. Scripts are
-    /// `WKWebViewConfiguration`'s, which is consulted when a navigation
-    /// commits and never afterwards — so the page is reloaded, which is what
-    /// upstream does for the same reason (`mainThreadWebviews.ts` reloads a
-    /// webview whose options changed). Reloading is free before `loadView()`
-    /// has run, which is the case a view provider is in.
+    /// decided per navigation, by `navigationPreferences(basedOn:)` — so the
+    /// page is reloaded, which is what makes the new answer take effect and is
+    /// also what upstream does for the same reason (`mainThreadWebviews.ts`
+    /// reloads a webview whose options changed). Reloading is free before
+    /// `loadView()` has run, which is the case a view provider is in.
+    ///
+    /// This used to write `webView.configuration.defaultWebpagePreferences`
+    /// here instead. `WKWebView.configuration` is `@NSCopying` — the getter
+    /// hands back a copy — so the write landed on a throwaway and WebKit was
+    /// never told. Taking scripts away from a running panel therefore did
+    /// nothing at all, which is the fail-open direction.
     ///
     /// The third effect — the roots — is deliberately *not* here:
     /// `declaredLocalResourceRoots` is what the extension wrote and
@@ -152,9 +158,7 @@ public final class WebviewPanelViewController: NSViewController {
         didSet {
             guard options != oldValue else { return }
             schemeHandler.contentSecurityPolicy = options.contentSecurityPolicy
-            guard let webView, !isDisposed else { return }
-            webView.configuration.defaultWebpagePreferences
-                .allowsContentJavaScript = options.enableScripts
+            guard webView != nil, !isDisposed else { return }
             loadHostDocument()
         }
     }
@@ -221,6 +225,13 @@ public final class WebviewPanelViewController: NSViewController {
         configuration.setURLSchemeHandler(schemeHandler, forURLScheme: WebviewResourceURL.scheme)
         configuration.userContentController.add(
             relay, name: WebviewHostDocument.messageHandlerName)
+        // The floor, not the mechanism: this configuration is the real one
+        // (it has not been through `WKWebView.configuration`'s copying getter
+        // yet), so it is what a navigation the delegate never sees would get.
+        // `navigationPreferences(basedOn:)` is what answers for the
+        // navigations that do reach the delegate, which is all of them while
+        // `navigationDelegate` is set. Keeping both means the unasked case
+        // fails closed rather than inheriting WebKit's default of "allowed".
         configuration.defaultWebpagePreferences.allowsContentJavaScript = options.enableScripts
         // Nothing a panel stores in `localStorage` survives a quit, on purpose:
         // `setState` is the documented way for a webview to persist, it is the
@@ -325,6 +336,39 @@ extension WebviewPanelViewController: WebviewMessageReceiving {
 
 extension WebviewPanelViewController: WKNavigationDelegate {
 
+    /// Answers both questions WebKit asks before a navigation: whether it
+    /// may happen at all, and what the page is allowed to do if it does.
+    ///
+    /// The two are one delegate method because WebKit picks **one** of the
+    /// `decidePolicyFor` overloads — implementing this one means the shorter
+    /// one is never called, so the URL rules have to live here or stop running.
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        preferences: WKWebpagePreferences
+    ) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
+        (policy(for: navigationAction), navigationPreferences(basedOn: preferences))
+    }
+
+    /// Whether the page about to load may run JavaScript.
+    ///
+    /// **Per navigation, and read straight off `options` each time.** That is
+    /// the whole reason this is a function rather than a value computed at
+    /// construction: `webview.options = { enableScripts: false }` is a thing an
+    /// extension may do at any moment, and the reload that follows it has to
+    /// get the new answer.
+    ///
+    /// `enableScripts` is the one option here that is a security boundary and
+    /// not a preference — a page that runs scripts can reach the host over the
+    /// message handler — so it is off unless the extension asked for it, which
+    /// `WebviewPanelOptions` decides.
+    func navigationPreferences(
+        basedOn preferences: WKWebpagePreferences = WKWebpagePreferences()
+    ) -> WKWebpagePreferences {
+        preferences.allowsContentJavaScript = options.enableScripts
+        return preferences
+    }
+
     /// A panel may load its own document and nothing else.
     ///
     /// A link to `https://…` is not blocked but *redirected* — out of the
@@ -333,9 +377,7 @@ extension WebviewPanelViewController: WKNavigationDelegate {
     /// Letting it navigate in place would replace the extension's page with a
     /// web page holding the panel's origin, which is a far larger thing than a
     /// broken link.
-    public func webView(
-        _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction
-    ) async -> WKNavigationActionPolicy {
+    private func policy(for navigationAction: WKNavigationAction) -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
         if url.scheme == WebviewResourceURL.scheme { return .allow }
         if navigationAction.navigationType == .linkActivated,

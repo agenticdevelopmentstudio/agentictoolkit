@@ -179,6 +179,11 @@ public final class ExtensionHost {
     private var activationSucceeded = false
     private var disposed = false
 
+    /// Whether `disposeSubscriptions()` has already run. Separate from
+    /// `disposed`, because the installer runs the subscriptions a phase before
+    /// it disposes the host — see `disposeSubscriptions()`.
+    private var subscriptionsDisposed = false
+
     /// One VM for the whole process. `JSVirtualMachine` is not `Sendable`; this
     /// static is main-actor isolated with the rest of the type, which is the
     /// same confinement every host that uses it already has.
@@ -870,12 +875,31 @@ public final class ExtensionHost {
     /// `JSValue` round trip to read the array's length each time round — the
     /// same walk, written in the language that cannot see it.
     ///
-    /// Failures are logged, never thrown. The caller is `dispose()`, which has
-    /// no error channel and no caller in a position to act on one; and an
-    /// extension whose `dispose` throws must not be able to stop the host from
-    /// finishing teardown. The shim keeps going through the rest of the list
-    /// for that same reason, which is why this can receive more than one.
-    private func disposeSubscriptions() {
+    /// Failures are logged, never thrown. The callers are `dispose()` and
+    /// `ExtensionHostInstaller.dispose()`, neither of which has an error
+    /// channel or a caller in a position to act on one; and an extension whose
+    /// `dispose` throws must not be able to stop the host from finishing
+    /// teardown. The shim keeps going through the rest of the list for that
+    /// same reason, which is why this can receive more than one.
+    ///
+    /// **Separable from `dispose()`, and called before it.** These entries are
+    /// the extension's own teardown, and every one of them reaches back through
+    /// an adaptor — a command it registered, a panel it opened, a collection it
+    /// owns. So they have to run while those adaptors are still standing, which
+    /// is earlier than the runtime teardown `dispose()` does and cannot be
+    /// merged with it: the adaptors' own sweeps call *into* JavaScript
+    /// (`onDidDispose` on a panel, say) and need the runtime alive when they
+    /// do. One teardown, three phases, in this order: the extension's
+    /// subscriptions, the adaptors, the runtime.
+    ///
+    /// Idempotent, so `dispose()` calling it again after the installer already
+    /// has is a no-op rather than a second pass over a list whose entries have
+    /// been disposed once already. A host disposed on its own — no installer in
+    /// front of it — still gets exactly one pass, from `dispose()`.
+    public func disposeSubscriptions() {
+        guard !subscriptionsDisposed else { return }
+        subscriptionsDisposed = true
+
         // Everything below is wrapped because every `JSValue` this produces —
         // the outcome, the failures array — is **autoreleased**, and a
         // `JSValue` holds its `JSContext` strongly. Without the drain the

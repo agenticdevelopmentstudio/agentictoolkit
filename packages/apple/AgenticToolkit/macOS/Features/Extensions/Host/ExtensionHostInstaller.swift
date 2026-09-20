@@ -659,15 +659,40 @@ public final class ExtensionHostInstallation {
 
     /// Tears the host and every adaptor down, in the one order that works.
     ///
-    /// Stubs first — a stub left in the registry outlives everything it can
+    /// **The extension's own teardown first.** `context.subscriptions` is where
+    /// an extension is asked to put the things that reach back into the app,
+    /// and disposing them is the extension's last chance to do anything — flush
+    /// state, close a panel, run its own cleanup command. Every one of those
+    /// goes through an adaptor, so it only means something while the adaptors
+    /// are still standing. This used to run last, inside `host.dispose()`,
+    /// after all eight had been swept: a `dispose` block that called a command
+    /// the extension itself registered found it already withdrawn, and since
+    /// `executeCommand` answers a rejected promise and a `dispose` block does
+    /// not await, nothing anywhere reported that the work had been dropped.
+    ///
+    /// Then stubs — a stub left in the registry outlives everything it can
     /// reach and would activate a disposed host on the next press. Then the
     /// eight adaptors, each of which withdraws what it registered elsewhere
     /// (commands, language configurations, status bar items, diagnostic
-    /// collections). The host last, because disposing it first would leave
-    /// those withdrawals running against a dead runtime.
+    /// collections).
+    ///
+    /// The host last, and still last: those withdrawals call into JavaScript —
+    /// a panel's `onDidDispose`, a tree view's — so disposing the runtime ahead
+    /// of them would leave them running against a dead context. That is what
+    /// makes this three phases rather than a swap; `host.dispose()` runs the
+    /// subscriptions too, and is a no-op on that count by the time it gets here.
+    ///
+    /// One thing this ordering does *not* buy: teardown is synchronous, so
+    /// anything a `dispose` block starts asynchronously — `workspace.fs`
+    /// writes, a quick pick — is still enqueued behind the adaptor sweeps and
+    /// finds its adaptor disposed when it lands. Making that work means making
+    /// teardown async, which `reconcile()` depends on not being: it disposes
+    /// the outgoing host before building its replacement, and the two must not
+    /// overlap.
     public func dispose() {
         guard !isDisposed else { return }
         isDisposed = true
+        host.disposeSubscriptions()
         for (id, token) in stubCommands {
             commandRegistry.unregister(id: id, token: token)
         }
