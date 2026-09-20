@@ -725,7 +725,7 @@ extension SessionWatcher {
         /// swallowing it as a generic miss — that swallowing was why a missing
         /// Automation grant looked like a failed Accessibility check.
         private func activateITerm(target: TerminalTextInjector.Target) -> ITermActivation {
-            let script = TerminalTextInjector.script(for: target, text: nil)
+            let script = TerminalTextInjector.script(for: target, text: nil, raising: true)
             // Click actions arrive on the main actor; NSAppleScript must run there.
             let result = MainActor.assumeIsolated {
                 TerminalTextInjector.run(script: script, target: target)

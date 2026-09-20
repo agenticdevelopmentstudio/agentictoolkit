@@ -54,9 +54,17 @@ public enum TerminalTextInjector {
     }
 
     /// Inject `text` into the session's pane. Runs `NSAppleScript` on the main thread.
+    ///
+    /// - Parameter raising: whether to bring that terminal forward as well.
+    ///   **Off by default**: sending a line to a session is not a request to go
+    ///   and watch it. The sender is reading a window of their own — a merged
+    ///   feed, a findings list — and a terminal that jumped in front of it took
+    ///   away the thing they were looking at to show them something they can
+    ///   already see. Going there is its own gesture, with its own control.
     @MainActor
     public static func inject(
-        _ text: String, termProgram: String, termSessionId: String, pid: Int
+        _ text: String, termProgram: String, termSessionId: String, pid: Int,
+        raising: Bool = false
     ) -> Result<Void, InjectionError> {
         guard isSupported(termProgram: termProgram) else {
             return .failure(.unsupportedTerminal(termProgram.isEmpty ? "an unknown terminal" : termProgram))
@@ -64,7 +72,7 @@ public enum TerminalTextInjector {
         guard let target = resolveTarget(termProgram: termProgram, termSessionId: termSessionId, pid: pid) else {
             return .failure(.paneUnresolvable)
         }
-        return run(script: script(for: target, text: text), target: target)
+        return run(script: script(for: target, text: text, raising: raising), target: target)
     }
 
     // MARK: - Pure pieces (unit-tested)
@@ -104,36 +112,48 @@ public enum TerminalTextInjector {
         }
     }
 
-    /// Build the AppleScript that focuses `target`'s pane and — when `text` is non-nil —
+    /// Build the AppleScript that finds `target`'s pane and — when `text` is non-nil —
     /// types it there. `text: nil` is the select-and-raise variant the session click
     /// actions use. Pure → unit-tested.
-    public static func script(for target: Target, text: String?) -> String {
+    ///
+    /// - Parameter raising: whether the pane is also selected and its application
+    ///   brought forward. True for going *to* a session, false for typing into
+    ///   one — see ``inject(_:termProgram:termSessionId:pid:raising:)``. A pane
+    ///   takes `write text` / `do script` whether or not anybody is looking at
+    ///   it, so this changes who has the screen and nothing about delivery.
+    public static func script(for target: Target, text: String?, raising: Bool) -> String {
         let escapedText = text.map(escape)
         switch target {
         case .iTermSession(let uuid):
-            return iTermScript(match: "id of s is \"\(escape(uuid))\"", text: escapedText)
+            return iTermScript(
+                match: "id of s is \"\(escape(uuid))\"", text: escapedText, raising: raising)
         case .iTermTTY(let tty):
-            return iTermScript(match: "tty of s is \"\(escape(normalizeTTY(tty)))\"", text: escapedText)
+            return iTermScript(
+                match: "tty of s is \"\(escape(normalizeTTY(tty)))\"", text: escapedText,
+                raising: raising)
         case .terminalTTY(let tty):
-            return terminalScript(tty: escape(normalizeTTY(tty)), text: escapedText)
+            return terminalScript(
+                tty: escape(normalizeTTY(tty)), text: escapedText, raising: raising)
         }
     }
 
-    /// iTerm: find the session (across all windows/tabs/panes) matching `match`, focus it,
-    /// then — when injecting — `write text` (which appends a newline — i.e. runs the line,
-    /// as if typed). Addressed by bundle id, not the name "iTerm"/"iTerm2", which has
-    /// varied across versions.
-    private static func iTermScript(match: String, text: String?) -> String {
+    /// iTerm: find the session (across all windows/tabs/panes) matching `match`, focus it
+    /// when `raising`, then — when injecting — `write text` (which appends a newline —
+    /// i.e. runs the line, as if typed). Addressed by bundle id, not the name
+    /// "iTerm"/"iTerm2", which has varied across versions.
+    private static func iTermScript(match: String, text: String?, raising: Bool) -> String {
         let write = text.map { "\n                        tell s to write text \"\($0)\"" } ?? ""
+        let raise = raising
+            ? "\n                        select s"
+                + "\n                        select t"
+                + "\n                        activate"
+            : ""
         return """
         tell application id "com.googlecode.iterm2"
             repeat with w in windows
                 repeat with t in tabs of w
                     repeat with s in sessions of t
-                        if \(match) then
-                            select s
-                            select t
-                            activate\(write)
+                        if \(match) then\(raise)\(write)
                             return "found"
                         end if
                     end repeat
@@ -144,19 +164,21 @@ public enum TerminalTextInjector {
         """
     }
 
-    /// Terminal.app: find the tab on `tty`, focus it, then — when injecting —
-    /// `do script … in <tab>` (which runs the text in that existing tab rather than
-    /// opening a new window).
-    private static func terminalScript(tty: String, text: String?) -> String {
+    /// Terminal.app: find the tab on `tty`, focus it when `raising`, then — when
+    /// injecting — `do script … in <tab>` (which runs the text in that existing tab
+    /// rather than opening a new window).
+    private static func terminalScript(tty: String, text: String?, raising: Bool) -> String {
         let run = text.map { "\n                    do script \"\($0)\" in t" } ?? ""
+        let raise = raising
+            ? "\n                        set selected tab of w to t"
+                + "\n                        set frontmost of w to true"
+                + "\n                        activate"
+            : ""
         return """
         tell application "Terminal"
             repeat with w in windows
                 repeat with t in tabs of w
-                    if tty of t is "\(tty)" then
-                        set selected tab of w to t
-                        set frontmost of w to true
-                        activate\(run)
+                    if tty of t is "\(tty)" then\(raise)\(run)
                         return "found"
                     end if
                 end repeat

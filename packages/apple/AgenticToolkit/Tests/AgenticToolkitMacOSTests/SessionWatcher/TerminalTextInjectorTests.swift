@@ -41,7 +41,8 @@ final class TerminalTextInjectorTests: XCTestCase {
     // MARK: - script (inject)
 
     func testITermScriptWritesTextToMatchedSession() {
-        let script = TerminalTextInjector.script(for: .iTermSession(uuid: "ABC"), text: "/compact")
+        let script = TerminalTextInjector.script(
+            for: .iTermSession(uuid: "ABC"), text: "/compact", raising: false)
         XCTAssertTrue(script.contains("com.googlecode.iterm2"))
         XCTAssertTrue(script.contains("id of s is \"ABC\""))
         XCTAssertTrue(script.contains("write text \"/compact\""))
@@ -49,27 +50,59 @@ final class TerminalTextInjectorTests: XCTestCase {
     }
 
     func testITermTTYScriptMatchesByTTY() {
-        let script = TerminalTextInjector.script(for: .iTermTTY(tty: "/dev/ttys003"), text: "/compact")
+        let script = TerminalTextInjector.script(
+            for: .iTermTTY(tty: "/dev/ttys003"), text: "/compact", raising: false)
         XCTAssertTrue(script.contains("tty of s is \"/dev/ttys003\""))
         XCTAssertTrue(script.contains("write text \"/compact\""))
     }
 
     func testTerminalScriptRunsDoScriptInMatchedTab() {
-        let script = TerminalTextInjector.script(for: .terminalTTY(tty: "ttys004"), text: "/compact")
+        let script = TerminalTextInjector.script(
+            for: .terminalTTY(tty: "ttys004"), text: "/compact", raising: false)
         XCTAssertTrue(script.contains("tell application \"Terminal\""))
         XCTAssertTrue(script.contains("tty of t is \"/dev/ttys004\""), "a bare tty gets the /dev/ prefix")
         XCTAssertTrue(script.contains("do script \"/compact\" in t"))
     }
 
     func testScriptEscapesInjectedText() {
-        let script = TerminalTextInjector.script(for: .iTermSession(uuid: "x"), text: #"say "hi""#)
+        let script = TerminalTextInjector.script(
+            for: .iTermSession(uuid: "x"), text: #"say "hi""#, raising: false)
         XCTAssertTrue(script.contains(#"write text "say \"hi\"""#), script)
+    }
+
+    // MARK: - script (raising: false — typing into a session nobody asked to visit)
+
+    func testITermInjectionDoesNotRaiseTheTerminal() {
+        let script = TerminalTextInjector.script(
+            for: .iTermSession(uuid: "ABC"), text: "/compact", raising: false)
+        XCTAssertTrue(script.contains("write text \"/compact\""), "the line is still delivered")
+        XCTAssertFalse(script.contains("activate"), "sending a line must not take the screen")
+        XCTAssertFalse(script.contains("select s"))
+        XCTAssertFalse(script.contains("select t"))
+    }
+
+    func testTerminalInjectionDoesNotRaiseTheTerminal() {
+        let script = TerminalTextInjector.script(
+            for: .terminalTTY(tty: "ttys004"), text: "/compact", raising: false)
+        XCTAssertTrue(script.contains("do script \"/compact\" in t"), "the line is still delivered")
+        XCTAssertFalse(script.contains("activate"), "sending a line must not take the screen")
+        XCTAssertFalse(script.contains("set frontmost"))
+        XCTAssertFalse(script.contains("set selected tab"))
+    }
+
+    func testITermInjectionCanRaiseWhenAsked() {
+        let script = TerminalTextInjector.script(
+            for: .iTermSession(uuid: "ABC"), text: "/compact", raising: true)
+        XCTAssertTrue(script.contains("write text \"/compact\""))
+        XCTAssertTrue(script.contains("activate"), "raising is still available to a caller that wants it")
+        XCTAssertTrue(script.contains("select s"))
     }
 
     // MARK: - script (select-only, text: nil — the click-action variant)
 
     func testITermSelectOnlyScriptOmitsWriteText() {
-        let script = TerminalTextInjector.script(for: .iTermSession(uuid: "ABC"), text: nil)
+        let script = TerminalTextInjector.script(
+            for: .iTermSession(uuid: "ABC"), text: nil, raising: true)
         XCTAssertTrue(script.contains("id of s is \"ABC\""))
         XCTAssertTrue(script.contains("select s"))
         XCTAssertTrue(script.contains("activate"))
@@ -77,7 +110,8 @@ final class TerminalTextInjectorTests: XCTestCase {
     }
 
     func testTerminalSelectOnlyScriptOmitsDoScript() {
-        let script = TerminalTextInjector.script(for: .terminalTTY(tty: "ttys004"), text: nil)
+        let script = TerminalTextInjector.script(
+            for: .terminalTTY(tty: "ttys004"), text: nil, raising: true)
         XCTAssertTrue(script.contains("tty of t is \"/dev/ttys004\""))
         XCTAssertTrue(script.contains("set selected tab of w to t"))
         XCTAssertFalse(script.contains("do script"), "select-only must never run anything in the tab")
