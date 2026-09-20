@@ -349,9 +349,56 @@ public final class MainThreadWebviews {
 
         let model = ExtensionWebviewPanelModel(
             panel: panel, viewType: viewType, surface: .panel)
-        panels[panel.panelID] = model
+        guard let panelObject = MainThreadWebviews.makePanelObject(
+            for: model, of: self, in: context)
+        else {
+            // The panel is on screen and nobody can address it: the object it
+            // would have been addressed through could not be built. Closing it
+            // and raising is the only answer that leaves no orphan — a pane
+            // the extension never received, cannot close, and would not
+            // recognise. `dispose()` here runs the pane tree's own handler,
+            // because this panel was never adopted and so has none of ours.
+            panel.dispose()
+            Self.logger.error(
+                """
+                A panel of view type \(viewType, privacy: .public) for \
+                \(self.extensionIdentifier, privacy: .public) could not be given a JavaScript \
+                object; it was closed again
+                """)
+            return VSCodeAPI.raise(
+                "\(path) could not build a panel object for view type '\(viewType)'.",
+                in: context)
+        }
+        adopt(model)
+        return panelObject
+    }
+
+    /// Takes a panel on as one of this adaptor's own.
+    ///
+    /// Two things at once, and they belong together: the dictionary's
+    /// reference is the model's only strong one, and `wire` is how the panel
+    /// reaches it. **Called at the moment the extension is handed an object
+    /// for the panel, never before.** Everything up to that moment can still
+    /// fail, and a panel adopted by a hand-over that then failed is one this
+    /// adaptor holds, wires its callbacks to, and closes at teardown on behalf
+    /// of an extension that never had it — while the pane it closes is the
+    /// user's layout, which is exactly what the failure paths promise to leave
+    /// alone.
+    private func adopt(_ model: ExtensionWebviewPanelModel) {
+        panels[model.panel.panelID] = model
         wire(model)
-        return MainThreadWebviews.makePanelObject(for: model, of: self, in: context)
+    }
+
+    /// `adopt(_:)` undone, for a hand-over that could not be delivered at all.
+    ///
+    /// Only for that case. An extension that *received* the object and then
+    /// threw keeps its panel: it may have set the page, subscribed to
+    /// messages, or stored the object before the throw, and taking the panel
+    /// back would make all of that inert with nothing to say so.
+    private func abandon(_ model: ExtensionWebviewPanelModel) {
+        model.panel.onDidDispose = nil
+        model.panel.onDidReceiveMessage = nil
+        forget(model.panel.panelID)
     }
 
     /// Points the panel's two host-side callbacks at this model's emitters.
@@ -475,8 +522,6 @@ public final class MainThreadWebviews {
 
         let model = ExtensionWebviewPanelModel(
             panel: panel, viewType: viewType, surface: .panel)
-        panels[panel.panelID] = model
-        wire(model)
         guard let panelObject = MainThreadWebviews.makePanelObject(for: model, of: self, in: context)
         else {
             Self.logger.error(
@@ -487,6 +532,7 @@ public final class MainThreadWebviews {
             return false
         }
 
+        adopt(model)
         let stateValue = MainThreadWebviews.restoredStateValue(state, in: context)
         switch VSCodeAPI.call(deserialize, thisArg: registration.serializer,
                               arguments: [panelObject, stateValue]) {
@@ -501,6 +547,7 @@ public final class MainThreadWebviews {
                 """)
             return false
         case .unavailable:
+            abandon(model)
             Self.logger.error(
                 """
                 \(self.extensionIdentifier, privacy: .public)'s deserializeWebviewPanel could not \
@@ -615,8 +662,6 @@ public final class MainThreadWebviews {
         }
 
         let model = ExtensionWebviewPanelModel(panel: panel, viewType: viewID, surface: .view)
-        panels[panel.panelID] = model
-        wire(model)
         guard let viewObject = MainThreadWebviews.makeWebviewViewObject(
             for: model, of: self, in: context)
         else {
@@ -628,6 +673,7 @@ public final class MainThreadWebviews {
             return false
         }
 
+        adopt(model)
         let resolveContext = MainThreadWebviews.resolveContextValue(of: self, in: context)
         let cancellation = MainThreadWebviews.uncancelledToken(in: context)
         switch VSCodeAPI.call(resolve, thisArg: registration.provider,
@@ -643,6 +689,7 @@ public final class MainThreadWebviews {
                 """)
             return false
         case .unavailable:
+            abandon(model)
             Self.logger.error(
                 """
                 \(self.extensionIdentifier, privacy: .public)'s resolveWebviewView could not be \

@@ -59,7 +59,7 @@ public enum ExtensionWebviewPanePlacer {
         // "lazily" includes "during this very call" — `PaneViewController`
         // calls the factory from `loadView()`, and a split that lays out
         // immediately reaches it before `split(_:adding:direction:)` returns.
-        serializer.prepareToPlace(panel)
+        serializer.prepareToPlace(panel, panesBeforeSplit: Set(panes.map(\.nodeID)))
 
         // The pane the split just made, found by difference, exactly as
         // `DocumentTabsViewController.openToTheSide(_:)` finds its editor: the
@@ -67,16 +67,21 @@ public enum ExtensionWebviewPanePlacer {
         // wrong pane as soon as the anchor is not the last one.
         let before = Set(panes.map(ObjectIdentifier.init))
         split.split(anchor, adding: WebviewPanelSerializer.viewID, direction: .right)
-        guard let pane = controller.allPanes().first(where: {
-            !before.contains(ObjectIdentifier($0))
-        }) else {
+        let newPane = controller.allPanes().first { !before.contains(ObjectIdentifier($0)) }
+        if let newPane {
+            serializer.didPlace(panel, in: newPane.nodeID)
+        }
+        // The difference lookup is the normal answer; the serializer's is the
+        // one case it cannot give. A split that lays out immediately reaches
+        // the factory before it returns, so the panel can already be in a pane
+        // — and cancelling a placement that has visibly happened would leave
+        // that panel on screen in a pane no extension verb can name.
+        guard let nodeID = newPane?.nodeID ?? serializer.nodeIDOfPaneThatClaimed(panel) else {
             serializer.cancelPlacement(of: panel)
             Self.logger.error("A webview panel was placed but the split produced no pane to put it in")
             return nil
         }
-        serializer.didPlace(panel, in: pane.nodeID)
 
-        let nodeID = pane.nodeID
         return ExtensionWebviewPlacement(
             reveal: { preserveFocus in
                 reveal(nodeID: nodeID, preserveFocus: preserveFocus)

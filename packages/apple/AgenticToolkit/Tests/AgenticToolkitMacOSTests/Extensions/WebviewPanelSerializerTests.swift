@@ -95,7 +95,7 @@ struct WebviewPanelSerializerTests {
         let panel = makePanel()
         let nodeID = UUID()
 
-        serializer.prepareToPlace(panel)
+        serializer.prepareToPlace(panel, panesBeforeSplit: [])
         serializer.didPlace(panel, in: nodeID)
 
         #expect(makeContent(registry, nodeID: nodeID, project: project) === panel)
@@ -111,7 +111,7 @@ struct WebviewPanelSerializerTests {
         let serializer = WebviewPanelSerializer(registry: registry) { _ in nil }
         let panel = makePanel()
 
-        serializer.prepareToPlace(panel)
+        serializer.prepareToPlace(panel, panesBeforeSplit: [])
 
         #expect(makeContent(registry, nodeID: UUID(), project: project) === panel)
     }
@@ -126,7 +126,7 @@ struct WebviewPanelSerializerTests {
         let serializer = WebviewPanelSerializer(registry: registry) { _ in nil }
         let panel = makePanel()
 
-        serializer.prepareToPlace(panel)
+        serializer.prepareToPlace(panel, panesBeforeSplit: [])
         serializer.cancelPlacement(of: panel)
 
         let content = makeContent(registry, nodeID: UUID(), project: project)
@@ -148,7 +148,7 @@ struct WebviewPanelSerializerTests {
                 enableScripts: true, enableForms: nil, localResourceRoots: []))
         let nodeID = UUID()
 
-        serializer.prepareToPlace(panel)
+        serializer.prepareToPlace(panel, panesBeforeSplit: [])
         serializer.didPlace(panel, in: nodeID)
         _ = makeContent(registry, nodeID: nodeID, project: project)
 
@@ -168,7 +168,7 @@ struct WebviewPanelSerializerTests {
         let serializer = WebviewPanelSerializer(registry: registry) { _ in nil }
         let panel = makePanel(title: "Preview")
         let nodeID = UUID()
-        serializer.prepareToPlace(panel)
+        serializer.prepareToPlace(panel, panesBeforeSplit: [])
         serializer.didPlace(panel, in: nodeID)
         _ = makeContent(registry, nodeID: nodeID, project: project)
 
@@ -186,11 +186,58 @@ struct WebviewPanelSerializerTests {
         let serializer = WebviewPanelSerializer(registry: registry) { _ in nil }
         let panel = makePanel()
         let nodeID = UUID()
-        serializer.prepareToPlace(panel)
+        serializer.prepareToPlace(panel, panesBeforeSplit: [])
         serializer.didPlace(panel, in: nodeID)
         _ = makeContent(registry, nodeID: nodeID, project: project)
 
         #expect(makeContent(registry, nodeID: UUID(), project: project) !== panel)
+    }
+
+    /// The bug this pins. A split forces a layout pass, and a layout pass
+    /// builds any pane that had been left lazy — a restored extension webview
+    /// pane in a tab the user had not looked at yet is exactly that. It runs
+    /// the same factory, under the same one identifier, and used to be handed
+    /// the panel the split was still in the middle of making room for.
+    ///
+    /// Two panes went wrong at once: the old one showed a panel that belongs
+    /// to a pane elsewhere instead of the one it had saved, and the new one
+    /// came up empty. So the placement is told which panes already existed,
+    /// and none of them can claim what the split is carrying.
+    @Test("a pane that already existed cannot take the panel a split is making")
+    func anOlderPaneCannotClaimTheWaitingPanel() {
+        let project = Self.makeWorkspace()
+        let registry = ComposableTabsViewRegistry()
+        let serializer = WebviewPanelSerializer(registry: registry) { _ in nil }
+        let panel = makePanel()
+        let older = UUID()
+
+        serializer.prepareToPlace(panel, panesBeforeSplit: [older])
+
+        #expect(makeContent(registry, nodeID: older, project: project) !== panel)
+        #expect(makeContent(registry, nodeID: UUID(), project: project) === panel)
+    }
+
+    /// And the placer has to be able to find out where it went.
+    ///
+    /// When the factory runs inside `split(_:adding:direction:)` the panel is
+    /// in a pane before the call returns, so `didPlace` has nothing left to
+    /// file — and if the placer then fails to name the new pane by difference
+    /// it would cancel a placement that already happened, leaving a panel on
+    /// screen in a pane the extension cannot reveal or close.
+    @Test("the pane that claimed a panel mid-split can be named")
+    func theClaimingPaneCanBeNamed() {
+        let project = Self.makeWorkspace()
+        let registry = ComposableTabsViewRegistry()
+        let serializer = WebviewPanelSerializer(registry: registry) { _ in nil }
+        let panel = makePanel()
+        let nodeID = UUID()
+
+        serializer.prepareToPlace(panel, panesBeforeSplit: [])
+        #expect(serializer.nodeIDOfPaneThatClaimed(panel) == nil)
+
+        _ = makeContent(registry, nodeID: nodeID, project: project)
+
+        #expect(serializer.nodeIDOfPaneThatClaimed(panel) == nodeID)
     }
 
     // MARK: - Rebuilding a pane from what was written down

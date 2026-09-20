@@ -74,6 +74,27 @@ public final class WebviewPanelSerializer {
     private var unplaced: WebviewPanelViewController?
     private var pendingByNode: [UUID: WebviewPanelViewController] = [:]
 
+    /// The panes that already existed when the in-flight split began, and so
+    /// cannot be the pane it is making.
+    ///
+    /// The `unplaced` slot has to be claimable by a pane whose node id nobody
+    /// knows yet, which is the whole of why it exists — but "any pane at all"
+    /// was too wide by one case that really happens: a split forces a layout
+    /// pass, and a layout pass builds panes that had been left lazy. A
+    /// restored extension webview pane in a tab the user has not opened yet is
+    /// one of those, and it ran this same factory, under this same one
+    /// identifier, in the middle of the split. It took the panel; the pane the
+    /// split made came up empty; and the panel the old pane should have
+    /// restored was never asked for. Naming the panes that existed first is
+    /// what distinguishes "the pane being built is the new one" from "the pane
+    /// being built is an old one waking up".
+    private var panesBeforeSplit: Set<UUID> = []
+
+    /// The pane that claimed `unplaced` from inside `split`, for the placer to
+    /// read back. Cleared by the next `prepareToPlace`, so it only ever
+    /// describes the placement in flight.
+    private var claimedDuringSplit: (panel: WebviewPanelViewController, nodeID: UUID)?
+
     /// Registers `viewID` on `registry`, which is what makes a persisted
     /// layout naming it resolve to a panel rather than a placeholder.
     public init(registry: ComposableTabsViewRegistry, restore: @escaping Restore) {
@@ -98,8 +119,28 @@ public final class WebviewPanelSerializer {
     /// Called immediately before `split(_:adding:direction:)`, because the
     /// factory may run inside that call. Between here and `didPlace(_:in:)`
     /// this object is the only thing holding the panel.
-    public func prepareToPlace(_ panel: WebviewPanelViewController) {
+    ///
+    /// - Parameter panesBeforeSplit: The node ids of every pane that exists
+    ///   now, before the split. None of them may claim this panel — see the
+    ///   property of the same name.
+    public func prepareToPlace(
+        _ panel: WebviewPanelViewController, panesBeforeSplit: Set<UUID>
+    ) {
         unplaced = panel
+        self.panesBeforeSplit = panesBeforeSplit
+        claimedDuringSplit = nil
+    }
+
+    /// Which pane took `panel` while the split was still running, if one did.
+    ///
+    /// The placer's fallback for naming the pane it just made. It normally
+    /// finds that pane by difference against the panes it listed beforehand;
+    /// when that comes up empty but the factory has already handed the panel
+    /// over, cancelling the placement would be wrong — the panel is on screen
+    /// — and this is the pane it is in.
+    public func nodeIDOfPaneThatClaimed(_ panel: WebviewPanelViewController) -> UUID? {
+        guard let claimed = claimedDuringSplit, claimed.panel === panel else { return nil }
+        return claimed.nodeID
     }
 
     /// Names the pane the split actually made, so the factory can find the
@@ -111,6 +152,7 @@ public final class WebviewPanelSerializer {
     public func didPlace(_ panel: WebviewPanelViewController, in nodeID: UUID) {
         guard unplaced === panel else { return }
         unplaced = nil
+        panesBeforeSplit = []
         pendingByNode[nodeID] = panel
     }
 
@@ -122,6 +164,7 @@ public final class WebviewPanelSerializer {
     public func cancelPlacement(of panel: WebviewPanelViewController) {
         guard unplaced === panel else { return }
         unplaced = nil
+        panesBeforeSplit = []
     }
 
     // MARK: - Filling a pane
@@ -140,9 +183,12 @@ public final class WebviewPanelSerializer {
         if let panel = pendingByNode.removeValue(forKey: nodeID) { return panel }
         // The factory ran inside `split`, so `didPlace` has not been called
         // yet. There can only be one such panel — a split is one call — and
-        // this pane is the one it was for.
-        guard let panel = unplaced else { return nil }
+        // this pane is the one it was for *unless* it is a pane that already
+        // existed when the split started, which is a lazy pane the split's own
+        // layout pass has just woken up. See `panesBeforeSplit`.
+        guard let panel = unplaced, !panesBeforeSplit.contains(nodeID) else { return nil }
         unplaced = nil
+        claimedDuringSplit = (panel: panel, nodeID: nodeID)
         return panel
     }
 

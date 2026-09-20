@@ -310,19 +310,42 @@ extension WebviewPanelViewController: WebviewMessageReceiving {
             onDidReceiveMessage?(body)
 
         case .setState:
-            state = Self.jsonText(of: body)
+            // A value this host cannot encode is a *message* dropped, never a
+            // state erased. Assigning the failure would throw away whatever the
+            // page last saved successfully, and the announcement immediately
+            // after would write that erasure into the project — so a panel that
+            // had a scroll position an hour ago comes back blank because of one
+            // message that never stored anything.
+            guard let text = Self.jsonText(of: body) else { return }
+            state = text
             onRestorationStateChanged?()
         }
     }
 
-    /// The page's state as the text `WebviewPanelState` carries.
+    /// The page's state as the text `WebviewPanelState` carries, or `nil` for
+    /// a value this host cannot encode.
     ///
     /// `.fragmentsAllowed` because `setState(42)` and `setState(null)` are both
     /// things a page may do, and refusing them would lose a panel's state to a
     /// shape the API permits.
+    ///
+    /// The validity check ahead of the encode is not belt and braces:
+    /// `data(withJSONObject:)` does not *throw* on a value it cannot encode, it
+    /// raises an Objective-C exception, which `try?` does not catch and which
+    /// takes the whole app down with it. A page needs nothing exotic to get
+    /// there — WebKit hands a JavaScript `Date` over as an `NSDate`, and `NaN`
+    /// and `Infinity` are as unencodable as that — so `setState(new Date())`
+    /// from any extension's page was a crash.
+    ///
+    /// Wrapped in an array because the two rules disagree at exactly one point:
+    /// `isValidJSONObject` refuses a bare number, string or null at the top
+    /// level, which is the whole of what `.fragmentsAllowed` exists to permit.
+    /// Validating the value as an array's element is that same recursive check
+    /// without the top-level rule.
     private static func jsonText(of body: Any) -> String? {
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: body, options: [.fragmentsAllowed, .sortedKeys]),
+        guard JSONSerialization.isValidJSONObject([body]),
+              let data = try? JSONSerialization.data(
+                withJSONObject: body, options: [.fragmentsAllowed, .sortedKeys]),
               let text = String(bytes: data, encoding: .utf8)
         else {
             Self.logger.error("A webview's setState value was not JSON; dropping it")
