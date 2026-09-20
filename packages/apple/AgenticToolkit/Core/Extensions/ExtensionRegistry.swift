@@ -166,18 +166,77 @@ public final class ExtensionRegistry {
     /// registry's own state said once, and the single `withdraw` on a later
     /// disable would leave one copy behind.
     public func loadAll() {
-        for loaded in extensions {
-            for point in contributionPoints {
-                point.withdraw(extensionIdentifier: loaded.identifier)
-            }
+        apply(Self.scan(searchPaths: searchPaths, hostVersion: hostVersion))
+    }
+
+    /// `loadAll()` with the disk read off the main actor.
+    ///
+    /// The same load in every respect a caller can observe — same order, same
+    /// failures, same `contributionsDidChange` — differing only in where the
+    /// expensive half happens. The class-level rationale for a synchronous load
+    /// is scoped to startup, when this runs once before any window exists; a
+    /// rescan after an install runs from a button in a live settings window,
+    /// and there the enumeration, the read and the JSONC decode per installed
+    /// extension are a stopped run loop for as long as the user's extensions
+    /// take. Only what genuinely belongs to this actor — withdrawing and
+    /// re-applying contributions, and whatever `contributionsDidChange` sets
+    /// off — stays on it.
+    ///
+    /// Note that the old contributions stay installed for the duration of the
+    /// scan, not withdrawn up front: nothing about a rescan is a request to
+    /// spend that time with the user's themes uninstalled.
+    public func reload() async {
+        let searchPaths = self.searchPaths
+        let hostVersion = self.hostVersion
+        let scan = await Task.detached(priority: .userInitiated) {
+            Self.scan(searchPaths: searchPaths, hostVersion: hostVersion)
+        }.value
+        apply(scan)
+    }
+
+    /// Everything a pass over the search paths could read, in the order it read
+    /// it, and whether it managed to read all of it.
+    ///
+    /// A value, and `Sendable`, because that is the whole point: deciding it
+    /// touches nothing but the file system, so it can be decided anywhere, and
+    /// applying it touches nothing but this actor's state.
+    struct Scan: Sendable {
+
+        /// One directory the scan looked at and could say something about.
+        /// Directories with no `package.json` are not here at all — see
+        /// `read(from:hostVersion:)`.
+        struct Directory: Sendable {
+            let url: URL
+            let outcome: Outcome
         }
 
-        extensions = []
-        failures = []
-        scanReadEverything = true
+        enum Outcome: Sendable {
+            case manifest(ExtensionManifest)
+            /// - Parameter identifier: whose extension this was, when the
+            ///   manifest had already decoded — and `nil` when it had not,
+            ///   which is the whole of what `ExtensionLoadFailure.identifier`
+            ///   means.
+            case failed(ExtensionLoadError, identifier: String?)
+        }
 
+        var directories: [Directory] = []
+
+        /// False when a search path exists and would not open, or a directory
+        /// entry's own type could not be read. Everything downstream reads
+        /// "not seen" as "gone" unless this says the scan was partial.
+        var readEverything = true
+    }
+
+    /// Reads every manifest under `searchPaths` and applies the engine gate.
+    ///
+    /// `nonisolated` and static: it is a pure function of the paths and the
+    /// host version, which is what lets `reload()` hand it to a detached task.
+    /// Nothing here decides anything about *this* registry — duplicate
+    /// identifiers, the enabled check and the contribution points all belong to
+    /// `apply(_:)`, because all three are state rather than disk.
+    nonisolated static func scan(searchPaths: [URL], hostVersion: SemanticVersion) -> Scan {
         let fileManager = FileManager.default
-        var claimedIdentifiers: [String: URL] = [:]
+        var scan = Scan()
 
         for searchPath in searchPaths {
             guard let contents = try? fileManager.contentsOfDirectory(
@@ -195,7 +254,7 @@ public final class ExtensionRegistry {
                 // extensions live under it, this scan did not see them, and
                 // it must not let anyone reconcile against that silence.
                 if fileManager.fileExists(atPath: searchPath.path) {
-                    scanReadEverything = false
+                    scan.readEverything = false
                 }
                 continue
             }
@@ -216,24 +275,87 @@ public final class ExtensionRegistry {
                     // unknown — it may well be an extension folder. `== true`
                     // used to fold this into the ordinary-file case below and
                     // drop it without trace.
-                    scanReadEverything = false
+                    scan.readEverything = false
                     continue
                 }
                 // A read that succeeded and said "not a directory" is an
                 // ordinary file. That is knowledge, not absence of it, and it
                 // leaves the scan complete.
                 guard isDirectory else { continue }
-                load(from: directory, claimedIdentifiers: &claimedIdentifiers)
+                if let read = read(from: directory, hostVersion: hostVersion) {
+                    scan.directories.append(read)
+                }
+            }
+        }
+
+        return scan
+    }
+
+    /// Turns what a scan read into this registry's state: the extensions it
+    /// loaded, the failures it recorded, and the contributions every point
+    /// holds.
+    ///
+    /// Safe to call more than once: the reset covers the contributions an
+    /// earlier call applied as well as the two arrays. Clearing only the
+    /// arrays would leave every contribution installed twice while the
+    /// registry's own state said once, and the single `withdraw` on a later
+    /// disable would leave one copy behind.
+    private func apply(_ scan: Scan) {
+        for loaded in extensions {
+            for point in contributionPoints {
+                point.withdraw(extensionIdentifier: loaded.identifier)
+            }
+        }
+
+        extensions = []
+        failures = []
+        scanReadEverything = scan.readEverything
+
+        var claimedIdentifiers: [String: URL] = [:]
+
+        for directory in scan.directories {
+            switch directory.outcome {
+            case .failed(let reason, let identifier):
+                record(reason, at: directory.url, identifier: identifier)
+
+            case .manifest(let manifest):
+                if let existing = claimedIdentifiers[manifest.identifier] {
+                    // swiftlint:disable:next line_length
+                    logger.warning("Skipping duplicate extension '\(manifest.identifier, privacy: .public)' at \(directory.url.path, privacy: .public); already loaded from \(existing.path, privacy: .public)")
+                    record(
+                        .duplicateIdentifier(existing: existing.path),
+                        at: directory.url,
+                        identifier: manifest.identifier
+                    )
+                    continue
+                }
+                claimedIdentifiers[manifest.identifier] = directory.url
+
+                let loaded = LoadedExtension(manifest: manifest, directory: directory.url)
+                extensions.append(loaded)
+                // swiftlint:disable:next line_length
+                logger.info("Loaded extension '\(manifest.identifier, privacy: .public)' from \(directory.url.path, privacy: .public)")
+
+                // A manifest with no `contributes` key still reaches every
+                // point, with `.empty`. Absent and empty are the same statement
+                // — this extension declares nothing — and a point that is never
+                // told cannot reconcile away what the *previous* version of the
+                // same extension declared, so an update that drops the key
+                // would orphan its contributions permanently. See
+                // `Contributions.empty` for why nil cannot also mean "failed to
+                // decode", which is the fact this rests on.
+                guard isEnabled(loaded.identifier) else { continue }
+                applyContributions(
+                    manifest.contributes ?? .empty, from: manifest, at: directory.url)
             }
         }
 
         contributionsDidChange?()
     }
 
-    /// Loads a single extension directory, recording a `LoadedExtension` on
-    /// success or an `ExtensionLoadFailure` on any of: an unreadable file,
-    /// malformed JSON, an unparsable engine range, or an engine range that
-    /// rejects `hostVersion`.
+    /// Reads a single extension directory, answering its decoded manifest or
+    /// the reason it has none: an unreadable file, malformed JSON, an
+    /// unparsable engine range, or an engine range that rejects `hostVersion`.
     ///
     /// A directory with no `package.json` is not itself a failure — a
     /// search path can hold ordinary non-extension directories (`.DS_Store`
@@ -255,11 +377,15 @@ public final class ExtensionRegistry {
     /// holding one stray folder, which disables pruning for everyone, always.
     /// A rare, transient, self-mostly-healing loss beats a certain,
     /// permanent one.
-    private func load(from directory: URL, claimedIdentifiers: inout [String: URL]) {
+    /// `nil` for a directory with no `package.json`, which is the one answer
+    /// that is neither a load nor a failure.
+    private nonisolated static func read(
+        from directory: URL, hostVersion: SemanticVersion
+    ) -> Scan.Directory? {
         let manifestURL = directory.appendingPathComponent("package.json")
 
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
-            return
+            return nil
         }
 
         let data: Data
@@ -267,8 +393,9 @@ public final class ExtensionRegistry {
             data = try Data(contentsOf: manifestURL)
         } catch {
             // No identifier: the file that carries it could not be read.
-            record(.manifestUnreadable(error.localizedDescription), at: directory)
-            return
+            return Scan.Directory(
+                url: directory,
+                outcome: .failed(.manifestUnreadable(error.localizedDescription), identifier: nil))
         }
 
         let manifest: ExtensionManifest
@@ -293,12 +420,11 @@ public final class ExtensionRegistry {
             // on the rest of the document being well-formed, and recovering
             // them is the difference between one broken extension and a whole
             // reconciliation pass declining to run.
-            record(
-                .manifestMalformed(error.localizedDescription),
-                at: directory,
-                identifier: Self.identifier(inRawManifest: data)
-            )
-            return
+            return Scan.Directory(
+                url: directory,
+                outcome: .failed(
+                    .manifestMalformed(error.localizedDescription),
+                    identifier: identifier(inRawManifest: data)))
         }
 
         // The manifest decoded, so every failure from here down knows whose
@@ -307,55 +433,29 @@ public final class ExtensionRegistry {
         // state against "what is installed" would otherwise delete a live
         // extension's contributions on a host downgrade (I2).
         guard let range = VSCodeEngineRange(manifest.engines.vscode) else {
-            record(
-                .engineRangeUnparsable(manifest.engines.vscode),
-                at: directory,
-                identifier: manifest.identifier
-            )
-            return
+            return Scan.Directory(
+                url: directory,
+                outcome: .failed(
+                    .engineRangeUnparsable(manifest.engines.vscode),
+                    identifier: manifest.identifier))
         }
 
         guard range.accepts(hostVersion) else {
-            record(
-                .engineIncompatible(required: manifest.engines.vscode, host: hostVersion.description),
-                at: directory,
-                identifier: manifest.identifier
-            )
-            return
+            return Scan.Directory(
+                url: directory,
+                outcome: .failed(
+                    .engineIncompatible(
+                        required: manifest.engines.vscode, host: hostVersion.description),
+                    identifier: manifest.identifier))
         }
 
-        if let existing = claimedIdentifiers[manifest.identifier] {
-            // swiftlint:disable:next line_length
-            logger.warning("Skipping duplicate extension '\(manifest.identifier, privacy: .public)' at \(directory.path, privacy: .public); already loaded from \(existing.path, privacy: .public)")
-            record(
-                .duplicateIdentifier(existing: existing.path),
-                at: directory,
-                identifier: manifest.identifier
-            )
-            return
-        }
-        claimedIdentifiers[manifest.identifier] = directory
-
-        let loaded = LoadedExtension(manifest: manifest, directory: directory)
-        extensions.append(loaded)
-        // swiftlint:disable:next line_length
-        logger.info("Loaded extension '\(manifest.identifier, privacy: .public)' from \(directory.path, privacy: .public)")
-
-        // A manifest with no `contributes` key still reaches every point, with
-        // `.empty`. Absent and empty are the same statement — this extension
-        // declares nothing — and a point that is never told cannot reconcile
-        // away what the *previous* version of the same extension declared, so
-        // an update that drops the key would orphan its contributions
-        // permanently. See `Contributions.empty` for why nil cannot also mean
-        // "failed to decode", which is the fact this rests on.
-        guard isEnabled(loaded.identifier) else { return }
-        applyContributions(manifest.contributes ?? .empty, from: manifest, at: directory)
+        return Scan.Directory(url: directory, outcome: .manifest(manifest))
     }
 
     /// - Parameter identifier: whose extension this was, when the manifest
     ///   had already decoded — and `nil` when it had not, which is the whole
-    ///   of what `ExtensionLoadFailure.identifier` means. Defaulted so the
-    ///   two pre-decode call sites read as the absence they are rather than
+    ///   of what `ExtensionLoadFailure.identifier` means. Defaulted so a call
+    ///   site with no identifier to give reads as the absence it is rather than
     ///   spelling `nil` and looking like an oversight.
     private func record(_ reason: ExtensionLoadError, at directory: URL, identifier: String? = nil) {
         failures.append(
@@ -375,7 +475,7 @@ public final class ExtensionRegistry {
     ///
     /// Folded to lower case to match `ExtensionManifest.identifier`, so a
     /// failure and a successful load of the same extension compare equal.
-    private static func identifier(inRawManifest data: Data) -> String? {
+    private nonisolated static func identifier(inRawManifest data: Data) -> String? {
         guard
             let object = try? JSONCPreprocessor.jsonObject(from: data) as? [String: Any],
             let name = object["name"] as? String,

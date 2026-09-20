@@ -19,11 +19,21 @@ import AgenticToolkitLanguage
 /// not replay past extensions against a point registered afterwards, so a point
 /// registered late silently receives nothing.
 ///
-/// The load is synchronous on the main actor by design (Ruling FN): `apply` is
-/// synchronous, `loadAll()` is `@MainActor` and already reads a manifest per
-/// extension there, and the whole thing runs once during feature construction,
-/// before any window is on screen. Making it async would also break the layout
-/// widening at the wiring site, which reads what the views point registered.
+/// The load in `init` is synchronous on the main actor by design (Ruling FN):
+/// `apply` is synchronous, `loadAll()` is `@MainActor` and already reads a
+/// manifest per extension there, and the whole thing runs once during feature
+/// construction, before any window is on screen. Making it async would also
+/// break the layout widening at the wiring site, which reads what the views
+/// point registered.
+///
+/// **That rationale is startup's alone.** Every later rescan — installing from
+/// the registry, and anything else that follows — goes through
+/// `registry.reload()`, which reads the disk off this actor. A load is not a
+/// cheap thing done twice: it is an enumeration, a read and a JSONC decode per
+/// installed extension, followed by every contribution withdrawn and
+/// re-applied and `contributionsDidChange` rebuilding the document layout and
+/// reconciling every host. In a settings window the user is looking at, all of
+/// that on this actor is a stopped run loop.
 @MainActor
 public final class ExtensionsCoordinator: AppFeature {
 
@@ -164,7 +174,10 @@ public final class ExtensionsCoordinator: AppFeature {
     /// The download and the archive work happen off the main actor: every
     /// method they go through is `nonisolated async`, so `await` here does not
     /// pin a multi-megabyte download and an Ed25519 verification to the actor
-    /// drawing the window.
+    /// drawing the window. The rescan that follows is the same bargain —
+    /// `reload()` rather than `loadAll()`, so the manifest pass over every
+    /// installed extension does not land on the actor drawing the settings
+    /// window the user clicked Install in.
     public func installFromRegistry(
         _ detail: OpenVSXExtensionDetail,
         using client: OpenVSXClient
@@ -176,7 +189,7 @@ public final class ExtensionsCoordinator: AppFeature {
             installDirectory: installDirectory,
             hostVersion: ExtensionRegistry.declaredVSCodeVersion)
         let installation = try await installer.install(detail, using: client)
-        registry.loadAll()
+        await registry.reload()
         return installation
     }
 

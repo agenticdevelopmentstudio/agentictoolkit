@@ -12,7 +12,7 @@ import WebKit
 /// panel that answers a bad message by erasing the good answer loses work the
 /// page believed was saved.
 @MainActor
-struct WebviewPanelStateTests {
+struct WebviewPanelSetStateTests {
 
     private func makePanel() -> WebviewPanelViewController {
         WebviewPanelViewController(
