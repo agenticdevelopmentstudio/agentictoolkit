@@ -5,6 +5,7 @@
 
 import AppKit
 import CodeEditLanguages
+import Combine
 import CodeEditSourceEditor
 import CodeEditTextView
 import Foundation
@@ -67,6 +68,7 @@ struct SemanticTokenHighlightProviderTests {
         let fixture: LSPEditorFixture
         let session: FakeEditorLanguageServerSession
         let document: TextDocument
+        let ledger: UpstreamDivergenceLedger
 
         var textView: TextView { controller.textView }
 
@@ -82,7 +84,8 @@ struct SemanticTokenHighlightProviderTests {
         response: SemanticTokensResponse = nil,
         error: LanguageServerSessionError? = nil,
         refetchDebounce: Duration = .zero,
-        queryTimeout: Duration = .seconds(5)
+        queryTimeout: Duration = .seconds(5),
+        ledger: UpstreamDivergenceLedger = UpstreamDivergenceLedger()
     ) async throws -> Harness {
         ensureEditorLanguageResourcesLocated()
         let fixture = LSPEditorFixture(
@@ -98,14 +101,16 @@ struct SemanticTokenHighlightProviderTests {
             document: document,
             registry: fixture.registry,
             refetchDebounce: refetchDebounce,
-            queryTimeout: queryTimeout
+            queryTimeout: queryTimeout,
+            ledger: ledger
         )
         return Harness(
             provider: provider,
             controller: makeEditorTextViewController(text: text),
             fixture: fixture,
             session: session,
-            document: document
+            document: document,
+            ledger: ledger
         )
     }
 
@@ -253,6 +258,133 @@ struct SemanticTokenHighlightProviderTests {
         #expect(highlights.count == 1)
         #expect(highlights.first?.range == NSRange(location: 4, length: 5))
         #expect(highlights.first?.capture == .parameter)
+    }
+
+    // MARK: - What it records about itself
+
+    /// Every test in this section hands the provider a ledger of its own.
+    /// `UpstreamDivergenceLedger.shared` is a process-wide default so that a
+    /// call site inside a decode loop can record without being handed a
+    /// dependency — it is not a reason for a test to assert against rows some
+    /// other test left behind.
+    ///
+    /// ★ The one that fails if the loop records per token rather than per fact.
+    ///
+    /// Three tokens of one declined type are one row saying "comment, three
+    /// times". Recorded inside the loop they are three calls, and each one
+    /// takes the ledger's lock, re-sorts every row it holds and publishes a
+    /// fresh array to every subscriber — for a row whose only change is an
+    /// integer. A file of comments from a server that sends them is that, once
+    /// per token, on every fetch.
+    @Test("tokens of one unmapped type are recorded once with a count, not once each")
+    func unmappedTokenTypesAreTalliedRatherThanRecordedPerToken() async throws {
+        let ledger = UpstreamDivergenceLedger()
+        let harness = try await makeHarness(
+            text: "// a line of prose\n",
+            capabilities: makeSemanticTokenCapabilities(legend: Self.legend),
+            response: Self.makeTokens([
+                WireToken(deltaLine: 0, deltaStartChar: 0, length: 2, typeIndex: 0),
+                WireToken(deltaLine: 0, deltaStartChar: 3, length: 1, typeIndex: 0),
+                WireToken(deltaLine: 0, deltaStartChar: 2, length: 4, typeIndex: 0)
+            ]),
+            ledger: ledger
+        )
+        let published = PublicationLog()
+        let cancellable = ledger.hitsPublisher.sink { published.append($0) }
+        defer { cancellable.cancel() }
+
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        await harness.provider.awaitPendingFetch()
+        #expect(try query(harness).isEmpty)
+
+        let rows = ledger.hits(for: .semanticTokenTypeUnmapped)
+        #expect(rows.map(\.detail) == ["comment"])
+        #expect(rows.map(\.count) == [3])
+        // The value handed over on subscribe, and one record.
+        #expect(published.values.count == 2)
+    }
+
+    /// The tally is per type, not per response: which row of the capture table
+    /// someone would go and write is the whole point of recording it.
+    @Test("two unmapped types are two rows, each recorded once")
+    func eachUnmappedTypeGetsItsOwnRow() async throws {
+        let ledger = UpstreamDivergenceLedger()
+        let harness = try await makeHarness(
+            text: "let value = 1\n",
+            capabilities: makeSemanticTokenCapabilities(
+                legend: SemanticTokensLegend(tokenTypes: ["comment", "keyword"], tokenModifiers: [])
+            ),
+            response: Self.makeTokens([
+                WireToken(deltaLine: 0, deltaStartChar: 0, length: 3, typeIndex: 1),
+                WireToken(deltaLine: 0, deltaStartChar: 4, length: 5, typeIndex: 0),
+                WireToken(deltaLine: 0, deltaStartChar: 6, length: 1, typeIndex: 1)
+            ]),
+            ledger: ledger
+        )
+        let published = PublicationLog()
+        let cancellable = ledger.hitsPublisher.sink { published.append($0) }
+        defer { cancellable.cancel() }
+
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        await harness.provider.awaitPendingFetch()
+        #expect(try query(harness).isEmpty)
+
+        let rows = ledger.hits(for: .semanticTokenTypeUnmapped)
+        #expect(rows.map(\.detail) == ["comment", "keyword"])
+        #expect(rows.map(\.count) == [1, 2])
+        // Subscribe, then one record per type.
+        #expect(published.values.count == 3)
+    }
+
+    /// A server that sends no modifier bits has diverged from nothing, so there
+    /// is no row — the ledger lists narrowings that *happened*.
+    ///
+    /// Green before the change as well as after it: the ledger's own
+    /// `guard count > 0` was already dropping the call. What changes is that
+    /// the call is no longer made, so the code and the ledger's contract stop
+    /// disagreeing about what a zero means.
+    @Test("a response whose tokens carry no modifier bits opens no row")
+    func aResponseWithoutModifiersOpensNoRow() async throws {
+        let ledger = UpstreamDivergenceLedger()
+        let harness = try await makeHarness(
+            text: "func run(value: Int) {}\n",
+            capabilities: makeSemanticTokenCapabilities(legend: Self.legend),
+            response: Self.makeTokens([
+                WireToken(deltaLine: 0, deltaStartChar: 5, length: 3, typeIndex: 1)
+            ]),
+            ledger: ledger
+        )
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        await harness.provider.awaitPendingFetch()
+        #expect(try query(harness).count == 1)
+
+        #expect(ledger.hits(for: .semanticTokenModifiersIgnored).isEmpty)
+    }
+
+    /// And the other half of that: the tokens that *do* carry modifier bits are
+    /// counted, so silence above means silence rather than a lost call.
+    @Test("tokens carrying modifier bits are counted in one row for the document")
+    func discardedModifiersAreCountedForTheDocument() async throws {
+        let ledger = UpstreamDivergenceLedger()
+        // Two of the three tokens carry a modifier bit in the fifth field.
+        let data: [UInt32] = [
+            0, 5, 3, 1, 0b01,
+            0, 4, 5, 3, 0,
+            0, 7, 3, 2, 0b10
+        ]
+        let harness = try await makeHarness(
+            text: "func run(value: Int) {}\n",
+            capabilities: makeSemanticTokenCapabilities(legend: Self.legend),
+            response: SemanticTokens(data: data),
+            ledger: ledger
+        )
+        harness.provider.setUp(textView: harness.textView, codeLanguage: .default)
+        await harness.provider.awaitPendingFetch()
+        #expect(try query(harness).count == 3)
+
+        let rows = ledger.hits(for: .semanticTokenModifiersIgnored)
+        #expect(rows.map(\.count) == [2])
+        #expect(rows.map(\.detail) == [harness.document.uri])
     }
 
     // MARK: - Provider behaviour
@@ -874,5 +1006,27 @@ struct SemanticTokenHighlightProviderTests {
             Issue.record("expected HighlightProvidingError.operationCancelled, got \(error)")
             return
         }
+    }
+}
+
+/// What a Combine sink was handed, in order, readable from another thread.
+///
+/// The provider records on the main actor, but `hitsPublisher` promises
+/// nothing about which thread a send arrives on, and a test that captured a
+/// local `var` would be asserting on that promise rather than on the ledger.
+private final class PublicationLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [[UpstreamDivergenceHit]] = []
+
+    func append(_ value: [UpstreamDivergenceHit]) {
+        lock.lock()
+        stored.append(value)
+        lock.unlock()
+    }
+
+    var values: [[UpstreamDivergenceHit]] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
     }
 }

@@ -87,6 +87,11 @@ public final class UpstreamDivergenceLedger: @unchecked Sendable {
     private var rows: [Key: UpstreamDivergenceHit] = [:]
     private let subject = CurrentValueSubject<[UpstreamDivergenceHit], Never>([])
 
+    /// Held across a publication — reading the rows and sending them — so that
+    /// two writers cannot send in the opposite order to the changes they are
+    /// describing. `publish()` says what goes wrong without it.
+    private let publishLock = NSLock()
+
     public init() {}
 
     /// Every row, ordered by divergence and then detail.
@@ -135,7 +140,6 @@ public final class UpstreamDivergenceLedger: @unchecked Sendable {
             lastSeen: now,
             count: (existing?.count ?? 0) + count
         )
-        let snapshot = Self.sorted(rows)
         lock.unlock()
 
         if existing == nil {
@@ -146,7 +150,7 @@ public final class UpstreamDivergenceLedger: @unchecked Sendable {
                 """
             )
         }
-        subject.send(snapshot)
+        publish()
     }
 
     /// Empties the ledger — the "I have read these, show me what the next
@@ -155,7 +159,37 @@ public final class UpstreamDivergenceLedger: @unchecked Sendable {
         lock.lock()
         rows.removeAll()
         lock.unlock()
-        subject.send([])
+        publish()
+    }
+
+    /// Hands subscribers what the ledger holds *now*.
+    ///
+    /// **The snapshot is taken inside `publishLock`, and that is the whole
+    /// point of this being a method.** Each writer used to compute its snapshot
+    /// under `lock` and send it after releasing, which left the order of the
+    /// sends to the scheduler: a recorder overtaken in that gap by `clear()`
+    /// published rows the clear had already removed. `CurrentValueSubject`
+    /// keeps the last value it is handed and gives it to every later
+    /// subscriber, so that is not a flicker — the panel goes on showing hits
+    /// `hits` says are gone, until the next one arrives, which may be never.
+    /// Reading the rows inside the publishing exclusion means whoever sends
+    /// last sends the newest state, whatever order the writers arrived in.
+    ///
+    /// Two locks rather than one because sending under `lock` would run every
+    /// subscriber's sink with it held, and a sink that so much as read `hits`
+    /// would deadlock against itself. The one rule this leaves is narrow and
+    /// worth stating: **a subscriber must not record into the same ledger from
+    /// inside its sink.** Nothing does; the settings panel reads the rows and
+    /// draws them.
+    private func publish() {
+        publishLock.lock()
+        defer { publishLock.unlock() }
+
+        lock.lock()
+        let snapshot = Self.sorted(rows)
+        lock.unlock()
+
+        subject.send(snapshot)
     }
 
     private static func sorted(_ rows: [Key: UpstreamDivergenceHit]) -> [UpstreamDivergenceHit] {

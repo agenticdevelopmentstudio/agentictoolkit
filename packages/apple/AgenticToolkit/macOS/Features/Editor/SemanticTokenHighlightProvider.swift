@@ -70,6 +70,17 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     private let refetchDebounce: Duration
     private let queryTimeout: Duration
 
+    /// Where the narrowings this decoder makes are recorded.
+    ///
+    /// Taken rather than reached for. `UpstreamDivergenceLedger.shared` is a
+    /// process-wide default so that a call site deep inside a decode loop can
+    /// record without being threaded a dependency — but a provider is
+    /// constructed once per document, which is exactly the place that can be
+    /// handed one, and `LanguageServerDocumentSync` already is. Holding it here
+    /// is also what lets a test assert on what one decode recorded rather than
+    /// on what every other test in the process has left in the shared one.
+    private let ledger: UpstreamDivergenceLedger
+
     /// Held weakly for the same reason the package holds it weakly: the text
     /// view owns the editor, not the other way round.
     private weak var textView: TextView?
@@ -149,12 +160,14 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         document: TextDocument,
         registry: LanguageServerRegistry,
         refetchDebounce: Duration = SemanticTokenHighlightProvider.defaultRefetchDebounce,
-        queryTimeout: Duration = SemanticTokenHighlightProvider.defaultQueryTimeout
+        queryTimeout: Duration = SemanticTokenHighlightProvider.defaultQueryTimeout,
+        ledger: UpstreamDivergenceLedger = .shared
     ) {
         self.document = document
         self.registry = registry
         self.refetchDebounce = refetchDebounce
         self.queryTimeout = queryTimeout
+        self.ledger = ledger
     }
 
     // Isolated explicitly (SE-0371): a `@MainActor` class's `deinit` is
@@ -520,6 +533,13 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         var result: [HighlightRange] = []
         var lastEnd = 0
         var overlapping = 0
+        // Tallied here and recorded after the loop. A row is "this type went
+        // unmapped, n times"; recording inside the loop makes n calls for the
+        // one row, and every one of them takes the ledger's lock, re-sorts
+        // every row it holds and hands a freshly built array to every
+        // subscriber — to change an integer. A file of comments, from a server
+        // that sends them, is that once per token on every fetch.
+        var unmapped: [String: Int] = [:]
         for token in representation.decodeTokens(in: whole) {
             guard let capture = SemanticTokenCaptureMapping.captureName(forTokenType: token.tokenType) else {
                 // Ruling AU: a token we have nothing to say about produces no
@@ -532,10 +552,7 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
                 // because the actionable fact is which type went unmapped —
                 // that is the row of `SemanticTokenCaptureMapping`'s table
                 // someone would go and write.
-                UpstreamDivergenceLedger.shared.record(
-                    .semanticTokenTypeUnmapped,
-                    detail: token.tokenType
-                )
+                unmapped[token.tokenType, default: 0] += 1
                 continue
             }
             guard let range = nsRange(for: token.range) else { continue }
@@ -559,6 +576,9 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
             result.append(HighlightRange(range: range, capture: capture, modifiers: []))
             lastEnd = range.upperBound
         }
+        for (tokenType, count) in unmapped {
+            ledger.record(.semanticTokenTypeUnmapped, detail: tokenType, count: count)
+        }
         if overlapping > 0 {
             Self.logger.error(
                 """
@@ -567,7 +587,7 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
                 overlappingTokenSupport: false.
                 """
             )
-            UpstreamDivergenceLedger.shared.record(
+            ledger.record(
                 .semanticTokenOverlapDropped,
                 detail: document.uri,
                 count: overlapping
@@ -588,15 +608,21 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     /// so the fifth of each group is the bitmask, and a non-zero one is a
     /// token whose styling we are declining to vary.
     ///
-    /// A zero here is worth as much as a non-zero: it says this server sends
-    /// no modifiers, so wiring them through would change nothing for it.
+    /// **A response that carried no modifier bits records nothing**, and the
+    /// zero is not information being thrown away — it is a server this
+    /// narrowing never applied to. The ledger lists narrowings that happened,
+    /// so a row saying one happened zero times reads as a finding when it is
+    /// the opposite of one, which is why `record` refuses a non-positive count
+    /// outright. Passing the zero and letting the ledger drop it was this same
+    /// behaviour written as though it were not.
     private func recordDiscardedModifiers(in response: SemanticTokensResponse) {
         guard let data = response?.data, data.count >= 5 else { return }
         var discarded = 0
         for index in stride(from: 4, to: data.count, by: 5) where data[index] != 0 {
             discarded += 1
         }
-        UpstreamDivergenceLedger.shared.record(
+        guard discarded > 0 else { return }
+        ledger.record(
             .semanticTokenModifiersIgnored,
             detail: document.uri,
             count: discarded
@@ -655,7 +681,7 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
             // an argument from three facts about code we do not own is exactly
             // the kind that stops being true without anyone noticing, and a row
             // appearing here is how we would find out.
-            UpstreamDivergenceLedger.shared.record(
+            ledger.record(
                 .semanticTokenLineOutOfRange,
                 detail: document.uri
             )
