@@ -57,14 +57,28 @@ public final class ConversationsShelfViewController: NSViewController,
     /// The sessions the feed is not drawing.
     public private(set) var hidden: Set<String> = []
 
-    /// Deliberately **not** a `ThemedTableView`: that type exists to paint a
-    /// palette plane over the system's `controlBackgroundColor`, and here there
-    /// is nothing to paint over — the sidebar's own material is the backdrop,
-    /// and a filled table hides the inset panel it is drawn inside.
+    /// Deliberately **not** a `ThemedTableView`: that type paints a palette
+    /// plane of its own, and here there is already one underneath — the panel.
+    /// A second fill on top of it would hide the inset the panel exists to
+    /// draw, and would be the same colour anyway.
     private let table = NSTableView(frame: .zero)
     private let scrollView = ThemedScrollView(frame: .zero)
     private let filterField = ThemedSearchField(placeholder: "Filter")
     private let selectionMenuButton = NSPopUpButton(frame: .zero, pullsDown: true)
+
+    /// The list's backdrop: a themed panel, not the system's sidebar material.
+    /// Sidebar material is drawn by the appearance and reaches no theme, so a
+    /// window in a custom theme had a grey-blue plane down its left that
+    /// belonged to none of it.
+    private let panel = ThemedBox(
+        fill: .surface,
+        stroke: .border,
+        cornerRadius: ConversationsShelfViewController.panelCornerRadius)
+
+    /// The sort control, in place of the table's own header: an
+    /// `NSTableHeaderView` is system-drawn to the last pixel, and every other
+    /// table in this toolkit sets `headerView = nil` for exactly that reason.
+    private let sortButton = NSButton(frame: .zero)
 
     /// The rows on screen: `sessions` narrowed by the filter text, then sorted.
     /// Held rather than recomputed per delegate callback because "the visible
@@ -74,6 +88,10 @@ public final class ConversationsShelfViewController: NSViewController,
 
     private var filterText: String = ""
     private var sortAscending = true
+
+    /// The palette the sort header was last painted with, so a click can
+    /// repaint it without waiting for a theme change to hand one over.
+    private var sortPalette: SemanticPalette = ThemePaletteObserver.currentPalette
 
     public init() {
         super.init(nibName: nil, bundle: nil)
@@ -150,23 +168,19 @@ public final class ConversationsShelfViewController: NSViewController,
             return true
         }
 
-        // The System Settings outline: a rounded panel of sidebar material,
-        // floating inside the window rather than filling a column of it. The
-        // system does not hand this out — `NSSplitViewItem`'s own sidebar
-        // backdrop is full-bleed and square — so the material is the system's
-        // and only the shape is ours.
-        let panel = NSVisualEffectView()
-        panel.material = .sidebar
-        panel.blendingMode = .behindWindow
-        panel.state = .followsWindowActiveState
-        panel.wantsLayer = true
-        panel.layer?.cornerRadius = Self.panelCornerRadius
-        panel.layer?.cornerCurve = .continuous
-        panel.layer?.masksToBounds = true
+        // The System Settings outline, in the theme's colours: a rounded panel
+        // floating inside the window rather than filling a column of it.
         panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.layer?.cornerCurve = .continuous
+        // Rows run the full width of the panel, so without this the top and
+        // bottom ones square off its corners from the inside.
+        panel.layer?.masksToBounds = true
 
         let filterBar = makeFilterBar()
         filterBar.translatesAutoresizingMaskIntoConstraints = false
+
+        let header = makeSortHeader()
+        header.translatesAutoresizingMaskIntoConstraints = false
 
         configureTable()
         scrollView.documentView = table
@@ -177,16 +191,35 @@ public final class ConversationsShelfViewController: NSViewController,
 
         container.addSubview(panel)
         panel.addSubview(filterBar)
+        panel.addSubview(header)
         panel.addSubview(scrollView)
 
         let inset = Self.panelInset
-        NSLayoutConstraint.activate([
-            // Inset on all four sides, including the top: the panel runs up
-            // behind the traffic lights exactly as System Settings' does, which
-            // is why the window's titlebar is transparent.
-            panel.topAnchor.constraint(equalTo: container.topAnchor, constant: inset),
+        // A collapsing split pane is animated to **zero** width, and every
+        // horizontal constraint in here is one AppKit would have to break to
+        // get there — which it does, loudly, and the contents jump sideways
+        // for the length of the animation. Below required, they simply give,
+        // and the panel slides out as one piece.
+        let horizontal = [
             panel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: inset),
             panel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            filterBar.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
+            filterBar.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -8),
+
+            header.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: panel.trailingAnchor, constant: -8),
+
+            scrollView.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: panel.trailingAnchor)
+        ]
+        for constraint in horizontal { constraint.priority = .defaultHigh }
+
+        NSLayoutConstraint.activate(horizontal + [
+            // Inset top and bottom: the panel runs up behind the traffic lights
+            // exactly as System Settings' does, which is why the window's
+            // titlebar is transparent.
+            panel.topAnchor.constraint(equalTo: container.topAnchor, constant: inset),
             panel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -inset),
 
             // The **safe area**, not the panel's own top: the panel runs under
@@ -195,20 +228,73 @@ public final class ConversationsShelfViewController: NSViewController,
             // them, so this is the first line that is free to be clicked.
             filterBar.topAnchor.constraint(
                 equalTo: container.safeAreaLayoutGuide.topAnchor, constant: 8),
-            filterBar.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 8),
-            filterBar.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -8),
 
-            // No rule between the field and the list: a full-width hairline
+            header.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 10),
+
+            // No rule between the header and the list: a full-width hairline
             // drawn across a rounded panel cuts it in half rather than
             // separating anything.
-            scrollView.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 8),
-            scrollView.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
             scrollView.bottomAnchor.constraint(equalTo: panel.bottomAnchor)
         ])
 
+        // The width the shelf opens at, and the reason it is a constraint
+        // rather than a divider position: it is what a split view asks the pane
+        // for, and it loses to the reader's own drag the moment there is one.
+        let width = container.widthAnchor.constraint(equalToConstant: Self.preferredWidth)
+        width.priority = .defaultLow
+        width.isActive = true
+
         self.view = container
         reload()
+    }
+
+    /// The sort control the table's own header would have been. One column, so
+    /// one button: it names what the list is sorted by and which way, and
+    /// clicking it turns the sort around.
+    private func makeSortHeader() -> NSView {
+        sortButton.isBordered = false
+        sortButton.bezelStyle = .regularSquare
+        sortButton.focusRingType = .none
+        sortButton.imagePosition = .imageTrailing
+        sortButton.target = self
+        sortButton.action = #selector(toggleSortDirection)
+        sortButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // Registered once, here: `observeTheme` appends an observer per call,
+        // so painting from inside it would stack up a new one on every click.
+        sortButton.observeTheme { [weak self] button, palette in
+            self?.paintSortHeader(button, palette: palette)
+        }
+        updateSortHeader()
+        return sortButton
+    }
+
+    @objc private func toggleSortDirection() {
+        sortAscending.toggle()
+        updateSortHeader()
+        reload()
+    }
+
+    /// Repaints the sort button from the palette and the current direction — an
+    /// attributed title freezes whatever palette drew it, so both a theme
+    /// change and a click come back through here.
+    private func paintSortHeader(_ button: NSButton, palette: SemanticPalette) {
+        sortPalette = palette
+        button.image = NSImage(
+            systemSymbolName: sortAscending ? "chevron.up" : "chevron.down",
+            accessibilityDescription: sortAscending ? "Ascending" : "Descending")
+        button.symbolConfiguration = NSImage.SymbolConfiguration(scale: .small)
+        button.contentTintColor = palette.nsColor(.secondaryText)
+        button.toolTip = sortAscending ? "Sorted A to Z — click to reverse"
+                                       : "Sorted Z to A — click to reverse"
+        button.attributedTitle = NSAttributedString(string: "Session", attributes: [
+            .foregroundColor: palette.nsColor(.secondaryText),
+            .font: palette.font(.caption)
+        ])
+    }
+
+    private func updateSortHeader() {
+        paintSortHeader(sortButton, palette: sortPalette)
     }
 
     /// The filter toolbar: a field that narrows the list, and beside it the
@@ -276,22 +362,22 @@ public final class ConversationsShelfViewController: NSViewController,
         let name = NSTableColumn(identifier: Column.name)
         name.title = "Session"
         name.resizingMask = .autoresizingMask
-        // The header is the sort control. A sortable table with its header
-        // hidden is a table that cannot be sorted by anyone who did not read
-        // the source.
-        name.sortDescriptorPrototype = NSSortDescriptor(key: Column.name.rawValue, ascending: true)
         table.addTableColumn(name)
 
         table.dataSource = self
         table.delegate = self
         table.style = .sourceList
         table.backgroundColor = .clear
+        // The sort control is the themed header above the list
+        // (`makeSortHeader`). `NSTableHeaderView` is drawn by the system down
+        // to its last pixel and reaches no palette, so a themed window got a
+        // grey band across the top of the panel.
+        table.headerView = nil
         table.usesAlternatingRowBackgroundColors = false
         table.allowsEmptySelection = true
         table.allowsMultipleSelection = false
         table.rowSizeStyle = .custom
         table.usesAutomaticRowHeights = true
-        table.sortDescriptors = [NSSortDescriptor(key: Column.name.rawValue, ascending: true)]
         table.target = self
         table.action = #selector(rowClicked)
         _ = table.accessibilityID(AXID.table)
@@ -306,6 +392,12 @@ public final class ConversationsShelfViewController: NSViewController,
     private static let panelInset: CGFloat = 8
     private static let panelCornerRadius: CGFloat = 10
 
+    /// The width the shelf opens at: enough for `project >> branch` to be read
+    /// whole, which is the only reason the list is there. Measured against the
+    /// real thing — "stenographer >> conversations" at the body size, with the
+    /// tick column and the panel's insets in front of it.
+    static let preferredWidth: CGFloat = 260
+
     // MARK: - Contents
 
     /// Recomputes the visible list from the roster, the filter text and the
@@ -316,7 +408,9 @@ public final class ConversationsShelfViewController: NSViewController,
             ? sessions
             : sessions.filter { $0.searchText.localizedCaseInsensitiveContains(needle) }
         visible = matched.sorted { lhs, rhs in
-            let order = lhs.name.localizedStandardCompare(rhs.name)
+            // By what the row *draws*. A list sorted on a title the reader
+            // cannot see is a list in no order at all.
+            let order = lhs.displayName.localizedStandardCompare(rhs.displayName)
             // A stable tiebreak on the id, so two sessions sharing a name do not
             // swap places every time the roster is re-read.
             let resolved = order == .orderedSame ? lhs.id.compare(rhs.id) : order
@@ -368,14 +462,6 @@ public final class ConversationsShelfViewController: NSViewController,
 
     public func tableView(
         _ tableView: NSTableView,
-        sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]
-    ) {
-        sortAscending = tableView.sortDescriptors.first?.ascending ?? true
-        reload()
-    }
-
-    public func tableView(
-        _ tableView: NSTableView,
         viewFor tableColumn: NSTableColumn?,
         row: Int
     ) -> NSView? {
@@ -404,12 +490,16 @@ public final class ConversationsShelfViewController: NSViewController,
         return image
     }
 
-    /// The session's name over its project and branch — the same two crumbs the
-    /// feed's rows carry, drawn small underneath so the name stays the thing
-    /// you read down the column.
+    /// `project >> branch` over the session's own name — its place on top,
+    /// because that is what stays put. A session's name is a summary of what it
+    /// is doing this minute, and a list sorted by a title that rewrites itself
+    /// under the reader is a list they cannot find anything in twice.
     private func nameCell(for session: Session) -> NSView {
-        let name = ThemedLabel(string: session.name, role: .primaryText, textRole: .body)
-        name.lineBreakMode = .byTruncatingTail
+        let name = ThemedLabel(
+            string: session.displayName, role: .primaryText, textRole: .body)
+        // From the head: the branch is the end of `project >> branch`, and it
+        // is the half that tells two rows of the same project apart.
+        name.lineBreakMode = .byTruncatingHead
         name.translatesAutoresizingMaskIntoConstraints = false
 
         let stack = NSStackView(views: [name])
@@ -424,12 +514,14 @@ public final class ConversationsShelfViewController: NSViewController,
         // neither label reaching the truncation it had asked for.
         stack.translatesAutoresizingMaskIntoConstraints = true
 
-        let crumbs = session.context.joined(separator: " · ")
-        if !crumbs.isEmpty {
-            let context = ThemedLabel(string: crumbs, role: .secondaryText, textRole: .caption)
-            context.lineBreakMode = .byTruncatingHead
-            context.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(context)
+        // The name, underneath, and only when it is saying something the title
+        // did not — a session with no crumbs is already titled by its name.
+        if session.name != session.displayName {
+            let subtitle = ThemedLabel(
+                string: session.name, role: .secondaryText, textRole: .caption)
+            subtitle.lineBreakMode = .byTruncatingTail
+            subtitle.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(subtitle)
         }
         // And a label only truncates if it is willing to be narrower than its
         // text. Both of these would rather overflow the column than shrink.

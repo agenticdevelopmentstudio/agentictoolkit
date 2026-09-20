@@ -61,8 +61,15 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         // way to get the System Settings outline in a window this app paints.
         let shelfItem = NSSplitViewItem(viewController: shelf)
         shelfItem.minimumThickness = 180
-        shelfItem.maximumThickness = 340
+        shelfItem.maximumThickness = 460
         shelfItem.canCollapse = true
+        // The whole of "do not resize the window". The default collapse
+        // behaviour resizes the *split view* and holds the siblings at their
+        // width, and the split view here is the window's content — so
+        // disclosing the shelf pushed the window 260 points wider and hiding
+        // it pulled the window back. This is the other way up: the window
+        // stays where the reader put it and the feed gives up the width.
+        shelfItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
         // Collapsed to begin with: the window's job is the conversation, and a
         // reader who has never needed to hide a session should not have to
         // dismiss a list to get at it.
@@ -70,7 +77,12 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         shelfItem.holdingPriority = .defaultLow + 1
 
         let feedItem = NSSplitViewItem(viewController: feed)
-        feedItem.minimumThickness = 320
+        // Low enough that the shelf and the feed together always fit inside
+        // this window's own minimum width (380). A pair of minimums that add
+        // up to more than the window is a window AppKit has to widen the
+        // moment the second pane appears, whatever the collapse behaviour
+        // says.
+        feedItem.minimumThickness = 180
 
         addSplitViewItem(shelfItem)
         addSplitViewItem(feedItem)
@@ -102,7 +114,22 @@ public final class ConversationsSplitViewController: NSSplitViewController {
     /// Shows the shelf if it is hidden, hides it if it is showing.
     @objc public func toggleShelf() {
         guard let item = splitViewItems.first else { return }
-        item.animator().isCollapsed = !item.isCollapsed
+        // Inside an explicit animation group, with implicit animation allowed:
+        // `item.animator()` on its own animates the divider while everything
+        // laid out against it jumps to its final place on the first frame, so
+        // the shelf's panel snapped to width while the pane was still sliding.
+        // The group is also what gives the two halves one duration and one
+        // curve instead of each finding its own.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            item.animator().isCollapsed.toggle()
+        } completionHandler: { [weak self] in
+            // The toggle reads as the state it *reached*, so it is repainted
+            // when the animation lands rather than when it starts.
+            self?.updateToggleAppearance()
+        }
         updateToggleAppearance()
     }
 

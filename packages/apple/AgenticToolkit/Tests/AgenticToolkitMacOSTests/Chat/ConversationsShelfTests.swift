@@ -110,6 +110,31 @@ final class ConversationsShelfTests: XCTestCase {
         XCTAssertEqual(shelf.visibleSessions.map(\.name), ["Alpha", "Beta", "Charlie"])
     }
 
+    func testARowIsTitledByWhereTheSessionIsNotWhatItIsCalled() {
+        // A session's name is a summary of what it is doing this minute
+        // ("editing AccountQuotaStore") and rewrites itself under the reader.
+        // Its project and branch do not.
+        let session = ConversationsSessionFilter.Session(
+            id: "a", name: "editing AccountQuotaStore", context: ["stenographer", "conversations"])
+        XCTAssertEqual(session.displayName, "stenographer >> conversations")
+
+        // And a session with nowhere to be is still titled by something.
+        let placeless = ConversationsSessionFilter.Session(id: "b", name: "Beta", context: [])
+        XCTAssertEqual(placeless.displayName, "Beta")
+    }
+
+    func testRowsAreSortedByTheTitleTheyDraw() {
+        // Sorting on the name while drawing the place gives a list in an order
+        // nobody looking at it can see.
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        shelf.sessions = [
+            ConversationsSessionFilter.Session(id: "a", name: "Zebra", context: ["alpha", "main"]),
+            ConversationsSessionFilter.Session(id: "b", name: "Apple", context: ["zulu", "main"])
+        ]
+        XCTAssertEqual(shelf.visibleSessions.map(\.displayName), ["alpha >> main", "zulu >> main"])
+    }
+
     func testTheFilterNarrowsTheList() {
         let shelf = shelf([("a", "Alpha"), ("b", "Beta")])
         shelf.filter = "bet"
@@ -179,24 +204,55 @@ final class ConversationsShelfTests: XCTestCase {
         XCTAssertEqual(shelf.visibleSessions.map(\.id), ["a", "c"])
     }
 
-    func testTheShelfDrawsAnInsetRoundedPanel() {
-        // The System Settings outline the window was asked for is this panel and
-        // nothing else: a sidebar split item's own backdrop is square and runs
-        // edge to edge, so the shape is ours to draw and ours to keep. A later
-        // simplification that pinned the list straight to the shelf's root would
-        // lose the look with nothing else going wrong to say so.
+    func testTheShelfDrawsAnInsetRoundedPanelFromThePalette() {
+        // Two things at once, because they are one decision: the System
+        // Settings outline is ours to draw (a sidebar split item's backdrop is
+        // square and full-bleed), and it is drawn from the *theme* — the
+        // system's sidebar material reaches no palette, so a custom theme had a
+        // grey-blue plane down the window's left belonging to none of it.
         let shelf = ConversationsShelfViewController()
-        shelf.view.frame = NSRect(x: 0, y: 0, width: 220, height: 400)
+        shelf.view.frame = NSRect(x: 0, y: 0, width: 260, height: 400)
         shelf.view.layoutSubtreeIfNeeded()
 
-        guard let panel = shelf.view.subviews.compactMap({ $0 as? NSVisualEffectView }).first
-        else { return XCTFail("the shelf drew no panel") }
+        guard let panel = shelf.view.subviews.compactMap({ $0 as? ThemedBox }).first
+        else { return XCTFail("the shelf drew no themed panel") }
 
-        XCTAssertEqual(panel.material, .sidebar)
+        XCTAssertEqual(panel.fillRole, .surface)
         XCTAssertGreaterThan(panel.layer?.cornerRadius ?? 0, 0, "square corners are not the outline")
         XCTAssertGreaterThan(panel.frame.minX, 0, "flush with the window edge is not inset")
         XCTAssertGreaterThan(panel.frame.minY, 0)
         XCTAssertLessThan(panel.frame.maxY, shelf.view.bounds.height)
+
+        XCTAssertFalse(
+            shelf.view.subviews.contains { $0 is NSVisualEffectView },
+            "system material is not the theme")
+    }
+
+    func testTheListHasNoSystemDrawnHeader() {
+        // `NSTableHeaderView` is drawn by the system to its last pixel and
+        // reaches no palette. The sort control is the themed header above the
+        // list instead — so if this ever comes back, the sort moved with it.
+        let shelf = shelf([("a", "Alpha")])
+        let table = firstTable(in: shelf.view)
+        XCTAssertNotNil(table)
+        XCTAssertNil(table?.headerView)
+    }
+
+    func testTheShelfOpensWideEnoughToReadASessionsPlace() {
+        // A list of names cut off at the project is a list you cannot tell two
+        // branches apart in, which is the whole job of the shelf.
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        let fitting = shelf.view.fittingSize.width
+        XCTAssertGreaterThanOrEqual(fitting, 240, "the shelf opens too narrow to read a row")
+    }
+
+    private func firstTable(in view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView { return table }
+        for subview in view.subviews {
+            if let found = firstTable(in: subview) { return found }
+        }
+        return nil
     }
 
     // MARK: - The split
@@ -206,6 +262,24 @@ final class ConversationsShelfTests: XCTestCase {
             feed: ConversationsViewController { _, _ in [] })
         _ = split.view
         XCTAssertFalse(split.isShelfVisible)
+    }
+
+    func testDisclosingTheShelfDoesNotResizeTheWindow() {
+        // The default collapse behaviour resizes the split view and holds the
+        // siblings fixed — and the split view here *is* the window's content,
+        // so the window jumped 260 points wider every time the shelf came out.
+        let split = ConversationsSplitViewController(
+            feed: ConversationsViewController { _, _ in [] })
+        _ = split.view
+
+        guard let shelfItem = split.splitViewItems.first else { return XCTFail("no shelf item") }
+        XCTAssertEqual(shelfItem.collapseBehavior, .preferResizingSiblingsWithFixedSplitView)
+
+        // And the two minimums together have to fit inside the window's own
+        // minimum width, or AppKit widens the window whatever the behaviour
+        // says. 380 is the Conversations window's minimum.
+        let minimums = split.splitViewItems.map(\.minimumThickness).reduce(0, +)
+        XCTAssertLessThanOrEqual(minimums, 380)
     }
 
     func testTickingASessionOffReachesTheFeed() {

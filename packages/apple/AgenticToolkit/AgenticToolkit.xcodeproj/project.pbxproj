@@ -596,6 +596,7 @@
 		662B0E27D78EDE122CF93109 /* AgenticDeveloperToolkit-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AA33F0AF418F0DDFE05C6BF /* AgenticDeveloperToolkit-macOS.framework */; };
 		664F8F60BCAC920B2BF060D3 /* FontPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A6CCA7870DBDB74A35168A /* FontPickerView.swift */; };
 		6652E253C85FA7BC081976A7 /* AppStorageLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377F378363D7C5429B3F0656 /* AppStorageLocation.swift */; };
+		665984835E1CCED0DC75B919 /* TranscriptWidthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6215CA0281C10A7E48468BA0 /* TranscriptWidthTests.swift */; };
 		66732C892740399548336630 /* MessageFraming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 578D700EFBAAC862EEFF04D3 /* MessageFraming.swift */; };
 		6685A5210B3792B88D1268A9 /* ApplicationsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0038EE81ABBA88095B85AC6C /* ApplicationsModels.swift */; };
 		66B97AD3582AC8075A26B8BA /* AIPluginDescriptorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FF57A9BB4F2B559D820C1F3 /* AIPluginDescriptorTests.swift */; };
@@ -2884,6 +2885,7 @@
 		6170A42638BD6625DAC97BF1 /* GitGlobalConfigTableViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitGlobalConfigTableViewTests.swift; sourceTree = "<group>"; };
 		61BD747D58D6E27C052C5027 /* NoteTaxonomyProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteTaxonomyProviding.swift; sourceTree = "<group>"; };
 		61BD92BDC45638613E843393 /* ExtensionSnippet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionSnippet.swift; sourceTree = "<group>"; };
+		6215CA0281C10A7E48468BA0 /* TranscriptWidthTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptWidthTests.swift; sourceTree = "<group>"; };
 		622753834F6CA35887E0B465 /* HeuristicRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeuristicRegistry.swift; sourceTree = "<group>"; };
 		623AF5C2213CCCDDD8841E8B /* AIModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelCatalog.swift; sourceTree = "<group>"; };
 		626129C1F55F69926E022874 /* CustomersDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomersDataSource.swift; sourceTree = "<group>"; };
@@ -6510,6 +6512,7 @@
 				E21982EBF4354EEA026A6698 /* ConversationsShelfTests.swift */,
 				7FB8AA1B5100D85B75A9E4A0 /* LocalChatSessionTests.swift */,
 				F847D48BBB231ABB339167AE /* TranscriptDateTests.swift */,
+				6215CA0281C10A7E48468BA0 /* TranscriptWidthTests.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -9121,6 +9124,7 @@
 				4635DCB7F3A90EBADC0E8A8C /* ThemedSplitViewOrientationTests.swift in Sources */,
 				0AFF0852BB6191797F3F6795 /* TopicListViewControllerTests.swift in Sources */,
 				1508BAA6C880D83608E3E1BB /* TranscriptDateTests.swift in Sources */,
+				665984835E1CCED0DC75B919 /* TranscriptWidthTests.swift in Sources */,
 				762E9DF12BA480FB3B8F3E8A /* UriTests.swift in Sources */,
 				DF98A9DC28BB381C42363B43 /* VSCodeAPIDisposableTests.swift in Sources */,
 				77C1CC1C137034CAA26B2E21 /* VSCodeAPISettlementTests.swift in Sources */,

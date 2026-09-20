@@ -33,6 +33,22 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// when the width changes — see `layout()` — to keep them proportional on resize.
     private var lastTranscriptWidth: CGFloat = 0
 
+    /// How wide the transcript is drawn — a **number**, written down each pass,
+    /// and deliberately not `transcriptStack.width == transcriptScroll.width`.
+    ///
+    /// That equality reads both ways. A bubble bakes the width it was measured
+    /// at into a constraint of its own, and through the equality those baked
+    /// widths become a width the scroll view *must* be, which becomes a width
+    /// the window must be: the window could be dragged wider and never narrower
+    /// again, and every widening raised the floor. `NSWindow` takes its minimum
+    /// from the content's fitting size, and a fitting size is worked out from
+    /// constraints of *any* priority, so lowering one would not have helped —
+    /// the relation itself is what had to go.
+    ///
+    /// Written in ``layout()``, where the clip view's width is already known.
+    private lazy var transcriptWidthConstraint =
+        transcriptStack.widthAnchor.constraint(equalToConstant: 0)
+
     /// Bubbles cap at this fraction of the transcript width, so they read as chat
     /// bubbles and grow/shrink with the window rather than spanning it.
     ///
@@ -218,7 +234,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             transcriptScroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             transcriptScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             transcriptScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
-            transcriptStack.widthAnchor.constraint(equalTo: transcriptScroll.widthAnchor),
+            transcriptWidthConstraint,
             divider.topAnchor.constraint(equalTo: transcriptScroll.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -241,6 +257,15 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     public override func layout() {
         super.layout()
         let width = transcriptScroll.contentView.bounds.width
+        // The transcript is as wide as the window has made the clip view, and
+        // is told so here rather than constrained to it — see
+        // ``transcriptWidthConstraint``. Laid out again in the same pass so the
+        // rows below are measured against the width they are about to be drawn
+        // at, not the previous one.
+        if width > 0, transcriptWidthConstraint.constant != width {
+            transcriptWidthConstraint.constant = width
+            transcriptStack.layoutSubtreeIfNeeded()
+        }
         if width > 0, abs(width - lastTranscriptWidth) > 1 {
             lastTranscriptWidth = width
             rebuildTranscript()

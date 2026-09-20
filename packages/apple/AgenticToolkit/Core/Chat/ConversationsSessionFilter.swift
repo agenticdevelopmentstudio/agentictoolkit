@@ -40,6 +40,21 @@ public final class ConversationsSessionFilter: @unchecked Sendable {
             self.context = context
         }
 
+        /// What the shelf draws as the row's title: **where** the session is
+        /// rather than what it is called — `project >> branch`.
+        ///
+        /// A session's own name is a summary of what it happens to be doing
+        /// this minute ("editing AccountQuotaStore"), which changes under the
+        /// reader while they are trying to find a row again. Its project and
+        /// branch do not, and they are also how the reader thinks of it. The
+        /// name is still drawn, underneath, and still searchable.
+        ///
+        /// Falls back to the name when there are no crumbs, because a row with
+        /// a blank title is unclickable in practice.
+        public var displayName: String {
+            context.isEmpty ? name : context.joined(separator: " >> ")
+        }
+
         /// What a textual filter matches against — everything the row draws, so
         /// typing a branch name finds the session on that branch even though
         /// the branch is not its name.
