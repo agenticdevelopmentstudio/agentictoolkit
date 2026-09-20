@@ -33,6 +33,16 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
     /// other half of this panel's effect and it is a sibling, not a child.
     private let onInstalled: () -> Void
 
+    /// How an extension actually gets installed.
+    ///
+    /// Injected for the same reason `client` and `onInstalled` are: the real
+    /// one downloads a multi-megabyte archive, checks a digest against the
+    /// registry's metadata and expands it onto disk, and a test of *which row
+    /// reports where* has no business doing any of that.
+    private let installer: Installer
+
+    typealias Installer = @MainActor (OpenVSXExtensionDetail) async throws -> VSIXInstallation
+
     // MARK: - Search
 
     private let searchField = AccessibleSearchField()
@@ -71,8 +81,24 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
 
     private var selection: OpenVSXExtensionDetail?
     private var detailTask: Task<Void, Never>?
-    private var installTask: Task<Void, Never>?
     private var licenseTask: Task<Void, Never>?
+
+    /// The installs in flight, one slot per extension.
+    ///
+    /// **Keyed, because this panel offers more than one install at a time.**
+    /// The Selected card has an Install button and every Updates row has its
+    /// own, and they all end up here. A single slot meant starting the second
+    /// cancelled the first — and a cancelled install returns without touching
+    /// anything, so the row it belonged to sat at "Downloading 1.2.3…" for the
+    /// life of the panel. Keying by identifier makes a cancellation mean the
+    /// one thing it should: this extension is being installed again, stop the
+    /// previous attempt at it.
+    ///
+    /// A finished task is left in its slot rather than removed. Removing it
+    /// from the task's own completion races the next click's replacement —
+    /// the late `nil` would drop a *running* install out of the table — and
+    /// the table is bounded by the number of extensions either way.
+    private var installTasks: [String: Task<Void, Never>] = [:]
 
     // MARK: - Updates
 
@@ -87,11 +113,15 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
     init(
         coordinator: ExtensionsCoordinator,
         client: OpenVSXClient = OpenVSXClient(),
-        onInstalled: @escaping () -> Void
+        onInstalled: @escaping () -> Void,
+        installer: Installer? = nil
     ) {
         self.coordinator = coordinator
         self.client = client
         self.onInstalled = onInstalled
+        self.installer = installer ?? { detail in
+            try await coordinator.installFromRegistry(detail, using: client)
+        }
         super.init(with: ComposableSettings.SettingsPanelDescriptor(
             title: "Browse & Install",
             icon: NSImage(systemSymbolName: "square.and.arrow.down",
@@ -109,9 +139,11 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
         // running would report into a view tree nobody is looking at.
         searchTask?.cancel()
         detailTask?.cancel()
-        installTask?.cancel()
         licenseTask?.cancel()
         updateTask?.cancel()
+        for task in installTasks.values {
+            task.cancel()
+        }
     }
 
     override var helpContent: ComposableSettings.PanelHelp? {
@@ -398,7 +430,12 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
         }
     }
 
-    private func showSelection(_ detail: OpenVSXExtensionDetail?) {
+    /// Puts one extension in the Selected card, or hides the card.
+    ///
+    /// Not `private`: the test target drives this rather than a search result,
+    /// because reaching the same state through the results table would mean
+    /// answering a registry search.
+    func showSelection(_ detail: OpenVSXExtensionDetail?) {
         selection = detail
         guard let detail else {
             selectionGroup.isHidden = true
@@ -530,31 +567,48 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
 
     private func installSelection() {
         guard let detail = selection else { return }
-        install(detail, progressInto: selectionStatus)
+        install(detail, progressInto: selectionStatus, disabling: installButton?.button)
     }
 
+    /// Installs `detail`, reporting into the status row that asked for it and
+    /// disabling the button that was pressed while it runs.
+    ///
+    /// **Every part of this is per-caller, and that is the point.** An install
+    /// is started from the Selected card or from any Updates row, and each of
+    /// those has its own status line and its own button. Reporting into a
+    /// status the caller hands over, and re-enabling the button the caller
+    /// hands over, is what keeps a click on one row from writing into another
+    /// one's — the previous version disabled the *card's* Install button
+    /// whichever row was pressed, and left it that way on success.
     private func install(
         _ detail: OpenVSXExtensionDetail,
-        progressInto status: ComposableSettings.ExplanationView
+        progressInto status: ComposableSettings.ExplanationView,
+        disabling button: NSButton?
     ) {
-        installTask?.cancel()
-        installButton?.button.isEnabled = false
+        installTasks[detail.identifier]?.cancel()
+        button?.isEnabled = false
         status.label.stringValue = "Downloading \(detail.version)…"
-        installTask = Task { [weak self] in
+        installTasks[detail.identifier] = Task { [weak self] in
             guard let self else { return }
             do {
-                let installation = try await self.coordinator.installFromRegistry(
-                    detail, using: self.client)
+                let installation = try await self.installer(detail)
                 if Task.isCancelled { return }
                 status.label.stringValue = Self.installedLine(for: installation)
+                button?.isEnabled = true
                 // The installed list is a sibling panel built from the registry,
                 // and the registry has just changed underneath it.
                 self.onInstalled()
-                self.showSelection(detail)
+                // Only when the card is showing what was installed. An update
+                // row installs something the reader may never have selected,
+                // and redrawing the card from it replaced whatever they were
+                // reading with an extension they had not asked to see.
+                if self.selection?.identifier == detail.identifier {
+                    self.showSelection(detail)
+                }
             } catch {
                 if Task.isCancelled { return }
                 status.label.stringValue = "Not installed: " + Self.sentence(for: error)
-                self.installButton?.button.isEnabled = true
+                button?.isEnabled = true
             }
         }
     }
@@ -612,10 +666,19 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
             let report = await check.check(installed)
             if Task.isCancelled { return }
             self.updatesButton?.button.isEnabled = true
-            self.updatesStatus.label.stringValue = Self.updatesSummary(for: report)
-            for update in report.updates {
-                self.updatesList.addArrangedSubview(self.makeUpdateRow(update))
-            }
+            self.showUpdates(report)
+        }
+    }
+
+    /// Puts a finished check on screen: the summary, then a row per update.
+    ///
+    /// Separate from `checkForUpdates()` so the rows can be built from a report
+    /// without a registry to get one from — which is how the rows are tested.
+    func showUpdates(_ report: ExtensionUpdateReport) {
+        clearUpdateRows()
+        updatesStatus.label.stringValue = Self.updatesSummary(for: report)
+        for update in report.updates {
+            updatesList.addArrangedSubview(makeUpdateRow(update))
         }
     }
 
@@ -652,8 +715,8 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
         // driven check — can hold onto between two checks.
         button.accessibilityID("extensions.browse.update.\(update.identifier)")
         status.label.accessibilityID("extensions.browse.update.\(update.identifier).status")
-        let action = UpdateRowAction { [weak self] in
-            self?.install(update.latest, progressInto: status)
+        let action = UpdateRowAction { [weak self, weak button] in
+            self?.install(update.latest, progressInto: status, disabling: button)
         }
         button.target = action
         button.action = #selector(UpdateRowAction.fire)
