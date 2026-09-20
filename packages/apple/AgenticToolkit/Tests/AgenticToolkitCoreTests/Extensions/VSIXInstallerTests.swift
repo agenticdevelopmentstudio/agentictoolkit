@@ -549,9 +549,13 @@ struct VSIXInstallerTests {
         defer { try? FileManager.default.removeItem(at: scratch) }
 
         // `/var/folders/…` → `/private/var/folders/…`: the same directory,
-        // named the way the guard could not cope with.
-        let installDirectory = scratch
-            .resolvingSymlinksInPath()
+        // named the way the guard could not cope with. Spelled out rather than
+        // asked for — `resolvingSymlinksInPath()` only ever *removes* a
+        // leading `/private`, so it cannot produce this form, which is the
+        // asymmetry the bug was made of.
+        let privateRoot = URL(fileURLWithPath: "/private" + scratch.path, isDirectory: true)
+        try #require(FileManager.default.fileExists(atPath: privateRoot.path))
+        let installDirectory = privateRoot
             .appendingPathComponent("Extensions", isDirectory: true)
         try #require(installDirectory.path.hasPrefix("/private/"))
         try FileManager.default.createDirectory(
@@ -576,8 +580,9 @@ struct VSIXInstallerTests {
         let scratch = try makeTemporaryDirectory("private-rooted-hostile")
         defer { try? FileManager.default.removeItem(at: scratch) }
 
-        let installDirectory = scratch
-            .resolvingSymlinksInPath()
+        let privateRoot = URL(fileURLWithPath: "/private" + scratch.path, isDirectory: true)
+        try #require(FileManager.default.fileExists(atPath: privateRoot.path))
+        let installDirectory = privateRoot
             .appendingPathComponent("Extensions", isDirectory: true)
         try FileManager.default.createDirectory(
             at: installDirectory, withIntermediateDirectories: true)

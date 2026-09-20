@@ -1142,4 +1142,57 @@ struct ExtensionRegistryTests {
             registry.removeContributionsObserver(UUID())
         }
     }
+
+    /// The unit tests pin the substitution; this pins that the registry
+    /// actually performs it. The two are different claims, and the one that
+    /// was false is this one — the resolver could be perfect and the settings
+    /// pane still list `%configuration.title%` if nothing called it.
+    @Test("a manifest whose strings are nls keys loads with the strings resolved")
+    func nlsKeysAreResolvedOnLoad() throws {
+        try withInMemorySettings {
+            let root = try makeTempDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            try writeManifest("""
+                {
+                    "name": "widget",
+                    "publisher": "acme",
+                    "version": "1.0.0",
+                    "displayName": "%extension.title%",
+                    "description": "%extension.blurb%",
+                    "engines": { "vscode": "^1.74.0" },
+                    "contributes": {
+                        "commands": [
+                            { "command": "acme.widget.run", "title": "%command.run%" }
+                        ]
+                    }
+                }
+                """, named: "widget-ext", in: root)
+
+            // Only the default table, so this test does not depend on the
+            // language of the machine running it — `loadAll` resolves against
+            // `Locale.current`, and the default table is the one every locale
+            // falls back to.
+            try """
+                {
+                    "extension.title": "Widget",
+                    "extension.blurb": "Widgets, for you",
+                    "command.run": "Run the widget"
+                }
+                """
+                .write(
+                    to: root.appendingPathComponent("widget-ext/package.nls.json"),
+                    atomically: true,
+                    encoding: .utf8)
+
+            let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+            registry.loadAll()
+
+            let manifest = try #require(registry.extensions.first?.manifest)
+            #expect(manifest.identifier == "acme.widget")
+            #expect(manifest.displayName == "Widget")
+            #expect(manifest.description == "Widgets, for you")
+            #expect(manifest.contributes?.commands.first?.title == "Run the widget")
+        }
+    }
 }

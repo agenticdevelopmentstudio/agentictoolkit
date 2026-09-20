@@ -696,14 +696,22 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
         // be wrong about — which it did, calling an unreachable registry a
         // registry with no record.
         for reason in Self.unavailableReasonOrder {
-            let named = report.notCheckable.filter { $0.reason == reason }
+            // Sorted here, not taken on trust. `ExtensionUpdateCheck.check`
+            // sorts what it produces, but `ExtensionUpdateReport` is a public
+            // value anything can build, and a sentence naming the same two
+            // extensions in a different order each time would read like a
+            // report about something else (`principle-of-least-astonishment`).
+            let named = report.notCheckable
+                .filter { $0.reason == reason }
+                .map(\.identifier)
+                .sorted()
             guard !named.isEmpty else { continue }
             // Named, not counted: the usual cause is an extension installed by
             // hand that the registry has never heard of, and the reader can
             // only recognise that from the name.
             sentences.append(
                 "\(named.count) could not be checked "
-                    + "(\(named.map(\.identifier).joined(separator: ", "))) "
+                    + "(\(named.joined(separator: ", "))) "
                     + "— \(Self.clause(for: reason, plural: named.count > 1)).")
         }
         return sentences.joined(separator: " ")

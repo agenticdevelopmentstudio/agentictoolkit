@@ -312,8 +312,15 @@ public struct VSIXInstaller: Sendable {
             throw VSIXInstallError.manifestUnreadable
         }
         do {
+            // The nls tables are in the expanded payload alongside the
+            // manifest, so the name this install reports is the one the
+            // registry will show for the same extension afterwards. Without
+            // it the status line says `%displayName%` installed successfully.
             return try JSONDecoder().decode(
-                ExtensionManifest.self, from: JSONCPreprocessor.jsonData(from: data))
+                ExtensionManifest.self,
+                from: JSONCPreprocessor.jsonData(
+                    from: ExtensionManifestLocalization.localize(
+                        data, forManifestIn: payload)))
         } catch {
             throw VSIXInstallError.manifestMalformed(error.localizedDescription)
         }

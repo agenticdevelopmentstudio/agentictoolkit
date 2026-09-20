@@ -449,8 +449,19 @@ public final class ExtensionRegistry {
             // readers already tolerate through this exact helper. A manifest
             // rejected here is not a degraded extension — it is an extension
             // that does not exist as far as this host is concerned.
+            //
+            // Through the localization tables too, because a manifest that
+            // ships translations does not contain the English: it contains
+            // `%configuration.title%` and puts the words in `package.nls.json`
+            // beside it. Resolved here rather than at each of the dozens of
+            // places a manifest string is displayed — there is one place the
+            // bytes become an `ExtensionManifest`, and everything downstream
+            // then holds strings a person can read (`dry`).
             manifest = try JSONDecoder().decode(
-                ExtensionManifest.self, from: JSONCPreprocessor.jsonData(from: data))
+                ExtensionManifest.self,
+                from: JSONCPreprocessor.jsonData(
+                    from: ExtensionManifestLocalization.localize(
+                        data, forManifestIn: directory)))
         } catch {
             // The manifest did not decode — but a failure that cannot name its
             // extension sets `establishedIdentifiers` to `nil`, which turns
