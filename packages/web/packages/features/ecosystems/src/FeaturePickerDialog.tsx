@@ -238,7 +238,10 @@ export function FeaturePickerDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="h-[26rem] min-h-0 overflow-hidden rounded-lg border border-apt-border">
+          {/* HTDV sizes itself with `flex-1`, so its container has to be a flex column — in a plain
+                block it resolves to height 0, and its own overflow clip then hides the list
+                entirely. `h-[26rem]` is what that `flex-1` divides up. */}
+          <div className="flex h-[26rem] min-h-0 flex-col overflow-hidden rounded-lg border border-apt-border">
             <HierarchicalDetailView
               levels={[level]}
               showBreadcrumb={false}
