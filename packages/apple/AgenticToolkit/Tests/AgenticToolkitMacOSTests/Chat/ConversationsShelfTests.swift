@@ -298,6 +298,67 @@ final class ConversationsShelfTests: XCTestCase {
         return nil
     }
 
+    /// Every string a view hierarchy actually draws, in no particular order.
+    private func texts(in view: NSView) -> [String] {
+        var found: [String] = []
+        if let field = view as? NSTextField, !field.stringValue.isEmpty {
+            found.append(field.stringValue)
+        }
+        for subview in view.subviews { found += texts(in: subview) }
+        return found
+    }
+
+    /// The `name` column's cell for a row, built the way the table builds it.
+    private func nameCell(
+        of shelf: ConversationsShelfViewController, row: Int
+    ) -> NSView? {
+        guard let table = firstTable(in: shelf.view),
+              let column = table.tableColumns.first(where: { $0.identifier.rawValue == "name" })
+        else { return nil }
+        return shelf.tableView(table, viewFor: column, row: row)
+    }
+
+    func testARowDrawsWhatTheSessionIsDoingUnderWhereItIs() {
+        // Folding the name into the breadcrumb trail as a third crumb cost the
+        // row its second line: one line ending in a truncated summary, in a
+        // column too narrow to hold the place and the summary together.
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        shelf.sessions = [ConversationsSessionFilter.Session(
+            id: "a",
+            name: "editing AccountQuotaStore",
+            context: ["stenographer", "conversations"])]
+
+        guard let cell = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
+        let drawn = texts(in: cell)
+        XCTAssertTrue(drawn.contains("stenographer"), "the row lost its project: \(drawn)")
+        XCTAssertTrue(drawn.contains("conversations"), "the row lost its branch: \(drawn)")
+        XCTAssertTrue(drawn.contains("editing AccountQuotaStore"),
+                      "the row lost the summary under the place: \(drawn)")
+    }
+
+    func testARowTitledByItsNameDoesNotDrawItTwice() {
+        // A session with nowhere to be is titled by its name, so a summary line
+        // saying the same thing again is the row repeating itself.
+        let shelf = shelf([("a", "Alpha")])
+        guard let cell = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
+        XCTAssertEqual(texts(in: cell).filter { $0 == "Alpha" }.count, 1)
+    }
+
+    func testARowIsTallerThanTheOneLineItUsedToBe() {
+        // `usesAutomaticRowHeights` measures the row through the cell's own
+        // constraints: a centred child leaves that chain open and the second
+        // line is drawn outside the row it belongs to.
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        shelf.sessions = [ConversationsSessionFilter.Session(
+            id: "a", name: "editing AccountQuotaStore", context: ["stenographer", "main"])]
+
+        guard let cell = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
+        XCTAssertGreaterThan(cell.fittingSize.height, 34,
+                             "the row is still one line tall, with no room for the summary")
+    }
+
     // MARK: - The split
 
     func testTheShelfStartsAway() {
@@ -305,6 +366,40 @@ final class ConversationsShelfTests: XCTestCase {
             feed: ConversationsViewController { _, _, _ in [] })
         _ = split.view
         XCTAssertFalse(split.isShelfVisible)
+    }
+
+    func testTheListHasNoWidthCeiling() {
+        // A maximum on the shelf is the app deciding how much of the window the
+        // list may have, and a reader who drags past it is sprung back by a
+        // pane refusing a width it could perfectly well be drawn at. AppKit
+        // spells "no maximum" as `unspecifiedDimension`, not as zero — zero is
+        // a real ceiling, and asserting on it passes only by accident.
+        let split = ConversationsSplitViewController(
+            feed: ConversationsViewController { _, _, _ in [] })
+        _ = split.view
+        guard let shelfItem = split.splitViewItems.first else { return XCTFail("no shelf item") }
+        XCTAssertEqual(
+            shelfItem.maximumThickness,
+            NSSplitViewItem.unspecifiedDimension,
+            "the session list is capped")
+    }
+
+    func testSwitchingToSingleModeShowsTheList() {
+        // Single mode is steered from the list — a click picks the one
+        // conversation, ⌘↑/⌘↓ walk it — so a mode switch that leaves the shelf
+        // away strands the reader on whichever session was showing.
+        let split = ConversationsSplitViewController(
+            feed: ConversationsViewController { _, _, _ in [] })
+        _ = split.view
+        XCTAssertFalse(split.isShelfVisible)
+
+        split.selectionMode = .single
+        XCTAssertTrue(split.isShelfVisible, "single mode left the session list hidden")
+
+        // And going back is not a toggle: multi mode leaves the list where the
+        // reader had it rather than putting it away again.
+        split.selectionMode = .multi
+        XCTAssertTrue(split.isShelfVisible)
     }
 
     func testDisclosingTheShelfDoesNotResizeTheWindow() {

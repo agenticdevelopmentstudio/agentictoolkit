@@ -512,6 +512,14 @@ public final class ConversationsShelfViewController: NSViewController,
     private static let panelInset: CGFloat = 8
     private static let panelCornerRadius: CGFloat = 10
 
+    /// Air above and below a row's two lines, and between them.
+    ///
+    /// Generous on purpose: a row here is a paragraph about a conversation — a
+    /// place and what is happening in it — and packed to a single line's
+    /// leading the list reads as a wall of text with no way in.
+    private static let rowPadding: CGFloat = 7
+    private static let rowLineGap: CGFloat = 2
+
     /// The width the shelf opens at: enough for `project >> branch` to be read
     /// whole, which is the only reason the list is there. Measured against the
     /// real thing — "stenographer >> conversations" at the body size, with the
@@ -616,9 +624,24 @@ public final class ConversationsShelfViewController: NSViewController,
         return image
     }
 
-    /// `[app] project » branch » session name` — the same one line the Sessions
-    /// window lists a session with and the feed heads each bubble with, so the
-    /// three read as one description of the same sessions.
+    /// Two lines: `[app] project » branch` — the same header the Sessions window
+    /// lists a session with and the feed heads each bubble with — over what the
+    /// session is *doing*, in the quieter caption colour.
+    ///
+    /// ```
+    /// [icon] stenographer » conversations
+    ///        editing AccountQuotaStore
+    /// ```
+    ///
+    /// The place goes on top because that is what stays put; the name is a
+    /// summary of this minute and rewrites itself under a reader trying to find
+    /// a row again. Folding the name into the trail as a third crumb lost that
+    /// distinction *and* the second line with it — one line ending in a
+    /// truncated summary, in a column too narrow to hold both.
+    ///
+    /// The summary is drawn only when it is saying something the header did
+    /// not: a session with no crumbs is already titled by its name
+    /// (``ConversationsSessionFilter/Session/displayName``).
     ///
     /// No activity indicator here. This window is about what was *said*, and a
     /// column of live-state glyphs beside a transcript invites reading the shelf
@@ -626,7 +649,14 @@ public final class ConversationsShelfViewController: NSViewController,
     /// job, and the one place the indicator appears.
     private func nameCell(for session: Session) -> NSView {
         let header = SessionHeaderView(
-            crumbs: .init(context: session.context, name: session.name),
+            // A session with nowhere to be has no crumbs at all, and a header
+            // built from an empty trail draws nothing — a blank row. Its name
+            // *is* its title then (``Session/displayName`` says so), so it goes
+            // in the trail's name slot, in Claude's orange, and the caption
+            // below is left off rather than saying it a second time.
+            crumbs: session.context.isEmpty
+                ? .init(context: [], name: session.name)
+                : .init(context: session.context),
             icon: session.appIdentity.isEmpty
                 ? nil
                 : .init(appIdentity: session.appIdentity, side: 16, gap: 6)
@@ -636,18 +666,42 @@ public final class ConversationsShelfViewController: NSViewController,
         // so it repaints itself instead of waiting to be told.
         header.observeTheme { view, palette in view.applyTheme(palette) }
 
+        let lines = NSStackView(views: [header])
+        lines.orientation = .vertical
+        lines.alignment = .leading
+        lines.spacing = Self.rowLineGap
+        lines.edgeInsets = NSEdgeInsets(
+            top: Self.rowPadding, left: 0, bottom: Self.rowPadding, right: 4)
+        lines.translatesAutoresizingMaskIntoConstraints = false
+
+        if session.name != session.displayName {
+            let summary = ThemedLabel(
+                string: session.name, role: .secondaryText, textRole: .caption)
+            summary.lineBreakMode = .byTruncatingTail
+            // A label resists compression harder than the row can afford: at
+            // full strength the summary sets the row's width and the column
+            // draws past its own edge instead of truncating.
+            summary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            summary.translatesAutoresizingMaskIntoConstraints = false
+            lines.addArrangedSubview(summary)
+        }
+
         // The table sets a cell view's frame itself, so the root of one keeps
         // its autoresizing translation. Turning it off left the row at its
         // intrinsic width — the width of the longest session name — and the
         // column drew a row that ran off its own right edge, mid-glyph, with
         // nothing reaching the truncation it had asked for.
         let cell = NSView()
-        cell.addSubview(header)
+        cell.addSubview(lines)
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
-            header.trailingAnchor.constraint(
-                lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
-            header.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            lines.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            lines.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+            // Top and bottom, not centred: `usesAutomaticRowHeights` measures a
+            // row by the chain of constraints running through its cell, and a
+            // centred child leaves that chain open — the row then falls back to
+            // a fixed height and the second line is drawn outside it.
+            lines.topAnchor.constraint(equalTo: cell.topAnchor),
+            lines.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
         ])
         return cell
     }

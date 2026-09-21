@@ -60,6 +60,12 @@ public final class ConversationsSplitViewController: NSSplitViewController {
             // destination — is read off what is left showing.
             shelf.selectionMode = selectionMode
             feed.selectionMode = selectionMode
+            // Single mode *is* the list: it shows one conversation at a time
+            // and the only ways to change which are clicking a row and the
+            // move-selection commands, both of which need the shelf out. A
+            // narrowing that leaves the reader looking at one conversation with
+            // no way to reach another is the mode doing half its job.
+            if selectionMode == .single { setShelfVisible(true) }
             updateSelectionModeControl()
             onSelectionModeChanged?(selectionMode)
         }
@@ -130,7 +136,13 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         // way to get the System Settings outline in a window this app paints.
         let shelfItem = NSSplitViewItem(viewController: shelf)
         shelfItem.minimumThickness = 180
-        shelfItem.maximumThickness = 460
+        // No maximum. A ceiling on the shelf is the app deciding how much of
+        // the window a reader is allowed to spend on the list, and it is wrong
+        // both ways: a long `project » branch` with a summary under it wants
+        // more than any number picked here, and a reader who drags the divider
+        // past it is told "no" by a pane that then springs back. What actually
+        // bounds it is the feed's own minimum, which is a fact about the
+        // *other* pane still being usable.
         shelfItem.canCollapse = true
         // The whole of "do not resize the window". The default collapse
         // behaviour resizes the *split view* and holds the siblings at their
@@ -141,8 +153,11 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         shelfItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
         // Collapsed to begin with: the window's job is the conversation, and a
         // reader who has never needed to hide a session should not have to
-        // dismiss a list to get at it.
-        shelfItem.isCollapsed = true
+        // dismiss a list to get at it. Unless the host restored single mode
+        // before the view loaded, in which case the list is how the mode is
+        // steered and it opens with it — the same answer the `didSet` gives
+        // when the mode changes while the window is up.
+        shelfItem.isCollapsed = selectionMode != .single
         shelfItem.holdingPriority = .defaultLow + 1
 
         let feedItem = NSSplitViewItem(viewController: feed)
@@ -267,8 +282,24 @@ public final class ConversationsSplitViewController: NSSplitViewController {
     }
 
     /// Shows the shelf if it is hidden, hides it if it is showing.
-    @objc public func toggleShelf() {
-        guard let item = splitViewItems.first else { return }
+    @objc public func toggleShelf() { setShelfVisible(!isShelfVisible) }
+
+    /// Slides the shelf out or away, doing nothing if it is already there.
+    ///
+    /// Separate from ``toggleShelf()`` because the mode switch is not a toggle:
+    /// entering single mode must *show* the list, whether or not it was showing
+    /// already, and a toggle asked to do that hides it half the time.
+    public func setShelfVisible(_ visible: Bool) {
+        guard let item = splitViewItems.first, item.isCollapsed == visible else { return }
+        // Nothing on screen, nothing to slide: a mode restored before the
+        // window is up has to leave the shelf in its *final* state, because
+        // there is no animation to land and no completion to repaint from.
+        guard view.window != nil else {
+            item.isCollapsed = !visible
+            updateToggleAppearance()
+            refreshKeyViewLoop()
+            return
+        }
         // Inside an explicit animation group, with implicit animation allowed:
         // `item.animator()` on its own animates the divider while everything
         // laid out against it jumps to its final place on the first frame, so
@@ -279,7 +310,7 @@ public final class ConversationsSplitViewController: NSSplitViewController {
             context.duration = 0.2
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             context.allowsImplicitAnimation = true
-            item.animator().isCollapsed.toggle()
+            item.animator().isCollapsed = !visible
         } completionHandler: { [weak self] in
             // The toggle reads as the state it *reached*, so it is repainted
             // when the animation lands rather than when it starts. The Tab
