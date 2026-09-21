@@ -1,0 +1,20 @@
+{
+  "recipes": "recipes",
+  "roots": [
+    {"path": "packages/web/packages/adh-ui/src/components", "tier": "adh-ui", "platform": "web"},
+    {"path": "packages/web/packages/adh-ui/src/blocks",     "tier": "adh-ui", "platform": "web"},
+    {"path": "packages/apple/AgenticToolkit/CoreUI",        "tier": "apple-ui", "platform": "apple"},
+    {"path": "packages/apple/AgenticToolkit/macOS",         "tier": "apple-ui", "platform": "apple"},
+    {"path": "packages/apple/AgenticToolkit/PermissionsUI", "tier": "apple-ui", "platform": "apple"}
+  ],
+  "ignore": [
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/index.ts",
+    "**/Tests/**",
+    "**/Resources/**",
+    "**/*.xcodeproj/**"
+  ],
+  "aliases": {}
+}
