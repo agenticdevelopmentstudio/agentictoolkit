@@ -74,10 +74,18 @@ private final class TestWebviewPresenter: ExtensionWebviewPresenting {
     ) -> (any ExtensionWebviewPanel)? {
         requests.append(request)
         guard canPresent else { return nil }
+        // **The options come across too, because they do in production.**
+        // `PaneWebviewPresenter` hands `request.options` to the view
+        // controller's initializer, so a panel is never in the field without
+        // the options it was created under — and `webview.options`' getter
+        // reads them back off the panel. A double that dropped them made that
+        // getter answer `undefined` for an extension that had declared roots,
+        // which is a defect of the double and not of the adaptor.
         let panel = TestWebviewPanel(
             panelID: "panel-\(panels.count + 1)",
             title: request.title,
             roots: request.localResourceRoots)
+        panel.options = request.options
         panels.append(panel)
         return panel
     }

@@ -49,6 +49,20 @@ struct ExtensionTreePaneLoadingTests {
         return []
     }
 
+    /// Waits for the pane's ask to actually reach the provider, or gives up.
+    ///
+    /// The count is the observation, not the wait: a test that wants to say
+    /// "asked exactly once" still has to see the one ask arrive first, or it
+    /// is asserting against a provider nothing has called yet — which passes
+    /// for the wrong reason.
+    private func asks(reaching count: Int, in source: SilentTreeDataSource) async -> Int {
+        for _ in 0..<400 {
+            if source.asks >= count { return source.asks }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return source.asks
+    }
+
     // MARK: - A provider that never answers
 
     /// The bug the budget exists for. While `getChildren` is out the handle is
@@ -61,13 +75,19 @@ struct ExtensionTreePaneLoadingTests {
         let pane = makePane(source, budget: 0.05)
 
         _ = rows(of: nil, in: pane)
-        let asked = source.asks
+        // **The ask has to be waited for, not read straight back.** The pane
+        // spawns a `Task` for it, so the provider is reached on a later turn
+        // of the main actor than the one that scheduled it; reading `asks`
+        // in the same synchronous stretch measures the scheduling, not the
+        // ask, and answers zero whenever the machine is busy enough not to
+        // have run the task yet.
+        let asked = await asks(reaching: 1, in: source)
         #expect(asked >= 1)
 
         try await Task.sleep(for: .milliseconds(300))
         _ = rows(of: nil, in: pane)
 
-        #expect(source.asks > asked)
+        #expect(await asks(reaching: asked + 1, in: source) > asked)
     }
 
     /// The other half, and the reason the fix is a budget rather than dropping
@@ -75,14 +95,22 @@ struct ExtensionTreePaneLoadingTests {
     /// so an outline that asks for the same rows twice in one pass does not
     /// call into the extension twice.
     @Test("a second ask inside the budget does not reach the provider twice")
-    func anAskInFlightIsNotRepeated() {
+    func anAskInFlightIsNotRepeated() async {
         let source = SilentTreeDataSource()
         let pane = makePane(source, budget: 30)
 
         _ = rows(of: nil, in: pane)
-        let asked = source.asks
+        // Seeing the first ask land is what makes the count below an
+        // assertion: read synchronously it is zero, and "zero twice" is a
+        // sentence about a provider nothing ever called.
+        let asked = await asks(reaching: 1, in: source)
+        #expect(asked == 1)
+
         _ = rows(of: nil, in: pane)
         _ = rows(of: nil, in: pane)
+        // Long enough for a second ask to have arrived if the guard let one
+        // through — the first one took a single turn of the actor.
+        try? await Task.sleep(for: .milliseconds(100))
 
         #expect(source.asks == asked)
     }

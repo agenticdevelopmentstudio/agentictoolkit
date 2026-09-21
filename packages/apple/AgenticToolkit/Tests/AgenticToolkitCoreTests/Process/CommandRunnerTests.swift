@@ -105,14 +105,24 @@ struct CommandRunnerTests {
     /// inside its budget, with `timedOut` set.
     @Test("a tool that ignores SIGTERM is killed, and the run still returns")
     func aToolThatIgnoresTerminationIsKilled() throws {
+        // **`/bin/sh`, and not an interpreter, because the arming has to beat
+        // the timeout.** The tool must have ignored `SIGTERM` and written its
+        // line within the one second below, or the run under test is not the
+        // escalation at all — it is a cold process killed on the first
+        // signal, and the output assertion fails for a reason that has
+        // nothing to do with this code. A `python3` here did exactly that
+        // inside a full 1206-test run: interpreter start-up plus two imports
+        // lost the race on a loaded machine, and the suite was green alone
+        // and red in company. `sh` arms in a few milliseconds, with `trap`
+        // and `echo` both builtins, so nothing is forked before the line is
+        // out. The `sleep`s that keep it alive send their own output to
+        // `/dev/null`, so no child holds the pipe's write end open after the
+        // shell is killed and EOF arrives at once.
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [
             "-c",
-            "import signal, time\n"
-                + "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-                + "print('armed', flush=True)\n"
-                + "time.sleep(120)\n"
+            "trap '' TERM; echo armed; while :; do sleep 1 >/dev/null 2>&1; done"
         ]
 
         let started = Date()
