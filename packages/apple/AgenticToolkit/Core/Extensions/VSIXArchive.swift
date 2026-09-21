@@ -131,7 +131,15 @@ public enum VSIXArchive {
     /// A pure-Swift unzip would have had to re-earn both, and getting either
     /// subtly wrong is a directory traversal in a path that takes third-party
     /// archives off the internet.
-    public static func expand(_ archive: URL, to destination: URL) throws {
+    /// - Parameter timeout: How long the unarchiver gets. Defaults to
+    ///   `expansionTimeout`, which is the only value production uses; it is a
+    ///   parameter so the giving-up path can be reached by a test in under a
+    ///   second instead of never *(dependency-injection)*.
+    public static func expand(
+        _ archive: URL,
+        to destination: URL,
+        timeout: TimeInterval = VSIXArchive.expansionTimeout
+    ) throws {
         guard !FileManager.default.fileExists(atPath: destination.path) else {
             throw VSIXArchiveError.destinationExists(destination)
         }
@@ -149,7 +157,7 @@ public enum VSIXArchive {
         // an expansion could take, on bytes fetched from a third party.
         let outcome: CommandRunner.Outcome
         do {
-            outcome = try CommandRunner.runToCompletion(process, timeout: expansionTimeout)
+            outcome = try CommandRunner.runToCompletion(process, timeout: timeout)
         } catch {
             try? FileManager.default.removeItem(at: destination)
             throw VSIXArchiveError.expansionUnavailable(String(describing: error))
@@ -160,7 +168,7 @@ public enum VSIXArchive {
         // for the wrong reason.
         guard !outcome.timedOut else {
             try? FileManager.default.removeItem(at: destination)
-            throw VSIXArchiveError.expansionTimedOut(seconds: expansionTimeout)
+            throw VSIXArchiveError.expansionTimedOut(seconds: timeout)
         }
         guard outcome.status == 0 else {
             try? FileManager.default.removeItem(at: destination)
