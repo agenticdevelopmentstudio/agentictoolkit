@@ -257,13 +257,26 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
             return []
         }
 
-        // Every positional handle beneath this parent is about to be reissued,
-        // and the ones that are not reissued name rows that no longer exist —
-        // a branch that shrank. Dropping them here is what keeps the table the
-        // size of the tree rather than the size of its history.
-        forgetDescendants(of: parentHandle)
+        // **What is dropped is what this answer did not name, and no more.**
+        //
+        // The children are taken off the parent before they are rebuilt, so
+        // that refiling them below cannot list one twice — but their own
+        // subtrees are left alone until the answer is in, and then only the
+        // subtrees of children that are actually gone are dropped.
+        //
+        // Forgetting the whole subtree up front was the bug. A targeted
+        // refresh — `onDidChangeTreeData(element)` — reloads exactly this
+        // branch, so the pane keeps drawing every grandchild row it had
+        // already read. Dropping their elements here left those rows on
+        // screen with nothing behind them: clicking one ran no command,
+        // opening one answered no children, and nothing ever asked again,
+        // because from the pane's side the branch was already read. Only the
+        // whole-tree refresh healed it, and only because it re-asks every
+        // loaded branch.
+        let previousChildren = childHandles.removeValue(forKey: parentHandle) ?? []
 
         var rows: [ContributedTreeItem] = []
+        var reissued: Set<String> = []
         rows.reserveCapacity(count)
         for index in 0..<count {
             guard !isInvalidated, let element = array.atIndex(index) else { continue }
@@ -273,8 +286,13 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
                 parent: parentHandle, index: index)
             elements[handle] = element
             file(handle, under: parentHandle)
+            reissued.insert(handle)
             rows.append(read(treeItem, element: element, handle: handle, in: context))
         }
+
+        // A branch that shrank: these name rows the extension has stopped
+        // listing, so they and everything under them go.
+        forget(previousChildren.filter { !reissued.contains($0) })
         return rows
     }
 
@@ -452,11 +470,29 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
     /// upstream warns about and the reason an extension with a mutable tree
     /// should declare `id`.
     ///
-    /// The two spaces cannot collide: a declared handle starts with `#`, and a
-    /// positional one starts with `/`.
+    /// **The two spaces are kept disjoint by escaping, not by the `#`.** A
+    /// positional handle is its parent's handle plus `/<index>`, so a row
+    /// declaring `id: "src"` gives its first unnamed child the handle
+    /// `#src/0` — the very handle a row declaring `id: "src/0"` would get. The
+    /// `#` prefix does not separate them, because a declared handle is a
+    /// legal *prefix* of a positional one. So `/` is escaped out of declared
+    /// ids (and `%` with it, which is what keeps the escaping reversible and
+    /// two different ids from escaping to one string). A declared handle
+    /// therefore contains no `/` at all, and the two spaces cannot meet.
     private static func handle(forDeclaredID declaredID: String?, parent: String, index: Int) -> String {
-        if let declaredID, !declaredID.isEmpty { return "#\(declaredID)" }
+        if let declaredID, !declaredID.isEmpty { return "#\(escapedForHandle(declaredID))" }
         return "\(parent)/\(index)"
+    }
+
+    /// The declared id as it appears inside a handle. Nothing reads it back —
+    /// handles are opaque — so this is about uniqueness, not about being able
+    /// to recover the id.
+    private static func escapedForHandle(_ declaredID: String) -> String {
+        guard declaredID.contains("%") || declaredID.contains("/") else { return declaredID }
+        // `%` first: escaping it afterwards would escape the escapes.
+        return declaredID
+            .replacingOccurrences(of: "%", with: "%25")
+            .replacingOccurrences(of: "/", with: "%2F")
     }
 
     /// Files `handle` as a child of `parent`, taking it off whatever parent
@@ -485,7 +521,12 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
     /// describes a cycle, and taking the list away on the way past is what
     /// makes the walk finish instead of running until the stack does.
     private func forgetDescendants(of parent: String) {
-        var doomed = childHandles.removeValue(forKey: parent) ?? []
+        forget(childHandles.removeValue(forKey: parent) ?? [])
+    }
+
+    /// Drops `handles` themselves and everything recorded beneath them.
+    private func forget(_ handles: [String]) {
+        var doomed = handles
         while let handle = doomed.popLast() {
             elements.removeValue(forKey: handle)
             commandsByHandle.removeValue(forKey: handle)

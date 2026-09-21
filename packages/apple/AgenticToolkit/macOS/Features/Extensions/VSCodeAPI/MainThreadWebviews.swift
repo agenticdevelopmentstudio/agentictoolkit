@@ -384,6 +384,24 @@ public final class MainThreadWebviews {
     /// of an extension that never had it — while the pane it closes is the
     /// user's layout, which is exactly what the failure paths promise to leave
     /// alone.
+    /// **A panel that is already gone is not handed over.**
+    ///
+    /// Both hand-overs exist because an extension may be asleep when its pane
+    /// appears, so the pane waits for `activate()` — and the user can close it
+    /// while that is happening. Adopting what comes back would wire
+    /// `onDidDispose` to a panel that has already fired it, so it can never
+    /// fire again: the model, its page, its JavaScript object and every
+    /// listener the extension registered would be held until the host is torn
+    /// down, and the extension would be told nothing. Refusing leaves exactly
+    /// what closing a pane should leave — nothing.
+    private func logRefusedHandover(of identifier: String, kind: String) {
+        Self.logger.notice(
+            """
+            The \(kind, privacy: .public) \(identifier, privacy: .public) was closed before \
+            \(self.extensionIdentifier, privacy: .public) could fill it; it is not handed over
+            """)
+    }
+
     private func adopt(_ model: ExtensionWebviewPanelModel) {
         panels[model.panel.panelID] = model
         wire(model)
@@ -508,6 +526,12 @@ public final class MainThreadWebviews {
         _ panel: any ExtensionWebviewPanel, viewType: String, state: String?
     ) -> Bool {
         guard !isDisposed, let registration = serializers[viewType] else { return false }
+        // The pane can be closed while its extension is still waking up, and
+        // this is where that lands. See `logRefusedHandover`.
+        guard !panel.isDisposed else {
+            logRefusedHandover(of: viewType, kind: "restored panel of view type")
+            return false
+        }
         guard let context = registration.serializer.context,
               let deserialize = registration.serializer.forProperty("deserializeWebviewPanel"),
               MainThreadWebviews.isFunction(deserialize, in: context)
@@ -649,6 +673,10 @@ public final class MainThreadWebviews {
     @discardableResult
     public func resolveWebviewView(_ panel: any ExtensionWebviewPanel, viewID: String) -> Bool {
         guard !isDisposed, let registration = viewProviders[viewID] else { return false }
+        guard !panel.isDisposed else {
+            logRefusedHandover(of: viewID, kind: "contributed view")
+            return false
+        }
         guard let context = registration.provider.context,
               let resolve = registration.provider.forProperty("resolveWebviewView"),
               MainThreadWebviews.isFunction(resolve, in: context)
@@ -1212,8 +1240,9 @@ public final class MainThreadWebviews {
                         value: VSCodeAPI.resolvedPromise(with: false, in: context))
                 }
                 let message = VSCodeAPI.currentArguments().first
-                model.panel.post(message: message?.toObject() ?? NSNull())
-                return UncheckedJSValueBox(value: VSCodeAPI.resolvedPromise(with: true, in: context))
+                let posted = model.panel.post(message: message?.toObject() ?? NSNull())
+                return UncheckedJSValueBox(
+                    value: VSCodeAPI.resolvedPromise(with: posted, in: context))
             }.value
         }
         object.setObject(postMessage, forKeyedSubscript: "postMessage" as NSString)
@@ -1248,14 +1277,28 @@ public final class MainThreadWebviews {
                 let current = model.panel.options
                 options.setObject(current.enableScripts, forKeyedSubscript: "enableScripts" as NSString)
                 options.setObject(current.enableForms, forKeyedSubscript: "enableForms" as NSString)
-                // The *resolved* roots, not the declared ones: this is the
-                // answer to "what may the page read", and a `localResourceRoots`
-                // the extension never wrote still has directories in it.
-                options.setObject(
-                    model.panel.localResourceRoots.compactMap {
-                        VSCodeAPI.uriValue(for: $0, in: context)
-                    },
-                    forKeyedSubscript: "localResourceRoots" as NSString)
+                // **The declared roots, and absent when nothing was declared.**
+                //
+                // This property is settable, so what it answers is what an
+                // extension writes back — `var o = webview.options; o
+                // .enableScripts = true; webview.options = o` is the ordinary
+                // way to turn one field on, and the setter reads the whole
+                // object. Answering the *resolved* roots there would turn a
+                // declaration the extension never made into one it did: the
+                // defaults this host derives — the install directory, the open
+                // workspace folders — would be frozen into the panel as an
+                // explicit list, and a folder opened afterwards would no longer
+                // reach the page. It is also what upstream answers
+                // (`vscode.d.ts:11667`), where the field is optional and
+                // `undefined` until an extension sets it.
+                //
+                // What the page may actually read is a different question, and
+                // `webview.localResourceRoots` below is where it is answered.
+                if let declared = current.declaredLocalResourceRoots {
+                    options.setObject(
+                        declared.compactMap { VSCodeAPI.uriValue(for: $0, in: context) },
+                        forKeyedSubscript: "localResourceRoots" as NSString)
+                }
                 return options
             },
             set: { [weak model, weak webviews] value in

@@ -117,8 +117,23 @@ public protocol ExtensionWebviewPanel: AnyObject {
     /// closing its pane.
     var onDidDispose: (() -> Void)? { get set }
 
-    /// `Webview.postMessage`.
-    func post(message: Any)
+    /// Whether this panel is already gone.
+    ///
+    /// `onDidDispose` says *when* a panel goes, which is only useful to
+    /// something that was already holding it. A hand-over —
+    /// `MainThreadWebviews.restore` and `resolveWebviewView` — arrives at a
+    /// panel it has never seen, and a pane the user closed while its extension
+    /// was still waking up has already fired that callback with nobody
+    /// listening. So the state has to be *askable*, not only announced: a
+    /// panel adopted after the fact would wire a disposal callback that can
+    /// never fire again, and be held, with its page and its JavaScript object,
+    /// until the extension is unloaded.
+    var isDisposed: Bool { get }
+
+    /// `Webview.postMessage`. Answers whether the message reached the page —
+    /// `false` for a disposed panel, and for a value WebKit will not pass.
+    @discardableResult
+    func post(message: Any) -> Bool
 
     /// `WebviewPanel.reveal`. Brings the panel's pane to the front; with
     /// `preserveFocus` it does so without taking the keyboard.

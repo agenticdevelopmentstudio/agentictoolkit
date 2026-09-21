@@ -31,6 +31,11 @@ public enum CommandRunner {
         /// The process's exit status. Meaningless when `timedOut` — the
         /// process was signalled, so the status describes this code's
         /// impatience rather than the tool's opinion.
+        ///
+        /// `neverExited` when the process outlived even `SIGKILL`, which is
+        /// not hypothetical: a process blocked in an uninterruptible kernel
+        /// wait — the classic one being a read against a hung network mount —
+        /// cannot be killed and does not reap.
         public let status: Int32
 
         public let standardOutput: Data
@@ -60,6 +65,13 @@ public enum CommandRunner {
     /// for, so there has to be a second step; two seconds is long enough for
     /// an honest cleanup handler and short enough that nobody notices.
     private static let terminationGrace: TimeInterval = 2
+
+    /// `Outcome.status` for a process that never exited at all.
+    ///
+    /// Distinct from any real exit status, which is 0...255 for an ordinary
+    /// exit, and from a signalled one. It is only ever seen alongside
+    /// `timedOut`, where the status already means nothing.
+    public static let neverExited: Int32 = -1
 
     /// Runs `process`, returning once it has exited or `timeout` has passed.
     ///
@@ -92,12 +104,13 @@ public enum CommandRunner {
         }
 
         var timedOut = false
+        var didExit = true
         if exited.wait(timeout: .now() + timeout) == .timedOut {
             timedOut = true
             process.terminate()
             if exited.wait(timeout: .now() + terminationGrace) == .timedOut {
                 kill(process.processIdentifier, SIGKILL)
-                _ = exited.wait(timeout: .now() + terminationGrace)
+                didExit = exited.wait(timeout: .now() + terminationGrace) == .success
             }
         }
         // Both write ends are closed once the process is gone, so these are
@@ -108,8 +121,17 @@ public enum CommandRunner {
         output.fileHandleForReading.readabilityHandler = nil
         errors.fileHandleForReading.readabilityHandler = nil
 
+        // **Only when it actually exited.** `Process.terminationStatus` is
+        // documented to raise `NSInvalidArgumentException` on a process that
+        // is still running, and an Objective-C exception is not catchable from
+        // Swift — it is a crash, in the one path that exists to handle a tool
+        // behaving badly. Surviving `SIGKILL` sounds impossible and is not:
+        // a process stuck in an uninterruptible kernel wait, which is what a
+        // read against a wedged network mount produces, neither dies nor
+        // reaps. The timeout path is exactly where that shows up, so the
+        // guard belongs exactly here *(fail-fast, not fail-crash)*.
         return Outcome(
-            status: process.terminationStatus,
+            status: didExit ? process.terminationStatus : Self.neverExited,
             standardOutput: collected.data(for: .standardOutput),
             standardError: collected.data(for: .standardError),
             timedOut: timedOut)

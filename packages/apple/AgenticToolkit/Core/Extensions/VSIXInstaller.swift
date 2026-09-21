@@ -120,11 +120,25 @@ public struct VSIXInstaller: Sendable {
             signature: signature,
             publicKeyPEM: publicKey)
 
-        return try install(
-            archive: archive,
-            verification: verification,
-            expectedIdentifier: detail.identifier,
-            source: .registry(detail.namespace + "/" + detail.name, version: detail.version))
+        // **Off the cooperative pool for the synchronous half.** Everything
+        // below this point is blocking: a write, `ditto` run through
+        // `CommandRunner` — which waits on a `DispatchSemaphore` for up to its
+        // 120-second timeout plus two 2-second termination graces — and then
+        // the moves. `Task.detached` would not help; a detached task is
+        // detached from its parent's context, not from the executor, and still
+        // occupies one of the pool's core-count threads for all of it.
+        // `BlockingWork` is the hop to a queue that is allowed to block.
+        let identifier = detail.identifier
+        let source = VSIXInstallation.Source.registry(
+            detail.namespace + "/" + detail.name, version: detail.version)
+        let installer = self
+        return try await BlockingWork.run {
+            try installer.install(
+                archive: archive,
+                verification: verification,
+                expectedIdentifier: identifier,
+                source: source)
+        }
     }
 
     /// Installs archive bytes already in hand — the local half of the flow
@@ -278,29 +292,17 @@ public struct VSIXInstaller: Sendable {
     /// Refuses a manifest field that is not a single, safe path component,
     /// before it can become one.
     ///
-    /// **An allowlist of shapes to reject, not of characters to accept**, and
-    /// deliberately so: extension names are internationalised, and an
-    /// allowlist of characters would refuse a legitimate publisher long before
-    /// it refused an attacker. What is rejected is what changes where the path
-    /// points — a separator, a `.` that hides the directory or climbs out of
-    /// it, a `:` that HFS still maps to `/` in some APIs, an empty component,
-    /// and the control characters that make a name unprintable in the settings
-    /// list that has to show it.
+    /// `ExtensionIdentityComponent` holds the predicate and the reasoning; this
+    /// wraps it in the error an install reports. `OpenVSXClient` applies the
+    /// same rule to the same fields before they become a URL — one piece of
+    /// knowledge, two splices.
     ///
     /// The refusal names the field and the value rather than saying "invalid":
     /// this is the one error here whose cause is a hostile document, and the
     /// person reading the message is the one who needs to see what it claimed.
     static func requireSafeComponent(_ value: String, field: String) throws {
-        func refuse() -> VSIXInstallError {
-            .unsafeIdentity(field: field, value: value)
-        }
-        guard !value.isEmpty else { throw refuse() }
-        guard !value.hasPrefix(".") else { throw refuse() }
-        guard !value.contains("/"), !value.contains("\\"), !value.contains(":") else {
-            throw refuse()
-        }
-        guard !value.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else {
-            throw refuse()
+        guard ExtensionIdentityComponent.isSafe(value) else {
+            throw VSIXInstallError.unsafeIdentity(field: field, value: value)
         }
     }
 

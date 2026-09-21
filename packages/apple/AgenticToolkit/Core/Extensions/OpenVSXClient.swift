@@ -35,12 +35,28 @@ public struct OpenVSXClient: Sendable {
     /// to scroll, not a limit anyone is meant to tune.
     public static let defaultPageSize = 50
 
+    /// The most an artifact may weigh before this client stops reading it.
+    ///
+    /// A `.vsix` is a zip of an editor extension; the large ones bundle a
+    /// language server binary per platform and reach a few hundred megabytes.
+    /// 512 MB is above every published extension and far below what it takes
+    /// to exhaust a desktop's memory, which is the only job this number has.
+    /// It is not a tuning knob — it is the difference between a download that
+    /// fails and a process that dies.
+    public static let defaultMaximumArtifactBytes = 512 * 1024 * 1024
+
     private let registryBase: URL
     private let session: URLSession
+    private let maximumArtifactBytes: Int
 
-    public init(registryBase: URL = OpenVSXClient.openVSXRegistry, session: URLSession = .shared) {
+    public init(
+        registryBase: URL = OpenVSXClient.openVSXRegistry,
+        session: URLSession = .shared,
+        maximumArtifactBytes: Int = OpenVSXClient.defaultMaximumArtifactBytes
+    ) {
         self.registryBase = registryBase
         self.session = session
+        self.maximumArtifactBytes = maximumArtifactBytes
     }
 
     // MARK: - Reading the catalog
@@ -87,6 +103,19 @@ public struct OpenVSXClient: Sendable {
         name: String,
         version: String? = nil
     ) async throws -> OpenVSXExtensionDetail {
+        // Before the join, not after. `appendingPathComponent` is a path
+        // *join* and escapes nothing, so a namespace of `a/../../admin`
+        // becomes structure and `URL` resolves it — two levels above the API
+        // root, at an endpoint this method never meant to address. None of
+        // these three names is typed by a person: they are manifest fields,
+        // and `ExtensionUpdateCheck` feeds in a sideloaded extension's
+        // `publisher`, which is whatever a folder someone dropped in claims.
+        try Self.requireSafeComponent(namespace, field: "namespace")
+        try Self.requireSafeComponent(name, field: "name")
+        if let version {
+            try Self.requireSafeComponent(version, field: "version")
+        }
+
         var url = registryBase
             .appendingPathComponent(namespace)
             .appendingPathComponent(name)
@@ -112,11 +141,46 @@ public struct OpenVSXClient: Sendable {
     /// and hand it back as the download; `http:` was a quieter version of the
     /// same, moving the fetch to whoever is on the network path. Neither is
     /// something a registry has any reason to ask for.
+    /// **Read to a ceiling, not to the end.** How many bytes arrive is the
+    /// sender's decision, and `session.data(from:)` accumulates all of them:
+    /// a registry — or whoever is answering as one on a compromised network
+    /// path — that never stops sending grows this process's heap until it
+    /// dies, with no request having failed and nothing to log. Streaming the
+    /// body and abandoning it at `maximumArtifactBytes` turns that into an
+    /// ordinary throw the caller already handles.
+    ///
+    /// **Why the whole body streams rather than only the unframed case.**
+    /// Iterating `AsyncBytes` measures 23.8 MB/s against an in-process stub,
+    /// where `data(from:)` — which cannot be bounded — measures 2.5 GB/s. That
+    /// gap is real but it is not on the critical path: this loop is consuming a
+    /// download, so it spends nearly all of its time waiting on the network,
+    /// and 23.8 MB/s is about 190 Mbps of headroom. Splitting into a fast path
+    /// for a `Content-Length`-framed response and a slow one for a chunked
+    /// reply would buy that back, at the cost of two code paths where the
+    /// rarely-taken one is the only one that has to be right *(simplicity)*.
     public func data(at url: URL) async throws -> Data {
         try Self.requireFetchable(url)
-        let (data, response) = try await session.data(from: url)
+        let (bytes, response) = try await session.bytes(from: url)
         try Self.checkStatus(of: response, for: url)
-        return data
+
+        // The status check comes first so a 404's error document is refused
+        // as a 404 rather than read. `expectedContentLength` is only a hint —
+        // it is -1 for a chunked response and it is the sender's claim either
+        // way — so it short-circuits an obvious refusal and decides nothing.
+        if response.expectedContentLength > Int64(maximumArtifactBytes) {
+            throw OpenVSXError.artifactTooLarge(url, limit: maximumArtifactBytes)
+        }
+
+        var collected = Data()
+        collected.reserveCapacity(
+            min(max(Int(response.expectedContentLength), 0), 1 << 20))
+        for try await byte in bytes {
+            collected.append(byte)
+            if collected.count > maximumArtifactBytes {
+                throw OpenVSXError.artifactTooLarge(url, limit: maximumArtifactBytes)
+            }
+        }
+        return collected
     }
 
     /// The text at `url`, stripped of surrounding whitespace.
@@ -159,6 +223,16 @@ public struct OpenVSXClient: Sendable {
     /// organisation's decision to run its own registry over plain HTTP inside
     /// its own network is theirs to make. What a registry *names* is a
     /// different thing entirely, and is what this guards.
+    /// `ExtensionIdentityComponent` holds the predicate; this wraps it in
+    /// the error a registry caller reports. The rule is shared with
+    /// `VSIXInstaller`, which applies it to the same manifest fields before
+    /// they become a directory name — one piece of knowledge, two splices.
+    private static func requireSafeComponent(_ value: String, field: String) throws {
+        guard ExtensionIdentityComponent.isSafe(value) else {
+            throw OpenVSXError.unsafeIdentity(field: field, value: value)
+        }
+    }
+
     private static func requireFetchable(_ url: URL) throws {
         let scheme = url.scheme?.lowercased() ?? ""
         guard fetchableSchemes.contains(scheme), url.host?.isEmpty == false else {
@@ -227,6 +301,18 @@ public enum OpenVSXError: Error, Sendable, Equatable {
     /// Carries the scheme, which is what makes the refusal legible: `file` is
     /// a very different report from a typo in a self-hosted registry's config.
     case artifactNotFetchable(URL, scheme: String)
+
+    /// The registry kept sending past the ceiling this client reads to.
+    /// Carries the limit, because the number is the actionable half: the
+    /// report is either "that extension really is enormous" or "something is
+    /// answering as the registry and will not stop".
+    case artifactTooLarge(URL, limit: Int)
+
+    /// A name that would have addressed something other than the extension it
+    /// claims to be. Carries the field and the value it carried — this is the
+    /// one error here whose cause is a hostile document, and the value is what
+    /// makes the report mean anything.
+    case unsafeIdentity(field: String, value: String)
 
     /// The response was not an HTTP response, so no status could be checked.
     case responseNotHTTP(URL)

@@ -540,6 +540,11 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         // subscriber — to change an integer. A file of comments, from a server
         // that sends them, is that once per token on every fetch.
         var unmapped: [String: Int] = [:]
+        // Tallied for the same reason, and recorded in the same place. This one
+        // is a single row per document, so a server that hit it for every token
+        // would be taking the ledger's lock once per token to increment one
+        // integer.
+        var linesOutOfRange = 0
         for token in representation.decodeTokens(in: whole) {
             guard let capture = SemanticTokenCaptureMapping.captureName(forTokenType: token.tokenType) else {
                 // Ruling AU: a token we have nothing to say about produces no
@@ -555,7 +560,8 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
                 unmapped[token.tokenType, default: 0] += 1
                 continue
             }
-            guard let range = nsRange(for: token.range) else { continue }
+            guard let range = nsRange(for: token.range, outOfRange: &linesOutOfRange)
+            else { continue }
             // We declare `overlappingTokenSupport: false`, so a conforming
             // server does not send overlap and this never fires. It is kept
             // because a server is free to ignore what we declared, and
@@ -578,6 +584,13 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         }
         for (tokenType, count) in unmapped {
             ledger.record(.semanticTokenTypeUnmapped, detail: tokenType, count: count)
+        }
+        if linesOutOfRange > 0 {
+            ledger.record(
+                .semanticTokenLineOutOfRange,
+                detail: document.uri,
+                count: linesOutOfRange
+            )
         }
         if overlapping > 0 {
             Self.logger.error(
@@ -637,7 +650,11 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
     /// emoji, an accented character or CRLF line endings does not paint
     /// garbage: LSP counts in UTF-16 code units and so does that type, while a
     /// `String.Index` walk counts `Character`s and a byte offset counts neither.
-    private func nsRange(for range: LSPRange) -> NSRange? {
+    ///
+    /// - Parameter outOfRange: incremented, rather than recorded, when a token
+    ///   names a line this document does not have. The caller records the tally
+    ///   once — see `decode`.
+    private func nsRange(for range: LSPRange, outOfRange: inout Int) -> NSRange? {
         // `TextDocument`'s conversion clamps rather than failing — it has to,
         // because a server legitimately answers with a range from a version it
         // has and we no longer do. Clamping is right for a diagnostic, which
@@ -677,14 +694,11 @@ final class SemanticTokenHighlightProvider: HighlightProviding {
         // `tokensPastTheEndAreTruncatedByTheDecoder` pins the dependency half.
         let lineStart = document.utf16Offset(for: Position(line: range.start.line, character: 0))
         guard document.position(forUTF16Offset: lineStart).line == range.start.line else {
-            // Recorded even though the paragraph above argues it cannot happen:
+            // Counted even though the paragraph above argues it cannot happen:
             // an argument from three facts about code we do not own is exactly
             // the kind that stops being true without anyone noticing, and a row
             // appearing here is how we would find out.
-            ledger.record(
-                .semanticTokenLineOutOfRange,
-                detail: document.uri
-            )
+            outOfRange += 1
             return nil
         }
 

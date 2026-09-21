@@ -26,6 +26,14 @@ struct ExtensionTreeRowTable {
     /// whole-tree refresh from walking a tree nobody has opened.
     private(set) var childrenByHandle: [String: [ExtensionTreeRow]] = [:]
 
+    /// Where each drawn row currently sits, by handle, with `""` for a root.
+    ///
+    /// The inverse of `childrenByHandle`, kept because the question `adopt`
+    /// has to answer is the one the forward map cannot: *does this id already
+    /// belong to somebody else?* Searching every branch for it on every item
+    /// of every refresh is the alternative.
+    private(set) var parentByHandle: [String: String] = [:]
+
     /// Rows whose `collapsibleState` was `.expanded` and which have therefore
     /// been opened once. Once only: a default is what fills in for an answer,
     /// never what overrules one, so a branch the user has closed stays closed
@@ -46,6 +54,20 @@ struct ExtensionTreeRowTable {
 
     // MARK: - Writing
 
+    /// What an `adopt` did, for a caller that has to redraw the result.
+    struct Adoption {
+
+        /// The rows now under the adopting handle, in the order the extension
+        /// gave them.
+        let rows: [ExtensionTreeRow]
+
+        /// Other branches this adoption changed, because a row they were
+        /// drawing has moved here. Empty in the ordinary case; a caller that
+        /// ignores it leaves those branches drawing a row that is no longer
+        /// theirs.
+        let displacedParents: [String]
+    }
+
     /// Puts a freshly read list of children in place, reusing the row object
     /// for every handle that survived and forgetting the subtrees of those that
     /// did not.
@@ -54,27 +76,53 @@ struct ExtensionTreeRowTable {
     /// view tracks expansion by object identity, so a row that comes back as a
     /// new object comes back closed.
     ///
-    /// - Returns: The rows now under `handle`, in the order the extension gave.
+    /// **One row is in exactly one place, and this is where that is enforced.**
+    /// `NSOutlineView` identifies rows by object, so the same row object at two
+    /// positions is not a cosmetic duplicate — one `row(forItem:)` index stands
+    /// for two rows, disclosure is shared between them, and the reload walks a
+    /// structure the view and this table no longer agree on. Two ways in, both
+    /// of them an ordinary provider bug rather than anything exotic:
+    ///
+    /// - **The same id twice in one list** — a `map` over a list with a repeat
+    ///   in it. The first wins and the rest are dropped.
+    /// - **The same id under two parents** — the newest claim wins, because it
+    ///   is the one the extension has just made, and the branch the row left is
+    ///   named in `displacedParents` so its caller can redraw it. Moving rather
+    ///   than refusing matters: a refresh where an item genuinely moved reaches
+    ///   the two branches in an order nobody controls, and a refusal in the
+    ///   wrong order makes the item vanish from both.
     @discardableResult
-    mutating func adopt(_ items: [ContributedTreeItem], under handle: String) -> [ExtensionTreeRow] {
+    mutating func adopt(_ items: [ContributedTreeItem], under handle: String) -> Adoption {
         let previous = childrenByHandle[handle] ?? []
         var next: [ExtensionTreeRow] = []
+        var taken: Set<String> = []
+        var displaced: [String] = []
         for item in items {
+            guard taken.insert(item.id).inserted else { continue }
             if let existing = rows[item.id] {
                 existing.item = item
                 next.append(existing)
+                if let owner = parentByHandle[item.id], owner != handle {
+                    childrenByHandle[owner]?.removeAll { $0.handle == item.id }
+                    if !displaced.contains(owner) { displaced.append(owner) }
+                }
             } else {
                 let row = ExtensionTreeRow(item: item)
                 rows[item.id] = row
                 next.append(row)
             }
+            parentByHandle[item.id] = handle
         }
         childrenByHandle[handle] = next
         let survivors = Set(next.map(\.handle))
         for gone in previous where !survivors.contains(gone.handle) {
+            // Only what still belongs here. A row that has moved on is
+            // somebody else's to keep, and forgetting it would take it out
+            // from under the branch now drawing it.
+            guard parentByHandle[gone.handle] == handle else { continue }
             forget(gone.handle)
         }
-        return next
+        return Adoption(rows: next, displacedParents: displaced)
     }
 
     /// Drops a handle and everything under it.
@@ -99,6 +147,7 @@ struct ExtensionTreeRowTable {
             doomed.append(contentsOf: (childrenByHandle[next] ?? []).map(\.handle))
             childrenByHandle[next] = nil
             rows[next] = nil
+            parentByHandle[next] = nil
             autoExpandedHandles.remove(next)
         }
     }

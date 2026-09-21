@@ -59,16 +59,27 @@ struct OpenDocumentReloaderTests {
     }
 
     /// Counts whole-file reads, which is the cost the pre-check exists to
-    /// avoid. Not `Sendable` and not synchronised, because `TextReader` is
-    /// called on the main actor and nowhere else — if that ever stops being
-    /// true this stops compiling, which is the right failure.
-    @MainActor
-    private final class ReadCounter {
-        private(set) var count = 0
+    /// avoid.
+    ///
+    /// Locked rather than main-actor isolated, because the read is the one
+    /// thing that deliberately does *not* happen on the main actor any more:
+    /// the closure runs on whichever GCD thread `BlockingWork` handed it, and
+    /// the count is read back here once `settled()` says the read has landed.
+    private final class ReadCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var reads = 0
+
+        var count: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return reads
+        }
 
         var reader: OpenDocumentReloader.TextReader {
             { [self] url in
-                count += 1
+                lock.lock()
+                reads += 1
+                lock.unlock()
                 return try String(contentsOf: url, encoding: .utf8)
             }
         }
@@ -86,14 +97,21 @@ struct OpenDocumentReloaderTests {
     }
 
     /// Delivers the event the real watcher would, and returns once the
-    /// reloader's main-actor hop has run.
+    /// reloader has finished acting on it.
     ///
-    /// The `Task { @MainActor }` inside the reloader is why this is `async`:
-    /// the handler returns before the reload happens, so an assertion made
-    /// straight after it would read the buffer one hop too early.
-    private func deliver(_ url: URL, to watcher: FakeWatcher) async {
+    /// Two hops, not one, and `Task.yield()` covers only the first. The
+    /// handler hops to the main actor to be heard at all, and then the read
+    /// itself hops off the main actor to a queue that is allowed to block —
+    /// which is the whole point of `BlockingWork`, and which means the buffer
+    /// has not been touched when the yield comes back. `settled()` is the
+    /// reloader saying the read has landed; without it every assertion here
+    /// would be a race that usually resolved the wrong way.
+    private func deliver(
+        _ url: URL, to watcher: FakeWatcher, settling reloader: OpenDocumentReloader
+    ) async {
         watcher.handler([url.resolvingSymlinksInPath().path])
         await Task.yield()
+        await reloader.settled()
     }
 
     // MARK: - 1. The reload itself
@@ -117,7 +135,7 @@ struct OpenDocumentReloaderTests {
         let versionBeforeReload = document.version
 
         try write("from somewhere else", to: file)
-        await deliver(file, to: try recorder.watcher(forDirectoryOf: file))
+        await deliver(file, to: try recorder.watcher(forDirectoryOf: file), settling: reloader)
 
         #expect(document.text == "from somewhere else")
         // A new version, not a silent substitution: every observer — language
@@ -153,7 +171,7 @@ struct OpenDocumentReloaderTests {
         let observation = document.addChangeHandler { _, _ in changeCount += 1 }
         let versionBefore = document.version
 
-        await deliver(file, to: try recorder.watcher(forDirectoryOf: file))
+        await deliver(file, to: try recorder.watcher(forDirectoryOf: file), settling: reloader)
 
         #expect(document.version == versionBefore)
         #expect(changeCount == 0)
@@ -192,7 +210,7 @@ struct OpenDocumentReloaderTests {
         #expect(document.isDirty)
 
         try write("from somewhere else", to: file)
-        await deliver(file, to: try recorder.watcher(forDirectoryOf: file))
+        await deliver(file, to: try recorder.watcher(forDirectoryOf: file), settling: reloader)
 
         #expect(document.text == "what the user typed")
     }
@@ -214,7 +232,7 @@ struct OpenDocumentReloaderTests {
 
         let document = store.open(uri: file.documentUri, languageId: "swift", text: "still here")
         try FileManager.default.removeItem(at: file)
-        await deliver(file, to: try recorder.watcher(forDirectoryOf: file))
+        await deliver(file, to: try recorder.watcher(forDirectoryOf: file), settling: reloader)
 
         #expect(document.text == "still here")
     }
@@ -244,7 +262,7 @@ struct OpenDocumentReloaderTests {
         let observation = document.addChangeHandler { _, _ in changeCount += 1 }
 
         try write("sibling edited", to: sibling)
-        await deliver(sibling, to: try recorder.watcher(forDirectoryOf: opened))
+        await deliver(sibling, to: try recorder.watcher(forDirectoryOf: opened), settling: reloader)
 
         #expect(changeCount == 0)
         #expect(document.text == "open")
@@ -303,7 +321,7 @@ struct OpenDocumentReloaderTests {
         reloader.start()
 
         try write("changed before anyone was listening", to: file)
-        await deliver(file, to: try recorder.watcher(forDirectoryOf: file))
+        await deliver(file, to: try recorder.watcher(forDirectoryOf: file), settling: reloader)
 
         #expect(document.text == "changed before anyone was listening")
     }
@@ -332,7 +350,7 @@ struct OpenDocumentReloaderTests {
         // test, so this is the reloader refusing rather than the event failing
         // to arrive.
         try write("after the stop", to: file)
-        await deliver(file, to: watcher)
+        await deliver(file, to: watcher, settling: reloader)
         #expect(document.text == "original")
     }
 
@@ -364,10 +382,10 @@ struct OpenDocumentReloaderTests {
         _ = store.open(uri: file.documentUri, languageId: "swift", text: "original")
 
         let watcher = try recorder.watcher(forDirectoryOf: file)
-        await deliver(file, to: watcher)
+        await deliver(file, to: watcher, settling: reloader)
         let afterFirst = counter.count
-        await deliver(file, to: watcher)
-        await deliver(file, to: watcher)
+        await deliver(file, to: watcher, settling: reloader)
+        await deliver(file, to: watcher, settling: reloader)
 
         // The first event has nothing to compare against and reads; every
         // event after it finds the same size and the same modification date
@@ -394,10 +412,10 @@ struct OpenDocumentReloaderTests {
         let document = store.open(uri: file.documentUri, languageId: "swift", text: "original")
 
         let watcher = try recorder.watcher(forDirectoryOf: file)
-        await deliver(file, to: watcher)
+        await deliver(file, to: watcher, settling: reloader)
 
         try write("from somewhere else, and longer", to: file)
-        await deliver(file, to: watcher)
+        await deliver(file, to: watcher, settling: reloader)
 
         #expect(counter.count == 2)
         #expect(document.text == "from somewhere else, and longer")
@@ -423,13 +441,13 @@ struct OpenDocumentReloaderTests {
         let document = store.open(uri: file.documentUri, languageId: "swift", text: "original")
 
         let watcher = try recorder.watcher(forDirectoryOf: file)
-        await deliver(file, to: watcher)
+        await deliver(file, to: watcher, settling: reloader)
         #expect(counter.count == 1)
 
         let stampBefore = try #require(
             FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as? Date)
         try FileManager.default.removeItem(at: file)
-        await deliver(file, to: watcher)
+        await deliver(file, to: watcher, settling: reloader)
         // The buffer is the only copy now, and it keeps what it had.
         #expect(document.text == "original")
 
@@ -440,7 +458,7 @@ struct OpenDocumentReloaderTests {
         try write("restored", to: file)
         try FileManager.default.setAttributes(
             [.modificationDate: stampBefore], ofItemAtPath: file.path)
-        await deliver(file, to: watcher)
+        await deliver(file, to: watcher, settling: reloader)
         #expect(counter.count == 2)
         #expect(document.text == "restored")
     }

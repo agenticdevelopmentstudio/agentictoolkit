@@ -31,6 +31,19 @@ public final class WebviewPanelViewController: NSViewController {
     /// other's DOM through a handle they were never given.
     public let panelID: String
 
+    /// How much time has to pass between one external open and the next.
+    ///
+    /// Settable so a test can say "and again" without spending the interval;
+    /// production never changes it.
+    var externalOpenInterval: TimeInterval = 0.5
+
+    /// Hands a link to the user's browser. Injected so a test can watch the
+    /// rate without the machine acquiring fifty browser windows.
+    var openExternalURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
+    /// When the last link was handed over, on the monotonic clock.
+    private var lastExternalOpen: TimeInterval = -.greatestFiniteMagnitude
+
     /// The view type it was created under, and the key its serializer is
     /// registered against.
     public let viewType: String
@@ -261,20 +274,69 @@ public final class WebviewPanelViewController: NSViewController {
     // MARK: - Talking to the page
 
     /// Delivers `webview.postMessage(...)` to the page as a `message` event,
-    /// which is where VS Code webviews listen.
+    /// which is where VS Code webviews listen. Answers whether it went.
     ///
     /// `callAsyncJavaScript` passes the value as a real argument rather than
     /// interpolating it into a script string, so there is no second escaper
     /// here to keep in step with `WebviewHostDocument`'s — and nothing an
     /// extension can put in a message that changes the shape of the script.
-    public func post(message: Any) {
-        guard let webView, !isDisposed else { return }
+    ///
+    /// **It does insist on the types it accepts, and not politely.** A value
+    /// outside them raises `NSInvalidArgumentException`, which is an
+    /// Objective-C exception: `try?` does not catch it and the app goes down.
+    /// The argument here is `JSValue.toObject()` of whatever the extension
+    /// passed, so nothing exotic is needed to get there — a `vscode.Uri`
+    /// bridges to an `NSURL`, and an `NSURL` is not on the list. `isPostable`
+    /// is the check that turns that crash into a dropped message and a `false`,
+    /// which is what upstream's own `postMessage` answers when the message does
+    /// not arrive *(fail-fast, at the boundary that knows the rule)*.
+    @discardableResult
+    public func post(message: Any) -> Bool {
+        guard Self.isPostable(message) else {
+            Self.logger.error(
+                "A webview message held a value WebKit cannot pass to a page; dropping it")
+            return false
+        }
+        guard let webView, !isDisposed else { return false }
         webView.callAsyncJavaScript(
             "window.dispatchEvent(new MessageEvent('message', { data: payload }));",
             arguments: ["payload": message],
             in: nil,
             in: .page,
             completionHandler: nil)
+        return true
+    }
+
+    /// `true` when `callAsyncJavaScript` will take `value` as an argument.
+    ///
+    /// The accepted set is `NSNumber`, `NSNull`, `NSString`, `NSDate`,
+    /// `NSArray` and `NSDictionary`, recursively, with string keys — WebKit's
+    /// documented list, restated because the framework offers no way to ask.
+    ///
+    /// **Deliberately not `JSONSerialization.isValidJSONObject`**, which is the
+    /// near-miss: the two sets are different in both directions. JSON refuses a
+    /// `Date` and a non-finite number, both of which WebKit passes happily and
+    /// a page may legitimately be sent — so borrowing the JSON rule would drop
+    /// `{ openedAt: new Date() }` to prevent a crash it never causes. That the
+    /// same file *does* use the JSON rule a few lines down, for `setState`, is
+    /// not an inconsistency: that value is going to storage as text, and this
+    /// one is going to a JavaScript engine.
+    nonisolated static func isPostable(_ value: Any) -> Bool {
+        switch value {
+        case is NSNull, is NSNumber, is NSString, is NSDate:
+            return true
+        case let dictionary as NSDictionary:
+            // Before `NSArray`, because the key rule is the one a check of the
+            // values alone never sees and JavaScript has no object to turn a
+            // non-string key into.
+            return dictionary.allSatisfy { key, element in
+                key is NSString && isPostable(element)
+            }
+        case let array as NSArray:
+            return array.allSatisfy { isPostable($0) }
+        default:
+            return false
+        }
     }
 
     // MARK: - Teardown
@@ -400,13 +462,34 @@ extension WebviewPanelViewController: WKNavigationDelegate {
     /// Letting it navigate in place would replace the extension's page with a
     /// web page holding the panel's origin, which is a far larger thing than a
     /// broken link.
-    private func policy(for navigationAction: WKNavigationAction) -> WKNavigationActionPolicy {
+    ///
+    /// **`.linkActivated` is not a promise that a user clicked anything.**
+    /// WebKit reports it for `anchor.click()` from script exactly as it does
+    /// for a real click, and there is no public flag that separates the two —
+    /// so a loop in a page was a loop of browser windows, with no prompt, no
+    /// permission and nothing the user could do but force-quit. The rate is
+    /// therefore capped here, at the one place that knows a navigation is
+    /// about to leave the app. A human clicking links is nowhere near this
+    /// limit; a script is past it on its second iteration.
+    ///
+    /// The cap is per panel, which is where the state can live without
+    /// inventing a shared one — an extension that wanted more could open more
+    /// panels, but a panel opening is itself something the user sees.
+    func policy(for navigationAction: WKNavigationAction) -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
         if url.scheme == WebviewResourceURL.scheme { return .allow }
-        if navigationAction.navigationType == .linkActivated,
-           let scheme = url.scheme, scheme == "http" || scheme == "https" {
-            NSWorkspace.shared.open(url)
+        guard navigationAction.navigationType == .linkActivated,
+              let scheme = url.scheme, scheme == "http" || scheme == "https"
+        else { return .cancel }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastExternalOpen >= externalOpenInterval else {
+            Self.logger.notice(
+                "A webview asked to open links faster than a person can click; dropping one")
+            return .cancel
         }
+        lastExternalOpen = now
+        openExternalURL(url)
         return .cancel
     }
 }

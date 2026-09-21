@@ -65,7 +65,12 @@ public final class OpenDocumentReloader {
     ) -> DirectoryWatching
 
     /// Reads a file's text, or throws. Injected for the same reason.
-    public typealias TextReader = (URL) throws -> String
+    ///
+    /// `@Sendable` because it is called off the main actor — see
+    /// `reloadIfNeeded(_:)`. The default reads with `String(contentsOf:)`,
+    /// which is a synchronous read of a whole file that may be on a network
+    /// volume, and that is the entire reason it does not run here.
+    public typealias TextReader = @Sendable (URL) throws -> String
 
     private let store: TextDocumentStore
     private let makeWatcher: WatcherFactory
@@ -110,6 +115,27 @@ public final class OpenDocumentReloader {
     private var tracked: [DocumentUri: Tracked] = [:]
 
     private var observation: TextDocumentStoreObservation?
+
+    /// Every reload that has not finished reading yet, by a token that is
+    /// unique to the reload rather than to the URI.
+    ///
+    /// Held rather than discarded for the same reason `PendingTeardowns`
+    /// exists: work that outlives the call that started it still has to be
+    /// waitable by someone. Here that someone is a test, which drives a
+    /// watcher callback and then wants to assert on the buffer — see
+    /// `settled()`.
+    ///
+    /// Keyed per reload and not per URI because two events for one file can
+    /// overlap, and a second one storing itself under the same key would
+    /// retire the first from this table while it was still running — leaving
+    /// `settled()` satisfied by work that had not happened. Nothing is
+    /// cancelled when they overlap: a read that comes back stale is already a
+    /// no-op, because `apply` will not act on a signature that has moved.
+    private var inFlight: [Int: Task<Void, Never>] = [:]
+
+    /// Hands out the keys of `inFlight`. Main-actor-confined, so it needs
+    /// nothing more than an increment to be unique.
+    private var nextReloadToken = 0
 
     public init(
         store: TextDocumentStore,
@@ -229,8 +255,28 @@ public final class OpenDocumentReloader {
         }
     }
 
+    /// **The stat is on this actor; the read is not.**
+    ///
+    /// Everything above the read is cheap and belongs here: the signature is
+    /// two fields of a `stat`, and it answers most callbacks without touching
+    /// the file at all. The read itself is a different animal —
+    /// `String(contentsOf:)` on a whole file, and this editor opens files from
+    /// wherever the user has them, including a network volume that can stall
+    /// for seconds. Doing that here stops the run loop: no typing, no
+    /// scrolling, no cursor, in a window whose own document is not even the
+    /// one that changed.
+    ///
+    /// So the read hops to `BlockingWork` and the decision comes back. What
+    /// returns from that hop is checked against the world again before it is
+    /// used — the buffer can be edited, saved, closed or reloaded by a later
+    /// event while the read is out, and the signature recorded before the hop
+    /// is exactly the token that says whether this read is still the current
+    /// one *(idempotency)*.
     private func reloadIfNeeded(_ uri: DocumentUri) {
-        guard let entry = tracked[uri], let document = store.document(for: uri) else { return }
+        // The store is checked here as well as in `apply` — here to avoid
+        // reading a file for a buffer that is already gone, there because it
+        // can go while the read is out.
+        guard let entry = tracked[uri], store.document(for: uri) != nil else { return }
 
         guard let signature = FileSignature(of: entry.url) else {
             // Deleted, renamed away, or momentarily absent between an atomic
@@ -254,17 +300,54 @@ public final class OpenDocumentReloader {
         guard signature != entry.lastRead else { return }
         tracked[uri]?.lastRead = signature
 
-        let onDisk: String
-        do {
-            onDisk = try readText(entry.url)
-        } catch {
-            // Between the stat and the read — an atomic writer's window is
-            // exactly this wide. Nothing was read, so nothing is known: drop
-            // the signature so the next event does not skip on the strength of
-            // a read that never happened.
-            tracked[uri]?.lastRead = nil
-            return
+        let url = entry.url
+        let reader = readText
+        nextReloadToken += 1
+        let token = nextReloadToken
+        inFlight[token] = Task { [weak self] in
+            let onDisk: String
+            do {
+                onDisk = try await BlockingWork.run(qos: .userInitiated) {
+                    try reader(url)
+                }
+            } catch {
+                // Between the stat and the read — an atomic writer's window is
+                // exactly this wide. Nothing was read, so nothing is known:
+                // drop the signature so the next event does not skip on the
+                // strength of a read that never happened.
+                self?.finishReload(token) { reloader in
+                    reloader.tracked[uri]?.lastRead = nil
+                }
+                return
+            }
+            self?.finishReload(token) { reloader in
+                reloader.apply(onDisk, to: uri, readAt: signature)
+            }
         }
+    }
+
+    /// Runs `body` back on the actor and retires this reload's entry.
+    ///
+    /// The retirement is unconditional and happens whichever way the read
+    /// went: an entry left behind would make `settled()` wait forever on a
+    /// task that has already finished.
+    private func finishReload(
+        _ token: Int, _ body: @escaping (OpenDocumentReloader) -> Void
+    ) {
+        body(self)
+        inFlight[token] = nil
+    }
+
+    /// What to do with text that has come back from a read.
+    ///
+    /// - Parameter signature: what the file looked like when this read was
+    ///   started. If `lastRead` has moved since, a later event has already
+    ///   read the file again and this text is stale — the newer read is the
+    ///   one that should decide, and applying this one would put older bytes
+    ///   in the buffer and leave no event behind to correct it.
+    private func apply(_ onDisk: String, to uri: DocumentUri, readAt signature: FileSignature) {
+        guard tracked[uri]?.lastRead == signature else { return }
+        guard let document = store.document(for: uri) else { return }
 
         // Our own save, echoing back. Comparing the text rather than tracking
         // the write is what makes this correct for a save this process did not
@@ -287,6 +370,20 @@ public final class OpenDocumentReloader {
         // right here and is why nothing follows this line: the buffer now
         // holds what the file holds, so there is nothing unsaved about it.
         document.replaceAll(with: onDisk)
+    }
+
+    /// Waits for every reload currently reading a file to finish applying.
+    ///
+    /// The reload is asynchronous by design — that is the whole of the change
+    /// that put the read off this actor — and a watcher callback therefore
+    /// returns before the buffer has been touched. Production has nobody who
+    /// needs to know when it has; a test that drove a watcher and then asserted
+    /// on the buffer very much does, and the alternative is a sleep that is
+    /// either flaky or slow.
+    func settled() async {
+        while let task = inFlight.values.first {
+            await task.value
+        }
     }
 }
 

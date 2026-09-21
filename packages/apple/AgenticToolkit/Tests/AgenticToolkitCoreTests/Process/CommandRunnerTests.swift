@@ -93,4 +93,57 @@ struct CommandRunnerTests {
         #expect(outcome.timedOut)
         #expect(!process.isRunning)
     }
+
+    /// The escalation the timeout exists for. A tool that ignores `SIGTERM` is
+    /// exactly the tool the two-step teardown was written for, and nothing
+    /// exercised the second step — so the `SIGKILL` path, and the status read
+    /// that follows it, ran for the first time in front of a user.
+    ///
+    /// The status is not asserted on beyond "it came back": the process was
+    /// signalled, so whatever it says describes this code's impatience. What
+    /// is asserted is that a run against an unkillable-by-TERM tool *returns*,
+    /// inside its budget, with `timedOut` set.
+    @Test("a tool that ignores SIGTERM is killed, and the run still returns")
+    func aToolThatIgnoresTerminationIsKilled() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [
+            "-c",
+            "import signal, time\n"
+                + "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                + "print('armed', flush=True)\n"
+                + "time.sleep(120)\n"
+        ]
+
+        let started = Date()
+        let outcome = try CommandRunner.runToCompletion(process, timeout: 1)
+        let elapsed = Date().timeIntervalSince(started)
+
+        #expect(outcome.timedOut)
+        // 1s timeout, then SIGTERM is ignored through a 2s grace, then SIGKILL.
+        // Comfortably inside the 1 + 2 + 2 budget, and well past it would mean
+        // the escalation never happened.
+        #expect(elapsed < 8)
+        // What it managed to write before being killed is still collected —
+        // the drain does not depend on a clean exit.
+        #expect(outcome.diagnostics.isEmpty)
+        #expect(String(bytes: outcome.standardOutput, encoding: .utf8)?
+            .contains("armed") == true)
+    }
+
+    /// The ordinary case still reports the tool's own status, not the sentinel.
+    /// A guard that read `neverExited` whenever it was unsure would turn every
+    /// successful run into an unreadable one.
+    @Test("a tool that exits normally reports its own status")
+    func anExitingToolReportsItsOwnStatus() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "exit 3"]
+
+        let outcome = try CommandRunner.runToCompletion(process, timeout: 10)
+
+        #expect(!outcome.timedOut)
+        #expect(outcome.status == 3)
+        #expect(outcome.status != CommandRunner.neverExited)
+    }
 }

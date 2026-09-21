@@ -225,14 +225,55 @@ public final class ExtensionRegistry {
     /// Note that the old contributions stay installed for the duration of the
     /// scan, not withdrawn up front: nothing about a rescan is a request to
     /// spend that time with the user's themes uninstalled.
+    /// **A superseded reload does not apply what it read.** Two of these can
+    /// be in flight at once — the settings window has a rescan button, an
+    /// install finishes and rescans, a search path changes — and each suspends
+    /// at its `await` with nothing holding the actor. Whichever scan *finished*
+    /// last used to win, which is not the same as whichever *started* last: a
+    /// scan begun before an install completed can return after the scan begun
+    /// to observe it, and overwrite a correct listing with a stale one. The
+    /// registry then reports an extension the user just installed as absent
+    /// until something else triggers a reload, and nothing here is wrong
+    /// enough to log.
+    ///
+    /// The generation counter settles it by start order. The loser drops its
+    /// result: it has already been re-read by a scan that began later, so the
+    /// work is redundant rather than lost, and the winner's `apply` is the one
+    /// that fires the contributions observers *(idempotency)*.
     public func reload() async {
         let searchPaths = self.searchPaths
         let hostVersion = self.hostVersion
-        let scan = await Task.detached(priority: .userInitiated) {
-            Self.scan(searchPaths: searchPaths, hostVersion: hostVersion)
-        }.value
-        apply(scan)
+        await reload {
+            await Task.detached(priority: .userInitiated) {
+                Self.scan(searchPaths: searchPaths, hostVersion: hostVersion)
+            }.value
+        }
     }
+
+    /// `reload()` with the scan supplied, so a test can decide the order two
+    /// overlapping reloads finish in. The production path is the caller above;
+    /// nothing else should need this.
+    func reload(performing scan: @Sendable () async -> Scan) async {
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
+
+        let result = await scan()
+
+        guard generation == reloadGeneration else {
+            Self.logger.debug(
+                """
+                Dropping the result of reload \(generation, privacy: .public): superseded by \
+                \(self.reloadGeneration, privacy: .public) while it was scanning.
+                """)
+            return
+        }
+        apply(result)
+    }
+
+    /// Bumped by each `reload` as it starts, and compared with the local copy
+    /// after the scan returns. Monotonic and main-actor-confined, so a
+    /// comparison here is a comparison against every reload that began later.
+    private var reloadGeneration = 0
 
     /// Everything a pass over the search paths could read, in the order it read
     /// it, and whether it managed to read all of it.

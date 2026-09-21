@@ -303,4 +303,109 @@ struct OpenVSXClientTests {
             _ = try await client.data(at: url)
         }
     }
+
+    // MARK: - What a name is allowed to address
+
+    /// `appendingPathComponent` does not escape anything. It is a *path join*,
+    /// so a component carrying `/` or `..` is spliced in as structure, and
+    /// `URL` resolves it — `api` + `a/../../admin` + `python` standardizes to
+    /// `https://registry.test/admin/python`, two levels above the API root.
+    ///
+    /// Neither of these names comes from a person typing. `namespace` and
+    /// `name` are read off a manifest — an `ExtensionUpdateCheck` feeds in a
+    /// sideloaded extension's `publisher`, which is whatever the folder someone
+    /// dropped in claims — so the value reaching here is attacker-chosen in
+    /// exactly the case that matters.
+    @Test("a namespace that climbs out of the API root is refused, not requested")
+    func detailRefusesATraversingNamespace() async throws {
+        let client = makeClient()
+
+        await #expect(throws: OpenVSXError.self) {
+            _ = try await client.detail(namespace: "a/../../admin", name: "python")
+        }
+        // The refusal has to happen *before* the request. A throw after the
+        // fact still sent the escaped URL to the registry.
+        #expect(StubbedRegistry.requestedURLs.isEmpty)
+    }
+
+    @Test("a name or version that climbs out of the API root is refused, not requested")
+    func detailRefusesATraversingNameAndVersion() async throws {
+        let client = makeClient()
+
+        await #expect(throws: OpenVSXError.self) {
+            _ = try await client.detail(namespace: "acme", name: "../../admin")
+        }
+        await #expect(throws: OpenVSXError.self) {
+            _ = try await client.detail(namespace: "acme", name: "widget", version: "../..")
+        }
+        // A bare separator is structure too, even without any `..`: it
+        // addresses a different endpoint than the one the caller named.
+        await #expect(throws: OpenVSXError.self) {
+            _ = try await client.detail(namespace: "acme/evil", name: "widget")
+        }
+        #expect(StubbedRegistry.requestedURLs.isEmpty)
+    }
+
+    /// The ordinary names still have to work. A guard that refused these would
+    /// be indistinguishable, from the outside, from the registry being down.
+    @Test("ordinary namespaces, names and versions are unaffected")
+    func detailAcceptsOrdinaryNames() async throws {
+        let client = makeClient()
+        StubbedRegistry.respond(to: "/ms-python", json: detailJSON)
+
+        _ = try await client.detail(
+            namespace: "ms-python", name: "python.vscode", version: "2024.1.0-rc.1")
+
+        let url = try #require(StubbedRegistry.requestedURLs.first)
+        #expect(url.absoluteString.hasSuffix("/api/ms-python/python.vscode/2024.1.0-rc.1"))
+    }
+
+    // MARK: - How much a registry may send
+
+    /// `session.data(from:)` accumulates the whole body in memory with no
+    /// ceiling, and the length is the sender's choice: a registry — or whoever
+    /// is answering as one — that streams indefinitely takes the app down by
+    /// growing its heap, with no request having failed.
+    @Test("an artifact larger than the cap is refused mid-stream")
+    func dataRefusesAnOversizeArtifact() async throws {
+        StubbedRegistry.reset()
+        let client = OpenVSXClient(
+            registryBase: StubbedRegistry.registryBase,
+            session: StubbedRegistry.makeSession(),
+            maximumArtifactBytes: 64)
+        let url = StubbedRegistry.registryBase.appendingPathComponent("huge.vsix")
+        StubbedRegistry.respond(
+            to: "/huge.vsix",
+            with: StubbedResponse(body: Data(repeating: 0x41, count: 4096)))
+
+        await #expect(throws: OpenVSXError.artifactTooLarge(url, limit: 64)) {
+            _ = try await client.data(at: url)
+        }
+    }
+
+    @Test("an artifact inside the cap is returned whole")
+    func dataAcceptsAnArtifactInsideTheCap() async throws {
+        StubbedRegistry.reset()
+        let client = OpenVSXClient(
+            registryBase: StubbedRegistry.registryBase,
+            session: StubbedRegistry.makeSession(),
+            maximumArtifactBytes: 4096)
+        let url = StubbedRegistry.registryBase.appendingPathComponent("small.vsix")
+        StubbedRegistry.respond(
+            to: "/small.vsix",
+            with: StubbedResponse(body: Data(repeating: 0x41, count: 4096)))
+
+        let read = try await client.data(at: url)
+        #expect(read.count == 4096)
+    }
+
+    private var detailJSON: String {
+        """
+        {
+            "namespace": "ms-python",
+            "name": "python.vscode",
+            "version": "2024.1.0-rc.1"
+        }
+        """
+    }
 }

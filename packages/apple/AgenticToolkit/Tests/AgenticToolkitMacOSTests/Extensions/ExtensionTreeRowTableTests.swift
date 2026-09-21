@@ -31,8 +31,8 @@ struct ExtensionTreeRowTableTests {
     @Test("a row that survives a refresh is the same object")
     func aSurvivingRowKeepsItsIdentity() {
         var table = ExtensionTreeRowTable()
-        let first = table.adopt([item("a"), item("b")], under: "")
-        let second = table.adopt([item("a"), item("b")], under: "")
+        let first = table.adopt([item("a"), item("b")], under: "").rows
+        let second = table.adopt([item("a"), item("b")], under: "").rows
         #expect(first[0] === second[0])
         #expect(first[1] === second[1])
     }
@@ -129,5 +129,73 @@ struct ExtensionTreeRowTableTests {
         let onReturn = table.markAutoExpanded("a")
         #expect(onFirstAppearance)
         #expect(onReturn)
+    }
+
+    // MARK: - One row, one place
+
+    /// **`NSOutlineView` requires an item to appear exactly once.** Handing it
+    /// the same object twice under one parent is not a cosmetic duplicate: the
+    /// view identifies rows by object, so `row(forItem:)` answers one index for
+    /// two rows, expansion state is shared between them, and the reload that
+    /// follows walks a structure the view and this table disagree about.
+    ///
+    /// Nothing stops an extension returning the same `id` twice from one
+    /// `getChildren` — a `map` over a list with a repeat in it is all it takes
+    /// — so the rule is enforced where the list arrives.
+    @Test("a duplicate id within one list is taken once")
+    func aDuplicateIdInOneListIsTakenOnce() {
+        var table = ExtensionTreeRowTable()
+        let children = table.adopt([item("a"), item("b"), item("a")], under: "").rows
+        #expect(children.map(\.handle) == ["a", "b"])
+        #expect(table.children(of: "")?.count == 2)
+    }
+
+    /// The same rule across parents. An id under two branches at once is the
+    /// same object in two places, which is the same impossibility for the
+    /// outline view — and worse for this table, because the `forget` that
+    /// follows either parent dropping it takes the row out from under the
+    /// other one.
+    ///
+    /// The newest claim wins, because it is the one the extension has just
+    /// made: the row moves, and the branch it left is reported so its
+    /// caller can redraw it rather than keep drawing a row that has gone.
+    @Test("an id claimed by a second parent moves, and the first is told")
+    func anIdClaimedByASecondParentMoves() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("parent-a", children: true), item("parent-b", children: true)],
+                        under: "")
+        _ = table.adopt([item("shared")], under: "parent-a")
+
+        let displaced = table.adopt([item("shared")], under: "parent-b").displacedParents
+
+        #expect(displaced == ["parent-a"])
+        #expect(table.children(of: "parent-a")?.map(\.handle) == [])
+        #expect(table.children(of: "parent-b")?.map(\.handle) == ["shared"])
+        // Still one row object, still present — a move, not a delete.
+        #expect(table.row(for: "shared") != nil)
+    }
+
+    /// And the row survives the move as the *same* object, or the branch it
+    /// moved into would draw it collapsed and the outline would lose whatever
+    /// was open underneath it.
+    @Test("a moved row keeps its identity")
+    func aMovedRowKeepsItsIdentity() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("parent-a", children: true), item("parent-b", children: true)],
+                        under: "")
+        let before = table.adopt([item("shared")], under: "parent-a").rows
+        let after = table.adopt([item("shared")], under: "parent-b").rows
+        #expect(before[0] === after[0])
+    }
+
+    /// Re-adopting the same list under the same parent is not a move, and must
+    /// not report one — a refresh of one branch would otherwise ask its caller
+    /// to redraw that same branch a second time, every time.
+    @Test("re-adopting a branch displaces nothing")
+    func reAdoptingABranchDisplacesNothing() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("a"), item("b")], under: "")
+        let displaced = table.adopt([item("a"), item("b")], under: "").displacedParents
+        #expect(displaced.isEmpty)
     }
 }

@@ -161,7 +161,18 @@ public final class WebviewPanelSerializer {
     /// Without this, a failed placement would leave the panel in `unplaced`
     /// for the *next* extension webview pane to pick up — a panel appearing in
     /// a pane nobody asked to put it in.
+    ///
+    /// **Both places a prepared panel can be waiting, not just the first.**
+    /// A panel moves from `unplaced` to `pendingByNode` the moment `didPlace`
+    /// names its pane, and a cancellation after that point would otherwise be
+    /// a silent no-op: the panel would stay filed against a node id, held by
+    /// this object, and handed to whatever pane is next built there. Today's
+    /// only caller cancels before `didPlace` — this is what keeps that a
+    /// property of the caller rather than a requirement on it.
     public func cancelPlacement(of panel: WebviewPanelViewController) {
+        for (nodeID, pending) in pendingByNode where pending === panel {
+            pendingByNode.removeValue(forKey: nodeID)
+        }
         guard unplaced === panel else { return }
         unplaced = nil
         panesBeforeSplit = []

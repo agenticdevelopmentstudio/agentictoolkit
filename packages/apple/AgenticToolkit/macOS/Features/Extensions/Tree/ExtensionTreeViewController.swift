@@ -220,8 +220,13 @@ final class ExtensionTreeRow {
 /// model too — a view id names one tree, not one per window — and the pane that
 /// loses the callbacks is the one the user is not looking at, since taking them
 /// is what building the newer pane does.
+///
+/// Internal rather than file-private so its two asynchronous rules — a branch
+/// stays askable when a provider never answers, and a row an extension moves is
+/// drawn under one parent — can be driven by a test. Nothing outside this
+/// framework can see it; `ExtensionTreeViewController` is still the only way in.
 @MainActor
-private final class ExtensionTreeOutlineViewController: NSViewController {
+final class ExtensionTreeOutlineViewController: NSViewController {
 
     private let dataSource: any ExtensionTreeDataSource
 
@@ -349,8 +354,28 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
     private var treeBelowMessage: NSLayoutConstraint!
     private var treeAtTop: NSLayoutConstraint!
 
+    /// This pane's claim on the data source's two callbacks.
+    ///
+    /// A token rather than the pane's identity because an address can be
+    /// reused once a pane has gone, and this outlives the pane that minted it.
+    private let callbackToken = UUID()
+
+    /// Which pane holds each data source's callbacks now.
+    ///
+    /// **One pane per view id is the model, and this is the other half of it.**
+    /// A second pane for the same contributed view takes both callbacks over
+    /// — see the class doc — so the older pane is already inert by the time
+    /// the user closes it. Its teardown, though, still ran unconditionally:
+    /// it nilled the callbacks the *live* pane had installed, and that pane
+    /// went quiet for good, showing whatever it had drawn until the window
+    /// closed. Closures cannot be compared, so ownership is recorded here and
+    /// a teardown only undoes its own wiring *(idempotency — a stale pane
+    /// tearing down twice, or out of order, changes nothing)*.
+    private static var callbackOwners: [ObjectIdentifier: UUID] = [:]
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        Self.callbackOwners[ObjectIdentifier(dataSource)] = callbackToken
         dataSource.onDidChangeTreeData = { [weak self] handle in
             self?.providerDidChangeTreeData(handle)
         }
@@ -415,6 +440,31 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
         return []
     }
 
+    /// How long a provider gets to answer `getChildren` before the pane stops
+    /// waiting for that answer.
+    ///
+    /// Settable so a test can reach the timeout without spending it;
+    /// production never changes it.
+    var childrenBudget: TimeInterval = 30
+
+    /// **Bounded, because the cost of an unbounded wait is not a slow branch.**
+    /// `getChildren` is an extension's code — a network call, a subprocess, a
+    /// promise nothing ever resolves — and while it is out, `loadingHandles`
+    /// holds this handle, which is what stops a second ask. A provider that
+    /// never answers therefore does not merely leave the branch empty; it
+    /// leaves it *unaskable*, so the branch stays empty after the extension
+    /// recovers, after a `refresh()`, and until the window is closed.
+    ///
+    /// The budget ends the wait and nothing else: no rows are adopted, so the
+    /// branch stays unread rather than being recorded as empty, and the next
+    /// time the outline asks it is asked again. That is the difference between
+    /// a late tree and a broken one *(idempotency — asking again is safe, so
+    /// the timeout can simply stop asking)*.
+    ///
+    /// The `weak self` is not promoted until after the await, which is the
+    /// other half: `guard let self` at the top holds the whole pane — outline
+    /// view, rows, window — alive for as long as the extension takes, which on
+    /// a provider that never answers is forever.
     private func loadChildren(of handle: String) {
         guard !isBeingDiscarded, !loadingHandles.contains(handle) else {
             // A refresh that arrives mid-flight is remembered rather than
@@ -427,10 +477,23 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
         guard handle.isEmpty || table.row(for: handle) != nil else { return }
         loadingHandles.insert(handle)
         let parent = handle.isEmpty ? nil : table.row(for: handle)?.item
+        let budget = childrenBudget
         Task { [weak self] in
+            // The ask goes back through `self` rather than through a captured
+            // data source: the source is a reference type an extension owns and
+            // is not `Sendable`, so the only place it may be touched is here,
+            // on the actor that owns it. `self` is weak throughout — see above.
+            let items = try? await withWallClockBudget(budget) { [weak self] in
+                await self?.askChildren(of: parent)
+            }
             guard let self else { return }
-            let items = await self.dataSource.children(of: parent)
             self.loadingHandles.remove(handle)
+            guard let items = items ?? nil else {
+                Self.logger.error(
+                    "A tree provider did not answer getChildren in time; the branch stays unread")
+                self.staleHandles.remove(handle)
+                return
+            }
             guard !self.isBeingDiscarded,
                   handle.isEmpty || self.table.row(for: handle) != nil else {
                 self.staleHandles.remove(handle)
@@ -446,8 +509,21 @@ private final class ExtensionTreeOutlineViewController: NSViewController {
     /// Puts a freshly read list of children in place, reusing the row object
     /// for every handle that survived and forgetting the subtrees of those that
     /// did not.
+    ///
+    /// A row an extension has moved leaves a branch that is still drawing it,
+    /// and that branch is nowhere in this reload's path — so `adopt` names it
+    /// and it is redrawn too. Doing it first means the outline is never briefly
+    /// holding the same row in two places, which is the state it cannot
+    /// represent.
+    /// The one place the data source is read, so that the read happens on the
+    /// actor that owns it rather than inside the budget's `@Sendable` closure.
+    private func askChildren(of parent: ContributedTreeItem?) async -> [ContributedTreeItem] {
+        await dataSource.children(of: parent)
+    }
+
     private func adopt(_ items: [ContributedTreeItem], under handle: String) {
-        table.adopt(items, under: handle)
+        let adoption = table.adopt(items, under: handle)
+        for displaced in adoption.displacedParents { redraw(displaced) }
         redraw(handle)
     }
 
@@ -647,6 +723,14 @@ extension ExtensionTreeOutlineViewController: PaneContentTeardown {
     func paneContentWillBeDiscarded() {
         guard !isBeingDiscarded else { return }
         isBeingDiscarded = true
+        // Only this pane's own wiring, and only while it is still this pane's
+        // — see `callbackOwners`. The visibility report goes with it: a pane
+        // that no longer holds the callbacks is not what `TreeView.visible`
+        // describes, and saying the tree went away would be telling the
+        // extension about a pane the user stopped looking at long ago.
+        let key = ObjectIdentifier(dataSource)
+        guard Self.callbackOwners[key] == callbackToken else { return }
+        Self.callbackOwners.removeValue(forKey: key)
         dataSource.onDidChangeTreeData = nil
         dataSource.onDidChangeChrome = nil
         dataSource.visibilityDidChange(to: false)
@@ -708,4 +792,8 @@ private final class ExtensionTreeRowView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+extension ExtensionTreeOutlineViewController: Loggable {
+    public static nonisolated let logger = makeLogger()
 }

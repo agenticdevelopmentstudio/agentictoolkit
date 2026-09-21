@@ -981,4 +981,179 @@ extension MainThreadTreeViewsTests {
         source.activate(apple)
         #expect(!marker.wasPressed)
     }
+
+    // MARK: - What a refresh keeps and what it drops
+
+    /// **A refresh of one branch must not blind the branches below it.**
+    ///
+    /// `onDidChangeTreeData(element)` names one branch, and the pane reloads
+    /// exactly that branch — every row it had already read further down stays
+    /// on screen, because from the pane's side those branches are read. So a
+    /// refresh that dropped every element beneath the named branch left those
+    /// rows drawn with nothing behind them: no command, no children, and
+    /// nothing that would ever ask again.
+    @Test
+    func refreshingABranchKeepsTheRowsBelowItAlive() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            globalThis.__ran = null;
+            exports.activate = function () {
+                vscode.commands.registerCommand('acme.open', function (which) {
+                    globalThis.__ran = which;
+                });
+                vscode.window.registerTreeDataProvider('acme.tree', {
+                    getChildren: function (element) {
+                        if (!element) { return [{ id: 'branch', depth: 0 }]; }
+                        if (element.depth === 0) { return [{ id: 'child', depth: 1 }]; }
+                        if (element.depth === 1) { return [{ id: 'grandchild', depth: 2 }]; }
+                        return [];
+                    },
+                    getTreeItem: function (element) {
+                        var item = new vscode.TreeItem(
+                            element.id,
+                            element.depth < 2
+                                ? vscode.TreeItemCollapsibleState.Collapsed
+                                : vscode.TreeItemCollapsibleState.None);
+                        item.id = element.id;
+                        item.command = { command: 'acme.open', arguments: [element.id] };
+                        return item;
+                    }
+                });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        let source = try dataSource(fixture.treeViews)
+        let branch = try #require(await source.children(of: nil).first)
+        let child = try #require(await source.children(of: branch).first)
+        let grandchild = try #require(await source.children(of: child).first)
+
+        // The targeted refresh. `branch` answers the same child, so nothing
+        // below it has gone anywhere.
+        _ = await source.children(of: branch)
+
+        source.activate(grandchild)
+        let context = try #require(fixture.host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.__ran")?.toString() == "grandchild")
+        #expect(await source.children(of: grandchild).isEmpty)
+    }
+
+    /// The other half, and the reason the refresh drops anything at all: a
+    /// branch that stops naming a row has said the row is gone, and a row that
+    /// is gone must not still run its command.
+    @Test
+    func refreshingABranchForgetsTheRowsItStoppedNaming() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            globalThis.__ran = null;
+            globalThis.__both = true;
+            exports.activate = function () {
+                vscode.commands.registerCommand('acme.open', function (which) {
+                    globalThis.__ran = which;
+                });
+                vscode.window.registerTreeDataProvider('acme.tree', {
+                    getChildren: function (element) {
+                        if (element) { return []; }
+                        return globalThis.__both
+                            ? [{ id: 'a' }, { id: 'b' }]
+                            : [{ id: 'a' }];
+                    },
+                    getTreeItem: function (element) {
+                        var item = new vscode.TreeItem(element.id);
+                        item.id = element.id;
+                        item.command = { command: 'acme.open', arguments: [element.id] };
+                        return item;
+                    }
+                });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        let source = try dataSource(fixture.treeViews)
+        let rows = await source.children(of: nil)
+        let departing = try #require(rows.last)
+        #expect(departing.id == "#b")
+
+        let context = try #require(fixture.host.javaScriptContext)
+        context.evaluateScript("globalThis.__both = false;")
+        #expect(await source.children(of: nil).map(\.id) == ["#a"])
+
+        source.activate(departing)
+        #expect(context.evaluateScript("globalThis.__ran")?.isNull == true)
+    }
+
+    // MARK: - Two handle spaces, one namespace
+
+    /// **A declared id must not be able to spell a positional handle.**
+    ///
+    /// Positional handles are built as `<parent>/<index>`, so a row declaring
+    /// `id: 'src'` gives its first unnamed child the handle `#src/0` — which is
+    /// exactly what a row declaring `id: 'src/0'` would have been given. Two
+    /// rows on one handle is one row as far as every table keyed by it is
+    /// concerned: the second one read wins the command, and activating the
+    /// other runs it.
+    @Test
+    func aDeclaredIDCannotCollideWithAPositionalHandle() async throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFixture(
+            source: """
+            var vscode = require('vscode');
+            globalThis.__ran = null;
+            exports.activate = function () {
+                vscode.commands.registerCommand('acme.open', function (which) {
+                    globalThis.__ran = which;
+                });
+                vscode.window.registerTreeDataProvider('acme.tree', {
+                    getChildren: function (element) {
+                        if (!element) {
+                            return [
+                                { id: 'src', label: 'src', branch: true },
+                                { id: 'src/0', label: 'a file called src/0' }
+                            ];
+                        }
+                        return element.branch ? [{ label: 'unnamed child' }] : [];
+                    },
+                    getTreeItem: function (element) {
+                        var item = new vscode.TreeItem(
+                            element.label,
+                            element.branch
+                                ? vscode.TreeItemCollapsibleState.Collapsed
+                                : vscode.TreeItemCollapsibleState.None);
+                        if (element.id) { item.id = element.id; }
+                        item.command = { command: 'acme.open', arguments: [element.label] };
+                        return item;
+                    }
+                });
+            };
+            """,
+            extensionDirectory: directory)
+        defer { fixture.host.dispose() }
+        try await fixture.host.activate()
+
+        let source = try dataSource(fixture.treeViews)
+        let roots = await source.children(of: nil)
+        #expect(roots.count == 2)
+        let namedLikeAPath = try #require(roots.last)
+        let unnamedChild = try #require(await source.children(of: roots[0]).first)
+
+        #expect(namedLikeAPath.id != unnamedChild.id)
+
+        // And the consequence of that, which is what a user would have seen:
+        // the row read second took the other's command.
+        source.activate(namedLikeAPath)
+        let context = try #require(fixture.host.javaScriptContext)
+        #expect(context.evaluateScript("globalThis.__ran")?.toString()
+            == "a file called src/0")
+    }
 }

@@ -134,6 +134,27 @@ struct WebviewPanelSerializerTests {
         #expect(content is PlaceholderPaneViewController)
     }
 
+    /// The same rule one step later. `didPlace` moves the panel out of
+    /// `unplaced` and files it against a node id, so a cancellation that only
+    /// looked at `unplaced` would leave it filed — and the next pane built at
+    /// that node id would be handed a panel whose placement was called off.
+    @Test("a placement cancelled after the pane was named leaves nothing filed")
+    func aCancelledPlacementIsDroppedEvenAfterItsPaneWasNamed() {
+        let project = Self.makeWorkspace()
+        let registry = ComposableTabsViewRegistry()
+        let serializer = WebviewPanelSerializer(registry: registry) { _ in nil }
+        let panel = makePanel()
+        let nodeID = UUID()
+
+        serializer.prepareToPlace(panel, panesBeforeSplit: [])
+        serializer.didPlace(panel, in: nodeID)
+        serializer.cancelPlacement(of: panel)
+
+        let content = makeContent(registry, nodeID: nodeID, project: project)
+        #expect(content !== panel)
+        #expect(content is PlaceholderPaneViewController)
+    }
+
     /// A created panel is the one case where nothing else will ever know the
     /// pane's node id — so the row has to be written the moment the two meet,
     /// not at the next retitle.

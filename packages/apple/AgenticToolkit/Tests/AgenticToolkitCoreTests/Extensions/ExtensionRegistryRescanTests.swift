@@ -214,4 +214,118 @@ struct ExtensionRegistryRescanTests {
         #expect(registry.extensions.map(\.identifier) == ["acme.first", "acme.second"])
         #expect(point.applied == ["acme.first", "acme.second"])
     }
+
+    // MARK: - Two reloads at once
+
+    /// **Finish order is not start order.** Both reloads suspend at their scan
+    /// with nothing holding the main actor, so a scan begun *before* an install
+    /// completed can return *after* the scan begun to observe it. Whichever
+    /// finished last used to win, overwriting a correct listing with a stale
+    /// one — the user installs an extension, the settings list does not show
+    /// it, and nothing is wrong enough to log.
+    ///
+    /// The gate is what makes this a test rather than a race: the stale scan is
+    /// held open until the newer one has already applied, which is the ordering
+    /// that used to lose and is now the ordering that is dropped.
+    @Test("a reload that finishes after a newer one does not overwrite it")
+    func aSupersededReloadDropsItsResult() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let previous = UserSettings.shared
+        UserSettings.shared = UserSettings(with: InMemorySettingsStorageProvider())
+        defer { UserSettings.shared = previous }
+
+        let stale = try scanListing(named: "stale", in: root)
+        let fresh = try scanListing(named: "fresh", in: root)
+
+        let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+        let started = AsyncGate()
+        let release = AsyncGate()
+
+        // Two gates, not one, and the first is what makes the ordering a fact
+        // rather than a hope: `async let` starts a child task but promises
+        // nothing about when it runs, and this task is already on the main
+        // actor, so an inline `reload` could otherwise take the *older*
+        // generation and invert what the test is asserting. The closure only
+        // runs after `reload` has bumped the counter, so waiting for `started`
+        // is waiting for exactly that.
+        async let first: Void = registry.reload {
+            await started.open()
+            await release.wait()
+            return stale
+        }
+        await started.wait()
+
+        await registry.reload { fresh }
+        await release.open()
+        await first
+
+        #expect(registry.extensions.map(\.identifier) == ["acme.fresh"])
+    }
+
+    /// The other half of the same claim: the *newer* reload still applies when
+    /// it is the one that finishes second. A generation check that dropped both
+    /// would pass the test above and leave the registry empty.
+    @Test("the newest reload applies even when it finishes last")
+    func theNewestReloadStillApplies() async throws {
+        let root = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let previous = UserSettings.shared
+        UserSettings.shared = UserSettings(with: InMemorySettingsStorageProvider())
+        defer { UserSettings.shared = previous }
+
+        let stale = try scanListing(named: "stale", in: root)
+        let fresh = try scanListing(named: "fresh", in: root)
+
+        let registry = ExtensionRegistry(searchPaths: [root], hostVersion: Self.hostVersion)
+        let gate = AsyncGate()
+
+        await registry.reload { stale }
+        #expect(registry.extensions.map(\.identifier) == ["acme.stale"])
+
+        // `async let`, because awaiting the reload inline would suspend this
+        // task on a gate only this task can open.
+        async let last: Void = registry.reload {
+            await gate.wait()
+            return fresh
+        }
+        await gate.open()
+        await last
+
+        #expect(registry.extensions.map(\.identifier) == ["acme.fresh"])
+    }
+
+    /// A `Scan` naming one extension, produced by writing it and running the
+    /// real scanner over it, so the fixture cannot drift from what production
+    /// actually reads. The directory is removed afterwards so the two fixtures
+    /// in a test describe alternative states of the same search path rather
+    /// than accumulating in it.
+    private func scanListing(named name: String, in root: URL) throws -> ExtensionRegistry.Scan {
+        try writeManifest(manifestJSON(name: name), named: "\(name)-ext", in: root)
+        let scan = ExtensionRegistry.scan(searchPaths: [root], hostVersion: Self.hostVersion)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("\(name)-ext"))
+        return scan
+    }
+}
+
+/// A one-shot gate, so a test can decide which of two overlapping operations
+/// finishes first instead of hoping.
+actor AsyncGate {
+
+    private var isOpen = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let resuming = waiting
+        waiting = []
+        for continuation in resuming { continuation.resume() }
+    }
 }

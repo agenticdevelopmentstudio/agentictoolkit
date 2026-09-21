@@ -822,6 +822,13 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
                         + "will not fetch."
             case .responseNotHTTP:
                 return "the registry's answer was not an HTTP response."
+            case .artifactTooLarge(_, let limit):
+                let megabytes = limit / (1024 * 1024)
+                return "the registry kept sending past \(megabytes) MB, so the download "
+                    + "was stopped."
+            case .unsafeIdentity(let field, let value):
+                return "the registry named a \(field) (\(value)) that would address "
+                    + "something other than the extension it claims to be."
             }
         case let error as VSIXInstallError:
             return sentence(forInstall: error)
