@@ -190,12 +190,22 @@ public enum TerminalTextInjector {
 
     /// Escape a string for interpolation inside an AppleScript double-quoted literal:
     /// backslash first (so we don't double-escape our own escapes), then the quote, and
-    /// strip control characters that would break out of the line.
+    /// deal with the control characters that would break out of the line.
+    ///
+    /// A line break cannot survive the trip: `write text` and `do script` press Return at
+    /// the end of what they are handed, so an embedded newline would submit the first half
+    /// of the message and type the rest at whatever answered it. It becomes a **space**
+    /// rather than being deleted — a pasted paragraph is words, and dropping the breaks
+    /// outright glues the last word of each line to the first of the next ("the fileare
+    /// you sure"), which is not what anybody typed.
     public static func escape(_ string: String) -> String {
         var escaped = string
         escaped = escaped.replacingOccurrences(of: "\\", with: "\\\\")
         escaped = escaped.replacingOccurrences(of: "\"", with: "\\\"")
-        return escaped.filter { !$0.isNewline && $0 != "\r" && $0 != "\0" }
+        return String(escaped.compactMap { character -> Character? in
+            if character == "\0" { return nil }
+            return character.isNewline ? " " : character
+        })
     }
 
     /// Both iTerm's `tty of s` and Terminal's `tty of t` report `/dev/ttysNNN`; ensure the

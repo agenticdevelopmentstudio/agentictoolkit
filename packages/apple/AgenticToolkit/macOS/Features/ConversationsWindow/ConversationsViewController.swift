@@ -41,9 +41,15 @@ public final class ConversationsViewController: NSViewController {
     /// result because the merged result is a *page*: the newest few hundred
     /// lines across every session, of which one session's share may be two. A
     /// conversation read out of that has holes in it.
+    ///
+    /// `limit` is how many entries to read. It is asked for rather than fixed
+    /// because hiding sessions in the shelf has to deepen the read — see
+    /// ``ConversationsSessionFilter/pageDeepening`` — and only the host knows
+    /// how to ask its source for more.
     public typealias Load = @Sendable (
         _ includeWorkOutput: Bool,
-        _ sourceID: String?
+        _ sourceID: String?,
+        _ limit: Int
     ) async -> [ChatMessage]?
 
     /// Whether the agent's work output (its narration and, where captured, its
@@ -90,12 +96,18 @@ public final class ConversationsViewController: NSViewController {
     /// main actor. The shelf beside the feed draws exactly this.
     public var onRosterChanged: (([ConversationsSessionFilter.Session]) -> Void)?
 
+    /// Called when the reader hides or shows a session, with the whole hidden
+    /// set. A host that wants the ticks to survive the window being closed
+    /// writes this to a setting and hands it back through ``hiddenSessions``.
+    public var onHiddenSessionsChanged: ((Set<String>) -> Void)?
+
     private let session: FeedChatSession
     private let viewModel: AIChatViewModel
     private let workOutputFlag: WorkOutputFlag
     private let sessionFilter: ConversationsSessionFilter
     private let load: Load
     private let refreshInterval: Duration
+    private let pageLimit: Int
     private var chatView: ChatView?
     private var overlay: ConversationFocusOverlay?
 
@@ -112,8 +124,16 @@ public final class ConversationsViewController: NSViewController {
     /// - Parameters:
     ///   - refreshInterval: how often the feed is re-read. A transcript on disk
     ///     has no push channel, so this is the whole of the window's liveness.
+    ///   - pageLimit: how many entries a read asks for while nothing is hidden.
+    ///     A hidden session multiplies it, so that ticking a box changes *which*
+    ///     conversations are on the timeline and not how much timeline there is.
     ///   - load: reads the feed.
-    public init(refreshInterval: Duration = .seconds(5), load: @escaping Load) {
+    public init(
+        refreshInterval: Duration = .seconds(5),
+        pageLimit: Int = 200,
+        load: @escaping Load
+    ) {
+        self.pageLimit = pageLimit
         // The filter is read at load time rather than captured by value, so
         // toggling it changes the *next* read without rebuilding the session.
         let flag = WorkOutputFlag()
@@ -127,7 +147,11 @@ public final class ConversationsViewController: NSViewController {
         let sessionFilter = ConversationsSessionFilter()
         self.sessionFilter = sessionFilter
         let session = FeedChatSession(refreshInterval: refreshInterval) {
-            guard let messages = await load(flag.value, nil) else { return nil }
+            // Deepened by whatever the last page lost to the hidden sessions,
+            // so the filter takes rows out of a bigger answer rather than out
+            // of the reader's scrollback.
+            let depth = pageLimit * sessionFilter.pageDeepening
+            guard let messages = await load(flag.value, nil, depth) else { return nil }
             return sessionFilter.apply(to: messages)
         }
         self.session = session
@@ -152,6 +176,7 @@ public final class ConversationsViewController: NSViewController {
     public func setHiddenSessions(_ ids: Set<String>) {
         guard ids != sessionFilter.hidden else { return }
         sessionFilter.hidden = ids
+        onHiddenSessionsChanged?(ids)
         refresh()
     }
 
@@ -215,9 +240,12 @@ public final class ConversationsViewController: NSViewController {
 
         let flag = workOutputFlag
         let load = self.load
+        let pageLimit = self.pageLimit
         let overlay = ConversationFocusOverlay(
             refreshInterval: refreshInterval,
-            load: { await load(flag.value, sourceID) },
+            // The base page, undeepened: this read is already narrowed to one
+            // session, so nothing is about to be filtered out of it.
+            load: { await load(flag.value, sourceID, pageLimit) },
             // What this session's rows already say, taken straight off the feed
             // behind. A page of the merged feed may hold only part of the
             // conversation, and the first read replaces it — but it is the part

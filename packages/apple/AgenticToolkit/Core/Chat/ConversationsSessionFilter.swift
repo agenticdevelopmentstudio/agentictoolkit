@@ -75,8 +75,32 @@ public final class ConversationsSessionFilter: @unchecked Sendable {
     private let lock = NSLock()
     private var hiddenIDs: Set<String> = []
     private var currentRoster: [Session] = []
+    private var deepening = 1
 
     public init() {}
+
+    /// How many times the base page the next read should ask for, so that what
+    /// survives this filter is still about a page.
+    ///
+    /// Hiding a session must not shorten the feed. The source answers with the
+    /// newest N entries across *every* session, so taking three of five
+    /// sessions out of that answer leaves two fifths of a page — the reader
+    /// ticked a box to see one conversation more clearly and got less
+    /// timeline, which is backwards. Reading deeper is what gives the box its
+    /// obvious meaning: fewer sessions, same amount to read, further back.
+    ///
+    /// Measured from the last page rather than from the number of ticks: what
+    /// matters is the share of *rows* lost, and a hidden session that says
+    /// nothing costs nothing. It is a ratio inside one page, so it does not
+    /// compound — a deeper page drops the same share and asks for the same
+    /// depth again.
+    public var pageDeepening: Int { withLock { deepening } }
+
+    /// The most a page may be deepened. A ceiling because the source's own
+    /// scan is finite: past a point a deeper request costs more and returns the
+    /// same rows, and a feed that pauses to re-read ten thousand lines every
+    /// poll is worse than a short one.
+    public static let maxPageDeepening = 8
 
     /// The sessions the feed is currently not drawing.
     public var hidden: Set<String> {
@@ -107,13 +131,30 @@ public final class ConversationsSessionFilter: @unchecked Sendable {
         if let changed { onRosterChanged?(changed) }
 
         let hidden = withLock { hiddenIDs }
-        guard !hidden.isEmpty else { return messages }
-        return messages.filter { message in
+        guard !hidden.isEmpty else {
+            withLock { deepening = 1 }
+            return messages
+        }
+        let shown = messages.filter { message in
             // A message with no session behind it — a notice the window itself
             // wrote — belongs to no row in the shelf, so no row can hide it.
             guard let id = message.attribution?.sourceID, !id.isEmpty else { return true }
             return !hidden.contains(id)
         }
+        noteYield(page: messages.count, shown: shown.count)
+        return shown
+    }
+
+    /// Records what share of the last page survived, as the depth the next read
+    /// should ask for. See ``pageDeepening``.
+    private func noteYield(page: Int, shown: Int) {
+        guard page > 0 else { return }
+        // Nothing survived: ask for the most, because the page holds no
+        // evidence of how much deeper the visible sessions start.
+        let wanted = shown == 0
+            ? Self.maxPageDeepening
+            : Int((Double(page) / Double(shown)).rounded(.up))
+        withLock { deepening = min(max(wanted, 1), Self.maxPageDeepening) }
     }
 
     /// The distinct sessions in a page, in the order they first appear.

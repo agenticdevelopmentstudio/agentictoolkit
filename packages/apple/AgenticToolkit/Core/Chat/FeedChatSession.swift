@@ -61,16 +61,23 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     ///     answers it when it is finished, not when it is sent.
     ///   - send: writes a line into the source. Nil for a feed that is only
     ///     watched, which is what leaves the composer disabled.
+    ///   - initial: the transcript to stand on until the first read returns.
+    ///     Without it the session's idea of the transcript is empty, and the
+    ///     first thing that publishes — a line typed before the first poll
+    ///     landed — yields *only* that line, wiping whatever the host had
+    ///     already put on screen.
     ///   - load: reads the transcript.
     public init(
         refreshInterval: Duration = .seconds(5),
         sendTimeout: Duration = .seconds(60),
         send: Sender? = nil,
+        initial: [ChatMessage] = [],
         load: @escaping Loader
     ) {
         self.refreshInterval = refreshInterval
         self.sendTimeout = sendTimeout
         self.send = send
+        self.loaded = initial
         self.load = load
     }
 
@@ -160,19 +167,36 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// nothing carries an identifier across a terminal. The timestamp is what
     /// keeps an identical line sent an hour ago from answering for this one —
     /// with a few seconds of slack, because the two clocks are not the same one.
+    ///
+    /// A line that was already given up on is reconciled too. A slow session
+    /// answers after the timeout has marked its line failed, and leaving the
+    /// pending copy in place then shows the reader the same sentence twice —
+    /// once in red saying it never arrived, once underneath it having arrived.
+    /// Arrival is the later fact and it wins.
     private func reconcile(_ transcript: [ChatMessage]) {
         withLock {
             pending.removeAll { message in
-                guard case .sending = message.delivery else { return false }
+                let written = Self.normalized(message.text)
                 let arrived = transcript.contains { candidate in
                     candidate.role == .user
-                        && candidate.text == message.text
+                        && Self.normalized(candidate.text) == written
                         && candidate.timestamp >= message.timestamp.addingTimeInterval(-Self.clockSlack)
                 }
                 if arrived { timeouts.removeValue(forKey: message.id)?.cancel() }
                 return arrived
             }
         }
+    }
+
+    /// The form two copies of the same line are compared in.
+    ///
+    /// What reaches the source is not always character-for-character what was
+    /// typed: a terminal takes one line, so a pasted paragraph arrives with its
+    /// breaks flattened to spaces. Comparing on runs of whitespace collapsed to
+    /// one keeps that the same message — the alternative is a line that is
+    /// visibly in the transcript and still shown as pending until it times out.
+    private static func normalized(_ text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
     /// How far a source's clock may run behind this one before a line read back

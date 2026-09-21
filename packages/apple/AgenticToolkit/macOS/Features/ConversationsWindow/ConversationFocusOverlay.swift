@@ -46,7 +46,14 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
         lineLimit: Int?,
         send: FeedChatSession.Sender? = nil
     ) {
-        let session = FeedChatSession(refreshInterval: refreshInterval, send: send, load: load)
+        // The seed goes to the session as well as to the view model. The view
+        // model's copy is what is drawn; the session's is what it will publish
+        // *around* — and a line typed in the second before the first read lands
+        // publishes the transcript as the session knows it, which without this
+        // is nothing at all. The overlay would blank the conversation the
+        // moment somebody answered it.
+        let session = FeedChatSession(
+            refreshInterval: refreshInterval, send: send, initial: seed, load: load)
         self.session = session
         self.viewModel = AIChatViewModel(session: session, initial: seed)
         self.chatView = ChatView(viewModel: self.viewModel)

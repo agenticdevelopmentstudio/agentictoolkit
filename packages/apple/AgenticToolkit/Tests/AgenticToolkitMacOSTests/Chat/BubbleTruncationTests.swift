@@ -363,7 +363,7 @@ final class BubbleTruncationTests: XCTestCase {
             )
         ]
         // An hour's refresh: the first read is the whole of what these tests want.
-        let controller = ConversationsViewController(refreshInterval: .seconds(3600)) { _, _ in
+        let controller = ConversationsViewController(refreshInterval: .seconds(3600)) { _, _, _ in
             messages
         }
         let window = NSWindow(

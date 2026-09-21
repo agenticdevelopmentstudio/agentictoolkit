@@ -417,7 +417,13 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             // A message that names its own speaker gets the fuller row: icon,
             // header line, timestamp underneath. Only a merged transcript
             // produces those, so an ordinary chat is untouched by this.
-            if message.attribution != nil {
+            //
+            // So does a message that is not settled yet, whatever it knows
+            // about its speaker: the sending spinner and the failure reason are
+            // drawn by that row and by nothing else, and a line written before
+            // the first read has nothing to borrow an attribution from — which
+            // is exactly the moment the reader most needs to see it in flight.
+            if message.attribution != nil || message.delivery != .settled {
                 var actions = rowActions
                 actions.onExpand = { [weak self] message in self?.expand(message) }
                 if isRowSelectionEnabled {

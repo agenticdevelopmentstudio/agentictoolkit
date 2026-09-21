@@ -240,6 +240,14 @@ public final class ChatTranscriptRowView: NSView {
             label.translatesAutoresizingMaskIntoConstraints = false
             label.lineBreakMode = .byWordWrapping
             label.maximumNumberOfLines = 0
+            // Wrapping is only half of it: a label measures itself on one line
+            // unless it is told the width it will be laid out at, so a reason
+            // as long as "Typing into a session needs iTerm2 or Terminal.app;
+            // this one runs in Ghostty" comes out one line tall and truncated
+            // — the half that says what to do about it cut off. The cap the
+            // bubble beside it uses is the starting width; `layout()` narrows
+            // it to whatever the row actually gave the label.
+            label.preferredMaxLayoutWidth = max(maxBubbleWidth, 80)
             self.deliveryView = label
             self.failureLabel = label
         }
@@ -257,6 +265,24 @@ public final class ChatTranscriptRowView: NSView {
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError() }
+
+    /// Re-measures the failure reason against the width the row actually gave
+    /// it.
+    ///
+    /// The bubble's cap is an upper bound; the row is narrower than that
+    /// whenever the window is, and a label measured for a width it did not get
+    /// is measured for the wrong number of lines. Setting the width it has and
+    /// asking for a fresh intrinsic size is the AppKit recipe for a wrapping
+    /// label that has to be as tall as its text — and it settles, because the
+    /// width is then the one the constraints already produced.
+    public override func layout() {
+        super.layout()
+        guard let failureLabel, failureLabel.frame.width > 0,
+              failureLabel.preferredMaxLayoutWidth != failureLabel.frame.width
+        else { return }
+        failureLabel.preferredMaxLayoutWidth = failureLabel.frame.width
+        failureLabel.invalidateIntrinsicContentSize()
+    }
 
     /// Which column the row lives in. A merged transcript still keeps the two
     /// sides apart — that is what makes it scannable — even though the header

@@ -711,6 +711,68 @@ final class ConversationFocusTests: XCTestCase {
                        "the read-back line and the pending one are both on screen")
     }
 
+    /// Opening a conversation and typing into it straight away is the ordinary
+    /// way to use the overlay, and until the first poll returns the session's
+    /// idea of the transcript is whatever it was seeded with. Seeded with
+    /// nothing, that first publish is the typed line *alone* — the conversation
+    /// the reader was answering blanks out under them.
+    func testALineTypedBeforeTheFirstReadKeepsTheTranscriptItWasSeededWith() async throws {
+        let seed = [
+            ChatMessage(id: "s1", role: .assistant, text: "rebased and pushed"),
+            ChatMessage(id: "s2", role: .user, text: "thanks")
+        ]
+        let reads = SourceLog()
+        let session = FeedChatSession(
+            refreshInterval: .seconds(3600),
+            send: { _ in nil },
+            initial: seed,
+            // Nothing readable yet, which is the case this is about: the source
+            // is unreachable or still answering, so the seed is all there is.
+            load: { reads.note("read"); return nil }
+        )
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+
+        // The read having been attempted is how this test knows it is watching;
+        // a line sent before then would publish into nothing.
+        try await waitUntil("the feed was read") { !reads.values.isEmpty }
+        session.send("what about the tests?")
+
+        try await waitUntil("the typed line was shown") { !log.latest.isEmpty }
+        XCTAssertEqual(log.latest.map(\.text),
+                       ["rebased and pushed", "thanks", "what about the tests?"],
+                       "typing wiped the transcript that was already on screen")
+    }
+
+    /// A terminal takes one line, so the injector flattens a pasted paragraph's
+    /// breaks to spaces and the source records the flattened form. Compared
+    /// character-for-character, the line is then visibly in the transcript and
+    /// still drawn as pending until it times out and goes red.
+    func testALineReadBackWithItsBreaksFlattenedStillSettles() async throws {
+        let sent = SourceLog()
+        let session = FeedChatSession(
+            refreshInterval: .milliseconds(20),
+            send: { text in
+                // What the injector does on the way through.
+                sent.note(text.split(whereSeparator: \.isNewline).joined(separator: " "))
+                return nil
+            },
+            load: {
+                sent.values.map { ChatMessage(id: "recorded-\($0)", role: .user, text: $0) }
+            }
+        )
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+
+        session.send("first line\nsecond line")
+
+        try await waitUntil("the source said the line back") {
+            log.latest.count == 1 && log.latest[0].delivery == .settled
+        }
+        XCTAssertEqual(log.latest.map(\.text), ["first line second line"],
+                       "the flattened line was not recognised as the one that was typed")
+    }
+
     /// An agent that is mid-turn answers when it is finished, so waiting is
     /// normal and silence is not — the difference is what the timeout draws.
     func testALineTheSourceNeverSaysBackFails() async throws {
@@ -1067,7 +1129,7 @@ final class ConversationFocusTests: XCTestCase {
         let asked = SourceLog()
         let feed = source ?? FeedSource(feedMessages)
         // An hour's refresh: the first read is the whole of what these tests want.
-        let controller = ConversationsViewController(refreshInterval: .seconds(3600)) { _, sourceID in
+        let controller = ConversationsViewController(refreshInterval: .seconds(3600)) { _, sourceID, _ in
             let all = feed.values
             guard let sourceID else { return all }
             asked.note(sourceID)

@@ -123,8 +123,18 @@ final class TerminalTextInjectorTests: XCTestCase {
         XCTAssertEqual(TerminalTextInjector.escape(#"a"b\c"#), #"a\"b\\c"#)
     }
 
-    func testEscapeStripsControlCharacters() {
-        XCTAssertEqual(TerminalTextInjector.escape("a\nb\rc"), "abc")
+    /// A newline becomes a space, not nothing. Deleting it welded the last word
+    /// of one line to the first of the next — "…the fileimport it" — and the
+    /// session was sent a line it was never shown. A space is what a terminal
+    /// line-edit buffer can hold and what the sender meant by the break.
+    func testEscapeTurnsNewlinesIntoSpaces() {
+        XCTAssertEqual(TerminalTextInjector.escape("first\nsecond"), "first second")
+        XCTAssertEqual(TerminalTextInjector.escape("a\nb\rc\r\nd"), "a b c d")
+    }
+
+    /// A NUL still goes: nothing can carry it, and it has no width to preserve.
+    func testEscapeDropsNulls() {
+        XCTAssertEqual(TerminalTextInjector.escape("a\0b"), "ab")
     }
 
     func testNormalizeTTYAddsDevPrefix() {

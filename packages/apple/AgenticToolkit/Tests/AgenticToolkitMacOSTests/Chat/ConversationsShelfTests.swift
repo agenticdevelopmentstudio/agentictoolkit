@@ -94,6 +94,49 @@ final class ConversationsShelfTests: XCTestCase {
         XCTAssertEqual(fired.value, 2)
     }
 
+    // MARK: - Page depth
+
+    /// Ticking a session off must not shorten the feed. The source answers with
+    /// the newest N entries across every session, so hiding most of them leaves
+    /// a fraction of a page: the reader asked to see one conversation more
+    /// clearly and got less timeline.
+    func testHidingMostOfAPageAsksTheNextReadToGoDeeper() {
+        let filter = ConversationsSessionFilter()
+        XCTAssertEqual(filter.pageDeepening, 1, "an unfiltered feed read deeper than a page")
+
+        filter.hidden = ["a", "b", "c"]
+        let page = (0..<4).flatMap { _ in
+            [message("a", name: "Alpha"), message("b", name: "Beta"),
+             message("c", name: "Gamma"), message("d", name: "Delta")]
+        }
+        XCTAssertEqual(filter.apply(to: page).count, 4)
+        XCTAssertEqual(filter.pageDeepening, 4,
+                       "a page that lost three quarters of its rows asked for the same depth again")
+    }
+
+    /// The ceiling exists because the source's scan is finite: past a point a
+    /// deeper request costs more and returns the same rows.
+    func testAPageThatLostEverythingAsksForTheMostAllowed() {
+        let filter = ConversationsSessionFilter()
+        filter.hidden = ["a"]
+        _ = filter.apply(to: [message("a", name: "Alpha")])
+        XCTAssertEqual(filter.pageDeepening, ConversationsSessionFilter.maxPageDeepening)
+    }
+
+    /// It is a ratio inside one page, so it must not compound — a deeper page
+    /// that drops the same share asks for the same depth, not for more.
+    func testUnhidingEverythingGoesBackToOnePage() {
+        let filter = ConversationsSessionFilter()
+        filter.hidden = ["a"]
+        _ = filter.apply(to: [message("a", name: "Alpha"), message("b", name: "Beta")])
+        XCTAssertGreaterThan(filter.pageDeepening, 1)
+
+        filter.hidden = []
+        _ = filter.apply(to: [message("a", name: "Alpha"), message("b", name: "Beta")])
+        XCTAssertEqual(filter.pageDeepening, 1,
+                       "a feed with nothing hidden kept re-reading a multiple of its page")
+    }
+
     // MARK: - The shelf
 
     private func shelf(_ sessions: [(String, String)]) -> ConversationsShelfViewController {
@@ -259,7 +302,7 @@ final class ConversationsShelfTests: XCTestCase {
 
     func testTheShelfStartsAway() {
         let split = ConversationsSplitViewController(
-            feed: ConversationsViewController { _, _ in [] })
+            feed: ConversationsViewController { _, _, _ in [] })
         _ = split.view
         XCTAssertFalse(split.isShelfVisible)
     }
@@ -269,7 +312,7 @@ final class ConversationsShelfTests: XCTestCase {
         // siblings fixed — and the split view here *is* the window's content,
         // so the window jumped 260 points wider every time the shelf came out.
         let split = ConversationsSplitViewController(
-            feed: ConversationsViewController { _, _ in [] })
+            feed: ConversationsViewController { _, _, _ in [] })
         _ = split.view
 
         guard let shelfItem = split.splitViewItems.first else { return XCTFail("no shelf item") }
@@ -283,7 +326,7 @@ final class ConversationsShelfTests: XCTestCase {
     }
 
     func testTickingASessionOffReachesTheFeed() {
-        let feed = ConversationsViewController { _, _ in [] }
+        let feed = ConversationsViewController { _, _, _ in [] }
         let split = ConversationsSplitViewController(feed: feed)
         _ = split.view
         split.shelf.sessions = [
@@ -291,5 +334,18 @@ final class ConversationsShelfTests: XCTestCase {
         ]
         split.shelf.unselectAllVisible()
         XCTAssertEqual(feed.hiddenSessions, ["a"])
+    }
+
+    /// A remembered hidden set is set on the feed before the window is built, so
+    /// the shelf has to be told as well. Left out, the feed draws four sessions
+    /// and the shelf ticks all five — and the row the reader unticked last time
+    /// is back with its box on, saying the opposite of what the timeline shows.
+    func testAFeedThatAlreadyHidesASessionStartsWithItsShelfRowUnticked() {
+        let feed = ConversationsViewController { _, _, _ in [] }
+        feed.hiddenSessions = ["a"]
+        let split = ConversationsSplitViewController(feed: feed)
+        _ = split.view
+        XCTAssertEqual(split.shelf.hidden, ["a"],
+                       "the shelf ticked a session the feed was already hiding")
     }
 }

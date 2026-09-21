@@ -38,6 +38,11 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         self.shelf = ConversationsShelfViewController()
         super.init(nibName: nil, bundle: nil)
 
+        // The shelf draws the ticks, the feed owns what they mean, and a host
+        // may have restored the feed's hidden set before either existed — so
+        // the shelf starts from the feed rather than from empty, or the boxes
+        // and the timeline disagree about which sessions are showing.
+        shelf.setHidden(feed.hiddenSessions)
         shelf.onHiddenChanged = { [weak self] hidden in
             self?.feed.setHiddenSessions(hidden)
         }
