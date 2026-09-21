@@ -87,7 +87,18 @@ public final class NotImplementedLedger {
 
     private var entries: [Key: NotImplementedAccess] = [:]
 
-    public init() {}
+    /// The clock `firstAccess` is stamped from.
+    ///
+    /// A parameter because the one rule this class has about time — the first
+    /// stamp is kept and every later reach leaves it alone — cannot be checked
+    /// against the real clock. Two `Date()` readings taken a microsecond apart
+    /// are equal to the precision anything here can assert, so the test would
+    /// pass whether the rule held or not *(dependency-injection)*.
+    private let now: @MainActor () -> Date
+
+    public init(now: @escaping @MainActor () -> Date = { Date() }) {
+        self.now = now
+    }
 
     /// Every access, ordered by extension and then by member path.
     ///
@@ -136,7 +147,7 @@ public final class NotImplementedLedger {
         let updated = NotImplementedAccess(
             extensionIdentifier: extensionIdentifier,
             memberPath: memberPath,
-            firstAccess: existing?.firstAccess ?? Date(),
+            firstAccess: existing?.firstAccess ?? now(),
             count: (existing?.count ?? 0) + (wasProbe ? 0 : 1),
             probeCount: (existing?.probeCount ?? 0) + (wasProbe ? 1 : 0)
         )
