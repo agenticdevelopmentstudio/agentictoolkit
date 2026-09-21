@@ -358,3 +358,60 @@ final class SpacingControlLayoutTests: XCTestCase {
         )
     }
 }
+
+/// The control is a composite: a diagram with eight fields, sixteen arrows and
+/// a reset hung around it, assembled out of plain `NSView`s. AppKit ignores a
+/// plain `NSView` in the accessibility tree — it hands the children straight to
+/// the parent and takes the view's identifier with them — so an identifier set
+/// on the control itself simply is not there to be found, and neither is
+/// anything that groups its parts together.
+///
+/// That is invisible from inside the framework, because every *part* keeps its
+/// own identifier and every unit test reaches for a part. It shows up one layer
+/// out, where a UI test asks the running app for `pane.options.spacing` and is
+/// told no such element exists.
+@MainActor
+final class SpacingControlAccessibilityTests: XCTestCase {
+
+    private func makeControl() -> SpacingControl {
+        let control = SpacingControl(style: .frame, range: 0...40)
+        control.accessibilityID("pane.options.spacing")
+        return control
+    }
+
+    func testTheControlIsInTheTreeUnderTheIdentifierItWasGiven() {
+        let control = makeControl()
+
+        XCTAssertTrue(control.isAccessibilityElement(),
+                      "a view that is not an element is spliced out of the tree, "
+                      + "and its identifier goes with it")
+        XCTAssertEqual(control.accessibilityRole(), .group,
+                       "it groups its parts; it is not one of them")
+        XCTAssertEqual(control.accessibilityIdentifier(), "pane.options.spacing")
+    }
+
+    /// A group is not a leaf. Turning the control into an accessibility element
+    /// the wrong way — announcing it and stopping there — would hide the eight
+    /// numbers behind it, which is a worse tree than the flattened one.
+    func testTheGroupStillOffersTheNumbersInsideIt() {
+        let control = makeControl()
+
+        XCTAssertTrue(identifiers(under: control).contains("spacing.top"),
+                      "the top inset's field should still be reachable through the group")
+        XCTAssertTrue(identifiers(under: control).contains("spacing.reset"),
+                      "and so should the control's own reset")
+    }
+
+    /// Every accessibility identifier at or below `view`, ignoring nothing:
+    /// which level a part sits at is layout's business and changes with it.
+    private func identifiers(under view: NSView) -> Set<String> {
+        var found: Set<String> = []
+        for subview in view.subviews {
+            if !subview.accessibilityIdentifier().isEmpty {
+                found.insert(subview.accessibilityIdentifier())
+            }
+            found.formUnion(identifiers(under: subview))
+        }
+        return found
+    }
+}

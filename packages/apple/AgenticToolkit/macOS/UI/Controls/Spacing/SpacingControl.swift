@@ -174,6 +174,16 @@ public final class SpacingControl: NSView, NSTextFieldDelegate {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
+        // AppKit ignores a plain `NSView`: it hands the children to the parent
+        // and takes the view's identifier with them, so an identifier a caller
+        // sets on this control is not there to be found afterwards — and the
+        // eight numbers arrive at the panel as eight loose fields belonging to
+        // nothing. A group is what this is, so a group is what it says it is
+        // (`explicit-over-implicit`). It stays a container, not a leaf: the
+        // parts inside keep their own elements and their own identifiers.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+
         switch style {
         case .frame: buildEdgeControls()
         case .paneDividers: buildDividerControls()
