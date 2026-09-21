@@ -23,7 +23,17 @@ public final class ConversationsSplitViewController: NSSplitViewController {
 
     private enum ItemID {
         static let toggleShelf = NSToolbarItem.Identifier("conversations.toggle-shelf")
+        static let selectionMode = NSToolbarItem.Identifier("conversations.selection-mode")
     }
+
+    /// The picker's segments, in the order `ConversationsSelectionMode`'s own
+    /// `allCases` puts them — one bubble for one conversation, two for several.
+    private static let selectionModeSegments: [ToolbarSegment] = [
+        ToolbarSegment(symbol: "bubble.left", toolTip: ConversationsSelectionMode.single.title),
+        ToolbarSegment(
+            symbol: "bubble.left.and.bubble.right",
+            toolTip: ConversationsSelectionMode.multi.title)
+    ]
 
     public let shelf: ConversationsShelfViewController
     public let feed: ConversationsViewController
@@ -32,6 +42,60 @@ public final class ConversationsSplitViewController: NSSplitViewController {
     /// dies the instant `configureWindowChrome` returns, and the titlebar comes
     /// up empty with no error to explain it.
     private var toolbarDelegate: WindowToolbarBuilder.Delegate?
+
+    /// Fired when the mode changes from anywhere — the control, a menu item, a
+    /// key command — so a host can remember it.
+    public var onSelectionModeChanged: ((ConversationsSelectionMode) -> Void)?
+
+    /// Whether the window is reading one conversation or several.
+    ///
+    /// The window's own copy of the answer, and the one place the two halves are
+    /// told about it: the shelf changes what a click means, the feed changes
+    /// whether a bubble opens and whether the composer is live.
+    public var selectionMode: ConversationsSelectionMode = .multi {
+        didSet {
+            guard selectionMode != oldValue else { return }
+            // The shelf first: switching to single mode narrows the hidden set to
+            // one session, and the feed's own answer — whether its composer has a
+            // destination — is read off what is left showing.
+            shelf.selectionMode = selectionMode
+            feed.selectionMode = selectionMode
+            updateSelectionModeControl()
+            onSelectionModeChanged?(selectionMode)
+        }
+    }
+
+    /// Switches to the other mode. The View menu item and the key command both
+    /// come through here; the picker sets the mode it was clicked on instead,
+    /// since a segment names a mode rather than a change.
+    @objc public func toggleSelectionMode() {
+        selectionMode = selectionMode.toggled
+    }
+
+    /// The toolbar picker's action.
+    @objc private func selectionModeChanged(_ sender: NSSegmentedControl) {
+        let modes = ConversationsSelectionMode.allCases
+        guard modes.indices.contains(sender.selectedSegment) else { return }
+        selectionMode = modes[sender.selectedSegment]
+    }
+
+    /// Keeps the picker reading as the mode the window is actually in — it is
+    /// not the only way to change it.
+    private func updateSelectionModeControl() {
+        guard let control = toolbarDelegate?.segmentedControl(for: ItemID.selectionMode),
+              let index = ConversationsSelectionMode.allCases.firstIndex(of: selectionMode)
+        else { return }
+        control.selectedSegment = index
+    }
+
+    /// The ⌘↑/⌘↓ monitor, live only while this window is on screen.
+    private var selectionKeyMonitor: Any?
+
+    /// What Tab walks in this window: the shelf's filter box and the feed's
+    /// composer, and nothing else. Built in `viewDidLoad`, once both panes have
+    /// loaded their views, and rewired whenever the composer is turned on or off
+    /// or the shelf is collapsed.
+    private var keyViewLoop: KeyViewLoop?
 
     public init(feed: ConversationsViewController) {
         self.feed = feed
@@ -100,6 +164,27 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         // the subclass came back out. The shelf's panel is inset from its
         // trailing edge anyway, so there is no divider to hide.
         splitView.autosaveName = NSSplitView.AutosaveName("conversations-split")
+
+        // Both panes have loaded their views by now — `addSplitViewItem` does
+        // it — so the two fields exist to be threaded together.
+        let loop = KeyViewLoop([shelf.filterTextField, feed.composerField].compactMap { $0 })
+        keyViewLoop = loop
+        feed.onComposerEnablementChanged = { [weak self] in self?.refreshKeyViewLoop() }
+        refreshKeyViewLoop()
+    }
+
+    /// Rebuild the Tab order from what can be typed into right now.
+    ///
+    /// Called on every change that adds or removes a participant: the composer
+    /// switching between single and multi mode, and the shelf collapsing — a
+    /// collapsed pane's views are hidden, and Tab into a hidden filter box is
+    /// focus the reader cannot see.
+    private func refreshKeyViewLoop() {
+        keyViewLoop?.refresh()
+        // Set every time rather than once: the window's initial responder is
+        // read when the window is first shown, and what is focusable then
+        // depends on whether the shelf was restored collapsed.
+        if let first = keyViewLoop?.first { view.window?.initialFirstResponder = first }
     }
 
     public override func viewDidAppear() {
@@ -108,6 +193,71 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         // exist yet when `configureWindowChrome` runs. By the time the window is
         // on screen it does.
         updateToggleAppearance()
+        updateSelectionModeControl()
+        installSelectionKeyMonitor()
+        refreshKeyViewLoop()
+    }
+
+    public override func viewWillDisappear() {
+        super.viewWillDisappear()
+        if let selectionKeyMonitor {
+            NSEvent.removeMonitor(selectionKeyMonitor)
+            self.selectionKeyMonitor = nil
+        }
+    }
+
+    /// Takes this window's key commands and performs them.
+    ///
+    /// A local event monitor rather than a `performKeyEquivalent` override,
+    /// because the shelf is usually **collapsed**: AppKit hides a collapsed
+    /// split item's view, and it does not offer key equivalents to hidden views
+    /// — so the one place the handler could naturally live is the one place it
+    /// would not fire. The monitor also means there is a single implementation
+    /// rather than one per pane, which matters because the keystroke is supposed
+    /// to work wherever in the window the reader happens to be looking.
+    ///
+    /// The chords come from ``KeyCommandRegistry`` rather than being written
+    /// here, which is what makes them rebindable in Settings — a monitor that
+    /// compared key codes would keep answering to ⌘↑ whatever the user chose.
+    ///
+    /// Only this window's own commands are matched: another window's app-scope
+    /// command is not this monitor's to fire, even though the registry can see
+    /// it. And a selection move swallows the event only when the shelf actually
+    /// moved, so ⌘↑ in multi mode, or at the top of the list, still means
+    /// whatever it meant before.
+    private func installSelectionKeyMonitor() {
+        guard selectionKeyMonitor == nil else { return }
+        selectionKeyMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: .keyDown
+        ) { [weak self] event in
+            guard let self,
+                  event.window === self.view.window,
+                  let command = KeyCommandRegistry.shared.command(matching: event, scope: .app)
+            else { return event }
+            switch command.id {
+            case ConversationsKeyCommands.moveSelectionUpID:
+                return self.moveSelection(by: -1) ? nil : event
+            case ConversationsKeyCommands.moveSelectionDownID:
+                return self.moveSelection(by: 1) ? nil : event
+            case ConversationsKeyCommands.toggleShelfID:
+                self.toggleShelf()
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    /// Move the shelf's pick by `delta`, reporting whether it moved.
+    ///
+    /// The single-mode guard lives here rather than in the monitor because it is
+    /// part of what the command *means*: in multi mode there is no single pick
+    /// to walk, so the command does nothing and the keystroke belongs to
+    /// whatever else wanted it.
+    @discardableResult
+    public func moveSelection(by delta: Int) -> Bool {
+        guard selectionMode == .single else { return false }
+        return shelf.moveSelection(by: delta)
     }
 
     /// Whether the shelf is showing.
@@ -132,8 +282,11 @@ public final class ConversationsSplitViewController: NSSplitViewController {
             item.animator().isCollapsed.toggle()
         } completionHandler: { [weak self] in
             // The toggle reads as the state it *reached*, so it is repainted
-            // when the animation lands rather than when it starts.
+            // when the animation lands rather than when it starts. The Tab
+            // order settles then too: a collapsing pane's views are hidden at
+            // the end of the animation, not at the start.
             self?.updateToggleAppearance()
+            self?.refreshKeyViewLoop()
         }
         updateToggleAppearance()
     }
@@ -152,6 +305,11 @@ public final class ConversationsSplitViewController: NSSplitViewController {
                     symbol: "sidebar.left",
                     label: "Sessions",
                     action: #selector(toggleShelf)),
+                .segmented(
+                    identifier: ItemID.selectionMode,
+                    label: "Conversations",
+                    segments: Self.selectionModeSegments,
+                    action: #selector(selectionModeChanged(_:))),
                 .flexibleSpace
             ],
             target: self)
@@ -170,6 +328,7 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         window.titleVisibility = .hidden
 
         updateToggleAppearance()
+        updateSelectionModeControl()
     }
 
     /// Keeps the toggle reading as the state it toggles — filled and accented

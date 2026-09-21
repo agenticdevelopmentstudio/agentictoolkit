@@ -135,6 +135,19 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         didSet { scheduleRender() }
     }
 
+    /// The shape every bubble in this transcript is drawn in.
+    ///
+    /// A property of the *view* rather than of each message, because the answer
+    /// is a fact about which window this is: one chat with one other party
+    /// colours its bubbles by role, a merged feed of many sessions names the
+    /// speaker in a header instead and draws the Sessions window's box. Either
+    /// answer applies to every row, and a transcript that mixed the two — a
+    /// message still in flight taking one shape and the same message taking the
+    /// other once it settled — would flicker between them.
+    public var bubbleStyle: AIChatBubbleView.Style = .speaker {
+        didSet { scheduleRender() }
+    }
+
     /// Whether the view paints the theme's chat surface behind the transcript.
     ///
     /// Off when the chat is being stacked over something that supplies its own
@@ -272,6 +285,16 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         }
     }
 
+    /// The composer, for a host wiring a window-wide Tab order — see
+    /// ``KeyViewLoop``. A view rather than the field's own type: what a host has
+    /// any business doing with it is putting it in a key-view loop.
+    public var composerField: NSView { inputField }
+
+    /// Called whenever ``isComposerEnabled`` takes effect, so a host that wired
+    /// the composer into a Tab order can drop it out of the cycle while it is
+    /// off. Tab landing on a greyed-out composer is focus with nothing to do.
+    public var onComposerEnablementChanged: (() -> Void)?
+
     /// Makes the input field the window's first responder. Returns `false` when the
     /// view is not in a window yet, or the window declined the change.
     @discardableResult
@@ -356,6 +379,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         var actionsGeneration: Int
         var state: ChatSessionState
         var messages: [ChatMessage]
+        var bubbleStyle: AIChatBubbleView.Style
     }
 
     /// What the transcript on screen was last built from, or nil before the
@@ -371,7 +395,8 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             selection: selectedMessageID,
             actionsGeneration: actionsGeneration,
             state: viewModel.state,
-            messages: viewModel.messages
+            messages: viewModel.messages,
+            bubbleStyle: bubbleStyle
         )
         guard inputs != rendered else { return }
         rendered = inputs
@@ -431,7 +456,8 @@ public final class ChatView: NSView, NSTextFieldDelegate {
                 }
                 let row = ChatTranscriptRowView(
                     message: message, maxBubbleWidth: rowBubbleWidth,
-                    actions: actions, lineLimit: bubbleLineLimit)
+                    actions: actions, lineLimit: bubbleLineLimit,
+                    bubbleStyle: bubbleStyle)
                 // A rebuild is not a deselection: the reader picked a message,
                 // and the row showing it having been thrown away and built again
                 // in the meantime is this view's business, not theirs.
@@ -445,7 +471,8 @@ public final class ChatView: NSView, NSTextFieldDelegate {
                 continue
             }
 
-            let bubble = AIChatBubbleView(message: message, maxWidth: maxBubbleWidth)
+            let bubble = AIChatBubbleView(
+                message: message, maxWidth: maxBubbleWidth, style: bubbleStyle)
             bubble.setContentHuggingPriority(.required, for: .horizontal)
 
             if message.role == .user {
@@ -622,7 +649,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// right shape anyway, since the composer is not what is being read.
     private func expand(_ message: ChatMessage) {
         expansion?.dismiss()
-        let overlay = BubbleExpansionOverlay(message: message)
+        let overlay = BubbleExpansionOverlay(message: message, style: bubbleStyle)
         overlay.onDismissed = { [weak self, weak overlay] in
             if self?.expansion === overlay { self?.expansion = nil }
         }
@@ -642,6 +669,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         inputField.isEnabled = enabled
         sendButton.isEnabled = enabled && !composerText.isEmpty
         applySendButtonTint(resolvedThemeScope.palette)
+        onComposerEnablementChanged?()
     }
 
     /// What is typed, with the whitespace that is not worth sending taken off.

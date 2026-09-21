@@ -99,7 +99,15 @@ extension SessionWatcher {
                 scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
                 scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-                stackView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+                // The *clip* view's width, not the scroll view's. They are the
+                // same under overlay scrollers, and differ by the scroller's
+                // width under legacy ones — and which of the two is in force is
+                // not ours to decide: `scrollerStyle` follows
+                // `NSScroller.preferredScrollerStyle`, which AppKit re-applies
+                // when the user changes "Show scroll bars" in System Settings.
+                // Measured against the scroll view, a legacy scroller pushed the
+                // rows' right edge underneath itself.
+                stackView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
 
                 emptyStateView.topAnchor.constraint(equalTo: topAnchor),
                 emptyStateView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -334,13 +342,16 @@ extension SessionWatcher {
         public var sessionId: String { session.sessionId }
 
         // Theme-sensitive subviews
-        private var headerRow: NSStackView!
-        private var headerSpacer: NSView!
-        /// `project » branch » session name`. The Conversations feed heads its
-        /// rows with the same view, which is what keeps the two windows reading
-        /// as one description of the same sessions.
-        private(set) var breadcrumb: SessionBreadcrumbView!
+        /// `[app] project » branch » session name … [activity]`. The
+        /// Conversations feed and its shelf head their rows with the same view,
+        /// which is what keeps the three windows reading as one description of
+        /// the same sessions.
+        private var headerView: SessionHeaderView!
         private var activityIcon: SessionWatcherActivityIconView!
+
+        /// The trail inside the header — what the tests measure, and what the
+        /// prose under it lines up with.
+        var breadcrumb: SessionBreadcrumbView { headerView.breadcrumb }
         /// The inset "terminal" the agent's last output is printed into.
         private var terminalView: NSView!
         private var outputLabel: NSTextField!
@@ -354,10 +365,31 @@ extension SessionWatcher {
         enum Metrics {
             static let horizontalPadding: CGFloat = 14
             static let verticalPadding: CGFloat = 12
-            /// Twice the old 22pt, so the "go to session" target is easy to hit.
-            static let iconSide: CGFloat = 44
-            static let iconToText: CGFloat = 12
-            static let headerSpacing: CGFloat = 6
+            /// Room kept clear after the row's content for the overlay scroller
+            /// to float in. The scroller fades out when the list fits, but
+            /// while it is on screen it draws *over* the right end of the row —
+            /// which is exactly where the activity icon sits, so the one thing
+            /// the row puts furthest right is the one thing the knob covers.
+            ///
+            /// 15 is AppKit's own overlay scroller width
+            /// (`NSScroller.scrollerWidth(for: .regular, scrollerStyle:
+            /// .overlay)`), written out rather than called: `NSScroller` is
+            /// main-actor isolated and a `static let` here is initialised
+            /// wherever it is first touched.
+            static let scrollerGutter: CGFloat = 15
+            /// What the row's content actually stops at on the right: its own
+            /// margin plus the scroller's lane. Only the right side has one —
+            /// the list scrolls vertically, so nothing floats over the left.
+            static let trailingPadding: CGFloat = horizontalPadding + scrollerGutter
+            /// The same icon at the same size as the header over a bubble in the
+            /// Conversations feed. It used to be 44 and a column of its own
+            /// beside the row's prose; on the header's line, at the feed's size,
+            /// it reads as part of the trail it heads — and the terminal under
+            /// it gets the width the column was spending.
+            static let iconSide: CGFloat = 28
+            /// Air between the icon and the first crumb — the feed's gap, for
+            /// the same reason as the size.
+            static let iconToText: CGFloat = 8
             /// The least room left between the breadcrumb and the activity icon.
             static let headerToActivity: CGFloat = 12
             static let headerToOutput: CGFloat = 8
@@ -437,7 +469,7 @@ extension SessionWatcher {
             isSummarizing = newIsSummarizing
             isFrontmost = newIsFrontmost
 
-            breadcrumb.crumbs = Self.crumbs(for: newSession)
+            headerView.crumbs = Self.crumbs(for: newSession)
             activityIcon.update(activity: newSession.activity, isSummarizing: newIsSummarizing)
             summaryLabel?.stringValue = summaryText()
             toolTip = Self.infoText(for: newSession)
@@ -458,14 +490,7 @@ extension SessionWatcher {
         /// breadcrumb's labels deliberately abstain from the fitting width, so a
         /// fitting size would squeeze them to nothing.
         public var minimumWidth: CGFloat {
-            let activityWidth = ceil(max(
-                activityIcon.intrinsicContentSize.width, activityIcon.fittingSize.width
-            ))
-            // The spacer is an arranged subview too, so spacing sits on both its sides.
-            let spacing = Metrics.headerSpacing * CGFloat(headerRow.arrangedSubviews.count - 1)
-            return Metrics.horizontalPadding + Metrics.iconSide + Metrics.iconToText
-                + breadcrumb.minimumWidth + activityWidth + spacing + Metrics.headerToActivity
-                + Metrics.horizontalPadding
+            headerView.minimumWidth + Metrics.horizontalPadding + Metrics.trailingPadding
         }
 
         /// The session as a breadcrumb: project, branch, name — each segment
@@ -495,8 +520,9 @@ extension SessionWatcher {
         private func applyTheme(_ palette: SemanticPalette) {
             layer?.backgroundColor = restingBackground(palette)
 
-            breadcrumb.applyTheme(palette)
-            activityIcon.applyTheme(palette)
+            // Reaches the trail and the activity icon both — the header owns
+            // them, and theming them from here would be theming them twice.
+            headerView.applyTheme(palette)
 
             // The agent's last output, printed into a terminal after a prompt.
             terminalView.layer?.backgroundColor = palette.surfaceColor.cgColor
@@ -550,36 +576,16 @@ extension SessionWatcher {
         private func setupViews() {
             typealias Layout = Metrics
 
-            // --- App icon: the "go to session" affordance, heading the row.
-            // The icon is the *only* thing in the row that navigates — clicking the
-            // text is not a shortcut for it, so a click meant for the context menu or
-            // for selecting a line can't yank the user into another terminal. The
-            // pointing-hand cursor over it is what says so.
-            let iconButton = PointingHandButton()
-            // The mapping is ``TerminalAppIcon``'s and not this row's: the
-            // Conversations feed heads its rows with the same icon for the same
-            // session, and two copies of the table would eventually disagree.
-            iconButton.image = TerminalAppIcon.image(forTermProgram: session.termProgram)
-            iconButton.imagePosition = .imageOnly
-            iconButton.imageScaling = .scaleProportionallyUpOrDown
-            iconButton.isBordered = false
-            iconButton.bezelStyle = .shadowlessSquare
-            iconButton.target = self
-            iconButton.action = #selector(goToSessionAction)
-            iconButton.toolTip = session.termProgram.isEmpty
-                ? "Go to session"
-                : "Go to session in \(session.termProgram)"
-            iconButton.accessibilityID("session-panel.row.\(session.sessionId).app-icon")
-            iconButton.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(iconButton)
-
-            // --- Line 1: project » branch » session name, then the activity icon ---
-            let header = NSStackView()
-            header.orientation = .horizontal
-            header.spacing = Layout.headerSpacing
-            header.alignment = .centerY
-            header.translatesAutoresizingMaskIntoConstraints = false
-            headerRow = header
+            // --- Line 1: [app] project » branch » session name … [activity] ---
+            // The same control the Conversations shelf lists sessions with and the
+            // Conversations feed heads each bubble with, so the three windows read
+            // as one description of the same sessions rather than as three
+            // arrangements of the same three facts.
+            let activity = SessionWatcherActivityIconView(
+                activity: session.activity,
+                isSummarizing: isSummarizing
+            )
+            activityIcon = activity
 
             // The project *root*'s name heads it, not the cwd's: a session run from
             // inside a submodule or a linked worktree belongs to the tree above it,
@@ -587,21 +593,30 @@ extension SessionWatcher {
             // directory the user never thinks of as the project. The window keeps
             // itself wide enough for the whole trail (`minimumWidth`); while it
             // catches up, the session name gives way first and the project survives.
-            let crumbs = SessionBreadcrumbView(crumbs: Self.crumbs(for: session))
-            header.addArrangedSubview(crumbs)
-            breadcrumb = crumbs
-
-            let spacer = NSView()
-            spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-            header.addArrangedSubview(spacer)
-            headerSpacer = spacer
-
-            let activity = SessionWatcherActivityIconView(
-                activity: session.activity,
-                isSummarizing: isSummarizing
+            let header = SessionHeaderView(
+                crumbs: Self.crumbs(for: session),
+                icon: .init(
+                    appIdentity: session.termProgram,
+                    side: Layout.iconSide,
+                    gap: Layout.iconToText,
+                    isActionable: true),
+                accessory: activity,
+                accessoryGap: Layout.headerToActivity
             )
-            header.addArrangedSubview(activity)
-            activityIcon = activity
+            headerView = header
+
+            // The icon is the *only* thing in the row that navigates — clicking the
+            // text is not a shortcut for it, so a click meant for the context menu or
+            // for selecting a line can't yank the user into another terminal. The
+            // pointing-hand cursor over it is what says so.
+            if let iconButton = header.iconButton {
+                iconButton.target = self
+                iconButton.action = #selector(goToSessionAction)
+                iconButton.toolTip = session.termProgram.isEmpty
+                    ? "Go to session"
+                    : "Go to session in \(session.termProgram)"
+                iconButton.accessibilityID("session-panel.row.\(session.sessionId).app-icon")
+            }
 
             addSubview(header)
 
@@ -630,7 +645,9 @@ extension SessionWatcher {
             // (and in the context menu's Show Info), keeping the row compact.
             toolTip = Self.infoText(for: session)
 
-            let textLeading = iconButton.trailingAnchor
+            // The prose starts at the row's own margin now that the icon is on the
+            // header's line rather than in a gutter beside the whole row — so the
+            // terminal gets the width that column was spending.
             var lastAnchor = terminal.bottomAnchor
 
             // --- The AI summary under a divider, two lines, only when the feature is on ---
@@ -651,30 +668,25 @@ extension SessionWatcher {
                 summaryHeight = height
                 NSLayoutConstraint.activate([
                     divider.topAnchor.constraint(equalTo: terminal.bottomAnchor, constant: Layout.dividerGap),
-                    divider.leadingAnchor.constraint(equalTo: textLeading, constant: Layout.iconToText),
-                    divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalPadding),
+                    divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalPadding),
+                    divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.trailingPadding),
 
                     summaryLbl.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: Layout.dividerGap),
-                    summaryLbl.leadingAnchor.constraint(equalTo: textLeading, constant: Layout.iconToText),
-                    summaryLbl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalPadding),
+                    summaryLbl.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalPadding),
+                    summaryLbl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.trailingPadding),
                     height
                 ])
                 lastAnchor = summaryLbl.bottomAnchor
             }
 
             NSLayoutConstraint.activate([
-                iconButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalPadding),
-                iconButton.topAnchor.constraint(equalTo: topAnchor, constant: Layout.verticalPadding),
-                iconButton.widthAnchor.constraint(equalToConstant: Layout.iconSide),
-                iconButton.heightAnchor.constraint(equalToConstant: Layout.iconSide),
-
                 header.topAnchor.constraint(equalTo: topAnchor, constant: Layout.verticalPadding),
-                header.leadingAnchor.constraint(equalTo: textLeading, constant: Layout.iconToText),
-                header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalPadding),
+                header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalPadding),
+                header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.trailingPadding),
 
                 terminal.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Layout.headerToOutput),
-                terminal.leadingAnchor.constraint(equalTo: textLeading, constant: Layout.iconToText),
-                terminal.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalPadding),
+                terminal.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalPadding),
+                terminal.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.trailingPadding),
 
                 outputLbl.topAnchor.constraint(equalTo: terminal.topAnchor, constant: Layout.terminalInsetY),
                 outputLbl.leadingAnchor.constraint(equalTo: terminal.leadingAnchor, constant: Layout.terminalInsetX),
@@ -682,10 +694,6 @@ extension SessionWatcher {
                 outputLbl.bottomAnchor.constraint(equalTo: terminal.bottomAnchor, constant: -Layout.terminalInsetY),
                 outputHeight,
 
-                // Whichever is taller — the icon or the text column — sets the row.
-                bottomAnchor.constraint(
-                    greaterThanOrEqualTo: iconButton.bottomAnchor, constant: Layout.verticalPadding
-                ),
                 bottomAnchor.constraint(equalTo: lastAnchor, constant: Layout.verticalPadding)
             ])
         }

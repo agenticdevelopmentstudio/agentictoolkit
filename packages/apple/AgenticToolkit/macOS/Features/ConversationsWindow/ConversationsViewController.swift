@@ -27,6 +27,48 @@ private final class WorkOutputFlag: @unchecked Sendable {
     }
 }
 
+/// Where a line typed into the feed's own composer goes, shared between the main
+/// actor that sets it and the session's sender, which runs off it.
+///
+/// A box rather than a captured closure because both halves move: the host
+/// supplies the write *after* the session exists, and which session it writes to
+/// changes every time the reader moves the single-mode selection.
+private final class FeedSendTarget: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sourceID: String?
+    private var send: (@Sendable (String, String) async -> String?)?
+
+    func set(sourceID: String?) {
+        lock.lock(); self.sourceID = sourceID; lock.unlock()
+    }
+
+    func set(send: (@Sendable (String, String) async -> String?)?) {
+        lock.lock(); self.send = send; lock.unlock()
+    }
+
+    /// Whether there is both somewhere to write and something to write with.
+    var isReady: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return sourceID != nil && send != nil
+    }
+
+    private func current() -> (String?, (@Sendable (String, String) async -> String?)?) {
+        lock.lock(); defer { lock.unlock() }
+        return (sourceID, send)
+    }
+
+    func write(_ text: String) async -> String? {
+        // Read out of the lock before the await: `NSLock.lock()` is unavailable
+        // from an async context, and a lock held across a suspension would be a
+        // bug even where the compiler allowed it.
+        let (destination, send) = current()
+        guard let destination, let send else {
+            return "There is no single session to write to."
+        }
+        return await send(destination, text)
+    }
+}
+
 @MainActor
 public final class ConversationsViewController: NSViewController {
 
@@ -86,11 +128,31 @@ public final class ConversationsViewController: NSViewController {
     /// line was handed over, or the reason it could not be, which the reader
     /// sees under the message they typed.
     ///
-    /// Only the focus overlay offers it: the merged feed has no single session
-    /// a line would belong to, so its composer stays disabled however this is
-    /// set. Left nil — a host with no way to reach a terminal — the overlay's
-    /// composer is disabled too.
-    public var onSendToSource: (@Sendable (String, String) async -> String?)?
+    /// In multi mode only the focus overlay offers it: a merged feed has no
+    /// single session a line would belong to, so its own composer stays disabled
+    /// however this is set. In single mode the window *is* one conversation, so
+    /// the feed's composer is the one that takes the line. Left nil — a host with
+    /// no way to reach a terminal — both are disabled.
+    public var onSendToSource: (@Sendable (String, String) async -> String?)? {
+        didSet {
+            sendTarget.set(send: onSendToSource)
+            updateComposer()
+        }
+    }
+
+    /// Whether the window is reading one conversation or several.
+    ///
+    /// Single mode changes two things here, and both follow from there being
+    /// exactly one session on the timeline: there is nothing left for the focus
+    /// overlay to isolate, and there is an unambiguous destination for a typed
+    /// line. So the overlay goes away and the composer comes alive.
+    public var selectionMode: ConversationsSelectionMode = .multi {
+        didSet {
+            guard selectionMode != oldValue else { return }
+            if selectionMode == .single { dismissFocus() }
+            updateComposer()
+        }
+    }
 
     /// Called when the set of sessions appearing in the feed changes, on the
     /// main actor. The shelf beside the feed draws exactly this.
@@ -105,6 +167,7 @@ public final class ConversationsViewController: NSViewController {
     private let viewModel: AIChatViewModel
     private let workOutputFlag: WorkOutputFlag
     private let sessionFilter: ConversationsSessionFilter
+    private let sendTarget = FeedSendTarget()
     private let load: Load
     private let refreshInterval: Duration
     private let pageLimit: Int
@@ -146,21 +209,39 @@ public final class ConversationsViewController: NSViewController {
         // back.
         let sessionFilter = ConversationsSessionFilter()
         self.sessionFilter = sessionFilter
-        let session = FeedChatSession(refreshInterval: refreshInterval) {
-            // Deepened by whatever the last page lost to the hidden sessions,
-            // so the filter takes rows out of a bigger answer rather than out
-            // of the reader's scrollback.
-            let depth = pageLimit * sessionFilter.pageDeepening
-            guard let messages = await load(flag.value, nil, depth) else { return nil }
-            return sessionFilter.apply(to: messages)
-        }
+        let sendTarget = self.sendTarget
+        let session = FeedChatSession(
+            refreshInterval: refreshInterval,
+            // A sender from the start, resolved when a line is actually typed —
+            // the host has not supplied the write yet, and which session it goes
+            // to changes every time the single-mode selection moves. What decides
+            // whether the composer is live is `canSend`, set below.
+            send: { text in await sendTarget.write(text) },
+            load: {
+                // Deepened by whatever the last page lost to the hidden sessions,
+                // so the filter takes rows out of a bigger answer rather than out
+                // of the reader's scrollback.
+                let depth = pageLimit * sessionFilter.pageDeepening
+                guard let messages = await load(flag.value, nil, depth) else { return nil }
+                return sessionFilter.apply(to: messages)
+            })
+        // Watched until told otherwise: the window opens on the merged feed,
+        // which has no one session a typed line would belong to.
+        session.canSend = false
         self.session = session
         self.viewModel = AIChatViewModel(session: session)
         super.init(nibName: nil, bundle: nil)
 
         // The poll runs off the main actor; the shelf lives on it.
         sessionFilter.onRosterChanged = { [weak self] roster in
-            Task { @MainActor in self?.onRosterChanged?(roster) }
+            Task { @MainActor in
+                guard let self else { return }
+                self.onRosterChanged?(roster)
+                // A roster that changed may have changed which single session is
+                // on the timeline, and in single mode that is the composer's
+                // destination.
+                self.updateComposer()
+            }
         }
     }
 
@@ -177,8 +258,40 @@ public final class ConversationsViewController: NSViewController {
         guard ids != sessionFilter.hidden else { return }
         sessionFilter.hidden = ids
         onHiddenSessionsChanged?(ids)
+        updateComposer()
         refresh()
     }
+
+    /// The one session on the timeline, or nil when there is more than one — the
+    /// destination a line typed into the feed's own composer would have.
+    ///
+    /// Read off the filter rather than taken from the shelf: the shelf's pick is
+    /// expressed *as* the hidden set, and what the feed can write to is whatever
+    /// is actually left showing.
+    private var soleShownSessionID: String? {
+        let shown = sessionFilter.roster.filter { !sessionFilter.hidden.contains($0.id) }
+        return shown.count == 1 ? shown[0].id : nil
+    }
+
+    /// Points the composer at the single session on the timeline, and turns it on
+    /// only when single mode and a live destination agree there is one.
+    private func updateComposer() {
+        sendTarget.set(sourceID: selectionMode == .single ? soleShownSessionID : nil)
+        let live = selectionMode == .single && sendTarget.isReady
+        session.canSend = live
+        chatView?.isComposerEnabled = live
+    }
+
+    /// The feed's composer, for a host wiring a window-wide Tab order — see
+    /// ``KeyViewLoop``.
+    public var composerField: NSView? {
+        loadViewIfNeeded()
+        return chatView?.composerField
+    }
+
+    /// Called whenever the composer is turned on or off, so a host's Tab order
+    /// can drop it out of the cycle while it is off.
+    public var onComposerEnablementChanged: (() -> Void)?
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError() }
@@ -190,11 +303,19 @@ public final class ConversationsViewController: NSViewController {
     /// on every layout pass, and nothing else belongs inside that.
     public override func loadView() {
         let chatView = ChatView(viewModel: viewModel)
-        // The composer stays, greyed: this is a conversation being watched, not
-        // one being joined, and a chat with the entry field cut out reads as a
-        // different kind of window rather than a read-only one.
+        // In multi mode the composer stays, greyed: a merged feed is a set of
+        // conversations being watched, not one being joined, and a chat with the
+        // entry field cut out reads as a different kind of window rather than a
+        // read-only one. `updateComposer` below turns it on when single mode
+        // gives it one session to write to.
         chatView.isComposerEnabled = false
         chatView.bubbleLineLimit = Self.bubbleLineLimit
+        // The Sessions window's box, not the chat window's speech bubble. Every
+        // row here is headed by the session it came from, so a fill that says
+        // "the user" or "the agent" is repeating in colour what the line above
+        // already says in words — and the two windows are read one beside the
+        // other, showing the same sessions.
+        chatView.bubbleStyle = .terminal
         // A merged feed is a list before it is a conversation, so it behaves
         // like one: a row can be picked, the arrows walk them, Return opens the
         // conversation a row came from and Shift-Return leaves for it.
@@ -203,6 +324,9 @@ public final class ConversationsViewController: NSViewController {
             onOpen: { [weak self] message in self?.presentFocus(on: message) },
             onJump: { [weak self] message in self?.onGoToSource?(message) }
         )
+        chatView.onComposerEnablementChanged = { [weak self] in
+            self?.onComposerEnablementChanged?()
+        }
         chatView.translatesAutoresizingMaskIntoConstraints = false
         self.chatView = chatView
 
@@ -219,6 +343,7 @@ public final class ConversationsViewController: NSViewController {
             chatView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
         self.view = container
+        updateComposer()
     }
 
     /// Re-reads the feed now rather than at the next interval — for a filter
@@ -234,7 +359,11 @@ public final class ConversationsViewController: NSViewController {
     // MARK: - Focus overlay
 
     /// Lifts one conversation out of the feed and lays it over the top.
+    ///
+    /// Nothing to do in single mode: the feed underneath is already the one
+    /// conversation, so the overlay would cover it with itself.
     private func presentFocus(on message: ChatMessage) {
+        guard selectionMode == .multi else { return }
         guard let sourceID = message.attribution?.sourceID, !sourceID.isEmpty else { return }
         dismissFocus()
 

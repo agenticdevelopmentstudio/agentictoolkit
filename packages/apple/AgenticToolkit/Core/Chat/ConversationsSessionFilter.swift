@@ -33,11 +33,22 @@ public final class ConversationsSessionFilter: @unchecked Sendable {
         public let name: String
         /// The project and branch crumbs, in the order the feed gave them.
         public let context: [String]
+        /// ``ChatMessage/Attribution/appIdentity`` — the terminal the session
+        /// runs in, which the shelf heads its row with. Empty is ordinary: a
+        /// message can be attributed to a session without naming an
+        /// application, and the icon is then simply absent.
+        public let appIdentity: String
 
-        public init(id: String, name: String, context: [String]) {
+        public init(
+            id: String,
+            name: String,
+            context: [String],
+            appIdentity: String = ""
+        ) {
             self.id = id
             self.name = name.isEmpty ? id : name
             self.context = context
+            self.appIdentity = appIdentity
         }
 
         /// What the shelf draws as the row's title: **where** the session is
@@ -173,7 +184,8 @@ public final class ConversationsSessionFilter: @unchecked Sendable {
             result.append(Session(
                 id: attribution.sourceID,
                 name: attribution.name,
-                context: attribution.context))
+                context: attribution.context,
+                appIdentity: attribution.appIdentity))
         }
         return result
     }

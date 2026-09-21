@@ -25,65 +25,51 @@ final class ConversationFocusTests: XCTestCase {
         try await super.tearDown()
     }
 
-    // MARK: - The jump control
+    // MARK: - The app icon, which is also the jump control
 
-    /// The control hangs off the bottom of the bubble, and its inside edge lines
-    /// up with the *text's* inside edge rather than the bubble's: the text
-    /// column is the line a reader's eye holds, and a control flush with a
-    /// rounded corner reads as hanging past it.
-    func testTheJumpControlLinesUpWithAnAssistantBubblesTextEdge() throws {
-        let (_, bubble, button) = try laidOutRow(role: .assistant, text: "a short reply")
+    /// The icon heads the row from the speaker's own margin, on the header's
+    /// line. Which margin it is against is one of the things that says who is
+    /// talking, so the two sides have to be mirror images and not both-at-once.
+    func testTheAppIconSitsInTheSpeakersOwnMargin() throws {
+        let (agentRow, _, agentIcon) = try laidOutRow(role: .assistant, text: "a short reply")
+        let (humanRow, _, humanIcon) = try laidOutRow(role: .user, text: "a short prompt")
+
         XCTAssertEqual(
-            aligned(button).maxX,
-            aligned(bubble).maxX - AIChatBubbleView.textInset, accuracy: 0.5,
-            "the agent's column runs left, so its bubble's inside edge is the trailing one")
+            aligned(agentIcon, in: agentRow).minX, agentRow.bounds.minX + Self.rowInset,
+            accuracy: 0.5,
+            "the agent's icon is not against the agent's margin")
         XCTAssertEqual(
-            aligned(button).maxY, aligned(bubble).minY + Self.jumpOverlap, accuracy: 0.5,
-            "the control is not hanging off the bottom of the bubble")
+            aligned(humanIcon, in: humanRow).maxX, humanRow.bounds.maxX - Self.rowInset,
+            accuracy: 0.5,
+            "the human's icon is not against the human's margin")
     }
 
-    func testTheJumpControlLinesUpWithAUserBubblesTextEdge() throws {
-        let (_, bubble, button) = try laidOutRow(role: .user, text: "a short prompt")
-        XCTAssertEqual(
-            aligned(button).minX,
-            aligned(bubble).minX + AIChatBubbleView.textInset, accuracy: 0.5,
-            "the human's column runs right, so its bubble's inside edge is the leading one")
-        XCTAssertEqual(
-            aligned(button).maxY, aligned(bubble).minY + Self.jumpOverlap, accuracy: 0.5,
-            "the control is not hanging off the bottom of the bubble")
-    }
+    /// The row's own inset from either margin — what the icon column starts
+    /// after, and the number ``ChatTranscriptRowView`` calls `hInset`.
+    private static let rowInset: CGFloat = 8
 
-    /// How far the control leans on its bubble, in points. A few — enough to
-    /// say whose bubble it is, little enough that a 30pt disc never lands on
-    /// the last line of the message, which is where a truncated bubble keeps
-    /// its own **More…** control.
-    private static let jumpOverlap: CGFloat = 4
-
-    /// The bottom edge is the one place that is the same on every row: a bubble
-    /// is as tall as its text, so a control measured from its middle moves
-    /// about. A one-line bubble and a forty-line one have to overlap it by the
-    /// same few points.
-    func testTheJumpControlLeansOnTheBubbleByTheSameFewPointsHoweverTallItIs() throws {
-        let (_, shortBubble, shortButton) = try laidOutRow(role: .assistant, text: "one line")
+    /// On the header's line, whatever the bubble under it is doing. The header
+    /// is what the icon heads; an icon centred on the row would ride down the
+    /// page as the message got longer, which is the one thing a column of icons
+    /// must not do.
+    func testTheAppIconStaysOnTheHeaderLineHoweverTallTheBubble() throws {
+        let (shortRow, shortBubble, shortIcon) = try laidOutRow(
+            role: .assistant, text: "one line")
         let paragraph = (0..<40).map { "line \($0) of a long reply" }.joined(separator: "\n")
-        let (_, tallBubble, tallButton) = try laidOutRow(role: .assistant, text: paragraph)
+        let (tallRow, tallBubble, tallIcon) = try laidOutRow(
+            role: .assistant, text: paragraph)
 
         XCTAssertGreaterThan(
             tallBubble.frame.height, shortBubble.frame.height * 4,
             "the fixture is wrong: the bubbles have to differ in height for this to mean anything")
 
-        let shortOverlap = aligned(shortButton).maxY - aligned(shortBubble).minY
-        let tallOverlap = aligned(tallButton).maxY - aligned(tallBubble).minY
+        // Measured from the top of the row, because these are two different
+        // rows of two different heights and neither is flipped.
+        let shortDrop = shortRow.bounds.maxY - aligned(shortIcon, in: shortRow).maxY
+        let tallDrop = tallRow.bounds.maxY - aligned(tallIcon, in: tallRow).maxY
         XCTAssertEqual(
-            shortOverlap, Self.jumpOverlap, accuracy: 0.5,
-            "the control leans on the bubble by \(shortOverlap)pt, not a few")
-        XCTAssertLessThan(
-            shortOverlap, shortBubble.frame.height,
-            "the control covers the whole of a one-line bubble")
-        XCTAssertEqual(
-            shortOverlap, tallOverlap, accuracy: 0.5,
-            "the control follows the bubble's centre, not its bottom: "
-                + "\(shortOverlap) vs \(tallOverlap)")
+            shortDrop, tallDrop, accuracy: 0.5,
+            "the icon moved with the message's length: \(shortDrop) vs \(tallDrop)")
     }
 
     /// Compared on alignment rects, not frames: a control's frame carries a
@@ -94,16 +80,15 @@ final class ConversationFocusTests: XCTestCase {
         view.alignmentRect(forFrame: view.frame)
     }
 
-    /// Nearly all of the control is below the bubble it is pinned to, in the
-    /// band the timestamp occupies — and a row's ``ChatTranscriptRowView/hitTest(_:)``
-    /// refuses anything outside its bounds, so a control hanging past either
-    /// edge would be drawn and unclickable.
-    func testTheRowIsTallEnoughToHoldTheJumpControl() throws {
-        let (_, _, button) = try laidOutRow(role: .assistant, text: "one line")
-        let row = try XCTUnwrap(button.superview as? ChatTranscriptRowView)
+    /// A row's ``ChatTranscriptRowView/hitTest(_:)`` refuses anything outside
+    /// its bounds, so an icon hanging past an edge would be drawn and
+    /// unclickable.
+    func testTheRowIsTallEnoughToHoldTheAppIcon() throws {
+        let (row, _, icon) = try laidOutRow(role: .assistant, text: "one line")
+        let box = row.convert(icon.frame, from: icon.superview)
         XCTAssertTrue(
-            row.bounds.contains(button.frame),
-            "the jump control hangs outside the row: \(button.frame) in \(row.bounds)")
+            row.bounds.contains(box),
+            "the app icon hangs outside the row: \(box) in \(row.bounds)")
     }
 
     // MARK: - How wide a bubble may grow
@@ -111,7 +96,7 @@ final class ConversationFocusTests: XCTestCase {
     /// One column, both sides. A merged feed is read straight down, and two
     /// columns offset from each other give it four vertical edges where it
     /// meant to have two — while who is talking is already said by the fill,
-    /// by the side the header is on, and by the avatar.
+    /// by the side the header is on, and by the margin the icon is against.
     func testBothColumnsRunBetweenTheSameTwoMargins() throws {
         let agent = try laidOutFeedRow(role: .assistant, text: Self.wideText)
         let human = try laidOutFeedRow(role: .user, text: Self.wideText)
@@ -159,47 +144,44 @@ final class ConversationFocusTests: XCTestCase {
                        "a short prompt ended somewhere other than the human's margin")
     }
 
-    /// The timestamp and the control come at the band under the bubble from
-    /// opposite ends, and a two-letter message puts both of them at the same
-    /// margin. The timestamp is what moves: a clock reading is legible anywhere
-    /// in that band, while the control's position is what says which bubble it
-    /// belongs to — and one drawn over the other is neither.
-    func testAShortBubblesTimestampStepsAsideForTheJumpControl() throws {
-        for (role, text) in [(ChatMessage.Role.user, "cy"), (.assistant, "ok")] {
-            let (row, _, button) = try laidOutRow(role: role, text: text)
-            let time = try timeLabel(in: row)
-            XCTAssertFalse(
-                time.frame.intersects(button.frame),
-                "\(role) row: the timestamp \(time.frame) is under the control \(button.frame)")
-        }
-    }
-
-    /// And it moves only when it has to — a bubble with room in it leaves the
-    /// timestamp on the margin, where every other row's is, so the column of
-    /// clock readings stays a column.
-    func testAnOrdinaryBubblesTimestampStaysOnTheMargin() throws {
+    /// Every row's clock reading sits on that row's own column edge, whatever
+    /// the message under it is — a two-letter one included. Nothing shares the
+    /// band with it any more, so the column of readings is a column.
+    func testEveryTimestampSitsOnItsOwnColumnEdge() throws {
         let (userRow, _, _) = try laidOutRow(role: .user, text: "a prompt with some length to it")
         let (agentRow, _, _) = try laidOutRow(role: .assistant, text: "a reply with some length")
         let (shortRow, _, _) = try laidOutRow(role: .user, text: "cy")
+        let edge = Self.rowInset + Self.iconColumn
 
         XCTAssertEqual(
-            try timeBox(in: userRow).maxX, Self.feedRowWidth - 8, accuracy: 0.5,
-            "the human's timestamp is not on the human's margin")
+            try timeBox(in: userRow).maxX, Self.feedRowWidth - edge, accuracy: 0.5,
+            "the human's timestamp is not on the human's column edge")
         XCTAssertEqual(
-            try timeBox(in: agentRow).minX, 40, accuracy: 0.5,
+            try timeBox(in: agentRow).minX, edge, accuracy: 0.5,
             "the agent's timestamp is not where the agent's column starts")
-        XCTAssertLessThan(
-            try timeBox(in: shortRow).maxX, try timeBox(in: userRow).maxX,
-            "the short row's timestamp did not move at all, so it must be under the control")
+        XCTAssertEqual(
+            try timeBox(in: shortRow).maxX, try timeBox(in: userRow).maxX, accuracy: 0.5,
+            "a short message moved its row's timestamp off the column edge")
     }
 
-    func testARowWithNoJumpActionShowsNoJumpControl() throws {
+    /// The icon and the air after it — what a row gives up on either margin
+    /// before its column starts.
+    private static let iconColumn: CGFloat = 28 + 8
+
+    /// The picture stays wherever the row came from a named session: it says
+    /// which application, which is worth knowing whether or not there is
+    /// anywhere to go. What a row with nowhere to go drops is the *control* —
+    /// no target, so a click on it does nothing and nothing promises otherwise.
+    func testARowWithNoJumpActionShowsTheIconButNotAControl() throws {
         let row = ChatTranscriptRowView(
             message: message(role: .assistant, text: "hello", sourceID: "s1"),
             maxBubbleWidth: 300,
             actions: .init(onOpen: { _ in })
         )
-        XCTAssertTrue(try jumpButton(in: row).isHidden)
+        let icon = try appIconView(in: row)
+        XCTAssertFalse(icon.isHidden, "the row dropped the picture along with the control")
+        XCTAssertNotNil(icon.image, "the row's icon has no application on it")
+        XCTAssertNil(icon.target, "a row with nowhere to go still offers to go there")
     }
 
     // MARK: - The overlay
@@ -377,7 +359,7 @@ final class ConversationFocusTests: XCTestCase {
         let went = Box()
         controller.onGoToSource = { went.values.append($0.attribution?.sourceID ?? "") }
 
-        try jumpButton(in: try firstRow(of: controller)).performClick(nil)
+        try appIconView(in: try firstRow(of: controller)).performClick(nil)
 
         XCTAssertEqual(went.values, ["s1"])
         XCTAssertNil(focusOverlay(in: controller), "the jump control is not a row click")
@@ -540,7 +522,7 @@ final class ConversationFocusTests: XCTestCase {
     /// The app icon says which application a row is running in — a question a
     /// *merged* feed asks and this view has already answered, since every row
     /// in it is the same session.
-    func testTheOverlayShowsNoAppIconOnItsRows() async throws {
+    func testTheOverlayOffersNoJumpOnItsRows() async throws {
         let (controller, _) = try await loadedFeed()
         doubleClick(try firstRow(of: controller))
         let overlay = try XCTUnwrap(focusOverlay(in: controller))
@@ -551,8 +533,8 @@ final class ConversationFocusTests: XCTestCase {
         let rows = transcriptRows(of: chat)
         XCTAssertFalse(rows.isEmpty, "the fixture is wrong: the overlay has no rows to check")
         for row in rows {
-            XCTAssertTrue(try jumpButton(in: row).isHidden,
-                          "a row inside one conversation still offers to go to it")
+            XCTAssertNil(try appIconView(in: row).target,
+                         "a row inside one conversation still offers to go to it")
         }
     }
 
@@ -1025,34 +1007,56 @@ final class ConversationFocusTests: XCTestCase {
     func testTheRowIsHeadedByTheSessionsWindowsBreadcrumb() throws {
         let row = try laidOutRow(role: .assistant, text: "a short reply").row
         let header = try XCTUnwrap(
-            row.subviews.compactMap { $0 as? SessionBreadcrumbView }.first,
+            descendants(of: row).compactMap { $0 as? SessionBreadcrumbView }.first,
             "the row's header is not the shared breadcrumb")
 
         XCTAssertEqual(header.segmentLabels.map(\.stringValue), ["proj", "main", "a session"])
         XCTAssertEqual(header.nameLabel?.textColor, SessionBreadcrumbView.nameColor)
     }
 
-    /// There is only ever one human here, so an avatar repeated down every
-    /// second row is a column of the same fact. The agent's stays: with work
-    /// output shown it is which *kind* of line this is.
-    func testTheHumansRowHasNoAvatar() throws {
+    /// Neither side carries a badge for who is talking. Who said it is already
+    /// said by the fill, by which margin the row hangs off, and by the header —
+    /// a fourth saying of it is the one thing in the row carrying no new fact.
+    /// What sits in the margin instead names the *application*, which is a
+    /// question neither of the other three answers.
+    func testNeitherSideCarriesASpeakerAvatar() throws {
+        for role in [ChatMessage.Role.user, .assistant] {
+            let row = try laidOutRow(role: role, text: "a short line").row
+            XCTAssertFalse(hasAvatar(row), "\(role) still carries a badge for the speaker")
+        }
+    }
+
+    /// The header starts where the icon's column ends, on whichever margin the
+    /// speaker's icon is against — not at the row's raw inset, which would run
+    /// the text under the picture.
+    func testTheHeaderStartsWhereTheIconColumnEnds() throws {
         let human = try laidOutRow(role: .user, text: "a short prompt").row
         let agent = try laidOutRow(role: .assistant, text: "a short reply").row
+        let edge = Self.rowInset + Self.iconColumn
 
-        XCTAssertFalse(hasAvatar(human), "the human's row still carries an avatar")
-        XCTAssertTrue(hasAvatar(agent), "the agent's row lost the icon that says which kind of line it is")
+        let humanHeader = try headerBox(in: human)
+        XCTAssertEqual(
+            human.bounds.maxX - humanHeader.maxX, edge, accuracy: 0.5,
+            "the human's header does not clear the icon in its own margin")
+        XCTAssertEqual(
+            try headerBox(in: agent).minX, edge, accuracy: 0.5,
+            "the agent's header does not clear the icon in its own margin")
     }
 
-    /// And the hole it left is closed: the human's header starts at the row's
-    /// own inset, not where the avatar used to end.
-    func testTheHumansRowStartsAtItsOwnEdge() throws {
-        let row = try laidOutRow(role: .user, text: "a short prompt").row
-        let header = try XCTUnwrap(row.subviews.compactMap { $0 as? SessionBreadcrumbView }.first)
-
-        XCTAssertEqual(row.bounds.maxX - header.frame.maxX, 8, accuracy: 0.5,
-                       "the human's row keeps a gap where the avatar was")
+    /// The *trail's* box, in the row's coordinates — not the whole header's.
+    /// The icon is part of the shared header view and sits in the margin the
+    /// column starts after, so a measurement of the header as a whole would be
+    /// a measurement of the icon's edge, which the icon's own test already
+    /// makes.
+    private func headerBox(in row: ChatTranscriptRowView) throws -> NSRect {
+        let crumbs = try XCTUnwrap(
+            descendants(of: row).compactMap { $0 as? SessionBreadcrumbView }.first,
+            "the row has no header")
+        return row.convert(crumbs.frame, from: crumbs.superview)
     }
 
+    /// An avatar was a symbol inside a wrapper; the app icon is the button
+    /// itself. So this looks for the shape that is gone, not for any image.
     private func hasAvatar(_ row: ChatTranscriptRowView) -> Bool {
         row.subviews.contains { $0.subviews.contains { $0 is NSImageView } }
     }
@@ -1175,7 +1179,7 @@ final class ConversationFocusTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         let bubble = try XCTUnwrap(row.subviews.compactMap { $0 as? AIChatBubbleView }.first)
-        return (row, bubble, try jumpButton(in: row))
+        return (row, bubble, try appIconView(in: row))
     }
 
     /// The width a fixture row is laid out at — a number rather than the
@@ -1234,13 +1238,25 @@ final class ConversationFocusTests: XCTestCase {
         return label.alignmentRect(forFrame: label.frame)
     }
 
-    private func jumpButton(in row: ChatTranscriptRowView) throws -> NSButton {
+    /// Searched through the whole row rather than among its direct children:
+    /// the icon lives inside the shared ``SessionHeaderView`` now, and a test
+    /// that reached for a direct subview would be asserting on where the
+    /// control is parented rather than on what the row shows.
+    private func appIconView(in row: ChatTranscriptRowView) throws -> NSButton {
         try XCTUnwrap(
-            row.subviews
+            descendants(of: row)
                 .compactMap { $0 as? NSButton }
                 .first { $0.accessibilityIdentifier() == "chat-row.jump" },
-            "the row has no jump control"
+            "the row has no app icon"
         )
+    }
+
+    /// A descendant's alignment rect in the *row's* own coordinates. Every
+    /// margin these tests are about is a margin of the row, and the header's
+    /// children are measured in the header.
+    private func aligned(_ view: NSView, in row: NSView) -> NSRect {
+        row.convert(view.alignmentRect(forFrame: view.frame),
+                    from: view.superview)
     }
 
     // MARK: - Reaching into the view tree

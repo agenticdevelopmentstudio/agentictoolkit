@@ -24,7 +24,7 @@ extension SessionWatcher {
     /// that layer turned about the glyph's corner: the arrows orbited down over the
     /// output line beneath them instead of spinning in place. AppKit never touches a
     /// sublayer's geometry, so its centred anchor holds.
-    public final class SessionWatcherActivityIconView: NSView {
+    public final class SessionWatcherActivityIconView: NSView, Themeable {
         private var activity: SessionWatcherActivity
         private var isSummarizing: Bool
         private var tint: NSColor = .tertiaryLabelColor
@@ -55,6 +55,7 @@ extension SessionWatcher {
             ])
             describeState()
             renderGlyph()
+            applyQuiet()
         }
 
         @available(*, unavailable)
@@ -73,10 +74,29 @@ extension SessionWatcher {
             self.isSummarizing = isSummarizing
             describeState()
             renderGlyph()
+            applyQuiet()
             // The state that was animating may not be the state that is, so the old
             // animation goes before the new one is chosen.
             stopAnimation()
             if window != nil { startAnimation() }
+        }
+
+        /// Idle is the state a row is in most of the time, so a dot for it is a
+        /// mark on nearly every row at once — which makes the marks say nothing,
+        /// and leaves the two states worth noticing competing with a column of
+        /// noise. An empty slot is the accurate rendering of *nothing is
+        /// happening*, and it is what makes a glyph appearing anywhere in the
+        /// list mean something.
+        ///
+        /// Summarizing is not quiet even while idle: the sparkles say work is
+        /// being done *about* the session, which is exactly the fact a blank
+        /// slot would deny.
+        private var isQuiet: Bool { activity == .idle && !isSummarizing }
+
+        /// The stack this sits in detaches a hidden arranged subview, so the
+        /// row closes up around the gap rather than reserving a blank square.
+        private func applyQuiet() {
+            isHidden = isQuiet
         }
 
         private var symbolName: String {

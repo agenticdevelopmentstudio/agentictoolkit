@@ -43,6 +43,7 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     private let sendTimeout: Duration
 
     private let lock = NSLock()
+    private var sendable: Bool
     private var continuation: AsyncStream<ChatEvent>.Continuation?
     private var pump: Task<Void, Never>?
 
@@ -77,12 +78,23 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
         self.refreshInterval = refreshInterval
         self.sendTimeout = sendTimeout
         self.send = send
+        self.sendable = send != nil
         self.loaded = initial
         self.load = load
     }
 
     /// Whether anything typed here has somewhere to go.
-    public var canSend: Bool { send != nil }
+    ///
+    /// Starts as "there is a sender" and stays that way for a session whose
+    /// destination is fixed. It is settable because a feed's destination can
+    /// come and go under it: the Conversations window has exactly one session to
+    /// write to in single-conversation mode and none in multi, and it is the
+    /// same session object either way. Setting it never conjures a sender — with
+    /// none supplied, ``send(_:)`` still has nowhere to write.
+    public var canSend: Bool {
+        get { withLock { sendable && send != nil } }
+        set { withLock { sendable = newValue } }
+    }
 
     public func events() -> AsyncStream<ChatEvent> {
         AsyncStream { continuation in
@@ -106,7 +118,7 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// which is a stronger thing to see than a message that was never drawn.
     public func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let send else { return }
+        guard !trimmed.isEmpty, canSend, let send else { return }
 
         let message = ChatMessage(
             id: "pending-\(UUID().uuidString)",

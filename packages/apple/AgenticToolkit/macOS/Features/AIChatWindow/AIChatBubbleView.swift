@@ -46,8 +46,36 @@ public final class AIChatBubbleView: NSView {
     private static let ellipsis = "…"
     private static let moreTitle = "More…"
 
+    /// Which of the two shapes a bubble is drawn in.
+    ///
+    /// They answer different questions. A one-to-one chat has two speakers and
+    /// no other way to tell them apart, so its bubbles are coloured by role —
+    /// that *is* the attribution. A merged feed already says who is talking, in
+    /// a header line over every row, so colouring by role there spends the
+    /// window's whole palette repeating a fact already in words — and does it
+    /// beside a session list where the same sessions are drawn as inset boxes on
+    /// the window's surface. `terminal` is that box: the Sessions window's own,
+    /// to the point.
+    public enum Style: Sendable {
+        /// Role-keyed fill, generous radius — the chat window's bubble.
+        case speaker
+        /// The Sessions window's inset output box: surface fill, hairline
+        /// border, small radius, whoever is speaking.
+        case terminal
+
+        /// How round the corners are. The terminal box's 6 is the tighter of
+        /// the two because it reads as a panel rather than as speech.
+        var cornerRadius: CGFloat {
+            switch self {
+            case .speaker: return 12
+            case .terminal: return 6
+            }
+        }
+    }
+
     private let message: ChatMessage
     private let maxWidth: CGFloat
+    private let style: Style
     private let showsInlineTimestamp: Bool
     private let isTextSelectable: Bool
 
@@ -159,6 +187,7 @@ public final class AIChatBubbleView: NSView {
     private static let moreInlineGap: CGFloat = 4
 
     /// - Parameters:
+    ///   - style: which of the two bubble shapes to draw — see ``Style``.
     ///   - showsInlineTimestamp: whether the time trails the text inside the
     ///     bubble. A bubble that sits in a ``ChatTranscriptRowView`` has the
     ///     time on its own line underneath instead, so it turns this off rather
@@ -175,6 +204,7 @@ public final class AIChatBubbleView: NSView {
     public init(
         message: ChatMessage,
         maxWidth: CGFloat,
+        style: Style = .speaker,
         showsInlineTimestamp: Bool = true,
         isTextSelectable: Bool = true,
         lineLimit: Int? = nil,
@@ -182,6 +212,7 @@ public final class AIChatBubbleView: NSView {
     ) {
         self.message = message
         self.maxWidth = maxWidth
+        self.style = style
         self.showsInlineTimestamp = showsInlineTimestamp
         self.isTextSelectable = isTextSelectable
         self.lineLimit = lineLimit
@@ -204,7 +235,7 @@ public final class AIChatBubbleView: NSView {
         }
 
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = style.cornerRadius
         translatesAutoresizingMaskIntoConstraints = false
 
         textView.isEditable = false
@@ -287,6 +318,15 @@ public final class AIChatBubbleView: NSView {
         // close enough to the fill that drawing them everywhere reads as fuzz.
         func border(_ role: ThemeRole) -> NSColor? {
             palette.declares(role) ? palette.nsColor(role) : nil
+        }
+        // The terminal shape takes the Sessions window's output box wholesale:
+        // the window's surface, the window's border, one hairline, always. Its
+        // two conversational roles come out identical on purpose — the row's
+        // header line says who is talking, and saying it twice is what this
+        // style exists to stop. `error` and `notice` fall through: they are not
+        // conversation, so they keep the colour that says what they are.
+        if case .terminal = style, message.role == .user || message.role == .assistant {
+            return (palette.surfaceColor, palette.primaryTextColor, palette.borderColor)
         }
         switch message.role {
         case .user:

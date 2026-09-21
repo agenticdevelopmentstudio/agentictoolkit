@@ -45,12 +45,44 @@ public final class ConversationsShelfViewController: NSViewController,
     /// hands it straight over without inverting anything.
     public var onHiddenChanged: ((Set<String>) -> Void)?
 
+    /// Whether the shelf picks one session at a time or any number of them.
+    ///
+    /// Switching to ``ConversationsSelectionMode/single`` keeps whichever
+    /// session was already the first one showing and hides the rest, so the
+    /// change reads as a narrowing of what is on screen rather than as a jump to
+    /// something arbitrary. Switching back leaves the ticks where they are —
+    /// one session showing is a legitimate multi-mode state, and re-ticking the
+    /// others for the reader would undo a narrowing they asked for.
+    public var selectionMode: ConversationsSelectionMode = .multi {
+        didSet {
+            guard selectionMode != oldValue else { return }
+            // Single mode always has a row picked, so there is nothing for an
+            // empty selection to mean and no way to reach one.
+            table.allowsEmptySelection = selectionMode == .multi
+            // Select All / Unselect All are multi-mode answers; see
+            // `selectAllVisible()`.
+            selectionMenuButton.isEnabled = selectionMode == .multi
+            if selectionMode == .single { adoptSolo() } else { syncTableSelection() }
+        }
+    }
+
+    /// In single mode, the one session being shown.
+    ///
+    /// Held rather than derived from the hidden set, because the roster changes
+    /// under it: a session that says nothing for a while falls off the page, and
+    /// "the first one not hidden" would then quietly become a different
+    /// conversation than the one the reader picked.
+    private var soloID: String?
+
     /// Every session in the feed, newest roster wins. Setting it keeps the
     /// reader's sort, filter text and scroll position.
     public var sessions: [Session] = [] {
         didSet {
             guard sessions != oldValue else { return }
             reload()
+            // A session that arrives mid-read arrives unhidden, which in single
+            // mode would put two conversations on a timeline built for one.
+            if selectionMode == .single { adoptSolo() }
         }
     }
 
@@ -65,6 +97,14 @@ public final class ConversationsShelfViewController: NSViewController,
     private let scrollView = ThemedScrollView(frame: .zero)
     private let filterField = ThemedSearchField(placeholder: "Filter")
     private let selectionMenuButton = NSPopUpButton(frame: .zero, pullsDown: true)
+
+    /// The filter box, for a host wiring a window-wide Tab order — see
+    /// ``KeyViewLoop``. The shelf is usually collapsed, and a collapsed pane
+    /// hides its contents rather than disabling them, which the loop reads.
+    public var filterTextField: NSView {
+        loadViewIfNeeded()
+        return filterField
+    }
 
     /// The list's backdrop: a themed panel, not the system's sidebar material.
     /// Sidebar material is drawn by the appearance and reaches no theme, so a
@@ -136,12 +176,18 @@ public final class ConversationsShelfViewController: NSViewController,
     /// A Select All that quietly reached past the filter would undo a reader's
     /// careful narrowing with one keystroke, and there would be no way to tell
     /// from the screen that it had.
+    ///
+    /// Both this and ``unselectAllVisible()`` do nothing in single mode: "all"
+    /// is the one answer that mode has no way to draw, and an unselect-all would
+    /// leave it with no conversation at all.
     @objc public func selectAllVisible() {
+        guard selectionMode == .multi else { return }
         apply(hidden.subtracting(visible.map(\.id)))
     }
 
     /// Unticks every row in the visible list, on the same terms.
     @objc public func unselectAllVisible() {
+        guard selectionMode == .multi else { return }
         apply(hidden.union(visible.map(\.id)))
     }
 
@@ -156,6 +202,78 @@ public final class ConversationsShelfViewController: NSViewController,
         apply(hidden.contains(id) ? hidden.subtracting([id]) : hidden.union([id]))
     }
 
+    // MARK: - Single mode
+
+    /// Makes `id` the one shown session. A click in single mode *replaces* the
+    /// pick rather than toggling it: unticking the only ticked row would leave
+    /// the feed empty, and an empty feed is not a state this mode has a way back
+    /// out of except by clicking something else anyway.
+    private func pick(_ id: String) {
+        soloID = id
+        applySolo()
+    }
+
+    /// Settles the single-mode invariant — one session shown, every other one
+    /// hidden — keeping the current pick if it is still in the roster.
+    private func adoptSolo() {
+        let ids = Set(sessions.map(\.id))
+        let current = soloID.flatMap { ids.contains($0) ? $0 : nil }
+        soloID = current
+            ?? visible.first { !hidden.contains($0.id) }?.id
+            ?? visible.first?.id
+            ?? sessions.first?.id
+        applySolo()
+    }
+
+    /// Hides everything but the pick.
+    ///
+    /// A no-op while the roster is empty, and that is load-bearing: the host
+    /// restores a remembered hidden set before the first page has been read, and
+    /// enforcing an invariant against zero sessions would compute "hide nothing"
+    /// and hand that back as the reader's new answer.
+    private func applySolo() {
+        guard selectionMode == .single, !sessions.isEmpty else { return }
+        apply(Set(sessions.map(\.id)).subtracting(soloID.map { [$0] } ?? []))
+        syncTableSelection()
+    }
+
+    /// Moves the pick `delta` rows down the visible list (negative is up).
+    ///
+    /// Stops at the ends rather than wrapping: the keystroke is one a reader
+    /// holds down to walk the list, and a wrap turns arriving at the bottom into
+    /// a jump back to the top that reads as the selection having been lost.
+    /// Returns whether it moved, so a key handler can let the keystroke fall
+    /// through when there was nowhere to go.
+    @discardableResult
+    public func moveSelection(by delta: Int) -> Bool {
+        guard selectionMode == .single, !visible.isEmpty else { return false }
+        let current = soloID.flatMap { id in visible.firstIndex { $0.id == id } }
+        // With nothing picked yet, the first press picks the first row rather
+        // than moving off an index that does not exist.
+        let target = current.map { $0 + delta } ?? 0
+        let next = min(max(target, 0), visible.count - 1)
+        guard next != current else { return false }
+        pick(visible[next].id)
+        return true
+    }
+
+    /// In single mode the picked row is the table's selected row too, so the
+    /// reader can see what the arrow keys just moved. In multi mode there is no
+    /// such thing as *the* row, and a highlight on one of several ticked
+    /// sessions would say there is.
+    private func syncTableSelection() {
+        guard isViewLoaded else { return }
+        guard selectionMode == .single,
+              let soloID,
+              let row = visible.firstIndex(where: { $0.id == soloID })
+        else {
+            table.deselectAll(nil)
+            return
+        }
+        table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        table.scrollRowToVisible(row)
+    }
+
     // MARK: - View
 
     public override func loadView() {
@@ -164,6 +282,7 @@ public final class ConversationsShelfViewController: NSViewController,
         let container = ShelfContainerView()
         container.onCommandA = { [weak self] extend in
             guard let self, self.ownsFirstResponder else { return false }
+            guard self.selectionMode == .multi else { return false }
             if extend { self.unselectAllVisible() } else { self.selectAllVisible() }
             return true
         }
@@ -333,6 +452,7 @@ public final class ConversationsShelfViewController: NSViewController,
         // A pull-down sizes itself for the widest title in its menu, which here
         // is "Unselect All" — a menu button three times the width of its glyph.
         selectionMenuButton.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        selectionMenuButton.isEnabled = selectionMode == .multi
         _ = selectionMenuButton.accessibilityID(AXID.selectionMenu)
 
         let bar = NSView()
@@ -418,6 +538,9 @@ public final class ConversationsShelfViewController: NSViewController,
         }
         guard isViewLoaded else { return }
         table.reloadData()
+        // `reloadData` drops the selection, so the single-mode highlight is
+        // re-stated here rather than only where the pick changes.
+        syncTableSelection()
     }
 
     /// The rows the reader can currently see, in the order they are drawn.
@@ -449,7 +572,10 @@ public final class ConversationsShelfViewController: NSViewController,
     @objc private func rowClicked() {
         let row = table.clickedRow
         guard visible.indices.contains(row) else { return }
-        toggle(visible[row].id)
+        switch selectionMode {
+        case .multi:  toggle(visible[row].id)
+        case .single: pick(visible[row].id)
+        }
     }
 
     // MARK: - NSTableViewDataSource / Delegate
@@ -490,46 +616,40 @@ public final class ConversationsShelfViewController: NSViewController,
         return image
     }
 
-    /// `project >> branch` over the session's own name — its place on top,
-    /// because that is what stays put. A session's name is a summary of what it
-    /// is doing this minute, and a list sorted by a title that rewrites itself
-    /// under the reader is a list they cannot find anything in twice.
+    /// `[app] project » branch » session name` — the same one line the Sessions
+    /// window lists a session with and the feed heads each bubble with, so the
+    /// three read as one description of the same sessions.
+    ///
+    /// No activity indicator here. This window is about what was *said*, and a
+    /// column of live-state glyphs beside a transcript invites reading the shelf
+    /// for what a session is doing right now — which is the Sessions window's
+    /// job, and the one place the indicator appears.
     private func nameCell(for session: Session) -> NSView {
-        let name = ThemedLabel(
-            string: session.displayName, role: .primaryText, textRole: .body)
-        // From the head: the branch is the end of `project >> branch`, and it
-        // is the half that tells two rows of the same project apart.
-        name.lineBreakMode = .byTruncatingHead
-        name.translatesAutoresizingMaskIntoConstraints = false
+        let header = SessionHeaderView(
+            crumbs: .init(context: session.context, name: session.name),
+            icon: session.appIdentity.isEmpty
+                ? nil
+                : .init(appIdentity: session.appIdentity, side: 16, gap: 6)
+        )
+        header.setAccessibilityLabel(session.displayName)
+        // The cell is rebuilt by the table rather than owned by this controller,
+        // so it repaints itself instead of waiting to be told.
+        header.observeTheme { view, palette in view.applyTheme(palette) }
 
-        let stack = NSStackView(views: [name])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 1
-        stack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 4)
         // The table sets a cell view's frame itself, so the root of one keeps
-        // its autoresizing translation. Turning it off here left the stack at
-        // its intrinsic width — the width of the longest session name — and the
+        // its autoresizing translation. Turning it off left the row at its
+        // intrinsic width — the width of the longest session name — and the
         // column drew a row that ran off its own right edge, mid-glyph, with
-        // neither label reaching the truncation it had asked for.
-        stack.translatesAutoresizingMaskIntoConstraints = true
-
-        // The name, underneath, and only when it is saying something the title
-        // did not — a session with no crumbs is already titled by its name.
-        if session.name != session.displayName {
-            let subtitle = ThemedLabel(
-                string: session.name, role: .secondaryText, textRole: .caption)
-            subtitle.lineBreakMode = .byTruncatingTail
-            subtitle.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(subtitle)
-        }
-        // And a label only truncates if it is willing to be narrower than its
-        // text. Both of these would rather overflow the column than shrink.
-        for label in stack.arrangedSubviews {
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        }
-        return stack
+        // nothing reaching the truncation it had asked for.
+        let cell = NSView()
+        cell.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            header.trailingAnchor.constraint(
+                lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+            header.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+        ])
+        return cell
     }
 }
 

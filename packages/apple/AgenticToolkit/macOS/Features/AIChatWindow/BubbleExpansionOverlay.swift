@@ -29,8 +29,14 @@ public final class BubbleExpansionOverlay: DismissibleOverlayView {
 
     private let message: ChatMessage
 
-    public init(message: ChatMessage) {
+    /// The shape the transcript drew this message in. Carried across rather than
+    /// defaulted: an overlay is the *same* bubble opened out, so one that came
+    /// back in the other style would read as a different message.
+    private let style: AIChatBubbleView.Style
+
+    public init(message: ChatMessage, style: AIChatBubbleView.Style = .speaker) {
         self.message = message
+        self.style = style
         super.init(material: .hudWindow)
         accessibilityID("bubble-expansion.overlay")
     }
@@ -44,6 +50,7 @@ public final class BubbleExpansionOverlay: DismissibleOverlayView {
         let bubble = AIChatBubbleView(
             message: message,
             maxWidth: min(available, Self.maxBubbleWidth),
+            style: style,
             showsInlineTimestamp: true,
             isTextSelectable: true
         )
