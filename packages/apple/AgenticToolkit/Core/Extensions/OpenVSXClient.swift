@@ -45,18 +45,33 @@ public struct OpenVSXClient: Sendable {
     /// fails and a process that dies.
     public static let defaultMaximumArtifactBytes = 512 * 1024 * 1024
 
+    /// The most a *metadata* answer may weigh — a search page or one
+    /// extension's record.
+    ///
+    /// Three orders of magnitude below the artifact ceiling, and deliberately
+    /// so: these are JSON documents describing extensions, not the extensions
+    /// themselves. The largest page this client asks for is 50 rows, and Open
+    /// VSX answers a detail request with URLs rather than with the readme they
+    /// point at, so 8 MB is far above any honest answer and far below what it
+    /// takes to matter. One number for both would have to be the download's,
+    /// which would make the metadata ceiling decorative.
+    public static let defaultMaximumMetadataBytes = 8 * 1024 * 1024
+
     private let registryBase: URL
     private let session: URLSession
     private let maximumArtifactBytes: Int
+    private let maximumMetadataBytes: Int
 
     public init(
         registryBase: URL = OpenVSXClient.openVSXRegistry,
         session: URLSession = .shared,
-        maximumArtifactBytes: Int = OpenVSXClient.defaultMaximumArtifactBytes
+        maximumArtifactBytes: Int = OpenVSXClient.defaultMaximumArtifactBytes,
+        maximumMetadataBytes: Int = OpenVSXClient.defaultMaximumMetadataBytes
     ) {
         self.registryBase = registryBase
         self.session = session
         self.maximumArtifactBytes = maximumArtifactBytes
+        self.maximumMetadataBytes = maximumMetadataBytes
     }
 
     // MARK: - Reading the catalog
@@ -141,46 +156,13 @@ public struct OpenVSXClient: Sendable {
     /// and hand it back as the download; `http:` was a quieter version of the
     /// same, moving the fetch to whoever is on the network path. Neither is
     /// something a registry has any reason to ask for.
-    /// **Read to a ceiling, not to the end.** How many bytes arrive is the
-    /// sender's decision, and `session.data(from:)` accumulates all of them:
-    /// a registry — or whoever is answering as one on a compromised network
-    /// path — that never stops sending grows this process's heap until it
-    /// dies, with no request having failed and nothing to log. Streaming the
-    /// body and abandoning it at `maximumArtifactBytes` turns that into an
-    /// ordinary throw the caller already handles.
     ///
-    /// **Why the whole body streams rather than only the unframed case.**
-    /// Iterating `AsyncBytes` measures 23.8 MB/s against an in-process stub,
-    /// where `data(from:)` — which cannot be bounded — measures 2.5 GB/s. That
-    /// gap is real but it is not on the critical path: this loop is consuming a
-    /// download, so it spends nearly all of its time waiting on the network,
-    /// and 23.8 MB/s is about 190 Mbps of headroom. Splitting into a fast path
-    /// for a `Content-Length`-framed response and a slow one for a chunked
-    /// reply would buy that back, at the cost of two code paths where the
-    /// rarely-taken one is the only one that has to be right *(simplicity)*.
+    /// How much of one a registry may send is `body`'s rule, not this
+    /// method's — it passes the artifact ceiling and the error that names it.
     public func data(at url: URL) async throws -> Data {
         try Self.requireFetchable(url)
-        let (bytes, response) = try await session.bytes(from: url)
-        try Self.checkStatus(of: response, for: url)
-
-        // The status check comes first so a 404's error document is refused
-        // as a 404 rather than read. `expectedContentLength` is only a hint —
-        // it is -1 for a chunked response and it is the sender's claim either
-        // way — so it short-circuits an obvious refusal and decides nothing.
-        if response.expectedContentLength > Int64(maximumArtifactBytes) {
-            throw OpenVSXError.artifactTooLarge(url, limit: maximumArtifactBytes)
-        }
-
-        var collected = Data()
-        collected.reserveCapacity(
-            min(max(Int(response.expectedContentLength), 0), 1 << 20))
-        for try await byte in bytes {
-            collected.append(byte)
-            if collected.count > maximumArtifactBytes {
-                throw OpenVSXError.artifactTooLarge(url, limit: maximumArtifactBytes)
-            }
-        }
-        return collected
+        return try await body(
+            at: url, limit: maximumArtifactBytes, tooLarge: OpenVSXError.artifactTooLarge)
     }
 
     /// The text at `url`, stripped of surrounding whitespace.
@@ -199,9 +181,73 @@ public struct OpenVSXClient: Sendable {
 
     // MARK: - Private
 
-    private func decode<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
-        let (data, response) = try await session.data(from: url)
+    /// Reads a response body to a ceiling, and no further.
+    ///
+    /// **Read to a ceiling, not to the end.** How many bytes arrive is the
+    /// sender's decision, and `session.data(from:)` accumulates all of them:
+    /// a registry — or whoever is answering as one on a compromised network
+    /// path — that never stops sending grows this process's heap until it
+    /// dies, with no request having failed and nothing to log. Streaming the
+    /// body and abandoning it at the ceiling turns that into an ordinary
+    /// throw the caller already handles.
+    ///
+    /// **Why the whole body streams rather than only the unframed case.**
+    /// Iterating `AsyncBytes` measures 23.8 MB/s against an in-process stub,
+    /// where `data(from:)` — which cannot be bounded — measures 2.5 GB/s. That
+    /// gap is real but it is not on the critical path: a download spends
+    /// nearly all of its time waiting on the network, and 23.8 MB/s is about
+    /// 190 Mbps of headroom; a metadata answer is a few hundred kilobytes, so
+    /// the same rate costs it single-digit milliseconds. Splitting into a fast
+    /// path for a `Content-Length`-framed response and a slow one for a
+    /// chunked reply would buy that back, at the cost of two code paths where
+    /// the rarely-taken one is the only one that has to be right
+    /// *(simplicity)*.
+    ///
+    /// Shared by the download and the metadata read because it is one rule —
+    /// how much of a stranger's answer this process is willing to hold — with
+    /// two numbers *(dry)*. Which number, and which error names it, is the
+    /// caller's to say; everything else about the two paths was identical, and
+    /// the copy that was not written is the one where the ceiling gets fixed
+    /// in one place and not the other.
+    ///
+    /// The status check comes first so a 404's error document is refused as a
+    /// 404 rather than read. `expectedContentLength` is consulted next and
+    /// decides nothing on its own: it is -1 for a chunked response and it is
+    /// the sender's claim either way, so it can only short-circuit a refusal
+    /// the byte count would reach anyway. Believing it in the other direction
+    /// — reading to a length the sender promised — is how an understated
+    /// header walks a body past the ceiling.
+    private func body(
+        at url: URL, limit: Int, tooLarge: (URL, Int) -> OpenVSXError
+    ) async throws -> Data {
+        let (bytes, response) = try await session.bytes(from: url)
         try Self.checkStatus(of: response, for: url)
+
+        if response.expectedContentLength > Int64(limit) {
+            throw tooLarge(url, limit)
+        }
+
+        var collected = Data()
+        collected.reserveCapacity(
+            min(max(Int(response.expectedContentLength), 0), 1 << 20))
+        for try await byte in bytes {
+            collected.append(byte)
+            if collected.count > limit {
+                throw tooLarge(url, limit)
+            }
+        }
+        return collected
+    }
+
+    /// **Metadata is a body too.** `search` and `detail` read a response into
+    /// memory with exactly the "however much the sender decides" property the
+    /// download had, and they are the *first* thing any registry interaction
+    /// does: a panel that has had one character typed into it has already made
+    /// this request, long before anyone chose to install anything. Bounding
+    /// the download and not this left the hole open at the cheaper end.
+    private func decode<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
+        let data = try await body(
+            at: url, limit: maximumMetadataBytes, tooLarge: OpenVSXError.responseTooLarge)
         do {
             return try JSONDecoder().decode(type, from: data)
         } catch {
@@ -316,4 +362,11 @@ public enum OpenVSXError: Error, Sendable, Equatable {
 
     /// The response was not an HTTP response, so no status could be checked.
     case responseNotHTTP(URL)
+
+    /// A metadata answer — a search page or one extension's record — ran past
+    /// the ceiling this client reads to. Distinct from `artifactTooLarge`
+    /// because the two ceilings are three orders of magnitude apart, so a
+    /// report that named the wrong one would be off by a factor of 64, and
+    /// because "the download was stopped" is not what happened.
+    case responseTooLarge(URL, limit: Int)
 }

@@ -1749,16 +1749,38 @@ public final class ExtensionHost {
     /// the shim is extension-reachable and this is not, and one bad
     /// `setTimeout` must not be able to kill every other extension and the app
     /// with it — which is the isolation property this host exists to provide.
-    private static let maximumTimerDelayMilliseconds: Double = 2_147_483_647
+    static let maximumTimerDelayMilliseconds: Double = 2_147_483_647
+
+    /// The delay a timer will actually sleep for, in seconds, given whatever
+    /// an extension passed to `setTimeout`.
+    ///
+    /// A named function rather than a line inside `scheduleTimer`, because
+    /// this is the arithmetic that has to be *aimed at*: the crash it prevents
+    /// is one JavaScript call away, the inputs that reach it are the whole of
+    /// `Double` including `NaN` and both infinities, and the value it produces
+    /// is otherwise only observable by waiting for a sleep to end. Extracting
+    /// it costs a call and makes every one of those cases assertable in a
+    /// microsecond *(fail-fast, tight-feedback-loops)*.
+    ///
+    /// `max(0, milliseconds)` is what handles `NaN`, and **the load-bearing
+    /// part is the argument order inside `max`, not `max` coming before
+    /// `min`.** Swift's `max(x, y)` is `y >= x ? y : x`, and every comparison
+    /// against `NaN` is false, so the fallback is always `x`: `max(0, .nan)`
+    /// is 0, while `max(.nan, 0)` is `NaN`. Swapping those two arguments sends
+    /// `NaN` into `Duration.seconds`, which traps and takes the app down.
+    /// Swapping `min` and `max` around instead changes nothing at all — this
+    /// comment asserted the opposite until a mutation survived and a
+    /// standalone probe settled it. `min` then takes the ceiling, which is
+    /// also what answers `.infinity`.
+    static func clampedTimerDelaySeconds(milliseconds: Double) -> Double {
+        min(max(0, milliseconds), maximumTimerDelayMilliseconds) / 1000
+    }
 
     private func scheduleTimer(timerID: Int32, delayMilliseconds: Double, repeats: Bool) {
         guard !isDisposed else { return }
         timerTasks[timerID]?.cancel()
 
-        // `max` first, and it is what handles NaN: a NaN comparison is false,
-        // so `max(0, .nan)` is 0 rather than NaN. `min` then takes the ceiling,
-        // including for `.infinity`.
-        let seconds = min(max(0, delayMilliseconds), Self.maximumTimerDelayMilliseconds) / 1000
+        let seconds = Self.clampedTimerDelaySeconds(milliseconds: delayMilliseconds)
         runningTimerTasks += 1
         timerTasks[timerID] = Task { @MainActor [weak self] in
             defer { self?.timerTaskDidFinish() }

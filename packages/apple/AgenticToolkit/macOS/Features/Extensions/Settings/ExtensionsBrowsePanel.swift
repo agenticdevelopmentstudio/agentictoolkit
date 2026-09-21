@@ -822,6 +822,10 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
                         + "will not fetch."
             case .responseNotHTTP:
                 return "the registry's answer was not an HTTP response."
+            case .responseTooLarge(_, let limit):
+                let megabytes = limit / (1024 * 1024)
+                return "the registry's answer kept coming past \(megabytes) MB, so "
+                    + "it was not read."
             case .artifactTooLarge(_, let limit):
                 let megabytes = limit / (1024 * 1024)
                 return "the registry kept sending past \(megabytes) MB, so the download "

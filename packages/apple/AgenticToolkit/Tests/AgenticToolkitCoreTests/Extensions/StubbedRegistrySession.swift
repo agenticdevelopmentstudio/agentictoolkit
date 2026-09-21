@@ -72,6 +72,17 @@ struct StubbedResponse {
     /// test for that needs a session that answers a request with a non-HTTP
     /// response, which is what this flag is for.
     var isHTTP: Bool = true
+
+    /// The `Content-Length` this response claims, when it must differ from the
+    /// body actually sent.
+    ///
+    /// A ceiling that believes the header and a ceiling that counts the bytes
+    /// are two different rules, and a stub whose header always matches its
+    /// body cannot tell them apart — every test passes under either one. The
+    /// shape that separates them is the dishonest one, which is also the only
+    /// shape worth guarding against: a header claiming a gigabyte before a
+    /// byte of it has arrived.
+    var claimedLength: Int?
 }
 
 /// The protocol doing the answering. Registered per-session through
@@ -105,9 +116,11 @@ final class StubURLProtocol: URLProtocol {
             client?.urlProtocolDidFinishLoading(self)
             return
         }
+        let headers = match.claimedLength.map { ["Content-Length": String($0)] }
         let response: URLResponse = match.isHTTP
             ? HTTPURLResponse(
-                url: url, statusCode: match.status, httpVersion: nil, headerFields: nil)!
+                url: url, statusCode: match.status, httpVersion: "HTTP/1.1",
+                headerFields: headers)!
             : URLResponse(
                 url: url, mimeType: nil, expectedContentLength: match.body.count,
                 textEncodingName: nil)

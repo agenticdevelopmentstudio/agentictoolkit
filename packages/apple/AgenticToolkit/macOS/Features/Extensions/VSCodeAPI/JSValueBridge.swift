@@ -79,9 +79,18 @@ enum JSValueBridge {
     /// Rejects `reject` with a JavaScript `Error` carrying `message`.
     ///
     /// An `Error` and not a bare string, so an extension's `catch` sees
-    /// `error.message` and a stack — which is what
+    /// `error.message` and `error instanceof Error` — which is what
     /// `VSCodeAPI.rejectedPromise(message:in:)` builds for the synchronous
     /// refusals, and the asynchronous ones should not be a different shape.
+    ///
+    /// No `stack`, and nothing can be done about it here:
+    /// `JSValue(newErrorFromMessage:in:)` constructs the object rather than
+    /// throwing from JavaScript, so there is no JavaScript frame to record
+    /// and `error.stack` is `undefined`. An extension's handler that logs
+    /// `e.stack` therefore logs "undefined" — which is why the message is
+    /// written to name the member and the reason on its own, rather than
+    /// leaning on a trace to supply the context.
+    ///
     /// Silent when the context is gone: there is then nothing left to reject
     /// into.
     static func rejectWithError(_ reject: JSValue, message: String) {

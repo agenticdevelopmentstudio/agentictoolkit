@@ -38,17 +38,39 @@ public struct VSIXInstaller: Sendable {
     /// disagree, and the manifest is the one the registry will be loaded by.
     public let hostVersion: SemanticVersion
 
-    /// `FileManager.default` throughout rather than an injected one: it is not
-    /// `Sendable`, and the seam a test actually needs is `installDirectory`,
-    /// which already points wherever the test says.
-    private var fileManager: FileManager { .default }
+    /// How this installer reaches the file system.
+    ///
+    /// `installDirectory` is the seam for almost everything here — a test
+    /// points it at a scratch directory and every path follows. Two behaviours
+    /// are not reachable that way, and both of them are what this type does
+    /// when the file system says no partway through:
+    ///
+    /// - `moveIntoPlace` moves an existing install aside, moves the new one
+    ///   in, and puts the old one back if that second move failed. Leaving a
+    ///   user with *neither* version is the outcome that would make an update
+    ///   button unsafe to press, and no arrangement of real directories asks
+    ///   `rename(2)` to fail on only the second of two calls.
+    /// - A superseded copy that cannot be deleted is logged and the install
+    ///   still succeeds, because the new version is already in place. A real
+    ///   directory that refuses to be removed is not something a test can
+    ///   arrange either.
+    ///
+    /// A closure rather than a stored `FileManager` because `FileManager` is
+    /// not `Sendable` and this type is. Storing one would cost the checked
+    /// conformance, and `@unchecked` here would be this file making a promise
+    /// about a class it does not own *(dependency-injection)*.
+    private let fileManagerProvider: @Sendable () -> FileManager
+
+    private var fileManager: FileManager { fileManagerProvider() }
 
     public init(
         installDirectory: URL,
-        hostVersion: SemanticVersion = ExtensionRegistry.declaredVSCodeVersion
+        hostVersion: SemanticVersion = ExtensionRegistry.declaredVSCodeVersion,
+        fileManager: @escaping @Sendable () -> FileManager = { .default }
     ) {
         self.installDirectory = installDirectory
         self.hostVersion = hostVersion
+        self.fileManagerProvider = fileManager
     }
 
     // MARK: - Installing
