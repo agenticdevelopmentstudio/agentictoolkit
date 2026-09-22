@@ -16,14 +16,48 @@ import AgenticToolkitCoreMacOS
 /// whoever knows what the row points at. It knows nothing about where the
 /// conversations come from — that is the ``Load`` closure, supplied by the host.
 /// The work-output filter, shared between the main actor that sets it and the
-/// feed's poll that reads it. A one-field lock box rather than an actor because
-/// the read sits inside a loader that should not have to await anything.
+/// feed's poll that reads it. A lock box rather than an actor because the read
+/// sits inside a loader that should not have to await anything.
+///
+/// Two halves, because there are two things that turn it on: what the reader
+/// asked for, and single mode insisting on it regardless. Kept apart rather
+/// than folded together so that leaving single mode gives the reader their own
+/// setting back instead of whatever the mode left behind.
 private final class WorkOutputFlag: @unchecked Sendable {
     private let lock = NSLock()
-    private var stored = false
+    private var preferred = false
+    private var forced = false
+
+    /// What the next read should actually ask for.
     var value: Bool {
-        get { lock.lock(); defer { lock.unlock() }; return stored }
-        set { lock.lock(); stored = newValue; lock.unlock() }
+        lock.lock(); defer { lock.unlock() }
+        return preferred || forced
+    }
+
+    /// The reader's own setting, with nothing overriding it.
+    var preference: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return preferred
+    }
+
+    /// Whether something other than the reader is insisting on work output.
+    var isForced: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return forced
+    }
+
+    /// Each setter reports whether ``value`` moved, so the caller re-reads the
+    /// feed only when the answer would differ — a refresh that asks the same
+    /// question costs a round trip and replaces the reader's rows with copies.
+    func setPreference(_ newValue: Bool) -> Bool { mutate { preferred = newValue } }
+
+    func setForced(_ newValue: Bool) -> Bool { mutate { forced = newValue } }
+
+    private func mutate(_ change: () -> Void) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let before = preferred || forced
+        change()
+        return (preferred || forced) != before
     }
 }
 
@@ -101,14 +135,21 @@ public final class ConversationsViewController: NSViewController {
     /// measured against live transcripts, narration outnumbers replies two to
     /// one and runs an order of magnitude shorter — showing it by default
     /// buries the conversation in "let me check X".
+    ///
+    /// That argument is about the *merged* feed, and single mode is not it: one
+    /// conversation on its own has nothing to bury, and the narration is most of
+    /// what following a session means. So single mode turns work output on
+    /// regardless (``isWorkOutputForced``) — this stays the reader's own setting
+    /// either way, and gets it back when the mode leaves.
     public var includeWorkOutput: Bool {
-        get { workOutputFlag.value }
-        set {
-            guard newValue != workOutputFlag.value else { return }
-            workOutputFlag.value = newValue
-            refresh()
-        }
+        get { workOutputFlag.preference }
+        set { if workOutputFlag.setPreference(newValue) { refresh() } }
     }
+
+    /// Whether work output is being shown whatever ``includeWorkOutput`` says —
+    /// true for as long as the window is in single mode. For a host that greys
+    /// out its own checkbox while the choice is not the reader's to make.
+    public var isWorkOutputForced: Bool { workOutputFlag.isForced }
 
     /// Called when a row's jump control is used, with the message that row
     /// rendered. The host reads ``ChatMessage/Attribution/sourceID`` to decide
@@ -142,15 +183,20 @@ public final class ConversationsViewController: NSViewController {
 
     /// Whether the window is reading one conversation or several.
     ///
-    /// Single mode changes two things here, and both follow from there being
-    /// exactly one session on the timeline: there is nothing left for the focus
-    /// overlay to isolate, and there is an unambiguous destination for a typed
-    /// line. So the overlay goes away and the composer comes alive.
+    /// Single mode changes three things here, and all of them follow from there
+    /// being exactly one session on the timeline: there is nothing left for the
+    /// focus overlay to isolate, there is an unambiguous destination for a typed
+    /// line, and there is nothing for the agent's narration to bury. So the
+    /// overlay goes away, the composer comes alive, and work output is shown
+    /// whatever the reader's own setting says.
     public var selectionMode: ConversationsSelectionMode = .multi {
         didSet {
             guard selectionMode != oldValue else { return }
             if selectionMode == .single { dismissFocus() }
             updateComposer()
+            // Only when the answer actually moved — with the reader's own
+            // setting already on there is nothing to re-read.
+            if workOutputFlag.setForced(selectionMode == .single) { refresh() }
         }
     }
 
