@@ -15,6 +15,18 @@ extension ComposableSettings {
             self.choices = choices
             super.init(title: title, setting: setting, explanation: explanation)
         }
+
+        /// A choice row bound to something other than `UserDefaults`.
+        public init(
+            title: String,
+            choices: [Choice],
+            get: @escaping () -> Value,
+            set: @escaping (Value) -> Void,
+            explanation: String? = nil
+        ) {
+            self.choices = choices
+            super.init(title: title, get: get, set: set, explanation: explanation)
+        }
     }
 }
 

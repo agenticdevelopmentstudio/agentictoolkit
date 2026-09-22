@@ -19,5 +19,19 @@ extension ComposableSettings {
 
             super.init(title: title, setting: setting, explanation: explanation)
         }
+
+        /// A ranged row bound to something other than `UserDefaults`.
+        public init(
+            title: String,
+            minValue: Value,
+            maxValue: Value,
+            get: @escaping () -> Value,
+            set: @escaping (Value) -> Void,
+            explanation: String? = nil
+        ) {
+            self.maxValue = maxValue
+            self.minValue = minValue
+            super.init(title: title, get: get, set: set, explanation: explanation)
+        }
     }
 }
