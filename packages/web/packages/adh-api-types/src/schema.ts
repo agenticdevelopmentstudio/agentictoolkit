@@ -17890,6 +17890,281 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ecosystem/features/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The features an ecosystem can be provisioned with
+         * @description The whole catalog, independent of any ecosystem — what the feature picker renders. Static: it changes only when the server ships a new feature.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Catalog */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            features: components["schemas"]["CatalogFeature"][];
+                        };
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ecosystem/features/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * An ecosystem's provisioned features (owner or admin)
+         * @description Every row, INCLUDING removed ones — a removed feature’s artifacts still exist, so the picker can say that re-adding it is free.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The ecosystem’s features */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            features: components["schemas"]["ProvisionedFeature"][];
+                        };
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Provision features onto the ecosystem
+         * @description Creates whatever each feature needs — the default bucket, the system roles, the ecosystem’s Project — in ONE transaction, so a partial failure rolls back whole. A key that is already active is a no-op, not a conflict. Returns the ecosystem’s full feature list afterwards. 422 when the ecosystem has no workspace principal behind it and a requested feature needs one.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Catalog feature keys to provision. A list, because the picker adds several behind one confirmation — one confirmation is one request and one transaction. */
+                        keys: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description The ecosystem’s features */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            features: components["schemas"]["ProvisionedFeature"][];
+                        };
+                    };
+                };
+                /** @description Error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ecosystem/features/{id}/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take a feature off the ecosystem
+         * @description Marks the feature removed and DESTROYS NOTHING — the buckets, roles and rows it provisioned are left exactly as they are. Taking a feature off the rail is a display decision; deleting the owner’s data is not, and the two do not share a verb.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            ok: boolean;
+                        };
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ecosystem/server-bag/{id}": {
         parameters: {
             query?: never;
@@ -40704,6 +40979,10 @@ export interface paths {
                         entityType: string;
                         /** @description Verified against the stored mapping */
                         entityId: string;
+                        /** @description The name to give each dead row that is still sitting on its own slug, keyed by the held rdid — an entry per listed row whose `needsName` is true, including held descendants, since releasing a namespace releases the names inside it. A missing entry answers 409 naming the rdid it wants. A value that is not a legal segment, or that ends in what looks like a slice of an id, answers 400: an rdid is a name a person reads. */
+                        newNames?: {
+                            [key: string]: string;
+                        };
                     };
                 };
             };
@@ -54632,7 +54911,7 @@ export interface paths {
                         externalId?: string | null;
                         email?: string | null;
                         displayName?: string | null;
-                        slug?: string;
+                        slug: string;
                         avatarUrl?: string;
                         profileVisibility?: string;
                         tokenVersion?: number;
@@ -57101,7 +57380,6 @@ export interface paths {
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
-                            isDefault: boolean;
                             isInfrastructure: boolean;
                             namespaceId: string | null;
                             parentId: string | null;
@@ -57139,7 +57417,6 @@ export interface paths {
                         region?: string;
                         dedicatedDbConnectionId?: string | null;
                         primaryDomain?: string;
-                        isDefault?: boolean;
                         isInfrastructure?: boolean;
                         namespaceId?: string | null;
                         parentId?: string | null;
@@ -57167,7 +57444,6 @@ export interface paths {
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
-                            isDefault: boolean;
                             isInfrastructure: boolean;
                             namespaceId: string | null;
                             parentId: string | null;
@@ -57240,7 +57516,6 @@ export interface paths {
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
-                            isDefault: boolean;
                             isInfrastructure: boolean;
                             namespaceId: string | null;
                             parentId: string | null;
@@ -57288,7 +57563,6 @@ export interface paths {
                         region?: string;
                         dedicatedDbConnectionId?: string | null;
                         primaryDomain?: string;
-                        isDefault?: boolean;
                         isInfrastructure?: boolean;
                         namespaceId?: string | null;
                         parentId?: string | null;
@@ -57315,7 +57589,6 @@ export interface paths {
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
-                            isDefault: boolean;
                             isInfrastructure: boolean;
                             namespaceId: string | null;
                             parentId: string | null;
@@ -71857,6 +72130,31 @@ export interface components {
             createdAt: string;
             updatedAt: string;
         };
+        CatalogFeature: {
+            /** @description Stable, permanent identifier. */
+            key: string;
+            label: string;
+            description: string;
+            /**
+             * @description Displayed as "Subscription Level Required: <tier>". A PLACEHOLDER — nothing enforces it.
+             * @enum {string}
+             */
+            subscriptionTier: "Free" | "Pro" | "Team" | "Enterprise";
+            /** @description The feature carries a public site of its own (the persona registry, research). */
+            featureSite?: boolean;
+        };
+        ProvisionedFeature: {
+            featureKey: string;
+            /**
+             * @description Only `active` counts as on. `provisioning` is a claim whose artifacts are not all there yet; `removed` keeps the record (and the data) of a feature taken off the rail.
+             * @enum {string}
+             */
+            state: "provisioning" | "active" | "removed";
+            /** @description When the feature was FIRST added. Never rewritten by a re-add. */
+            provisionedAt: string;
+            provisionedBy?: string | null;
+            updatedAt: string;
+        };
         EcosystemServerBagEntry: {
             key: string;
             /** @description Arbitrary JSON value */
@@ -74071,14 +74369,16 @@ export interface components {
             entityType: string;
             entityId: string;
             /**
-             * @description What is holding the name, and therefore what releasing it does: an in-window rename alias and an orphaned mapping are deleted; a deleted entity is RENAMED to a placeholder and its subtree moves with it.
+             * @description What is holding the name. An in-window rename alias and an orphaned mapping are deleted outright. A deleted entity is freed the same way when its own table has already let the name go; while that table is still holding it, the release renames that row instead and `needsName` is true.
              * @enum {string}
              */
             reason: "rename-leftover" | "orphan" | "deleted-entity";
             /** @description When the name got stuck: an alias's supersede instant, else the row's last write */
             heldSince: string | null;
-            /** @description False for names this surface can only report — a revoked token slug (reserved by policy) and legacy reverse-domain handles. Releasing one answers 403. */
+            /** @description False for names this surface can only report: a revoked token slug (reserved by policy) and legacy reverse-domain handles with no parent chain. Releasing a non-releasable row answers 403. */
             releasable: boolean;
+            /** @description Releasing this one needs a name from you. The deleted row is still sitting on the slug in its own table, so freeing it is a rename, and this service does not invent names — send it as `newNames[rdid]` on the release. */
+            needsName: boolean;
         };
         ReservedIdentifierPage: {
             items: components["schemas"]["ReservedIdentifier"][];
@@ -74090,17 +74390,20 @@ export interface components {
             /** @description A held name is missing from this response — a source scan came back at its cap, or the merge overflowed the overall one. Clients that filter client-side MUST surface this: past the cap an empty result is not evidence that a name is free. */
             truncated: boolean;
         };
-        ReleaseResult: {
+        ReleasedName: {
             rdid: string;
             /** @enum {string} */
             reason: "rename-leftover" | "orphan" | "deleted-entity";
             /** @description The released NAME is available again. Deliberately not "the surrounding namespace is empty" — a different type sharing that path is a different name. */
             freed: boolean;
-            /** @description The name the entity was renamed to, when the release was a rename */
-            placeholder?: string;
             aliasesRemoved: number;
             /** @description Canonical addresses still sitting in that space, informational. Read as "these exist nearby", never as "the release failed". */
             stillHeldBy: string[];
+            /** @description The name the dead row was renamed to — your own `newNames` entry, echoed back. Null on every other branch, where nothing outside the identifier table was written. */
+            renamedTo: string | null;
+        };
+        ReleaseResult: components["schemas"]["ReleasedName"] & {
+            children: components["schemas"]["ReleasedName"][];
         };
         /** @description An operator note attached to some other row. Never visible to that row’s subject. */
         AdminNote: {
