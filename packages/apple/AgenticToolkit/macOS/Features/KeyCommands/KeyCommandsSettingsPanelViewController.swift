@@ -68,8 +68,17 @@ public final class KeyCommandsSettingsPanelViewController: ComposableSettings.Se
             return
         }
 
-        for section in registry.sections {
-            settingsView.addGroup(makeGroup(for: section))
+        // Scope first, then the window, then the feature inside it: a command is
+        // only understandable once you know where it fires and what it acts on,
+        // and a flat list of titles said neither.
+        for scope in KeyCommandScope.allCases {
+            let sections = registry.sections(in: scope)
+            guard !sections.isEmpty else { continue }
+
+            settingsView.addHeading(scope.settingsHeading, caption: scope.settingsCaption)
+            for section in sections {
+                settingsView.addGroup(makeGroup(for: section))
+            }
         }
     }
 
@@ -82,6 +91,13 @@ public final class KeyCommandsSettingsPanelViewController: ComposableSettings.Se
 
         for command in section.commands {
             group.addSettingSubview(KeyCommandRowView(command: command, registry: registry))
+        }
+
+        for feature in section.features {
+            group.addSettingSubview(ComposableSettings.HeaderView(title: feature.title))
+            for command in feature.commands {
+                group.addSettingSubview(KeyCommandRowView(command: command, registry: registry))
+            }
         }
 
         return group

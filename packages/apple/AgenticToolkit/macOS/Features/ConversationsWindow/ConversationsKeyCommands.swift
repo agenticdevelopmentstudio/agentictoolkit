@@ -20,7 +20,13 @@ public enum ConversationsKeyCommands {
     public static let moveSelectionDownID = "conversations.moveSelectionDown"
     public static let toggleShelfID = "conversations.toggleShelf"
 
-    public static let sectionTitle = "App"
+    public static let sectionTitle = "Conversations Window"
+
+    /// The two commands that only mean anything in single conversation mode —
+    /// there is no "next conversation" when several are on screen at once — so
+    /// the panel lists them under their mode rather than beside a command that
+    /// works in both.
+    public static let singleModeFeatureTitle = "Single Conversation Mode"
 
     /// The section. `resolve` answers with the live split controller, or `nil`
     /// when the window is not up — in which case the commands do nothing, which
@@ -30,29 +36,34 @@ public enum ConversationsKeyCommands {
     ) -> KeyCommandSection {
         KeyCommandSection(
             title: sectionTitle,
-            caption: "These work while this app is frontmost.",
+            scope: .app,
             commands: [
-                KeyCommandDescriptor(
-                    id: moveSelectionUpID,
-                    title: "Previous Conversation",
-                    scope: .app,
-                    defaultShortcut: KeyboardShortcuts.Shortcut(.upArrow, modifiers: .command),
-                    run: { resolve()?.moveSelection(by: -1) }
-                ),
-                KeyCommandDescriptor(
-                    id: moveSelectionDownID,
-                    title: "Next Conversation",
-                    scope: .app,
-                    defaultShortcut: KeyboardShortcuts.Shortcut(.downArrow, modifiers: .command),
-                    run: { resolve()?.moveSelection(by: 1) }
-                ),
                 KeyCommandDescriptor(
                     id: toggleShelfID,
                     title: "Show Conversation List",
-                    scope: .app,
                     defaultShortcut: KeyboardShortcuts.Shortcut(.zero, modifiers: .command),
                     run: { resolve()?.toggleShelf() }
                 )
+            ],
+            features: [
+                KeyCommandFeature(
+                    title: singleModeFeatureTitle,
+                    commands: [
+                        KeyCommandDescriptor(
+                            id: moveSelectionUpID,
+                            title: "Previous Conversation",
+                            defaultShortcut: KeyboardShortcuts.Shortcut(
+                                .upArrow, modifiers: .command),
+                            run: { resolve()?.moveSelection(by: -1) }
+                        ),
+                        KeyCommandDescriptor(
+                            id: moveSelectionDownID,
+                            title: "Next Conversation",
+                            defaultShortcut: KeyboardShortcuts.Shortcut(
+                                .downArrow, modifiers: .command),
+                            run: { resolve()?.moveSelection(by: 1) }
+                        )
+                    ])
             ])
     }
 }

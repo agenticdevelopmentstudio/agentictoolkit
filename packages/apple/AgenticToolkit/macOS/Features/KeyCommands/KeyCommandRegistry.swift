@@ -43,7 +43,7 @@ public final class KeyCommandRegistry {
             sections.append(section)
         }
 
-        for command in section.commands {
+        for command in section.allCommands {
             descriptorsByID[command.id] = command
             if command.scope == .global {
                 installGlobalHandler(for: command)
@@ -53,7 +53,14 @@ public final class KeyCommandRegistry {
     }
 
     public var allCommands: [KeyCommandDescriptor] {
-        sections.flatMap(\.commands)
+        sections.flatMap(\.allCommands)
+    }
+
+    /// The installed sections listened for in `scope`, in the order they were
+    /// declared. The settings panel draws one heading per scope, so it asks the
+    /// registry this way round rather than sorting the whole list itself.
+    public func sections(in scope: KeyCommandScope) -> [KeyCommandSection] {
+        sections.filter { $0.scope == scope }
     }
 
     public func descriptor(for id: String) -> KeyCommandDescriptor? {

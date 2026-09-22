@@ -54,5 +54,23 @@ extension ComposableSettings {
             self.stackView.addArrangedSubview(group)
         }
 
+        /// Adds a heading over the groups that follow it.
+        ///
+        /// The gap above a heading is wider than the gap between two cards,
+        /// because that gap is what says the heading belongs to what comes
+        /// *after* it — at the stack's own spacing it reads as a caption
+        /// trailing the card above.
+        @discardableResult
+        public func addHeading(_ title: String, caption: String? = nil) -> PanelHeadingView {
+            let heading = PanelHeadingView(title: title, caption: caption)
+            if let last = self.stackView.arrangedSubviews.last {
+                self.stackView.setCustomSpacing(
+                    SettingsLayout.default[.groupSpacing] * 1.5, after: last)
+            }
+            self.stackView.addArrangedSubview(heading)
+            heading.widthAnchor.constraint(equalTo: self.stackView.widthAnchor).isActive = true
+            return heading
+        }
+
     }
 }

@@ -15,6 +15,30 @@ public enum KeyCommandScope: String, Codable, Sendable, CaseIterable {
 
     /// Delivered system-wide, through `KeyboardShortcuts`' global event tap.
     case global
+
+    /// The heading the settings panel puts a run of sections under. Where a
+    /// command is listened for is the first thing a reader needs to know about
+    /// it, so it is the outermost grouping rather than a word in a caption.
+    public var settingsHeading: String {
+        switch self {
+        case .app: "App"
+        case .global: "Global"
+        }
+    }
+
+    /// Shown under that heading — once, for every section in the scope. Each
+    /// section used to carry its own copy of this sentence, which is one
+    /// explanation of what a scope means written once per window that happens
+    /// to be in it.
+    public var settingsCaption: String {
+        switch self {
+        case .app:
+            "These work while this app is frontmost."
+        case .global:
+            "These work whatever app is frontmost, which also means they are taken "
+                + "away from that app. They ship switched off."
+        }
+    }
 }
 
 /// What the user authored for one command: the chord, and whether it is on.
@@ -59,7 +83,12 @@ public struct KeyCommandDescriptor {
     /// What the settings row calls it.
     public let title: String
 
-    public let scope: KeyCommandScope
+    /// Where it is listened for. Not the declarer's to state per command: it is
+    /// a property of the section, which is why it is set by
+    /// ``KeyCommandSection`` rather than passed in. A section that said `.app`
+    /// while one of its commands said `.global` could otherwise list a command
+    /// under a heading that was not where it actually fired.
+    public internal(set) var scope: KeyCommandScope = .app
 
     /// The chord shipped with the command. `nil` means the command is listed
     /// with no key command until the user gives it one.
@@ -75,14 +104,12 @@ public struct KeyCommandDescriptor {
     public init(
         id: String,
         title: String,
-        scope: KeyCommandScope,
         defaultShortcut: KeyboardShortcuts.Shortcut? = nil,
         isEnabledByDefault: Bool = true,
         run: @escaping () -> Void
     ) {
         self.id = id
         self.title = title
-        self.scope = scope
         self.defaultShortcut = defaultShortcut
         self.isEnabledByDefault = isEnabledByDefault
         self.run = run
@@ -92,9 +119,46 @@ public struct KeyCommandDescriptor {
     public var defaultBinding: KeyCommandBinding {
         KeyCommandBinding(shortcut: defaultShortcut, isEnabled: isEnabledByDefault)
     }
+
+    /// The same command, listened for in `scope`. Used by ``KeyCommandSection``
+    /// to stamp its own scope through everything it carries.
+    func scoped(to scope: KeyCommandScope) -> KeyCommandDescriptor {
+        var copy = self
+        copy.scope = scope
+        return copy
+    }
 }
 
-/// A titled run of commands, which is how the settings panel groups them.
+/// A named run of commands *inside* a section: the feature of that window they
+/// operate on.
+///
+/// A window's commands are not one flat list to the person using them — two of
+/// the Conversations window's three only exist in single conversation mode, and
+/// a list that did not say so read as three equal commands, one of which
+/// mysteriously did nothing.
+@MainActor
+public struct KeyCommandFeature {
+
+    public let title: String
+    public let commands: [KeyCommandDescriptor]
+
+    public init(title: String, commands: [KeyCommandDescriptor]) {
+        self.title = title
+        self.commands = commands
+    }
+
+    func scoped(to scope: KeyCommandScope) -> KeyCommandFeature {
+        KeyCommandFeature(title: title, commands: commands.map { $0.scoped(to: scope) })
+    }
+}
+
+/// One surface's commands: a window, usually, and within it the features they
+/// belong to.
+///
+/// The settings panel draws the three levels the section describes — the scope
+/// as a heading, the section as a card under it, and each feature as a named
+/// run inside that card — so a command is read as *where* it works before it is
+/// read as *what* it does.
 @MainActor
 public struct KeyCommandSection {
 
@@ -103,15 +167,39 @@ public struct KeyCommandSection {
     /// a plugin loads, say) without stacking duplicates.
     public let title: String
 
-    /// Shown under the title in the panel; `nil` for no caption.
+    /// Shown under the title in the panel; `nil` for no caption. What the
+    /// *scope* means is not this — that is said once, by
+    /// ``KeyCommandScope/settingsCaption``.
     public let caption: String?
 
+    /// Where every command in the section is listened for.
+    public let scope: KeyCommandScope
+
+    /// The surface's own commands — the ones that are not particular to any one
+    /// feature of it.
     public let commands: [KeyCommandDescriptor]
 
-    public init(title: String, caption: String? = nil, commands: [KeyCommandDescriptor]) {
+    /// Named runs within the section.
+    public let features: [KeyCommandFeature]
+
+    public init(
+        title: String,
+        caption: String? = nil,
+        scope: KeyCommandScope,
+        commands: [KeyCommandDescriptor] = [],
+        features: [KeyCommandFeature] = []
+    ) {
         self.title = title
         self.caption = caption
-        self.commands = commands
+        self.scope = scope
+        self.commands = commands.map { $0.scoped(to: scope) }
+        self.features = features.map { $0.scoped(to: scope) }
+    }
+
+    /// Everything the section carries, in the order the panel lists it: the
+    /// surface's own commands, then each feature's.
+    public var allCommands: [KeyCommandDescriptor] {
+        commands + features.flatMap(\.commands)
     }
 }
 
