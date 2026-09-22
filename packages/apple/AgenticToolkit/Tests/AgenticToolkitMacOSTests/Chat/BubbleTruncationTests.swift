@@ -8,9 +8,9 @@ import XCTest
 /// to the rest of it.
 ///
 /// None of this is visible to a build. A bubble that truncated at the wrong
-/// count still lays out, a cut that landed mid-word still renders, and an
-/// expansion overlay showing the *truncated* copy looks exactly like one
-/// showing the whole message until you read it.
+/// count still lays out, a cut that landed mid-word still renders, and a
+/// toggle that opens the *truncated* copy out looks exactly like one that
+/// opens the whole message until you read it.
 @MainActor
 final class BubbleTruncationTests: XCTestCase {
 
@@ -51,7 +51,7 @@ final class BubbleTruncationTests: XCTestCase {
     }
 
     /// The ellipsis is the whole of what tells a reader the message continues —
-    /// the **More…** control says there is a way in, not that anything is
+    /// the toggle beneath it says there is a way in, not that anything is
     /// missing from what they just read.
     func testTheCutTextEndsInAnEllipsis() throws {
         let bubble = try laidOutBubble(text: paragraph(of: 40), lineLimit: 8)
@@ -69,9 +69,9 @@ final class BubbleTruncationTests: XCTestCase {
                        "wrapped lines were counted differently from written ones")
     }
 
-    // MARK: - The More… control
+    // MARK: - The expand toggle
 
-    func testOnlyATruncatedBubbleOffersMore() throws {
+    func testOnlyAnOverlongBubbleOffersTheToggle() throws {
         let short = try laidOutBubble(text: paragraph(of: 3), lineLimit: 8)
         let long = try laidOutBubble(text: paragraph(of: 40), lineLimit: 8)
 
@@ -82,156 +82,147 @@ final class BubbleTruncationTests: XCTestCase {
 
     /// Enabled by having somewhere to go, not by being visible: a control that
     /// looks live and does nothing is worse than no control.
-    func testTheMoreControlIsDeadUntilExpandingIsWired() throws {
+    func testTheToggleIsDeadUntilExpandingIsWired() throws {
         let bubble = try laidOutBubble(text: paragraph(of: 40), lineLimit: 8)
         XCTAssertFalse(try moreButton(in: bubble).isEnabled)
 
-        bubble.onExpand = {}
+        bubble.onToggleExpanded = {}
         XCTAssertTrue(try moreButton(in: bubble).isEnabled)
     }
 
-    func testTheMoreControlNeverWidensPastTheBubblesLimit() throws {
-        // One short word, so the text is far narrower than "More…" — the bubble
-        // has to fit the offer as well as the message.
+    func testTheToggleNeverWidensPastTheBubblesLimit() throws {
+        // One short word per line, so the text is far narrower than the toggle
+        // — the bubble has to fit the offer as well as the message.
         let bubble = try laidOutBubble(text: "hi\nthere\nyou\nand\nyou\ntwo\nand\nyou\nthree",
                                        lineLimit: 8, maxWidth: 300)
         XCTAssertTrue(bubble.isTruncated)
         let more = try moreButton(in: bubble)
         XCTAssertLessThanOrEqual(bubble.frame.width, 300)
         XCTAssertGreaterThanOrEqual(
-            bubble.frame.width, more.intrinsicContentSize.width,
-            "the bubble is narrower than the control it is showing, so More… is clipped")
+            more.frame.minX, 0,
+            "the bubble is narrower than the control it is showing, so the toggle is clipped")
+        XCTAssertLessThanOrEqual(more.frame.maxX, bubble.frame.width)
     }
 
-    /// The control follows the ellipsis on the same line: that is where the
-    /// sentence stopped, so it is where "what else did it say" gets asked.
-    func testTheMoreControlFollowsTheEllipsisOnTheLastLine() throws {
+    /// Under the text, at the bubble's trailing edge: out of the way of the
+    /// words, and in the corner the eye is already at when the message stops.
+    func testTheToggleSitsInTheBubblesLowerRight() throws {
         let bubble = try laidOutBubble(text: paragraph(of: 40), lineLimit: 8)
         XCTAssertTrue(bubble.isTruncated)
-        let more = try moreButton(in: bubble)
         let lastLine = try lastLineRect(of: bubble)
+        // Where the button was *placed*, not the frame it draws in: a button's
+        // frame is its alignment rect grown by the bezel insets, so the frame
+        // overhangs the padding by a couple of points at every edge.
+        let more = try placement(of: moreButton(in: bubble))
 
-        XCTAssertGreaterThanOrEqual(
-            more.frame.minX, lastLine.maxX,
-            "the control is drawn over the text it is offering to complete")
         XCTAssertEqual(
-            more.frame.minX, lastLine.maxX + 4, accuracy: 1,
-            "the control is not right after the ellipsis")
+            more.maxX, bubble.frame.width - 12, accuracy: 0.5,
+            "the toggle is not on the bubble's trailing edge")
+        XCTAssertLessThanOrEqual(
+            more.maxY, lastLine.minY + 0.5,
+            "the toggle is drawn over the text it is offering to complete")
         XCTAssertEqual(
-            more.frame.midY, lastLine.midY, accuracy: 1,
-            "the control is not on the last line — it is above or below it")
+            more.minY, 8, accuracy: 0.5,
+            "the toggle is not sitting on the bubble's bottom padding")
     }
 
-    /// Being on the line rather than under it is also what makes a truncated row
-    /// cost no more height than a full one: the control used to add a line that
-    /// carried no words, on every truncated row in the feed.
-    func testATruncatedBubbleIsNoTallerThanAFullOne() throws {
+    /// The toggle costs the row the control's own height and nothing else: a
+    /// truncated bubble is a full one plus the button, not plus a blank line of
+    /// text. The bubble measures itself from the toggle on every row, so a row
+    /// with nothing to expand has to come out exactly as it always did.
+    func testTheToggleCostsARowTheControlAndNothingElse() throws {
         let truncated = try laidOutBubble(text: paragraph(of: 40), lineLimit: 8)
         let whole = try laidOutBubble(text: paragraph(of: 8), lineLimit: 8)
 
         XCTAssertTrue(truncated.isTruncated)
         XCTAssertFalse(whole.isTruncated)
+        XCTAssertTrue(try moreButton(in: whole).isHidden)
         XCTAssertEqual(
-            truncated.frame.height, whole.frame.height, accuracy: 0.5,
-            "the More… control is still costing the row a line of its own")
+            truncated.frame.height, whole.frame.height + 2 + 22, accuracy: 0.5,
+            "a truncated row costs more than the toggle that made it one")
     }
 
     /// The cut lands where the text wrapped, so the last line normally ends at
     /// the far edge — with the ellipsis standing in for the space that wrapped
-    /// it. Something has to give for the control to follow it, and it is the
-    /// text: a couple of characters, not the bubble's edge.
-    func testTheCutLeavesRoomOnTheLastLineForTheControl() throws {
+    /// it. Appending that ellipsis can re-wrap the line it lands on, and a cut
+    /// that came back one line longer than the limit is no cut at all.
+    func testTheCutStaysWithinTheLimitWhenTheEllipsisWouldWrap() throws {
         let wrapped = String(repeating: "a long unbroken sentence that has to wrap. ", count: 40)
         let bubble = try laidOutBubble(text: wrapped, lineLimit: 8, fillsWidthWhenWrapped: true)
-        XCTAssertTrue(bubble.isTruncated)
-        let more = try moreButton(in: bubble)
 
-        XCTAssertLessThanOrEqual(
-            more.frame.maxX, bubble.frame.width - 12 + 0.5,
-            "the control ran out through the bubble's own padding")
-        XCTAssertGreaterThanOrEqual(
-            more.frame.minX, try lastLineRect(of: bubble).maxX,
-            "the control slid back over the ellipsis instead of the text making room")
+        XCTAssertTrue(bubble.isTruncated)
+        XCTAssertEqual(try lineCount(of: bubble), 8,
+                       "the ellipsis wrapped onto a line of its own")
         XCTAssertTrue(try text(of: bubble).hasSuffix("…"),
-                      "making room cost the ellipsis")
+                      "staying within the limit cost the ellipsis")
     }
 
-    // MARK: - The expansion overlay
+    /// An open bubble is showing everything, so it is not truncated — and it
+    /// still has to offer the way back, which is what the second flag is for.
+    func testAnOpenBubbleIsWholeAndStillOffersTheWayBack() throws {
+        let bubble = try laidOutBubble(text: paragraph(of: 40), lineLimit: 8)
+        XCTAssertTrue(bubble.isTruncated)
 
-    func testMoreOpensAnOverlayShowingTheWholeMessage() async throws {
+        bubble.isExpanded = true
+
+        XCTAssertFalse(bubble.isTruncated, "an opened bubble is still reporting itself cut off")
+        XCTAssertTrue(bubble.isExpandable, "an opened bubble stopped offering the way back")
+        XCTAssertFalse(try moreButton(in: bubble).isHidden)
+        XCTAssertEqual(try lineCount(of: bubble), 40)
+        XCTAssertEqual(try text(of: bubble), paragraph(of: 40))
+    }
+
+    // MARK: - Opening a message out in place
+
+    func testTheToggleOpensTheMessageInPlace() async throws {
         let (controller, chat) = try await loadedFeed()
-        try moreButton(in: try firstBubble(of: chat)).performClick(nil)
+        let bubble = try firstBubble(of: chat)
+        XCTAssertTrue(bubble.isTruncated, "the fixture is wrong: nothing was cut off")
 
-        let overlay = try XCTUnwrap(expansion(in: chat), "More… opened nothing")
+        try moreButton(in: bubble).performClick(nil)
         await settle()
 
-        let expanded = try XCTUnwrap(expandedBubble(in: overlay), "the overlay holds no bubble")
-        XCTAssertFalse(expanded.isTruncated,
-                       "the overlay showed the truncated copy, which is the message it was opened to escape")
-        XCTAssertTrue(try text(of: expanded).hasPrefix(Self.longText),
-                      "the expanded bubble is not the whole message")
+        XCTAssertFalse(bubble.isTruncated,
+                       "the toggle left the message cut off, which is what it was there to undo")
+        XCTAssertEqual(try text(of: bubble), Self.longText,
+                       "the opened bubble is not the whole message")
+        XCTAssertTrue(bubble.isDescendant(of: chat),
+                      "the message opened somewhere other than where it was being read")
         XCTAssertNotNil(controller.view.window)
     }
 
-    func testTheExpansionOverlayCoversTheWholeChat() async throws {
+    func testTheToggleClosesTheMessageAgain() async throws {
         let (_, chat) = try await loadedFeed()
-        try moreButton(in: try firstBubble(of: chat)).performClick(nil)
-        let overlay = try XCTUnwrap(expansion(in: chat))
+        let bubble = try firstBubble(of: chat)
+
+        try moreButton(in: bubble).performClick(nil)
+        await settle()
+        try moreButton(in: bubble).performClick(nil)
         await settle()
 
-        XCTAssertEqual(overlay.frame, chat.bounds,
-                       "the overlay has to cover the whole chat, composer and all")
+        XCTAssertTrue(bubble.isTruncated, "the toggle only goes one way")
+        XCTAssertTrue(try text(of: bubble).hasSuffix("…"))
     }
 
-    func testEscapeDismissesTheExpansionOverlay() async throws {
-        let (_, chat) = try await loadedFeed()
+    /// A watched feed throws its rows away and builds new ones every few
+    /// seconds. A message the reader opened has to come back open, or it closes
+    /// itself under them mid-sentence.
+    func testAMessageLeftOpenComesBackOpenAfterARebuild() async throws {
+        let (controller, chat) = try await loadedFeed()
+        let row = try XCTUnwrap(rows(in: chat).first)
         try moreButton(in: try firstBubble(of: chat)).performClick(nil)
-        let overlay = try XCTUnwrap(expansion(in: chat))
-
-        XCTAssertTrue(overlay.performKeyEquivalent(with: key(code: 53)))
-        try await waitUntil("the overlay went away") { overlay.superview == nil }
-    }
-
-    func testReturnDismissesTheExpansionOverlay() async throws {
-        let (_, chat) = try await loadedFeed()
-        try moreButton(in: try firstBubble(of: chat)).performClick(nil)
-        let overlay = try XCTUnwrap(expansion(in: chat))
-
-        XCTAssertTrue(overlay.performKeyEquivalent(with: key(code: 36)))
-        try await waitUntil("the overlay went away") { overlay.superview == nil }
-    }
-
-    func testAPressThatNoControlTookDismissesTheExpansionOverlay() async throws {
-        let (_, chat) = try await loadedFeed()
-        try moreButton(in: try firstBubble(of: chat)).performClick(nil)
-        let overlay = try XCTUnwrap(expansion(in: chat))
         await settle()
 
-        overlay.mouseDown(with: mouseEvent(.leftMouseDown, in: overlay))
-        try await waitUntil("the overlay went away") { overlay.superview == nil }
-    }
-
-    /// The reason the overlay exists at all is to be read, and reading a
-    /// message this long usually ends in copying part of it — so the press that
-    /// starts a selection must not be the press that closes it.
-    func testClickingTheExpandedBubbleDoesNotDismissTheOverlay() async throws {
-        let (_, chat) = try await loadedFeed()
-        try moreButton(in: try firstBubble(of: chat)).performClick(nil)
-        let overlay = try XCTUnwrap(expansion(in: chat))
+        // Resizing is a rebuild the transcript really does do: the bubbles are
+        // measured against the width, so a new width is a new transcript.
+        controller.view.window?.setContentSize(NSSize(width: 460, height: 640))
+        try await waitUntil("the transcript was rebuilt") {
+            self.rows(in: chat).first !== row
+        }
         await settle()
-        let expanded = try XCTUnwrap(expandedBubble(in: overlay))
 
-        // Inside the bubble's padding, where the text view is not: the point a
-        // reader's click lands on when they miss the first word by a hair.
-        let hit = overlay.hitTest(expanded.convert(NSPoint(x: 4, y: 4), to: overlay.superview))
-        XCTAssertTrue(
-            hit?.isDescendant(of: expanded) ?? false,
-            "a press on the expanded bubble reached \(String(describing: hit)) instead")
-
-        expanded.mouseDown(with: mouseEvent(.leftMouseDown, in: expanded))
-        try await Task.sleep(for: .milliseconds(400))
-        XCTAssertNotNil(overlay.superview,
-                        "clicking the message closed it, so none of it can be copied")
+        XCTAssertFalse(try firstBubble(of: chat).isTruncated,
+                       "the rebuild closed a message the reader had opened")
     }
 
     // MARK: - The face
@@ -353,7 +344,7 @@ final class BubbleTruncationTests: XCTestCase {
     }
 
     /// A one-row feed whose single message is long enough to truncate, in a
-    /// window — the shape the **More…** control actually ships in.
+    /// window — the shape the expand toggle actually ships in.
     private func loadedFeed() async throws -> (ConversationsViewController, ChatView) {
         let messages = [
             ChatMessage(
@@ -395,14 +386,10 @@ final class BubbleTruncationTests: XCTestCase {
             "the feed has no bubbles")
     }
 
-    private func expansion(in chat: ChatView) -> BubbleExpansionOverlay? {
-        chat.subviews.compactMap { $0 as? BubbleExpansionOverlay }.first
-    }
-
-    private func expandedBubble(in overlay: BubbleExpansionOverlay) -> AIChatBubbleView? {
-        overlay.subviews
-            .compactMap { ($0 as? NSScrollView)?.documentView as? AIChatBubbleView }
-            .first
+    /// The rect Auto Layout actually placed a control at — its frame minus the
+    /// bezel insets AppKit grows it by.
+    private func placement(of control: NSView) -> NSRect {
+        control.alignmentRect(forFrame: control.frame)
     }
 
     private func moreButton(in bubble: AIChatBubbleView) throws -> NSButton {
@@ -410,7 +397,7 @@ final class BubbleTruncationTests: XCTestCase {
             bubble.subviews
                 .compactMap { $0 as? NSButton }
                 .first { $0.accessibilityIdentifier() == "chat-bubble.more" },
-            "the bubble has no More… control")
+            "the bubble has no expand toggle")
     }
 
     /// The tests that drive the face through Terminal settings only mean
@@ -489,38 +476,8 @@ final class BubbleTruncationTests: XCTestCase {
 
     // MARK: - Driving and waiting
 
-    private func mouseEvent(_ type: NSEvent.EventType, in view: NSView) -> NSEvent {
-        let centre = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
-        return NSEvent.mouseEvent(
-            with: type,
-            location: view.convert(centre, to: nil),
-            modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: view.window?.windowNumber ?? 0,
-            context: nil,
-            eventNumber: 0,
-            clickCount: 1,
-            pressure: 1
-        )!
-    }
-
-    private func key(code: UInt16) -> NSEvent {
-        NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
-            modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: windows.last?.windowNumber ?? 0,
-            context: nil,
-            characters: "",
-            charactersIgnoringModifiers: "",
-            isARepeat: false,
-            keyCode: code
-        )!
-    }
-
     /// Polls `condition` for up to two seconds, laying out between tries — the
-    /// feed's read and the overlay's fade are both real time.
+    /// feed's read and the transcript's rebuild are both real time.
     private func waitUntil(
         _ what: String,
         file: StaticString = #filePath, line: UInt = #line,

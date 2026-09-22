@@ -57,9 +57,9 @@ public final class ChatTranscriptRowView: NSView {
         public var onOpen: ((ChatMessage) -> Void)?
         /// The row's app icon was clicked: leave for wherever this came from.
         public var onJump: ((ChatMessage) -> Void)?
-        /// The bubble's **More…** control was used — this message is truncated
-        /// and the reader wants all of it.
-        public var onExpand: ((ChatMessage) -> Void)?
+        /// The bubble's expand/collapse toggle was used — the reader wants all
+        /// of this message, or wants it back the way it was.
+        public var onToggleExpanded: ((ChatMessage) -> Void)?
         /// The row was clicked once: make it *the* row.
         ///
         /// A single click is the cheapest gesture there is and it was doing
@@ -72,12 +72,12 @@ public final class ChatTranscriptRowView: NSView {
         public init(
             onOpen: ((ChatMessage) -> Void)? = nil,
             onJump: ((ChatMessage) -> Void)? = nil,
-            onExpand: ((ChatMessage) -> Void)? = nil,
+            onToggleExpanded: ((ChatMessage) -> Void)? = nil,
             onSelect: ((ChatMessage) -> Void)? = nil
         ) {
             self.onOpen = onOpen
             self.onJump = onJump
-            self.onExpand = onExpand
+            self.onToggleExpanded = onToggleExpanded
             self.onSelect = onSelect
         }
     }
@@ -128,10 +128,24 @@ public final class ChatTranscriptRowView: NSView {
     /// selection moves by keyboard rather than by a press on a particular row.
     public var shownMessage: ChatMessage { message }
 
-    /// Whether the row is showing less than the message holds — the question a
-    /// keyboard asks before offering to open it out, since the **More…** control
-    /// that would answer it with a click is drawn only when it is true.
+    /// Whether the row is showing less than the message holds.
     public var isTruncated: Bool { bubble.isTruncated }
+
+    /// Whether the message runs past the row's line limit — the question a
+    /// keyboard asks before offering to open it out, since it stays true while
+    /// the row is open and so answers "can this be closed again" too.
+    public var isExpandable: Bool { bubble.isExpandable }
+
+    /// Whether the row is showing the whole message, line limit or no.
+    ///
+    /// Settable, so the transcript can open a row the reader is looking at
+    /// without rebuilding itself around it — a rebuild empties the stack, and
+    /// the row that comes back is at the top of a transcript scrolled somewhere
+    /// else entirely.
+    public var isExpanded: Bool {
+        get { bubble.isExpanded }
+        set { bubble.isExpanded = newValue }
+    }
 
     /// Thick enough to read as a frame at a glance across a busy feed, thin
     /// enough not to shift the row's content when it appears — it is drawn
@@ -182,12 +196,15 @@ public final class ChatTranscriptRowView: NSView {
     ///     truncates and offers the rest — see ``AIChatBubbleView``.
     ///   - bubbleStyle: which shape the bubble is drawn in — see
     ///     ``AIChatBubbleView/Style``.
+    ///   - isExpanded: whether the row starts out showing the whole message —
+    ///     see ``isExpanded``.
     public init(
         message: ChatMessage,
         maxBubbleWidth: CGFloat,
         actions: Actions,
         lineLimit: Int? = nil,
-        bubbleStyle: AIChatBubbleView.Style = .speaker
+        bubbleStyle: AIChatBubbleView.Style = .speaker,
+        isExpanded: Bool = false
     ) {
         self.message = message
         let attribution = message.attribution
@@ -229,7 +246,8 @@ public final class ChatTranscriptRowView: NSView {
             // was long" is already in the height. A one-liner still stops at its
             // own words: there the short shape *is* the message, and stretching
             // "ok" across the window would be reading weight into it.
-            fillsWidthWhenWrapped: true
+            fillsWidthWhenWrapped: true,
+            isExpanded: isExpanded
         )
         switch message.delivery {
         case .settled:
@@ -334,9 +352,9 @@ public final class ChatTranscriptRowView: NSView {
         timeLabel.alignment = isFromUser ? .right : .left
 
         bubble.setContentHuggingPriority(.required, for: .horizontal)
-        bubble.onExpand = { [weak self] in
+        bubble.onToggleExpanded = { [weak self] in
             guard let self else { return }
-            self.actions.onExpand?(self.message)
+            self.actions.onToggleExpanded?(self.message)
         }
         // A click anywhere in the row picks it, the bubble's own text included:
         // hit-testing hands presses on the text to the bubble, so a row that

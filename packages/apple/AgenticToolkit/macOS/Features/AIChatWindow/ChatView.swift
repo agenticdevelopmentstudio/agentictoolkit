@@ -14,8 +14,14 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     private let sendButton = NSButton()
     private var isAtBottom = true
 
-    /// The message currently laid out in full over the transcript, if any.
-    private var expansion: BubbleExpansionOverlay?
+    /// The messages the reader has opened out, by id.
+    ///
+    /// Kept here rather than on the rows because the rows do not last: a
+    /// watched feed rebuilds its whole transcript every few seconds, and a
+    /// message opened on one pass would close itself on the next. This view
+    /// survives that, so it is what remembers, and each rebuild hands the
+    /// answer back to the row it builds.
+    private var expandedMessageIDs: Set<String> = []
 
     /// True from the start of a transcript rebuild until the scroll that follows
     /// it has landed, so ``transcriptDidScroll`` can tell the reader's scrolling
@@ -128,9 +134,9 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     ///
     /// A feed is the case for setting it: one long reply among short ones takes
     /// the whole window, and a reader scrolling past it has lost the thread by
-    /// the time they are out. Opening the rest is ``BubbleExpansionOverlay``'s
-    /// job, and this view wires it — a row that can truncate can always
-    /// un-truncate, so there is nothing for a caller to remember.
+    /// the time they are out. Opening the rest is this view's job, and it wires
+    /// it — a row that can truncate can always un-truncate, so there is nothing
+    /// for a caller to remember.
     public var bubbleLineLimit: Int? {
         didSet { scheduleRender() }
     }
@@ -450,14 +456,17 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             // is exactly the moment the reader most needs to see it in flight.
             if message.attribution != nil || message.delivery != .settled {
                 var actions = rowActions
-                actions.onExpand = { [weak self] message in self?.expand(message) }
+                actions.onToggleExpanded = { [weak self] message in
+                    self?.toggleExpanded(message.id)
+                }
                 if isRowSelectionEnabled {
                     actions.onSelect = { [weak self] message in self?.select(message.id) }
                 }
                 let row = ChatTranscriptRowView(
                     message: message, maxBubbleWidth: rowBubbleWidth,
                     actions: actions, lineLimit: bubbleLineLimit,
-                    bubbleStyle: bubbleStyle)
+                    bubbleStyle: bubbleStyle,
+                    isExpanded: expandedMessageIDs.contains(message.id))
                 // A rebuild is not a deselection: the reader picked a message,
                 // and the row showing it having been thrown away and built again
                 // in the meantime is this view's business, not theirs.
@@ -588,7 +597,8 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     }
 
     /// The letters a picked row answers to: **c** opens the conversation here,
-    /// **m** opens the message out, **g** goes to the session it came from.
+    /// **m** opens the message out — or closes it — and **g** goes to the
+    /// session it came from.
     ///
     /// Bare letters, because a feed with a picked row is a list and this is what
     /// lists do — the reader's hand is already on the keys that moved the pick.
@@ -603,11 +613,12 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         case "c": rowActions.onOpen?(row.shownMessage)
         case "g": rowActions.onJump?(row.shownMessage)
         case "m":
-            // Only where there is more to show. On a message already whole the
-            // key means nothing, and an overlay that opened to say "here it is
-            // again" would be an answer to a question nobody asked.
-            guard row.isTruncated else { return false }
-            expand(row.shownMessage)
+            // Only where there is more to the message than the row's limit
+            // shows. On one already short enough the key means nothing, and a
+            // row that flashed to say "here it is again" would be an answer to
+            // a question nobody asked.
+            guard row.isExpandable else { return false }
+            toggleExpanded(row.shownMessage.id)
         default: return false
         }
         return true
@@ -641,20 +652,29 @@ public final class ChatView: NSView, NSTextFieldDelegate {
 
     // MARK: - Expansion
 
-    /// Lays one message out in full over the transcript.
+    /// Opens one message out in place, or closes it again.
     ///
-    /// Hosted on this view rather than on the transcript's document: a rebuild
-    /// empties that stack, and a feed rebuilds every few seconds — the overlay
-    /// would vanish mid-read. Covering the composer as well as the rows is the
-    /// right shape anyway, since the composer is not what is being read.
-    private func expand(_ message: ChatMessage) {
-        expansion?.dismiss()
-        let overlay = BubbleExpansionOverlay(message: message, style: bubbleStyle)
-        overlay.onDismissed = { [weak self, weak overlay] in
-            if self?.expansion === overlay { self?.expansion = nil }
+    /// The row on screen is changed directly and the transcript is *not* rebuilt
+    /// around it: a rebuild empties the stack and refills it, which puts the
+    /// reader back at the top of a transcript they had scrolled — for the sake
+    /// of one row that is already in front of them. What the rebuild is for is
+    /// the *next* one, where the row itself is gone and only the id survives.
+    private func toggleExpanded(_ messageID: String) {
+        let isOpening = !expandedMessageIDs.contains(messageID)
+        if isOpening {
+            expandedMessageIDs.insert(messageID)
+        } else {
+            expandedMessageIDs.remove(messageID)
         }
-        expansion = overlay
-        overlay.present(in: self)
+        transcriptRows.first { $0.shownMessage.id == messageID }?.isExpanded = isOpening
+    }
+
+    /// Every row currently in the transcript, in order.
+    ///
+    /// Not ``selectableRows``: that list is empty wherever row selection is off,
+    /// and a message opens out the same either way.
+    private var transcriptRows: [ChatTranscriptRowView] {
+        transcriptStack.arrangedSubviews.compactMap { $0 as? ChatTranscriptRowView }
     }
 
     /// Disabled while a turn is in flight, so rapid sends can't overlap turns —

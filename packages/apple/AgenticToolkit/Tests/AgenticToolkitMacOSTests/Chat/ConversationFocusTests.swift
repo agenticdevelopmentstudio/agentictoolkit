@@ -575,19 +575,21 @@ final class ConversationFocusTests: XCTestCase {
         click(row)
         feed.keyDown(with: letter("m"))
 
-        XCTAssertNotNil(expansion(in: feed), "m left a capped message capped")
+        XCTAssertFalse(row.isTruncated, "m left a capped message capped")
+        XCTAssertTrue(row.isExpanded)
     }
 
-    /// On a message already whole the key means nothing: an overlay that opened
-    /// to say "here it is again" would answer a question nobody asked.
+    /// On a message already whole the key means nothing: there is nothing to
+    /// open, and nothing to close either.
     func testMOnAMessageThatIsAlreadyWholeOpensNothing() async throws {
         let (controller, _) = try await loadedFeed()
         let feed = try feedChat(of: controller)
+        let row = try firstRow(of: controller)
 
-        click(try firstRow(of: controller))
+        click(row)
         feed.keyDown(with: letter("m"))
 
-        XCTAssertNil(expansion(in: feed), "m opened a message that was not cut off")
+        XCTAssertFalse(row.isExpanded, "m opened a message that was not cut off")
     }
 
     /// ⌘C is a copy and ⌥G is a character — neither is this view's to take.
@@ -603,10 +605,6 @@ final class ConversationFocusTests: XCTestCase {
 
         XCTAssertNil(focusOverlay(in: controller), "⌘C opened the conversation instead of copying")
         XCTAssertEqual(went.values, [], "⌥G left the window instead of typing a character")
-    }
-
-    private func expansion(in chat: ChatView) -> BubbleExpansionOverlay? {
-        chat.subviews.compactMap { $0 as? BubbleExpansionOverlay }.first
     }
 
     private func feedChat(of controller: ConversationsViewController) throws -> ChatView {
