@@ -498,6 +498,52 @@ final class ConversationsShelfTests: XCTestCase {
         XCTAssertEqual(heard, [["a"]])
     }
 
+    // MARK: - Passing through single mode
+
+    /// Single mode is a way of looking at the roster, not a way of editing it,
+    /// so a visit to it must cost the reader nothing. Re-ticking by hand is the
+    /// one repair a several-session selection makes tedious.
+    func testAMultiModeSelectionSurvivesAVisitToSingleMode() {
+        let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
+        shelf.setHidden(["c"])
+
+        shelf.selectionMode = .single
+        XCTAssertEqual(shelf.hidden, ["b", "c"], "single mode did not narrow to one conversation")
+
+        shelf.selectionMode = .multi
+        XCTAssertEqual(shelf.hidden, ["c"], "the reader's ticks did not come back")
+    }
+
+    /// The restore is a change to what the feed draws, so the host has to hear
+    /// it — `setHidden` is the quiet door, and this is not that.
+    func testTheHostHearsTheSelectionComeBack() {
+        let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
+        shelf.setHidden(["c"])
+        shelf.selectionMode = .single
+
+        var heard: [Set<String>] = []
+        shelf.onHiddenChanged = { heard.append($0) }
+        shelf.selectionMode = .multi
+
+        XCTAssertEqual(heard, [["c"]])
+    }
+
+    /// What the reader ticks after a restore is theirs, and is what the *next*
+    /// visit restores — a remembered set that outlived its round trip would put
+    /// back a selection they had already moved on from.
+    func testASecondVisitRestoresTheNewerSelection() {
+        let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
+        shelf.setHidden(["c"])
+        shelf.selectionMode = .single
+        shelf.selectionMode = .multi
+
+        shelf.setHidden(["a"])
+        shelf.selectionMode = .single
+        shelf.selectionMode = .multi
+
+        XCTAssertEqual(shelf.hidden, ["a"])
+    }
+
     // MARK: - The split
 
     func testTheShelfStartsAway() {

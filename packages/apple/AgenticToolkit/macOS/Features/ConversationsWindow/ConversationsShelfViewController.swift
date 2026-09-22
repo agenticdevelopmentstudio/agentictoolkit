@@ -93,9 +93,11 @@ public final class ConversationsShelfViewController: NSViewController,
     /// Switching to ``ConversationsSelectionMode/single`` keeps whichever
     /// session was already the first one showing and hides the rest, so the
     /// change reads as a narrowing of what is on screen rather than as a jump to
-    /// something arbitrary. Switching back leaves the ticks where they are —
-    /// one session showing is a legitimate multi-mode state, and re-ticking the
-    /// others for the reader would undo a narrowing they asked for.
+    /// something arbitrary. Switching back restores the ticks the reader had
+    /// before that narrowing: single mode is a way of *looking* at the roster,
+    /// so passing through it must not cost the selection they built — and
+    /// re-ticking by hand is the one repair a multi-session selection makes
+    /// tedious.
     public var selectionMode: ConversationsSelectionMode = .multi {
         didSet {
             guard selectionMode != oldValue else { return }
@@ -105,9 +107,19 @@ public final class ConversationsShelfViewController: NSViewController,
             // Select All / Unselect All are multi-mode answers; see
             // `selectAllVisible()`.
             selectionMenuButton.isEnabled = selectionMode == .multi
-            if selectionMode == .single { adoptSolo() } else { syncTableSelection() }
+            if selectionMode == .single {
+                multiHidden = hidden
+                adoptSolo()
+            } else {
+                restoreMultiSelection()
+            }
         }
     }
+
+    /// The ticks as multi mode last had them, kept across a visit to single
+    /// mode. Nil whenever the shelf is in multi mode — the live `hidden` set is
+    /// the selection then, and there is nothing else to remember.
+    private var multiHidden: Set<String>?
 
     /// In single mode, the one session being shown.
     ///
@@ -293,6 +305,22 @@ public final class ConversationsShelfViewController: NSViewController,
             ?? visible.first?.id
             ?? sessions.first?.id
         applySolo()
+    }
+
+    /// Puts the reader's multi-mode ticks back, and drops the memory of them —
+    /// what they tick from here is theirs, not something to be restored again
+    /// on the next round trip.
+    ///
+    /// A session that arrived while single mode was on is in neither set, so it
+    /// stays ticked, which is how every new session arrives. And an id remembered
+    /// for a session that has since left the roster is kept rather than pruned:
+    /// it costs nothing while the session is gone, and if the session comes back
+    /// it comes back unticked, as the reader left it.
+    private func restoreMultiSelection() {
+        defer { syncTableSelection() }
+        guard let remembered = multiHidden else { return }
+        multiHidden = nil
+        apply(remembered)
     }
 
     /// Hides everything but the pick.
