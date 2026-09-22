@@ -443,6 +443,61 @@ final class ConversationsShelfTests: XCTestCase {
                                     "the row is too short for the icon the Sessions window draws")
     }
 
+    // MARK: - Walking the list with the arrow keys
+
+    /// Moving the highlight is the arrow keys' half of the job and AppKit's
+    /// own — a table with the keyboard has always done it. What was missing is
+    /// this half: the feed following the highlight. So the tests below move the
+    /// selection the way the keystroke does, and assert on what follows.
+    private func moveHighlight(to row: Int, in table: NSTableView) {
+        table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+    }
+
+    func testWalkingTheHighlightWalksTheShownConversation() {
+        let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
+        shelf.selectionMode = .single
+        guard let table = firstTable(in: shelf.view) else { return XCTFail("no table") }
+
+        XCTAssertEqual(shelf.hidden, ["b", "c"], "single mode did not start on the first row")
+
+        moveHighlight(to: 1, in: table)
+        XCTAssertEqual(shelf.hidden, ["a", "c"], "the feed did not follow the highlight down")
+
+        moveHighlight(to: 2, in: table)
+        XCTAssertEqual(shelf.hidden, ["a", "b"])
+
+        moveHighlight(to: 1, in: table)
+        XCTAssertEqual(shelf.hidden, ["a", "c"], "the feed did not follow the highlight back up")
+    }
+
+    /// In multi mode there is no *the* conversation to walk to, and a highlight
+    /// that quietly unticked two of three sessions would be the arrow keys
+    /// undoing the reader's selection.
+    func testTheHighlightLeavesAMultiModeSelectionAlone() {
+        let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
+        guard let table = firstTable(in: shelf.view) else { return XCTFail("no table") }
+
+        moveHighlight(to: 0, in: table)
+        moveHighlight(to: 1, in: table)
+
+        XCTAssertEqual(shelf.hidden, [], "moving the highlight hid sessions in multi mode")
+    }
+
+    /// The host hears the move exactly as it hears a click: one change per
+    /// move, not one per redraw — the pick re-states the table's selection,
+    /// which is the loop this would otherwise run round.
+    func testTheHostHearsTheMoveOnce() {
+        let shelf = shelf([("a", "Alpha"), ("b", "Beta")])
+        shelf.selectionMode = .single
+        guard let table = firstTable(in: shelf.view) else { return XCTFail("no table") }
+
+        var heard: [Set<String>] = []
+        shelf.onHiddenChanged = { heard.append($0) }
+        moveHighlight(to: 1, in: table)
+
+        XCTAssertEqual(heard, [["a"]])
+    }
+
     // MARK: - The split
 
     func testTheShelfStartsAway() {

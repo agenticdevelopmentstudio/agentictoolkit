@@ -117,6 +117,10 @@ public final class ConversationsShelfViewController: NSViewController,
     /// conversation than the one the reader picked.
     private var soloID: String?
 
+    /// Whether the selection is being moved by the shelf rather than by the
+    /// reader — see ``reloadRows()``.
+    private var isSettlingSelection = false
+
     /// Every session in the feed, newest roster wins. Setting it keeps the
     /// reader's sort, filter text and scroll position.
     public var sessions: [Session] = [] {
@@ -208,7 +212,7 @@ public final class ConversationsShelfViewController: NSViewController,
     public func setHidden(_ ids: Set<String>) {
         guard ids != hidden else { return }
         hidden = ids
-        if isViewLoaded { table.reloadData() }
+        if isViewLoaded { reloadRows() }
     }
 
     /// Ticks every row **in the visible list**, leaving anything the filter has
@@ -237,8 +241,31 @@ public final class ConversationsShelfViewController: NSViewController,
     private func apply(_ ids: Set<String>) {
         guard ids != hidden else { return }
         hidden = ids
-        table.reloadData()
+        reloadRows()
         onHiddenChanged?(hidden)
+    }
+
+    /// Redraws the list.
+    ///
+    /// Every row is rebuilt, so the table drops its highlight — and since single
+    /// mode disallows an empty selection, AppKit immediately puts one back on
+    /// row 0, before ``syncTableSelection()`` has restored the pick. That is the
+    /// shelf redrawing itself, never the reader moving, so the selection change
+    /// it raises is one ``tableViewSelectionDidChange(_:)`` has to sit out;
+    /// otherwise picking the third row would redraw, be told the first row was
+    /// picked, and land back where it started.
+    private func reloadRows() {
+        settlingSelection { table.reloadData() }
+    }
+
+    /// Runs `body` with the shelf's own selection changes marked as such.
+    /// Nested because a redraw restores the highlight, which redraws nothing but
+    /// is equally not the reader.
+    private func settlingSelection(_ body: () -> Void) {
+        let wasSettling = isSettlingSelection
+        isSettlingSelection = true
+        defer { isSettlingSelection = wasSettling }
+        body()
     }
 
     private func toggle(_ id: String) {
@@ -306,15 +333,17 @@ public final class ConversationsShelfViewController: NSViewController,
     /// sessions would say there is.
     private func syncTableSelection() {
         guard isViewLoaded else { return }
-        guard selectionMode == .single,
-              let soloID,
-              let row = visible.firstIndex(where: { $0.id == soloID })
-        else {
-            table.deselectAll(nil)
-            return
+        settlingSelection {
+            guard selectionMode == .single,
+                  let soloID,
+                  let row = visible.firstIndex(where: { $0.id == soloID })
+            else {
+                table.deselectAll(nil)
+                return
+            }
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            table.scrollRowToVisible(row)
         }
-        table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        table.scrollRowToVisible(row)
     }
 
     // MARK: - View
@@ -597,7 +626,7 @@ public final class ConversationsShelfViewController: NSViewController,
             return sortAscending ? resolved == .orderedAscending : resolved == .orderedDescending
         }
         guard isViewLoaded else { return }
-        table.reloadData()
+        reloadRows()
         // `reloadData` drops the selection, so the single-mode highlight is
         // re-stated here rather than only where the pick changes.
         syncTableSelection()
@@ -694,6 +723,28 @@ public final class ConversationsShelfViewController: NSViewController,
     // MARK: - NSTableViewDataSource / Delegate
 
     public func numberOfRows(in tableView: NSTableView) -> Int { visible.count }
+
+    /// The table's highlighted row *is* the pick, so whatever moved the
+    /// highlight has moved the pick.
+    ///
+    /// That is what makes the bare arrow keys work once the list has the
+    /// keyboard: ⌘↑ and ⌘↓ are the window-wide command, listened for wherever
+    /// the reader is looking, while ↑ and ↓ are the table's own — AppKit was
+    /// already moving the highlight with them, and the feed simply did not
+    /// follow it. Nothing here is a second implementation of the move; it is
+    /// the one place the highlight and the shown conversation are tied
+    /// together, which is also why a click needs no special case.
+    ///
+    /// A redraw moves the highlight too, and that is not the reader — see
+    /// ``reloadRows()`` for what is being sat out and why.
+    public func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !isSettlingSelection,
+              selectionMode == .single,
+              visible.indices.contains(table.selectedRow),
+              visible[table.selectedRow].id != soloID
+        else { return }
+        pick(visible[table.selectedRow].id)
+    }
 
     public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         ThemedTableRowView()
