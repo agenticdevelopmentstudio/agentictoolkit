@@ -40,6 +40,14 @@ extension SessionWatcher {
         /// than pre-digested so the source stays a dumb carrier; ``activity`` is the
         /// interpretation.
         public var lastEventType: String
+        /// Whether a **subagent** of this session was doing something just now.
+        ///
+        /// ``lastEventType`` cannot say: it is the *main agent's* turn, and a
+        /// subagent's hooks are deliberately kept out of it. So a session whose
+        /// main agent has handed back while a background subagent is still working
+        /// looks idle by that measure, and isn't. The source carries the verdict;
+        /// ``activity`` is where it is read.
+        public var subagentWorking: Bool
 
         public init(
             id: Int? = nil,
@@ -58,7 +66,8 @@ extension SessionWatcher {
             termSessionId: String = "",
             sessionName: String = "",
             lastOutput: String = "",
-            lastEventType: String = ""
+            lastEventType: String = "",
+            subagentWorking: Bool = false
         ) {
             self.id = id
             self.sessionId = sessionId
@@ -77,6 +86,7 @@ extension SessionWatcher {
             self.sessionName = sessionName
             self.lastOutput = lastOutput
             self.lastEventType = lastEventType
+            self.subagentWorking = subagentWorking
         }
 
         /// What the session is doing right now, as the row's activity icon shows it.
@@ -84,8 +94,19 @@ extension SessionWatcher {
         /// Derived from ``status`` and ``lastEventType`` rather than stored: the
         /// daemon records what happened, not what it means, so the meaning can be
         /// re-read (or re-mapped for a new event type) without a schema change.
+        ///
+        /// A live subagent (``subagentWorking``) reads as working, because it is —
+        /// but it never overrides ``waiting``: a session blocked on a permission
+        /// prompt still needs the user, whatever its subagents are doing.
         public var activity: SessionWatcherActivity {
             guard status == .active else { return .idle }
+            let turn = turnActivity
+            guard turn == .idle, subagentWorking else { return turn }
+            return .working
+        }
+
+        /// ``activity`` as the *main agent's turn* alone tells it.
+        private var turnActivity: SessionWatcherActivity {
             switch lastEventType {
             // The agent has handed control back to the user and is waiting on them.
             // (The daemon only records a Notification that asks for an answer — not
