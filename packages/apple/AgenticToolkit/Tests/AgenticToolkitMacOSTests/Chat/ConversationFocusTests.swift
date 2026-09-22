@@ -797,6 +797,94 @@ final class ConversationFocusTests: XCTestCase {
                        "the reader was not told why their line did not go anywhere")
     }
 
+    /// A feed pointed at one conversation at a time, the way single mode reads:
+    /// `showing` says which, and the loader returns that conversation alone.
+    private func pointableFeed(
+        _ source: FeedSource, showing: SourceLog, sendTimeout: Duration = .seconds(60)
+    ) -> FeedChatSession {
+        FeedChatSession(
+            refreshInterval: .milliseconds(20),
+            sendTimeout: sendTimeout,
+            send: { _ in nil },
+            load: {
+                let shown = showing.values.last
+                return source.values.filter { $0.attribution?.sourceID == shown }
+            }
+        )
+    }
+
+    /// Typed into one conversation while its agent was busy, the line used to be
+    /// drawn in front of every conversation the reader moved to afterwards —
+    /// and since none of them ever said it back, it sat there until it went red.
+    func testALineTypedIntoOneConversationIsNotDrawnInAnother() async throws {
+        let source = FeedSource(feedMessages)
+        let showing = SourceLog()
+        showing.note("s1")
+        let session = pointableFeed(source, showing: showing)
+        session.destinationID = "s1"
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+        try await waitUntil("s1 was read") { log.latest.map(\.text) == ["s1 first", "s1 second"] }
+
+        session.send("and the tests")
+        try await waitUntil("the line was shown in s1") { log.latest.last?.text == "and the tests" }
+
+        showing.note("s2")
+        session.destinationID = "s2"
+        try await waitUntil("s2 was read") { log.latest.first?.text == "s2 first" }
+        XCTAssertEqual(log.latest.map(\.text), ["s2 first"],
+                       "the line written to s1 followed the reader into s2")
+
+        showing.note("s1")
+        session.destinationID = "s1"
+        try await waitUntil("s1 was read again") { log.latest.first?.text == "s1 first" }
+        XCTAssertEqual(log.latest.map(\.text), ["s1 first", "s1 second", "and the tests"],
+                       "the line was lost on the way back to the conversation it was written to")
+        XCTAssertEqual(log.latest.last?.delivery, .sending)
+    }
+
+    /// Several conversations on the timeline together include the one the line
+    /// was written to, so the line is still part of what the reader is looking at.
+    func testALineStaysOnTheTimelineWhileItsConversationIsOnIt() async throws {
+        let source = FeedSource(feedMessages)
+        let session = FeedChatSession(
+            refreshInterval: .milliseconds(20), send: { _ in nil }, load: { source.values })
+        session.destinationID = "s1"
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+        try await waitUntil("the feed was read") { log.latest.count == 3 }
+
+        session.send("and the tests")
+        session.destinationID = nil
+
+        try await waitUntil("the line was shown") { log.latest.last?.text == "and the tests" }
+        XCTAssertEqual(log.latest.last?.attribution?.sourceID, "s1",
+                       "the line is headed by a conversation other than the one it went to")
+    }
+
+    /// The same words said in another conversation are not this line arriving.
+    func testOnlyTheConversationWrittenToCanSettleTheLine() async throws {
+        let source = FeedSource(feedMessages)
+        let session = FeedChatSession(
+            refreshInterval: .milliseconds(20), send: { _ in nil }, load: { source.values })
+        session.destinationID = "s1"
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+        try await waitUntil("the feed was read") { log.latest.count == 3 }
+
+        session.send("yes")
+        source.append(message(role: .user, text: "yes", sourceID: "s2"))
+        try await waitUntil("s2's line was read") { log.latest.contains { $0.id == "s2-yes" } }
+        XCTAssertEqual(log.latest.last?.delivery, .sending,
+                       "another conversation's \"yes\" settled the line written to s1")
+
+        source.append(message(role: .user, text: "yes", sourceID: "s1"))
+        try await waitUntil("s1 said it back") {
+            log.latest.filter { $0.text == "yes" }.allSatisfy { $0.delivery == .settled }
+                && log.latest.filter { $0.text == "yes" }.count == 2
+        }
+    }
+
     /// Both marks sit between the bubble and its timestamp, on the speaker's
     /// side: a row that is waiting is the row above the answer, not a banner
     /// somewhere else in the window.

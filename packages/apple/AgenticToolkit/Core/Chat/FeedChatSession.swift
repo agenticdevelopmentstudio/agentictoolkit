@@ -51,6 +51,12 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// it yet. What the view sees is the two, in that order.
     private var loaded: [ChatMessage] = []
     private var pending: [ChatMessage] = []
+    private var destination: String?
+    /// Which conversation each pending line was written to, by id. Kept beside
+    /// the message rather than on it, because a line written to a conversation
+    /// with nothing on screen yet has no attribution to borrow and still has a
+    /// destination.
+    private var destinations: [String: String] = [:]
     private var timeouts: [String: Task<Void, Never>] = [:]
 
     /// - Parameters:
@@ -96,6 +102,29 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
         set { withLock { sendable = newValue } }
     }
 
+    /// The conversation a line typed here goes to, by
+    /// ``ChatMessage/Attribution/sourceID`` — nil for a feed with one fixed
+    /// destination, where the question never comes up.
+    ///
+    /// A feed that can be pointed at different conversations has to know which
+    /// one each written line belongs to, or the line follows the reader around:
+    /// typed into one conversation, it is drawn in front of every other one the
+    /// window is moved to, and — since the others never say it back — it sits
+    /// there until it goes red. With a destination, a pending line is shown only
+    /// while its conversation is on the timeline and is only settled by a line
+    /// that conversation recorded.
+    public var destinationID: String? {
+        get { withLock { destination } }
+        set {
+            let changed = withLock { () -> Bool in
+                guard destination != newValue else { return false }
+                destination = newValue
+                return !pending.isEmpty
+            }
+            if changed { publish() }
+        }
+    }
+
     public func events() -> AsyncStream<ChatEvent> {
         AsyncStream { continuation in
             withLock { self.continuation = continuation }
@@ -120,17 +149,24 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, canSend, let send else { return }
 
+        let target = withLock { destination }
         let message = ChatMessage(
             id: "pending-\(UUID().uuidString)",
             role: .user,
             text: trimmed,
-            // Borrowed from the transcript it is joining, so a written line is
+            // Borrowed from the conversation it is joining, so a written line is
             // headed by the same session as everything around it rather than
             // appearing as a row from nowhere.
-            attribution: withLock { loaded.last?.attribution },
+            attribution: withLock {
+                guard let target else { return loaded.last?.attribution }
+                return loaded.last { $0.attribution?.sourceID == target }?.attribution
+            },
             delivery: .sending
         )
-        withLock { pending.append(message) }
+        withLock {
+            pending.append(message)
+            if let target { destinations[message.id] = target }
+        }
         publish()
 
         let id = message.id
@@ -155,6 +191,7 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
         withLock {
             timeouts.values.forEach { $0.cancel() }
             timeouts.removeAll()
+            destinations.removeAll()
         }
         withLock { continuation }?.finish()
     }
@@ -189,12 +226,17 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
         withLock {
             pending.removeAll { message in
                 let written = Self.normalized(message.text)
+                let target = destinations[message.id]
                 let arrived = transcript.contains { candidate in
                     candidate.role == .user
+                        && (target == nil || candidate.attribution?.sourceID == target)
                         && Self.normalized(candidate.text) == written
                         && candidate.timestamp >= message.timestamp.addingTimeInterval(-Self.clockSlack)
                 }
-                if arrived { timeouts.removeValue(forKey: message.id)?.cancel() }
+                if arrived {
+                    timeouts.removeValue(forKey: message.id)?.cancel()
+                    destinations.removeValue(forKey: message.id)
+                }
                 return arrived
             }
         }
@@ -216,10 +258,24 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     private static let clockSlack: TimeInterval = 5
 
     /// Re-publishes the transcript as it now stands: what was read, then what
-    /// has been written since and not read back.
+    /// has been written since and not read back — those of it whose
+    /// conversation is on the timeline.
+    ///
+    /// "On the timeline" is the conversation the composer points at, or any
+    /// conversation the transcript holds a line of. The second is what keeps a
+    /// line typed in one conversation visible when the reader widens the window
+    /// to several that include it; the first is what shows it at all in a
+    /// conversation that has nothing on screen yet.
     private func publish() {
-        let (transcript, outstanding, cont) = withLock { (loaded, pending, continuation) }
-        cont?.yield(.transcriptLoaded(transcript + outstanding))
+        let (transcript, cont) = withLock { () -> ([ChatMessage], AsyncStream<ChatEvent>.Continuation?) in
+            let shown = Set(loaded.compactMap { $0.attribution?.sourceID })
+            let visible = pending.filter { message in
+                guard let target = destinations[message.id] else { return true }
+                return target == destination || shown.contains(target)
+            }
+            return (loaded + visible, continuation)
+        }
+        cont?.yield(.transcriptLoaded(transcript))
     }
 
     // MARK: - Pump

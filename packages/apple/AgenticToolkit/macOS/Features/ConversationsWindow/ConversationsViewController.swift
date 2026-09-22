@@ -322,7 +322,9 @@ public final class ConversationsViewController: NSViewController {
     /// Points the composer at the single session on the timeline, and turns it on
     /// only when single mode and a live destination agree there is one.
     private func updateComposer() {
-        sendTarget.set(sourceID: selectionMode == .single ? soleShownSessionID : nil)
+        let destination = selectionMode == .single ? soleShownSessionID : nil
+        sendTarget.set(sourceID: destination)
+        session.destinationID = destination
         let live = selectionMode == .single && sendTarget.isReady
         session.canSend = live
         chatView?.isComposerEnabled = live
