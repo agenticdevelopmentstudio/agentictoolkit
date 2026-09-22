@@ -119,6 +119,9 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         feed.onRosterChanged = { [weak self] sessions in
             self?.shelf.sessions = sessions
         }
+        shelf.onActivityChanged = { [weak self] activity in
+            self?.feed.activity = activity
+        }
     }
 
     @available(*, unavailable)

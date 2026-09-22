@@ -61,6 +61,54 @@ private final class WorkOutputFlag: @unchecked Sendable {
     }
 }
 
+/// The newest thing the agent was doing, as the feed's last read found it —
+/// written by the poll, off the main actor, and read by the status line on it.
+///
+/// Taken from the page *before* work output is stripped out of it, which is the
+/// point: single mode shows the agent's work here, on one line that is replaced
+/// as it moves, rather than as a stack of bubbles burying what it said.
+private final class FeedWorkStatus: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latest: (sourceID: String, text: String)?
+    private var onChange: (@Sendable () -> Void)?
+
+    func set(onChange: (@Sendable () -> Void)?) {
+        lock.lock(); self.onChange = onChange; lock.unlock()
+    }
+
+    /// What `sourceID` was last seen doing, or nil when its newest line was not
+    /// work — a reply, or a prompt it has not started on.
+    func text(for sourceID: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return latest?.sourceID == sourceID ? latest?.text : nil
+    }
+
+    /// Records the newest line of `messages` if it is work output. Tells the
+    /// main actor only when the answer moved, since this runs on every poll.
+    func note(_ messages: [ChatMessage]) {
+        let next = messages.last.flatMap { last -> (String, String)? in
+            guard last.isWorkOutput, let id = last.attribution?.sourceID,
+                  let line = Self.firstLine(of: last.text) else { return nil }
+            return (id, line)
+        }
+        lock.lock()
+        let moved = next?.0 != latest?.sourceID || next?.1 != latest?.text
+        latest = next.map { (sourceID: $0.0, text: $0.1) }
+        let onChange = self.onChange
+        lock.unlock()
+        if moved { onChange?() }
+    }
+
+    /// The first line with anything on it: a status line has room for one, and
+    /// the first is the one that says what the rest is about.
+    private static func firstLine(of text: String) -> String? {
+        text.split(whereSeparator: \.isNewline)
+            .lazy
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+    }
+}
+
 /// Where a line typed into the feed's own composer goes, shared between the main
 /// actor that sets it and the session's sender, which runs off it.
 ///
@@ -136,14 +184,22 @@ public final class ConversationsViewController: NSViewController {
     /// one and runs an order of magnitude shorter — showing it by default
     /// buries the conversation in "let me check X".
     ///
-    /// That argument is about the *merged* feed, and single mode is not it: one
-    /// conversation on its own has nothing to bury, and the narration is most of
-    /// what following a session means. So single mode turns work output on
-    /// regardless (``isWorkOutputForced``) — this stays the reader's own setting
-    /// either way, and gets it back when the mode leaves.
+    /// Single mode reads work output regardless (``isWorkOutputForced``): the
+    /// narration is most of what following one session means, so it is shown —
+    /// but as the status line over the composer, one line replaced as the agent
+    /// moves, not as bubbles. This stays the reader's own setting either way.
+    ///
+    /// In single mode the read asks for work output regardless — the status line
+    /// over the composer is made of it — and this decides only whether it is
+    /// *also* drawn as bubbles. So a change here re-reads in single mode even
+    /// when the question put to the loader stays the same.
     public var includeWorkOutput: Bool {
         get { workOutputFlag.preference }
-        set { if workOutputFlag.setPreference(newValue) { refresh() } }
+        set {
+            guard newValue != workOutputFlag.preference else { return }
+            let moved = workOutputFlag.setPreference(newValue)
+            if moved || workOutputFlag.isForced { refresh() }
+        }
     }
 
     /// Whether work output is being shown whatever ``includeWorkOutput`` says —
@@ -195,7 +251,8 @@ public final class ConversationsViewController: NSViewController {
             if selectionMode == .single { dismissFocus() }
             updateComposer()
             // Only when the answer actually moved — with the reader's own
-            // setting already on there is nothing to re-read.
+            // setting already on there is nothing to re-read, and with it off
+            // the question moves either way.
             if workOutputFlag.setForced(selectionMode == .single) { refresh() }
         }
     }
@@ -209,11 +266,26 @@ public final class ConversationsViewController: NSViewController {
     /// writes this to a setting and hands it back through ``hiddenSessions``.
     public var onHiddenSessionsChanged: ((Set<String>) -> Void)?
 
+    /// What each session is doing, by ``ChatMessage/Attribution/sourceID`` —
+    /// the shelf's activity, handed over by the split view. In single mode the
+    /// shown session's entry decides whether the status line is up at all: a
+    /// transcript cannot say the agent has *finished*, only what it did last.
+    public var activity: [String: SessionWatcher.SessionWatcherActivity] = [:] {
+        didSet {
+            guard activity != oldValue else { return }
+            updateStatus()
+        }
+    }
+
     private let session: FeedChatSession
     private let viewModel: AIChatViewModel
     private let workOutputFlag: WorkOutputFlag
     private let sessionFilter: ConversationsSessionFilter
     private let sendTarget = FeedSendTarget()
+    private let workStatus = FeedWorkStatus()
+    /// Kept across updates so its animation runs on rather than restarting from
+    /// its first frame on every poll.
+    private var statusIcon: SessionWatcher.SessionWatcherActivityIconView?
     private let load: Load
     private let refreshInterval: Duration
     private let pageLimit: Int
@@ -256,6 +328,7 @@ public final class ConversationsViewController: NSViewController {
         let sessionFilter = ConversationsSessionFilter()
         self.sessionFilter = sessionFilter
         let sendTarget = self.sendTarget
+        let workStatus = self.workStatus
         let session = FeedChatSession(
             refreshInterval: refreshInterval,
             // A sender from the start, resolved when a line is actually typed —
@@ -269,7 +342,12 @@ public final class ConversationsViewController: NSViewController {
                 // of the reader's scrollback.
                 let depth = pageLimit * sessionFilter.pageDeepening
                 guard let messages = await load(flag.value, nil, depth) else { return nil }
-                return sessionFilter.apply(to: messages)
+                let shown = sessionFilter.apply(to: messages)
+                workStatus.note(shown)
+                // Asked for only for the status line — the reader has not
+                // asked for it as bubbles.
+                guard flag.isForced, !flag.preference else { return shown }
+                return shown.filter { !$0.isWorkOutput }
             })
         // Watched until told otherwise: the window opens on the merged feed,
         // which has no one session a typed line would belong to.
@@ -289,6 +367,9 @@ public final class ConversationsViewController: NSViewController {
                 self.updateComposer()
             }
         }
+        workStatus.set(onChange: { [weak self] in
+            Task { @MainActor in self?.updateStatus() }
+        })
     }
 
     /// The sessions the feed is currently not drawing, by
@@ -328,7 +409,39 @@ public final class ConversationsViewController: NSViewController {
         let live = selectionMode == .single && sendTarget.isReady
         session.canSend = live
         chatView?.isComposerEnabled = live
+        updateStatus()
     }
+
+    /// Says what the shown session is doing over the composer, for as long as
+    /// it is doing anything.
+    ///
+    /// Single mode only: over a merged feed the line would have to pick one
+    /// conversation to talk about, and the shelf already shows every session's
+    /// glyph. What it says is the agent's newest line of work when that is the
+    /// newest thing in the transcript, and otherwise just the state — a reply
+    /// written before the current turn started says nothing about the turn.
+    private func updateStatus() {
+        guard let chatView else { return }
+        guard selectionMode == .single,
+              let id = soleShownSessionID,
+              let state = activity[id], state != .idle else {
+            chatView.setStatus(nil, icon: nil)
+            return
+        }
+        let icon = statusIcon ?? SessionWatcher.SessionWatcherActivityIconView(
+            activity: state, isSummarizing: false)
+        if statusIcon == nil {
+            icon.observeTheme { view, palette in view.applyTheme(palette) }
+            statusIcon = icon
+        }
+        icon.update(activity: state, isSummarizing: false)
+        let fallback = state == .waiting ? "Waiting for you…" : "Working…"
+        chatView.setStatus(workStatus.text(for: id) ?? fallback, icon: icon)
+    }
+
+    /// What the status line over the composer says right now, or nil when it is
+    /// down — for a test, or a host's scripting surface.
+    public var statusText: String? { chatView?.statusText }
 
     /// The feed's composer, for a host wiring a window-wide Tab order — see
     /// ``KeyViewLoop``.
@@ -357,6 +470,9 @@ public final class ConversationsViewController: NSViewController {
         // read-only one. `updateComposer` below turns it on when single mode
         // gives it one session to write to.
         chatView.isComposerEnabled = false
+        // A line typed here is typed at the session's own terminal, so the field
+        // wears the prompt it lands at.
+        chatView.composerPrompt = ">"
         chatView.bubbleLineLimit = Self.bubbleLineLimit
         // The Sessions window's box, not the chat window's speech bubble. Every
         // row here is headed by the session it came from, so a fill that says

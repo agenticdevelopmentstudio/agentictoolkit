@@ -71,6 +71,9 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
         // for the same reason it is in the feed: a transcript with the entry
         // field cut out reads as a different kind of view, not a read-only one.
         chatView.isComposerEnabled = session.canSend
+        // A line typed here lands at the session's own prompt, so the field
+        // wears one — see the feed's composer, which reads the same way.
+        chatView.composerPrompt = ">"
         chatView.bubbleLineLimit = lineLimit
         // No row actions at all. `onOpen` would open the conversation the reader
         // is already inside, and the app icon it would draw says which

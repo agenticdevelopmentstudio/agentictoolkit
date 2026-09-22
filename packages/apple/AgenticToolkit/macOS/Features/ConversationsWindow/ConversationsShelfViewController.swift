@@ -71,8 +71,13 @@ public final class ConversationsShelfViewController: NSViewController,
         didSet {
             guard activity != oldValue else { return }
             repaintActivity()
+            onActivityChanged?(activity)
         }
     }
+
+    /// Fired when ``activity`` changes, so a host can show the same fact
+    /// somewhere else — the feed's status line — without polling a second time.
+    public var onActivityChanged: (([String: SessionWatcher.SessionWatcherActivity]) -> Void)?
 
     /// The glyphs currently on screen, held **weakly**: the table owns its cells
     /// and discards them when it likes, and a poll landing between a discard and

@@ -25,6 +25,15 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     /// seconds at a stretch.
     public var delivery: Delivery
 
+    /// Whether this is the agent showing its work — thinking, a tool call, the
+    /// progress of one — rather than saying something to the reader.
+    ///
+    /// Only a source can know: the words alone do not say whether a line was
+    /// the answer or the working that led to it. A reader that wants only the
+    /// conversation drops these; one that wants to know what the agent is busy
+    /// with reads the newest of them.
+    public let isWorkOutput: Bool
+
     /// Where a message is between "typed" and "seen coming back".
     public enum Delivery: Sendable, Equatable {
         /// It is part of the record. Everything read from a source is this.
@@ -114,7 +123,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         isStreaming: Bool = false,
         timestamp: Date = Date(),
         attribution: Attribution? = nil,
-        delivery: Delivery = .settled
+        delivery: Delivery = .settled,
+        isWorkOutput: Bool = false
     ) {
         self.id = id
         self.role = role
@@ -123,6 +133,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         self.timestamp = timestamp
         self.attribution = attribution
         self.delivery = delivery
+        self.isWorkOutput = isWorkOutput
     }
 }
 

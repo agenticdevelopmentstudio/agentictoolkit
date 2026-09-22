@@ -12,6 +12,10 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     private let transcriptStack = NSStackView()
     private let inputField = NSTextField()
     private let sendButton = NSButton()
+    private let promptLabel = NSTextField(labelWithString: "")
+    private let statusRow = NSStackView()
+    private let statusLabel = NSTextField(labelWithString: "")
+    private var statusIcon: NSView?
     private var isAtBottom = true
 
     /// The messages the reader has opened out, by id.
@@ -84,6 +88,42 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// broken, while a chat with a disabled composer reads as read-only.
     public var isComposerEnabled = true {
         didSet { applyComposerEnablement() }
+    }
+
+    /// What is drawn in front of the composer, the way a shell draws its prompt —
+    /// nil for none, which is how an ordinary chat reads.
+    ///
+    /// A host whose composer types into a terminal sets it, so the field reads
+    /// as the command line it stands in for rather than as a message box.
+    public var composerPrompt: String? {
+        didSet {
+            promptLabel.stringValue = composerPrompt ?? ""
+            promptLabel.isHidden = composerPrompt == nil
+        }
+    }
+
+    /// The line above the composer saying what the other side is doing, or nil
+    /// when there is nothing to say — see ``setStatus(_:icon:)``.
+    public private(set) var statusText: String?
+
+    /// Shows `text` above the composer with `icon` in front of it, or hides the
+    /// line when `text` is nil.
+    ///
+    /// The icon is the host's, not this view's: what "busy" looks like is a
+    /// fact about whatever is busy, and a host that already draws it somewhere
+    /// else wants the two to be the same glyph. Passing the view already on
+    /// screen leaves it where it is, so an animation in it keeps running
+    /// across updates instead of restarting from its first frame.
+    public func setStatus(_ text: String?, icon: NSView?) {
+        statusText = text
+        statusLabel.stringValue = text ?? ""
+        statusLabel.toolTip = text
+        if icon !== statusIcon {
+            statusIcon?.removeFromSuperview()
+            statusIcon = icon
+            if let icon { statusRow.insertArrangedSubview(icon, at: 0) }
+        }
+        statusRow.isHidden = text == nil
     }
 
     /// What a transcript row does when it is pressed. Only rows that carry a
@@ -213,6 +253,31 @@ public final class ChatView: NSView, NSTextFieldDelegate {
                 ]
             )
         }
+        promptLabel.observeTheme { [weak self] label, palette in
+            label.font = palette.font(.body)
+            self?.applyPromptTint(palette)
+        }
+        promptLabel.isHidden = true
+        promptLabel.setContentHuggingPriority(.required, for: .horizontal)
+        promptLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        promptLabel.accessibilityID("ai-chat.prompt")
+
+        statusLabel.observeTheme { label, palette in
+            label.font = palette.font(.caption)
+            label.textColor = palette.nsColor(.secondaryText)
+        }
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.maximumNumberOfLines = 1
+        statusLabel.cell?.usesSingleLineMode = true
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        statusLabel.accessibilityID("ai-chat.status")
+        statusRow.addArrangedSubview(statusLabel)
+        statusRow.orientation = .horizontal
+        statusRow.alignment = .centerY
+        statusRow.spacing = 6
+        statusRow.edgeInsets = NSEdgeInsets(top: 6, left: 16, bottom: 6, right: 16)
+        statusRow.isHidden = true
+
         inputField.isBordered = false
         inputField.focusRingType = .none
         inputField.drawsBackground = false
@@ -236,17 +301,30 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             view.applySurfaceFill(palette)
         }
 
-        let inputRow = NSStackView(views: [inputField, sendButton])
+        let inputRow = NSStackView(views: [promptLabel, inputField, sendButton])
         inputRow.orientation = .horizontal
         inputRow.spacing = 10
+        inputRow.setCustomSpacing(6, after: promptLabel)
         inputRow.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
         inputRow.translatesAutoresizingMaskIntoConstraints = false
+
+        // The status line sits over the divider, at the foot of the transcript:
+        // it is about what is happening in the conversation, which is the thing
+        // above the line, not about what is being typed below it. A stack so a
+        // hidden status closes up rather than leaving a blank band.
+        let footer = NSStackView(views: [statusRow, divider, inputRow])
+        footer.orientation = .vertical
+        footer.alignment = .leading
+        footer.spacing = 0
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        for view in [statusRow, divider, inputRow] {
+            view.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
+        }
 
         let topAnchorView: NSView = self
 
         addSubview(transcriptScroll)
-        addSubview(divider)
-        addSubview(inputRow)
+        addSubview(footer)
 
         NSLayoutConstraint.activate([
             transcriptScroll.topAnchor.constraint(equalTo: topAnchorView.topAnchor),
@@ -254,13 +332,10 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             transcriptScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             transcriptScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
             transcriptWidthConstraint,
-            divider.topAnchor.constraint(equalTo: transcriptScroll.bottomAnchor),
-            divider.leadingAnchor.constraint(equalTo: leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: trailingAnchor),
-            inputRow.topAnchor.constraint(equalTo: divider.bottomAnchor),
-            inputRow.leadingAnchor.constraint(equalTo: leadingAnchor),
-            inputRow.trailingAnchor.constraint(equalTo: trailingAnchor),
-            inputRow.bottomAnchor.constraint(equalTo: bottomAnchor)
+            footer.topAnchor.constraint(equalTo: transcriptScroll.bottomAnchor),
+            footer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
@@ -688,6 +763,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         let enabled = isComposerEnabled && viewModel.state != .responding
         inputField.isEnabled = enabled
         sendButton.isEnabled = enabled && !composerText.isEmpty
+        applyPromptTint(resolvedThemeScope.palette)
         applySendButtonTint(resolvedThemeScope.palette)
         onComposerEnablementChanged?()
     }
@@ -695,6 +771,14 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// What is typed, with the whitespace that is not worth sending taken off.
     private var composerText: String {
         inputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The prompt greys with the field it stands in front of, so a composer that
+    /// is off does not still read as a command line waiting for input.
+    private func applyPromptTint(_ palette: SemanticPalette) {
+        promptLabel.textColor = inputField.isEnabled
+            ? palette.nsColor(.secondaryText)
+            : palette.nsColor(.placeholderText)
     }
 
     /// The composer's text changed, so what can be done with it changed too.

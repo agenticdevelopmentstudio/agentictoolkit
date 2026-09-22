@@ -10,7 +10,9 @@ import XCTest
 /// does not apply: narration only buries a conversation when there are other
 /// conversations to bury it under. None of this is visible in a screenshot —
 /// what it changes is the `includeWorkOutput` argument the loader is handed —
-/// so it is asserted on the reads themselves.
+/// so it is asserted on the reads themselves. (Single mode draws what it reads
+/// on the status line rather than as bubbles — see
+/// `ConversationsStatusLineTests`.)
 @MainActor
 final class ConversationsWorkOutputTests: XCTestCase {
 
