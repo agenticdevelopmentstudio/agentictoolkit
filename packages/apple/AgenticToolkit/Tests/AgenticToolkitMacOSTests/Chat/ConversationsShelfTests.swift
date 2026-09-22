@@ -318,10 +318,21 @@ final class ConversationsShelfTests: XCTestCase {
         return shelf.tableView(table, viewFor: column, row: row)
     }
 
-    func testARowDrawsWhatTheSessionIsDoingUnderWhereItIs() {
-        // Folding the name into the breadcrumb trail as a third crumb cost the
-        // row its second line: one line ending in a truncated summary, in a
-        // column too narrow to hold the place and the summary together.
+    /// The first ``SessionHeaderView`` in a hierarchy — the shared control the
+    /// Sessions window, the shelf and each bubble are all supposed to be drawing.
+    private func header(in view: NSView) -> SessionHeaderView? {
+        if let header = view as? SessionHeaderView { return header }
+        for subview in view.subviews {
+            if let found = header(in: subview) { return found }
+        }
+        return nil
+    }
+
+    func testARowDrawsTheWholeTrailInTheSharedHeader() {
+        // The shelf used to put two crumbs in the header and the name on a
+        // caption line beneath it, so one session read as "stenographer" here
+        // and "stenographer » conversations » editing…" in the Sessions window.
+        // Same control, different arguments — which is not sharing a control.
         let shelf = ConversationsShelfViewController()
         _ = shelf.view
         shelf.sessions = [ConversationsSessionFilter.Session(
@@ -330,11 +341,80 @@ final class ConversationsShelfTests: XCTestCase {
             context: ["stenographer", "conversations"])]
 
         guard let cell = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
+        guard let header = header(in: cell) else { return XCTFail("no shared header") }
+        let inHeader = texts(in: header)
+        XCTAssertTrue(inHeader.contains("stenographer"), "the header lost its project: \(inHeader)")
+        XCTAssertTrue(inHeader.contains("conversations"), "the header lost its branch: \(inHeader)")
+        XCTAssertTrue(inHeader.contains("editing AccountQuotaStore"),
+                      "the name is not in the trail: \(inHeader)")
+        // And nowhere else: a caption repeating the name is the row saying the
+        // same thing twice, which is what the second line had become.
+        XCTAssertEqual(texts(in: cell).count, inHeader.count,
+                       "the row draws text outside the shared header: \(texts(in: cell))")
+    }
+
+    func testAnUnnamedSessionDoesNotEndItsTrailWithItsId() {
+        // `Session` falls back to the id when there is no name, which is the
+        // right answer for a row that would otherwise be blank and the wrong
+        // one for the end of a trail.
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        shelf.sessions = [ConversationsSessionFilter.Session(
+            id: "3f7c1a9e-0000", name: "", context: ["stenographer", "main"])]
+
+        guard let cell = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
         let drawn = texts(in: cell)
+        XCTAssertEqual(drawn.filter { $0.contains("3f7c1a9e") }, [], "the id is drawn: \(drawn)")
         XCTAssertTrue(drawn.contains("stenographer"), "the row lost its project: \(drawn)")
-        XCTAssertTrue(drawn.contains("conversations"), "the row lost its branch: \(drawn)")
-        XCTAssertTrue(drawn.contains("editing AccountQuotaStore"),
-                      "the row lost the summary under the place: \(drawn)")
+
+        // But a session with nowhere to be at all still draws something.
+        shelf.sessions = [ConversationsSessionFilter.Session(
+            id: "3f7c1a9e-0000", name: "", context: [])]
+        guard let placeless = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
+        XCTAssertEqual(texts(in: placeless), ["3f7c1a9e-0000"])
+    }
+
+    func testARowDrawsNoActivityGlyphUntilTheSourceSaysOtherwise() {
+        // The roster is built out of what was *said*, so it carries no live
+        // state: a shelf nobody has given a source to draws no glyphs at all,
+        // rather than a column of idle ones.
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        shelf.sessions = [ConversationsSessionFilter.Session(
+            id: "a", name: "Alpha", context: ["stenographer", "main"])]
+
+        guard let cell = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
+        guard let glyph = activityIcon(in: cell) else { return XCTFail("no activity view") }
+        XCTAssertTrue(glyph.isHidden, "an idle session is drawing a glyph")
+
+        shelf.activity = ["a": .working]
+        XCTAssertFalse(glyph.isHidden, "a working session is drawing nothing")
+    }
+
+    func testActivityReachesRowsThatAreAlreadyOnScreen() {
+        // Rebuilding the table every poll would restart each animation from its
+        // first frame, so the state is pushed into the glyphs in place.
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        shelf.sessions = [ConversationsSessionFilter.Session(
+            id: "a", name: "Alpha", context: ["stenographer", "main"])]
+        shelf.activity = ["a": .working]
+
+        guard let cell = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
+        guard let glyph = activityIcon(in: cell) else { return XCTFail("no activity view") }
+        XCTAssertFalse(glyph.isHidden)
+
+        shelf.activity = ["a": .idle]
+        XCTAssertTrue(glyph.isHidden, "the glyph kept drawing after the session went quiet")
+    }
+
+    /// The first activity glyph in a hierarchy.
+    private func activityIcon(in view: NSView) -> SessionWatcher.SessionWatcherActivityIconView? {
+        if let icon = view as? SessionWatcher.SessionWatcherActivityIconView { return icon }
+        for subview in view.subviews {
+            if let found = activityIcon(in: subview) { return found }
+        }
+        return nil
     }
 
     func testARowTitledByItsNameDoesNotDrawItTwice() {
@@ -345,18 +425,22 @@ final class ConversationsShelfTests: XCTestCase {
         XCTAssertEqual(texts(in: cell).filter { $0 == "Alpha" }.count, 1)
     }
 
-    func testARowIsTallerThanTheOneLineItUsedToBe() {
+    func testARowIsTallEnoughForTheIconTheSessionsWindowDraws() {
         // `usesAutomaticRowHeights` measures the row through the cell's own
-        // constraints: a centred child leaves that chain open and the second
-        // line is drawn outside the row it belongs to.
+        // constraints: a centred child leaves that chain open, and the row then
+        // falls back to a fixed height that crops the app icon.
         let shelf = ConversationsShelfViewController()
         _ = shelf.view
         shelf.sessions = [ConversationsSessionFilter.Session(
-            id: "a", name: "editing AccountQuotaStore", context: ["stenographer", "main"])]
+            id: "a", name: "editing AccountQuotaStore",
+            context: ["stenographer", "main"], appIdentity: "iTerm.app")]
 
         guard let cell = nameCell(of: shelf, row: 0) else { return XCTFail("no name cell") }
-        XCTAssertGreaterThan(cell.fittingSize.height, 34,
-                             "the row is still one line tall, with no room for the summary")
+        // The Sessions window's 28pt icon plus this shelf's padding above and
+        // below it. Smaller than that and the shared control is being drawn at
+        // two sizes, which is two controls to a reader.
+        XCTAssertGreaterThanOrEqual(cell.fittingSize.height, 28 + 7 + 7,
+                                    "the row is too short for the icon the Sessions window draws")
     }
 
     // MARK: - The split

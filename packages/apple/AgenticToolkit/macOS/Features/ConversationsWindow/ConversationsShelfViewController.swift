@@ -40,6 +40,49 @@ public final class ConversationsShelfViewController: NSViewController,
         static let name = NSUserInterfaceItemIdentifier("name")
     }
 
+    /// Where the rows' activity glyphs come from — the same seam the Sessions
+    /// window reads, so both windows agree about what a session is doing rather
+    /// than each deriving it from whatever it happens to have.
+    ///
+    /// Optional, and nil is a working shelf with no glyphs: the roster is built
+    /// out of what was *said* (``ConversationsSessionFilter``), which carries no
+    /// live state at all, so a host that cannot answer the question simply does
+    /// not.
+    public var activitySource: SessionWatcher.SessionListSource? {
+        didSet {
+            guard activitySource !== oldValue else { return }
+            oldValue?.stopObserving()
+            activity = [:]
+            guard let source = activitySource else { return }
+            // The source decides its own cadence; this just says it is being
+            // watched. Its first read is what fills the cache, so the immediate
+            // read below is not an optimisation — without it the shelf draws no
+            // glyphs until the source's first poll happens to change something.
+            source.startObserving { [weak self] in
+                Task { @MainActor in await self?.readActivity(from: source) }
+            }
+            Task { @MainActor [weak self] in await self?.readActivity(from: source) }
+        }
+    }
+
+    /// What each session is doing, by id. Written by the poll below, and
+    /// settable directly by a host that already has the answer (or by a test).
+    public var activity: [String: SessionWatcher.SessionWatcherActivity] = [:] {
+        didSet {
+            guard activity != oldValue else { return }
+            repaintActivity()
+        }
+    }
+
+    /// The glyphs currently on screen, held **weakly**: the table owns its cells
+    /// and discards them when it likes, and a poll landing between a discard and
+    /// the next reload must update nothing rather than resurrect a dead row.
+    private final class WeakIcon {
+        weak var view: SessionWatcher.SessionWatcherActivityIconView?
+        init(_ view: SessionWatcher.SessionWatcherActivityIconView) { self.view = view }
+    }
+    private var activityViews: [String: WeakIcon] = [:]
+
     /// Fired when the ticked set changes, with the ids that are now **hidden** —
     /// the same vocabulary ``ConversationsSessionFilter`` stores, so the host
     /// hands it straight over without inverting anything.
@@ -520,6 +563,15 @@ public final class ConversationsShelfViewController: NSViewController,
     private static let rowPadding: CGFloat = 7
     private static let rowLineGap: CGFloat = 2
 
+    /// The header's own metrics, and the Sessions window's numbers verbatim
+    /// (``SessionWatcher/SessionListView``'s `Layout`). A shared control drawn
+    /// at two different sizes is two controls to a reader, so these are copied
+    /// rather than chosen — if the Sessions row's icon changes size, this one
+    /// changes with it.
+    private static let iconSide: CGFloat = 28
+    private static let iconToText: CGFloat = 8
+    private static let headerToActivity: CGFloat = 12
+
     /// The width the shelf opens at: enough for `project >> branch` to be read
     /// whole, which is the only reason the list is there. Measured against the
     /// real thing — "stenographer >> conversations" at the body size, with the
@@ -549,6 +601,59 @@ public final class ConversationsShelfViewController: NSViewController,
         // `reloadData` drops the selection, so the single-mode highlight is
         // re-stated here rather than only where the pick changes.
         syncTableSelection()
+    }
+
+    // MARK: - Activity
+
+    /// Reads the whole roster's live state in one go and keeps only what the
+    /// rows draw.
+    ///
+    /// Re-checked against ``activitySource`` on the way out because the read is
+    /// asynchronous: a source replaced mid-flight would otherwise land its last
+    /// answer on top of its successor's first one.
+    private func readActivity(from source: SessionWatcher.SessionListSource) async {
+        guard let sessions = try? await source.fetchSessions() else { return }
+        guard source === activitySource else { return }
+        activity = Dictionary(
+            sessions.map { ($0.sessionId, $0.activity) },
+            // A session id is a session id; if a source hands back two rows for
+            // one, the first is as good an answer as the second and neither is
+            // worth a crash.
+            uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Pushes the new state into the glyphs already on screen, rather than
+    /// reloading the table. A reload every three seconds would rebuild every
+    /// cell, drop the selection and restart each animation from its first
+    /// frame — a spinner that keeps jumping back to the top reads as broken.
+    private func repaintActivity() {
+        for (id, box) in activityViews {
+            box.view?.update(activity: activity[id] ?? .idle, isSummarizing: false)
+        }
+        activityViews = activityViews.filter { $0.value.view != nil }
+    }
+
+    /// The row's live-state glyph, which draws nothing at all while the session
+    /// is idle — that is ``SessionWatcher/SessionWatcherActivityIconView``'s own
+    /// rule, and the reason this is attached unconditionally instead of being
+    /// decided here.
+    private func activityIcon(for session: Session) -> NSView {
+        let icon = SessionWatcher.SessionWatcherActivityIconView(
+            activity: activity[session.id] ?? .idle, isSummarizing: false)
+        icon.observeTheme { view, palette in view.applyTheme(palette) }
+        activityViews[session.id] = WeakIcon(icon)
+        return icon
+    }
+
+    /// The name crumb, or nothing when the roster had no name to give.
+    ///
+    /// ``ConversationsSessionFilter/Session`` falls back to the session id when
+    /// a session is unnamed, which is the right answer for a row that would
+    /// otherwise be blank and the wrong one for the end of a trail — `whippet »
+    /// main » 3f7c1a9e-…` is a crumb that says less than the two before it. So
+    /// the fallback is used only when it is the whole title.
+    private static func trailName(of session: Session) -> String {
+        session.name == session.id && !session.context.isEmpty ? "" : session.name
     }
 
     /// The rows the reader can currently see, in the order they are drawn.
@@ -624,42 +729,36 @@ public final class ConversationsShelfViewController: NSViewController,
         return image
     }
 
-    /// Two lines: `[app] project » branch` — the same header the Sessions window
-    /// lists a session with and the feed heads each bubble with — over what the
-    /// session is *doing*, in the quieter caption colour.
+    /// `[app] project » branch » name` — the identical trail the Sessions
+    /// window lists a session with and the feed heads each bubble with:
     ///
     /// ```
-    /// [icon] stenographer » conversations
-    ///        editing AccountQuotaStore
+    /// [icon] stenographer » conversations » editing AccountQuotaStore
     /// ```
     ///
-    /// The place goes on top because that is what stays put; the name is a
-    /// summary of this minute and rewrites itself under a reader trying to find
-    /// a row again. Folding the name into the trail as a third crumb lost that
-    /// distinction *and* the second line with it — one line ending in a
-    /// truncated summary, in a column too narrow to hold both.
+    /// Identical is the requirement, not a nicety. A reader moving between the
+    /// three windows is looking at one set of conversations, and this row used
+    /// to draw two of the three crumbs on one line and the third underneath in
+    /// caption grey — so the same session read as `stenographer` here and
+    /// `stenographer » conversations` next door, with the name in a different
+    /// colour in each. Same view class, different arguments, which is not what
+    /// sharing a control is for. The arguments are now the same too: same
+    /// crumbs, same icon size, same gap.
     ///
-    /// The summary is drawn only when it is saying something the header did
-    /// not: a session with no crumbs is already titled by its name
-    /// (``ConversationsSessionFilter/Session/displayName``).
-    ///
-    /// No activity indicator here. This window is about what was *said*, and a
-    /// column of live-state glyphs beside a transcript invites reading the shelf
-    /// for what a session is doing right now — which is the Sessions window's
-    /// job, and the one place the indicator appears.
+    /// ``SessionBreadcrumbView/Crumbs`` drops the empty segments itself, so a
+    /// session with no branch, or none of either, simply draws fewer crumbs —
+    /// there is no arrangement of the three to choose between here.
     private func nameCell(for session: Session) -> NSView {
         let header = SessionHeaderView(
-            // A session with nowhere to be has no crumbs at all, and a header
-            // built from an empty trail draws nothing — a blank row. Its name
-            // *is* its title then (``Session/displayName`` says so), so it goes
-            // in the trail's name slot, in Claude's orange, and the caption
-            // below is left off rather than saying it a second time.
-            crumbs: session.context.isEmpty
-                ? .init(context: [], name: session.name)
-                : .init(context: session.context),
+            crumbs: .init(context: session.context, name: Self.trailName(of: session)),
             icon: session.appIdentity.isEmpty
                 ? nil
-                : .init(appIdentity: session.appIdentity, side: 16, gap: 6)
+                : .init(
+                    appIdentity: session.appIdentity,
+                    side: Self.iconSide,
+                    gap: Self.iconToText),
+            accessory: activityIcon(for: session),
+            accessoryGap: Self.headerToActivity
         )
         header.setAccessibilityLabel(session.displayName)
         // The cell is rebuilt by the table rather than owned by this controller,
@@ -673,18 +772,11 @@ public final class ConversationsShelfViewController: NSViewController,
         lines.edgeInsets = NSEdgeInsets(
             top: Self.rowPadding, left: 0, bottom: Self.rowPadding, right: 4)
         lines.translatesAutoresizingMaskIntoConstraints = false
-
-        if session.name != session.displayName {
-            let summary = ThemedLabel(
-                string: session.name, role: .secondaryText, textRole: .caption)
-            summary.lineBreakMode = .byTruncatingTail
-            // A label resists compression harder than the row can afford: at
-            // full strength the summary sets the row's width and the column
-            // draws past its own edge instead of truncating.
-            summary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            summary.translatesAutoresizingMaskIntoConstraints = false
-            lines.addArrangedSubview(summary)
-        }
+        // The header owns the row's whole width — the activity glyph rides its
+        // far margin, and a header that hugged its text would park the glyph
+        // against the name instead of against the column's edge.
+        lines.setHuggingPriority(.init(1), for: .horizontal)
+        header.setContentHuggingPriority(.init(1), for: .horizontal)
 
         // The table sets a cell view's frame itself, so the root of one keeps
         // its autoresizing translation. Turning it off left the row at its
