@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 import { HierarchicalDetailView, ListHeader, type TopicLevel, type TopicDetailItem } from "@agenticdevelopertoolkit/ui/blocks";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@agenticdevelopertoolkit/ui/components/dialog";
 import { DialogActions } from "@agenticdevelopertoolkit/ui/components/dialog-actions";
@@ -27,7 +27,10 @@ import type { CatalogFeature } from "@agentic-toolkit/data/ecosystems";
  */
 export interface FeaturePickerDialogProps {
   open: boolean;
-  /** Every feature that can be added. Rendered alphabetically by label, whatever order this is in. */
+  /**
+   * Every feature in the catalog. Rendered alphabetically by label, whatever order this is in, with
+   * the `comingSoon` ones last under a "Coming soon" divider, their checkboxes disabled.
+   */
   catalog: CatalogFeature[];
   /**
    * Keys the ecosystem ALREADY has (active or still provisioning). Rendered ticked and
@@ -44,9 +47,14 @@ export interface FeaturePickerDialogProps {
   onCancel: () => void;
 }
 
-/** Alphabetical by label, then filtered on label + description — what the rail lists. */
+/**
+ * Alphabetical by label, then filtered on label + description — what the rail lists. The
+ * coming-soon features follow the rest as their own alphabetical group, under the divider.
+ */
 function visibleFeatures(catalog: CatalogFeature[], query: string): CatalogFeature[] {
-  const sorted = [...catalog].sort((a, b) => a.label.localeCompare(b.label));
+  const sorted = [...catalog].sort(
+    (a, b) => Number(!!a.comingSoon) - Number(!!b.comingSoon) || a.label.localeCompare(b.label),
+  );
   const q = query.trim().toLowerCase();
   if (!q) return sorted;
   return sorted.filter(
@@ -89,20 +97,21 @@ export function FeaturePickerDialog({
   // The order the backend is asked for is the CATALOG's, not the click order: the batch is a
   // set, and a stable order makes the request reproducible.
   const pickedKeys = useMemo(
-    () => catalog.filter((f) => picked.has(f.key)).map((f) => f.key),
+    () => catalog.filter((f) => picked.has(f.key) && !f.comingSoon).map((f) => f.key),
     [catalog, picked],
   );
 
   const toggle = useCallback(
     (key: string) => {
       if (provisioned.has(key)) return; // already there — the tick is a statement, not a control
+      if (byKey.get(key)?.comingSoon) return; // not built — nothing to provision
       setPicked((prev) => {
         const next = new Set(prev);
         if (!next.delete(key)) next.add(key);
         return next;
       });
     },
-    [provisioned],
+    [provisioned, byKey],
   );
 
   // Ticked = picked ∪ already-provisioned. The provisioned ones read as ticked because they
@@ -115,11 +124,20 @@ export function FeaturePickerDialog({
 
   const items: TopicDetailItem[] = useMemo(
     () =>
-      visible.map((f) => ({
-        id: f.key,
-        label: f.label,
-        trailing: provisioned.has(f.key) ? <AddedMark /> : undefined,
-      })),
+      visible.map((f, i) => {
+        const next = visible[i + 1];
+        return {
+          id: f.key,
+          label: f.label,
+          trailing: provisioned.has(f.key) ? <AddedMark /> : undefined,
+          // Already in the ecosystem, or not built yet: the tick is DISABLED — this dialog adds
+          // only what exists, and never removes — while the row stays selectable so its details
+          // can still be read.
+          checkDisabled: provisioned.has(f.key) || !!f.comingSoon,
+          // The last available row carries the divider that opens the coming-soon group.
+          ...(!f.comingSoon && next?.comingSoon ? { dividerAfter: true, dividerLabel: "Coming soon" } : {}),
+        };
+      }),
     [visible, provisioned],
   );
 
@@ -222,6 +240,23 @@ export function FeaturePickerDialog({
 
   const active = activeId != null ? byKey.get(activeId) : undefined;
 
+  // The list box is exactly as tall as the WHOLE catalog needs, and no taller; the dialog's own
+  // `max-h` then shrinks it to the window when that does not fit, and the list scrolls. Measured
+  // rather than computed from a row height, because the rows' height belongs to the shared rail,
+  // not to this file. Only an unfiltered list is measured: filtering must not make the dialog jump.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [boxHeight, setBoxHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!open || query.trim() || catalog.length === 0) return;
+    const box = boxRef.current;
+    const scroller = box && findScroller(box);
+    const content = scroller?.firstElementChild as HTMLElement | null | undefined;
+    if (!box || !scroller || !content) return;
+    const pad = parseFloat(getComputedStyle(scroller).paddingTop) + parseFloat(getComputedStyle(scroller).paddingBottom);
+    const needed = box.offsetHeight - scroller.clientHeight + content.offsetHeight + pad;
+    setBoxHeight((prev) => (prev != null && Math.abs(prev - needed) < 1 ? prev : needed));
+  }, [open, query, catalog.length, items]);
+
   return (
     <>
       <Dialog
@@ -230,7 +265,7 @@ export function FeaturePickerDialog({
           if (!next && !busy) onCancel();
         }}
       >
-        <DialogContent className="max-w-4xl" showClose={!busy}>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-4xl flex-col" showClose={!busy}>
           <DialogHeader>
             <DialogTitle>Add features</DialogTitle>
             <DialogDescription>
@@ -240,8 +275,13 @@ export function FeaturePickerDialog({
 
           {/* HTDV sizes itself with `flex-1`, so its container has to be a flex column — in a plain
                 block it resolves to height 0, and its own overflow clip then hides the list
-                entirely. `h-[26rem]` is what that `flex-1` divides up. */}
-          <div className="flex h-[26rem] min-h-0 flex-col overflow-hidden rounded-lg border border-apt-border">
+                entirely. Its height is the measured one above (26rem until the first measure);
+                `min-h-0` lets the dialog's `max-h` shrink it to fit the window. */}
+          <div
+            ref={boxRef}
+            className="flex min-h-0 shrink flex-col overflow-hidden rounded-lg border border-apt-border"
+            style={{ height: boxHeight ?? "26rem" }}
+          >
             <HierarchicalDetailView
               levels={[level]}
               showBreadcrumb={false}
@@ -286,11 +326,24 @@ export function FeaturePickerDialog({
   );
 }
 
+/** The list column's scroll region: the descendant that scrolls vertically. */
+function findScroller(root: HTMLElement): HTMLElement | null {
+  for (const el of root.querySelectorAll<HTMLElement>("*")) {
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy === "auto" || oy === "scroll") && el.querySelector('[role="checkbox"], input[type="checkbox"], button')) return el;
+  }
+  return null;
+}
+
 /** One shared empty set, so a default prop and a cleared state are the same identity. */
 const EMPTY: ReadonlySet<string> = new Set<string>();
 
 function AddedMark(): ReactElement {
   return <span className="text-[0.6875rem] tracking-wide text-apt-text-muted uppercase">Added</span>;
+}
+
+function ComingSoonMark(): ReactElement {
+  return <span className="text-[0.6875rem] tracking-wide text-apt-text-muted uppercase">Coming soon</span>;
 }
 
 /**
@@ -313,6 +366,7 @@ function FeatureDetail({
       <div className="flex items-baseline gap-3">
         <h3 className="text-base font-semibold text-apt-text">{feature.label}</h3>
         {added && <AddedMark />}
+        {feature.comingSoon && <ComingSoonMark />}
       </div>
       <p className="text-sm text-apt-text-dim">{feature.description}</p>
       {feature.featureSite && (

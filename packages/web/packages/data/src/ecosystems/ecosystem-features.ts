@@ -48,6 +48,11 @@ export interface CatalogFeature {
   subscriptionTier: FeatureSubscriptionTier;
   /** The feature carries a standalone public site of its own (persona registry, research). */
   featureSite?: boolean;
+  /**
+   * Not built yet: listed so the owner can see it is coming, never provisionable — the
+   * backend refuses it. The picker shows it under "Coming soon" with its checkbox disabled.
+   */
+  comingSoon?: boolean;
 }
 
 /**

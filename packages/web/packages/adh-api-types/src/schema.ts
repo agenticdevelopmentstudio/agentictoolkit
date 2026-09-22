@@ -72142,6 +72142,8 @@ export interface components {
             subscriptionTier: "Free" | "Pro" | "Team" | "Enterprise";
             /** @description The feature carries a public site of its own (the persona registry, research). */
             featureSite?: boolean;
+            /** @description Not built yet. Listed so the picker can say it is coming; provisioning it is refused (400). */
+            comingSoon?: boolean;
         };
         ProvisionedFeature: {
             featureKey: string;
