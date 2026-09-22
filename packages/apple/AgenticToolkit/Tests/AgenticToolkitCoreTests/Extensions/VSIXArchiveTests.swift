@@ -326,4 +326,80 @@ struct VSIXArchiveTests {
         }
         #expect(!FileManager.default.fileExists(atPath: destination.path))
     }
+
+    // MARK: - How much may land
+
+    /// **A zip bomb is a ratio, not a duration.** The timeout above bounds how
+    /// long `ditto` may run; it does nothing at all about an archive that
+    /// writes tens of gigabytes as fast as the disk accepts them and then
+    /// exits cleanly, which is what the canonical bombs actually do. The
+    /// archive built here is the same shape in miniature: 64 MB of zeroes that
+    /// compress to a few kilobytes.
+    ///
+    /// The interval is lowered along with the ceiling so the miniature is
+    /// still measured several times while it lands — at the production half
+    /// second, 64 MB is gone before the first look *(dependency-injection)*.
+    @Test("an archive that expands past the ceiling is stopped and reported")
+    func anOversizeExpansionIsStopped() throws {
+        let scratch = try makeTemporaryDirectory("bomb")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let staging = scratch.appendingPathComponent("staging", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        // Many files rather than one, so the destination grows in steps a walk
+        // can see however the unarchiver buffers a single large write.
+        let megabyte = Data(count: 1024 * 1024)
+        for index in 0..<64 {
+            try megabyte.write(to: staging.appendingPathComponent("zeroes-\(index).bin"))
+        }
+        let archive = scratch.appendingPathComponent("bomb.zip")
+        try zip(contentsOf: staging, to: archive)
+
+        let destination = scratch.appendingPathComponent("out", isDirectory: true)
+
+        #expect(throws: VSIXArchiveError.expansionTooLarge(bytes: 1024 * 1024)) {
+            try VSIXArchive.expand(
+                archive, to: destination,
+                byteCeiling: 1024 * 1024, checkInterval: 0.005)
+        }
+        // And nothing left behind, for the same reason a timeout leaves
+        // nothing: the next attempt would fail as `destinationExists`.
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    /// The ceiling must not fire on an ordinary extension, which is the
+    /// assertion that stops "abort always" from passing the test above. Same
+    /// archive shape, same fast interval — only the ceiling differs.
+    @Test("an archive comfortably under the ceiling expands as before")
+    func anOrdinaryExpansionIsNotStopped() throws {
+        let scratch = try makeTemporaryDirectory("under")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let staging = scratch.appendingPathComponent("staging", isDirectory: true)
+        let payload = staging.appendingPathComponent(
+            VSIXArchive.payloadDirectoryName, isDirectory: true)
+        try FileManager.default.createDirectory(at: payload, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: payload.appendingPathComponent("package.json"))
+        let archive = scratch.appendingPathComponent("small.vsix")
+        try zip(contentsOf: staging, to: archive)
+
+        let destination = scratch.appendingPathComponent("out", isDirectory: true)
+        try VSIXArchive.expand(
+            archive, to: destination,
+            byteCeiling: 64 * 1024 * 1024, checkInterval: 0.005)
+
+        let landed = VSIXArchive.payloadDirectory(in: destination)
+            .appendingPathComponent("package.json")
+        #expect(FileManager.default.fileExists(atPath: landed.path))
+    }
+
+    /// The published default is a real number in the right order of magnitude:
+    /// above any extension anyone ships, below a volume anyone has spare. A
+    /// ceiling under the 512 MB artifact cap would refuse archives the
+    /// downloader is willing to fetch.
+    @Test("the default ceiling is above what a download may be")
+    func theDefaultCeilingIsAboveTheDownloadCap() {
+        #expect(VSIXArchive.expansionByteCeiling
+            > Int64(OpenVSXClient.defaultMaximumArtifactBytes))
+    }
 }

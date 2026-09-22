@@ -395,4 +395,93 @@ struct LanguageServerDocumentSyncScopeTests {
         #expect(hits.first?.count == 3)
         #expect(hits.first?.detail == root.path)
     }
+
+    /// The other path into the filter, and the one that is a *loop*: documents
+    /// already open when the sync starts are seeded in one pass. A project
+    /// opened beside a large unrelated tree refuses hundreds of them there,
+    /// and recording each separately is hundreds of trips through the ledger's
+    /// lock and its published snapshot to arrive at a single row whose whole
+    /// content is a number.
+    ///
+    /// The row has to say the same number either way, which is what this pins:
+    /// one row, `count` equal to the documents refused, and the in-scope one
+    /// leaving no trace.
+    @Test("documents refused while seeding are counted in one entry")
+    func seededRefusalsAreCountedInOneEntry() async throws {
+        let parent = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appendingPathComponent("root", isDirectory: true)
+        let elsewhere = parent.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+
+        let settings = makeSettingsStore()
+        let log = SessionLog()
+        let documents = TextDocumentStore()
+
+        // Open *before* `start()`, so every one of these goes through the
+        // seeding loop rather than through the per-event path.
+        for index in 0..<4 {
+            _ = documents.open(
+                uri: elsewhere.appendingPathComponent("Outside\(index).swift").documentUri,
+                languageId: "swift",
+                text: "abcdef"
+            )
+        }
+        _ = documents.open(
+            uri: root.appendingPathComponent("Inside.swift").documentUri,
+            languageId: "swift",
+            text: "abcdef"
+        )
+
+        let registry = makeRegistry(settings: settings, log: log, workspaceURL: root)
+        let ledger = UpstreamDivergenceLedger()
+        let sync = LanguageServerDocumentSync(
+            store: documents,
+            registry: registry,
+            ledger: ledger
+        )
+        sync.start()
+
+        await sync.shutdown()
+
+        let hits = ledger.hits(for: .documentOutsideWorkspaceScope)
+        #expect(hits.count == 1)
+        #expect(hits.first?.count == 4)
+        #expect(hits.first?.detail == root.path)
+    }
+
+    /// A seeding pass that refused nothing must leave the ledger untouched —
+    /// not a row reading zero. The panel lists the divergences that have
+    /// actually been reached, so a zero row is a report of a narrowing that
+    /// never happened, published on every window that opens.
+    @Test("a seeding pass with nothing to refuse records nothing")
+    func aCleanSeedingPassRecordsNothing() async throws {
+        let parent = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appendingPathComponent("root", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let settings = makeSettingsStore()
+        let log = SessionLog()
+        let documents = TextDocumentStore()
+        _ = documents.open(
+            uri: root.appendingPathComponent("Inside.swift").documentUri,
+            languageId: "swift",
+            text: "abcdef"
+        )
+
+        let registry = makeRegistry(settings: settings, log: log, workspaceURL: root)
+        let ledger = UpstreamDivergenceLedger()
+        let sync = LanguageServerDocumentSync(
+            store: documents,
+            registry: registry,
+            ledger: ledger
+        )
+        sync.start()
+
+        await sync.shutdown()
+
+        #expect(ledger.hits(for: .documentOutsideWorkspaceScope).isEmpty)
+    }
 }

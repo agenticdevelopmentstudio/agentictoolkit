@@ -201,6 +201,23 @@ struct VSCodeEngineRangeTests {
         #expect(!range.accepts(SemanticVersion(major: 1, minor: 95, patch: 0)))
     }
 
+    // MARK: - Naming the wildcard
+
+    /// `*` is the one range with no lower bound at all, and it is not
+    /// distinguishable from `^0.0.0` by `minimumVersion` — both answer 0.0.0.
+    /// Anything deciding "did this extension declare a floor?" needs the
+    /// difference, so the type says it rather than each caller re-deriving it
+    /// from flags it should not have to know about.
+    @Test("only * is unconstrained")
+    func onlyTheWildcardIsUnconstrained() throws {
+        #expect(try #require(VSCodeEngineRange("*")).isUnconstrained)
+
+        for constrained in ["^1.74.0", ">=1.80.2", "1.74.0", "^0.9.0", "^0.0.1"] {
+            let range = try #require(VSCodeEngineRange(constrained))
+            #expect(!range.isUnconstrained, "\(constrained) reported unconstrained")
+        }
+    }
+
     // MARK: - The registry as it really is
 
     /// Every distinct `engines.vscode` string that more than one web

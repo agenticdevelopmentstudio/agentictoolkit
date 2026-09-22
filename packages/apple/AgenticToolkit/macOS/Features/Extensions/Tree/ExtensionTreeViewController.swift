@@ -102,8 +102,25 @@ public final class ExtensionTreeViewController: NSViewController {
         }
     }
 
-    private func adopt(_ dataSource: any ExtensionTreeDataSource) {
-        guard !isBeingDiscarded, !(content is ExtensionTreeOutlineViewController) else { return }
+    /// `replacing` is what lets a second source past the refusal below.
+    ///
+    /// The refusal is for `resolve` answering twice — an extension that is
+    /// already awake answers synchronously *and* again on the activation
+    /// callback — and a second outline for the same source would throw away
+    /// the user's open branches. A *replacement* source is the opposite case:
+    /// the outline on screen is bound to a model the adaptor has retired,
+    /// which answers no children by design, so leaving it there leaves a
+    /// permanently blank pane.
+    private func adopt(_ dataSource: any ExtensionTreeDataSource, replacing: Bool = false) {
+        guard !isBeingDiscarded else { return }
+        guard replacing || !(content is ExtensionTreeOutlineViewController) else { return }
+        // Re-hooked on every source this pane binds to, so the chain keeps
+        // going: a replacement is itself replaced by the registration after
+        // it, and a pane that hooked only the first one would go blank on the
+        // second reload instead of the first.
+        dataSource.onProviderReplaced = { [weak self] replacement in
+            self?.adopt(replacement, replacing: true)
+        }
         show(ExtensionTreeOutlineViewController(
             dataSource: dataSource,
             fallbackTitle: contributedView.name,
@@ -114,6 +131,14 @@ public final class ExtensionTreeViewController: NSViewController {
     /// whichever child holds it now.
     private func show(_ child: NSViewController) {
         if let current = content {
+            // The outgoing child is discarded, not merely unparented. An
+            // outline retires by this route now (see `adopt(_:replacing:)`),
+            // and one that is never told hands its callbacks back to nobody:
+            // it stays registered in `callbackOwners` against a source it no
+            // longer draws, so the replacement's own teardown finds the
+            // ownership test failing and leaves the *live* source wired to a
+            // pane that is gone.
+            (current as? PaneContentTeardown)?.paneContentWillBeDiscarded()
             (current as? PaneTitleProviding)?.onPaneTitleChange = nil
             current.removeFromParent()
             current.view.removeFromSuperview()
@@ -354,6 +379,10 @@ final class ExtensionTreeOutlineViewController: NSViewController {
     private var treeBelowMessage: NSLayoutConstraint!
     private var treeAtTop: NSLayoutConstraint!
 
+    /// The identifier the plain background row views are recycled under.
+    private static let backgroundRowIdentifier =
+        NSUserInterfaceItemIdentifier("extension.tree.backgroundRow")
+
     /// This pane's claim on the data source's two callbacks.
     ///
     /// A token rather than the pane's identity because an address can be
@@ -388,12 +417,28 @@ final class ExtensionTreeOutlineViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        dataSource.visibilityDidChange(to: true)
+        reportVisibility(true)
     }
 
     override func viewDidDisappear() {
         super.viewDidDisappear()
-        dataSource.visibilityDidChange(to: false)
+        reportVisibility(false)
+    }
+
+    /// `TreeView.visible` describes the pane that holds the source's
+    /// callbacks, and no other — the same ownership test `paneContentWillBeDiscarded`
+    /// makes, for the same reason, and it was missing here.
+    ///
+    /// A pane superseded by a second one for the same view id stays in its
+    /// window until the user closes it, and goes on receiving appearance
+    /// notifications the whole time. Unguarded, those overwrote the live
+    /// pane's answer: the retired pane scrolling out of view, or its window
+    /// closing, told the extension its tree was hidden while the tree the user
+    /// is looking at was on screen — and an extension that only refreshes
+    /// while visible then stopped refreshing.
+    private func reportVisibility(_ isVisible: Bool) {
+        guard Self.callbackOwners[ObjectIdentifier(dataSource)] == callbackToken else { return }
+        dataSource.visibilityDidChange(to: isVisible)
     }
 
     /// The width a multi-line `NSTextField` computes its intrinsic height
@@ -491,7 +536,18 @@ final class ExtensionTreeOutlineViewController: NSViewController {
             guard let items = items ?? nil else {
                 Self.logger.error(
                     "A tree provider did not answer getChildren in time; the branch stays unread")
-                self.staleHandles.remove(handle)
+                // A refresh that arrived while this ask was in flight is still
+                // owed an answer, and dropping it was the one path that broke
+                // `staleHandles`' promise above. The provider had already
+                // fired its change event, so nothing was left to ask again:
+                // the branch stayed both unread *and* unasked until something
+                // else happened to refresh the whole tree. Bounded, because
+                // only an arriving refresh ever sets the flag — a provider
+                // that answers nothing and changes nothing is asked once.
+                if self.staleHandles.remove(handle) != nil {
+                    self.loadChildren(of: handle)
+                }
+                self.pruneIfSettled()
                 return
             }
             guard !self.isBeingDiscarded,
@@ -503,7 +559,27 @@ final class ExtensionTreeOutlineViewController: NSViewController {
             if self.staleHandles.remove(handle) != nil {
                 self.loadChildren(of: handle)
             }
+            self.pruneIfSettled()
         }
+    }
+
+    /// Forgets the rows a refresh dropped, once the refresh is over.
+    ///
+    /// "Over" is `loadingHandles` being empty: a refresh asks every loaded
+    /// branch at once and the answers come back in the extension's order, so
+    /// until the last one lands, a row no branch currently claims may simply
+    /// belong to a branch that has not answered yet. Pruning per answer is
+    /// what made a moved row lose its identity — and therefore its open
+    /// disclosure and its whole loaded subtree — depending on which of the two
+    /// branches the extension happened to answer for first. See
+    /// `ExtensionTreeRowTable.orphanedHandles`.
+    ///
+    /// After the stale re-ask, not before: a branch whose refresh arrived
+    /// mid-flight is about to be asked again, and that ask puts its handle back
+    /// into `loadingHandles`.
+    private func pruneIfSettled() {
+        guard loadingHandles.isEmpty else { return }
+        table.pruneOrphans()
     }
 
     /// Puts a freshly read list of children in place, reusing the row object
@@ -678,17 +754,33 @@ extension ExtensionTreeOutlineViewController: NSOutlineViewDataSource, NSOutline
     }
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-        ThemedTableRowView()
+        if let reused = outlineView.makeView(
+            withIdentifier: Self.backgroundRowIdentifier, owner: self) as? ThemedTableRowView {
+            return reused
+        }
+        let fresh = ThemedTableRowView()
+        fresh.identifier = Self.backgroundRowIdentifier
+        return fresh
     }
 
+    /// Recycled rather than built per row, which is what every other outline
+    /// and table in this framework does and this one alone did not. A tree is
+    /// the shape where it matters most: a branch that opens onto a few hundred
+    /// children built a few hundred view hierarchies — each one a stack view,
+    /// two labels, an image view and three constraints — for the dozen rows
+    /// that fit on screen, and built them all again on every scroll pass, on
+    /// the main thread, while the user was dragging the scroller.
     func outlineView(
         _ outlineView: NSOutlineView,
         viewFor tableColumn: NSTableColumn?,
         item: Any
     ) -> NSView? {
         guard let row = item as? ExtensionTreeRow else { return nil }
-        return ExtensionTreeRowView(
-            item: row.item, palette: view.resolvedThemeScope.palette)
+        let rowView = outlineView.makeView(
+            withIdentifier: ExtensionTreeRowView.reuseIdentifier, owner: self
+        ) as? ExtensionTreeRowView ?? ExtensionTreeRowView()
+        rowView.configure(item: row.item, palette: view.resolvedThemeScope.palette)
+        return rowView
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -733,6 +825,7 @@ extension ExtensionTreeOutlineViewController: PaneContentTeardown {
         Self.callbackOwners.removeValue(forKey: key)
         dataSource.onDidChangeTreeData = nil
         dataSource.onDidChangeChrome = nil
+        dataSource.onProviderReplaced = nil
         dataSource.visibilityDidChange(to: false)
     }
 }
@@ -749,30 +842,29 @@ extension ExtensionTreeOutlineViewController: PaneContentTeardown {
 @MainActor
 private final class ExtensionTreeRowView: NSView {
 
-    init(item: ContributedTreeItem, palette: SemanticPalette) {
-        super.init(frame: .zero)
+    /// What `makeView(withIdentifier:owner:)` recycles these under. One
+    /// identifier for the whole outline, because every row in it is these same
+    /// three pieces in this same order.
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("extension.tree.row")
 
-        let label = ThemedLabel(string: item.label, role: .primaryText, textRole: .body)
+    private let icon = NSImageView()
+    private let label = ThemedLabel(string: "", role: .primaryText, textRole: .body)
+    private let caption = ThemedLabel(string: "", role: .tertiaryText, textRole: .caption)
+
+    /// Builds the three pieces and the layout once. Nothing here depends on an
+    /// item — that is `configure(item:palette:)`, and the split is what makes
+    /// the view reusable.
+    init() {
+        super.init(frame: .zero)
+        identifier = Self.reuseIdentifier
+
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        caption.lineBreakMode = .byTruncatingTail
+        caption.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        icon.setContentHuggingPriority(.required, for: .horizontal)
 
-        var views: [NSView] = []
-        if let symbolName = item.symbolName,
-           let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
-            let icon = NSImageView(image: image)
-            icon.contentTintColor = palette.nsColor(.secondaryText)
-            icon.setContentHuggingPriority(.required, for: .horizontal)
-            views.append(icon)
-        }
-        views.append(label)
-        if let description = item.description, !description.isEmpty {
-            let caption = ThemedLabel(string: description, role: .tertiaryText, textRole: .caption)
-            caption.lineBreakMode = .byTruncatingTail
-            caption.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
-            views.append(caption)
-        }
-
-        let stack = NSStackView(views: views)
+        let stack = NSStackView(views: [icon, label, caption])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 4
@@ -783,6 +875,32 @@ private final class ExtensionTreeRowView: NSView {
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+    }
+
+    /// Dresses this view as `item`. Every way one row differs from another is
+    /// written here, and nothing is built.
+    ///
+    /// The icon and the description are *hidden* rather than left out:
+    /// `NSStackView` detaches a hidden arranged subview from its layout, so a
+    /// row with no icon lays out exactly as one built without an icon did —
+    /// which is the alignment this type exists for — and a recycled view
+    /// cannot inherit its predecessor's symbol or caption.
+    func configure(item: ContributedTreeItem, palette: SemanticPalette) {
+        if let symbolName = item.symbolName,
+           let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+            icon.image = image
+            icon.contentTintColor = palette.nsColor(.secondaryText)
+            icon.isHidden = false
+        } else {
+            icon.image = nil
+            icon.isHidden = true
+        }
+
+        label.stringValue = item.label
+
+        let description = item.description ?? ""
+        caption.stringValue = description
+        caption.isHidden = description.isEmpty
 
         // The tooltip, and the label as its own fallback: a truncated row is
         // the one a user most wants to hover, and an item that declared no

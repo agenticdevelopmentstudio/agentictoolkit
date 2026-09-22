@@ -151,9 +151,16 @@ final class WebviewSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     private static func contents(of file: URL) async -> Data? {
-        await Task.detached(priority: .userInitiated) {
+        // `BlockingWork`, not `Task.detached`. This is `open(2)` and `read(2)`
+        // on a file that may sit on a network volume or a sleeping external
+        // disk, and a detached task runs on the same cooperative pool as every
+        // other task — one that is sized to the core count on the assumption
+        // that nothing on it blocks. Every image, stylesheet and script a
+        // webview page loads arrives here, so a page on a slow volume is a
+        // handful of those threads at once.
+        await BlockingWork.run(qos: .userInitiated) {
             try? Data(contentsOf: file, options: .mappedIfSafe)
-        }.value
+        }
     }
 
     // MARK: - What the response says about itself

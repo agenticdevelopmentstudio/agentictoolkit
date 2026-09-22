@@ -44,6 +44,12 @@ public enum CommandRunner {
         /// The run did not finish inside its timeout and was terminated.
         public let timedOut: Bool
 
+        /// A `Watchdog` said stop, and the run was terminated for that reason
+        /// rather than for the clock. Kept apart from `timedOut` because the
+        /// two report differently: a timeout says how long the caller waited,
+        /// an abort says which limit the caller set was reached.
+        public let aborted: Bool
+
         /// `standardError` as trimmed text — what a tool's complaint reads
         /// like when it is put in front of a person.
         public var diagnostics: String {
@@ -51,11 +57,48 @@ public enum CommandRunner {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        public init(status: Int32, standardOutput: Data, standardError: Data, timedOut: Bool) {
+        public init(
+            status: Int32,
+            standardOutput: Data,
+            standardError: Data,
+            timedOut: Bool,
+            aborted: Bool = false
+        ) {
             self.status = status
             self.standardOutput = standardOutput
             self.standardError = standardError
             self.timedOut = timedOut
+            self.aborted = aborted
+        }
+    }
+
+    /// A condition polled while the process runs; the first `true` ends the run
+    /// the same way the deadline does.
+    ///
+    /// **Why the runner and not the caller.** Terminating the process is
+    /// already this type's job, in two steps with a grace period, and it reads
+    /// `terminationStatus` only once it knows the process is gone — a caller
+    /// that reached around it to call `terminate()` from a timer of its own
+    /// would be a second thread in that sequence, racing a status read that
+    /// raises an uncatchable Objective-C exception if it loses.
+    ///
+    /// A poll rather than a callback because what it is for is watching
+    /// something the process does not report: bytes appearing on disk, a
+    /// directory growing. Nothing tells you about those; you go and look.
+    public struct Watchdog: Sendable {
+
+        /// How often to look. The run is ended within one interval of the
+        /// condition becoming true, so this is the resolution of whatever
+        /// limit `shouldAbort` enforces — it should be small against that
+        /// limit, not against the timeout.
+        public let interval: TimeInterval
+
+        /// Called on the waiting thread, never concurrently with itself.
+        public let shouldAbort: @Sendable () -> Bool
+
+        public init(interval: TimeInterval, shouldAbort: @escaping @Sendable () -> Bool) {
+            self.interval = interval
+            self.shouldAbort = shouldAbort
         }
     }
 
@@ -81,7 +124,8 @@ public enum CommandRunner {
     /// because what a failing helper wrote is usually the whole answer.
     public static func runToCompletion(
         _ process: Process,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        watchdog: Watchdog? = nil
     ) throws -> Outcome {
         let output = Pipe()
         let errors = Pipe()
@@ -104,9 +148,31 @@ public enum CommandRunner {
         }
 
         var timedOut = false
+        var aborted = false
         var didExit = true
-        if exited.wait(timeout: .now() + timeout) == .timedOut {
+        if let watchdog {
+            let deadline = Date().addingTimeInterval(timeout)
+            while true {
+                let remaining = deadline.timeIntervalSinceNow
+                guard remaining > 0 else {
+                    timedOut = true
+                    break
+                }
+                // The shorter of the two, so neither the poll interval
+                // overshoots the deadline nor the deadline delays a poll.
+                if exited.wait(timeout: .now() + min(watchdog.interval, remaining)) == .success {
+                    break
+                }
+                if watchdog.shouldAbort() {
+                    aborted = true
+                    break
+                }
+            }
+        } else if exited.wait(timeout: .now() + timeout) == .timedOut {
             timedOut = true
+        }
+
+        if timedOut || aborted {
             process.terminate()
             if exited.wait(timeout: .now() + terminationGrace) == .timedOut {
                 kill(process.processIdentifier, SIGKILL)
@@ -134,7 +200,8 @@ public enum CommandRunner {
             status: didExit ? process.terminationStatus : Self.neverExited,
             standardOutput: collected.data(for: .standardOutput),
             standardError: collected.data(for: .standardError),
-            timedOut: timedOut)
+            timedOut: timedOut,
+            aborted: aborted)
     }
 
     // MARK: - Private

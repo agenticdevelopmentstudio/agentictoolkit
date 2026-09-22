@@ -34,6 +34,39 @@ struct ExtensionTreeRowTable {
     /// of every refresh is the alternative.
     private(set) var parentByHandle: [String: String] = [:]
 
+    /// Handles a branch has stopped naming and nothing has claimed since.
+    ///
+    /// **Why a row does not leave the moment its parent drops it.** A refresh
+    /// re-asks every loaded branch, and the answers arrive in whatever order
+    /// the extension's `getChildren` calls happen to finish in — an order
+    /// nothing here controls. An item that *moved* from one branch to another
+    /// is therefore dropped by its old parent and claimed by its new one in
+    /// either order, and forgetting it on the drop destroyed the row object
+    /// before the claim arrived: the item came back as a new object, which
+    /// `NSOutlineView` tracks separately, so it came back closed with its whole
+    /// subtree discarded and re-fetched. The same move in the other order cost
+    /// nothing at all.
+    ///
+    /// Holding the row here until the refresh settles makes the two orders the
+    /// same *(idempotency)*. `pruneOrphans()` is what finally forgets the ones
+    /// nobody claimed; a caller that never calls it keeps them, which is a leak
+    /// of one row per genuinely deleted item rather than a wrong tree.
+    private(set) var orphanedHandles: Set<String> = []
+
+    /// For each detached top in `orphanedHandles`, the branch that stopped
+    /// naming it.
+    ///
+    /// The two readings of a later claim, and the only thing that tells them
+    /// apart. A claim by a *different* branch is the move this deferral exists
+    /// for, and the row survives whole. A claim by the *same* branch is not a
+    /// move at all: one branch is asked once per refresh, so a branch that
+    /// omitted an item and then named it again did so across two refreshes,
+    /// with the item genuinely absent in between. That is a new item under an
+    /// id it happens to share, and it gets a new row and the extension's
+    /// stated default expansion again — which is what it got before any of
+    /// this deferral existed.
+    private(set) var orphanedFromParent: [String: String] = [:]
+
     /// Rows whose `collapsibleState` was `.expanded` and which have therefore
     /// been opened once. Once only: a default is what fills in for an answer,
     /// never what overrules one, so a branch the user has closed stays closed
@@ -44,13 +77,30 @@ struct ExtensionTreeRowTable {
 
     var isEmpty: Bool { childrenByHandle.isEmpty }
 
-    func row(for handle: String) -> ExtensionTreeRow? { rows[handle] }
+    /// The row for `handle`, or nil once no branch names it.
+    ///
+    /// An orphan answers nil here even though its object is still held: to
+    /// everything outside this type a row no parent lists is gone, and only
+    /// `adopt` — reclaiming it for a new parent — has any business with the
+    /// object in between. See `orphanedHandles`.
+    func row(for handle: String) -> ExtensionTreeRow? {
+        orphanedHandles.contains(handle) ? nil : rows[handle]
+    }
 
-    func children(of handle: String) -> [ExtensionTreeRow]? { childrenByHandle[handle] }
+    /// Nil once no branch names `handle` — an orphan's children are held for a
+    /// possible reclaim, and are no more visible than the orphan itself.
+    func children(of handle: String) -> [ExtensionTreeRow]? {
+        orphanedHandles.contains(handle) ? nil : childrenByHandle[handle]
+    }
 
-    func hasLoaded(_ handle: String) -> Bool { childrenByHandle[handle] != nil }
+    func hasLoaded(_ handle: String) -> Bool { children(of: handle) != nil }
 
-    var loadedBranches: [String] { Array(childrenByHandle.keys) }
+    /// Every branch whose children have been asked for — orphans excluded,
+    /// since a refresh that asked an unreachable branch for its children would
+    /// be work spent on rows about to be forgotten.
+    var loadedBranches: [String] {
+        childrenByHandle.keys.filter { !orphanedHandles.contains($0) }
+    }
 
     // MARK: - Writing
 
@@ -99,6 +149,20 @@ struct ExtensionTreeRowTable {
         var displaced: [String] = []
         for item in items {
             guard taken.insert(item.id).inserted else { continue }
+            // Claimed, so it is not going anywhere — whether it was dropped by
+            // another branch a moment ago or has been here all along. The
+            // whole subtree comes back with it, which is the point: the row
+            // kept its identity *and* its loaded, disclosed children.
+            if orphanedHandles.contains(item.id) {
+                if orphanedFromParent[item.id] == handle {
+                    // Named again by the branch that dropped it: a return, not
+                    // a move. Nothing is rescued — see `orphanedFromParent`.
+                    forget(item.id)
+                } else {
+                    orphanedHandles.subtract(subtree(of: item.id))
+                    orphanedFromParent[item.id] = nil
+                }
+            }
             if let existing = rows[item.id] {
                 existing.item = item
                 next.append(existing)
@@ -120,9 +184,54 @@ struct ExtensionTreeRowTable {
             // somebody else's to keep, and forgetting it would take it out
             // from under the branch now drawing it.
             guard parentByHandle[gone.handle] == handle else { continue }
-            forget(gone.handle)
+            // Unparented but not forgotten — see `orphanedHandles`. Clearing
+            // the parent is what makes a later claim an ordinary adoption
+            // rather than a move, so no branch is told to redraw a row it had
+            // already let go of.
+            parentByHandle[gone.handle] = nil
+            // The descendants keep their parents — the subtree is intact and
+            // only detached at the top — but they are just as unreachable, so
+            // they are marked too. `row(for:)` hides every one of them, which
+            // is what keeps a row held for a possible reclaim from looking, to
+            // everything outside this type, like a row that is still there.
+            orphanedHandles.formUnion(subtree(of: gone.handle))
+            orphanedFromParent[gone.handle] = handle
         }
         return Adoption(rows: next, displacedParents: displaced)
+    }
+
+    /// Forgets every row still orphaned, and everything under it.
+    ///
+    /// Called when a refresh has settled — when nothing is out asking an
+    /// extension for children — because that is the first moment at which "no
+    /// branch has claimed this" means the item is gone rather than that its new
+    /// parent has not answered yet.
+    mutating func pruneOrphans() {
+        let doomed = orphanedHandles
+        orphanedHandles.removeAll()
+        orphanedFromParent.removeAll()
+        // Only the detached tops. A descendant is in `doomed` as well and
+        // still has its parent, and `forget` takes it when it takes the top.
+        for handle in doomed where parentByHandle[handle] == nil {
+            forget(handle)
+        }
+    }
+
+    /// `handle` and everything beneath it, cycle-safe.
+    ///
+    /// Shares `forget`'s shape rather than its code because one of them
+    /// mutates as it walks; the `seen` set is what makes a tree an extension
+    /// built with a loop in it terminate rather than hang the app.
+    private func subtree(of handle: String) -> [String] {
+        var found: [String] = []
+        var pending = [handle]
+        var seen: Set<String> = []
+        while let next = pending.popLast() {
+            guard seen.insert(next).inserted else { continue }
+            found.append(next)
+            pending.append(contentsOf: (childrenByHandle[next] ?? []).map(\.handle))
+        }
+        return found
     }
 
     /// Drops a handle and everything under it.
@@ -148,6 +257,8 @@ struct ExtensionTreeRowTable {
             childrenByHandle[next] = nil
             rows[next] = nil
             parentByHandle[next] = nil
+            orphanedHandles.remove(next)
+            orphanedFromParent[next] = nil
             autoExpandedHandles.remove(next)
         }
     }

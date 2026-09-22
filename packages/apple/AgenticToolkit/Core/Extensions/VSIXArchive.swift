@@ -135,10 +135,19 @@ public enum VSIXArchive {
     ///   `expansionTimeout`, which is the only value production uses; it is a
     ///   parameter so the giving-up path can be reached by a test in under a
     ///   second instead of never *(dependency-injection)*.
+    /// - Parameter byteCeiling: How much may land in `destination` before the
+    ///   unarchiver is stopped. Defaults to `expansionByteCeiling`, and is a
+    ///   parameter for the same reason `timeout` is.
+    /// - Parameter checkInterval: How often the destination is measured
+    ///   against `byteCeiling`. Defaults to `expansionCheckInterval`; a test
+    ///   lowers it so a bomb it can afford to build — megabytes, not
+    ///   gigabytes — is still measured more than once while it lands.
     public static func expand(
         _ archive: URL,
         to destination: URL,
-        timeout: TimeInterval = VSIXArchive.expansionTimeout
+        timeout: TimeInterval = VSIXArchive.expansionTimeout,
+        byteCeiling: Int64 = VSIXArchive.expansionByteCeiling,
+        checkInterval: TimeInterval = VSIXArchive.expansionCheckInterval
     ) throws {
         guard !FileManager.default.fileExists(atPath: destination.path) else {
             throw VSIXArchiveError.destinationExists(destination)
@@ -157,7 +166,12 @@ public enum VSIXArchive {
         // an expansion could take, on bytes fetched from a third party.
         let outcome: CommandRunner.Outcome
         do {
-            outcome = try CommandRunner.runToCompletion(process, timeout: timeout)
+            outcome = try CommandRunner.runToCompletion(
+                process,
+                timeout: timeout,
+                watchdog: CommandRunner.Watchdog(interval: checkInterval) {
+                    expandedSize(of: destination, stoppingAbove: byteCeiling) > byteCeiling
+                })
         } catch {
             try? FileManager.default.removeItem(at: destination)
             throw VSIXArchiveError.expansionUnavailable(String(describing: error))
@@ -169,6 +183,10 @@ public enum VSIXArchive {
         guard !outcome.timedOut else {
             try? FileManager.default.removeItem(at: destination)
             throw VSIXArchiveError.expansionTimedOut(seconds: timeout)
+        }
+        guard !outcome.aborted else {
+            try? FileManager.default.removeItem(at: destination)
+            throw VSIXArchiveError.expansionTooLarge(bytes: byteCeiling)
         }
         guard outcome.status == 0 else {
             try? FileManager.default.removeItem(at: destination)
@@ -182,9 +200,77 @@ public enum VSIXArchive {
     /// Generous on purpose: this covers a large extension on a slow disk, and
     /// the number is not a performance budget — it is the point at which
     /// waiting has stopped being waiting. What it bounds is an archive crafted
-    /// so that expanding it never ends, which is a real shape (a zip bomb
-    /// expands forever, not merely large) and arrives here from the internet.
+    /// so that expanding it takes forever, which arrives here from the
+    /// internet.
+    ///
+    /// It bounds **time, and only time**. This comment used to claim it
+    /// covered zip bombs too, on the premise that a bomb "expands forever,
+    /// not merely large" — which is backwards. A zip bomb is compression
+    /// ratio, not duration: the canonical ones write tens of gigabytes as
+    /// fast as the disk accepts them, and finish. Two minutes of that is a
+    /// full volume, and the timeout never fires. `expansionByteCeiling` is
+    /// what bounds the other axis.
     public static let expansionTimeout: TimeInterval = 120
+
+    /// How much may be written into the destination before the unarchiver is
+    /// stopped.
+    ///
+    /// The `.vsix` that produced it is already capped at 512 MB by
+    /// `OpenVSXClient`, and what this caps is the *ratio*: deflate reaches
+    /// about 1000:1 on adversarial input, so that 512 MB is licence to write
+    /// half a terabyte. 2 GB is several times the largest real extension —
+    /// the big ones bundle a language-server binary per platform and land in
+    /// the hundreds of megabytes — and small enough that reaching it leaves a
+    /// volume with room to report the failure.
+    ///
+    /// Not a substitute for the timeout and not substituted by it: one bounds
+    /// how long a hostile archive can hold a thread, the other how much of
+    /// the disk it can take. An archive can do either without doing the other.
+    public static let expansionByteCeiling: Int64 = 2 * 1024 * 1024 * 1024
+
+    /// How often the growing destination is measured.
+    ///
+    /// Half a second against a 2 GB ceiling means an overshoot of whatever the
+    /// disk writes in half a second — tens or low hundreds of megabytes, which
+    /// is noise against the ceiling and against the free space it protects.
+    /// Measuring more often would not buy accuracy that matters and would walk
+    /// the tree more.
+    public static let expansionCheckInterval: TimeInterval = 0.5
+
+    /// The bytes under `directory`, giving up as soon as the answer is known
+    /// to be over `ceiling`.
+    ///
+    /// **The early exit is what makes this affordable to poll.** A tree being
+    /// written by a zip bomb is a handful of enormous files, so the sum passes
+    /// the ceiling within a few entries and the walk stops there rather than
+    /// enumerating a volume's worth of output. The opposite shape — millions
+    /// of tiny files — makes each walk proportionally longer, and that one is
+    /// bounded by the expansion timeout instead: the walk runs on the thread
+    /// that is already waiting out the deadline.
+    ///
+    /// Allocated size rather than logical size, because what is being defended
+    /// is the volume. A file's last block is charged in full either way, and a
+    /// sparse file is charged for what it occupies rather than what it claims.
+    private static func expandedSize(of directory: URL, stoppingAbove ceiling: Int64) -> Int64 {
+        let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey]
+        guard let walk = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            // A hostile archive gets no discount for naming its payload with a
+            // leading dot, and `ditto` restores package directories as
+            // directories, not as opaque single items.
+            options: [.skipsPackageDescendants])
+        else { return 0 }
+
+        var total: Int64 = 0
+        for case let url as URL in walk {
+            let values = try? url.resourceValues(forKeys: keys)
+            let size = values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0
+            total += Int64(size)
+            if total > ceiling { return total }
+        }
+        return total
+    }
 
     /// `<expanded>/extension` — the directory that becomes the installed
     /// extension. Everything beside it in the archive is packaging.
@@ -311,4 +397,10 @@ public enum VSIXArchiveError: Error, Sendable, Equatable {
     /// nothing about the archive's contents — there is no exit status and no
     /// message, only a decision this code made.
     case expansionTimedOut(seconds: TimeInterval)
+
+    /// The expansion passed `bytes` on disk and was stopped. Distinct from the
+    /// timeout for the reason the two limits are distinct: this one is a
+    /// statement about the archive — it decompresses to more than any real
+    /// extension does — where a timeout says only that a clock ran out.
+    case expansionTooLarge(bytes: Int64)
 }

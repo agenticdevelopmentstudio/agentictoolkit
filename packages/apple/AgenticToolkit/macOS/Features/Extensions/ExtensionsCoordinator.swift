@@ -130,6 +130,20 @@ public final class ExtensionsCoordinator: AppFeature {
         // the load, with no exception to remember.
         languagePoint.install()
 
+        // Before the first scan, because an install the last run of this app
+        // died in the middle of leaves the extension under a hidden name that
+        // the scan does not look at — so loading first would prune that
+        // extension's themes as orphans, including the user's selected one,
+        // moments before the recovery that would have brought it back. This
+        // is the only moment that can see the crash at all: nothing else
+        // re-reads the install directory before the reconcile below.
+        if let installDirectory {
+            VSIXInstaller(
+                installDirectory: installDirectory,
+                hostVersion: ExtensionRegistry.declaredVSCodeVersion
+            ).recoverInterruptedInstalls()
+        }
+
         registry.loadAll()
 
         // An extension deleted while the app was closed never gets a

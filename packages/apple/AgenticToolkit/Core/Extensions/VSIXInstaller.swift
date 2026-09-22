@@ -136,26 +136,36 @@ public struct VSIXInstaller: Sendable {
             publicKey = try await client.text(at: publicKeyURL)
         }
 
-        let verification = try VSIXArchive.verify(
-            archive,
-            expectedDigest: digest,
-            signature: signature,
-            publicKeyPEM: publicKey)
-
         // **Off the cooperative pool for the synchronous half.** Everything
-        // below this point is blocking: a write, `ditto` run through
+        // below this point is blocking: a SHA-256 over the whole archive and
+        // an Ed25519 check against it, a write, `ditto` run through
         // `CommandRunner` — which waits on a `DispatchSemaphore` for up to its
         // 120-second timeout plus two 2-second termination graces — and then
         // the moves. `Task.detached` would not help; a detached task is
         // detached from its parent's context, not from the executor, and still
         // occupies one of the pool's core-count threads for all of it.
         // `BlockingWork` is the hop to a queue that is allowed to block.
+        //
+        // **Verification is inside the fence, and used to be three lines above
+        // it.** It hashes every byte of the archive — up to the 512 MB
+        // `OpenVSXClient` will download — with no suspension point anywhere in
+        // the middle, so on the cooperative pool it holds a thread exactly as
+        // `ditto` does. Being fast on a small extension is not the same as
+        // being non-blocking, and the large ones are the ones that matter.
         let identifier = detail.identifier
         let source = VSIXInstallation.Source.registry(
             detail.namespace + "/" + detail.name, version: detail.version)
         let installer = self
+        let expectedDigest = digest
+        let expectedSignature = signature
+        let expectedPublicKey = publicKey
         return try await BlockingWork.run {
-            try installer.install(
+            let verification = try VSIXArchive.verify(
+                archive,
+                expectedDigest: expectedDigest,
+                signature: expectedSignature,
+                publicKeyPEM: expectedPublicKey)
+            return try installer.install(
                 archive: archive,
                 verification: verification,
                 expectedIdentifier: identifier,
@@ -249,6 +259,14 @@ public struct VSIXInstaller: Sendable {
         }
 
         try fileManager.createDirectory(at: installDirectory, withIntermediateDirectories: true)
+
+        // Before anything is listed or moved. An aside left behind by a crash
+        // is invisible to `otherInstallDirectories` below, so an install that
+        // ran without this would compute "the old versions to remove" against
+        // a directory that is missing one — and, if the crash had been on this
+        // very extension, would install over a destination whose only previous
+        // copy is sitting hidden beside it with nothing left to reclaim it.
+        recoverInterruptedInstalls()
 
         // Re-installing the same version is a no-op that succeeds, not a
         // conflict: an interrupted download, a retry after a network error, or
@@ -394,7 +412,8 @@ public struct VSIXInstaller: Sendable {
         let aside = destination
             .deletingLastPathComponent()
             .appendingPathComponent(
-                ".\(destination.lastPathComponent).replacing-\(UUID().uuidString)",
+                "\(Self.asidePrefix)\(destination.lastPathComponent)"
+                    + "\(Self.asideMarker)\(UUID().uuidString)",
                 isDirectory: true)
 
         let hadExisting = fileManager.fileExists(atPath: destination.path)
@@ -404,14 +423,132 @@ public struct VSIXInstaller: Sendable {
         do {
             try fileManager.moveItem(at: payload, to: destination)
         } catch {
-            if hadExisting {
-                try? fileManager.moveItem(at: aside, to: destination)
+            let reason = error.localizedDescription
+            guard hadExisting else {
+                throw VSIXInstallError.couldNotInstall(reason)
             }
-            throw VSIXInstallError.couldNotInstall(error.localizedDescription)
+            do {
+                try fileManager.moveItem(at: aside, to: destination)
+            } catch {
+                // **The rollback failing is a different failure, and it used to
+                // be a `try?`.** The thrown error then carried only the first
+                // reason, so the one outcome this whole dance exists to prevent
+                // — the user left with no version of the extension at all —
+                // was reported in exactly the same words as the one where the
+                // previous version is safely back. Say which happened; the
+                // aside is named, because a person can move it back by hand
+                // and nothing else on disk says where it went.
+                let rollbackReason = error.localizedDescription
+                Self.logger.error(
+                    """
+                    Could not put the previous \(destination.lastPathComponent, privacy: .public) \
+                    back from \(aside.lastPathComponent, privacy: .public): \
+                    \(rollbackReason, privacy: .public)
+                    """)
+                throw VSIXInstallError.couldNotInstall(
+                    "\(reason) — and the previous version could not be put back; "
+                        + "it is at \(aside.lastPathComponent)")
+            }
+            throw VSIXInstallError.couldNotInstall(reason)
         }
         if hadExisting {
             try? fileManager.removeItem(at: aside)
         }
+    }
+
+    // MARK: - Finishing an install that was interrupted
+
+    /// The leading dot on the name an install-in-progress moves the previous
+    /// version to. Hidden on purpose: for the moment it exists, the directory
+    /// holds a *second* copy of an extension already claiming its identifier,
+    /// and `ExtensionRegistry.scan` and `otherInstallDirectories` both skip
+    /// hidden entries — so neither sees a duplicate that is about to stop
+    /// existing.
+    private static let asidePrefix = "."
+
+    /// What separates the name being replaced from the nonce. Its own constant
+    /// because `recoverInterruptedInstalls()` reads back what `moveIntoPlace`
+    /// wrote, and a name format spelled twice is a name format that drifts
+    /// *(dry)*.
+    private static let asideMarker = ".replacing-"
+
+    /// The install directory this name belongs to, if it is one of ours.
+    private static func replacedName(ofAside name: String) -> String? {
+        guard name.hasPrefix(asidePrefix),
+              let marker = name.range(of: asideMarker, options: .backwards),
+              !name[marker.upperBound...].isEmpty
+        else { return nil }
+        let replaced = String(name[name.index(after: name.startIndex)..<marker.lowerBound])
+        // It became a path component here, so it has to still be one.
+        guard !replaced.isEmpty, replaced != ".", replaced != "..",
+              !replaced.contains("/")
+        else { return nil }
+        return replaced
+    }
+
+    /// Finishes, one way or the other, any replacement that a crash left
+    /// halfway through — and returns what it touched.
+    ///
+    /// **The window this closes.** Replacing an install is two renames: the
+    /// previous version out to a hidden aside, the new one in. Between them the
+    /// destination does not exist, and the only copy of the extension the user
+    /// had is under a name beginning with a dot. Nothing else here would ever
+    /// find it again: `otherInstallDirectories` and `ExtensionRegistry.scan`
+    /// both pass `.skipsHiddenFiles`, and `pruneOrphans` prunes themes. A power
+    /// cut in that window therefore reads, forever after, as an extension that
+    /// vanished — with its themes pruned as orphans, because as far as the
+    /// scan is concerned it is gone.
+    ///
+    /// Which way to finish is decided by what is at the destination, and both
+    /// answers are the safe one:
+    ///
+    /// - **Nothing there** — the crash landed between the renames. The aside is
+    ///   the user's only copy, so it goes back.
+    /// - **Something there** — the second rename completed and only the delete
+    ///   did not. The aside is the superseded version, so it goes.
+    ///
+    /// Idempotent, and safe to run when no install is in progress: a live
+    /// `moveIntoPlace` holds its aside for two renames on one thread, and this
+    /// runs from the same actor-free synchronous path before one starts
+    /// *(idempotency)*.
+    @discardableResult
+    public func recoverInterruptedInstalls() -> [URL] {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: installDirectory,
+            includingPropertiesForKeys: nil,
+            // The opposite of everywhere else here: these are exactly the
+            // hidden entries, and they are the only hidden entries this
+            // directory is ever given.
+            options: [])
+        else { return [] }
+
+        var recovered: [URL] = []
+        for aside in contents {
+            guard let replaced = Self.replacedName(ofAside: aside.lastPathComponent) else {
+                continue
+            }
+            let destination = installDirectory.appendingPathComponent(
+                replaced, isDirectory: true)
+            do {
+                if fileManager.fileExists(atPath: destination.path) {
+                    try fileManager.removeItem(at: aside)
+                } else {
+                    try fileManager.moveItem(at: aside, to: destination)
+                }
+                recovered.append(destination)
+            } catch {
+                // Left where it is, named in the log. It is still the only
+                // copy, so removing it on a failure to restore it would turn a
+                // recoverable state into the unrecoverable one.
+                let reason = error.localizedDescription
+                Self.logger.error(
+                    """
+                    Could not finish the interrupted replacement of \
+                    \(replaced, privacy: .public): \(reason, privacy: .public)
+                    """)
+            }
+        }
+        return recovered
     }
 }
 

@@ -235,6 +235,16 @@ public final class WebviewPanelSerializer {
         // pane is being built for — and the pane does not exist yet at this
         // moment, which is exactly why those verbs look it up at call time.
         ExtensionWebviewPanePlacer.placement(forNodeID: context.nodeID).install(on: panel)
+
+        // A deserializer that disposed the panel it was handed — the ordinary
+        // way to say "this state refers to something that is gone" — has had
+        // its removal replayed by the line above, because `install` is the
+        // first moment anything was listening. What must not follow is the
+        // write: storing a dead panel's state means this pane is rebuilt
+        // tomorrow, deserialized, disposed and stored again, for as long as
+        // the project exists.
+        guard !panel.isDisposed else { return blank }
+
         persist(panel, in: context)
         return panel
     }
@@ -256,7 +266,9 @@ public final class WebviewPanelSerializer {
         let project = context.project
         let nodeID = context.nodeID
         let write: () -> Void = { [weak panel] in
-            guard let panel else { return }
+            // A disposed panel's pane is on its way out of the tree; what it
+            // would answer now is the state of something nobody can see.
+            guard let panel, !panel.isDisposed else { return }
             do {
                 project.setPaneState(
                     nodeID: nodeID,

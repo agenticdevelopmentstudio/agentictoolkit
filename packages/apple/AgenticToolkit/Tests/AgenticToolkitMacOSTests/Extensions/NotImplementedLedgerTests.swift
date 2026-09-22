@@ -171,6 +171,46 @@ struct NotImplementedLedgerTests {
             == ["aa.first/alpha", "aa.first/beta", "zz.last/alpha", "zz.last/zeta"])
     }
 
+    /// One extension's rows, in the same order as the whole ledger's — a
+    /// report draws one of these per installed extension, and a per-extension
+    /// section ordered differently from the whole list reads as two different
+    /// reports.
+    @Test("one extension's accesses come back sorted, and only that extension's")
+    func oneExtensionsAccessesAreSortedAndFiltered() {
+        let (ledger, _) = makeLedger()
+        ledger.record(memberPath: "zeta", extensionIdentifier: "zz.last")
+        ledger.record(memberPath: "beta", extensionIdentifier: "aa.first")
+        ledger.record(memberPath: "alpha", extensionIdentifier: "zz.last")
+        ledger.record(memberPath: "alpha", extensionIdentifier: "aa.first")
+
+        #expect(ledger.accesses(for: "aa.first").map(\.memberPath) == ["alpha", "beta"])
+        #expect(ledger.accesses(for: "zz.last").map(\.memberPath) == ["alpha", "zeta"])
+    }
+
+    /// And the two accessors agree, which is what a shared comparator is for.
+    @Test("filtering the whole list gives the same answer as asking for one")
+    func theTwoAccessorsAgree() {
+        let (ledger, _) = makeLedger()
+        for (index, member) in ["delta", "alpha", "charlie", "bravo"].enumerated() {
+            ledger.record(
+                memberPath: member,
+                extensionIdentifier: index.isMultiple(of: 2) ? "aa.first" : "zz.last")
+        }
+
+        for identifier in ["aa.first", "zz.last"] {
+            #expect(ledger.accesses(for: identifier)
+                == ledger.accesses.filter { $0.extensionIdentifier == identifier })
+        }
+    }
+
+    @Test("an extension that asked for nothing has no accesses")
+    func anUnknownExtensionHasNoAccesses() {
+        let (ledger, _) = makeLedger()
+        ledger.record(memberPath: "fetch", extensionIdentifier: "acme.widget")
+
+        #expect(ledger.accesses(for: "other.thing").isEmpty)
+    }
+
     @Test("a ledger nothing has been recorded in is empty")
     func aFreshLedgerIsEmpty() {
         let (ledger, _) = makeLedger()

@@ -198,4 +198,182 @@ struct ExtensionTreeRowTableTests {
         let displaced = table.adopt([item("a"), item("b")], under: "").displacedParents
         #expect(displaced.isEmpty)
     }
+
+    // MARK: - A move whose two halves arrive in either order
+
+    /// **The order the extension answers in is not ours to choose.** A refresh
+    /// asks every loaded branch at once, and a row that moved from A to B is
+    /// dropped by A and claimed by B in whichever order `getChildren` happens
+    /// to finish. `aMovedRowKeepsItsIdentity` above is the lucky order — B
+    /// first — and it passed while the unlucky one destroyed the row.
+    ///
+    /// Destroyed is not an overstatement: a new object comes back closed,
+    /// because `NSOutlineView` tracks disclosure by identity, and its loaded
+    /// children are gone with it.
+    @Test("a row moved between branches survives the old branch answering first")
+    func aMovedRowSurvivesTheOldBranchAnsweringFirst() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("parent-a", children: true), item("parent-b", children: true)],
+                        under: "")
+        let before = table.adopt([item("shared")], under: "parent-a").rows
+
+        // A answers first, and no longer names the row.
+        _ = table.adopt([], under: "parent-a")
+        // Then B does.
+        let after = table.adopt([item("shared")], under: "parent-b").rows
+
+        #expect(before[0] === after[0])
+        #expect(table.row(for: "shared") != nil)
+    }
+
+    /// And the subtree under it comes back too — which is what makes the row's
+    /// identity worth keeping. A row that returns as the same object with its
+    /// children thrown away still collapses everything below it.
+    @Test("a moved row brings its loaded subtree back with it")
+    func aMovedRowKeepsItsSubtree() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("parent-a", children: true), item("parent-b", children: true)],
+                        under: "")
+        _ = table.adopt([item("shared", children: true)], under: "parent-a")
+        let grandchild = table.adopt([item("leaf")], under: "shared").rows
+
+        _ = table.adopt([], under: "parent-a")
+        _ = table.adopt([item("shared", children: true)], under: "parent-b")
+
+        #expect(table.children(of: "shared")?.count == 1)
+        #expect(table.row(for: "leaf") === grandchild[0])
+    }
+
+    /// While it is in between, it is *gone* as far as anyone outside this type
+    /// is concerned. Holding the object is an implementation detail of the
+    /// reclaim; a pane that drew a row no branch lists would be drawing a row
+    /// the extension has removed.
+    @Test("a dropped row is invisible while it is held")
+    func aDroppedRowIsInvisibleWhileHeld() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("parent-a", children: true)], under: "")
+        _ = table.adopt([item("shared", children: true)], under: "parent-a")
+        _ = table.adopt([item("leaf")], under: "shared")
+
+        _ = table.adopt([], under: "parent-a")
+
+        #expect(table.row(for: "shared") == nil)
+        #expect(table.row(for: "leaf") == nil)
+        #expect(table.children(of: "parent-a")?.isEmpty == true)
+        #expect(!table.loadedBranches.contains("shared"))
+    }
+
+    /// And when the refresh settles with nobody having claimed it, it really
+    /// does leave — holding it forever would be a leak of one row per deleted
+    /// item, growing for as long as the pane is open.
+    @Test("an orphan nobody claimed is forgotten when the refresh settles")
+    func anUnclaimedOrphanIsForgottenOnPrune() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("parent-a", children: true)], under: "")
+        _ = table.adopt([item("shared", children: true)], under: "parent-a")
+        _ = table.adopt([item("leaf")], under: "shared")
+
+        _ = table.adopt([], under: "parent-a")
+        table.pruneOrphans()
+
+        #expect(table.row(for: "shared") == nil)
+        #expect(table.row(for: "leaf") == nil)
+        // Not merely hidden: the branch's children are gone from the graph, so
+        // a later row with the same id starts clean rather than inheriting a
+        // stale subtree.
+        #expect(table.children(of: "shared") == nil)
+        #expect(table.children(of: "leaf") == nil)
+    }
+
+    /// A prune must not touch a row that was reclaimed in the same pass, which
+    /// is the assertion that stops "forget everything at the end" from passing
+    /// the tests above.
+    @Test("a reclaimed row survives the prune that follows")
+    func aReclaimedRowSurvivesThePrune() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("parent-a", children: true), item("parent-b", children: true)],
+                        under: "")
+        let before = table.adopt([item("shared")], under: "parent-a").rows
+
+        _ = table.adopt([], under: "parent-a")
+        _ = table.adopt([item("shared")], under: "parent-b")
+        table.pruneOrphans()
+
+        #expect(table.row(for: "shared") === before[0])
+        #expect(table.children(of: "parent-b")?.count == 1)
+    }
+
+    /// Pruning twice is pruning once — the sweep runs after every settled
+    /// refresh, so most of its calls have nothing to do.
+    @Test("pruning with nothing orphaned changes nothing")
+    func pruningNothingChangesNothing() {
+        var table = ExtensionTreeRowTable()
+        let rows = table.adopt([item("a"), item("b")], under: "").rows
+
+        table.pruneOrphans()
+        table.pruneOrphans()
+
+        #expect(table.row(for: "a") === rows[0])
+        #expect(table.row(for: "b") === rows[1])
+    }
+
+    /// **A branch that drops an item and later names it again has not moved
+    /// anything.** One branch is asked once per refresh, so those two answers
+    /// came from two refreshes with the item genuinely absent in between —
+    /// which is an item that left and a different one that arrived, not the
+    /// interleaving this deferral exists for.
+    ///
+    /// The distinction is not academic: the row it gets is what decides
+    /// whether the extension's stated default expansion applies again, and
+    /// rescuing here would silently repeal
+    /// `autoExpansionResetsWhenARowLeaves`.
+    @Test("a branch that names a dropped row again gets a new row, not the held one")
+    func aReturnToTheSameBranchIsNotAReclaim() {
+        var table = ExtensionTreeRowTable()
+        let before = table.adopt([item("a", expanded: true)], under: "").rows
+
+        _ = table.adopt([], under: "")
+        let after = table.adopt([item("a", expanded: true)], under: "").rows
+
+        #expect(before[0] !== after[0])
+        // Bound to a local because `#expect` cannot call a `mutating` member.
+        let expandsAgain = table.markAutoExpanded("a")
+        #expect(expandsAgain)
+    }
+
+    /// And the subtree it had does not come back with it, for the same reason:
+    /// this is a new item, and its children are whatever the extension answers
+    /// for it now.
+    @Test("a row that returns to the same branch does not inherit its old subtree")
+    func aReturnToTheSameBranchStartsEmpty() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("a", children: true)], under: "")
+        _ = table.adopt([item("stale")], under: "a")
+
+        _ = table.adopt([], under: "")
+        _ = table.adopt([item("a", children: true)], under: "")
+
+        #expect(table.children(of: "a") == nil)
+        #expect(table.row(for: "stale") == nil)
+    }
+
+    /// The other half of the same rule, stated where it can fail: a claim by a
+    /// *different* branch keeps everything, auto-expansion included. A row that
+    /// merely moved and came back wanting to re-open itself is the bug in the
+    /// opposite direction.
+    @Test("a row reclaimed by another branch keeps its one automatic expansion")
+    func aReclaimByAnotherBranchKeepsItsExpansion() {
+        var table = ExtensionTreeRowTable()
+        _ = table.adopt([item("parent-a", children: true), item("parent-b", children: true)],
+                        under: "")
+        _ = table.adopt([item("shared", expanded: true)], under: "parent-a")
+        let onFirstAppearance = table.markAutoExpanded("shared")
+
+        _ = table.adopt([], under: "parent-a")
+        _ = table.adopt([item("shared", expanded: true)], under: "parent-b")
+        let onReclaim = table.markAutoExpanded("shared")
+
+        #expect(onFirstAppearance)
+        #expect(!onReclaim)
+    }
 }

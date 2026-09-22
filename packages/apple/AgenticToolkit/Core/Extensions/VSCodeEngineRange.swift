@@ -209,5 +209,27 @@ public struct VSCodeEngineRange: Sendable, Hashable, CustomStringConvertible {
             patch: requirement.patchBase)
     }
 
+    /// Whether the range declares no version requirement at all — `*`, or an
+    /// all-`x` range, and nothing else.
+    ///
+    /// The distinction `minimumVersion` cannot draw. `*` parses to three zero
+    /// bases with every flag cleared, so its declared floor reads as 0.0.0 —
+    /// indistinguishable from a manifest that really did ask for 0.0.0, and
+    /// below every floor a caller might compare against. But `*` is the
+    /// *absence* of a version claim, not a claim about an ancient VS Code, and
+    /// reading it as one makes an extension that named no engine the strictest
+    /// case rather than the loosest.
+    ///
+    /// The flags are what separate the two: only `*` and `x` clear a base's
+    /// must-equal flag while leaving the base at zero. A literal `0.0.0` sets
+    /// all three, `>=0.0.0` is a minimum rather than a range, and `0.x.x`
+    /// still claims a major of 0 — none of them is unconstrained.
+    public var isUnconstrained: Bool {
+        !requirement.isMinimum
+            && requirement.majorBase == 0 && !requirement.majorMustEqual
+            && requirement.minorBase == 0 && !requirement.minorMustEqual
+            && requirement.patchBase == 0 && !requirement.patchMustEqual
+    }
+
     public var description: String { rawValue }
 }

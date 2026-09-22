@@ -155,6 +155,105 @@ struct OpenVSXClientLimitsTests {
             < OpenVSXClient.defaultMaximumArtifactBytes)
     }
 
+    // MARK: - Which refusal a refused response gets
+
+    /// A registry that is down often says so at length — an HTML error page
+    /// from a proxy is easily larger than the metadata cap. Reporting that as
+    /// "the answer was too large" sends the reader to look for a setting to
+    /// raise, when what happened is a 503 and the answer is to wait.
+    ///
+    /// The ceiling still fires first in the *reading*; what this pins is which
+    /// error comes out of it, which is why the body has to be past the cap for
+    /// the test to mean anything.
+    @Test("an oversize body behind an error status is reported as the status")
+    func anErrorStatusOutranksTheCeiling() async throws {
+        let client = makeClient(metadataBytes: 1024)
+        StubbedRegistry.respond(
+            to: "/-/search",
+            with: StubbedResponse(status: 503, body: Data(repeating: 0x41, count: 64 * 1024)))
+
+        do {
+            _ = try await client.search("vim")
+            Issue.record("an oversize error page was accepted")
+        } catch let error as OpenVSXError {
+            guard case .requestFailed(_, let status) = error else {
+                Issue.record("reported as \(error) rather than as the status")
+                return
+            }
+            #expect(status == 503)
+        }
+    }
+
+    /// And the same for a download, where the wrong report is worse: a 404 for
+    /// a version that was unpublished between the search and the install is an
+    /// ordinary thing to hit, and "too large" would be a lie about a body that
+    /// was never the artifact at all.
+    @Test("a 404 with a long error document is reported as a 404")
+    func aMissingArtifactIsReportedAsMissing() async throws {
+        let client = makeClient(artifactBytes: 1000)
+        let url = StubbedRegistry.registryBase.appendingPathComponent("gone.vsix")
+        StubbedRegistry.respond(
+            to: "/gone.vsix",
+            with: StubbedResponse(status: 404, body: Data(repeating: 0x41, count: 8192)))
+
+        await #expect(throws: OpenVSXError.requestFailed(url, status: 404)) {
+            _ = try await client.data(at: url)
+        }
+    }
+
+    // MARK: - What a body under the cap comes back as
+
+    /// The reader delivers a body in whatever chunks arrive, and a reassembly
+    /// that dropped or reordered one would be invisible to every ceiling test
+    /// above — they all assert on a refusal, and a refusal needs no bytes to
+    /// be right. This one asserts on the bytes.
+    ///
+    /// The payload is a counted pattern rather than a repeated one for that
+    /// exact reason: `Data(repeating:)` compares equal to itself however it
+    /// was cut up and put back together.
+    @Test("a body just under the cap arrives whole and in order")
+    func aBodyUnderTheCapArrivesIntact() async throws {
+        let client = makeClient(artifactBytes: 1 << 20)
+        let url = StubbedRegistry.registryBase.appendingPathComponent("real.vsix")
+        let payload = Data((0..<(512 * 1024)).map { UInt8($0 % 251) })
+        StubbedRegistry.respond(to: "/real.vsix", with: StubbedResponse(body: payload))
+
+        let read = try await client.data(at: url)
+
+        #expect(read == payload)
+    }
+
+    /// Exactly the cap is inside it. An off-by-one here is a download that
+    /// fails at a size the published limit says is allowed, and the boundary
+    /// is the only place the difference shows.
+    @Test("a body of exactly the cap is accepted")
+    func aBodyOfExactlyTheCapIsAccepted() async throws {
+        let client = makeClient(artifactBytes: 4096)
+        let url = StubbedRegistry.registryBase.appendingPathComponent("exact.vsix")
+        StubbedRegistry.respond(
+            to: "/exact.vsix",
+            with: StubbedResponse(body: Data(repeating: 0x41, count: 4096)))
+
+        let read = try await client.data(at: url)
+
+        #expect(read.count == 4096)
+    }
+
+    /// And one byte over is not, from the body alone — the stub sends no
+    /// `Content-Length` here, so the header check cannot be what refuses it.
+    @Test("a body one byte over the cap is refused")
+    func aBodyOneByteOverTheCapIsRefused() async throws {
+        let client = makeClient(artifactBytes: 4096)
+        let url = StubbedRegistry.registryBase.appendingPathComponent("over.vsix")
+        StubbedRegistry.respond(
+            to: "/over.vsix",
+            with: StubbedResponse(body: Data(repeating: 0x41, count: 4097)))
+
+        await #expect(throws: OpenVSXError.artifactTooLarge(url, limit: 4096)) {
+            _ = try await client.data(at: url)
+        }
+    }
+
     // MARK: - Addresses this client will not go to
 
     /// `URLSession` implements `data:`, so a registry that answered

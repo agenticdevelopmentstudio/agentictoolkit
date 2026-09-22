@@ -53,4 +53,23 @@ public enum BlockingWork {
             }
         }
     }
+
+    /// The same hop for work that cannot throw.
+    ///
+    /// An overload rather than a second name because it is the same idea, and
+    /// because the alternative at the call sites is worse: a non-throwing
+    /// closure put through the throwing form has to be written
+    /// `(try? await run { … }) ?? fallback`, which invents a failure case that
+    /// does not exist and then invents an answer for it. Swift picks between
+    /// the two by whether the call is in a `try` position.
+    public static func run<T: Sendable>(
+        qos: DispatchQoS.QoSClass = .userInitiated,
+        _ work: @escaping @Sendable () -> T
+    ) async -> T {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: qos).async {
+                continuation.resume(returning: work())
+            }
+        }
+    }
 }

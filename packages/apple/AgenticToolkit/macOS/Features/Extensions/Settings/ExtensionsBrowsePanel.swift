@@ -858,6 +858,9 @@ final class ExtensionsBrowsePanel: ComposableSettings.SettingsPanelViewControlle
             case .expansionTimedOut(let seconds):
                 return "the archive was still expanding after "
                     + "\(Int(seconds)) seconds, so it was stopped."
+            case .expansionTooLarge(let bytes):
+                return "the archive expands to more than "
+                    + "\(bytes / (1024 * 1024 * 1024)) GB, so it was stopped."
             }
         case is ExtensionInstallUnavailable:
             return "this app has nowhere to install extensions to."

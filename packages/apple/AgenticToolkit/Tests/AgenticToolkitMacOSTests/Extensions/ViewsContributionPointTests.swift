@@ -528,6 +528,7 @@ private final class StubTreeDataSource: ExtensionTreeDataSource {
     var allowsMultipleSelection = false
     var onDidChangeTreeData: ((String?) -> Void)?
     var onDidChangeChrome: (() -> Void)?
+    var onProviderReplaced: ((any ExtensionTreeDataSource) -> Void)?
 
     init(roots: [ContributedTreeItem]) {
         self.roots = roots

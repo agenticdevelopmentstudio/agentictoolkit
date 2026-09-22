@@ -222,6 +222,7 @@ private final class SilentTreeDataSource: ExtensionTreeDataSource {
     var allowsMultipleSelection = false
     var onDidChangeTreeData: ((String?) -> Void)?
     var onDidChangeChrome: (() -> Void)?
+    var onProviderReplaced: ((any ExtensionTreeDataSource) -> Void)?
 
     func children(of _: ContributedTreeItem?) async -> [ContributedTreeItem] {
         asks += 1
@@ -251,6 +252,7 @@ private final class ScriptedTreeDataSource: ExtensionTreeDataSource {
     var allowsMultipleSelection = false
     var onDidChangeTreeData: ((String?) -> Void)?
     var onDidChangeChrome: (() -> Void)?
+    var onProviderReplaced: ((any ExtensionTreeDataSource) -> Void)?
 
     init(children: [String: [ContributedTreeItem]]) {
         self.children = children

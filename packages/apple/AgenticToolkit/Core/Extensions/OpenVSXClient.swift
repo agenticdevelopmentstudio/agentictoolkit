@@ -20,7 +20,7 @@ import OSLog
 /// here, and nothing in this type sends anything the registry could attribute
 /// to a user beyond the request itself.
 ///
-/// Stateless and `Sendable`: it holds a base URL and a `URLSession` and keeps
+/// Stateless and `Sendable`: it holds a base URL and a body reader and keeps
 /// no cache. Caching belongs to whoever is showing the results — a client that
 /// memoized would hand a settings panel a stale "latest version" for an update
 /// check whose whole job is to be current.
@@ -58,7 +58,7 @@ public struct OpenVSXClient: Sendable {
     public static let defaultMaximumMetadataBytes = 8 * 1024 * 1024
 
     private let registryBase: URL
-    private let session: URLSession
+    private let loader: BoundedBodyLoader
     private let maximumArtifactBytes: Int
     private let maximumMetadataBytes: Int
 
@@ -69,7 +69,11 @@ public struct OpenVSXClient: Sendable {
         maximumMetadataBytes: Int = OpenVSXClient.defaultMaximumMetadataBytes
     ) {
         self.registryBase = registryBase
-        self.session = session
+        // The *configuration*, not the session: the loader needs a session of
+        // its own to be the delegate of, and a configuration is what carries
+        // everything a caller passes a session in order to say — including the
+        // `protocolClasses` every test here stands the registry up with.
+        self.loader = BoundedBodyLoader(configuration: session.configuration)
         self.maximumArtifactBytes = maximumArtifactBytes
         self.maximumMetadataBytes = maximumMetadataBytes
     }
@@ -191,17 +195,19 @@ public struct OpenVSXClient: Sendable {
     /// body and abandoning it at the ceiling turns that into an ordinary
     /// throw the caller already handles.
     ///
-    /// **Why the whole body streams rather than only the unframed case.**
-    /// Iterating `AsyncBytes` measures 23.8 MB/s against an in-process stub,
-    /// where `data(from:)` — which cannot be bounded — measures 2.5 GB/s. That
-    /// gap is real but it is not on the critical path: a download spends
-    /// nearly all of its time waiting on the network, and 23.8 MB/s is about
-    /// 190 Mbps of headroom; a metadata answer is a few hundred kilobytes, so
-    /// the same rate costs it single-digit milliseconds. Splitting into a fast
-    /// path for a `Content-Length`-framed response and a slow one for a
-    /// chunked reply would buy that back, at the cost of two code paths where
-    /// the rarely-taken one is the only one that has to be right
-    /// *(simplicity)*.
+    /// **Chunks, not bytes, and still one code path.** This streamed with
+    /// `URLSession.bytes(from:)` until a review priced it: `AsyncBytes` yields
+    /// one `UInt8` per `await`, which measures 23.8 MB/s against an in-process
+    /// stub where `data(from:)` — which cannot be bounded — measures 2.5 GB/s.
+    /// The argument for accepting that was that a download waits on the
+    /// network anyway; what it missed is that the ceiling it defends is 512 MB,
+    /// so the worst case it is *designed for* is twenty seconds of a
+    /// cooperative-pool thread counting to five hundred million, and that the
+    /// same routine serves the metadata read behind a search field, once per
+    /// keystroke. `BoundedBodyLoader` gets both properties at once — whole
+    /// chunks at the system's rate, with the ceiling tested per chunk — so
+    /// there is still one path here, not a framed fast one and a chunked slow
+    /// one *(simplicity)*.
     ///
     /// Shared by the download and the metadata read because it is one rule —
     /// how much of a stranger's answer this process is willing to hold — with
@@ -220,23 +226,19 @@ public struct OpenVSXClient: Sendable {
     private func body(
         at url: URL, limit: Int, tooLarge: (URL, Int) -> OpenVSXError
     ) async throws -> Data {
-        let (bytes, response) = try await session.bytes(from: url)
-        try Self.checkStatus(of: response, for: url)
-
-        if response.expectedContentLength > Int64(limit) {
+        do {
+            let (data, response) = try await loader.body(at: url, limit: limit)
+            try Self.checkStatus(of: response, for: url)
+            return data
+        } catch BoundedBodyLoader.Failure.tooLarge(let response) {
+            // Still the status first. A refusal reported as "too large" when
+            // what actually arrived was a 500's error document sends the
+            // reader to the wrong question entirely.
+            if let response {
+                try Self.checkStatus(of: response, for: url)
+            }
             throw tooLarge(url, limit)
         }
-
-        var collected = Data()
-        collected.reserveCapacity(
-            min(max(Int(response.expectedContentLength), 0), 1 << 20))
-        for try await byte in bytes {
-            collected.append(byte)
-            if collected.count > limit {
-                throw tooLarge(url, limit)
-            }
-        }
-        return collected
     }
 
     /// **Metadata is a body too.** `search` and `detail` read a response into

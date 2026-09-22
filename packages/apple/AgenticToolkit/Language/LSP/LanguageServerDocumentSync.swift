@@ -100,9 +100,15 @@ public final class LanguageServerDocumentSync {
         guard !isStarted, !isShutDown else { return }
         isStarted = true
 
-        for document in store.openDocuments where isInWorkspaceScope(document.uri) {
+        var refused = 0
+        for document in store.openDocuments {
+            guard isInWorkspaceScope(document.uri) else {
+                refused += 1
+                continue
+            }
             languageIdsByURI[document.uri] = document.languageId
         }
+        recordOutOfScope(count: refused)
 
         storeObservation = store.addObserver { [weak self] event in
             self?.handle(event)
@@ -256,8 +262,13 @@ public final class LanguageServerDocumentSync {
         let claimed = Set(session.languageIds.map { $0.lowercased() })
         guard !claimed.isEmpty else { return }
 
+        var refused = 0
         for document in store.openDocuments
-        where claimed.contains(document.languageId.lowercased()) && isInWorkspaceScope(document.uri) {
+        where claimed.contains(document.languageId.lowercased()) {
+            guard isInWorkspaceScope(document.uri) else {
+                refused += 1
+                continue
+            }
             pipeline.enqueue(.opened(
                 uri: document.uri,
                 languageId: document.languageId,
@@ -265,6 +276,7 @@ public final class LanguageServerDocumentSync {
                 text: document.text
             ))
         }
+        recordOutOfScope(count: refused)
     }
 
     private func retire(_ entry: PipelineEntry) {
@@ -295,7 +307,10 @@ public final class LanguageServerDocumentSync {
             // See `isInWorkspaceScope(_:)` for why this guard, the seeding loop
             // in `start()` and the one in `replayOpenDocuments` are the only
             // three needed.
-            guard isInWorkspaceScope(uri) else { return }
+            guard isInWorkspaceScope(uri) else {
+                recordOutOfScope()
+                return
+            }
             languageIdsByURI[uri] = languageId
             enqueue(
                 .opened(uri: uri, languageId: languageId, version: version, text: text),
@@ -373,51 +388,60 @@ public final class LanguageServerDocumentSync {
     /// for its root — an `await` per event on the synchronous store-callback
     /// path — which is not a trade worth making here.
     ///
-    /// **The gap is counted now, not only described.** Every document this
-    /// method turns away is recorded against
-    /// `UpstreamDivergence.documentOutsideWorkspaceScope`, so the Language
-    /// Servers panel can say how often the accepted gap is actually reached.
-    /// That is the difference between a narrowing nobody trips over and one
-    /// that is costing a user their completions every day, and it is not
-    /// derivable from this source.
+    /// **The gap is counted, by the caller.** Every document turned away is
+    /// recorded against `UpstreamDivergence.documentOutsideWorkspaceScope`, so
+    /// the Language Servers panel can say how often the accepted gap is
+    /// actually reached — the difference between a narrowing nobody trips over
+    /// and one that is costing a user their completions every day, which is not
+    /// derivable from this source. The count is the caller's and not this
+    /// method's because two of the three callers are *loops*: a project opened
+    /// beside a large unrelated tree refuses hundreds of documents in one pass,
+    /// and one `record` per refusal is hundreds of trips through the ledger's
+    /// lock and its published snapshot to add up to a single row that says a
+    /// number. `recordOutOfScope(count:)` says the number once.
     private func isInWorkspaceScope(_ uri: DocumentUri) -> Bool {
-        // Defensive, and first so that no refusal is counted behind it: a
-        // sync with no root has no gap to be outside of, and a row saying
-        // "every document was rejected" would report the absence of a project
-        // as a narrowing of VS Code. `URL.pathComponents` on a file URL is
-        // never actually empty, which is why nothing below pins this line.
+        // Defensive: a sync with no root refuses everything, which is why
+        // `recordOutOfScope(count:)` declines to write that down — see there.
+        // `URL.pathComponents` on a file URL is never actually empty, which is
+        // why nothing below pins this line.
         let root = workspaceScopeComponents
         guard !root.isEmpty else { return false }
 
         // Not a file URL — an `untitled:` buffer, or something unparseable. The
         // servers this layer drives are all filesystem-backed, so out of scope.
-        guard let url = URL(string: uri), url.isFileURL else {
-            recordOutOfScope()
-            return false
-        }
+        guard let url = URL(string: uri), url.isFileURL else { return false }
 
         // Path *components*, never a string prefix: `/Users/me/proj-old` has
         // `/Users/me/proj` as a string prefix but is a different directory.
         let components = Self.scopeComponents(of: url)
         guard components.count >= root.count,
               Array(components.prefix(root.count)) == root
-        else {
-            recordOutOfScope()
-            return false
-        }
+        else { return false }
         return true
     }
 
-    /// Counts one document this filter refused.
+    /// Counts the documents this filter refused.
     ///
     /// Keyed by the workspace rather than by the document — hence no URI
     /// parameter — so the row reads as "this project turned away N files",
     /// one line per window, instead of growing a row per file and burying the
-    /// total it exists to show.
-    private func recordOutOfScope() {
+    /// total it exists to show. Since the row is a total either way, a caller
+    /// that refused a batch passes the batch: `count: 0` is the ordinary
+    /// no-refusals case and must not touch the ledger at all, or every seeding
+    /// pass would publish a change that changed nothing.
+    private func recordOutOfScope(count: Int = 1) {
+        guard count > 0 else { return }
+        // A sync with no workspace root has no gap for a document to be
+        // outside of — it refuses every one of them — and a row reading "this
+        // project turned away N files" would report the absence of a project
+        // as a narrowing of VS Code. The refusal still happens; it is just not
+        // this divergence. Here rather than in the filter because the filter
+        // no longer counts anything.
+        guard !workspaceScopeComponents.isEmpty else { return }
         ledger.record(
             .documentOutsideWorkspaceScope,
-            detail: registry.workspaceURL.path
+            detail: registry.workspaceURL.path,
+            count: count
         )
     }
 

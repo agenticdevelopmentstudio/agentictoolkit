@@ -106,17 +106,33 @@ public final class NotImplementedLedger {
     /// and a list whose order depends on which member an extension happened to
     /// touch first reads as noise and cannot be diffed between two runs.
     public var accesses: [NotImplementedAccess] {
-        entries.values.sorted {
-            if $0.extensionIdentifier != $1.extensionIdentifier {
-                return $0.extensionIdentifier < $1.extensionIdentifier
-            }
-            return $0.memberPath < $1.memberPath
-        }
+        entries.values.sorted(by: Self.reportOrder)
     }
 
     /// Everything one extension asked for, in the same order.
+    ///
+    /// Filtered *before* sorting, not after. A report draws one of these per
+    /// installed extension, so sorting the whole ledger first would sort it
+    /// once per extension — and each of those sorts is over every other
+    /// extension's rows as well, which is the bulk of the work and all of it
+    /// thrown away by the filter on the next line. Filtering first sorts each
+    /// extension's own rows and nothing else, and the result is identical
+    /// because the order is total.
     public func accesses(for extensionIdentifier: String) -> [NotImplementedAccess] {
-        accesses.filter { $0.extensionIdentifier == extensionIdentifier }
+        entries.values
+            .filter { $0.extensionIdentifier == extensionIdentifier }
+            .sorted(by: Self.reportOrder)
+    }
+
+    /// By extension, then by member path — the order both accessors report in,
+    /// in one place so they cannot drift apart.
+    private static func reportOrder(
+        _ lhs: NotImplementedAccess, _ rhs: NotImplementedAccess
+    ) -> Bool {
+        if lhs.extensionIdentifier != rhs.extensionIdentifier {
+            return lhs.extensionIdentifier < rhs.extensionIdentifier
+        }
+        return lhs.memberPath < rhs.memberPath
     }
 
     /// Records one reach for `memberPath`, or bumps the count of one already

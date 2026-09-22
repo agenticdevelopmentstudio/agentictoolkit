@@ -250,6 +250,15 @@ public struct ActivationEventMatcher: Sendable, Equatable {
     /// `engines.vscode` does not parse gets no implicit activation — an
     /// engine string this host cannot evaluate is not evidence the extension
     /// supports the newer inference.
+    ///
+    /// **`*` is not a declared minimum of 0.0.0.** It parses to three zero
+    /// bases, so a test written on `minimumVersion` alone puts every
+    /// `"vscode": "*"` manifest below the floor and hands it an empty set —
+    /// every command it declares becomes inert, and the symptom is a palette
+    /// entry that does nothing rather than an error anywhere. An engine of
+    /// `*` is the absence of a version claim, which is the opposite of a
+    /// claim to predate 1.74, so `isUnconstrained` takes the same branch as
+    /// a modern floor.
     public init(manifest: ExtensionManifest) {
         var parsed: [ActivationEvent] = []
         var unrecognized: [String] = []
@@ -277,7 +286,8 @@ public struct ActivationEventMatcher: Sendable, Equatable {
         workspaceContainsPatterns = patterns
 
         if let range = VSCodeEngineRange(manifest.engines.vscode),
-           range.minimumVersion >= Self.implicitCommandActivationFloor {
+           range.isUnconstrained
+               || range.minimumVersion >= Self.implicitCommandActivationFloor {
             let commandIDs = manifest.contributes?.commands.map(\.command) ?? []
             implicitlyActivatingCommands = Set(commandIDs)
         } else {

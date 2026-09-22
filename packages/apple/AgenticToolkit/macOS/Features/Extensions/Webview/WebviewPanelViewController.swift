@@ -117,7 +117,40 @@ public final class WebviewPanelViewController: NSViewController {
     /// know which tree it was put in — only the presenter that put it there
     /// does. A second handle object to carry one verb would be a type with one
     /// implementation (`design-for-deletion`).
-    public var onRevealRequested: ((Bool) -> Void)?
+    ///
+    /// **A reveal that arrives before this is installed is kept, not lost.**
+    /// The restoration path builds the panel by handing the stored state to
+    /// the extension's own `deserializeWebviewPanel`, and that call is where
+    /// an extension does its setting up — including `panel.reveal()`. It runs
+    /// to completion *before* the serializer has anything to install the verbs
+    /// on, because the panel it installs them on is the one that call returns.
+    /// See `deferredReveal`.
+    public var onRevealRequested: ((Bool) -> Void)? {
+        didSet {
+            guard let onRevealRequested else { return }
+            hasBeenPlaced = true
+            guard let preserveFocus = deferredReveal else { return }
+            deferredReveal = nil
+            onRevealRequested(preserveFocus)
+        }
+    }
+
+    /// A `reveal` made before anything was listening, with the
+    /// `preserveFocus` it was made with, replayed by the first installation.
+    ///
+    /// Only ever filled *before* a first installation — see `hasBeenPlaced`.
+    /// A panel whose presenter has since gone away still reveals into silence,
+    /// which is what VS Code does for a panel in a closed window group and is
+    /// the behaviour this deliberately does not change.
+    private var deferredReveal: Bool?
+
+    /// Whether the placement verbs have ever been installed.
+    ///
+    /// The whole distinction between "not wired up yet" and "not wired up any
+    /// more". The first is a message owed; the second is a panel nobody is
+    /// showing, and replaying into it would reveal or close a pane on the
+    /// strength of something an extension asked for before the pane existed.
+    private var hasBeenPlaced = false
 
     /// Called once, from `dispose()`, when the panel's pane should be taken
     /// out of the window's tree.
@@ -133,7 +166,27 @@ public final class WebviewPanelViewController: NSViewController {
     /// `paneContentWillBeDiscarded()`, which disposes, which lands here — so
     /// the closure must tolerate being asked to remove a pane that is already
     /// on its way out.
-    public var onRemovalRequested: (() -> Void)?
+    ///
+    /// **A dispose that arrives before this is installed is kept**, for
+    /// `onRevealRequested`'s reason and with the same one-shot rule: an
+    /// extension's `deserializeWebviewPanel` may decide, on reading the state
+    /// it is given, that the panel refers to nothing any more and dispose it
+    /// on the spot. Dropped, that left a pane on screen holding a disposed
+    /// panel — inert, unremovable, and written straight back into the
+    /// project's pane state to be rebuilt tomorrow.
+    public var onRemovalRequested: (() -> Void)? {
+        didSet {
+            guard let onRemovalRequested else { return }
+            hasBeenPlaced = true
+            guard deferredRemoval else { return }
+            deferredRemoval = false
+            onRemovalRequested()
+        }
+    }
+
+    /// Whether `dispose()` ran with nobody listening for the removal, and
+    /// before anybody ever had been. See `deferredReveal`.
+    private var deferredRemoval = false
 
     public private(set) var isDisposed = false
 
@@ -171,6 +224,14 @@ public final class WebviewPanelViewController: NSViewController {
         didSet {
             guard options != oldValue else { return }
             schemeHandler.contentSecurityPolicy = options.contentSecurityPolicy
+            // `restorationState` carries the options, so a write here is a
+            // write to what the pane stores — and it was the one change to
+            // that value nothing announced. The direction it failed in is the
+            // wrong one: an extension that *tightens* its options (revokes
+            // `enableScripts`, narrows `localResourceRoots`) had the tightening
+            // apply to the running page and then vanish at quit, so the panel
+            // came back tomorrow under the looser options it was created with.
+            onRestorationStateChanged?()
             guard webView != nil, !isDisposed else { return }
             loadHostDocument()
         }
@@ -352,7 +413,11 @@ public final class WebviewPanelViewController: NSViewController {
             forName: WebviewHostDocument.messageHandlerName)
         webView?.loadHTMLString("", baseURL: nil)
         onDidDispose?()
-        onRemovalRequested?()
+        guard let onRemovalRequested else {
+            deferredRemoval = !hasBeenPlaced
+            return
+        }
+        onRemovalRequested()
     }
 
     /// What the pane stores, and what `WebviewPanelSerializer` reads back.
@@ -513,7 +578,11 @@ extension WebviewPanelViewController: ExtensionWebviewPanel {
     /// which is what VS Code does for a panel in a closed window group too.
     public func reveal(preserveFocus: Bool) {
         guard !isDisposed else { return }
-        onRevealRequested?(preserveFocus)
+        guard let onRevealRequested else {
+            if !hasBeenPlaced { deferredReveal = preserveFocus }
+            return
+        }
+        onRevealRequested(preserveFocus)
     }
 }
 

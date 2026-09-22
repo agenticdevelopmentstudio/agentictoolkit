@@ -95,6 +95,24 @@ public protocol ExtensionTreeDataSource: AnyObject {
     /// collapse every branch the user had opened.
     var onDidChangeChrome: (() -> Void)? { get set }
 
+    /// Told that this source has been retired in favour of `replacement`, and
+    /// that the pane should rebind to it.
+    ///
+    /// The one event that travels *forwards* rather than out to the pane's
+    /// own callbacks, and it exists because a pane resolves its data source
+    /// exactly once, when its view loads. Nothing re-offers one. An extension
+    /// re-registering a provider for a view id it already owns is ordinary —
+    /// every deactivate/activate cycle does it, and reloading the host does it
+    /// for every view at once — and without this the open pane went on holding
+    /// the retired source, which answers no children by design, forever.
+    ///
+    /// Called *before* the outgoing source is invalidated, so the pane can
+    /// hand its callbacks over while both are still live. The replacement
+    /// arrives unsubscribed: whoever takes it assigns `onDidChangeTreeData`
+    /// and `onDidChangeChrome` on it, including this one again, or the next
+    /// replacement has nowhere to go.
+    var onProviderReplaced: ((any ExtensionTreeDataSource) -> Void)? { get set }
+
     /// Tells the provider's `TreeView` object which rows are selected, so
     /// `TreeView.selection` and `onDidChangeSelection` can answer.
     func selectionDidChange(to items: [ContributedTreeItem])

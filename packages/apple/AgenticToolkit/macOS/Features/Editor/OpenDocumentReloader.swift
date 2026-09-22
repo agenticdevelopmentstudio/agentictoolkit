@@ -191,7 +191,17 @@ public final class OpenDocumentReloader {
             beginWatching(uri)
         case .closed(let uri):
             endWatching(uri)
-        case .changed, .dirtyStateChanged:
+        case .dirtyStateChanged(let uri, let isDirty):
+            // A change refused because the buffer was dirty is deferred, not
+            // discarded: `apply` forgets the signature rather than leave one
+            // claiming the file has been reconciled, and this is the moment
+            // the deferral ends. Saving writes the buffer over the disk change
+            // and the read that follows finds the two equal; reverting writes
+            // nothing, raises no watcher event of its own, and so has no other
+            // way back at all.
+            guard !isDirty else { break }
+            reloadIfNeeded(uri)
+        case .changed:
             break
         }
     }
@@ -245,13 +255,24 @@ public final class OpenDocumentReloader {
         // nobody has open. Build the lookup once rather than scanning the open
         // set per path.
         guard !tracked.isEmpty else { return }
-        var byPath: [String: DocumentUri] = [:]
+        // Keyed case-insensitively, and to *every* uri under a path rather
+        // than to the last one written. Two open documents can resolve to one
+        // path — the same file reached through a symlink and through its
+        // target — and a dictionary holding one dropped all but whichever the
+        // hash order stored last, leaving the other deaf to its own file for
+        // as long as both are open. The case fold is for the volume: APFS is
+        // case-insensitive by default, so FSEvents can name a path in a case
+        // the open URL does not use and an exact compare misses it outright.
+        // On a case-sensitive volume the fold can only add a candidate, and a
+        // candidate costs one `stat` that answers "unchanged".
+        var byPath: [String: [DocumentUri]] = [:]
         for (uri, entry) in tracked {
-            byPath[entry.url.path] = uri
+            byPath[entry.url.path.lowercased(), default: []].append(uri)
         }
         for path in Set(paths) {
-            guard let uri = byPath[path] else { continue }
-            reloadIfNeeded(uri)
+            for uri in byPath[path.lowercased()] ?? [] {
+                reloadIfNeeded(uri)
+            }
         }
     }
 
@@ -363,6 +384,16 @@ public final class OpenDocumentReloader {
                 change.
                 """
             )
+            // Forgotten for the same reason as the deleted and read-error
+            // branches above, and it is the one that was missing: the
+            // signature was recorded before the read as the token saying this
+            // file has been reconciled with the buffer, and it has not been.
+            // Left standing, the `signature != entry.lastRead` guard skips
+            // every later event for a file the buffer is still behind — and
+            // since the buffer going clean writes nothing to disk, there may
+            // be no later event at all. `.dirtyStateChanged` is what asks
+            // again; this is what stops the asking being a no-op.
+            tracked[uri]?.lastRead = nil
             return
         }
 

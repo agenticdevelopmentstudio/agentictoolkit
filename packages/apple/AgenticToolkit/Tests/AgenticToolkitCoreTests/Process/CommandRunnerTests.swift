@@ -141,6 +141,79 @@ struct CommandRunnerTests {
             .contains("armed") == true)
     }
 
+    // MARK: - Giving up for a reason other than the clock
+
+    /// The clock is the wrong limit for a tool whose damage is measured in
+    /// bytes. A watchdog is how a caller enforces its own limit on something
+    /// the tool does not report — an archive expanding on disk, for one — and
+    /// the run has to end on it, well inside a timeout generous enough for an
+    /// honest slow tool.
+    @Test("a watchdog that says stop ends the run, inside the timeout")
+    func aWatchdogEndsTheRun() throws {
+        let started = Date()
+        let calls = Counter()
+
+        let outcome = try CommandRunner.runToCompletion(
+            shell("sleep 30"),
+            timeout: 30,
+            watchdog: CommandRunner.Watchdog(interval: 0.1) { calls.bump() > 2 })
+
+        #expect(outcome.aborted)
+        #expect(!outcome.timedOut)
+        #expect(Date().timeIntervalSince(started) < 10)
+    }
+
+    /// Aborted is not timed out, and a caller has to be able to tell them
+    /// apart: one says "your limit was reached" and the other says "the tool
+    /// is wedged". Collapsing them into one flag makes both messages wrong
+    /// half the time.
+    @Test("the clock still reports as a timeout even with a watchdog attached")
+    func aTimeoutWithAWatchdogIsStillATimeout() throws {
+        let outcome = try CommandRunner.runToCompletion(
+            shell("sleep 30"),
+            timeout: 0.5,
+            watchdog: CommandRunner.Watchdog(interval: 0.1) { false })
+
+        #expect(outcome.timedOut)
+        #expect(!outcome.aborted)
+    }
+
+    /// A watchdog that never fires must not change what an ordinary run does —
+    /// including collecting its output, which the polling loop is a second
+    /// path to and could easily have dropped.
+    @Test("a watchdog that never fires leaves an ordinary run alone")
+    func aQuietWatchdogChangesNothing() throws {
+        let outcome = try CommandRunner.runToCompletion(
+            shell("printf hello; exit 3"),
+            timeout: 30,
+            watchdog: CommandRunner.Watchdog(interval: 0.05) { false })
+
+        #expect(!outcome.aborted)
+        #expect(!outcome.timedOut)
+        #expect(outcome.status == 3)
+        #expect(String(bytes: outcome.standardOutput, encoding: .utf8) == "hello")
+    }
+
+    /// And a run the watchdog outlives is not signalled on the way past: the
+    /// poll loop has to notice the exit rather than waiting out its interval.
+    @Test("a process that exits during a poll interval is not aborted")
+    func anExitDuringAPollIsNotAnAbort() throws {
+        let outcome = try CommandRunner.runToCompletion(
+            shell("exit 0"),
+            timeout: 30,
+            watchdog: CommandRunner.Watchdog(interval: 5) { true })
+
+        #expect(!outcome.aborted)
+        #expect(outcome.status == 0)
+    }
+
+    /// Counts `shouldAbort` calls across the waiting thread and this one.
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+        func bump() -> Int { lock.withLock { value += 1; return value } }
+    }
+
     /// The ordinary case still reports the tool's own status, not the sentinel.
     /// A guard that read `neverExited` whenever it was unsure would turn every
     /// successful run into an unreadable one.

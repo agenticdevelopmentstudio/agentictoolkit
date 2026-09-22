@@ -220,6 +220,170 @@ struct VSIXInstallerFileSystemFailureTests {
         #expect(VSIXFixtures.installedDirectoryNames(in: installDirectory)
             == ["acme.widget-2.0.0"])
     }
+
+    // MARK: - A crash between the two renames
+
+    /// **The window the aside name exists to close.** Replacing an install is
+    /// two renames: the previous version out of the way, the new one in. Lose
+    /// power between them and the extension is present on disk under a hidden
+    /// name that `ExtensionRegistry` does not scan — so the extension is
+    /// simply gone, and nothing in the app ever looks at that name again.
+    ///
+    /// Staged by hand rather than by killing a process, because there is no
+    /// way to stop this one between two lines. What is staged is exactly what
+    /// the crash leaves: the aside, and no destination.
+    @Test("an aside left by a crash is put back under its own name")
+    func anInterruptedReplacementIsPutBack() throws {
+        let (scratch, installDirectory) = try installFirstVersion("recover-restore")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let live = installDirectory.appendingPathComponent(
+            "acme.widget-1.0.0", isDirectory: true)
+        let aside = installDirectory.appendingPathComponent(
+            ".acme.widget-1.0.0.replacing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.moveItem(at: live, to: aside)
+
+        let installer = VSIXInstaller(
+            installDirectory: installDirectory, hostVersion: Self.host)
+        let recovered = installer.recoverInterruptedInstalls()
+
+        #expect(recovered.map(\.lastPathComponent) == ["acme.widget-1.0.0"])
+        #expect(VSIXFixtures.installedDirectoryNames(in: installDirectory)
+            == ["acme.widget-1.0.0"])
+        // Whole, not an empty directory wearing the right name.
+        for file in ["package.json", "theme.json"] {
+            #expect(FileManager.default.fileExists(
+                atPath: live.appendingPathComponent(file).path))
+        }
+        #expect(!FileManager.default.fileExists(atPath: aside.path))
+    }
+
+    /// The other side of the same window, and the one that must *not* restore:
+    /// the crash came after the second rename, so the new version is already
+    /// in place and the aside is the superseded copy. Putting it back would
+    /// undo a completed install.
+    @Test("an aside whose destination is occupied is discarded, not restored")
+    func aSupersededAsideIsDiscarded() throws {
+        let (scratch, installDirectory) = try installFirstVersion("recover-discard")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let live = installDirectory.appendingPathComponent(
+            "acme.widget-1.0.0", isDirectory: true)
+        let aside = installDirectory.appendingPathComponent(
+            ".acme.widget-1.0.0.replacing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.copyItem(at: live, to: aside)
+        // The mark of the *new* copy, so a restore that overwrote it would be
+        // visible rather than a directory comparing equal to itself.
+        try Data("new".utf8).write(to: live.appendingPathComponent("marker.txt"))
+
+        let installer = VSIXInstaller(
+            installDirectory: installDirectory, hostVersion: Self.host)
+        _ = installer.recoverInterruptedInstalls()
+
+        #expect(!FileManager.default.fileExists(atPath: aside.path))
+        #expect(FileManager.default.fileExists(
+            atPath: live.appendingPathComponent("marker.txt").path))
+    }
+
+    /// Recovery runs on every install, so it has to leave an ordinary
+    /// directory alone — including one whose name merely begins with a dot.
+    /// A sweep that read any hidden entry as an aside would move a
+    /// `.DS_Store` to `DS_Store`.
+    @Test("a hidden entry that is not an aside is left where it is")
+    func anUnrelatedHiddenEntryIsLeftAlone() throws {
+        let (scratch, installDirectory) = try installFirstVersion("recover-unrelated")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let stray = installDirectory.appendingPathComponent(".DS_Store")
+        try Data("x".utf8).write(to: stray)
+
+        let installer = VSIXInstaller(
+            installDirectory: installDirectory, hostVersion: Self.host)
+        let recovered = installer.recoverInterruptedInstalls()
+
+        #expect(recovered.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: stray.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: installDirectory.appendingPathComponent("DS_Store").path))
+    }
+
+    /// And the sweep is wired into `install`, not only exposed for a caller to
+    /// remember: an install that follows a crash has to see the extension it
+    /// is replacing, or `otherInstallDirectories` cannot find the stranded
+    /// copy and the install leaves two of them.
+    @Test("installing after a crash recovers the stranded copy first")
+    func installingRunsTheRecoverySweep() throws {
+        let (scratch, installDirectory) = try installFirstVersion("recover-on-install")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        let live = installDirectory.appendingPathComponent(
+            "acme.widget-1.0.0", isDirectory: true)
+        let aside = installDirectory.appendingPathComponent(
+            ".acme.widget-1.0.0.replacing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.moveItem(at: live, to: aside)
+
+        let installer = VSIXInstaller(
+            installDirectory: installDirectory, hostVersion: Self.host)
+        let installed = try installer.install(
+            archive: try archive(version: "2.0.0", in: scratch),
+            verification: unsigned,
+            source: .localFile(scratch))
+
+        #expect(installed.version == "2.0.0")
+        // 1.0.0 was restored and then superseded by the install, so exactly one
+        // directory is left — not 2.0.0 beside a hidden 1.0.0 nobody scans.
+        #expect(VSIXFixtures.installedDirectoryNames(in: installDirectory)
+            == ["acme.widget-2.0.0"])
+        let everything = try FileManager.default.contentsOfDirectory(
+            atPath: installDirectory.path)
+        #expect(everything.filter { $0.hasPrefix(".") } == [])
+    }
+
+    // MARK: - When the rollback itself fails
+
+    /// The worst case, and the one the message has to be honest about: the new
+    /// version would not move in, and the previous version would not move
+    /// back. The only copy of the extension is now under a hidden name, and a
+    /// message that said only "could not install" would leave the user
+    /// believing their previous version is still there.
+    @Test("a rollback that fails names where the previous version was left")
+    func aFailedRollbackSaysWhereTheCopyIs() throws {
+        let (scratch, installDirectory) = try installFirstVersion("rollback-failed")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+
+        // Refuses *every* move into the destination name, so the rollback —
+        // which has the same destination and comes from a dotfile — fails too.
+        let manager = RefusingFileManager(
+            refuseMovesInto: "acme.widget-1.0.0", refusingAsides: true)
+        let installer = VSIXInstaller(
+            installDirectory: installDirectory,
+            hostVersion: Self.host,
+            fileManager: { manager })
+
+        do {
+            _ = try installer.install(
+                archive: try archive(version: "1.0.0", in: scratch),
+                verification: unsigned,
+                source: .localFile(scratch))
+            Issue.record("a refused move was reported as a successful install")
+        } catch let error as VSIXInstallError {
+            guard case .couldNotInstall(let reason) = error else {
+                Issue.record("wrong case: \(error)")
+                return
+            }
+            #expect(reason.contains("could not be put back"))
+            // And it names the directory, because that is the only way anyone
+            // gets the extension back by hand.
+            #expect(reason.contains(".acme.widget-1.0.0.replacing-"))
+        }
+
+        // Still on disk under the aside name — not deleted to tidy up. It is
+        // the only copy there is.
+        let hidden = try FileManager.default
+            .contentsOfDirectory(atPath: installDirectory.path)
+            .filter { $0.hasPrefix(".") }
+        #expect(hidden.count == 1)
+    }
 }
 
 /// A `FileManager` that refuses one named operation and does everything else
@@ -250,16 +414,27 @@ private final class RefusingFileManager: FileManager, @unchecked Sendable {
     /// Fail the removal of anything ending in this.
     private let refusedRemoval: String?
 
-    init(refuseMovesInto: String? = nil, refuseRemovalsOf: String? = nil) {
+    /// Drop the "not from an aside" exemption, so the rollback move is
+    /// refused as well. That is the double failure — nothing moved in, and the
+    /// previous version could not be moved back — and it is the only way to
+    /// reach the message that says so.
+    private let refusingAsides: Bool
+
+    init(
+        refuseMovesInto: String? = nil,
+        refuseRemovalsOf: String? = nil,
+        refusingAsides: Bool = false
+    ) {
         self.refusedMoveDestination = refuseMovesInto
         self.refusedRemoval = refuseRemovalsOf
+        self.refusingAsides = refusingAsides
         super.init()
     }
 
     override func moveItem(at source: URL, to destination: URL) throws {
         if let refusedMoveDestination,
            destination.lastPathComponent == refusedMoveDestination,
-           !source.lastPathComponent.hasPrefix(".") {
+           refusingAsides || !source.lastPathComponent.hasPrefix(".") {
             throw CocoaError(.fileWriteNoPermission)
         }
         try super.moveItem(at: source, to: destination)

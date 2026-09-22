@@ -205,6 +205,16 @@ public final class ExtensionRegistry {
     /// registry's own state said once, and the single `withdraw` on a later
     /// disable would leave one copy behind.
     public func loadAll() {
+        // Counted as a generation for the reason `reload(performing:)` counts
+        // them, and this was the gap in it. A synchronous load reads the world
+        // as it is *now*; an asynchronous reload that started earlier is
+        // suspended at its `await` holding a listing of the world as it was,
+        // and it resumes afterwards and applies it over the top. The registry
+        // then reports whatever changed in between — the extension the user
+        // just installed, the one they just deleted — as though it had not,
+        // until something else happens to reload. Bumping here is what makes
+        // the scan already in flight drop its result.
+        reloadGeneration &+= 1
         apply(Self.scan(searchPaths: searchPaths, hostVersion: hostVersion))
     }
 
@@ -244,9 +254,16 @@ public final class ExtensionRegistry {
         let searchPaths = self.searchPaths
         let hostVersion = self.hostVersion
         await reload {
-            await Task.detached(priority: .userInitiated) {
+            // `BlockingWork`, not `Task.detached`. The scan is a directory
+            // enumeration plus a read and a JSONC decode per installed
+            // extension — synchronous file I/O from end to end, with no
+            // suspension point anywhere in it — and a detached task is
+            // detached from its parent's context, not from the executor. It
+            // would hold one of the cooperative pool's core-count threads for
+            // the whole walk, which is what that type exists to stop.
+            await BlockingWork.run(qos: .userInitiated) {
                 Self.scan(searchPaths: searchPaths, hostVersion: hostVersion)
-            }.value
+            }
         }
     }
 

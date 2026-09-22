@@ -180,6 +180,35 @@ struct ActivationEventMatcherTests {
         #expect(matcher.matches(.commandInvoked("x.run")))
     }
 
+    /// **`*` means "any version", and any version includes today's.** It
+    /// parses to a range whose minimum is 0.0.0, so the floor comparison alone
+    /// reads it as an extension targeting VS Code 0 — and denies it the
+    /// inference every version it actually runs on provides. `*` is the single
+    /// most common `engines.vscode` value in the registry, so this is not a
+    /// corner: it is most of the catalogue's commands failing to open.
+    @Test("engine * implicitly activates its declared commands")
+    func implicitActivationWithAnUnconstrainedEngine() throws {
+        let manifest = try Self.manifest(engines: "*", activationEvents: [], commands: ["x.run"])
+
+        let matcher = ActivationEventMatcher(manifest: manifest)
+
+        #expect(matcher.implicitlyActivatingCommands == ["x.run"])
+        #expect(matcher.matches(.commandInvoked("x.run")))
+    }
+
+    /// The other direction, which is what stops "treat a zero minimum as
+    /// unconstrained" from passing the test above: `^0.9.0` really is a
+    /// declared minimum below the floor, and really does predate the
+    /// inference.
+    @Test("engine ^0.9.0 is a declared minimum below the floor, not a wildcard")
+    func aZeroMajorMinimumIsStillAMinimum() throws {
+        let manifest = try Self.manifest(engines: "^0.9.0", activationEvents: [], commands: ["x.run"])
+
+        let matcher = ActivationEventMatcher(manifest: manifest)
+
+        #expect(matcher.implicitlyActivatingCommands.isEmpty)
+    }
+
     @Test("an unparseable engine string gets no implicit activation")
     func unparseableEngineGetsNoImplicitActivation() throws {
         let manifest = try Self.manifest(engines: "~1.74.0", activationEvents: [], commands: ["x.run"])

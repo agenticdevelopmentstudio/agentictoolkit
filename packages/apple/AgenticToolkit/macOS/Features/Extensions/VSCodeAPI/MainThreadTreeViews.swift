@@ -101,6 +101,7 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
 
     var onDidChangeTreeData: ((String?) -> Void)?
     var onDidChangeChrome: (() -> Void)?
+    var onProviderReplaced: ((any ExtensionTreeDataSource) -> Void)?
 
     /// `TreeView.description` (`vscode.d.ts:11288`) — stored so an extension
     /// reads back what it wrote, and shown nowhere. A pane here has a title and
@@ -284,6 +285,20 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
             let handle = Self.handle(
                 forDeclaredID: Self.string(treeItem.forProperty("id")),
                 parent: parentHandle, index: index)
+            // Two siblings that declared the same `TreeItem.id` resolve to
+            // one handle, and the first of them keeps it. The pane-side table
+            // already resolves the collision that way
+            // (`ExtensionTreeRowTable`'s `aDuplicateIdInOneListIsTakenOnce`
+            // takes `[a, b, a]` as `[a, b]`), and this side resolved it the
+            // other way round — the last write won `elements[handle]` — so
+            // the single row the pane drew was bound to the element it had
+            // *not* drawn. Clicking the first row ran the third row's
+            // command. Agreeing with the table is what makes a row and its
+            // element the same row.
+            guard !reissued.contains(handle) else {
+                log("getChildren listed two children under one id; the later one is dropped", nil)
+                continue
+            }
             elements[handle] = element
             file(handle, under: parentHandle)
             reissued.insert(handle)
@@ -443,7 +458,17 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
     /// pane so it can offer activation, the arguments stay here.
     private func readCommand(_ command: JSValue?, handle: String, in context: JSContext) -> String? {
         guard let command, command.isObject,
-              let id = Self.string(command.forProperty("command")) else { return nil }
+              let id = Self.string(command.forProperty("command")) else {
+            // Cleared, not merely left unwritten. Handles are reused across
+            // refreshes — the declared-id space by design, the positional one
+            // whenever the row count holds — so a row that had a command and
+            // has stopped declaring one would otherwise keep the entry it
+            // wrote last time, and `activate` would go on running a command
+            // the extension has withdrawn. A tree whose rows become inert
+            // when their work is done is the ordinary way to express that.
+            commandsByHandle.removeValue(forKey: handle)
+            return nil
+        }
         var arguments: [JSValue] = []
         if let list = command.forProperty("arguments"), let count = VSCodeAPI.arrayLength(of: list) {
             for index in 0..<count {
@@ -616,8 +641,11 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
                 guard let element = changed.atIndex(index) else { continue }
                 // One unknown element in the list refreshes the whole tree
                 // rather than the rest of the list: the unknown one is the
-                // part this model cannot draw the boundary of.
-                guard let handle = self.handle(of: element) else {
+                // part this model cannot draw the boundary of. An element
+                // under *several* handles is the same admission — this model
+                // cannot say which branch the provider meant — and it takes
+                // the same answer.
+                guard case .one(let handle) = self.match(element) else {
                     onDidChangeTreeData?(nil)
                     return
                 }
@@ -625,7 +653,27 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
             }
             return
         }
-        onDidChangeTreeData?(handle(of: changed))
+        switch match(changed) {
+        case .one(let handle):
+            onDidChangeTreeData?(handle)
+        case .none, .ambiguous:
+            onDidChangeTreeData?(nil)
+        }
+    }
+
+    /// What a scan of `elements` for an element found: exactly one handle,
+    /// none, or more than one.
+    ///
+    /// The third case is not a corner. `isEqual(to:)` is JavaScript `===`, so
+    /// it is identity for objects but *value* equality for primitives — and a
+    /// provider whose elements are strings or numbers is both legal and
+    /// common (`TreeDataProvider<string>` is upstream's own first example).
+    /// Such a provider can easily have the same element under two handles: the
+    /// same label in two branches, or one branch reloaded at two indices.
+    private enum ElementMatch {
+        case one(String)
+        case none
+        case ambiguous
     }
 
     /// The handle an element is filed under, by JavaScript identity.
@@ -633,9 +681,19 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
     /// A scan rather than an index, because the key is `===` on a `JSValue` and
     /// there is nothing hashable to index it by. It runs once per refresh
     /// event, not once per row, which is what makes the cost the tree's size
-    /// and not its size squared.
-    private func handle(of element: JSValue) -> String? {
-        elements.first { $0.value.isEqual(to: element) }?.key
+    /// and not its size squared. It goes all the way through rather than
+    /// stopping at the first hit for the same reason it reports `ambiguous`
+    /// at all: `first` answered whichever match the dictionary's hash order
+    /// happened to reach first, which is to say an arbitrary one of the
+    /// branches that changed, leaving the others drawing rows nothing had
+    /// re-read.
+    private func match(_ element: JSValue) -> ElementMatch {
+        var found: String?
+        for (handle, candidate) in elements where candidate.isEqual(to: element) {
+            guard found == nil else { return .ambiguous }
+            found = handle
+        }
+        return found.map(ElementMatch.one) ?? .none
     }
 
     // MARK: - The TreeView object's side
@@ -679,6 +737,14 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
         changeSubscription = nil
         elements.removeAll()
         commandsByHandle.removeAll()
+        // The same per-row bookkeeping as `elements`, and dropped with it.
+        // These two grow by every row the extension ever showed, and an
+        // invalidated model is not necessarily a released one — the pane that
+        // registered the second provider still holds this one until it
+        // rebinds, and `MainThreadTreeViews.models` holds a disposed
+        // registration's model until the view id is registered again.
+        parentByHandle.removeAll()
+        childHandles.removeAll()
         selectedHandles.removeAll()
         selectionChanges.removeListeners(ownedBy: self)
         visibilityChanges.removeListeners(ownedBy: self)
@@ -687,6 +753,10 @@ final class ExtensionTreeModel: ExtensionTreeDataSource {
         checkboxChanges.removeListeners(ownedBy: self)
         onDidChangeTreeData = nil
         onDidChangeChrome = nil
+        // Dropped last, and after `adopt` has already fired it: this is the
+        // hook a pane rebinds through, so nilling it any earlier would retire
+        // a model with no way to tell the pane holding it.
+        onProviderReplaced = nil
     }
 
     /// Records a row against this provider, used for every member an extension
@@ -878,13 +948,13 @@ public final class MainThreadTreeViews {
     /// app's word over the extension's would leave a live pane wired to a dead
     /// context.
     private func adopt(_ provider: JSValue, for viewID: String) -> ExtensionTreeModel {
-        if let existing = models[viewID] {
+        let replaced = models[viewID]
+        if replaced != nil {
             Self.logger.error(
                 """
                 \(self.extensionIdentifier, privacy: .public) registered a second tree data \
                 provider for view id \(viewID, privacy: .public); the later one wins
                 """)
-            existing.invalidate()
         }
         let model = ExtensionTreeModel(
             viewID: viewID,
@@ -895,6 +965,19 @@ public final class MainThreadTreeViews {
             notImplementedLedger: notImplementedLedger)
         models[viewID] = model
         model.subscribeToChanges()
+        // The pane is handed over *before* the model it is holding is
+        // invalidated, and the order is the fix. A pane resolves its data
+        // source once, at `viewDidLoad`, and nothing ever re-offers one — so
+        // an extension that registers a second provider for a view id it
+        // already owns (what every deactivate/activate cycle does, and what
+        // `reload` does for every view at once) used to leave an open pane
+        // bound to a model whose `invalidate` had made `children(of:)` answer
+        // `[]` for good. The pane stayed on screen, permanently blank, with
+        // no way back short of restarting the app.
+        if let replaced {
+            replaced.onProviderReplaced?(model)
+            replaced.invalidate()
+        }
         return model
     }
 
