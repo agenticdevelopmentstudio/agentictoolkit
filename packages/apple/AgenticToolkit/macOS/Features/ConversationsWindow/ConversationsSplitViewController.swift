@@ -316,8 +316,15 @@ public final class ConversationsSplitViewController: NSSplitViewController {
             // when the animation lands rather than when it starts. The Tab
             // order settles then too: a collapsing pane's views are hidden at
             // the end of the animation, not at the start.
-            self?.updateToggleAppearance()
-            self?.refreshKeyViewLoop()
+            //
+            // `assumeIsolated` rather than a `Task`: AppKit runs this handler
+            // on the main thread, it is only the `@Sendable` signature that
+            // loses that, and hopping would repaint a frame after the
+            // animation instead of on it.
+            MainActor.assumeIsolated {
+                self?.updateToggleAppearance()
+                self?.refreshKeyViewLoop()
+            }
         }
         updateToggleAppearance()
     }
