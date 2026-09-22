@@ -397,10 +397,13 @@ extension SessionWatcher {
 
                 log.append("=== Results: \(passCount) passed, \(failCount) failed ===")
 
-                DispatchQueue.main.async {
+                // Weak here too, not just in the timer below: Swift 6.4 rejects a
+                // `[weak self]` capture nested inside a closure that implicitly
+                // captured `self` strongly (#ImplicitStrongCapture).
+                DispatchQueue.main.async { [weak self] in
                     NSApp.activate(ignoringOtherApps: true)
                     let logPath = ActivationTestLog.whippetShared.logPath ?? "(no path)"
-                    self.lastActionError =
+                    self?.lastActionError =
                         "Test: \(passCount) passed, \(failCount) failed — see \(logPath)"
 
                     DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
