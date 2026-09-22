@@ -22,6 +22,14 @@ final class MoneyTests: XCTestCase {
         XCTAssertEqual(Money.amountCents(seconds: 1799, rateCents: 1), 0)
     }
 
+    /// A negative rate (e.g. a credit or refund) keeps its sign through the
+    /// arithmetic rather than being clamped to zero like negative seconds are.
+    func testAmountCentsPreservesNegativeRateSign() {
+        XCTAssertEqual(Money.amountCents(seconds: 3600, rateCents: -12_500), -12_500)
+        // Half-up boundary on the negative side: 1800s at -1 cent/hr = -0.5 → -1.
+        XCTAssertEqual(Money.amountCents(seconds: 1800, rateCents: -1), -1)
+    }
+
     func testAmountCentsIsZeroForAZeroRate() {
         XCTAssertEqual(Money.amountCents(seconds: 86_400, rateCents: 0), 0)
     }
