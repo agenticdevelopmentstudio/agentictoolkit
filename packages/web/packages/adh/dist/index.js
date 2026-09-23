@@ -1101,6 +1101,7 @@ function AdhHeader({
 
 // src/footer/AdhFooter.tsx
 import Link4 from "next/link";
+import { ChevronUp } from "lucide-react";
 import { jsx as jsx10, jsxs as jsxs7 } from "react/jsx-runtime";
 function closeContainingMenu(el) {
   const menu = el.closest("[popover]");
@@ -1119,7 +1120,7 @@ function FooterMenu({
 }) {
   const anchor = { "--adh-footer-menu-anchor": `--${id}` };
   return /* @__PURE__ */ jsxs7("span", { className: ["adh-footer__menu-host", className].filter(Boolean).join(" "), style: anchor, children: [
-    /* @__PURE__ */ jsx10(
+    /* @__PURE__ */ jsxs7(
       "button",
       {
         type: "button",
@@ -1127,7 +1128,10 @@ function FooterMenu({
         "aria-label": ariaLabel,
         "aria-haspopup": "menu",
         className: `${triggerClassName} adh-footer__menu-trigger`,
-        children: label
+        children: [
+          label,
+          /* @__PURE__ */ jsx10(ChevronUp, { className: "adh-footer__menu-caret", "aria-hidden": true })
+        ]
       }
     ),
     /* @__PURE__ */ jsx10("div", { id, popover: "auto", className: "adh-footer__menu", children: /* @__PURE__ */ jsx10("ul", { className: "adh-footer__menu-list", children: items.map((item) => /* @__PURE__ */ jsx10("li", { children: "popoverTarget" in item ? /* @__PURE__ */ jsx10(

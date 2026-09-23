@@ -110,6 +110,15 @@ describe('FooterMenu', () => {
     expect(panel.querySelector('button[popovertarget="about-dialog"]')).not.toBeNull()
   })
 
+  it('shows a popup indicator on its trigger, hidden from the accessible name', () => {
+    // Without it the copyright line reads as plain text and Legal as a link to a page.
+    render(<FooterMenu id="m1" label="Legal" items={items} />)
+    const trigger = screen.getByRole('button', { name: 'Legal' })
+    const caret = trigger.querySelector('.adh-footer__menu-caret')
+    expect(caret).not.toBeNull()
+    expect(caret).toHaveAttribute('aria-hidden')
+  })
+
   it('anchors each menu to its own trigger, so two menus in one bar do not share a position', () => {
     const { container } = render(
       <>

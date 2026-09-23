@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { ChevronUp } from 'lucide-react'
 import type { CSSProperties, MouseEvent, ReactNode } from 'react'
 
 /** One entry of a {@link FooterMenu}: a real link, or a trigger for another popover. */
@@ -89,6 +90,10 @@ export function FooterMenu({
         className={`${triggerClassName} adh-footer__menu-trigger`}
       >
         {label}
+        {/* Says "this opens a menu" — without it the copyright line read as plain text and
+            Legal as a link to a page called Legal. UP, because every footer menu opens
+            upward off the bottom edge (see .adh-footer__menu's position-area). */}
+        <ChevronUp className="adh-footer__menu-caret" aria-hidden />
       </button>
       <div id={id} popover="auto" className="adh-footer__menu">
         <ul className="adh-footer__menu-list">

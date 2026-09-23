@@ -82,21 +82,34 @@
 /* THE NARROW BAR: bitbag rests in its middle (FooterChatInner docks him avatar-only),
    so each side has to fit in half a phone. Terms + Privacy fold into one "Legal" menu
    — SiteFooter renders both forms and this picks one, so the server HTML is right at
-   every width — and the copyright's label drops the studio's name, which About still
-   carries. 40rem (640px — a media query's `rem` is the browser default, whatever the
-   page's root size) is roughly where the full copyright line on the left and the Legal
-   links on the right stop clearing his resting face in the middle. */
+   every width. 40rem (640px — a media query's `rem` is the browser default, whatever
+   the page's root size) is roughly where the full copyright line on the left and the
+   Legal links on the right stop clearing his resting face in the middle.
+
+   The copyright keeps the studio's name here and WRAPS it, capped at the half-bar left
+   of his face. It used to drop the name instead, leaving a bare "© 2026" that read as
+   the name clipped off — the name is the brand, and the line is the About menu's
+   trigger, so it is the one thing on the bar that should say who this is. The cap is
+   half the bar's content box less his half-width plus a gap; the percentage resolves
+   against the container's content box, so the padding cancels out. */
 .adh-footer__link--narrow {
   display: none;
 }
 
 @media (max-width: 40rem) {
-  .adh-footer__link--wide,
-  .adh-footer__copyright .adh-footer__brand-link {
+  .adh-footer__link--wide {
     display: none;
   }
   .adh-footer__link--narrow {
     display: inline-flex;
+  }
+  .adh-footer__copyright {
+    white-space: normal;
+    max-width: calc(50% - var(--adh-footer-rest-clearance, 2.5rem));
+    line-height: 1.35;
+  }
+  .adh-footer__copyright .adh-footer__menu-trigger {
+    text-align: left;
   }
 }
 
@@ -169,6 +182,16 @@
    box sits inside the footer bar's own height, centred in its empty middle. His
    chat only exists while he is being talked to, under the scrim that dims the
    page anyway. Nothing overhangs, so nothing is paid for. */
+
+/* …but his resting face sat on the bar's bottom edge, reading as cut off rather than
+   centred in it. Lifted 6px over bitbag's own 0.1rem rest margin. adh's rule, not
+   bitbag's: the lift is about THIS bar's height, and the dock knows nothing of the
+   bar. Both of bitbag-dock.css's resting selectors are matched and each is outranked
+   by the host class, because that sheet lands later (see the z-index note above). */
+.adh-footer__chat.bb-dock--resting .bb-dock__avatar,
+.adh-footer__chat.bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
+  margin-bottom: calc(0.1rem + 6px);
+}
 
 /* The shared footer modal dialog (native HTML Popover API) — used by the Sites,
    Terms and Privacy triggers. Open state is centered in the top layer with a
