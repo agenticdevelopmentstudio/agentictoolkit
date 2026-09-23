@@ -194,3 +194,32 @@ describe('NavigationPopover — hovering off the rows onto the chrome', () => {
     expect(screen.getByText('Consultants')).toBeInTheDocument()
   })
 })
+
+describe('NavigationPopover — sectionLabels', () => {
+  const SECTIONED: PopoverEntry[] = [
+    { kind: 'leaf', section: 0, item: { key: 'mine', label: 'Mine', href: '/mine' } },
+    { kind: 'leaf', section: 0, item: { key: 'temporal', label: 'Temporal', href: '/temporal' } },
+    { kind: 'leaf', section: 1, item: { key: 'help', label: 'Help' } },
+  ]
+
+  it('heads a section once, above its first row, and the heading is not a row to pick', async () => {
+    render(<Menu entries={SECTIONED} sectionLabels={{ 0: 'Workspaces' }} />)
+    fireEvent.click(screen.getByRole('button', { name: TRIGGER }))
+    await expectOpen()
+    // getByText throws on a duplicate, so this also asserts the heading appears once.
+    const heading = screen.getByText('Workspaces')
+    expect(heading.closest('[role="menuitem"]')).toBeNull()
+    // Document order: the heading precedes the section's first row.
+    const first = screen.getByText('Mine')
+    expect(heading.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('drops the heading while searching — a filtered list is ranked, not sectioned', async () => {
+    render(<Menu entries={SECTIONED} sectionLabels={{ 0: 'Workspaces' }} />)
+    fireEvent.click(screen.getByRole('button', { name: TRIGGER }))
+    await expectOpen()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'temp' } })
+    await waitFor(() => expect(screen.queryByText('Mine')).toBeNull())
+    expect(screen.queryByText('Workspaces')).toBeNull()
+  })
+})

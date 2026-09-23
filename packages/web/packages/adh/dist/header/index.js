@@ -243,6 +243,7 @@ import {
   DropdownMenu as DropdownMenu2,
   DropdownMenuTrigger as DropdownMenuTrigger2,
   DropdownMenuContent as DropdownMenuContent2,
+  DropdownMenuLabel,
   DropdownMenuSeparator as DropdownMenuSeparator2,
   DropdownMenuSub,
   DropdownMenuSubTrigger,
@@ -302,6 +303,7 @@ function NavigationPopover({
   commandTrailing,
   searchCommand,
   footer,
+  sectionLabels,
   openShortcut
 }) {
   const [open, setOpen] = useState(false);
@@ -631,7 +633,11 @@ function NavigationPopover({
               !searching && entries.map((entry, index) => {
                 const prev = entries[index - 1];
                 const divider = prev !== void 0 && prev.section !== entry.section;
-                const sep = divider ? /* @__PURE__ */ jsx4("div", { className: "adh-dropdown-menu__separator", role: "separator" }) : null;
+                const heading = prev === void 0 || prev.section !== entry.section ? sectionLabels?.[entry.section] : void 0;
+                const sep = /* @__PURE__ */ jsxs3(Fragment4, { children: [
+                  divider && /* @__PURE__ */ jsx4("div", { className: "adh-dropdown-menu__separator", role: "separator" }),
+                  heading && /* @__PURE__ */ jsx4(DropdownMenuLabel, { className: "adh-nav-popover__section-label", children: heading })
+                ] });
                 if (entry.kind === "topic") {
                   return /* @__PURE__ */ jsxs3(Fragment3, { children: [
                     sep,
@@ -843,7 +849,7 @@ import {
   DropdownMenuTrigger as DropdownMenuTrigger3,
   DropdownMenuContent as DropdownMenuContent3,
   DropdownMenuLinkItem as DropdownMenuLinkItem2,
-  DropdownMenuLabel,
+  DropdownMenuLabel as DropdownMenuLabel2,
   DropdownMenuSeparator as DropdownMenuSeparator3
 } from "@agenticdevelopertoolkit/ui/components/dropdown-menu";
 import { jsx as jsx6, jsxs as jsxs4 } from "react/jsx-runtime";
@@ -865,7 +871,7 @@ function SiteOptionsMenu({
       }
     ),
     /* @__PURE__ */ jsxs4(DropdownMenuContent3, { align: "end", children: [
-      /* @__PURE__ */ jsx6(DropdownMenuLabel, { children: groupLabel }),
+      /* @__PURE__ */ jsx6(DropdownMenuLabel2, { children: groupLabel }),
       /* @__PURE__ */ jsx6(DropdownMenuSeparator3, {}),
       sites.map((site) => (
         // LinkItem, not Item-wrapping-an-anchor: these are cross-SITE hrefs, so the
@@ -2092,6 +2098,8 @@ import {
 import { useHubPreferences as useHubPreferences2 } from "@agentic-toolkit/adh/header/hub-preferences";
 import { useHelp as useHelp2 } from "@agentic-toolkit/adh/help";
 import { jsx as jsx17 } from "react/jsx-runtime";
+var WORKSPACES_SECTION = 0;
+var SECTION_LABELS = { [WORKSPACES_SECTION]: "Workspaces" };
 function WorkspaceMenu({
   menu,
   onSettings,
@@ -2116,7 +2124,7 @@ function WorkspaceMenu({
     if (!items.length) {
       items.push({ key: "ws:empty", label: menu.loading ? "Loading\u2026" : "No workspaces yet" });
     }
-    return items.map((item) => ({ kind: "leaf", section: 0, item }));
+    return items.map((item) => ({ kind: "leaf", section: WORKSPACES_SECTION, item }));
   }, [menu]);
   const linksCollapsed = useHeaderLinksCollapsed();
   const navSection = useMemo4(
@@ -2160,6 +2168,7 @@ function WorkspaceMenu({
       triggerClassName,
       placeholder: "Search workspaces",
       emptyLabel: "No matching workspaces",
+      sectionLabels: SECTION_LABELS,
       commandTrailing: ({ close }) => onSettings ? /* @__PURE__ */ jsx17(
         "button",
         {

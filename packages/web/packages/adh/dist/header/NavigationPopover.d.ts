@@ -109,6 +109,11 @@ export type NavigationPopoverProps = {
      *  destination. It sits outside the scrolling list too, so it stays visible on a
      *  menu long enough to scroll. */
     footer?: ReactNode;
+    /** A heading above a section's first entry, keyed by `section` — "Workspaces" over
+     *  the workspace rows, say. Browse only: search results are one flat list with each
+     *  row's area already spelled out, so a heading there would label nothing. Not a row:
+     *  never highlighted, never reached by the arrow keys. */
+    sectionLabels?: Partial<Record<number, string>>;
     /** A chord that TOGGLES the menu, in `@agenticdevelopertoolkit/ui/hooks/useShortcut`
      *  spelling — `'mod+shift+k'`, say. Omit (or pass `''`) for no shortcut, which is
      *  what every popover that isn't the site menu wants: two popovers registering the
@@ -140,5 +145,5 @@ export type NavigationPopoverProps = {
  * navigate a chosen item, and any command-row trailing control / special search
  * command.
  */
-export declare function NavigationPopover({ entries, triggerLabel, triggerContent, triggerText, triggerIcon, triggerClassName, placeholder, emptyLabel, onChoose, commandTrailing, searchCommand, footer, openShortcut, }: NavigationPopoverProps): ReactElement;
+export declare function NavigationPopover({ entries, triggerLabel, triggerContent, triggerText, triggerIcon, triggerClassName, placeholder, emptyLabel, onChoose, commandTrailing, searchCommand, footer, sectionLabels, openShortcut, }: NavigationPopoverProps): ReactElement;
 //# sourceMappingURL=NavigationPopover.d.ts.map

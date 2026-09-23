@@ -243,6 +243,7 @@ import {
   DropdownMenu as DropdownMenu2,
   DropdownMenuTrigger as DropdownMenuTrigger2,
   DropdownMenuContent as DropdownMenuContent2,
+  DropdownMenuLabel,
   DropdownMenuSeparator as DropdownMenuSeparator2,
   DropdownMenuSub,
   DropdownMenuSubTrigger,
@@ -302,6 +303,7 @@ function NavigationPopover({
   commandTrailing,
   searchCommand,
   footer,
+  sectionLabels,
   openShortcut
 }) {
   const [open, setOpen] = useState(false);
@@ -631,7 +633,11 @@ function NavigationPopover({
               !searching && entries.map((entry, index) => {
                 const prev = entries[index - 1];
                 const divider = prev !== void 0 && prev.section !== entry.section;
-                const sep = divider ? /* @__PURE__ */ jsx4("div", { className: "adh-dropdown-menu__separator", role: "separator" }) : null;
+                const heading = prev === void 0 || prev.section !== entry.section ? sectionLabels?.[entry.section] : void 0;
+                const sep = /* @__PURE__ */ jsxs3(Fragment4, { children: [
+                  divider && /* @__PURE__ */ jsx4("div", { className: "adh-dropdown-menu__separator", role: "separator" }),
+                  heading && /* @__PURE__ */ jsx4(DropdownMenuLabel, { className: "adh-nav-popover__section-label", children: heading })
+                ] });
                 if (entry.kind === "topic") {
                   return /* @__PURE__ */ jsxs3(Fragment3, { children: [
                     sep,
@@ -843,7 +849,7 @@ import {
   DropdownMenuTrigger as DropdownMenuTrigger3,
   DropdownMenuContent as DropdownMenuContent3,
   DropdownMenuLinkItem as DropdownMenuLinkItem2,
-  DropdownMenuLabel,
+  DropdownMenuLabel as DropdownMenuLabel2,
   DropdownMenuSeparator as DropdownMenuSeparator3
 } from "@agenticdevelopertoolkit/ui/components/dropdown-menu";
 import { jsx as jsx6, jsxs as jsxs4 } from "react/jsx-runtime";
@@ -865,7 +871,7 @@ function SiteOptionsMenu({
       }
     ),
     /* @__PURE__ */ jsxs4(DropdownMenuContent3, { align: "end", children: [
-      /* @__PURE__ */ jsx6(DropdownMenuLabel, { children: groupLabel }),
+      /* @__PURE__ */ jsx6(DropdownMenuLabel2, { children: groupLabel }),
       /* @__PURE__ */ jsx6(DropdownMenuSeparator3, {}),
       sites.map((site) => (
         // LinkItem, not Item-wrapping-an-anchor: these are cross-SITE hrefs, so the

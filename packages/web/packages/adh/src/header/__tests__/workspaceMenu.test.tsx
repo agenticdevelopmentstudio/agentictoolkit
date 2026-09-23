@@ -67,6 +67,18 @@ describe('WorkspaceMenu', () => {
     ])
   })
 
+  it('heads the workspace rows\' section "Workspaces", and only that section', () => {
+    render(<WorkspaceMenu menu={{ workspaces: WORKSPACES, loading: false }} />)
+    const { entries, sectionLabels } = props() as unknown as {
+      entries: PopoverEntry[]
+      sectionLabels: Record<number, string>
+    }
+    const wsSection = entries.find((e) => e.kind === 'leaf' && e.item.key.startsWith('ws:'))!.section
+    const help = entries.find((e) => e.kind === 'leaf' && e.item.key === 'help')!.section
+    expect(sectionLabels[wsSection]).toBe('Workspaces')
+    expect(sectionLabels[help]).toBeUndefined()
+  })
+
   it('says it is loading rather than claiming there are no workspaces', () => {
     render(<WorkspaceMenu menu={{ workspaces: [], loading: true }} />)
     expect(props().triggerText).toBe('Loading…')

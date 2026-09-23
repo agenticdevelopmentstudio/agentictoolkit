@@ -22,6 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubTrigger,
@@ -141,6 +142,11 @@ export type NavigationPopoverProps = {
    *  destination. It sits outside the scrolling list too, so it stays visible on a
    *  menu long enough to scroll. */
   footer?: ReactNode
+  /** A heading above a section's first entry, keyed by `section` — "Workspaces" over
+   *  the workspace rows, say. Browse only: search results are one flat list with each
+   *  row's area already spelled out, so a heading there would label nothing. Not a row:
+   *  never highlighted, never reached by the arrow keys. */
+  sectionLabels?: Partial<Record<number, string>>
   /** A chord that TOGGLES the menu, in `@agenticdevelopertoolkit/ui/hooks/useShortcut`
    *  spelling — `'mod+shift+k'`, say. Omit (or pass `''`) for no shortcut, which is
    *  what every popover that isn't the site menu wants: two popovers registering the
@@ -255,6 +261,7 @@ export function NavigationPopover({
   commandTrailing,
   searchCommand,
   footer,
+  sectionLabels,
   openShortcut,
 }: NavigationPopoverProps): ReactElement {
   const [open, setOpen] = useState(false)
@@ -753,9 +760,22 @@ export function NavigationPopover({
               // A divider falls between sections, never within one or at the top.
               const prev = entries[index - 1]
               const divider = prev !== undefined && prev.section !== entry.section
-              const sep = divider ? (
-                <div className="adh-dropdown-menu__separator" role="separator" />
-              ) : null
+              // A labelled section's heading sits above its FIRST entry, under the
+              // divider — including at the very top, where there is no divider.
+              const heading =
+                prev === undefined || prev.section !== entry.section
+                  ? sectionLabels?.[entry.section]
+                  : undefined
+              const sep = (
+                <>
+                  {divider && <div className="adh-dropdown-menu__separator" role="separator" />}
+                  {heading && (
+                    <DropdownMenuLabel className="adh-nav-popover__section-label">
+                      {heading}
+                    </DropdownMenuLabel>
+                  )}
+                </>
+              )
 
               if (entry.kind === 'topic') {
                 return (

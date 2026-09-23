@@ -19,6 +19,13 @@ import { buildSiteNavEntries } from './siteNavEntries'
 import { menuIcon } from './menu-icons'
 import type { SiteMenuChromeProps } from './SiteMenu'
 
+// The workspace rows' section. Distinct from SITE_NAV_SECTION (3), which sits above them on a
+// phone, so the divider — and the "Workspaces" heading — fall between the two.
+const WORKSPACES_SECTION = 0
+// Named, because on a phone the site's own nav rows sit above the workspaces in this same
+// list, and without a heading nothing says where one population ends and the other begins.
+const SECTION_LABELS = { [WORKSPACES_SECTION]: 'Workspaces' }
+
 export type WorkspaceMenuProps = Pick<
   SiteMenuChromeProps,
   'onSettings' | 'settingsHref' | 'navLinks' | 'triggerClassName'
@@ -68,7 +75,7 @@ export function WorkspaceMenu({
     if (!items.length) {
       items.push({ key: 'ws:empty', label: menu.loading ? 'Loading…' : 'No workspaces yet' })
     }
-    return items.map((item) => ({ kind: 'leaf', section: 0, item }))
+    return items.map((item) => ({ kind: 'leaf', section: WORKSPACES_SECTION, item }))
   }, [menu])
 
   // The site's own primary nav, exactly while the bar has dropped it (below 768px) — the same
@@ -118,6 +125,7 @@ export function WorkspaceMenu({
       triggerClassName={triggerClassName}
       placeholder="Search workspaces"
       emptyLabel="No matching workspaces"
+      sectionLabels={SECTION_LABELS}
       commandTrailing={({ close }) =>
         onSettings ? (
           <button

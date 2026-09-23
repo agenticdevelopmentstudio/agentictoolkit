@@ -482,6 +482,24 @@
   font-weight: 600;
 }
 
+/* A section heading ("Workspaces") above a group of rows — NavigationPopover's
+   `sectionLabels`. Smaller and dimmer than a row, and set in the mono caps the command
+   prompt uses, so it reads as a caption over the rows rather than as one more row to
+   click. Tighter than .adh-dropdown-menu__label's default padding, which is sized for
+   a standalone menu title, not a caption between a divider and its rows. Compound, because
+   the ui package's components.css loads after this sheet: a lone class of equal weight lost
+   to its label rule and the heading shipped at row size. */
+.adh-dropdown-menu__label.adh-nav-popover__section-label {
+  padding: 0.45rem 0.75rem 0.2rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  user-select: none;
+}
+
 /* Command field — the VS Code-style command box pinned at the top of the open
    switcher. Focused on open; a `>` prompt leads it; typing a site name filters
    the list below. */
