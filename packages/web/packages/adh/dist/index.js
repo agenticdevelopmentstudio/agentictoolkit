@@ -1019,19 +1019,81 @@ function AdhHeader({
 // src/footer/AdhFooter.tsx
 import Link4 from "next/link";
 import { jsx as jsx10, jsxs as jsxs7 } from "react/jsx-runtime";
-function AdhFooter({ links = [], copyright, version, trailing }) {
+function closeContainingMenu(el) {
+  const menu = el.closest("[popover]");
+  if (menu && "hidePopover" in menu && menu.matches(":popover-open")) menu.hidePopover();
+}
+function menuItemClass(extra) {
+  return ["adh-footer__link", extra].filter(Boolean).join(" ");
+}
+function FooterMenu({
+  id,
+  label,
+  items,
+  ariaLabel,
+  className,
+  triggerClassName = "adh-footer__link"
+}) {
+  const anchor = { "--adh-footer-menu-anchor": `--${id}` };
+  return /* @__PURE__ */ jsxs7("span", { className: ["adh-footer__menu-host", className].filter(Boolean).join(" "), style: anchor, children: [
+    /* @__PURE__ */ jsx10(
+      "button",
+      {
+        type: "button",
+        popoverTarget: id,
+        "aria-label": ariaLabel,
+        "aria-haspopup": "menu",
+        className: `${triggerClassName} adh-footer__menu-trigger`,
+        children: label
+      }
+    ),
+    /* @__PURE__ */ jsx10("div", { id, popover: "auto", className: "adh-footer__menu", children: /* @__PURE__ */ jsx10("ul", { className: "adh-footer__menu-list", children: items.map((item) => /* @__PURE__ */ jsx10("li", { children: "popoverTarget" in item ? /* @__PURE__ */ jsx10(
+      "button",
+      {
+        type: "button",
+        popoverTarget: item.popoverTarget,
+        "aria-label": item.ariaLabel,
+        className: menuItemClass("adh-footer__menu-item"),
+        onClick: (e) => closeContainingMenu(e.currentTarget),
+        children: item.label
+      }
+    ) : /* @__PURE__ */ jsx10(
+      Link4,
+      {
+        href: item.href,
+        className: menuItemClass("adh-footer__menu-item"),
+        prefetch: item.prefetch,
+        onClick: (e) => {
+          closeContainingMenu(e.currentTarget);
+          item.onSelect?.(e);
+        },
+        children: item.label
+      }
+    ) }, "popoverTarget" in item ? `popover:${item.popoverTarget}` : `href:${item.href}`)) }) })
+  ] });
+}
+function AdhFooter({ links = [], copyright, trailing }) {
   return /* @__PURE__ */ jsxs7("footer", { className: "adh-footer", role: "contentinfo", children: [
     /* @__PURE__ */ jsxs7("div", { className: "adh-footer__container", children: [
       copyright && /* @__PURE__ */ jsx10("span", { className: "adh-footer__copyright", children: copyright }),
-      version && /* @__PURE__ */ jsx10("span", { className: "adh-footer__version", children: version }),
       links.length > 0 && /* @__PURE__ */ jsx10("nav", { className: "adh-footer__links", "aria-label": "Footer", children: links.map(
-        (link) => "popoverTarget" in link ? /* @__PURE__ */ jsx10(
+        (link) => "menuId" in link ? /* @__PURE__ */ jsx10(
+          FooterMenu,
+          {
+            id: link.menuId,
+            label: link.label,
+            items: link.items,
+            ariaLabel: link.ariaLabel,
+            className: link.className
+          },
+          `menu:${link.menuId}`
+        ) : "popoverTarget" in link ? /* @__PURE__ */ jsx10(
           "button",
           {
             type: "button",
             popoverTarget: link.popoverTarget,
             "aria-label": link.ariaLabel,
-            className: "adh-footer__link adh-footer__sites-trigger",
+            className: ["adh-footer__link adh-footer__sites-trigger", link.className].filter(Boolean).join(" "),
             children: link.label
           },
           `popover:${link.popoverTarget}`
@@ -1039,7 +1101,7 @@ function AdhFooter({ links = [], copyright, version, trailing }) {
           Link4,
           {
             href: link.href,
-            className: "adh-footer__link",
+            className: menuItemClass(link.className),
             onClick: link.onSelect,
             prefetch: link.prefetch,
             children: link.label

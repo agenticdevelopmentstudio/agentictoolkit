@@ -91,7 +91,8 @@
 @media (prefers-reduced-motion: reduce) {
   .bb-dock,
   .bb-dock::before,
-  .bb-dock__avatar {
+  .bb-dock__avatar,
+  .bb-dock--rest-avatar .bb-dock__avatar {
     transition: none;
   }
 }
@@ -172,6 +173,32 @@
 /* Chat folded away → he dozes at half size, sitting on his own entry line. */
 .bb-dock:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
   transform: scale(0.5);
+}
+
+/* --- the avatar-only rest (`rest="avatar"`) --------------------------------
+ *
+ * No entry line: his face alone, the whole dock. BitbagDock halves his LAYOUT
+ * width here instead of leaning on the doze transform above — a scaled box keeps
+ * its full-size footprint, and on a host whose bottom edge is a bar of its own
+ * that invisible 132px box sits over the bar's controls and takes their clicks.
+ * So the transform is switched off while resting, or he would be quartered. The
+ * width change is animated with the transform's own curve, so waking still reads
+ * as him growing up out of the bar. */
+.bb-dock--rest-avatar .bb-dock__avatar {
+  transition:
+    transform 0.34s cubic-bezier(0.16, 1, 0.3, 1),
+    width 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bb-dock--resting .bb-dock__avatar,
+.bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
+  transform: none;
+  margin-bottom: 0.1rem;
+}
+/* He is the button here, so he gets a button's focus ring. */
+.bb-dock--rest-avatar .bb-dock__avatar:focus-visible {
+  outline: 2px solid var(--color-accent, #e8a33d);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 /* His chat and the `i` on its corner, the last item in the column, so they land

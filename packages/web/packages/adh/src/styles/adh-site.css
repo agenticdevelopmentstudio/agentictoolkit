@@ -56,10 +56,16 @@
  * lives in this always-loaded stylesheet; his skin is his own toolkit theme,
  * injected scoped by BitbagChat. */
 
-/* The studio brand name in the copyright line — a link to fishlamp.com, tinted
-   with the site's highlight (accent) color so it reads as the brand. */
+/* The copyright line — the trigger of the footer's About / Sites menu (SiteFooter).
+   The studio's name in it is tinted with the site's highlight (accent) colour so it
+   reads as the brand; the class keeps its old `-link` name because the theme editor
+   targets it (theme-editor/areas.tsx), though the link itself now lives in About. */
 .adh-footer__copyright {
   white-space: nowrap;
+}
+
+.adh-footer__copyright-trigger {
+  color: inherit;
 }
 
 .adh-footer__brand-link {
@@ -68,8 +74,30 @@
   transition: color calc(0.2s * var(--apt-anim-scale, 1));
 }
 
-.adh-footer__brand-link:hover {
+.adh-footer__copyright-trigger:hover .adh-footer__brand-link,
+.adh-footer__copyright-trigger:focus-visible .adh-footer__brand-link {
   color: var(--adh-footer-brand-color-hover, var(--color-accent-bright));
+}
+
+/* THE NARROW BAR: bitbag rests in its middle (FooterChatInner docks him avatar-only),
+   so each side has to fit in half a phone. Terms + Privacy fold into one "Legal" menu
+   — SiteFooter renders both forms and this picks one, so the server HTML is right at
+   every width — and the copyright's label drops the studio's name, which About still
+   carries. 40rem (640px — a media query's `rem` is the browser default, whatever the
+   page's root size) is roughly where the full copyright line on the left and the Legal
+   links on the right stop clearing his resting face in the middle. */
+.adh-footer__link--narrow {
+  display: none;
+}
+
+@media (max-width: 40rem) {
+  .adh-footer__link--wide,
+  .adh-footer__copyright .adh-footer__brand-link {
+    display: none;
+  }
+  .adh-footer__link--narrow {
+    display: inline-flex;
+  }
 }
 
 /* WHERE BITBAG PARKS — one line of it, because the rest is HIS.
@@ -108,8 +136,8 @@
 
    Conditioning on `:has(.persona-chat:not(.pc-collapsed))` — the same selector the
    scrim two blocks down already engages on — costs the lift nothing it was written
-   for and takes back everything it was not. Collapsed, the rig is a 3.6rem entry
-   line on the viewport's bottom edge and the header is at the top: they cannot
+   for and takes back everything it was not. Resting, the rig is his face alone
+   sitting in the footer bar and the header is at the top: they cannot
    overlap, so 45 is indistinguishable from 51 except to the overlays. Engaged, the
    scrim covers the viewport and the lift is exactly the reason it exists.
 
@@ -131,87 +159,16 @@
   z-index: 51;
 }
 
-/* AND KEEPING THE BAR'S OWN LINKS OUT FROM UNDER HIM. Above 64rem the bar lays
-   out as copyright-left / nav-right, so the dock lands in its empty middle and
-   nothing collides. Below that the two fill (and wrap across) the whole width,
-   putting Sites/Terms/Privacy directly under a box that is NOT click-through —
-   `.bb-dock__chat` takes pointer events across the full min(560px, 100vw - 2rem).
-
-   The old fix was to lift the DOCK above the bar at this breakpoint, which worked
-   because it was absolutely positioned inside it and so re-measured whatever the
-   links wrapped to. That is exactly the competing geometry removed above, and
-   re-adding it as a fixed offset would need the bar's height as a number — which
-   is content-driven, so there isn't one. Padding the bar instead keeps the answer
-   self-adjusting AND leaves every dock rule in the bitbag package: its content
-   rises by the height of the collapsed entry line, and the dock overlays the empty
-   strip left below it. Which also reads closer to fishlamp than the lift did — he
-   sits on the viewport's bottom edge at every width, rather than hopping up a
-   bar's height at 64rem.
-
-   Measured (chromium, the news footer: brand + Sites/Terms/Privacy), asking
-   `elementFromPoint` at each control's centre whether the control or the chat box
-   is on top: unpadded, all four are unreachable at 375, 430 and 600; three at 700;
-   'Sites' alone at 800; all clear by 860. Padded, none is blocked at any width
-   from 375 to 1440. The breakpoint stays at the footer's existing 64rem rather
-   than the ~830px the measurement alone would justify — the box is a fixed 560px
-   centred, so what it reaches is the BRAND link's right edge, and that link is the
-   site's own name. It is 'Agentic Development Studio' here and shorter or longer
-   elsewhere, which moves the collision width per site; 64rem covers the spread.
-
-   Probe `a, button`, not `a`. 'Sites' is a `<button popovertarget>` while the
-   other three are anchors, so an anchors-only sweep drops the ONE control that is
-   still covered at 800 and reports the collision gone a full breakpoint early —
-   which reads as "this rule is oversized" rather than "the probe missed it." */
-@media (max-width: 64rem) {
-  .adh-footer__container {
-    /* 3rem of composer plus 1.5rem of air. The entry line measures 48px and sits
-       flush on the viewport's bottom edge, and this REPLACES the bar's resting
-       0.75rem rather than adding to it (computed: 72px inside this query, 12px
-       outside). Walking the padding down, 52px is the first step at which every
-       control's centre is reachable — the extra 20px is deliberate, so the links
-       clear the composer's top edge instead of resting on it. */
-    padding-bottom: 4.5rem;
-  }
-}
-
-/* WHAT THE DOCK COSTS THE PAGE. Being fixed it reserves NOTHING, so it overhangs
-   page content — and the overhang is not click-through: only the empty width
-   BESIDE bitbag is pointer-transparent, while `.bb-dock__avatar` and
-   `.bb-dock__chat` (the 560px box) are both pointer-events:auto. So the overhang
-   is paid for here, once, or every page's last row (buttons, list actions, form
-   footers) silently loses its clicks.
-
-   6rem covers the collapsed rig: the entry line (~3.6rem) plus bitbag's own
-   layout box riding above it (his 350×195 viewBox at 132px wide ≈ 4.6rem, halved
-   in Z but not in layout — the doze is a transform, which doesn't reflow), less
-   the part that overlaps the footer bar's own ~2.5rem. Unconditional, unlike
-   before: fixed to the VIEWPORT rather than to the bar, the rig sits in the same
-   place at every width, so there is no longer a narrow-screen case where it lifts
-   clear of the bar and overhangs more. Below 64rem it overhangs LESS, not more —
-   the rule above makes the bar taller there, so it covers more of the rig — and
-   6rem simply stays the safe side of that. */
-.adh-app-shell__main {
-  padding-bottom: 6rem;
-}
-
-/* …EXCEPT ON A PAGE THAT IS SIZED TO THE VIEWPORT. The reservation above buys a
-   scrolling page one screenful of slack at the very bottom, which costs nothing —
-   you scroll past it once and never see it again. On a page whose content is
-   MEASURED against the viewport (an HTDV console, a split view: `min-h-0
-   flex-1` all the way down, no page scroll at all) it is not slack, it is a
-   permanent 72px band of empty between the last row and the footer, in view the
-   entire time — and the layout has already shrunk itself to fit above it, so the
-   band is content the page gave up rather than space it had spare.
-
-   Nothing is at risk there either: the dock overhangs a viewport-filling page's
-   own SCROLL CONTAINER, whose last row scrolls clear of it, rather than a final
-   page row that is stuck under it. So the page declares itself with
-   `data-fills-viewport` and this hands the space back. Declarative on purpose —
-   the fact lives on the block that knows it (the HTDV root sets the attribute),
-   not in a per-site override that every new console would have to remember. */
-.adh-app-shell__main:has([data-fills-viewport]) {
-  padding-bottom: 0;
-}
+/* NO ROOM IS RESERVED FOR HIM ANY MORE — not in the bar, not under the page.
+   Both reservations were for his resting ENTRY LINE: a 560px composer fixed across
+   the bottom edge, which covered the bar's links below 64rem (so the bar padded
+   itself 4.5rem tall to lift them clear) and overhung every page's last row (so
+   `.adh-app-shell__main` padded itself 6rem, and viewport-filling consoles had to
+   opt back out with `data-fills-viewport`). FooterChatInner now docks him with
+   `rest="avatar"`: resting he is his face alone, laid out at half size, and that
+   box sits inside the footer bar's own height, centred in its empty middle. His
+   chat only exists while he is being talked to, under the scrim that dims the
+   page anyway. Nothing overhangs, so nothing is paid for. */
 
 /* The shared footer modal dialog (native HTML Popover API) — used by the Sites,
    Terms and Privacy triggers. Open state is centered in the top layer with a
@@ -303,11 +260,89 @@
 }
 
 /* Legal content inside the modal: drop the standalone page's centering/width so
-   it reads as modal-body prose (legal.css styles the headings/paragraphs). */
+   it reads as modal-body prose (legal.css styles the headings/paragraphs).
+
+   And set it in the THEME's font, one size down. The standalone /terms and /privacy
+   pages are a landing-style document — serif at 1.05rem, italic serif headings, mono
+   eyebrows — and inside a 44rem dialog that read as a second site pasted into this
+   one. Here it follows the site's own `--font-sans`, and the headings keep their
+   hierarchy by size and weight instead of by switching faces. */
 .adh-modal__body--legal .adh-legal-doc {
   max-width: none;
   margin: 0;
   padding: 0;
+  font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.adh-modal__body--legal .adh-legal-doc h2 {
+  font-family: inherit;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 1.05rem;
+  letter-spacing: 0;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.adh-modal__body--legal .adh-legal-doc h3 {
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin: 1.1rem 0 0.4rem;
+}
+
+.adh-modal__body--legal .adh-legal-doc__meta {
+  font-family: inherit;
+  margin-bottom: 1.5rem;
+}
+
+/* The About dialog (AboutModal): two short entries and the build line. */
+.adh-modal__body--about {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.adh-about__name {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.adh-about__blurb {
+  margin: 0 0 0.35rem;
+  color: var(--color-text-secondary);
+}
+
+.adh-about__link {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.adh-about__link:hover {
+  text-decoration: underline;
+}
+
+.adh-about__build {
+  display: flex;
+  gap: 0.75rem;
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+}
+
+.adh-about__build dd {
+  margin: 0;
+  color: var(--color-text-secondary);
 }
 
 .adh-sites-popover__group {
@@ -375,8 +410,16 @@
    still in the server HTML, so crawlers follow them regardless of this. */
 @supports not selector(:popover-open) {
   .adh-modal,
-  .adh-footer__sites-trigger {
+  .adh-footer__sites-trigger,
+  .adh-footer__menu,
+  .adh-footer__link--narrow {
     display: none;
+  }
+  /* Without popovers the Legal menu is dead, so the plain links stay at every width —
+     a crowded bar beats an unreachable Terms page. Later than the narrow-bar rule and
+     equally specific, so it wins. */
+  .adh-footer__link--wide {
+    display: revert;
   }
 }
 

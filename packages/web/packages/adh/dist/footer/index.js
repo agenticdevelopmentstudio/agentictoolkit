@@ -5,19 +5,81 @@
 // src/footer/AdhFooter.tsx
 import Link from "next/link";
 import { jsx, jsxs } from "react/jsx-runtime";
-function AdhFooter({ links = [], copyright, version, trailing }) {
+function closeContainingMenu(el) {
+  const menu = el.closest("[popover]");
+  if (menu && "hidePopover" in menu && menu.matches(":popover-open")) menu.hidePopover();
+}
+function menuItemClass(extra) {
+  return ["adh-footer__link", extra].filter(Boolean).join(" ");
+}
+function FooterMenu({
+  id,
+  label,
+  items,
+  ariaLabel,
+  className,
+  triggerClassName = "adh-footer__link"
+}) {
+  const anchor = { "--adh-footer-menu-anchor": `--${id}` };
+  return /* @__PURE__ */ jsxs("span", { className: ["adh-footer__menu-host", className].filter(Boolean).join(" "), style: anchor, children: [
+    /* @__PURE__ */ jsx(
+      "button",
+      {
+        type: "button",
+        popoverTarget: id,
+        "aria-label": ariaLabel,
+        "aria-haspopup": "menu",
+        className: `${triggerClassName} adh-footer__menu-trigger`,
+        children: label
+      }
+    ),
+    /* @__PURE__ */ jsx("div", { id, popover: "auto", className: "adh-footer__menu", children: /* @__PURE__ */ jsx("ul", { className: "adh-footer__menu-list", children: items.map((item) => /* @__PURE__ */ jsx("li", { children: "popoverTarget" in item ? /* @__PURE__ */ jsx(
+      "button",
+      {
+        type: "button",
+        popoverTarget: item.popoverTarget,
+        "aria-label": item.ariaLabel,
+        className: menuItemClass("adh-footer__menu-item"),
+        onClick: (e) => closeContainingMenu(e.currentTarget),
+        children: item.label
+      }
+    ) : /* @__PURE__ */ jsx(
+      Link,
+      {
+        href: item.href,
+        className: menuItemClass("adh-footer__menu-item"),
+        prefetch: item.prefetch,
+        onClick: (e) => {
+          closeContainingMenu(e.currentTarget);
+          item.onSelect?.(e);
+        },
+        children: item.label
+      }
+    ) }, "popoverTarget" in item ? `popover:${item.popoverTarget}` : `href:${item.href}`)) }) })
+  ] });
+}
+function AdhFooter({ links = [], copyright, trailing }) {
   return /* @__PURE__ */ jsxs("footer", { className: "adh-footer", role: "contentinfo", children: [
     /* @__PURE__ */ jsxs("div", { className: "adh-footer__container", children: [
       copyright && /* @__PURE__ */ jsx("span", { className: "adh-footer__copyright", children: copyright }),
-      version && /* @__PURE__ */ jsx("span", { className: "adh-footer__version", children: version }),
       links.length > 0 && /* @__PURE__ */ jsx("nav", { className: "adh-footer__links", "aria-label": "Footer", children: links.map(
-        (link) => "popoverTarget" in link ? /* @__PURE__ */ jsx(
+        (link) => "menuId" in link ? /* @__PURE__ */ jsx(
+          FooterMenu,
+          {
+            id: link.menuId,
+            label: link.label,
+            items: link.items,
+            ariaLabel: link.ariaLabel,
+            className: link.className
+          },
+          `menu:${link.menuId}`
+        ) : "popoverTarget" in link ? /* @__PURE__ */ jsx(
           "button",
           {
             type: "button",
             popoverTarget: link.popoverTarget,
             "aria-label": link.ariaLabel,
-            className: "adh-footer__link adh-footer__sites-trigger",
+            className: ["adh-footer__link adh-footer__sites-trigger", link.className].filter(Boolean).join(" "),
             children: link.label
           },
           `popover:${link.popoverTarget}`
@@ -25,7 +87,7 @@ function AdhFooter({ links = [], copyright, version, trailing }) {
           Link,
           {
             href: link.href,
-            className: "adh-footer__link",
+            className: menuItemClass(link.className),
             onClick: link.onSelect,
             prefetch: link.prefetch,
             children: link.label
@@ -39,24 +101,17 @@ function AdhFooter({ links = [], copyright, version, trailing }) {
 }
 
 // src/footer/SiteFooter.tsx
-import { AdhFooter as ToolkitFooter } from "@agentic-toolkit/adh/footer";
+import {
+  AdhFooter as ToolkitFooter,
+  FooterMenu as FooterMenu2
+} from "@agentic-toolkit/adh/footer";
 
-// src/footer/FooterChat.tsx
-import dynamic from "next/dynamic";
-import { jsx as jsx2 } from "react/jsx-runtime";
-var FooterChatInner = dynamic(() => import("@agentic-toolkit/adh/footer/FooterChatInner"), {
-  ssr: false
-});
-function FooterChat() {
-  return /* @__PURE__ */ jsx2(FooterChatInner, {});
-}
-
-// src/footer/SitesOverview.tsx
-import { FOOTER_SITES, groupSitesByCategory, siteProdUrl } from "@agentic-toolkit/adh-registry";
+// src/footer/AboutModal.tsx
+import { getSite, siteProdUrl } from "@agentic-toolkit/adh-registry";
 
 // src/footer/AdhModalPopover.tsx
 import { X } from "lucide-react";
-import { jsx as jsx3, jsxs as jsxs2 } from "react/jsx-runtime";
+import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 function AdhModalPopover({ id, title, children, bodyClassName }) {
   const titleId = `${id}-title`;
   return /* @__PURE__ */ jsxs2(
@@ -71,8 +126,8 @@ function AdhModalPopover({ id, title, children, bodyClassName }) {
       className: "adh-modal",
       children: [
         /* @__PURE__ */ jsxs2("div", { className: "adh-modal__header", children: [
-          /* @__PURE__ */ jsx3("h2", { id: titleId, className: "adh-modal__title", children: title }),
-          /* @__PURE__ */ jsx3(
+          /* @__PURE__ */ jsx2("h2", { id: titleId, className: "adh-modal__title", children: title }),
+          /* @__PURE__ */ jsx2(
             "button",
             {
               type: "button",
@@ -80,36 +135,77 @@ function AdhModalPopover({ id, title, children, bodyClassName }) {
               popoverTarget: id,
               popoverTargetAction: "hide",
               "aria-label": "Close",
-              children: /* @__PURE__ */ jsx3(X, { className: "adh-modal__close-icon", "aria-hidden": true })
+              children: /* @__PURE__ */ jsx2(X, { className: "adh-modal__close-icon", "aria-hidden": true })
             }
           )
         ] }),
-        /* @__PURE__ */ jsx3("div", { className: `adh-modal__body${bodyClassName ? ` ${bodyClassName}` : ""}`, children })
+        /* @__PURE__ */ jsx2("div", { className: `adh-modal__body${bodyClassName ? ` ${bodyClassName}` : ""}`, children })
       ]
     }
   );
 }
 
+// src/footer/AboutModal.tsx
+import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
+var ABOUT_DIALOG_ID = "adh-about-dialog";
+var BRAND_LABEL = "Agentic Development Studio";
+var BRAND_HREF = "https://agenticdevelopmentstudio.com/";
+function hostOf(href) {
+  return new URL(href).host;
+}
+function Entry({ name, href, children }) {
+  return /* @__PURE__ */ jsxs3("section", { className: "adh-about__entry", children: [
+    /* @__PURE__ */ jsx3("h3", { className: "adh-about__name", children: name }),
+    /* @__PURE__ */ jsx3("p", { className: "adh-about__blurb", children }),
+    /* @__PURE__ */ jsx3("a", { className: "adh-about__link", href, children: hostOf(href) })
+  ] });
+}
+function AboutModal({ version }) {
+  const fishlamp = getSite("fishlamp");
+  return /* @__PURE__ */ jsxs3(AdhModalPopover, { id: ABOUT_DIALOG_ID, title: "About", bodyClassName: "adh-modal__body--about", children: [
+    /* @__PURE__ */ jsx3(Entry, { name: BRAND_LABEL, href: BRAND_HREF, children: "The company behind the Agentic Developer family of sites, and the name on their copyright." }),
+    fishlamp && /* @__PURE__ */ jsxs3(Entry, { name: fishlamp.label, href: siteProdUrl("fishlamp", "/"), children: [
+      fishlamp.description,
+      "."
+    ] }),
+    /* @__PURE__ */ jsxs3("dl", { className: "adh-about__build", children: [
+      /* @__PURE__ */ jsx3("dt", { children: "Site version" }),
+      /* @__PURE__ */ jsx3("dd", { children: version ?? "Not recorded in this build" })
+    ] })
+  ] });
+}
+
+// src/footer/FooterChat.tsx
+import dynamic from "next/dynamic";
+import { jsx as jsx4 } from "react/jsx-runtime";
+var FooterChatInner = dynamic(() => import("@agentic-toolkit/adh/footer/FooterChatInner"), {
+  ssr: false
+});
+function FooterChat() {
+  return /* @__PURE__ */ jsx4(FooterChatInner, {});
+}
+
 // src/footer/SitesOverview.tsx
-import { jsx as jsx4, jsxs as jsxs3 } from "react/jsx-runtime";
+import { FOOTER_SITES, groupSitesByCategory, siteProdUrl as siteProdUrl2 } from "@agentic-toolkit/adh-registry";
+import { jsx as jsx5, jsxs as jsxs4 } from "react/jsx-runtime";
 var SITES_OVERVIEW_POPOVER_ID = "adh-sites-overview";
 function SitesPopover() {
   const groups = groupSitesByCategory(FOOTER_SITES);
-  return /* @__PURE__ */ jsx4(AdhModalPopover, { id: SITES_OVERVIEW_POPOVER_ID, title: "The Agentic Developer family", children: groups.map((group) => /* @__PURE__ */ jsxs3(
+  return /* @__PURE__ */ jsx5(AdhModalPopover, { id: SITES_OVERVIEW_POPOVER_ID, title: "The Agentic Developer family", children: groups.map((group) => /* @__PURE__ */ jsxs4(
     "nav",
     {
       className: "adh-sites-popover__group",
       "aria-label": group.label,
       children: [
-        /* @__PURE__ */ jsx4("h3", { className: "adh-sites-popover__group-title", children: group.label }),
-        /* @__PURE__ */ jsx4("ul", { className: "adh-sites-popover__list", children: group.sites.map((site) => /* @__PURE__ */ jsx4("li", { children: /* @__PURE__ */ jsxs3(
+        /* @__PURE__ */ jsx5("h3", { className: "adh-sites-popover__group-title", children: group.label }),
+        /* @__PURE__ */ jsx5("ul", { className: "adh-sites-popover__list", children: group.sites.map((site) => /* @__PURE__ */ jsx5("li", { children: /* @__PURE__ */ jsxs4(
           "a",
           {
             className: "adh-sites-popover__item",
-            href: siteProdUrl(site.id, "/"),
+            href: siteProdUrl2(site.id, "/"),
             children: [
-              /* @__PURE__ */ jsx4("span", { className: "adh-sites-popover__name", children: site.label }),
-              site.description && /* @__PURE__ */ jsx4("span", { className: "adh-sites-popover__blurb", children: site.description })
+              /* @__PURE__ */ jsx5("span", { className: "adh-sites-popover__name", children: site.label }),
+              site.description && /* @__PURE__ */ jsx5("span", { className: "adh-sites-popover__blurb", children: site.description })
             ]
           }
         ) }, site.id)) })
@@ -122,7 +218,7 @@ function SitesPopover() {
 // src/footer/LegalModals.tsx
 import { useEffect, useState } from "react";
 import { LEGAL_EFFECTIVE_DATE, TermsBody, PrivacyBody } from "@agentic-toolkit/adh/legal";
-import { jsx as jsx5, jsxs as jsxs4 } from "react/jsx-runtime";
+import { jsx as jsx6, jsxs as jsxs5 } from "react/jsx-runtime";
 var TERMS_DIALOG_ID = "adh-terms-dialog";
 var PRIVACY_DIALOG_ID = "adh-privacy-dialog";
 function useOpenedOnce(id) {
@@ -140,8 +236,8 @@ function useOpenedOnce(id) {
   return opened;
 }
 function LegalDoc({ children }) {
-  return /* @__PURE__ */ jsxs4("article", { className: "adh-legal-doc", children: [
-    /* @__PURE__ */ jsxs4("p", { className: "adh-legal-doc__meta", children: [
+  return /* @__PURE__ */ jsxs5("article", { className: "adh-legal-doc", children: [
+    /* @__PURE__ */ jsxs5("p", { className: "adh-legal-doc__meta", children: [
       "Effective ",
       LEGAL_EFFECTIVE_DATE
     ] }),
@@ -150,11 +246,11 @@ function LegalDoc({ children }) {
 }
 function TermsModal() {
   const opened = useOpenedOnce(TERMS_DIALOG_ID);
-  return /* @__PURE__ */ jsx5(AdhModalPopover, { id: TERMS_DIALOG_ID, title: "Terms of Service", bodyClassName: "adh-modal__body--legal", children: opened && /* @__PURE__ */ jsx5(LegalDoc, { children: /* @__PURE__ */ jsx5(TermsBody, {}) }) });
+  return /* @__PURE__ */ jsx6(AdhModalPopover, { id: TERMS_DIALOG_ID, title: "Terms of Service", bodyClassName: "adh-modal__body--legal", children: opened && /* @__PURE__ */ jsx6(LegalDoc, { children: /* @__PURE__ */ jsx6(TermsBody, {}) }) });
 }
 function PrivacyModal() {
   const opened = useOpenedOnce(PRIVACY_DIALOG_ID);
-  return /* @__PURE__ */ jsx5(AdhModalPopover, { id: PRIVACY_DIALOG_ID, title: "Privacy Policy", bodyClassName: "adh-modal__body--legal", children: opened && /* @__PURE__ */ jsx5(LegalDoc, { children: /* @__PURE__ */ jsx5(PrivacyBody, {}) }) });
+  return /* @__PURE__ */ jsx6(AdhModalPopover, { id: PRIVACY_DIALOG_ID, title: "Privacy Policy", bodyClassName: "adh-modal__body--legal", children: opened && /* @__PURE__ */ jsx6(LegalDoc, { children: /* @__PURE__ */ jsx6(PrivacyBody, {}) }) });
 }
 function openLegalModal(dialogId) {
   return (e) => {
@@ -168,43 +264,67 @@ function openLegalModal(dialogId) {
 }
 
 // src/footer/SiteFooter.tsx
-import { Fragment, jsx as jsx6, jsxs as jsxs5 } from "react/jsx-runtime";
+import { Fragment, jsx as jsx7, jsxs as jsxs6 } from "react/jsx-runtime";
 var COPYRIGHT_PREFIX = "\xA9 2026 ";
-var BRAND_LABEL = "Agentic Development Studio";
-var BRAND_HREF = "https://agenticdevelopmentstudio.com/";
-var SITES_LINK = {
-  label: "Sites",
-  popoverTarget: SITES_OVERVIEW_POPOVER_ID,
-  ariaLabel: "Sites \u2014 Agentic Developer family overview"
+var COPYRIGHT_MENU_ID = "adh-footer-copyright-menu";
+var LEGAL_MENU_ID = "adh-footer-legal-menu";
+var COPYRIGHT_MENU = [
+  { label: "About", popoverTarget: ABOUT_DIALOG_ID },
+  {
+    label: "Sites",
+    popoverTarget: SITES_OVERVIEW_POPOVER_ID,
+    ariaLabel: "Sites \u2014 Agentic Developer family overview"
+  }
+];
+var TERMS = {
+  label: "Terms",
+  href: "/terms",
+  onSelect: openLegalModal(TERMS_DIALOG_ID),
+  prefetch: false
+};
+var PRIVACY = {
+  label: "Privacy",
+  href: "/privacy",
+  onSelect: openLegalModal(PRIVACY_DIALOG_ID),
+  prefetch: false
 };
 var LEGAL_LINKS = [
-  { label: "Terms", href: "/terms", onSelect: openLegalModal(TERMS_DIALOG_ID), prefetch: false },
-  { label: "Privacy", href: "/privacy", onSelect: openLegalModal(PRIVACY_DIALOG_ID), prefetch: false }
+  { ...TERMS, className: "adh-footer__link--wide" },
+  { ...PRIVACY, className: "adh-footer__link--wide" },
+  { label: "Legal", menuId: LEGAL_MENU_ID, items: [TERMS, PRIVACY], className: "adh-footer__link--narrow" }
 ];
 function buildVersionLabel(live) {
   const version = live?.version ?? process.env.NEXT_PUBLIC_ADH_SITE_VERSION ?? "";
   const sha = live?.sha ?? process.env.NEXT_PUBLIC_ADH_RELEASE ?? "";
   const label = [version && `v${version}`, sha && sha.slice(0, 8)].filter(Boolean).join(" \xB7 ");
   if (!label) return null;
-  return /* @__PURE__ */ jsx6("span", { title: sha || void 0, children: label });
+  return /* @__PURE__ */ jsx7("span", { title: sha || void 0, children: label });
 }
 function SiteFooter({ links = [], chat = true, live }) {
-  return /* @__PURE__ */ jsxs5(Fragment, { children: [
-    /* @__PURE__ */ jsx6(
+  return /* @__PURE__ */ jsxs6(Fragment, { children: [
+    /* @__PURE__ */ jsx7(
       ToolkitFooter,
       {
-        links: [SITES_LINK, ...links, ...LEGAL_LINKS],
-        copyright: /* @__PURE__ */ jsxs5(Fragment, { children: [
-          COPYRIGHT_PREFIX,
-          /* @__PURE__ */ jsx6("a", { className: "adh-footer__brand-link", href: BRAND_HREF, children: BRAND_LABEL })
-        ] }),
-        version: buildVersionLabel(live),
-        trailing: chat ? /* @__PURE__ */ jsx6(FooterChat, {}) : null
+        links: [...links, ...LEGAL_LINKS],
+        copyright: /* @__PURE__ */ jsx7(
+          FooterMenu2,
+          {
+            id: COPYRIGHT_MENU_ID,
+            triggerClassName: "adh-footer__copyright-trigger",
+            label: /* @__PURE__ */ jsxs6(Fragment, { children: [
+              COPYRIGHT_PREFIX,
+              /* @__PURE__ */ jsx7("span", { className: "adh-footer__brand-link", children: BRAND_LABEL })
+            ] }),
+            items: COPYRIGHT_MENU
+          }
+        ),
+        trailing: chat ? /* @__PURE__ */ jsx7(FooterChat, {}) : null
       }
     ),
-    /* @__PURE__ */ jsx6(SitesPopover, {}),
-    /* @__PURE__ */ jsx6(TermsModal, {}),
-    /* @__PURE__ */ jsx6(PrivacyModal, {})
+    /* @__PURE__ */ jsx7(AboutModal, { version: buildVersionLabel(live) }),
+    /* @__PURE__ */ jsx7(SitesPopover, {}),
+    /* @__PURE__ */ jsx7(TermsModal, {}),
+    /* @__PURE__ */ jsx7(PrivacyModal, {})
   ] });
 }
 
@@ -276,6 +396,7 @@ function useChatTheme() {
 export {
   AdhFooter,
   BITBAG_PERSONA,
+  FooterMenu,
   SITES_OVERVIEW_POPOVER_ID,
   SiteFooter,
   createSeededBackend,

@@ -1,7 +1,7 @@
 'use client'
 
-export { AdhFooter } from './AdhFooter'
-export type { AdhFooterProps, FooterLink } from './AdhFooter'
+export { AdhFooter, FooterMenu } from './AdhFooter'
+export type { AdhFooterProps, FooterLink, FooterMenuItem } from './AdhFooter'
 
 // adh's registry-aware footer, merged in from the former `@adh/chrome/footer`. Renamed from that
 // source's `AdhFooter` — this barrel already publishes an `AdhFooter` (the registry-free

@@ -632,12 +632,94 @@
   color: var(--adh-footer-link-color-hover, var(--color-accent));
 }
 
-/* No new colour work: .adh-footer already resolves to 0.7rem / font-mono /
-   letter-spacing 0.04em / --color-text-dim, so anything in the bar is small grey
-   text by inheritance. This exists as a hook, and dims one step past the links
-   (which use --color-text-secondary) so build identity reads as metadata. */
-.adh-footer__version {
-  color: var(--adh-footer-version-color, var(--color-text-dim));
+/* FOOTER MENUS (FooterMenu) — a popover-trigger button and the panel it opens.
+   The trigger reads as one of the bar's links, so it takes their type and colour by
+   inheritance and only drops the button chrome. */
+.adh-footer__menu-host {
+  display: inline-flex;
+}
+
+.adh-footer__menu-trigger,
+.adh-footer__menu-item {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+/* The trigger is the panel's anchor. The name arrives as a custom property set per
+   menu (FooterMenu derives it from the panel's id), because `anchor-name` must be
+   unique per bar and a class cannot be. */
+.adh-footer__menu-trigger {
+  anchor-name: var(--adh-footer-menu-anchor);
+}
+
+/* Closed must be `display:none` explicitly: the open rule below sets `display`, and
+   an author rule beats the UA's `[popover]:not(:popover-open)` — the same trap
+   `.adh-modal` documents. The links inside stay in the DOM, so they are crawlable. */
+.adh-footer__menu:not(:popover-open) {
+  display: none;
+}
+
+/* Where anchor positioning is missing, the menu parks just above the bar, centred —
+   the UA's default for a popover is the middle of the viewport, which reads as a
+   dialog rather than as the bar's own menu. */
+.adh-footer__menu {
+  position: fixed;
+  inset: auto 0 3rem;
+  width: max-content;
+  min-width: 9rem;
+  margin: 0 auto;
+  padding: 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-raised, var(--color-surface));
+  color: inherit;
+  box-shadow: 0 12px 32px -12px color-mix(in srgb, var(--color-shadow, #000) 60%, transparent);
+  font-family: var(--adh-footer-font, var(--font-mono));
+  font-size: var(--adh-footer-size, 0.7rem);
+  letter-spacing: var(--adh-footer-letter-spacing, 0.04em);
+}
+
+.adh-footer__menu:popover-open {
+  display: block;
+}
+
+@supports (position-area: top) {
+  .adh-footer__menu {
+    position-anchor: var(--adh-footer-menu-anchor);
+    inset: auto;
+    margin: 0 0 0.5rem;
+    /* Opens UP from its trigger — the bar is on the bottom edge — and flips sideways
+       rather than running off whichever edge the trigger sits near. */
+    position-area: top span-right;
+    position-try-fallbacks: flip-inline;
+  }
+}
+
+.adh-footer__menu-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adh-footer__menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.3rem;
+}
+
+.adh-footer__menu-item:hover,
+.adh-footer__menu-item:focus-visible {
+  background: var(--color-surface-hover, rgba(255, 255, 255, 0.06));
+  outline: none;
 }
 
 /* Avatar menu — trigger sitting inside the header bar. The whole chip is

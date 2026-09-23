@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AdhFooter } from '../AdhFooter'
+import { AdhFooter, FooterMenu } from '../AdhFooter'
 import { buildVersionLabel } from '../SiteFooter'
 
 // Stub next/link so the (otherwise DOM-invisible) `prefetch` prop can be observed —
@@ -76,49 +76,75 @@ describe('AdhFooter (identity-free)', () => {
     expect(screen.getByRole('link', { name: 'GitHub' }).getAttribute('data-prefetch')).toBe('undefined')
   })
 
-  it('renders the version INSIDE the container, not as a sibling of it', () => {
-    render(<AdhFooter copyright={<span>© 2026</span>} version="v1.0.155 · a73e79b7" />)
-    const footer = screen.getByRole('contentinfo')
-    const container = footer.firstElementChild!
-    // Containment, not textContent: `trailing` renders OUTSIDE the container
-    // and is bitbag's portal mount, so a version routed there would be text-present
-    // but visually absent from the footer bar. This is the assertion that catches it.
-    // Asserted by containment rather than by position, so it survives a reorder
-    // within the bar — where the version sits among its siblings is the next test's
-    // contract, and only that one should fail when the order changes.
-    const version = container.querySelector('.adh-footer__version')!
-    expect(version).not.toBeNull()
-    expect(version.textContent).toBe('v1.0.155 · a73e79b7')
-    expect(version.parentElement).toBe(container)
-  })
-
-  it('renders the version BEFORE the links nav, so Sites/Terms/Privacy sit at the trailing edge', () => {
-    render(
-      <AdhFooter
-        links={[{ label: 'Terms', href: '/terms' }]}
-        version="v1.0.155"
-      />,
-    )
-    const container = screen.getByRole('contentinfo').firstElementChild!
-    const kids = Array.from(container.children).map((el) => el.className)
-    expect(kids.indexOf('adh-footer__version')).toBeLessThan(kids.indexOf('adh-footer__links'))
-    // The links nav is the container's last child — the bar's trailing edge, since
-    // `trailing` (bitbag) renders outside the container entirely.
-    expect(container.lastElementChild!.className).toBe('adh-footer__links')
-  })
-
-  it('renders no version element at all when none is passed', () => {
-    const { container } = render(<AdhFooter copyright={<span>© 2026</span>} />)
+  it('renders no version of its own — the build identity lives in the host\'s About dialog', () => {
+    // The bar used to carry a `.adh-footer__version` slot; SiteFooter moved the version
+    // into About (see AboutModal). A leftover slot would be an empty flex item taking a
+    // gap in a bar that has to fit bitbag's face in its middle on a phone.
+    const { container } = render(<AdhFooter copyright={<span>© 2026</span>} links={[{ label: 'Terms', href: '/terms' }]} />)
     expect(container.querySelector('.adh-footer__version')).toBeNull()
   })
 
-  it('keeps the version inside the container even when trailing is present', () => {
-    render(<AdhFooter version="v1.0.155" trailing={<span>chat</span>} />)
-    const footer = screen.getByRole('contentinfo')
-    // trailing stays the footer's last child (the existing contract); the version
-    // is inside the container, so the two never compete for the same slot.
-    expect(footer.lastElementChild!.textContent).toBe('chat')
-    expect(footer.firstElementChild!.querySelector('.adh-footer__version')).not.toBeNull()
+  it('keeps the links nav as the container\'s last child, so the links sit at the trailing edge', () => {
+    render(<AdhFooter copyright={<span>© 2026</span>} links={[{ label: 'Terms', href: '/terms' }]} trailing={<span>chat</span>} />)
+    const container = screen.getByRole('contentinfo').firstElementChild!
+    expect(container.lastElementChild!.className).toBe('adh-footer__links')
+  })
+})
+
+describe('FooterMenu', () => {
+  const items = [
+    { label: 'About', popoverTarget: 'about-dialog' },
+    { label: 'Terms', href: '/terms', prefetch: false },
+  ]
+
+  it('is a native popover: a popovertarget button and its panel, both in the rendered HTML', () => {
+    // In the markup even while closed — that is what keeps the menu's links crawlable
+    // (server-rendered, hidden by CSS), rather than existing only after a click.
+    const { container } = render(<FooterMenu id="m1" label="© 2026" items={items} />)
+    const trigger = screen.getByRole('button', { name: '© 2026' })
+    expect(trigger.getAttribute('popovertarget')).toBe('m1')
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
+    const panel = container.querySelector('#m1')!
+    expect(panel.getAttribute('popover')).toBe('auto')
+    expect(panel.querySelector('a[href="/terms"]')).not.toBeNull()
+    expect(panel.querySelector('button[popovertarget="about-dialog"]')).not.toBeNull()
+  })
+
+  it('anchors each menu to its own trigger, so two menus in one bar do not share a position', () => {
+    const { container } = render(
+      <>
+        <FooterMenu id="m1" label="One" items={items} />
+        <FooterMenu id="m2" label="Two" items={items} />
+      </>,
+    )
+    const anchors = Array.from(container.querySelectorAll<HTMLElement>('.adh-footer__menu-host')).map((el) =>
+      el.style.getPropertyValue('--adh-footer-menu-anchor'),
+    )
+    expect(anchors).toEqual(['--m1', '--m2'])
+  })
+
+  it('passes prefetch and onSelect through to a link item', () => {
+    let selected = false
+    render(
+      <FooterMenu
+        id="m1"
+        label="Legal"
+        items={[{ label: 'Terms', href: '/terms', prefetch: false, onSelect: (e) => { e.preventDefault(); selected = true } }]}
+      />,
+    )
+    const link = screen.getByRole('link', { name: 'Terms', hidden: true })
+    expect(link.getAttribute('data-prefetch')).toBe('false')
+    link.click()
+    expect(selected).toBe(true)
+  })
+
+  it('renders a menu entry of the bar from a `menuId` link, carrying its className to the host', () => {
+    const { container } = render(
+      <AdhFooter links={[{ label: 'Legal', menuId: 'legal', items, className: 'narrow-only' }]} />,
+    )
+    const host = container.querySelector('.adh-footer__menu-host')!
+    expect(host.classList.contains('narrow-only')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Legal' }).getAttribute('popovertarget')).toBe('legal')
   })
 })
 

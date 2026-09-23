@@ -57,9 +57,9 @@ export declare function buildVersionLabel(live?: {
     sha?: string;
 }): import("react").JSX.Element | null;
 /** adh's footer: the toolkit's identity-free primitive ({@link ToolkitFooter}, published as
- *  `AdhFooter` from this same barrel) plus everything that IS adh — the FishLamp brand
- *  line, the sites popover, the legal modals, and bitbag himself. The copyright is a fixed
- *  brand line, deliberately not per-site.
+ *  `AdhFooter` from this same barrel) plus everything that IS adh — the studio's copyright
+ *  menu, the About dialog, the sites popover, the legal modals, and bitbag himself. The
+ *  copyright is a fixed brand line, deliberately not per-site.
  *
  *  Named `SiteFooter` rather than `AdhFooter`: this barrel already publishes an `AdhFooter`
  *  — the registry-free primitive this component wraps. The two are unrelated components

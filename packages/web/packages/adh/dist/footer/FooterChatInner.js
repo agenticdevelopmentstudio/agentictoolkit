@@ -54,7 +54,7 @@ function FooterChatInner() {
   const [chatTheme] = useChatTheme();
   if (typeof document === "undefined") return null;
   return createPortal(
-    /* @__PURE__ */ jsx(BitbagDock, { className: "adh-footer__chat", theme: chatTheme ?? void 0 }),
+    /* @__PURE__ */ jsx(BitbagDock, { className: "adh-footer__chat", theme: chatTheme ?? void 0, rest: "avatar" }),
     document.body
   );
 }
