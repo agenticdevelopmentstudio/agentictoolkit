@@ -1,7 +1,7 @@
 ---
 id: e36ff99d-0ebd-42ca-87f0-2881a8bfedea
 title: Hierarchical Category Browser
-domain: agenticdeveloperhub://recipes/hierarchical-category-browser
+domain: agentictoolkit://recipes/hierarchical-category-browser
 type: recipe
 version: 1.1.0
 status: draft
@@ -23,15 +23,15 @@ tags:
 - master-detail
 - taxonomy
 ingredients:
-- agenticdeveloperhub://recipes/category-picker
+- agenticdevelopertoolkit://recipes/category-picker-dialog
 depends-on:
-- agenticdeveloperhub://recipes/hierarchical-topic-detail
+- agenticdevelopertoolkit://recipes/hierarchical-topic-detail
 related:
-- agenticdeveloperhub://recipes/hierarchical-topic-detail
-- agenticdeveloperhub://recipes/topic-detail
-- agenticdeveloperhub://recipes/category-picker
-- agenticdeveloperhub://recipes/list-chooser
-- agenticdeveloperhub://recipes/entity-chooser
+- agenticdevelopertoolkit://recipes/hierarchical-topic-detail
+- agenticdevelopertoolkit://recipes/topic-detail
+- agenticdevelopertoolkit://recipes/category-picker-dialog
+- agenticdevelopertoolkit://recipes/list-chooser
+- agenticdevelopertoolkit://recipes/entity-chooser
 references: []
 ---
 
@@ -77,7 +77,7 @@ about the rail itself differs between them (see Design Decisions).
 
 | Name | Domain | Role | Required | Configuration |
 |---|---|---|---|---|
-| Category Picker | agenticdeveloperhub://recipes/category-picker | The dialog behind BOTH place-picking gear actions — browses the folded forest and returns a place to file the selected category under. | yes | Move: `confirmLabel="Move"`, `allowRoot`, `rootLabel` = "Top level" or "Remove from “<parent>”" (see `must-not-call-an-unfiling-a-rooting`), `disabledIds` = the moved category + its own descendants. Also file: `confirmLabel="File"`, `initialSelectedId={null}`, NO `allowRoot` (a root is a category with no parents, so there is nothing to add), `disabledIds` = the category + its descendants + every parent it is ALREADY filed under. |
+| Category Picker | agenticdevelopertoolkit://recipes/category-picker-dialog | The dialog behind BOTH place-picking gear actions — browses the folded forest and returns a place to file the selected category under. | yes | Move: `confirmLabel="Move"`, `allowRoot`, `rootLabel` = "Top level" or "Remove from “<parent>”" (see `must-not-call-an-unfiling-a-rooting`), `disabledIds` = the moved category + its own descendants. Also file: `confirmLabel="File"`, `initialSelectedId={null}`, NO `allowRoot` (a root is a category with no parents, so there is nothing to add), `disabledIds` = the category + its descendants + every parent it is ALREADY filed under. |
 
 The other three gear dialogs (Rename, Delete, and the one-field Add) are plain
 compositions of the shared `Dialog`/`Input`/`DialogActions`/`AlertModal`

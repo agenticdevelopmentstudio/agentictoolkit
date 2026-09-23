@@ -1,7 +1,7 @@
 ---
 id: d3a0b65f-92c0-43c1-b04c-77638eb72044
 title: ADH Offline Sync Client
-domain: agenticdeveloperhub://recipes/adh-offline-sync-client
+domain: agentictoolkit://recipes/adh-offline-sync-client
 type: ingredient
 category: engine
 version: 1.1.0
@@ -23,7 +23,7 @@ tags:
   - adh
 depends-on: []
 related:
-  - agenticdeveloperhub://recipes/offline-sync-client
+  - agenticdevelopertoolkit://recipes/offline-sync-client
 references:
   - src/adh/src/sync/wire.ts (adhbackend)
   - src/adh/src/sync/registry.ts (adhbackend)
@@ -35,7 +35,7 @@ references:
 # ADH Offline Sync Client
 
 > **Two recipes, one contract.** The public `offline-sync-client`
-> (`agenticdeveloperhub://recipes/offline-sync-client`, in the agenticdevelopertoolkit
+> (`agenticdevelopertoolkit://recipes/offline-sync-client`, in the agenticdevelopertoolkit
 > repo — see `related` above) states the same contract as a *pattern*, for readers with no
 > access to adh — it names no files, because that repo holds no implementation of it.
 > **This** is the adh-concrete version: every path below resolves in this repo or in

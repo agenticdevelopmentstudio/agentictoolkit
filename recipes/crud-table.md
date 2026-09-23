@@ -1,7 +1,7 @@
 ---
 id: ec64b22b-8a25-431d-8866-b7a01acd91fe
 title: CrudTable
-domain: agenticdeveloperhub://recipes/crud-table
+domain: agentictoolkit://recipes/crud-table
 type: ingredient
 version: 1.0.0
 status: draft
@@ -22,7 +22,7 @@ tags:
 - list
 depends-on: []
 related:
-- agenticdeveloperhub://recipes/crud-record-form
+- agentictoolkit://recipes/crud-record-form
 references: []
 ---
 

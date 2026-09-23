@@ -1,7 +1,7 @@
 ---
 id: f2d56415-ac36-4a27-bee5-b447c4186513
 title: SiteMenu
-domain: agenticdeveloperhub://recipes/site-menu
+domain: agentictoolkit://recipes/site-menu
 type: recipe
 version: 1.0.0
 status: draft
@@ -59,7 +59,7 @@ the user actually landed on and deep-links back to each.
 | Name | Domain | Role | Required | Configuration |
 |---|---|---|---|---|
 | NavigationPopover | `@agentic-toolkit/adh/header` | Popover surface, search box, keyboard navigation, row rendering, flyout submenus | yes | Consumes `PopoverEntry[]` with icon + inline-subitem support |
-| SiteWordmark | agenticdeveloperhub://recipes/site-wordmark | The header trigger that opens the menu | yes | Unchanged |
+| SiteWordmark | agentictoolkit://recipes/site-wordmark | The header trigger that opens the menu | yes | Unchanged |
 | menu-icons map | `@agentic-toolkit/adh/header` `menu-icons.ts` (ADH vocabulary — it is keyed by `SiteId`) | Single source of truth for every row's icon — keyed by SiteId, in-hub route path, or chrome key | yes | `MENU_ICONS` record + `menuIcon(key)` resolver |
 | lucide-react icons | (library) | The icon glyphs | yes | Only icons already used elsewhere on the platform are reused where one exists |
 | `useWorkspaces` | `@/api/workspaces` (hub) | Supplies the Workspaces flyout entries | yes (logged-in) | react-query; `{ slug, name, type }[]` |

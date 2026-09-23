@@ -1,7 +1,7 @@
 ---
 id: 3dc693ab-28e4-4624-9b2d-8dc81f81e037
 title: CrudRecordForm
-domain: agenticdeveloperhub://recipes/crud-record-form
+domain: agentictoolkit://recipes/crud-record-form
 type: recipe
 version: 1.0.0
 status: draft
@@ -21,10 +21,10 @@ tags:
 - metadata
 - validation
 ingredients:
-- agenticdeveloperhub://recipes/field
+- agenticdevelopertoolkit://recipes/field
 depends-on: []
 related:
-- agenticdeveloperhub://recipes/crud-table
+- agentictoolkit://recipes/crud-table
 references: []
 ---
 
@@ -56,7 +56,7 @@ creates/edits one CRUD row without hand-authored fields.
 
 | Name | Domain | Role | Required | Configuration |
 |---|---|---|---|---|
-| Field | agenticdeveloperhub://recipes/field | Label + optional hint wrapper around each non-boolean control | yes | `label` = `name` (+ ` *` when required); `hint="JSON"` for object/array/unknown columns |
+| Field | agenticdevelopertoolkit://recipes/field | Label + optional hint wrapper around each non-boolean control | yes | `label` = `name` (+ ` *` when required); `hint="JSON"` for object/array/unknown columns |
 
 Composed shared primitives without their own recipe domains: `CrudFieldInput` (the
 per-type control picker — `Select`/`Checkbox`/`Textarea`/`Input`), `Button`

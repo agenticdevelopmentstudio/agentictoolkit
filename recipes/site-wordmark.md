@@ -1,7 +1,7 @@
 ---
 id: 21cbbc1c-38a0-4e7a-8ca0-06e2f29429f5
 title: SiteWordmark
-domain: agenticdeveloperhub://recipes/site-wordmark
+domain: agentictoolkit://recipes/site-wordmark
 type: ingredient
 version: 1.0.0
 status: draft

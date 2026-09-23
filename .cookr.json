@@ -1,5 +1,6 @@
 {
   "recipes": "recipes",
+  "scheme": "agentictoolkit",
   "roots": [
     {"path": "packages/web/packages/adh-ui/src/components", "tier": "adh-ui", "platform": "web"},
     {"path": "packages/web/packages/adh-ui/src/blocks",     "tier": "adh-ui", "platform": "web"},
