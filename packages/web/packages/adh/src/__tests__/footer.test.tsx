@@ -59,23 +59,31 @@ describe('adh SiteFooter', () => {
     expect(container.querySelector('.adh-footer__container .adh-footer__version')).toBeNull()
   })
 
-  it('renders Terms and Privacy both inline (wide) and inside a Legal menu (narrow), hrefs intact', () => {
-    // Both forms are in the HTML at every width and CSS picks one — so the server
-    // page is right on a phone without waiting for a client measurement.
+  it('folds Terms and Privacy into a Legal menu at every width, keeping the inline pair only as the no-popover fallback', () => {
+    // Both forms are in the server HTML, hrefs intact, and CSS decides: the Legal menu
+    // everywhere, the inline pair only where the Popover API is missing.
     const { container } = render(<SiteFooter />)
     const nav = screen.getByRole('navigation', { name: 'Footer' })
-    const wide = Array.from(nav.querySelectorAll('.adh-footer__link--wide')).map((a) => [
+    const fallback = Array.from(nav.querySelectorAll('.adh-footer__link--no-popover')).map((a) => [
       a.textContent,
       a.getAttribute('href'),
     ])
-    expect(wide).toEqual([
+    expect(fallback).toEqual([
       ['Terms', '/terms'],
       ['Privacy', '/privacy'],
     ])
-    const legal = container.querySelector('.adh-footer__link--narrow')!
+    const legal = container.querySelector('.adh-footer__legal')!
     expect(legal.querySelector('button')!.textContent).toBe('Legal')
     const inMenu = Array.from(legal.querySelectorAll('a')).map((a) => a.getAttribute('href'))
     expect(inMenu).toEqual(['/terms', '/privacy'])
+  })
+
+  it('reserves bitbag\'s resting slot only when it mounts him', () => {
+    const { container, rerender } = render(<SiteFooter />)
+    expect(container.querySelector('footer')).toHaveClass('adh-footer', 'adh-footer--with-chat')
+    rerender(<SiteFooter chat={false} />)
+    expect(container.querySelector('footer')).toHaveClass('adh-footer')
+    expect(container.querySelector('footer')).not.toHaveClass('adh-footer--with-chat')
   })
 
   it('keeps passed links ahead of the legal entries', () => {

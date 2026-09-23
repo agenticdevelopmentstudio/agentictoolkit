@@ -1101,7 +1101,7 @@ function AdhHeader({
 
 // src/footer/AdhFooter.tsx
 import Link4 from "next/link";
-import { ChevronUp } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { jsx as jsx10, jsxs as jsxs7 } from "react/jsx-runtime";
 function closeContainingMenu(el) {
   const menu = el.closest("[popover]");
@@ -1130,7 +1130,7 @@ function FooterMenu({
         className: `${triggerClassName} adh-footer__menu-trigger`,
         children: [
           label,
-          /* @__PURE__ */ jsx10(ChevronUp, { className: "adh-footer__menu-caret", "aria-hidden": true })
+          /* @__PURE__ */ jsx10(ChevronsUpDown, { className: "adh-footer__menu-caret", "aria-hidden": true })
         ]
       }
     ),
@@ -1159,8 +1159,8 @@ function FooterMenu({
     ) }, "popoverTarget" in item ? `popover:${item.popoverTarget}` : `href:${item.href}`)) }) })
   ] });
 }
-function AdhFooter({ links = [], copyright, trailing }) {
-  return /* @__PURE__ */ jsxs7("footer", { className: "adh-footer", role: "contentinfo", children: [
+function AdhFooter({ links = [], copyright, trailing, className }) {
+  return /* @__PURE__ */ jsxs7("footer", { className: ["adh-footer", className].filter(Boolean).join(" "), role: "contentinfo", children: [
     /* @__PURE__ */ jsxs7("div", { className: "adh-footer__container", children: [
       copyright && /* @__PURE__ */ jsx10("span", { className: "adh-footer__copyright", children: copyright }),
       links.length > 0 && /* @__PURE__ */ jsx10("nav", { className: "adh-footer__links", "aria-label": "Footer", children: links.map(

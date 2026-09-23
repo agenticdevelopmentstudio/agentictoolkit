@@ -73,15 +73,16 @@ const PRIVACY: FooterMenuItem = {
 }
 
 // Terms + Privacy appear on EVERY footer — owned here so individual sites can't drop
-// them. Twice, deliberately: inline on a wide bar, and folded into one "Legal" menu on a
-// narrow one, where the bar is shared with bitbag in its middle and two links plus a
-// site's own no longer fit either side of him. Which one shows is CSS (adh-site.css's
-// `--wide` / `--narrow` classes), not a width read in JS, so the server HTML is right at
-// every width and carries both hrefs either way.
+// them. Folded into one "Legal" menu at every width: inline they cost the bar the room
+// the studio's full name needs on a phone, and a bar that changed shape at a breakpoint
+// read as two different footers. The inline pair is still rendered, as the fallback for
+// a browser without the Popover API — where the Legal menu is dead and a crowded bar
+// beats an unreachable Terms page. Which one shows is CSS (adh-site.css), so the server
+// HTML carries both hrefs either way.
 const LEGAL_LINKS: FooterLink[] = [
-  { ...TERMS, className: 'adh-footer__link--wide' },
-  { ...PRIVACY, className: 'adh-footer__link--wide' },
-  { label: 'Legal', menuId: LEGAL_MENU_ID, items: [TERMS, PRIVACY], className: 'adh-footer__link--narrow' },
+  { ...TERMS, className: 'adh-footer__link--no-popover' },
+  { ...PRIVACY, className: 'adh-footer__link--no-popover' },
+  { label: 'Legal', menuId: LEGAL_MENU_ID, items: [TERMS, PRIVACY], className: 'adh-footer__legal' },
 ]
 
 /** The footer's build identity: `v1.0.155 · a73e79b7`, or null when neither field exists.
@@ -131,12 +132,13 @@ export function SiteFooter({ links = [], chat = true, live }: SiteFooterProps) {
   // bitbag is rendered here but does NOT live here: FooterChatInner portals him to
   // `document.body` and he fixes himself to the viewport's bottom edge, so the
   // primitive's `trailing` slot is his mount point and nothing else. At rest he is his
-  // face alone, sitting in the bar's empty middle — which is why the narrow bar folds
-  // its legal links into one menu and drops the studio's name from the copyright's
-  // label (adh-site.css). For where he actually is, read bitbag-dock.css.
+  // face alone, parked in the bar's lower-right corner — and `adh-footer--with-chat` is
+  // what makes the bar leave that corner empty for him (adh-site.css). Only when he is
+  // mounted: a chat-less footer has no one to make room for.
   return (
     <>
       <ToolkitFooter
+        className={chat ? 'adh-footer--with-chat' : undefined}
         links={[...links, ...LEGAL_LINKS]}
         copyright={
           <FooterMenu

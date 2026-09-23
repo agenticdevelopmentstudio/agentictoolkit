@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ChevronUp } from 'lucide-react'
+import { ChevronsUpDown } from 'lucide-react'
 import type { CSSProperties, MouseEvent, ReactNode } from 'react'
 
 /** One entry of a {@link FooterMenu}: a real link, or a trigger for another popover. */
@@ -38,6 +38,9 @@ export type AdhFooterProps = {
   links?: FooterLink[]
   copyright?: ReactNode
   trailing?: ReactNode
+  /** Extra classes for the `<footer>`, for a host whose `trailing` needs the bar to make
+   *  room — adh's SiteFooter reserves bitbag's resting slot with one. */
+  className?: string
 }
 
 /** Close the menu an item sits in. A menu entry that opens something else — a modal, a
@@ -91,9 +94,12 @@ export function FooterMenu({
       >
         {label}
         {/* Says "this opens a menu" — without it the copyright line read as plain text and
-            Legal as a link to a page called Legal. UP, because every footer menu opens
-            upward off the bottom edge (see .adh-footer__menu's position-area). */}
-        <ChevronUp className="adh-footer__menu-caret" aria-hidden />
+            Legal as a link to a page called Legal. The up/down pair is the pop-up button's
+            own glyph (macOS's NSPopUpButton): a lone chevron reads as a disclosure
+            triangle, which expands in place rather than opening a menu. It is also the
+            menu's anchor (adh-components.css), so the menu opens beside it rather than
+            off the far end of a long label like the copyright. */}
+        <ChevronsUpDown className="adh-footer__menu-caret" aria-hidden />
       </button>
       <div id={id} popover="auto" className="adh-footer__menu">
         <ul className="adh-footer__menu-list">
@@ -130,9 +136,9 @@ export function FooterMenu({
   )
 }
 
-export function AdhFooter({ links = [], copyright, trailing }: AdhFooterProps) {
+export function AdhFooter({ links = [], copyright, trailing, className }: AdhFooterProps) {
   return (
-    <footer className="adh-footer" role="contentinfo">
+    <footer className={['adh-footer', className].filter(Boolean).join(' ')} role="contentinfo">
       <div className="adh-footer__container">
         {copyright && <span className="adh-footer__copyright">{copyright}</span>}
         {links.length > 0 && (

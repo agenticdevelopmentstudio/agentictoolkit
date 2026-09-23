@@ -35,9 +35,11 @@ import '@agentic-toolkit/bitbag/css/bitbag-dock.css'
  *
  * `rest="avatar"` is the one way he differs from fishlamp's mounting, and it is a
  * difference of CONTEXT, not a fork: here he shares the bottom edge with the footer
- * bar, so at rest he is his face alone, centred in the bar, and his chat opens under
- * him only when he is tapped. His resting entry line used to lie across the middle
- * of the bar, over its links, and made every page reserve 6rem for it.
+ * bar, so at rest he is his face alone, in the slot at the bar's right end, and when
+ * he is tapped he grows back to the centre with his chat opening under him (the
+ * corner is adh-site.css's, a translate off the dock's centre). His resting entry
+ * line used to lie across the middle of the bar, over its links, and made every page
+ * reserve 6rem for it.
  *
  * PORTALLED TO `document.body`, not rendered in place. The dock positions itself
  * (`position: fixed`, bottom-centred, riding the keyboard — see bitbag-dock.css),

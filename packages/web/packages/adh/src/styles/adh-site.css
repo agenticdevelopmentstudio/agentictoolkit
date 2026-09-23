@@ -59,7 +59,12 @@
 /* The copyright line — the trigger of the footer's About / Sites menu (SiteFooter).
    The studio's name in it is tinted with the site's highlight (accent) colour so it
    reads as the brand; the class keeps its old `-link` name because the theme editor
-   targets it (theme-editor/areas.tsx), though the link itself now lives in About. */
+   targets it (theme-editor/areas.tsx), though the link itself now lives in About.
+
+   Never wrapped, at any width. A narrow bar once let it wrap to keep clear of bitbag,
+   and the studio's name broken over two lines read as broken; before that it was cut
+   to a bare "© 2026", which read as clipped. The bar's shape below is what makes the
+   one line fit instead. */
 .adh-footer__copyright {
   white-space: nowrap;
 }
@@ -79,37 +84,62 @@
   color: var(--adh-footer-brand-color-hover, var(--color-accent-bright));
 }
 
-/* THE NARROW BAR: bitbag rests in its middle (FooterChatInner docks him avatar-only),
-   so each side has to fit in half a phone. Terms + Privacy fold into one "Legal" menu
-   — SiteFooter renders both forms and this picks one, so the server HTML is right at
-   every width. 40rem (640px — a media query's `rem` is the browser default, whatever
-   the page's root size) is roughly where the full copyright line on the left and the
-   Legal links on the right stop clearing his resting face in the middle.
+/* THE BAR'S SHAPE — one shape at every width: the copyright on the left; on the right
+   the Legal menu (SiteFooter folds Terms + Privacy into it everywhere) and, past it,
+   bitbag's resting slot. Folding the links and moving him out of the bar's middle is
+   what lets the studio's full name fit on one line on a phone.
 
-   The copyright keeps the studio's name here and WRAPS it, capped at the half-bar left
-   of his face. It used to drop the name instead, leaving a bare "© 2026" that read as
-   the name clipped off — the name is the brand, and the line is the About menu's
-   trigger, so it is the one thing on the bar that should say who this is. The cap is
-   half the bar's content box less his half-width plus a gap; the percentage resolves
-   against the container's content box, so the padding cancels out. */
-.adh-footer__link--narrow {
+   The inline Terms / Privacy pair is the no-popover fallback, shown only by the
+   @supports block further down. */
+.adh-footer__link--no-popover {
   display: none;
 }
 
-@media (max-width: 40rem) {
-  .adh-footer__link--wide {
-    display: none;
+/* HIS SLOT. bitbag rests in the bar's lower-right corner, just past Legal — and the
+   bar reserves the room for him in its right padding, so nothing it lays out can end
+   up under him. SiteFooter sets `--with-chat` only when it mounts him, so a footer
+   without chat keeps its plain padding. The slot is his resting box's full width (not
+   just the visible face): that box is hit-testable (see the z-index note below), so a
+   narrower slot would let it sit over Legal's right edge and take its clicks.
+
+   On :root, not `.adh-footer`: the dock rule further down parks him in the slot's
+   centre from the same two numbers, and the dock is portaled to `document.body`, out
+   from under the footer, so it could not inherit them from there. */
+:root {
+  --adh-footer-pad-x: 1.5rem;
+  --adh-footer-rest-slot: 4.25rem;
+}
+
+.adh-footer--with-chat .adh-footer__container {
+  padding-right: calc(var(--adh-footer-pad-x) + var(--adh-footer-rest-slot));
+}
+
+/* A small phone: the edge padding gives up a third so the one-line bar still fits at
+   375px (iPhone mini / SE). */
+@media (max-width: 24rem) {
+  :root {
+    --adh-footer-pad-x: 1rem;
   }
-  .adh-footer__link--narrow {
-    display: inline-flex;
+  .adh-footer__container {
+    padding-left: var(--adh-footer-pad-x);
+    padding-right: var(--adh-footer-pad-x);
   }
-  .adh-footer__copyright {
-    white-space: normal;
-    max-width: calc(50% - var(--adh-footer-rest-clearance, 2.5rem));
-    line-height: 1.35;
+}
+
+/* The smallest phones (320px — the first iPhone SE). Padding alone cannot fit the line
+   there: measured, Legal wrapped to a second row and doubled the bar's height. So the
+   type steps down and loses its tracking, and the gaps tighten — the name still reads,
+   whole, on one line. */
+@media (max-width: 21rem) {
+  :root {
+    --adh-footer-pad-x: 0.75rem;
   }
-  .adh-footer__copyright .adh-footer__menu-trigger {
-    text-align: left;
+  .adh-footer {
+    --adh-footer-size: 0.6rem;
+    --adh-footer-letter-spacing: 0;
+  }
+  .adh-footer__container {
+    column-gap: 0.5rem;
   }
 }
 
@@ -172,24 +202,41 @@
   z-index: 51;
 }
 
-/* NO ROOM IS RESERVED FOR HIM ANY MORE — not in the bar, not under the page.
-   Both reservations were for his resting ENTRY LINE: a 560px composer fixed across
-   the bottom edge, which covered the bar's links below 64rem (so the bar padded
-   itself 4.5rem tall to lift them clear) and overhung every page's last row (so
-   `.adh-app-shell__main` padded itself 6rem, and viewport-filling consoles had to
-   opt back out with `data-fills-viewport`). FooterChatInner now docks him with
-   `rest="avatar"`: resting he is his face alone, laid out at half size, and that
-   box sits inside the footer bar's own height, centred in its empty middle. His
-   chat only exists while he is being talked to, under the scrim that dims the
-   page anyway. Nothing overhangs, so nothing is paid for. */
+/* ROOM IS RESERVED FOR HIS FACE, AND ONLY FOR HIS FACE — the slot at the bar's right
+   end (above). What used to be reserved was his resting ENTRY LINE: a 560px composer
+   fixed across the bottom edge, which covered the bar's links below 64rem (so the bar
+   padded itself 4.5rem tall to lift them clear) and overhung every page's last row (so
+   `.adh-app-shell__main` padded itself 6rem, and viewport-filling consoles had to opt
+   back out with `data-fills-viewport`). FooterChatInner now docks him with
+   `rest="avatar"`: resting he is his face alone, laid out at half size, inside the
+   bar's own height. His chat only exists while he is being talked to, under the scrim
+   that dims the page anyway. Nothing overhangs, so nothing under the page is paid for.
 
-/* …but his resting face sat on the bar's bottom edge, reading as cut off rather than
-   centred in it. Lifted 6px over bitbag's own 0.1rem rest margin. adh's rule, not
-   bitbag's: the lift is about THIS bar's height, and the dock knows nothing of the
-   bar. Both of bitbag-dock.css's resting selectors are matched and each is outranked
-   by the host class, because that sheet lands later (see the z-index note above). */
+   WHERE HE RESTS: the slot's centre, bottom-right. The dock is a full-width column that
+   centres him, and waking must bring him back to that centre — his chat opens under
+   him there — so the corner is a TRANSLATE off the centre, not a different layout.
+   That is what makes the wake a single motion: bitbag-dock.css drops the resting
+   transform to `none` and grows his width, both on its 0.34s curve, so he slides from
+   the corner to the middle as he grows. A layout move (margin-left:auto, a
+   justify change) would jump instead, because neither animates.
+
+   The offset is half the viewport less the slot's centre from the right edge. `vw`,
+   not container units: `container-type` would put layout containment on the dock,
+   which makes it the containing block for the fixed scrim its ::before paints over the
+   whole viewport — the scrim would shrink to the dock's own box. `100vw` counts a
+   classic (non-overlay) scrollbar the dock does not span, so on such a desktop he sits
+   up to half a scrollbar's width further right; the slot's 2px of slack does not cover
+   that, but the error is toward the screen edge, away from Legal.
+
+   His resting face also sat on the bar's bottom edge, reading as cut off rather than
+   centred in it: lifted 6px over bitbag's own 0.1rem rest margin. Both of
+   bitbag-dock.css's resting selectors are matched and each is outranked by the host
+   class, because that sheet lands later (see the z-index note above). adh's rule, not
+   bitbag's: the bar and its slot are this footer's, and the dock knows nothing of
+   either. */
 .adh-footer__chat.bb-dock--resting .bb-dock__avatar,
 .adh-footer__chat.bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
+  transform: translateX(calc(50vw - var(--adh-footer-pad-x) - var(--adh-footer-rest-slot) / 2));
   margin-bottom: calc(0.1rem + 6px);
 }
 
@@ -435,13 +482,13 @@
   .adh-modal,
   .adh-footer__sites-trigger,
   .adh-footer__menu,
-  .adh-footer__link--narrow {
+  .adh-footer__legal {
     display: none;
   }
-  /* Without popovers the Legal menu is dead, so the plain links stay at every width —
-     a crowded bar beats an unreachable Terms page. Later than the narrow-bar rule and
+  /* Without popovers the Legal menu is dead, so the plain links come back — a crowded
+     bar beats an unreachable Terms page. Later than the rule that hides them and
      equally specific, so it wins. */
-  .adh-footer__link--wide {
+  .adh-footer__link--no-popover {
     display: revert;
   }
 }

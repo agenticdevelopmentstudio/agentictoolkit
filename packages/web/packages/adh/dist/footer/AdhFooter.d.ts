@@ -44,6 +44,9 @@ export type AdhFooterProps = {
     links?: FooterLink[];
     copyright?: ReactNode;
     trailing?: ReactNode;
+    /** Extra classes for the `<footer>`, for a host whose `trailing` needs the bar to make
+     *  room — adh's SiteFooter reserves bitbag's resting slot with one. */
+    className?: string;
 };
 /**
  * A footer popup menu, on the native Popover API: a `popovertarget` button and the panel it
@@ -64,5 +67,5 @@ export declare function FooterMenu({ id, label, items, ariaLabel, className, tri
     className?: string;
     triggerClassName?: string;
 }): import("react").JSX.Element;
-export declare function AdhFooter({ links, copyright, trailing }: AdhFooterProps): import("react").JSX.Element;
+export declare function AdhFooter({ links, copyright, trailing, className }: AdhFooterProps): import("react").JSX.Element;
 //# sourceMappingURL=AdhFooter.d.ts.map

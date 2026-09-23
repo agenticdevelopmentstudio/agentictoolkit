@@ -4,7 +4,7 @@
 
 // src/footer/AdhFooter.tsx
 import Link from "next/link";
-import { ChevronUp } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { jsx, jsxs } from "react/jsx-runtime";
 function closeContainingMenu(el) {
   const menu = el.closest("[popover]");
@@ -33,7 +33,7 @@ function FooterMenu({
         className: `${triggerClassName} adh-footer__menu-trigger`,
         children: [
           label,
-          /* @__PURE__ */ jsx(ChevronUp, { className: "adh-footer__menu-caret", "aria-hidden": true })
+          /* @__PURE__ */ jsx(ChevronsUpDown, { className: "adh-footer__menu-caret", "aria-hidden": true })
         ]
       }
     ),
@@ -62,8 +62,8 @@ function FooterMenu({
     ) }, "popoverTarget" in item ? `popover:${item.popoverTarget}` : `href:${item.href}`)) }) })
   ] });
 }
-function AdhFooter({ links = [], copyright, trailing }) {
-  return /* @__PURE__ */ jsxs("footer", { className: "adh-footer", role: "contentinfo", children: [
+function AdhFooter({ links = [], copyright, trailing, className }) {
+  return /* @__PURE__ */ jsxs("footer", { className: ["adh-footer", className].filter(Boolean).join(" "), role: "contentinfo", children: [
     /* @__PURE__ */ jsxs("div", { className: "adh-footer__container", children: [
       copyright && /* @__PURE__ */ jsx("span", { className: "adh-footer__copyright", children: copyright }),
       links.length > 0 && /* @__PURE__ */ jsx("nav", { className: "adh-footer__links", "aria-label": "Footer", children: links.map(
@@ -293,9 +293,9 @@ var PRIVACY = {
   prefetch: false
 };
 var LEGAL_LINKS = [
-  { ...TERMS, className: "adh-footer__link--wide" },
-  { ...PRIVACY, className: "adh-footer__link--wide" },
-  { label: "Legal", menuId: LEGAL_MENU_ID, items: [TERMS, PRIVACY], className: "adh-footer__link--narrow" }
+  { ...TERMS, className: "adh-footer__link--no-popover" },
+  { ...PRIVACY, className: "adh-footer__link--no-popover" },
+  { label: "Legal", menuId: LEGAL_MENU_ID, items: [TERMS, PRIVACY], className: "adh-footer__legal" }
 ];
 function buildVersionLabel(live) {
   const version = live?.version ?? process.env.NEXT_PUBLIC_ADH_SITE_VERSION ?? "";
@@ -309,6 +309,7 @@ function SiteFooter({ links = [], chat = true, live }) {
     /* @__PURE__ */ jsx7(
       ToolkitFooter,
       {
+        className: chat ? "adh-footer--with-chat" : void 0,
         links: [...links, ...LEGAL_LINKS],
         copyright: /* @__PURE__ */ jsx7(
           FooterMenu2,

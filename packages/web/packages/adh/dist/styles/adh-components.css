@@ -651,18 +651,17 @@
   cursor: pointer;
 }
 
-/* The trigger is the panel's anchor. The name arrives as a custom property set per
-   menu (FooterMenu derives it from the panel's id), because `anchor-name` must be
-   unique per bar and a class cannot be. */
-.adh-footer__menu-trigger {
-  anchor-name: var(--adh-footer-menu-anchor);
-}
+/* The trigger's popup indicator (FooterMenu), dimmed like the header's caret so the
+   label stays the thing you read.
 
-/* The trigger's popup indicator (FooterMenu). Inline, not a flex sibling, so when a
-   narrow bar wraps the label it rides the end of the LAST line, beside the words it
-   belongs to, rather than centring itself against the whole block. Dimmed like the
-   header's caret so the label stays the thing you read. */
+   It is also the panel's ANCHOR — not the whole trigger. Anchored to the trigger, the
+   copyright's menu opened off the far end of "© 2026 Agentic Development Studio", a
+   whole label's width from the caret that says it opens a menu, and read as some other
+   control's. The name arrives as a custom property set per menu (FooterMenu derives it
+   from the panel's id), because `anchor-name` must be unique per bar and a class
+   cannot be. */
 .adh-footer__menu-caret {
+  anchor-name: var(--adh-footer-menu-anchor);
   display: inline-block;
   width: 1em;
   height: 1em;
@@ -707,8 +706,9 @@
     position-anchor: var(--adh-footer-menu-anchor);
     inset: auto;
     margin: 0 0 0.5rem;
-    /* Opens UP from its trigger — the bar is on the bottom edge — and flips sideways
-       rather than running off whichever edge the trigger sits near. */
+    /* Opens UP from its caret — the bar is on the bottom edge — starting at the caret
+       and running right; near the right edge (Legal) it flips to end at the caret
+       instead of running off the screen. */
     position-area: top span-right;
     position-try-fallbacks: flip-inline;
   }

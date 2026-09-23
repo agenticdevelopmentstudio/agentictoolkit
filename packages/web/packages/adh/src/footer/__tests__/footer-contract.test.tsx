@@ -79,9 +79,16 @@ describe('AdhFooter (identity-free)', () => {
   it('renders no version of its own — the build identity lives in the host\'s About dialog', () => {
     // The bar used to carry a `.adh-footer__version` slot; SiteFooter moved the version
     // into About (see AboutModal). A leftover slot would be an empty flex item taking a
-    // gap in a bar that has to fit bitbag's face in its middle on a phone.
+    // gap in a bar that has to fit the studio's full name on one line on a phone.
     const { container } = render(<AdhFooter copyright={<span>© 2026</span>} links={[{ label: 'Terms', href: '/terms' }]} />)
     expect(container.querySelector('.adh-footer__version')).toBeNull()
+  })
+
+  it('adds a host\'s className to the <footer>, keeping its own', () => {
+    // adh's SiteFooter reserves bitbag's resting slot through this; the primitive knows
+    // nothing of bitbag, so the room is asked for by class, not by a prop about him.
+    render(<AdhFooter className="adh-footer--with-chat" />)
+    expect(screen.getByRole('contentinfo')).toHaveClass('adh-footer', 'adh-footer--with-chat')
   })
 
   it('keeps the links nav as the container\'s last child, so the links sit at the trailing edge', () => {
@@ -119,7 +126,7 @@ describe('FooterMenu', () => {
     expect(caret).toHaveAttribute('aria-hidden')
   })
 
-  it('anchors each menu to its own trigger, so two menus in one bar do not share a position', () => {
+  it('anchors each menu to its own caret, so two menus in one bar do not share a position', () => {
     const { container } = render(
       <>
         <FooterMenu id="m1" label="One" items={items} />
