@@ -27,10 +27,8 @@ extension ComposableSettings {
     @MainActor
     open class SettingsWindow: WindowController<SplitViewController>, NSToolbarDelegate {
 
-        private static let windowID = "settings"
-
-        public init() {
-            super.init(windowID: Self.windowID, contentViewController: SplitViewController())
+        public init(windowID: String = "settings") {
+            super.init(windowID: windowID, contentViewController: SplitViewController())
             self.windowTitle = "Settings"
             // `.fullSizeContentView` is what lets the sidebar run the *whole*
             // height of the window, with the close/minimise/zoom buttons sitting
@@ -149,7 +147,7 @@ extension ComposableSettings {
             window.titlebarSeparatorStyle = .none
 
             viewController?.onNavigationChange = { [weak self] in
-                self?.updateToolbarState()
+                self?.navigationDidChange()
             }
             // The detail pane's floating `?` stands down now that the titlebar
             // carries one: two buttons reporting one drawer is one too many.
@@ -158,6 +156,16 @@ extension ComposableSettings {
             viewController?.onHelpVisibilityChange = { [weak self] in
                 self?.updateHelpButton()
             }
+            updateToolbarState()
+        }
+
+        /// The selection or the trail moved. The base keeps the toolbar in step;
+        /// a subclass overrides to learn about the move as well.
+        ///
+        /// A subclass assigning `onNavigationChange` instead would take the
+        /// toolbar's only notification away from it, and the `‹ ›` arrows would
+        /// freeze in whatever state they were in when the window opened.
+        open func navigationDidChange() {
             updateToolbarState()
         }
 

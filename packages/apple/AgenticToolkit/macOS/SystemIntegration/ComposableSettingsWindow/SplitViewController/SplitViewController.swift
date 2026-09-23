@@ -90,6 +90,11 @@ extension ComposableSettings {
             return currentPanel?.descriptor.title
         }
 
+        /// The panel on screen. `currentPanelTitle` names it; a host that has to
+        /// *identify* it — because its panels stand for records, not
+        /// destinations — needs the object.
+        public var selectedPanel: (any ComposableSettingsPanel)? { currentPanel }
+
         /// Where the `‹ ›` arrows can go from here.
         private var history = SettingsNavigationHistory()
 
