@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type KeyboardEvent, type ReactElement } from "react";
 import { HierarchicalDetailView, ListHeader, type TopicLevel, type TopicDetailItem } from "@agenticdevelopertoolkit/ui/blocks";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@agenticdevelopertoolkit/ui/components/dialog";
 import { DialogActions } from "@agenticdevelopertoolkit/ui/components/dialog-actions";
@@ -248,18 +248,22 @@ export function FeaturePickerDialog({
   // `max-h` then shrinks it to the window when that does not fit, and the list scrolls. Measured
   // rather than computed from a row height, because the rows' height belongs to the shared rail,
   // not to this file. Only an unfiltered list is measured: filtering must not make the dialog jump.
-  const boxRef = useRef<HTMLDivElement>(null);
+  //
+  // The box is held in STATE, not a ref: the dialog's portal mounts its content a render after
+  // `open` flips, so an effect keyed on `open` alone runs while the box is still absent. That went
+  // unseen while the catalog always arrived after the dialog opened — its arrival re-ran the
+  // measure — and surfaced once the rail began reading the same catalog, so it is cached by then.
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
   const [boxHeight, setBoxHeight] = useState<number | null>(null);
   useLayoutEffect(() => {
     if (!open || query.trim() || catalog.length === 0) return;
-    const box = boxRef.current;
     const scroller = box && findScroller(box);
     const content = scroller?.firstElementChild as HTMLElement | null | undefined;
     if (!box || !scroller || !content) return;
     const pad = parseFloat(getComputedStyle(scroller).paddingTop) + parseFloat(getComputedStyle(scroller).paddingBottom);
     const needed = box.offsetHeight - scroller.clientHeight + content.offsetHeight + pad;
     setBoxHeight((prev) => (prev != null && Math.abs(prev - needed) < 1 ? prev : needed));
-  }, [open, query, catalog.length, items]);
+  }, [open, query, catalog.length, items, box]);
 
   return (
     <>
@@ -283,7 +287,7 @@ export function FeaturePickerDialog({
                 entirely. Its height is the measured one above (26rem until the first measure);
                 `min-h-0` lets the dialog's `max-h` shrink it to fit the window. */}
           <div
-            ref={boxRef}
+            ref={setBox}
             className="flex min-h-0 shrink flex-col overflow-hidden rounded-lg border border-apt-border"
             style={{ height: boxHeight ?? "26rem" }}
           >
