@@ -23,6 +23,12 @@ public final class KeyCommandCaptureField: NSView {
     /// The user pressed Escape with no modifiers: back out.
     public var onCancel: (() -> Void)?
 
+    /// The user pressed Return or Enter with no modifiers: keep the pending
+    /// chord. Neither is recordable bare — a command bound to plain ↩ would
+    /// take it from every text field — so they mean what they mean in any
+    /// other edit.
+    public var onCommit: (() -> Void)?
+
     /// Recording started or stopped. Starting is a click or Space; stopping is
     /// losing focus.
     public var onRecordingChanged: ((Bool) -> Void)?
@@ -151,10 +157,18 @@ public final class KeyCommandCaptureField: NSView {
             return true
         }
 
-        // Bare Tab keeps moving focus. A recorder that swallowed it would trap
-        // anyone who arrived here by tabbing through the panel, and ⌥⇥ / ⌃⇥ are
-        // still recordable because they carry a modifier.
-        if event.keyCode == UInt16(KeyboardShortcuts.Key.tab.rawValue), modifiers.isEmpty {
+        let isReturn = event.keyCode == UInt16(KeyboardShortcuts.Key.return.rawValue)
+            || event.keyCode == UInt16(KeyboardShortcuts.Key.keypadEnter.rawValue)
+        if isReturn, modifiers.isEmpty {
+            onCommit?()
+            return true
+        }
+
+        // Tab and ⇧Tab keep moving focus. A recorder that swallowed either
+        // would trap anyone who arrived here by tabbing through the panel, and
+        // ⌥⇥ / ⌃⇥ are still recordable because they carry a modifier.
+        if event.keyCode == UInt16(KeyboardShortcuts.Key.tab.rawValue),
+           modifiers.isEmpty || modifiers == .shift {
             return false
         }
 

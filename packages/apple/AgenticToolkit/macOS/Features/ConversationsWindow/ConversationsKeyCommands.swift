@@ -7,6 +7,10 @@ import KeyboardShortcuts
 /// is shared and knows nothing about conversations, and because only the window
 /// can actually perform these.
 ///
+/// The registry's one app-wide key monitor performs these; each asks the
+/// controller whether the keystroke is its to take (the Conversations window is
+/// key, the caret is not in a text field), and passes it on when not.
+///
 /// The controller is resolved **when the command runs**, not when the section is
 /// installed, so the host can declare these at launch — before any Conversations
 /// window exists, and whether or not one is ever opened. Binding them to a live
@@ -42,7 +46,7 @@ public enum ConversationsKeyCommands {
                     id: toggleShelfID,
                     title: "Show Conversation List",
                     defaultShortcut: KeyboardShortcuts.Shortcut(.zero, modifiers: .command),
-                    run: { resolve()?.toggleShelf() }
+                    perform: { resolve()?.performToggleShelfCommand() ?? false }
                 )
             ],
             features: [
@@ -54,14 +58,14 @@ public enum ConversationsKeyCommands {
                             title: "Previous Conversation",
                             defaultShortcut: KeyboardShortcuts.Shortcut(
                                 .upArrow, modifiers: .command),
-                            run: { resolve()?.moveSelection(by: -1) }
+                            perform: { resolve()?.performMoveSelectionCommand(by: -1) ?? false }
                         ),
                         KeyCommandDescriptor(
                             id: moveSelectionDownID,
                             title: "Next Conversation",
                             defaultShortcut: KeyboardShortcuts.Shortcut(
                                 .downArrow, modifiers: .command),
-                            run: { resolve()?.moveSelection(by: 1) }
+                            perform: { resolve()?.performMoveSelectionCommand(by: 1) ?? false }
                         )
                     ])
             ])

@@ -53,6 +53,11 @@ public final class SystemWindowShortcutManager {
         KeyboardShortcuts.onKeyDown(for: .contextPicker) { [weak self] in
             self?.model.toggleContextPicker()
         }
+
+        // So Settings › Key Commands refuses these chords instead of letting a
+        // second command fire on them too.
+        KeyCommandRegistry.shared.reserveExternal(
+            KeyboardShortcuts.Name.allWindowContextShortcuts, owner: "window contexts")
     }
 
     /// Switches to the context at the given zero-based index.

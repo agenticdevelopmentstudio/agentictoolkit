@@ -293,4 +293,33 @@ final class SessionListViewTests: XCTestCase {
     func testListMinimumContentWidthIsZeroWithoutRows() {
         XCTAssertEqual(makeView(FakeViewSource([])).minimumContentWidth, 0)
     }
+
+    /// A legacy scroller takes its width out of the clip view the rows are
+    /// pinned to, so the list has to ask for that much more — measured without
+    /// it, the widest breadcrumb truncated by a scroller's width.
+    func testALegacyScrollerWidensTheMinimumByItsOwnWidth() async throws {
+        let view = makeView(FakeViewSource([
+            makeSession("alpha", cwd: "/Users/me/projA", projectRoot: "/Users/me/projA")
+        ]))
+        observedView = view
+        let populated = expectation(description: "list populated")
+        populatedExpectation = populated
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleContentSizeChanged),
+            name: SessionWatcher.SessionListView.contentSizeDidChangeNotification, object: view)
+        await viewModel?.reloadSessions()
+        await fulfillment(of: [populated], timeout: 3)
+
+        let scroll = try XCTUnwrap(view.subviews.compactMap { $0 as? NSScrollView }.first)
+        scroll.scrollerStyle = .overlay
+        let overlay = view.minimumContentWidth
+        XCTAssertGreaterThan(overlay, 0)
+        scroll.scrollerStyle = .legacy
+        let legacy = view.minimumContentWidth
+        XCTAssertEqual(
+            legacy - overlay,
+            NSScroller.scrollerWidth(for: scroll.verticalScroller?.controlSize ?? .regular,
+                                     scrollerStyle: .legacy),
+            accuracy: 0.5)
+    }
 }

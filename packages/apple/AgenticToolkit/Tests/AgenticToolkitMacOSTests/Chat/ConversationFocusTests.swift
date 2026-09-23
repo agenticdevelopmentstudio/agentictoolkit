@@ -652,7 +652,7 @@ final class ConversationFocusTests: XCTestCase {
     /// of a composer emptying into nothing.
     func testALineTypedShowsAtOnceAsPending() async throws {
         let session = FeedChatSession(
-            refreshInterval: .seconds(3600), send: { _ in nil }, load: { [] })
+            refreshInterval: .seconds(3600), send: { _, _ in nil }, load: { [] })
         let (log, pump) = watch(session)
         defer { pump.cancel(); session.close() }
 
@@ -672,7 +672,7 @@ final class ConversationFocusTests: XCTestCase {
         let echo = SourceLog()
         let session = FeedChatSession(
             refreshInterval: .milliseconds(20),
-            send: { text in echo.note(text); return nil },
+            send: { text, _ in echo.note(text); return nil },
             load: {
                 echo.values.map {
                     ChatMessage(id: "recorded-\($0)", role: .user, text: $0)
@@ -704,7 +704,7 @@ final class ConversationFocusTests: XCTestCase {
         let reads = SourceLog()
         let session = FeedChatSession(
             refreshInterval: .seconds(3600),
-            send: { _ in nil },
+            send: { _, _ in nil },
             initial: seed,
             // Nothing readable yet, which is the case this is about: the source
             // is unreachable or still answering, so the seed is all there is.
@@ -732,7 +732,7 @@ final class ConversationFocusTests: XCTestCase {
         let sent = SourceLog()
         let session = FeedChatSession(
             refreshInterval: .milliseconds(20),
-            send: { text in
+            send: { text, _ in
                 // What the injector does on the way through.
                 sent.note(text.split(whereSeparator: \.isNewline).joined(separator: " "))
                 return nil
@@ -759,7 +759,7 @@ final class ConversationFocusTests: XCTestCase {
         let session = FeedChatSession(
             refreshInterval: .seconds(3600),
             sendTimeout: .milliseconds(50),
-            send: { _ in nil },
+            send: { _, _ in nil },
             load: { [] }
         )
         let (log, pump) = watch(session)
@@ -780,7 +780,7 @@ final class ConversationFocusTests: XCTestCase {
     func testALineThatCouldNotBeHandedOverFailsWithTheReasonGiven() async throws {
         let session = FeedChatSession(
             refreshInterval: .seconds(3600),
-            send: { _ in "this session runs in an unknown terminal." },
+            send: { _, _ in "this session runs in an unknown terminal." },
             load: { [] }
         )
         let (log, pump) = watch(session)
@@ -805,7 +805,7 @@ final class ConversationFocusTests: XCTestCase {
         FeedChatSession(
             refreshInterval: .milliseconds(20),
             sendTimeout: sendTimeout,
-            send: { _ in nil },
+            send: { _, _ in nil },
             load: {
                 let shown = showing.values.last
                 return source.values.filter { $0.attribution?.sourceID == shown }
@@ -848,7 +848,7 @@ final class ConversationFocusTests: XCTestCase {
     func testALineStaysOnTheTimelineWhileItsConversationIsOnIt() async throws {
         let source = FeedSource(feedMessages)
         let session = FeedChatSession(
-            refreshInterval: .milliseconds(20), send: { _ in nil }, load: { source.values })
+            refreshInterval: .milliseconds(20), send: { _, _ in nil }, load: { source.values })
         session.destinationID = "s1"
         let (log, pump) = watch(session)
         defer { pump.cancel(); session.close() }
@@ -866,7 +866,7 @@ final class ConversationFocusTests: XCTestCase {
     func testOnlyTheConversationWrittenToCanSettleTheLine() async throws {
         let source = FeedSource(feedMessages)
         let session = FeedChatSession(
-            refreshInterval: .milliseconds(20), send: { _ in nil }, load: { source.values })
+            refreshInterval: .milliseconds(20), send: { _, _ in nil }, load: { source.values })
         session.destinationID = "s1"
         let (log, pump) = watch(session)
         defer { pump.cancel(); session.close() }
@@ -883,6 +883,75 @@ final class ConversationFocusTests: XCTestCase {
             log.latest.filter { $0.text == "yes" }.allSatisfy { $0.delivery == .settled }
                 && log.latest.filter { $0.text == "yes" }.count == 2
         }
+    }
+
+    /// A failed line has been read by the time the reader moves on; keeping it
+    /// would pin it under the transcript for the life of the window.
+    func testMovingToAnotherConversationDismissesAFailedLine() async throws {
+        let source = FeedSource(feedMessages)
+        let session = FeedChatSession(
+            refreshInterval: .milliseconds(20),
+            send: { _, _ in "refused" },
+            load: { source.values })
+        session.destinationID = "s1"
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+        try await waitUntil("the feed was read") { log.latest.count == 3 }
+
+        session.send("go on")
+        try await waitUntil("the line failed") {
+            if case .failed = log.latest.last?.delivery { return true }
+            return false
+        }
+
+        session.destinationID = "s2"
+        session.destinationID = "s1"
+        try await waitUntil("the feed was re-published") { log.latest.count == 3 }
+        XCTAssertFalse(log.latest.contains { $0.text == "go on" },
+                       "a failed line outlived the reader leaving its conversation")
+    }
+
+    /// Trying again replaces the failure rather than stacking a second red line
+    /// under the first.
+    func testARetryToTheSameConversationReplacesItsFailure() async throws {
+        let source = FeedSource(feedMessages)
+        let session = FeedChatSession(
+            refreshInterval: .milliseconds(20),
+            send: { _, _ in "refused" },
+            load: { source.values })
+        session.destinationID = "s1"
+        let (log, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+        try await waitUntil("the feed was read") { log.latest.count == 3 }
+
+        session.send("go on")
+        try await waitUntil("the line failed") {
+            if case .failed = log.latest.last?.delivery { return true }
+            return false
+        }
+        session.send("go on, please")
+        try await waitUntil("the retry was shown") { log.latest.last?.text == "go on, please" }
+
+        XCTAssertFalse(log.latest.contains { $0.text == "go on" },
+                       "the retry left the earlier failure on screen")
+    }
+
+    /// The line goes where the composer pointed when it was typed, not wherever
+    /// the reader has moved to by the time the write runs.
+    func testTheSenderIsToldWhereTheLineWasTyped() async throws {
+        let targets = SourceLog()
+        let session = FeedChatSession(
+            refreshInterval: .seconds(3600),
+            send: { _, destination in targets.note(destination ?? "nil"); return nil },
+            load: { [] })
+        session.destinationID = "s1"
+        let (_, pump) = watch(session)
+        defer { pump.cancel(); session.close() }
+
+        session.send("hello")
+        session.destinationID = "s2"
+        try await waitUntil("the line was written") { !targets.values.isEmpty }
+        XCTAssertEqual(targets.values, ["s1"])
     }
 
     /// Both marks sit between the bubble and its timestamp, on the speaker's

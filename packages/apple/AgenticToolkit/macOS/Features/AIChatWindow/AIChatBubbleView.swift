@@ -64,12 +64,12 @@ public final class AIChatBubbleView: NSView {
         /// border, small radius, whoever is speaking.
         case terminal
 
-        /// How round the corners are. The terminal box's 6 is the tighter of
+        /// How round the corners are. The terminal box's is the tighter of
         /// the two because it reads as a panel rather than as speech.
         var cornerRadius: CGFloat {
             switch self {
             case .speaker: return 12
-            case .terminal: return 6
+            case .terminal: return TerminalBoxStyle.cornerRadius
             }
         }
     }
@@ -177,26 +177,8 @@ public final class AIChatBubbleView: NSView {
     private var toggleWidthConstraint: NSLayoutConstraint!
     private var toggleTopConstraint: NSLayoutConstraint!
 
-    /// The width this bubble came to.
-    ///
-    /// The bubble measures its own text rather than leaving its width to the
-    /// engine, which is what makes this answerable before any layout pass has
-    /// run — and a caller arranging the band *under* the bubble has to know it
-    /// while it is still deciding what to constrain.
-    public var measuredWidth: CGFloat { bubbleWidthConstraint.constant }
-
-    /// The expand/collapse toggle, for a container that has taken over
-    /// hit-testing for its whole subtree and has to name the parts that still
-    /// take a click.
-    public var expandControl: NSView { expandToggle }
-
     /// How far a bubble's text sits in from the bubble's own edge.
-    ///
-    /// Public because it is not only the bubble's business: a row that hangs
-    /// furniture off a bubble — ``ChatTranscriptRowView``'s jump control — lines
-    /// that furniture up with the *text*, not with the bubble's edge, and this
-    /// is how far in the text's edge is.
-    public static let textInset: CGFloat = 12
+    private static let textInset: CGFloat = 12
     private static let vPad: CGFloat = 8
 
     /// The toggle is a symbol rather than the words, and a big one.
@@ -356,15 +338,23 @@ public final class AIChatBubbleView: NSView {
         // header line says who is talking, and saying it twice is what this
         // style exists to stop. `error` and `notice` fall through: they are not
         // conversation, so they keep the colour that says what they are.
+        //
+        // Work output — the agent narrating its tool calls — is the agent
+        // talking to itself, not to the reader, so its text is set back in
+        // either shape. An icon alone asked the reader to look left of every
+        // line to know whether to read it.
+        let workOutput = message.isWorkOutput && message.role == .assistant
         if case .terminal = style, message.role == .user || message.role == .assistant {
-            return (palette.surfaceColor, palette.primaryTextColor, palette.borderColor)
+            let text = workOutput ? palette.nsColor(.secondaryText) : palette.primaryTextColor
+            return (TerminalBoxStyle.fill(palette), text, TerminalBoxStyle.border(palette))
         }
         switch message.role {
         case .user:
             return (palette.nsColor(.userBubble), palette.nsColor(.userText),
                     border(.userBubbleBorder))
         case .assistant:
-            return (palette.nsColor(.personaBubble), palette.nsColor(.personaText),
+            let text = workOutput ? palette.nsColor(.secondaryText) : palette.nsColor(.personaText)
+            return (palette.nsColor(.personaBubble), text,
                     border(.personaBubbleBorder))
         case .error:
             return (palette.nsColor(.danger).withAlphaComponent(0.08),
@@ -425,7 +415,7 @@ public final class AIChatBubbleView: NSView {
         let (fill, text, border) = colors(from: palette)
         layer?.backgroundColor = fill.cgColor
         layer?.borderColor = border?.cgColor
-        layer?.borderWidth = border == nil ? 0 : 1
+        layer?.borderWidth = border == nil ? 0 : TerminalBoxStyle.borderWidth
 
         let full = attributedText(for: palette)
         let textMaxWidth = maxWidth - Self.textInset * 2

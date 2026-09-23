@@ -64,9 +64,10 @@ private final class WorkOutputFlag: @unchecked Sendable {
 /// The newest thing the agent was doing, as the feed's last read found it —
 /// written by the poll, off the main actor, and read by the status line on it.
 ///
-/// Taken from the page *before* work output is stripped out of it, which is the
-/// point: single mode shows the agent's work here, on one line that is replaced
-/// as it moves, rather than as a stack of bubbles burying what it said.
+/// Taken from a read that carries work output whether or not the bubbles do,
+/// which is the point: single mode shows the agent's work here, on one line that
+/// is replaced as it moves, rather than as a stack of bubbles burying what it
+/// said.
 private final class FeedWorkStatus: @unchecked Sendable {
     private let lock = NSLock()
     private var latest: (sourceID: String, text: String)?
@@ -109,42 +110,37 @@ private final class FeedWorkStatus: @unchecked Sendable {
     }
 }
 
-/// Where a line typed into the feed's own composer goes, shared between the main
-/// actor that sets it and the session's sender, which runs off it.
+/// The host's write, shared between the main actor that supplies it and the
+/// session's sender, which runs off it.
 ///
-/// A box rather than a captured closure because both halves move: the host
-/// supplies the write *after* the session exists, and which session it writes to
-/// changes every time the reader moves the single-mode selection.
+/// A box rather than a captured closure because the host supplies the write
+/// *after* the session exists. Where the line goes is not in here: the session
+/// hands over the destination the line was typed at, so a reader who moves on
+/// before the write runs does not take the line with them.
 private final class FeedSendTarget: @unchecked Sendable {
     private let lock = NSLock()
-    private var sourceID: String?
     private var send: (@Sendable (String, String) async -> String?)?
-
-    func set(sourceID: String?) {
-        lock.lock(); self.sourceID = sourceID; lock.unlock()
-    }
 
     func set(send: (@Sendable (String, String) async -> String?)?) {
         lock.lock(); self.send = send; lock.unlock()
     }
 
-    /// Whether there is both somewhere to write and something to write with.
+    /// Whether there is something to write with.
     var isReady: Bool {
         lock.lock(); defer { lock.unlock() }
-        return sourceID != nil && send != nil
+        return send != nil
     }
 
-    private func current() -> (String?, (@Sendable (String, String) async -> String?)?) {
+    private func current() -> (@Sendable (String, String) async -> String?)? {
         lock.lock(); defer { lock.unlock() }
-        return (sourceID, send)
+        return send
     }
 
-    func write(_ text: String) async -> String? {
+    func write(_ text: String, to destination: String?) async -> String? {
         // Read out of the lock before the await: `NSLock.lock()` is unavailable
         // from an async context, and a lock held across a suspension would be a
         // bug even where the compiler allowed it.
-        let (destination, send) = current()
-        guard let destination, let send else {
+        guard let destination, let send = current() else {
             return "There is no single session to write to."
         }
         return await send(destination, text)
@@ -187,12 +183,9 @@ public final class ConversationsViewController: NSViewController {
     /// Single mode reads work output regardless (``isWorkOutputForced``): the
     /// narration is most of what following one session means, so it is shown —
     /// but as the status line over the composer, one line replaced as the agent
-    /// moves, not as bubbles. This stays the reader's own setting either way.
-    ///
-    /// In single mode the read asks for work output regardless — the status line
-    /// over the composer is made of it — and this decides only whether it is
-    /// *also* drawn as bubbles. So a change here re-reads in single mode even
-    /// when the question put to the loader stays the same.
+    /// moves, from a short read of its own. This setting still decides whether
+    /// it is *also* drawn as bubbles, in either mode, and it stays the reader's
+    /// own: leaving single mode gives it back unchanged.
     public var includeWorkOutput: Bool {
         get { workOutputFlag.preference }
         set {
@@ -243,17 +236,41 @@ public final class ConversationsViewController: NSViewController {
     /// being exactly one session on the timeline: there is nothing left for the
     /// focus overlay to isolate, there is an unambiguous destination for a typed
     /// line, and there is nothing for the agent's narration to bury. So the
-    /// overlay goes away, the composer comes alive, and work output is shown
-    /// whatever the reader's own setting says.
+    /// overlay goes away, the composer comes alive, and the agent's work is
+    /// shown on the status line whatever the reader's own setting says.
     public var selectionMode: ConversationsSelectionMode = .multi {
         didSet {
             guard selectionMode != oldValue else { return }
             if selectionMode == .single { dismissFocus() }
+            let soloMoved = syncSolo()
             updateComposer()
             // Only when the answer actually moved — with the reader's own
-            // setting already on there is nothing to re-read, and with it off
-            // the question moves either way.
-            if workOutputFlag.setForced(selectionMode == .single) { refresh() }
+            // setting already on and no conversation picked there is nothing to
+            // re-read, and a refresh that asks the same question costs the
+            // reader their rows.
+            let forcedMoved = workOutputFlag.setForced(selectionMode == .single)
+            if forcedMoved || soloMoved { refresh() }
+        }
+    }
+
+    /// The conversation single mode reads, by
+    /// ``ChatMessage/Attribution/sourceID`` — the shelf's pick, handed over by
+    /// the split view. Kept while in multi mode, so going back to single mode
+    /// goes back to the same conversation; it is only *read* in single mode.
+    ///
+    /// Nil falls back to whichever one session the hidden set leaves showing,
+    /// which is what a feed used without a shelf has.
+    ///
+    /// A change re-reads after a short pause rather than at once: a reader
+    /// holding an arrow key walks through a dozen conversations a second, and
+    /// a read per step queues a dozen reads that cannot be called back, each
+    /// landing after the one the reader stopped on.
+    public var soloSessionID: String? {
+        didSet {
+            guard soloSessionID != oldValue else { return }
+            guard syncSolo() else { return }
+            updateComposer()
+            scheduleRefresh()
         }
     }
 
@@ -291,6 +308,16 @@ public final class ConversationsViewController: NSViewController {
     private let pageLimit: Int
     private var chatView: ChatView?
     private var overlay: ConversationFocusOverlay?
+    private var pendingRefresh: Task<Void, Never>?
+
+    /// How long a moved pick waits before the feed re-reads — long enough to
+    /// swallow key repeat, short enough not to read as lag.
+    static let soloSettle: Duration = .milliseconds(150)
+
+    /// How many of one session's newest entries the status line reads. It
+    /// shows the newest line only; the rest is slack for a read that races a
+    /// turn ending.
+    static let statusDepth = 20
 
     /// How many lines of a message a feed row shows before it truncates and
     /// offers the rest.
@@ -329,25 +356,55 @@ public final class ConversationsViewController: NSViewController {
         self.sessionFilter = sessionFilter
         let sendTarget = self.sendTarget
         let workStatus = self.workStatus
+        let statusDepth = Self.statusDepth
         let session = FeedChatSession(
             refreshInterval: refreshInterval,
             // A sender from the start, resolved when a line is actually typed —
-            // the host has not supplied the write yet, and which session it goes
-            // to changes every time the single-mode selection moves. What decides
-            // whether the composer is live is `canSend`, set below.
-            send: { text in await sendTarget.write(text) },
+            // the host has not supplied the write yet. The session hands over
+            // the destination the line was typed at. What decides whether the
+            // composer is live is `canSend`, set below.
+            send: { text, destination in await sendTarget.write(text, to: destination) },
             load: {
-                // Deepened by whatever the last page lost to the hidden sessions,
-                // so the filter takes rows out of a bigger answer rather than out
-                // of the reader's scrollback.
-                let depth = pageLimit * sessionFilter.pageDeepening
-                guard let messages = await load(flag.value, nil, depth) else { return nil }
-                let shown = sessionFilter.apply(to: messages)
-                workStatus.note(shown)
-                // Asked for only for the status line — the reader has not
-                // asked for it as bubbles.
-                guard flag.isForced, !flag.preference else { return shown }
-                return shown.filter { !$0.isWorkOutput }
+                // The bubbles ask for what the reader asked for, in either mode.
+                // Single mode's work output comes from a read of its own below:
+                // asked for here it would take the page's room from what the
+                // agent said, and a page that is two thirds narration shows a
+                // third of the conversation.
+                let bubbles: [ChatMessage]
+                if let solo = sessionFilter.solo {
+                    // The merged page for the roster, the conversation's own
+                    // read for the timeline — see `apply(page:conversation:solo:)`.
+                    async let page = load(flag.preference, nil, pageLimit)
+                    async let conversation = load(flag.preference, solo, pageLimit)
+                    guard let page = await page, let conversation = await conversation else { return nil }
+                    // A read the reader has already moved on from says nothing
+                    // about the roster or the status line any more.
+                    guard !Task.isCancelled else { return nil }
+                    bubbles = sessionFilter.apply(page: page, conversation: conversation, solo: solo)
+                } else {
+                    // Deepened by whatever the last page lost to the hidden
+                    // sessions, so the filter takes rows out of a bigger answer
+                    // rather than out of the reader's scrollback.
+                    let depth = pageLimit * sessionFilter.pageDeepening
+                    guard let messages = await load(flag.preference, nil, depth) else { return nil }
+                    guard !Task.isCancelled else { return nil }
+                    bubbles = sessionFilter.apply(to: messages)
+                }
+                guard flag.isForced, !flag.preference else {
+                    workStatus.note(bubbles)
+                    return bubbles
+                }
+                // The status line's own read: the newest few entries of the
+                // one conversation, work output included. A failed read leaves
+                // the line saying what it said.
+                if let target = sessionFilter.solo ?? sessionFilter.soleShownID,
+                   let recent = await load(true, target, statusDepth) {
+                    guard !Task.isCancelled else { return nil }
+                    workStatus.note(recent.filter { $0.attribution?.sourceID == target })
+                }
+                // The loader was not asked for work output, but a source that
+                // sends it anyway would put it back as bubbles.
+                return bubbles.filter { !$0.isWorkOutput }
             })
         // Watched until told otherwise: the window opens on the merged feed,
         // which has no one session a typed line would belong to.
@@ -389,24 +446,40 @@ public final class ConversationsViewController: NSViewController {
         refresh()
     }
 
-    /// The one session on the timeline, or nil when there is more than one — the
-    /// destination a line typed into the feed's own composer would have.
+    /// The one conversation single mode is reading — the destination a line
+    /// typed into the feed's own composer would have. Nil in multi mode.
     ///
-    /// Read off the filter rather than taken from the shelf: the shelf's pick is
-    /// expressed *as* the hidden set, and what the feed can write to is whatever
-    /// is actually left showing.
-    private var soleShownSessionID: String? {
-        let shown = sessionFilter.roster.filter { !sessionFilter.hidden.contains($0.id) }
-        return shown.count == 1 ? shown[0].id : nil
+    /// The shelf's pick when there is one; otherwise whichever one session the
+    /// hidden set leaves showing.
+    private var singleDestination: String? {
+        guard selectionMode == .single else { return nil }
+        return soloSessionID ?? sessionFilter.soleShownID
     }
 
-    /// Points the composer at the single session on the timeline, and turns it on
-    /// only when single mode and a live destination agree there is one.
+    /// Hands the pick to the filter while in single mode, and takes it away
+    /// outside it. Reports whether what the filter reads moved.
+    private func syncSolo() -> Bool {
+        let solo = selectionMode == .single ? soloSessionID : nil
+        guard sessionFilter.solo != solo else { return false }
+        sessionFilter.solo = solo
+        return true
+    }
+
+    private func scheduleRefresh() {
+        pendingRefresh?.cancel()
+        pendingRefresh = Task { [weak self] in
+            try? await Task.sleep(for: Self.soloSettle)
+            guard !Task.isCancelled else { return }
+            self?.refresh()
+        }
+    }
+
+    /// Points the composer at the conversation single mode is reading, and turns
+    /// it on only when there is one and something to write to it with.
     private func updateComposer() {
-        let destination = selectionMode == .single ? soleShownSessionID : nil
-        sendTarget.set(sourceID: destination)
+        let destination = singleDestination
         session.destinationID = destination
-        let live = selectionMode == .single && sendTarget.isReady
+        let live = destination != nil && sendTarget.isReady
         session.canSend = live
         chatView?.isComposerEnabled = live
         updateStatus()
@@ -422,8 +495,7 @@ public final class ConversationsViewController: NSViewController {
     /// written before the current turn started says nothing about the turn.
     private func updateStatus() {
         guard let chatView else { return }
-        guard selectionMode == .single,
-              let id = soleShownSessionID,
+        guard let id = singleDestination,
               let state = activity[id], state != .idle else {
             chatView.setStatus(nil, icon: nil)
             return
@@ -457,7 +529,10 @@ public final class ConversationsViewController: NSViewController {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError() }
 
-    deinit { session.close() }
+    deinit {
+        pendingRefresh?.cancel()
+        session.close()
+    }
 
     /// A plain container holding the feed, so the overlay is the feed's
     /// *sibling* rather than its subview — a chat view rebuilds its transcript
@@ -513,6 +588,8 @@ public final class ConversationsViewController: NSViewController {
     /// Re-reads the feed now rather than at the next interval — for a filter
     /// change, or a host that knows something just happened.
     public func refresh() {
+        pendingRefresh?.cancel()
+        pendingRefresh = nil
         session.refresh()
         // The overlay is a second reader of the same conversation, so a push
         // that reaches the feed has to reach it too — otherwise the closer look
@@ -551,7 +628,7 @@ public final class ConversationsViewController: NSViewController {
             // what asking meant.
             lineLimit: nil,
             send: onSendToSource.map { send in
-                { @Sendable text in await send(sourceID, text) }
+                { @Sendable text, _ in await send(sourceID, text) }
             }
         )
         overlay.onDismissed = { [weak self, weak overlay] in

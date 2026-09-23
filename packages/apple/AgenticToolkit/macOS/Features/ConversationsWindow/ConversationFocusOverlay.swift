@@ -75,6 +75,10 @@ public final class ConversationFocusOverlay: DismissibleOverlayView {
         // wears one — see the feed's composer, which reads the same way.
         chatView.composerPrompt = ">"
         chatView.bubbleLineLimit = lineLimit
+        // The feed's box, not the chat window's speech bubble: this is the
+        // feed's conversation brought forward, and a line that changes shape
+        // on the way in reads as a different line.
+        chatView.bubbleStyle = .terminal
         // No row actions at all. `onOpen` would open the conversation the reader
         // is already inside, and the app icon it would draw says which
         // application each row is running in — a question a *merged* feed asks

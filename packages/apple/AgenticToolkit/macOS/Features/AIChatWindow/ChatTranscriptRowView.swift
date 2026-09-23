@@ -501,10 +501,9 @@ public final class ChatTranscriptRowView: NSView {
     ///
     /// They have to be named here rather than left to the normal search, because
     /// that search never happens: this override answers for the whole subtree.
-    /// There are three: the app icon (leave for the session), the **More…**
-    /// control (open this message out), and the bubble itself, whose text a
-    /// reader drags across to copy and whose double click this row reads as
-    /// "open".
+    /// There are two: the app icon (leave for the session), and the bubble
+    /// itself — its expand toggle, and its text, which a reader drags across to
+    /// copy and whose double click this row reads as "open".
     public override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         guard bounds.contains(local) else { return nil }

@@ -31,6 +31,22 @@ extension SessionWatcher {
             accessibilityID("session-panel.list")
             setupViews()
             bindViewModel()
+            // The row's width budget depends on the scroller style (see
+            // `minimumContentWidth`), and the style changes under a running app
+            // when "Show scroll bars" does. The host re-fits on this list's
+            // content-size notification, so a style change is posted as one.
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(preferredScrollerStyleChanged),
+                name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
+        }
+
+        @objc private func preferredScrollerStyleChanged() {
+            // AppKit re-applies the preferred style to the scroll view on this
+            // same notification; hop once so the width is read after it has.
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.contentSizeDidChangeNotification, object: self)
+            }
         }
 
         @available(*, unavailable)
@@ -54,8 +70,25 @@ extension SessionWatcher {
 
         /// The narrowest the list can be with every row's breadcrumb shown whole.
         /// Hosts keep their window at least this wide; zero when there are no rows.
+        ///
+        /// Rows are as wide as the *clip* view, and each already keeps a lane
+        /// clear for an overlay scroller. A legacy scroller floats over nothing:
+        /// it takes its width out of the clip view, so a list measured without
+        /// it came up one scroller short and the widest breadcrumb truncated.
         public var minimumContentWidth: CGFloat {
-            rows.values.map(\.minimumWidth).max() ?? 0
+            guard let widest = rows.values.map(\.minimumWidth).max() else { return 0 }
+            return widest + legacyScrollerWidth
+        }
+
+        /// What a legacy scroller takes out of the clip view's width; nothing
+        /// under overlay scrollers. Counted whether or not it is currently
+        /// shown: it appears the moment the list outgrows the window, and a
+        /// minimum that moved with it would shift the window sideways then.
+        private var legacyScrollerWidth: CGFloat {
+            guard scrollView.hasVerticalScroller, scrollView.scrollerStyle == .legacy else { return 0 }
+            return NSScroller.scrollerWidth(
+                for: scrollView.verticalScroller?.controlSize ?? .regular,
+                scrollerStyle: .legacy)
         }
 
         private func setupViews() {
@@ -525,8 +558,7 @@ extension SessionWatcher {
             headerView.applyTheme(palette)
 
             // The agent's last output, printed into a terminal after a prompt.
-            terminalView.layer?.backgroundColor = palette.surfaceColor.cgColor
-            terminalView.layer?.borderColor = palette.borderColor.cgColor
+            TerminalBoxStyle.apply(palette, to: terminalView.layer)
             let codeFont = palette.font(.code)
             outputLabel.attributedStringValue = Self.terminalText(
                 Self.outputText(for: session),
@@ -624,8 +656,7 @@ extension SessionWatcher {
             // prompt. Always four lines tall, so the rows line up down the list.
             let terminal = NSView()
             terminal.wantsLayer = true
-            terminal.layer?.cornerRadius = 6
-            terminal.layer?.borderWidth = 1
+            TerminalBoxStyle.shape(terminal.layer)
             terminal.translatesAutoresizingMaskIntoConstraints = false
             addSubview(terminal)
             terminalView = terminal

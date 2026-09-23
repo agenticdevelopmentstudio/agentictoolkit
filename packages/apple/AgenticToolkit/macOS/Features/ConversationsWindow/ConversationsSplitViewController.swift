@@ -55,9 +55,9 @@ public final class ConversationsSplitViewController: NSSplitViewController {
     public var selectionMode: ConversationsSelectionMode = .multi {
         didSet {
             guard selectionMode != oldValue else { return }
-            // The shelf first: switching to single mode narrows the hidden set to
-            // one session, and the feed's own answer — whether its composer has a
-            // destination — is read off what is left showing.
+            // The shelf first: switching to single mode may settle a pick
+            // (``onSoloChanged``), and the feed's composer takes its
+            // destination from that pick.
             shelf.selectionMode = selectionMode
             feed.selectionMode = selectionMode
             // Single mode *is* the list: it shows one conversation at a time
@@ -71,9 +71,9 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         }
     }
 
-    /// Switches to the other mode. The View menu item and the key command both
-    /// come through here; the picker sets the mode it was clicked on instead,
-    /// since a segment names a mode rather than a change.
+    /// Switches to the other mode. The View menu item comes through here; the
+    /// picker sets the mode it was clicked on instead, since a segment names a
+    /// mode rather than a change.
     @objc public func toggleSelectionMode() {
         selectionMode = selectionMode.toggled
     }
@@ -94,8 +94,20 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         control.selectedSegment = index
     }
 
-    /// The ⌘↑/⌘↓ monitor, live only while this window is on screen.
-    private var selectionKeyMonitor: Any?
+    /// Fired when single mode's pick moves, so a host can remember it.
+    public var onSoloSessionChanged: ((String?) -> Void)?
+
+    /// The conversation single mode shows — the shelf's pick, and the one
+    /// session the feed reads. Kept while the window is in multi mode, so
+    /// going back to single mode lands on the same conversation. Setting it is
+    /// a restore: nothing is told, the host already knows.
+    public var soloSessionID: String? {
+        get { shelf.soloID }
+        set {
+            shelf.setSolo(newValue)
+            feed.soloSessionID = newValue
+        }
+    }
 
     /// What Tab walks in this window: the shelf's filter box and the feed's
     /// composer, and nothing else. Built in `viewDidLoad`, once both panes have
@@ -121,6 +133,13 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         }
         shelf.onActivityChanged = { [weak self] activity in
             self?.feed.activity = activity
+        }
+        // The pick, on the same terms as the ticks: from the feed first, since
+        // a host may have restored it there, then the shelf's moves to the feed.
+        shelf.setSolo(feed.soloSessionID)
+        shelf.onSoloChanged = { [weak self] id in
+            self?.feed.soloSessionID = id
+            self?.onSoloSessionChanged?(id)
         }
     }
 
@@ -212,58 +231,53 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         // on screen it does.
         updateToggleAppearance()
         updateSelectionModeControl()
-        installSelectionKeyMonitor()
         refreshKeyViewLoop()
+        // Watched from here, not from the shelf's own appearance: the shelf is
+        // often collapsed, and the feed's status line reads the same activity.
+        shelf.watchesActivity = true
     }
 
     public override func viewWillDisappear() {
         super.viewWillDisappear()
-        if let selectionKeyMonitor {
-            NSEvent.removeMonitor(selectionKeyMonitor)
-            self.selectionKeyMonitor = nil
-        }
+        shelf.watchesActivity = false
     }
 
-    /// Takes this window's key commands and performs them.
+    // MARK: - Key commands
+
+    /// ⌘↑/⌘↓ — or whatever the user rebound them to in Settings — as
+    /// performed by ``KeyCommandRegistry``'s app-wide monitor. Returns whether
+    /// the keystroke was taken, so one that was not goes on to whoever would
+    /// otherwise have had it.
     ///
-    /// A local event monitor rather than a `performKeyEquivalent` override,
-    /// because the shelf is usually **collapsed**: AppKit hides a collapsed
-    /// split item's view, and it does not offer key equivalents to hidden views
-    /// — so the one place the handler could naturally live is the one place it
-    /// would not fire. The monitor also means there is a single implementation
-    /// rather than one per pane, which matters because the keystroke is supposed
-    /// to work wherever in the window the reader happens to be looking.
-    ///
-    /// The chords come from ``KeyCommandRegistry`` rather than being written
-    /// here, which is what makes them rebindable in Settings — a monitor that
-    /// compared key codes would keep answering to ⌘↑ whatever the user chose.
-    ///
-    /// Only this window's own commands are matched: another window's app-scope
-    /// command is not this monitor's to fire, even though the registry can see
-    /// it. And a selection move swallows the event only when the shelf actually
-    /// moved, so ⌘↑ in multi mode, or at the top of the list, still means
-    /// whatever it meant before.
-    private func installSelectionKeyMonitor() {
-        guard selectionKeyMonitor == nil else { return }
-        selectionKeyMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: .keyDown
-        ) { [weak self] event in
-            guard let self,
-                  event.window === self.view.window,
-                  let command = KeyCommandRegistry.shared.command(matching: event, scope: .app)
-            else { return event }
-            switch command.id {
-            case ConversationsKeyCommands.moveSelectionUpID:
-                return self.moveSelection(by: -1) ? nil : event
-            case ConversationsKeyCommands.moveSelectionDownID:
-                return self.moveSelection(by: 1) ? nil : event
-            case ConversationsKeyCommands.toggleShelfID:
-                self.toggleShelf()
-                return nil
-            default:
-                return event
-            }
-        }
+    /// Only while this window is key: the monitor sees every window's keys, and
+    /// another window's ⌘↑ is not this one's to take. Nor while text is being
+    /// edited: ⌘↑ and ⌘↓ are a text view's own "to the start" and "to the end",
+    /// and the composer is where a reader in single mode spends most of their
+    /// time — a monitor sees the keystroke before the field does, so without
+    /// this the field never would. And only when the shelf actually moved, so
+    /// ⌘↑ in multi mode, or at the top of the list, still means whatever it
+    /// meant before.
+    func performMoveSelectionCommand(by delta: Int) -> Bool {
+        guard isKeyWindow, !isEditingText else { return false }
+        return moveSelection(by: delta)
+    }
+
+    /// ⌘0 as performed by the registry's monitor: this window's only when it
+    /// is key.
+    func performToggleShelfCommand() -> Bool {
+        guard isKeyWindow else { return false }
+        toggleShelf()
+        return true
+    }
+
+    private var isKeyWindow: Bool {
+        view.window?.isKeyWindow == true
+    }
+
+    /// Whether the keyboard is in a text field or text view — the field editor
+    /// behind any `NSTextField` is an `NSText` too.
+    private var isEditingText: Bool {
+        view.window?.firstResponder is NSText
     }
 
     /// Move the shelf's pick by `delta`, reporting whether it moved.

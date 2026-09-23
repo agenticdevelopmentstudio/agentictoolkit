@@ -35,7 +35,13 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// "Handed over" is deliberately weaker than "arrived": the source is
     /// something else's to write, so the only proof of arrival is reading it
     /// back, which is what ``ChatMessage/Delivery/sending`` waits for.
-    public typealias Sender = @Sendable (String) async -> String?
+    ///
+    /// The second argument is the ``destinationID`` as it stood when the line
+    /// was typed — not as it stands when the write gets round to running. The
+    /// write is asynchronous, and a reader who moves to another conversation in
+    /// between would otherwise have the line typed into the first one delivered
+    /// to the second.
+    public typealias Sender = @Sendable (_ text: String, _ destinationID: String?) async -> String?
 
     private let load: Loader
     private let send: Sender?
@@ -119,7 +125,12 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
             let changed = withLock { () -> Bool in
                 guard destination != newValue else { return false }
                 destination = newValue
-                return !pending.isEmpty
+                // A failed line has been read by now: it was on screen, in red,
+                // for as long as the reader stayed. Moving on is the reader
+                // dismissing it — keeping it would pin it under the transcript
+                // for the life of the window.
+                dropFailed()
+                return true
             }
             if changed { publish() }
         }
@@ -164,6 +175,10 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
             delivery: .sending
         )
         withLock {
+            // A new line to the same place supersedes an earlier failure there:
+            // the reader has seen it and is trying again. Without this every
+            // retry adds another red line and none of them ever leaves.
+            dropFailed { destinations[$0.id] == target }
             pending.append(message)
             if let target { destinations[message.id] = target }
         }
@@ -178,7 +193,7 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
             }
         }
         Task { [weak self] in
-            if let reason = await send(trimmed) {
+            if let reason = await send(trimmed, target) {
                 self?.fail(id, reason: reason)
             }
         }
@@ -192,11 +207,22 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
             timeouts.values.forEach { $0.cancel() }
             timeouts.removeAll()
             destinations.removeAll()
+            pending.removeAll()
         }
         withLock { continuation }?.finish()
     }
 
     // MARK: - Pending writes
+
+    /// Removes the failed lines `matching` — every failed line by default.
+    /// Called with the lock held.
+    private func dropFailed(where matching: (ChatMessage) -> Bool = { _ in true }) {
+        pending.removeAll { message in
+            guard case .failed = message.delivery, matching(message) else { return false }
+            destinations.removeValue(forKey: message.id)
+            return true
+        }
+    }
 
     /// Marks a written line failed, unless the source has already said it back.
     private func fail(_ id: String, reason: String) {
@@ -249,7 +275,7 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// breaks flattened to spaces. Comparing on runs of whitespace collapsed to
     /// one keeps that the same message — the alternative is a line that is
     /// visibly in the transcript and still shown as pending until it times out.
-    private static func normalized(_ text: String) -> String {
+    public static func normalized(_ text: String) -> String {
         text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 

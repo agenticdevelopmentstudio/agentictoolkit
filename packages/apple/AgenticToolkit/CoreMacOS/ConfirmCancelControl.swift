@@ -15,6 +15,10 @@ import AgenticDeveloperToolkitUI
 /// **Cancel is never disabled.** Only confirming is gated, by
 /// ``isConfirmEnabled``; a control you cannot back out of is a trap, and the
 /// one moment you most want out is when confirming is refused.
+///
+/// Return confirms and Escape cancels, as in any other edit — but only while
+/// the pair is on screen: a hidden pair (every other row's, in a list of
+/// editors) must not answer the keys meant for the visible one.
 @MainActor
 public final class ConfirmCancelControl: NSView {
 
@@ -51,6 +55,8 @@ public final class ConfirmCancelControl: NSView {
 
         configure(confirmButton, symbol: "checkmark", title: "Save", action: #selector(confirmClicked))
         configure(cancelButton, symbol: "xmark", title: "Cancel", action: #selector(cancelClicked))
+        confirmButton.keyEquivalent = "\r"
+        cancelButton.keyEquivalent = "\u{1b}"
 
         divider.translatesAutoresizingMaskIntoConstraints = false
         divider.wantsLayer = true
@@ -87,6 +93,11 @@ public final class ConfirmCancelControl: NSView {
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError() }
+
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard !isHiddenOrHasHiddenAncestor else { return false }
+        return super.performKeyEquivalent(with: event)
+    }
 
     private func configure(
         _ button: PointingHandButton,

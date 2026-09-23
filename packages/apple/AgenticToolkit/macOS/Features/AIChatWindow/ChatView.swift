@@ -27,6 +27,10 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// answer back to the row it builds.
     private var expandedMessageIDs: Set<String> = []
 
+    /// Watches the text the reader is selecting while a rebuild waits for them
+    /// to finish — see ``holdsForTextSelection()``.
+    private var heldSelectionObserver: NSObjectProtocol?
+
     /// True from the start of a transcript rebuild until the scroll that follows
     /// it has landed, so ``transcriptDidScroll`` can tell the reader's scrolling
     /// apart from the view's own.
@@ -480,7 +484,15 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             bubbleStyle: bubbleStyle
         )
         guard inputs != rendered else { return }
+        guard !holdsForTextSelection() else { return }
+        carryExpansion(from: rendered?.messages ?? [], to: inputs.messages)
         rendered = inputs
+
+        // Where the reader is, by message, so a transcript rebuilt under them
+        // puts the same message back at the same place — the stack is emptied
+        // and refilled, and an offset alone would land on whatever row now
+        // happens to sit there.
+        let anchor = isAtBottom ? nil : scrollAnchor()
 
         isRebuilding = true
         transcriptStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -535,7 +547,12 @@ public final class ChatView: NSView, NSTextFieldDelegate {
                     self?.toggleExpanded(message.id)
                 }
                 if isRowSelectionEnabled {
-                    actions.onSelect = { [weak self] message in self?.select(message.id) }
+                    // A click picks the row under the pointer, which is already
+                    // in view; scrolling it "into view" would drag the text out
+                    // from under a reader starting to select it.
+                    actions.onSelect = { [weak self] message in
+                        self?.select(message.id, reveal: false)
+                    }
                 }
                 let row = ChatTranscriptRowView(
                     message: message, maxBubbleWidth: rowBubbleWidth,
@@ -549,6 +566,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
                     row.isSelected = message.id == selectedMessageID
                     selectableRows.append(row)
                 }
+                row.identifier = NSUserInterfaceItemIdentifier(message.id)
                 transcriptStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(
                     equalTo: transcriptStack.widthAnchor, constant: -Self.rowWidthInset).isActive = true
@@ -558,6 +576,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
             let bubble = AIChatBubbleView(
                 message: message, maxWidth: maxBubbleWidth, style: bubbleStyle)
             bubble.setContentHuggingPriority(.required, for: .horizontal)
+            let messageID = NSUserInterfaceItemIdentifier(message.id)
 
             if message.role == .user {
                 let spacer = NSView()
@@ -567,6 +586,7 @@ public final class ChatView: NSView, NSTextFieldDelegate {
                 hStack.orientation = .horizontal
                 hStack.alignment = .top
                 hStack.spacing = 0
+                hStack.identifier = messageID
                 transcriptStack.addArrangedSubview(hStack)
                 hStack.widthAnchor.constraint(
                     equalTo: transcriptStack.widthAnchor,
@@ -585,11 +605,13 @@ public final class ChatView: NSView, NSTextFieldDelegate {
                 hStack.alignment = .top
                 hStack.spacing = 0
                 leading.widthAnchor.constraint(equalTo: trailing.widthAnchor).isActive = true
+                hStack.identifier = messageID
                 transcriptStack.addArrangedSubview(hStack)
                 hStack.widthAnchor.constraint(
                     equalTo: transcriptStack.widthAnchor,
                     constant: -Self.rowWidthInset).isActive = true
             } else {
+                bubble.identifier = messageID
                 transcriptStack.addArrangedSubview(bubble)
             }
         }
@@ -608,9 +630,114 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         let followNewest = isAtBottom
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if followNewest { self.scrollToBottom() }
+            if followNewest {
+                self.scrollToBottom()
+            } else if let anchor {
+                self.restore(anchor)
+            }
             self.isRebuilding = false
         }
+    }
+
+    // MARK: - Surviving a rebuild
+
+    /// Whether the reader is selecting text in the transcript right now — in
+    /// which case the rebuild waits, and runs once they let go.
+    ///
+    /// A rebuild throws every row away, and with it the text view the
+    /// selection lives in: a poll landing between the drag and ⌘C would copy
+    /// nothing. The selection ending — collapsing to a caret, which is what a
+    /// click elsewhere in the text does — is what releases it; a reader who
+    /// moves to another view entirely stops being "selecting", so the next
+    /// change goes through.
+    private func holdsForTextSelection() -> Bool {
+        guard let textView = window?.firstResponder as? NSTextView,
+              textView.isDescendant(of: transcriptStack),
+              textView.selectedRange().length > 0
+        else { return false }
+        guard heldSelectionObserver == nil else { return true }
+        heldSelectionObserver = NotificationCenter.default.addObserver(
+            forName: NSTextView.didChangeSelectionNotification, object: textView, queue: .main
+        ) { [weak self, weak textView] _ in
+            MainActor.assumeIsolated {
+                guard let self, textView?.selectedRange().length ?? 0 == 0 else { return }
+                self.releaseSelectionHold()
+                self.rebuildTranscript()
+            }
+        }
+        return true
+    }
+
+    private func releaseSelectionHold() {
+        if let heldSelectionObserver {
+            NotificationCenter.default.removeObserver(heldSelectionObserver)
+        }
+        heldSelectionObserver = nil
+    }
+
+    /// Hands an opened-out message's state on to the message that replaced it.
+    ///
+    /// A line typed here is drawn under an id of its own until the source says
+    /// it back, and then it is the source's row, under the source's id. Keyed
+    /// by id alone, a long line the reader had opened snapped shut the moment
+    /// it arrived. Ids that simply left the page are forgotten rather than kept
+    /// for ever.
+    private func carryExpansion(from old: [ChatMessage], to new: [ChatMessage]) {
+        guard !expandedMessageIDs.isEmpty else { return }
+        let present = Set(new.map(\.id))
+        for id in expandedMessageIDs.subtracting(present) {
+            expandedMessageIDs.remove(id)
+            guard let gone = old.first(where: { $0.id == id }), gone.delivery != .settled else {
+                continue
+            }
+            let said = FeedChatSession.normalized(gone.text)
+            if let arrived = new.last(where: {
+                $0.role == gone.role && FeedChatSession.normalized($0.text) == said
+            }) {
+                expandedMessageIDs.insert(arrived.id)
+            }
+        }
+    }
+
+    /// A message on screen and how far the visible region's top edge sits from
+    /// that message's own top.
+    private struct ScrollAnchor {
+        var id: NSUserInterfaceItemIdentifier
+        var offset: CGFloat
+    }
+
+    /// The topmost message showing, and where the reader is relative to it.
+    private func scrollAnchor() -> ScrollAnchor? {
+        guard let docView = transcriptScroll.documentView else { return nil }
+        let visible = transcriptScroll.contentView.bounds
+        let top = Self.topEdge(of: visible, flipped: docView.isFlipped)
+        let showing = transcriptStack.arrangedSubviews.filter {
+            $0.identifier != nil && $0.frame.intersects(visible)
+        }
+        let topmost = docView.isFlipped
+            ? showing.min { $0.frame.minY < $1.frame.minY }
+            : showing.max { $0.frame.maxY < $1.frame.maxY }
+        guard let view = topmost, let id = view.identifier else { return nil }
+        return ScrollAnchor(id: id, offset: top - Self.topEdge(of: view.frame, flipped: docView.isFlipped))
+    }
+
+    /// Scrolls so the anchored message sits where it sat before the rebuild.
+    private func restore(_ anchor: ScrollAnchor) {
+        guard let docView = transcriptScroll.documentView,
+              let view = transcriptStack.arrangedSubviews.first(where: { $0.identifier == anchor.id })
+        else { return }
+        docView.layoutSubtreeIfNeeded()
+        let clip = transcriptScroll.contentView
+        let top = Self.topEdge(of: view.frame, flipped: docView.isFlipped) + anchor.offset
+        let origin = docView.isFlipped ? top : top - clip.bounds.height
+        let limit = max(docView.bounds.height - clip.bounds.height, 0)
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(origin, 0), limit)))
+        transcriptScroll.reflectScrolledClipView(clip)
+    }
+
+    /// The edge of `rect` that is at the top of the screen.
+    private static func topEdge(of rect: NSRect, flipped: Bool) -> CGFloat {
+        flipped ? rect.minY : rect.maxY
     }
 
     // MARK: - Selection
@@ -620,7 +747,11 @@ public final class ChatView: NSView, NSTextFieldDelegate {
     /// Applied straight to the rows rather than through a rebuild: a rebuild
     /// throws away every bubble and measures them again, which is a visible
     /// stutter to pay for a two-pixel frame moving one row.
-    public func select(_ id: String?) {
+    ///
+    /// `reveal` scrolls the picked row into view — what a pick made from the
+    /// keyboard needs, and what a click, landing on a row already in view,
+    /// must not do.
+    public func select(_ id: String?, reveal: Bool = true) {
         guard isRowSelectionEnabled else { return }
         selectedMessageID = id
         for row in selectableRows {
@@ -635,8 +766,15 @@ public final class ChatView: NSView, NSTextFieldDelegate {
         // would find the arrow keys still scrolling the transcript, which is the
         // one thing selection is supposed to have taken over.
         window?.makeFirstResponder(self)
-        if let id, let row = selectableRows.first(where: { $0.shownMessage.id == id }) {
-            row.scrollToVisible(row.bounds)
+        if reveal, let id, let row = selectableRows.first(where: { $0.shownMessage.id == id }) {
+            // An opened-out message can be taller than the view; showing all
+            // of it is impossible, and showing its end skips what it says
+            // first — so a tall row is revealed from its top.
+            let height = min(row.bounds.height, transcriptScroll.contentView.bounds.height)
+            let top = Self.topEdge(of: row.bounds, flipped: row.isFlipped)
+            let slice = NSRect(x: row.bounds.minX, y: row.isFlipped ? top : top - height,
+                               width: row.bounds.width, height: height)
+            row.scrollToVisible(slice)
         }
     }
 

@@ -130,7 +130,7 @@ public final class SessionHeaderView: NSStackView, Themeable {
     // MARK: - Build
 
     private func makeIcon(_ spec: IconSpec) -> NSButton {
-        let button = spec.isActionable ? PointingHandButton() : NSButton()
+        let button = spec.isActionable ? PointingHandButton() : InertIconButton()
         button.translatesAutoresizingMaskIntoConstraints = false
         button.image = TerminalAppIcon.image(forTermProgram: spec.appIdentity)
         button.imagePosition = .imageOnly
@@ -177,6 +177,13 @@ public final class SessionHeaderView: NSStackView, Themeable {
             setCustomSpacing(
                 accessoryGap, after: edge == .leading ? slack : accessory)
         }
+    }
+
+    /// An icon nobody wired: a picture, not a target. It hands every click to
+    /// what is under it — a list row's own selection, say — rather than
+    /// swallowing it in a button whose action does nothing.
+    private final class InertIconButton: NSButton {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 
     // MARK: - Measurement

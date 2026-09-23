@@ -32,10 +32,20 @@ public final class KeyCommandRowView: NSView {
     private var isEditing = false {
         didSet {
             guard isEditing != oldValue else { return }
+            if isEditing { refusal = nil }
             confirmCancel.isHidden = !isEditing
-            readoutRow.isHidden = !isEditing
+            updateReadoutVisibility()
         }
     }
+
+    /// Why the switch was just refused, shown in the readout until the next
+    /// edit. The switch snapping back by itself would otherwise read as a
+    /// control that is broken rather than one that said no.
+    private var refusal: String? {
+        didSet { updateReadoutVisibility() }
+    }
+
+    private var bindingsObserver: NSObjectProtocol?
 
     public init(command: KeyCommandDescriptor, registry: KeyCommandRegistry) {
         self.registry = registry
@@ -69,6 +79,20 @@ public final class KeyCommandRowView: NSView {
 
         wireUp()
         refresh()
+
+        // Another row taking a chord changes what this one may have.
+        bindingsObserver = NotificationCenter.default.addObserver(
+            forName: KeyCommandRegistry.bindingsDidChangeNotification,
+            object: registry, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+    }
+
+    isolated deinit {
+        if let bindingsObserver {
+            NotificationCenter.default.removeObserver(bindingsObserver)
+        }
     }
 
     @available(*, unavailable)
@@ -86,9 +110,11 @@ public final class KeyCommandRowView: NSView {
         }
 
         captureField.onCancel = { [weak self] in self?.cancelEdit() }
+        captureField.onCommit = { [weak self] in self?.commitEdit() }
 
         captureField.onRecordingChanged = { [weak self] isRecording in
             guard let self else { return }
+            self.registry.isRecordingChord = isRecording
             if isRecording {
                 self.isEditing = true
                 self.refreshAvailability()
@@ -106,14 +132,23 @@ public final class KeyCommandRowView: NSView {
     // MARK: - Editing
 
     private func commitEdit() {
-        guard let shortcut = pendingShortcut,
-              registry.availability(of: shortcut, for: command.id).isAvailable else { return }
+        guard let shortcut = pendingShortcut else { return }
+        guard registry.availability(of: shortcut, for: command.id).isAvailable else {
+            // Taken since it was pressed — by another row, or a menu. Say so
+            // rather than letting ✓ do nothing.
+            refreshAvailability()
+            return
+        }
 
         let current = registry.binding(for: command.id)
-        // Giving a chord to a command that had none is unambiguous intent to
-        // use it, so it comes on. Re-recording a command that already had one
-        // leaves the switch exactly where the user put it.
-        let isEnabled = current.shortcut == nil ? true : current.isEnabled
+        // Recording a chord is unambiguous intent to use it, so the command
+        // comes on — unless the user themselves switched it off, in which case
+        // the switch stays where they put it. A shipped "off" is not the user's
+        // choice: the suggested global chords ship off, and recording over one
+        // must not save a chord that silently never fires.
+        let isEnabled = registry.hasAuthoredBinding(for: command.id) && current.shortcut != nil
+            ? current.isEnabled
+            : true
 
         registry.setBinding(
             KeyCommandBinding(shortcut: shortcut, isEnabled: isEnabled),
@@ -137,8 +172,19 @@ public final class KeyCommandRowView: NSView {
 
     @objc private func toggleChanged() {
         let current = registry.binding(for: command.id)
+        let isOn = toggle.state == .on
+        // Switching on puts the chord back in play, so it has to be free: a
+        // chord two commands hold fires both, and switching either off then
+        // unregisters the hotkey the other still relies on.
+        if isOn, case .unavailable(let reason) = registry.availability(of: current.shortcut, for: command.id) {
+            toggle.state = .off
+            refusal = "can’t switch on — \(reason)"
+            refreshAvailability()
+            return
+        }
+        refusal = nil
         registry.setBinding(
-            KeyCommandBinding(shortcut: current.shortcut, isEnabled: toggle.state == .on),
+            KeyCommandBinding(shortcut: current.shortcut, isEnabled: isOn),
             for: command.id)
         refresh()
     }
@@ -157,9 +203,19 @@ public final class KeyCommandRowView: NSView {
         refreshAvailability()
     }
 
+    private func updateReadoutVisibility() {
+        readoutRow.isHidden = !isEditing && refusal == nil
+    }
+
     private func refreshAvailability() {
         let availability = registry.availability(of: pendingShortcut, for: command.id)
         confirmCancel.isConfirmEnabled = availability.isAvailable
+
+        if let refusal, !isEditing {
+            statusLabel.stringValue = refusal
+            statusLabel.role = .danger
+            return
+        }
 
         if let reason = availability.reason, pendingShortcut != nil {
             statusLabel.stringValue = "\(availability.label) — \(reason)"

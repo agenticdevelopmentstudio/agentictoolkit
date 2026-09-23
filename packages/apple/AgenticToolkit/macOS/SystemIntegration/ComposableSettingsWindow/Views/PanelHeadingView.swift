@@ -18,11 +18,16 @@ extension ComposableSettings {
         public let titleLabel: ThemedLabel
 
         /// `nil` when the heading was given no caption.
-        public let captionLabel: NSTextField?
+        public var captionLabel: NSTextField? { captionView?.label }
+
+        /// The caption is an ``ExplanationView`` rather than a label of its own,
+        /// so it wraps inside the panel by the one policy every settings blurb
+        /// shares instead of a copy of it.
+        private let captionView: ExplanationView?
 
         public init(title: String, caption: String? = nil) {
             self.titleLabel = ThemedLabel(string: title, role: .primaryText, textRole: .heading)
-            self.captionLabel = caption.map { ComposableSettings.makeValueLabel($0) }
+            self.captionView = caption.map { ExplanationView(withText: $0) }
 
             super.init(frame: .zero)
             self.translatesAutoresizingMaskIntoConstraints = false
@@ -37,21 +42,9 @@ extension ComposableSettings {
             self.titleLabel.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(self.titleLabel)
 
-            if let captionLabel {
-                // The same wrap policy `ExplanationView` needs, and for the same
-                // reason: a `ThemedLabel` is single-line until the cell is told
-                // otherwise, so a caption left at its defaults runs off the
-                // panel's right edge rather than wrapping inside it.
-                captionLabel.translatesAutoresizingMaskIntoConstraints = false
-                captionLabel.cell?.wraps = true
-                captionLabel.cell?.usesSingleLineMode = false
-                captionLabel.lineBreakMode = .byWordWrapping
-                captionLabel.maximumNumberOfLines = 0
-                captionLabel.setContentCompressionResistancePriority(.required, for: .vertical)
-                captionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-                captionLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-                stack.addArrangedSubview(captionLabel)
-                captionLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            if let captionView {
+                stack.addArrangedSubview(captionView)
+                captionView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
 
             NSLayoutConstraint.activate([

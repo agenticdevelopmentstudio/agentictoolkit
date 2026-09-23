@@ -48,21 +48,42 @@ public final class ConversationsShelfViewController: NSViewController,
     /// out of what was *said* (``ConversationsSessionFilter``), which carries no
     /// live state at all, so a host that cannot answer the question simply does
     /// not.
+    ///
+    /// The source is only watched while ``watchesActivity`` is on — the window
+    /// turns it on when it appears and off when it goes away, so a window built
+    /// at launch and never opened polls nothing.
     public var activitySource: SessionWatcher.SessionListSource? {
         didSet {
             guard activitySource !== oldValue else { return }
-            oldValue?.stopObserving()
+            if watchesActivity { oldValue?.stopObserving() }
             activity = [:]
-            guard let source = activitySource else { return }
-            // The source decides its own cadence; this just says it is being
-            // watched. Its first read is what fills the cache, so the immediate
-            // read below is not an optimisation — without it the shelf draws no
-            // glyphs until the source's first poll happens to change something.
-            source.startObserving { [weak self] in
-                Task { @MainActor in await self?.readActivity(from: source) }
-            }
-            Task { @MainActor [weak self] in await self?.readActivity(from: source) }
+            if watchesActivity { startWatching() }
         }
+    }
+
+    /// Whether ``activitySource`` is being watched. Off by default; the host's
+    /// window switches it on while it is on screen.
+    public var watchesActivity = false {
+        didSet {
+            guard watchesActivity != oldValue else { return }
+            if watchesActivity {
+                startWatching()
+            } else {
+                activitySource?.stopObserving()
+            }
+        }
+    }
+
+    private func startWatching() {
+        guard let source = activitySource else { return }
+        // The source decides its own cadence; this just says it is being
+        // watched. Its first read is what fills the cache, so the immediate
+        // read below is not an optimisation — without it the shelf draws no
+        // glyphs until the source's first poll happens to change something.
+        source.startObserving { [weak self] in
+            Task { @MainActor in await self?.readActivity(from: source) }
+        }
+        Task { @MainActor [weak self] in await self?.readActivity(from: source) }
     }
 
     /// What each session is doing, by id. Written by the poll below, and
@@ -93,16 +114,21 @@ public final class ConversationsShelfViewController: NSViewController,
     /// hands it straight over without inverting anything.
     public var onHiddenChanged: ((Set<String>) -> Void)?
 
+    /// Fired when single mode's pick moves, with the session now shown.
+    ///
+    /// A channel of its own rather than a hidden set: the hidden set is the
+    /// reader's multi-mode ticks, and expressing a pick as "everything else
+    /// hidden" overwrote them — a visit to single mode came back to one tick.
+    public var onSoloChanged: ((String?) -> Void)?
+
     /// Whether the shelf picks one session at a time or any number of them.
     ///
-    /// Switching to ``ConversationsSelectionMode/single`` keeps whichever
-    /// session was already the first one showing and hides the rest, so the
-    /// change reads as a narrowing of what is on screen rather than as a jump to
-    /// something arbitrary. Switching back restores the ticks the reader had
-    /// before that narrowing: single mode is a way of *looking* at the roster,
-    /// so passing through it must not cost the selection they built — and
-    /// re-ticking by hand is the one repair a multi-session selection makes
-    /// tedious.
+    /// Switching to ``ConversationsSelectionMode/single`` keeps the session
+    /// last picked, or else the first one showing, so the change reads as a
+    /// narrowing of what is on screen rather than as a jump to something
+    /// arbitrary. The ticks are never touched by it: single mode is a way of
+    /// *looking* at the roster, and passing through it must not cost the
+    /// selection the reader built.
     public var selectionMode: ConversationsSelectionMode = .multi {
         didSet {
             guard selectionMode != oldValue else { return }
@@ -112,27 +138,24 @@ public final class ConversationsShelfViewController: NSViewController,
             // Select All / Unselect All are multi-mode answers; see
             // `selectAllVisible()`.
             selectionMenuButton.isEnabled = selectionMode == .multi
+            // The check column draws a different answer in each mode.
+            if isViewLoaded { reloadRows() }
             if selectionMode == .single {
-                multiHidden = hidden
                 adoptSolo()
             } else {
-                restoreMultiSelection()
+                syncTableSelection()
             }
         }
     }
 
-    /// The ticks as multi mode last had them, kept across a visit to single
-    /// mode. Nil whenever the shelf is in multi mode — the live `hidden` set is
-    /// the selection then, and there is nothing else to remember.
-    private var multiHidden: Set<String>?
-
-    /// In single mode, the one session being shown.
+    /// In single mode, the one session being shown. Kept across a visit to
+    /// multi mode, so coming back lands on the same conversation.
     ///
     /// Held rather than derived from the hidden set, because the roster changes
     /// under it: a session that says nothing for a while falls off the page, and
     /// "the first one not hidden" would then quietly become a different
     /// conversation than the one the reader picked.
-    private var soloID: String?
+    public private(set) var soloID: String?
 
     /// Whether the selection is being moved by the shelf rather than by the
     /// reader — see ``reloadRows()``.
@@ -144,8 +167,8 @@ public final class ConversationsShelfViewController: NSViewController,
         didSet {
             guard sessions != oldValue else { return }
             reload()
-            // A session that arrives mid-read arrives unhidden, which in single
-            // mode would put two conversations on a timeline built for one.
+            // The first roster is what a restored pick is checked against, and
+            // a pick whose session has gone needs replacing.
             if selectionMode == .single { adoptSolo() }
         }
     }
@@ -255,11 +278,41 @@ public final class ConversationsShelfViewController: NSViewController,
         apply(hidden.union(visible.map(\.id)))
     }
 
+    /// Replaces the single-mode pick without telling the host — for restoring
+    /// a remembered one. Checked against the roster when the roster arrives,
+    /// not here: at restore time there is no roster yet, and a pick refused
+    /// for that would never survive a relaunch.
+    public func setSolo(_ id: String?) {
+        guard id != soloID else { return }
+        let old = soloID
+        soloID = id
+        reloadCheckRows(for: [old, id].compactMap { $0 })
+        syncTableSelection()
+    }
+
     private func apply(_ ids: Set<String>) {
         guard ids != hidden else { return }
+        let changed = ids.symmetricDifference(hidden)
         hidden = ids
-        reloadRows()
+        reloadCheckRows(for: changed)
         onHiddenChanged?(hidden)
+    }
+
+    /// Redraws the check column of the rows for `ids` and nothing else.
+    ///
+    /// A tick is one cell. Rebuilding every row for it restarted every
+    /// activity glyph's animation and dropped every row's hover state, on a
+    /// click that changed one mark.
+    private func reloadCheckRows(for ids: some Sequence<String>) {
+        guard isViewLoaded else { return }
+        let wanted = Set(ids)
+        let rows = IndexSet(visible.indices.filter { wanted.contains(visible[$0].id) })
+        guard !rows.isEmpty,
+              let column = table.tableColumns.firstIndex(where: { $0.identifier == Column.check })
+        else { return }
+        settlingSelection {
+            table.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: column))
+        }
     }
 
     /// Redraws the list.
@@ -296,48 +349,27 @@ public final class ConversationsShelfViewController: NSViewController,
     /// the feed empty, and an empty feed is not a state this mode has a way back
     /// out of except by clicking something else anyway.
     private func pick(_ id: String) {
-        soloID = id
-        applySolo()
+        guard id != soloID else { return syncTableSelection() }
+        setSolo(id)
+        onSoloChanged?(id)
     }
 
-    /// Settles the single-mode invariant — one session shown, every other one
-    /// hidden — keeping the current pick if it is still in the roster.
-    private func adoptSolo() {
-        let ids = Set(sessions.map(\.id))
-        let current = soloID.flatMap { ids.contains($0) ? $0 : nil }
-        soloID = current
-            ?? visible.first { !hidden.contains($0.id) }?.id
-            ?? visible.first?.id
-            ?? sessions.first?.id
-        applySolo()
-    }
-
-    /// Puts the reader's multi-mode ticks back, and drops the memory of them —
-    /// what they tick from here is theirs, not something to be restored again
-    /// on the next round trip.
-    ///
-    /// A session that arrived while single mode was on is in neither set, so it
-    /// stays ticked, which is how every new session arrives. And an id remembered
-    /// for a session that has since left the roster is kept rather than pruned:
-    /// it costs nothing while the session is gone, and if the session comes back
-    /// it comes back unticked, as the reader left it.
-    private func restoreMultiSelection() {
-        defer { syncTableSelection() }
-        guard let remembered = multiHidden else { return }
-        multiHidden = nil
-        apply(remembered)
-    }
-
-    /// Hides everything but the pick.
+    /// Settles the single-mode invariant — one session picked — keeping the
+    /// current pick if it is still in the roster.
     ///
     /// A no-op while the roster is empty, and that is load-bearing: the host
-    /// restores a remembered hidden set before the first page has been read, and
-    /// enforcing an invariant against zero sessions would compute "hide nothing"
-    /// and hand that back as the reader's new answer.
-    private func applySolo() {
+    /// restores a remembered pick before the first page has been read, and
+    /// checking it against zero sessions would throw it away.
+    private func adoptSolo() {
         guard selectionMode == .single, !sessions.isEmpty else { return }
-        apply(Set(sessions.map(\.id)).subtracting(soloID.map { [$0] } ?? []))
-        syncTableSelection()
+        if let soloID, sessions.contains(where: { $0.id == soloID }) {
+            return syncTableSelection()
+        }
+        let next = visible.first { !hidden.contains($0.id) }?.id
+            ?? visible.first?.id
+            ?? sessions.first?.id
+        guard let next else { return }
+        pick(next)
     }
 
     /// Moves the pick `delta` rows down the visible list (negative is up).
@@ -371,7 +403,13 @@ public final class ConversationsShelfViewController: NSViewController,
                   let soloID,
                   let row = visible.firstIndex(where: { $0.id == soloID })
             else {
+                // `deselectAll` does nothing to a table that disallows an
+                // empty selection — which single mode's does, and the pick can
+                // be filtered out of view there. Allowed for the one call.
+                let allowsEmpty = table.allowsEmptySelection
+                table.allowsEmptySelection = true
                 table.deselectAll(nil)
+                table.allowsEmptySelection = allowsEmpty
                 return
             }
             table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -599,7 +637,10 @@ public final class ConversationsShelfViewController: NSViewController,
         // grey band across the top of the panel.
         table.headerView = nil
         table.usesAlternatingRowBackgroundColors = false
-        table.allowsEmptySelection = true
+        // Set from the mode, not assumed: a host may set the mode before the
+        // view loads, and single mode's table must not be emptied by a click
+        // on blank space below the rows.
+        table.allowsEmptySelection = selectionMode == .multi
         table.allowsMultipleSelection = false
         table.rowSizeStyle = .custom
         table.usesAutomaticRowHeights = true
@@ -617,22 +658,18 @@ public final class ConversationsShelfViewController: NSViewController,
     private static let panelInset: CGFloat = 8
     private static let panelCornerRadius: CGFloat = 10
 
-    /// Air above and below a row's two lines, and between them.
+    /// Air above and below a row's line.
     ///
-    /// Generous on purpose: a row here is a paragraph about a conversation — a
-    /// place and what is happening in it — and packed to a single line's
-    /// leading the list reads as a wall of text with no way in.
+    /// Generous on purpose: a row here is a place a conversation is happening,
+    /// and packed to a single line's leading the list reads as a wall of text
+    /// with no way in.
     private static let rowPadding: CGFloat = 7
-    private static let rowLineGap: CGFloat = 2
 
-    /// The header's own metrics, and the Sessions window's numbers verbatim
-    /// (``SessionWatcher/SessionListView``'s `Layout`). A shared control drawn
-    /// at two different sizes is two controls to a reader, so these are copied
-    /// rather than chosen — if the Sessions row's icon changes size, this one
-    /// changes with it.
-    private static let iconSide: CGFloat = 28
-    private static let iconToText: CGFloat = 8
-    private static let headerToActivity: CGFloat = 12
+    /// The header's own metrics — the Sessions window's, read from its row
+    /// rather than copied. A shared control drawn at two different sizes is
+    /// two controls to a reader, so if the Sessions row's icon changes size,
+    /// this one changes with it.
+    private typealias HeaderMetrics = SessionWatcher.SessionWatcherRowAppKitView.Metrics
 
     /// The width the shelf opens at: enough for `project >> branch` to be read
     /// whole, which is the only reason the list is there. Measured against the
@@ -791,9 +828,19 @@ public final class ConversationsShelfViewController: NSViewController,
         guard visible.indices.contains(row), let column = tableColumn else { return nil }
         let session = visible[row]
         switch column.identifier {
-        case Column.check: return checkCell(shown: !hidden.contains(session.id))
+        case Column.check: return checkCell(shown: isChecked(session.id))
         case Column.name: return nameCell(for: session)
         default: return nil
+        }
+    }
+
+    /// Whether a row carries the checkmark: the pick in single mode, the ticks
+    /// in multi mode. The ticks survive single mode untouched, but drawing them
+    /// there would say several conversations are showing when one is.
+    private func isChecked(_ id: String) -> Bool {
+        switch selectionMode {
+        case .multi:  return !hidden.contains(id)
+        case .single: return id == soloID
         }
     }
 
@@ -832,34 +879,30 @@ public final class ConversationsShelfViewController: NSViewController,
     /// ``SessionBreadcrumbView/Crumbs`` drops the empty segments itself, so a
     /// session with no branch, or none of either, simply draws fewer crumbs —
     /// there is no arrangement of the three to choose between here.
+    ///
+    /// The icon is always there: ``TerminalAppIcon`` falls back to a generic
+    /// terminal glyph for a session that named no application, and a row
+    /// without one started its trail 36 points left of every row that had one.
     private func nameCell(for session: Session) -> NSView {
         let header = SessionHeaderView(
             crumbs: .init(context: session.context, name: Self.trailName(of: session)),
-            icon: session.appIdentity.isEmpty
-                ? nil
-                : .init(
-                    appIdentity: session.appIdentity,
-                    side: Self.iconSide,
-                    gap: Self.iconToText),
+            icon: .init(
+                appIdentity: session.appIdentity,
+                side: HeaderMetrics.iconSide,
+                gap: HeaderMetrics.iconToText),
             accessory: activityIcon(for: session),
-            accessoryGap: Self.headerToActivity
+            accessoryGap: HeaderMetrics.headerToActivity
         )
         header.setAccessibilityLabel(session.displayName)
+        // The crumbs truncate to fit the shelf, so the whole trail has to be
+        // reachable somewhere.
+        header.toolTip = Self.tooltip(for: session)
         // The cell is rebuilt by the table rather than owned by this controller,
         // so it repaints itself instead of waiting to be told.
         header.observeTheme { view, palette in view.applyTheme(palette) }
-
-        let lines = NSStackView(views: [header])
-        lines.orientation = .vertical
-        lines.alignment = .leading
-        lines.spacing = Self.rowLineGap
-        lines.edgeInsets = NSEdgeInsets(
-            top: Self.rowPadding, left: 0, bottom: Self.rowPadding, right: 4)
-        lines.translatesAutoresizingMaskIntoConstraints = false
         // The header owns the row's whole width — the activity glyph rides its
         // far margin, and a header that hugged its text would park the glyph
         // against the name instead of against the column's edge.
-        lines.setHuggingPriority(.init(1), for: .horizontal)
         header.setContentHuggingPriority(.init(1), for: .horizontal)
 
         // The table sets a cell view's frame itself, so the root of one keeps
@@ -868,18 +911,25 @@ public final class ConversationsShelfViewController: NSViewController,
         // column drew a row that ran off its own right edge, mid-glyph, with
         // nothing reaching the truncation it had asked for.
         let cell = NSView()
-        cell.addSubview(lines)
+        cell.addSubview(header)
         NSLayoutConstraint.activate([
-            lines.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
-            lines.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+            header.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
             // Top and bottom, not centred: `usesAutomaticRowHeights` measures a
             // row by the chain of constraints running through its cell, and a
             // centred child leaves that chain open — the row then falls back to
-            // a fixed height and the second line is drawn outside it.
-            lines.topAnchor.constraint(equalTo: cell.topAnchor),
-            lines.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
+            // a fixed height.
+            header.topAnchor.constraint(equalTo: cell.topAnchor, constant: Self.rowPadding),
+            header.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -Self.rowPadding)
         ])
         return cell
+    }
+
+    /// The whole trail, untruncated — what the row would say given the room.
+    static func tooltip(for session: Session) -> String {
+        (session.context + [trailName(of: session)])
+            .filter { !$0.isEmpty }
+            .joined(separator: " » ")
     }
 }
 

@@ -10,9 +10,10 @@ import XCTest
 /// does not apply: narration only buries a conversation when there are other
 /// conversations to bury it under. None of this is visible in a screenshot —
 /// what it changes is the `includeWorkOutput` argument the loader is handed —
-/// so it is asserted on the reads themselves. (Single mode draws what it reads
-/// on the status line rather than as bubbles — see
-/// `ConversationsStatusLineTests`.)
+/// so it is asserted on the reads themselves. The merged page — the bubbles —
+/// always asks for the reader's own setting; single mode's work output comes
+/// from a short scoped read of its own, drawn on the status line rather than as
+/// bubbles (see `ConversationsStatusLineTests`).
 @MainActor
 final class ConversationsWorkOutputTests: XCTestCase {
 
@@ -42,8 +43,22 @@ final class ConversationsWorkOutputTests: XCTestCase {
         XCTAssertFalse(controller.includeWorkOutput)
 
         controller.selectionMode = .single
-        try await waitUntil("the feed re-read with work output") { asked.latest == true }
+        try await waitUntil("the status line read the conversation with work output") {
+            asked.statusReads > 0
+        }
         XCTAssertTrue(controller.isWorkOutputForced)
+        XCTAssertEqual(asked.latest, false,
+                       "the bubbles' read took the status line's work output")
+    }
+
+    /// The status read is of the one conversation and nobody else: a merged read
+    /// with work output would spend the page on every session's narration.
+    func testTheStatusReadIsScopedToTheConversation() async throws {
+        let (controller, asked) = try await loadedFeed()
+        controller.selectionMode = .single
+        try await waitUntil("the status line read") { asked.statusReads > 0 }
+
+        XCTAssertEqual(asked.statusSources, ["s1"])
     }
 
     /// The reader's own setting is the one they get back — not whatever the mode
@@ -52,12 +67,17 @@ final class ConversationsWorkOutputTests: XCTestCase {
         let (controller, asked) = try await loadedFeed()
 
         controller.selectionMode = .single
-        try await waitUntil("work output came on") { asked.latest == true }
+        try await waitUntil("work output came on") { asked.statusReads > 0 }
         XCTAssertFalse(controller.includeWorkOutput, "the mode is not the reader")
 
         controller.selectionMode = .multi
-        try await waitUntil("work output went off again") { asked.latest == false }
+        await settle()
+        let statusReads = asked.statusReads
+        controller.refresh()
+        await settle()
         XCTAssertFalse(controller.isWorkOutputForced)
+        XCTAssertEqual(asked.latest, false)
+        XCTAssertEqual(asked.statusReads, statusReads, "multi mode still reads a status line")
     }
 
     func testAReaderWhoWantedWorkOutputKeepsItAcrossARoundTrip() async throws {
@@ -89,18 +109,32 @@ final class ConversationsWorkOutputTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    /// Every `includeWorkOutput` the loader was asked for, in order.
+    /// Every read the loader was asked for, in order. `latest` and `count` are
+    /// the merged page's — the bubbles; `statusReads` are the scoped reads with
+    /// work output that feed single mode's status line.
     private final class ReadLog: @unchecked Sendable {
         private let lock = NSLock()
-        private var stored: [Bool] = []
-        func note(_ includeWorkOutput: Bool) {
-            lock.lock(); stored.append(includeWorkOutput); lock.unlock()
+        private var merged: [Bool] = []
+        private var status: [String] = []
+        func note(_ includeWorkOutput: Bool, sourceID: String?) {
+            lock.lock(); defer { lock.unlock() }
+            if let sourceID {
+                if includeWorkOutput { status.append(sourceID) }
+            } else {
+                merged.append(includeWorkOutput)
+            }
         }
         var latest: Bool? {
-            lock.lock(); defer { lock.unlock() }; return stored.last
+            lock.lock(); defer { lock.unlock() }; return merged.last
         }
         var count: Int {
-            lock.lock(); defer { lock.unlock() }; return stored.count
+            lock.lock(); defer { lock.unlock() }; return merged.count
+        }
+        var statusReads: Int {
+            lock.lock(); defer { lock.unlock() }; return status.count
+        }
+        var statusSources: Set<String> {
+            lock.lock(); defer { lock.unlock() }; return Set(status)
         }
     }
 
@@ -124,8 +158,7 @@ final class ConversationsWorkOutputTests: XCTestCase {
         let controller = ConversationsViewController(
             refreshInterval: .seconds(3600)
         ) { includeWorkOutput, sourceID, _ in
-            guard sourceID == nil else { return messages }
-            asked.note(includeWorkOutput)
+            asked.note(includeWorkOutput, sourceID: sourceID)
             return messages
         }
 

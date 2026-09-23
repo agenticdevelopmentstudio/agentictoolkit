@@ -85,6 +85,7 @@ public final class ConversationsSessionFilter: @unchecked Sendable {
 
     private let lock = NSLock()
     private var hiddenIDs: Set<String> = []
+    private var soloID: String?
     private var currentRoster: [Session] = []
     private var deepening = 1
 
@@ -119,11 +120,67 @@ public final class ConversationsSessionFilter: @unchecked Sendable {
         set { withLock { hiddenIDs = newValue } }
     }
 
+    /// The one session single mode shows, or nil outside single mode.
+    ///
+    /// Kept apart from ``hidden`` rather than expressed as "everything else
+    /// hidden": the hidden set is the reader's multi-mode ticks, and a pick
+    /// written into it overwrote them — a visit to single mode came back to one
+    /// tick. It also answers a different question. "Everything but these" lets
+    /// through a session that started talking a second ago, which is right for
+    /// the ticks and wrong for a window that is reading one conversation.
+    public var solo: String? {
+        get { withLock { soloID } }
+        set { withLock { soloID = newValue } }
+    }
+
     /// The sessions seen in the last page read, in the order they first spoke.
     public var roster: [Session] { withLock { currentRoster } }
 
     /// Whether `id` is drawn — that is, whether the shelf shows its checkmark.
     public func isShown(_ id: String) -> Bool { !withLock { hiddenIDs.contains(id) } }
+
+    /// The one session left on the roster once the hidden ones are taken out, or
+    /// nil when there are none or several.
+    public var soleShownID: String? {
+        withLock {
+            let shown = currentRoster.filter { !hiddenIDs.contains($0.id) }
+            return shown.count == 1 ? shown[0].id : nil
+        }
+    }
+
+    /// Notes a single-mode read and returns the one conversation in it.
+    ///
+    /// Two reads, because single mode wants two different things. `page` is the
+    /// merged feed at its ordinary depth, and it is there only for the roster:
+    /// the shelf still lists every session. `conversation` is `solo`'s own
+    /// scoped read, and it is what is drawn — a page of the merged feed may hold
+    /// two of a quiet session's lines, and deepening that page until one session
+    /// fills it cost eight merged pages a poll to show one.
+    ///
+    /// The roster is the page's plus whoever the conversation holds, so a
+    /// session too quiet to reach the merged page keeps its row, and the pick
+    /// with it. What comes back is `solo`'s lines only — a session that starts
+    /// talking now is not drawn into a window reading someone else.
+    public func apply(
+        page: [ChatMessage],
+        conversation: [ChatMessage],
+        solo: String
+    ) -> [ChatMessage] {
+        let own = conversation.filter { $0.attribution?.sourceID == solo }
+        var roster = Self.roster(of: page)
+        let listed = Set(roster.map(\.id))
+        roster += Self.roster(of: own).filter { !listed.contains($0.id) }
+        let changed: [Session]? = withLock {
+            // One conversation, read at its own depth: nothing is filtered out
+            // of it, so the merged read owes nothing either.
+            deepening = 1
+            guard roster != currentRoster else { return nil }
+            currentRoster = roster
+            return roster
+        }
+        if let changed { onRosterChanged?(changed) }
+        return own
+    }
 
     /// Notes what a freshly read page contains and drops the hidden sessions
     /// from it.

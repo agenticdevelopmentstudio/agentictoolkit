@@ -137,6 +137,60 @@ final class ConversationsShelfTests: XCTestCase {
                        "a feed with nothing hidden kept re-reading a multiple of its page")
     }
 
+    // MARK: - Single mode
+
+    /// Single mode draws the one conversation and nothing else — not a session
+    /// that started talking a second ago, which the hidden set would let through.
+    func testASoloReadDrawsOnlyThatConversation() {
+        let filter = ConversationsSessionFilter()
+        let shown = filter.apply(
+            page: [message("a", name: "Alpha"), message("new", name: "New")],
+            conversation: [message("a", name: "Alpha"), message("new", name: "New")],
+            solo: "a")
+        XCTAssertEqual(shown.compactMap { $0.attribution?.sourceID }, ["a"])
+    }
+
+    /// A session too quiet to reach the merged page keeps its row, and the pick
+    /// with it — its lines come from its own read.
+    func testASoloTooQuietForTheMergedPageStaysOnTheRoster() {
+        let filter = ConversationsSessionFilter()
+        _ = filter.apply(
+            page: [message("b", name: "Beta"), message("c", name: "Gamma")],
+            conversation: [message("a", name: "Alpha")],
+            solo: "a")
+        XCTAssertEqual(filter.roster.map(\.id), ["b", "c", "a"])
+    }
+
+    /// The reader's multi-mode ticks are no part of a single-mode read, so a
+    /// hidden session picked in single mode still shows.
+    func testTheTicksDoNotHideTheSolo() {
+        let filter = ConversationsSessionFilter()
+        filter.hidden = ["a"]
+        let shown = filter.apply(
+            page: [message("a", name: "Alpha")], conversation: [message("a", name: "Alpha")], solo: "a")
+        XCTAssertEqual(shown.count, 1)
+        XCTAssertEqual(filter.hidden, ["a"])
+    }
+
+    /// One conversation read at its own depth owes the merged read nothing.
+    func testASoloReadResetsThePageDepth() {
+        let filter = ConversationsSessionFilter()
+        filter.hidden = ["a"]
+        _ = filter.apply(to: [message("a", name: "Alpha")])
+        XCTAssertGreaterThan(filter.pageDeepening, 1)
+
+        _ = filter.apply(page: [], conversation: [message("b", name: "Beta")], solo: "b")
+        XCTAssertEqual(filter.pageDeepening, 1)
+    }
+
+    func testTheSoleShownSessionIsTheOneTheTicksLeave() {
+        let filter = ConversationsSessionFilter()
+        _ = filter.apply(to: [message("a", name: "Alpha"), message("b", name: "Beta")])
+        XCTAssertNil(filter.soleShownID, "two sessions showing is not one")
+        filter.hidden = ["a"]
+        XCTAssertEqual(filter.soleShownID, "b")
+    }
+
     // MARK: - The shelf
 
     private func shelf(_ sessions: [(String, String)]) -> ConversationsShelfViewController {
@@ -408,6 +462,39 @@ final class ConversationsShelfTests: XCTestCase {
         XCTAssertTrue(glyph.isHidden, "the glyph kept drawing after the session went quiet")
     }
 
+    /// A source that only counts being watched.
+    private final class CountingSource: SessionWatcher.SessionListSource, @unchecked Sendable {
+        let starts = Counter()
+        let stops = Counter()
+        func fetchSessions() async throws -> [SessionWatcher.SessionWatcherSession] { [] }
+        func startObserving(onChange: @escaping @Sendable () -> Void) { starts.bump() }
+        func stopObserving() { stops.bump() }
+    }
+
+    func testTheSourceIsWatchedOnlyWhileTheWindowIsOnScreen() {
+        // The window controller is built at launch, and its source polls the
+        // daemon's whole session table. Watched from the moment it is handed
+        // over, it polled every three seconds for the life of the app whether
+        // or not the window had ever been opened.
+        let shelf = ConversationsShelfViewController()
+        let source = CountingSource()
+        shelf.activitySource = source
+        XCTAssertEqual(source.starts.value, 0, "a window nobody opened is polling")
+
+        shelf.watchesActivity = true
+        XCTAssertEqual(source.starts.value, 1)
+        shelf.watchesActivity = false
+        XCTAssertEqual(source.stops.value, 1, "a closed window kept polling")
+
+        let feed = ConversationsViewController { _, _, _ in [] }
+        let split = ConversationsSplitViewController(feed: feed)
+        _ = split.view
+        split.viewDidAppear()
+        XCTAssertTrue(split.shelf.watchesActivity, "the window on screen does not watch")
+        split.viewWillDisappear()
+        XCTAssertFalse(split.shelf.watchesActivity, "the window gone away still watches")
+    }
+
     /// The first activity glyph in a hierarchy.
     private func activityIcon(in view: NSView) -> SessionWatcher.SessionWatcherActivityIconView? {
         if let icon = view as? SessionWatcher.SessionWatcherActivityIconView { return icon }
@@ -458,16 +545,16 @@ final class ConversationsShelfTests: XCTestCase {
         shelf.selectionMode = .single
         guard let table = firstTable(in: shelf.view) else { return XCTFail("no table") }
 
-        XCTAssertEqual(shelf.hidden, ["b", "c"], "single mode did not start on the first row")
+        XCTAssertEqual(shelf.soloID, "a", "single mode did not start on the first row")
 
         moveHighlight(to: 1, in: table)
-        XCTAssertEqual(shelf.hidden, ["a", "c"], "the feed did not follow the highlight down")
+        XCTAssertEqual(shelf.soloID, "b", "the feed did not follow the highlight down")
 
         moveHighlight(to: 2, in: table)
-        XCTAssertEqual(shelf.hidden, ["a", "b"])
+        XCTAssertEqual(shelf.soloID, "c")
 
         moveHighlight(to: 1, in: table)
-        XCTAssertEqual(shelf.hidden, ["a", "c"], "the feed did not follow the highlight back up")
+        XCTAssertEqual(shelf.soloID, "b", "the feed did not follow the highlight back up")
     }
 
     /// In multi mode there is no *the* conversation to walk to, and a highlight
@@ -481,6 +568,7 @@ final class ConversationsShelfTests: XCTestCase {
         moveHighlight(to: 1, in: table)
 
         XCTAssertEqual(shelf.hidden, [], "moving the highlight hid sessions in multi mode")
+        XCTAssertNil(shelf.soloID)
     }
 
     /// The host hears the move exactly as it hears a click: one change per
@@ -491,60 +579,112 @@ final class ConversationsShelfTests: XCTestCase {
         shelf.selectionMode = .single
         guard let table = firstTable(in: shelf.view) else { return XCTFail("no table") }
 
-        var heard: [Set<String>] = []
-        shelf.onHiddenChanged = { heard.append($0) }
+        var heard: [String?] = []
+        shelf.onSoloChanged = { heard.append($0) }
         moveHighlight(to: 1, in: table)
 
-        XCTAssertEqual(heard, [["a"]])
+        XCTAssertEqual(heard, ["b"])
+    }
+
+    /// The single-mode checkmark is the pick, and only the pick: the ticks are
+    /// still there underneath, but drawing them would say several
+    /// conversations are showing when one is.
+    func testSingleModeChecksOnlyThePick() {
+        let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
+        shelf.selectionMode = .single
+        guard let table = firstTable(in: shelf.view) else { return XCTFail("no table") }
+
+        let checked = (0..<table.numberOfRows).map { row in
+            (table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSImageView)?.image != nil
+        }
+        XCTAssertEqual(checked, [true, false, false])
     }
 
     // MARK: - Passing through single mode
 
     /// Single mode is a way of looking at the roster, not a way of editing it,
-    /// so a visit to it must cost the reader nothing. Re-ticking by hand is the
-    /// one repair a several-session selection makes tedious.
+    /// so a visit to it must cost the reader nothing — the ticks are never
+    /// touched, so there is nothing to restore.
     func testAMultiModeSelectionSurvivesAVisitToSingleMode() {
         let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
         shelf.setHidden(["c"])
 
         shelf.selectionMode = .single
-        XCTAssertEqual(shelf.hidden, ["b", "c"], "single mode did not narrow to one conversation")
+        XCTAssertEqual(shelf.hidden, ["c"], "single mode rewrote the reader's ticks")
+        XCTAssertEqual(shelf.soloID, "a")
 
         shelf.selectionMode = .multi
-        XCTAssertEqual(shelf.hidden, ["c"], "the reader's ticks did not come back")
+        XCTAssertEqual(shelf.hidden, ["c"], "the reader's ticks did not survive")
     }
 
-    /// The restore is a change to what the feed draws, so the host has to hear
-    /// it — `setHidden` is the quiet door, and this is not that.
-    func testTheHostHearsTheSelectionComeBack() {
+    /// Neither the visit nor the return is a change to the ticks, so the host
+    /// hears nothing about them.
+    func testAVisitToSingleModeTellsTheHostNothingAboutTheTicks() {
         let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
         shelf.setHidden(["c"])
-        shelf.selectionMode = .single
 
         var heard: [Set<String>] = []
         shelf.onHiddenChanged = { heard.append($0) }
+        shelf.selectionMode = .single
         shelf.selectionMode = .multi
 
-        XCTAssertEqual(heard, [["c"]])
+        XCTAssertEqual(heard, [])
     }
 
-    /// What the reader ticks after a restore is theirs, and is what the *next*
-    /// visit restores — a remembered set that outlived its round trip would put
-    /// back a selection they had already moved on from.
-    func testASecondVisitRestoresTheNewerSelection() {
+    /// Coming back to single mode lands on the conversation it was reading.
+    func testTheNextVisitKeepsThePick() {
         let shelf = shelf([("a", "Alpha"), ("b", "Beta"), ("c", "Charlie")])
-        shelf.setHidden(["c"])
         shelf.selectionMode = .single
+        XCTAssertTrue(shelf.moveSelection(by: 2))
         shelf.selectionMode = .multi
-
-        shelf.setHidden(["a"])
         shelf.selectionMode = .single
-        shelf.selectionMode = .multi
 
-        XCTAssertEqual(shelf.hidden, ["a"])
+        XCTAssertEqual(shelf.soloID, "c")
     }
 
-    // MARK: - The split
+    /// A remembered pick is restored before the first page has been read, so
+    /// it cannot be checked against the roster then — and one thrown away for
+    /// that would never survive a relaunch.
+    func testARestoredPickSurvivesUntilTheRosterArrives() {
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        shelf.setSolo("b")
+        shelf.selectionMode = .single
+        XCTAssertEqual(shelf.soloID, "b")
+
+        shelf.sessions = [("a", "Alpha"), ("b", "Beta")].map {
+            ConversationsSessionFilter.Session(id: $0.0, name: $0.1, context: [])
+        }
+        XCTAssertEqual(shelf.soloID, "b", "the roster replaced a pick that was on it")
+    }
+
+    /// A pick whose session is gone is replaced, and the host told.
+    func testAPickOffTheRosterIsReplaced() {
+        let shelf = ConversationsShelfViewController()
+        _ = shelf.view
+        shelf.setSolo("gone")
+        shelf.selectionMode = .single
+        var heard: [String?] = []
+        shelf.onSoloChanged = { heard.append($0) }
+
+        shelf.sessions = [ConversationsSessionFilter.Session(id: "a", name: "Alpha", context: [])]
+
+        XCTAssertEqual(shelf.soloID, "a")
+        XCTAssertEqual(heard, ["a"])
+    }
+
+    // MARK: - Rows
+
+    /// The crumbs truncate to fit the shelf, so the tooltip carries the whole
+    /// trail.
+    func testARowsTooltipIsTheWholeTrail() {
+        let session = ConversationsSessionFilter.Session(
+            id: "s1", name: "editing", context: ["stenographer", "main"])
+        XCTAssertEqual(ConversationsShelfViewController.tooltip(for: session),
+                       "stenographer » main » editing")
+    }
+
+        // MARK: - The split
 
     func testTheShelfStartsAway() {
         let split = ConversationsSplitViewController(
@@ -627,5 +767,37 @@ final class ConversationsShelfTests: XCTestCase {
         _ = split.view
         XCTAssertEqual(split.shelf.hidden, ["a"],
                        "the shelf ticked a session the feed was already hiding")
+    }
+
+    /// The shelf's pick is what the feed reads in single mode, and what the
+    /// host remembers.
+    func testThePickReachesTheFeedAndTheHost() {
+        let feed = ConversationsViewController { _, _, _ in [] }
+        let split = ConversationsSplitViewController(feed: feed)
+        _ = split.view
+        var heard: [String?] = []
+        split.onSoloSessionChanged = { heard.append($0) }
+        split.shelf.sessions = [("a", "Alpha"), ("b", "Beta")].map {
+            ConversationsSessionFilter.Session(id: $0.0, name: $0.1, context: [])
+        }
+        split.selectionMode = .single
+        XCTAssertTrue(split.moveSelection(by: 1))
+
+        XCTAssertEqual(feed.soloSessionID, "b")
+        XCTAssertEqual(split.soloSessionID, "b")
+        XCTAssertEqual(heard.last, "b")
+    }
+
+    /// A restored pick reaches both halves without being reported back.
+    func testARestoredPickReachesBothHalvesQuietly() {
+        let feed = ConversationsViewController { _, _, _ in [] }
+        let split = ConversationsSplitViewController(feed: feed)
+        var heard: [String?] = []
+        split.onSoloSessionChanged = { heard.append($0) }
+        split.soloSessionID = "b"
+
+        XCTAssertEqual(split.shelf.soloID, "b")
+        XCTAssertEqual(feed.soloSessionID, "b")
+        XCTAssertEqual(heard, [])
     }
 }

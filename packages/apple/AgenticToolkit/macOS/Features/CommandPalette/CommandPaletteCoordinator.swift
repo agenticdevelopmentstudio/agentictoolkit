@@ -90,6 +90,9 @@ public final class CommandPaletteCoordinator: AppFeature {
         KeyboardShortcuts.onKeyDown(for: .showCommandPalette) { [weak self] in
             self?.showPalette()
         }
+        // So Settings › Key Commands refuses this chord instead of letting a
+        // second command fire on it too.
+        KeyCommandRegistry.shared.reserveExternal([.showCommandPalette], owner: "the command palette")
     }
 
     /// Give the shortcut back. `removeHandler` drops the stored handler *and*
@@ -98,6 +101,7 @@ public final class CommandPaletteCoordinator: AppFeature {
         guard hasClaimedGlobalShortcut else { return }
         hasClaimedGlobalShortcut = false
         KeyboardShortcuts.removeHandler(for: .showCommandPalette)
+        KeyCommandRegistry.shared.releaseExternal([.showCommandPalette])
     }
 
     /// Whether the global shortcut is claimed right now.

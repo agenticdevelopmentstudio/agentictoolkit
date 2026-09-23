@@ -28,6 +28,9 @@ extension SessionWatcher {
         private var activity: SessionWatcherActivity
         private var isSummarizing: Bool
         private var tint: NSColor = .tertiaryLabelColor
+        /// The palette last applied, so a state change can re-tint without
+        /// waiting for the next theme change: the tint depends on the state.
+        private var palette: SemanticPalette?
         private let glyph = CALayer()
 
         /// Side of the glyph's box. Small enough to sit inside a two-line row
@@ -73,7 +76,9 @@ extension SessionWatcher {
             self.activity = activity
             self.isSummarizing = isSummarizing
             describeState()
-            renderGlyph()
+            // The colour is the state's: an idle row turning to waiting kept the
+            // idle tint until the theme next changed.
+            if let palette { applyTheme(palette) } else { renderGlyph() }
             applyQuiet()
             // The state that was animating may not be the state that is, so the old
             // animation goes before the new one is chosen.
@@ -126,6 +131,7 @@ extension SessionWatcher {
         /// Colours the glyph. Waiting is the one state meant to catch the eye
         /// across a full window of rows, so it takes the warning colour.
         public func applyTheme(_ palette: SemanticPalette) {
+            self.palette = palette
             if isSummarizing {
                 tint = palette.accentColor
             } else {

@@ -97,10 +97,35 @@ public struct KeyCommandDescriptor {
     /// Whether the shipped chord is live out of the box. A command can ship
     /// *with* a suggested chord and still be off — which is exactly what the
     /// global window shortcuts do.
-    public let isEnabledByDefault: Bool
+    ///
+    /// A global command is always off out of the box, whatever its declarer
+    /// said: ``KeyCommandScope/settingsCaption`` promises the user so, and a
+    /// system-wide hotkey switched on by an upgrade takes a chord away from
+    /// every other app without the user ever having asked for it.
+    public internal(set) var isEnabledByDefault: Bool
 
-    public let run: () -> Void
+    /// Performs the command, and says whether it did anything. `false` means
+    /// "not mine to handle right now" — the Conversations window's ⌘↑ while
+    /// the caret is in a text field — so the key event goes on to whoever
+    /// would have had it, instead of being swallowed by a command that
+    /// declined it.
+    public let perform: () -> Bool
 
+    public init(
+        id: String,
+        title: String,
+        defaultShortcut: KeyboardShortcuts.Shortcut? = nil,
+        isEnabledByDefault: Bool = true,
+        perform: @escaping () -> Bool
+    ) {
+        self.id = id
+        self.title = title
+        self.defaultShortcut = defaultShortcut
+        self.isEnabledByDefault = isEnabledByDefault
+        self.perform = perform
+    }
+
+    /// A command that always handles its chord.
     public init(
         id: String,
         title: String,
@@ -108,11 +133,18 @@ public struct KeyCommandDescriptor {
         isEnabledByDefault: Bool = true,
         run: @escaping () -> Void
     ) {
-        self.id = id
-        self.title = title
-        self.defaultShortcut = defaultShortcut
-        self.isEnabledByDefault = isEnabledByDefault
-        self.run = run
+        self.init(
+            id: id, title: title, defaultShortcut: defaultShortcut,
+            isEnabledByDefault: isEnabledByDefault,
+            perform: {
+                run()
+                return true
+            })
+    }
+
+    /// Perform the command, ignoring whether it handled anything.
+    public func run() {
+        _ = perform()
     }
 
     /// What a command is bound to before the user touches it.
@@ -125,6 +157,9 @@ public struct KeyCommandDescriptor {
     func scoped(to scope: KeyCommandScope) -> KeyCommandDescriptor {
         var copy = self
         copy.scope = scope
+        if scope == .global {
+            copy.isEnabledByDefault = false
+        }
         return copy
     }
 }
