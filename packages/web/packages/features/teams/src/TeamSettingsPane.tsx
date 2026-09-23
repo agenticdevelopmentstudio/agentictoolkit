@@ -52,7 +52,8 @@ export function TeamSettingsPane({
     getId: (t) => t.id,
     blank: teamBlank,
     toInput: teamToInput,
-    validate: (draft, others) => teamValidate(draft, others.map((o) => o.identifier)),
+    validate: (draft, others, base) =>
+      teamValidate(draft, others.map((o) => o.identifier), base?.identifier),
     differs,
     normalize,
     // Guarded for safety — the pane only renders once the list (hence the ecosystem)

@@ -17,11 +17,21 @@ export function teamToInput(t: Team): TeamInput {
   return { displayName: t.displayName, identifier: t.identifier };
 }
 
-/** Returns an error message, or null when the draft is valid. */
-export function teamValidate(draft: TeamInput, takenIdentifiers: string[]): string | null {
+/** Returns an error message, or null when the draft is valid.
+ *
+ *  `storedIdentifier` is the identifier already on the record being edited. It is exempt from the
+ *  reverse-domain FORMAT rule: the backend provisions teams with plain slugs (`participants`,
+ *  `admins`), and requiring the user to rename one before any other field could be saved left
+ *  Save permanently disabled on exactly the teams every workspace has. A changed identifier is
+ *  still held to the format. */
+export function teamValidate(
+  draft: TeamInput,
+  takenIdentifiers: string[],
+  storedIdentifier?: string,
+): string | null {
   if (!draft.displayName.trim()) return "Display name is required.";
   const id = draft.identifier.trim();
-  const idErr = validateTeamIdentifier(id);
+  const idErr = id && id === storedIdentifier ? null : validateTeamIdentifier(id);
   if (idErr) return idErr;
   if (takenIdentifiers.includes(id)) return `Identifier "${id}" is already in use.`;
   return null;

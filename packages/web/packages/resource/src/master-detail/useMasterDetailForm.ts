@@ -27,8 +27,12 @@ export interface MasterDetailFormConfig<TItem, TInput> {
   getId: (item: TItem) => string;
   blank: () => TInput;
   toInput: (item: TItem) => TInput;
-  /** `others` = every row except the selected one (for uniqueness checks). */
-  validate: (draft: TInput, others: TItem[]) => string | null;
+  /** `others` = every row except the selected one (for uniqueness checks). `base` = the draft's
+   *  baseline (the stored record's input, or `blank()` on create), so a rule can grandfather a
+   *  value the user did not touch — a row the BACKEND wrote need not satisfy a client-side format
+   *  rule, and holding every other field's Save hostage to it is how the team pane shipped with
+   *  Save permanently greyed out on the auto-provisioned `participants` / `admins` teams. */
+  validate: (draft: TInput, others: TItem[], base: TInput | null) => string | null;
   /** True when the draft differs from its baseline. */
   differs: (a: TInput, b: TInput) => boolean;
   /** Trim/clean the draft just before persisting. Defaults to identity. */
@@ -122,7 +126,7 @@ export function useMasterDetailForm<TItem, TInput>(
   // eleven panes greying Save out with no explanation anywhere. Now it rides in `actions` next to
   // `canSave` and ButtonBar renders it beside the button. Not gated on `dirty`: a create opens on
   // a blank draft that is already blocked, and that is exactly when the reason is instruction.
-  const blockedReason = draft ? config.validate(draft, others) : null;
+  const blockedReason = draft ? config.validate(draft, others, base) : null;
   const valid = Boolean(draft) && blockedReason === null;
   // dirty && valid ONLY. The in-flight term is NOT folded in here: `canSave` is a statement about
   // the DRAFT, and every consumer hands it to ButtonBar → SaveCancelButtons, which already renders
@@ -225,7 +229,7 @@ export function useMasterDetailForm<TItem, TInput>(
     // Already in flight — swallow the duplicate. Reporting `false` is right for the exit guard
     // too: nothing has been persisted YET, so leaving now would still lose the edit.
     if (savingRef.current) return false;
-    const problem = config.validate(draft, others);
+    const problem = config.validate(draft, others, base);
     if (problem) {
       setError(problem);
       return false;
