@@ -73,6 +73,12 @@ export interface ProvisionedFeature {
   updatedAt: string;
 }
 
+/** One visit to the picker, applied: features to add, and provisioned features to remove. */
+export interface FeatureChange {
+  add: string[];
+  remove: string[];
+}
+
 interface CatalogResponse {
   features: CatalogFeature[];
 }
@@ -178,6 +184,28 @@ export function useRemoveFeature(ecosystemId: string | null | undefined) {
     mutationFn: (featureKey: string) =>
       ecosystemFeaturesApi.remove(ecosystemId as string, featureKey),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: KEYS.provisioned(ecosystemId ?? "") });
+    },
+  });
+}
+
+/**
+ * Apply one picker visit: the adds as a single POST (one transaction, see `provision`), then one
+ * DELETE per removal. Removal only marks the ledger row — the backend then refuses the feature's
+ * routes and tools — so nothing it owns is deleted and a later add restores all of it.
+ *
+ * Adds go first so a failed removal never costs the owner the features they just added. The list
+ * is invalidated whatever happened, since a failure partway still changed some of it.
+ */
+export function useApplyFeatureChange(ecosystemId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ add, remove }: FeatureChange) => {
+      const id = ecosystemId as string;
+      if (add.length > 0) await ecosystemFeaturesApi.provision(id, add);
+      for (const key of remove) await ecosystemFeaturesApi.remove(id, key);
+    },
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: KEYS.provisioned(ecosystemId ?? "") });
     },
   });

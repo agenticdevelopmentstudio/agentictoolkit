@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactElement } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
@@ -9,7 +9,7 @@ import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import {
   useFeatureCatalog,
   useProvisionedFeatures,
-  useProvisionFeatures,
+  useApplyFeatureChange,
   useRemoveFeature,
   type CatalogFeature,
   type ProvisionedFeature,
@@ -21,11 +21,11 @@ import { FeaturePickerDialog } from "./FeaturePickerDialog";
  *
  * An ecosystem is a CONTAINER: it is created empty, and every capability in it got there
  * because someone added it here. So this pane is deliberately plain — a list of what is in
- * the box, an Add that opens the picker, and a Remove per row.
+ * the box, a Manage features that opens the picker, and a Remove per row.
  *
- * Remove is not a delete. The backend marks the row removed and leaves everything the
- * feature provisioned — its buckets, its rows — exactly where they are, so removing a
- * feature by mistake costs nothing but re-adding it. The confirm says so.
+ * Remove is not a delete. The backend marks the row removed — which turns the feature's REST
+ * routes and MCP tools off — and leaves everything the feature provisioned exactly where it is,
+ * so removing a feature by mistake costs nothing but re-adding it. The confirm says so.
  */
 export function EcosystemFeaturesPane({
   ecosystemId,
@@ -38,7 +38,7 @@ export function EcosystemFeaturesPane({
 }): ReactElement {
   const catalogQ = useFeatureCatalog();
   const provisionedQ = useProvisionedFeatures(ecosystemId);
-  const provision = useProvisionFeatures(ecosystemId);
+  const apply = useApplyFeatureChange(ecosystemId);
   const remove = useRemoveFeature(ecosystemId);
 
   const [picking, setPicking] = useState(false);
@@ -90,14 +90,13 @@ export function EcosystemFeaturesPane({
         </p>
         {canEdit && (
           <Button size="sm" onClick={() => setPicking(true)} disabled={catalogQ.isPending}>
-            <Plus className="size-4" aria-hidden />
-            Add features
+            <SlidersHorizontal className="size-4" aria-hidden />
+            Manage features
           </Button>
         )}
       </div>
 
       <ErrorText error={loadError} />
-      <ErrorText error={provision.isError ? "Failed to add the features." : null} />
       <ErrorText error={remove.isError ? "Failed to remove the feature." : null} />
 
       {provisionedQ.isPending ? (
@@ -109,8 +108,8 @@ export function EcosystemFeaturesPane({
           action={
             canEdit ? (
               <Button size="sm" onClick={() => setPicking(true)}>
-                <Plus className="size-4" aria-hidden />
-                Add features
+                <SlidersHorizontal className="size-4" aria-hidden />
+                Manage features
               </Button>
             ) : undefined
           }
@@ -135,16 +134,16 @@ export function EcosystemFeaturesPane({
         open={picking}
         catalog={catalog}
         alreadyProvisioned={presentKeys}
-        busy={provision.isPending}
-        error={provision.isError ? "Failed to add the features. Nothing was changed." : null}
-        onAdd={(keys) => provision.mutate(keys, { onSuccess: () => setPicking(false) })}
+        busy={apply.isPending}
+        error={apply.isError ? "Failed to change the features. Check the list and try again." : null}
+        onApply={(change) => apply.mutate(change, { onSuccess: () => setPicking(false) })}
         onCancel={() => setPicking(false)}
       />
 
       <AlertModal
         open={removing != null}
         title={`Remove ${removing?.label ?? ""}?`}
-        description="The feature leaves this ecosystem. Nothing it created is deleted, so adding it back restores it."
+        description="The feature is hidden and turned off for this ecosystem, including over the REST and MCP APIs. Its data is kept, and adding it back restores it."
         confirmLabel="Remove"
         cancelLabel="Cancel"
         destructive

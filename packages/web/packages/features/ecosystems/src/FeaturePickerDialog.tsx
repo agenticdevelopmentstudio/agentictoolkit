@@ -6,14 +6,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { DialogActions } from "@agenticdevelopertoolkit/ui/components/dialog-actions";
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import type { CatalogFeature } from "@agentic-toolkit/data/ecosystems";
+import type { CatalogFeature, FeatureChange } from "@agentic-toolkit/data/ecosystems";
 
 /**
- * The FEATURE PICKER: what an ecosystem gets provisioned with.
+ * The FEATURE PICKER ("Manage features"): what an ecosystem has.
  *
  * An ecosystem is a container that starts EMPTY, so this dialog is how anything at all
- * gets into it. Pick several features, confirm, and the backend provisions each one's
- * artifacts in a single transaction.
+ * gets into it — and how it comes back out. Ticked rows are what the ecosystem has: tick a
+ * row to add that feature, untick one it already has to remove it, confirm once for both.
+ * Removing HIDES and DISABLES the feature (its REST routes and MCP tools refuse) and keeps
+ * every row of its data; adding it back brings all of it back. The confirm says so.
  *
  * Built on the shared stack rather than a bespoke list because the picker is a
  * list-plus-details surface and `HierarchicalDetailView` already is one — its `checkable`
@@ -23,7 +25,7 @@ import type { CatalogFeature } from "@agentic-toolkit/data/ecosystems";
  * space handling below is written here.
  *
  * Purely presentational: it holds the filter text, the ticks and the confirm, and hands
- * the chosen keys back. Fetching the catalog and POSTing the batch belong to the caller.
+ * the change back. Fetching the catalog and applying the change belong to the caller.
  */
 export interface FeaturePickerDialogProps {
   open: boolean;
@@ -33,19 +35,20 @@ export interface FeaturePickerDialogProps {
    */
   catalog: CatalogFeature[];
   /**
-   * Keys the ecosystem ALREADY has (active or still provisioning). Rendered ticked and
-   * marked "Added", and their tick cannot be cleared — this dialog adds, it never removes.
-   * They are excluded from the "Add N" count for the same reason.
+   * Keys the ecosystem ALREADY has (active or still provisioning). Rendered ticked; unticking
+   * one queues its removal.
    */
   alreadyProvisioned?: ReadonlySet<string>;
-  /** The add is in flight — the footer shows a spinner and the dialog cannot be dismissed. */
+  /** The change is in flight — the footer shows a spinner and the dialog cannot be dismissed. */
   busy?: boolean;
-  /** A failed add, shown under the list. The ticks survive so the user can simply retry. */
+  /** A failed change, shown under the list. The ticks survive so the user can simply retry. */
   error?: string | null;
-  /** Confirmed. Receives only the NEWLY ticked keys, in catalog order. */
-  onAdd: (keys: string[]) => void;
+  /** Confirmed. `add` is the newly ticked keys, `remove` the provisioned keys unticked — each in
+   *  catalog order. At least one of the two is non-empty. */
+  onApply: (change: FeatureChange) => void;
   onCancel: () => void;
 }
+
 
 /**
  * Alphabetical by label, then filtered on label + description — what the rail lists. The
@@ -68,14 +71,16 @@ export function FeaturePickerDialog({
   alreadyProvisioned,
   busy = false,
   error = null,
-  onAdd,
+  onApply,
   onCancel,
 }: FeaturePickerDialogProps): ReactElement {
   const provisioned = alreadyProvisioned ?? EMPTY;
 
   const [query, setQuery] = useState("");
-  // The rows the user has ticked THIS visit — never includes an already-provisioned key.
-  const [picked, setPicked] = useState<ReadonlySet<string>>(EMPTY);
+  // The rows the user has FLIPPED this visit. A row is ticked when it is provisioned XOR flipped,
+  // so a provisioned key here is a removal and any other key an add — and the ecosystem's list can
+  // arrive after the dialog opens without clobbering what the user already did.
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(EMPTY);
   // The row whose description the detail pane is showing. Also the arrow keys' cursor:
   // one concept, because a keyboard cursor that did not drive the details pane would be a
   // second highlight on the same list meaning something else.
@@ -86,7 +91,7 @@ export function FeaturePickerDialog({
   useEffect(() => {
     if (!open) return;
     setQuery("");
-    setPicked(EMPTY);
+    setFlipped(EMPTY);
     setActiveId(null);
     setConfirming(false);
   }, [open]);
@@ -94,33 +99,34 @@ export function FeaturePickerDialog({
   const visible = useMemo(() => visibleFeatures(catalog, query), [catalog, query]);
   const byKey = useMemo(() => new Map(catalog.map((f) => [f.key, f])), [catalog]);
 
-  // The order the backend is asked for is the CATALOG's, not the click order: the batch is a
+  // The order the backend is asked for is the CATALOG's, not the click order: each batch is a
   // set, and a stable order makes the request reproducible.
-  const pickedKeys = useMemo(
-    () => catalog.filter((f) => picked.has(f.key) && !f.comingSoon).map((f) => f.key),
-    [catalog, picked],
-  );
+  const change: FeatureChange = useMemo(() => {
+    const flippedKeys = catalog.filter((f) => flipped.has(f.key) && !f.comingSoon).map((f) => f.key);
+    return {
+      add: flippedKeys.filter((k) => !provisioned.has(k)),
+      remove: flippedKeys.filter((k) => provisioned.has(k)),
+    };
+  }, [catalog, flipped, provisioned]);
+  const changeCount = change.add.length + change.remove.length;
 
   const toggle = useCallback(
     (key: string) => {
-      if (provisioned.has(key)) return; // already there — the tick is a statement, not a control
       if (byKey.get(key)?.comingSoon) return; // not built — nothing to provision
-      setPicked((prev) => {
+      setFlipped((prev) => {
         const next = new Set(prev);
         if (!next.delete(key)) next.add(key);
         return next;
       });
     },
-    [provisioned, byKey],
+    [byKey],
   );
 
-  // Ticked = picked ∪ already-provisioned. The provisioned ones read as ticked because they
-  // ARE in the ecosystem; `toggle` is what makes them immovable.
   const checkedIds = useMemo(() => {
-    const s = new Set(picked);
-    for (const key of provisioned) s.add(key);
+    const s = new Set<string>();
+    for (const f of catalog) if (provisioned.has(f.key) !== flipped.has(f.key)) s.add(f.key);
     return s;
-  }, [picked, provisioned]);
+  }, [catalog, flipped, provisioned]);
 
   const items: TopicDetailItem[] = useMemo(
     () =>
@@ -129,16 +135,14 @@ export function FeaturePickerDialog({
         return {
           id: f.key,
           label: f.label,
-          trailing: provisioned.has(f.key) ? <AddedMark /> : undefined,
-          // Already in the ecosystem, or not built yet: the tick is DISABLED — this dialog adds
-          // only what exists, and never removes — while the row stays selectable so its details
+          // Not built yet: the tick is DISABLED, while the row stays selectable so its details
           // can still be read.
-          checkDisabled: provisioned.has(f.key) || !!f.comingSoon,
+          checkDisabled: !!f.comingSoon,
           // The last available row carries the divider that opens the coming-soon group.
           ...(!f.comingSoon && next?.comingSoon ? { dividerAfter: true, dividerLabel: "Coming soon" } : {}),
         };
       }),
-    [visible, provisioned],
+    [visible],
   );
 
   // Keep the cursor on a row that still exists: filtering the active row away would otherwise
@@ -159,9 +163,9 @@ export function FeaturePickerDialog({
   );
 
   const openConfirm = useCallback(() => {
-    if (pickedKeys.length === 0 || busy) return;
+    if (changeCount === 0 || busy) return;
     setConfirming(true);
-  }, [pickedKeys.length, busy]);
+  }, [changeCount, busy]);
 
   /**
    * The picker's keyboard, wired on the filter row because that is where focus lives: the
@@ -219,7 +223,7 @@ export function FeaturePickerDialog({
     itemNoun: "feature",
     emptyLabel: query.trim() ? "No features match" : "No features",
     overview: true,
-    overviewHelp: "Tick the features to add to this ecosystem.",
+    overviewHelp: "Tick a feature to add it to this ecosystem; untick one to remove it.",
     width: 280,
     headerSlot: (
       <div onKeyDown={onHeaderKeyDown}>
@@ -267,9 +271,10 @@ export function FeaturePickerDialog({
       >
         <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-4xl flex-col" showClose={!busy}>
           <DialogHeader>
-            <DialogTitle>Add features</DialogTitle>
+            <DialogTitle>Manage features</DialogTitle>
             <DialogDescription>
-              An ecosystem starts empty. Adding a feature provisions everything it needs.
+              An ecosystem starts empty. Adding a feature provisions everything it needs; removing
+              one turns it off and keeps its data.
             </DialogDescription>
           </DialogHeader>
 
@@ -289,7 +294,7 @@ export function FeaturePickerDialog({
               manualCollapse={false}
               minDetailWidth="18rem"
             >
-              <FeatureDetail feature={active} added={active ? provisioned.has(active.key) : false} />
+              <FeatureDetail feature={active} />
             </HierarchicalDetailView>
           </div>
 
@@ -298,9 +303,9 @@ export function FeaturePickerDialog({
           <DialogActions
             cancelLabel="Cancel"
             onCancel={onCancel}
-            confirmLabel={pickedKeys.length > 0 ? `Add ${pickedKeys.length}` : "Add"}
+            confirmLabel="Apply"
             onConfirm={openConfirm}
-            confirmDisabled={pickedKeys.length === 0}
+            confirmDisabled={changeCount === 0}
             busy={busy}
             // The filter field autofocuses and owns the keyboard — the footer must not take
             // focus off it on mount, or the first keystroke goes to a button.
@@ -311,14 +316,16 @@ export function FeaturePickerDialog({
 
       <AlertModal
         open={confirming}
-        title={`Add ${pickedKeys.length} ${pickedKeys.length === 1 ? "feature" : "features"}?`}
-        description={pickedKeys.map((k) => byKey.get(k)?.label ?? k).join(", ")}
-        confirmLabel="Add"
+        title={confirmTitle(change)}
+        description={<ChangeSummary change={change} labelOf={(k) => byKey.get(k)?.label ?? k} />}
+        confirmLabel={change.remove.length > 0 ? "Remove" : "Add"}
         cancelLabel="Cancel"
+        // A removal is the consequential half: red, and no Enter-to-confirm.
+        destructive={change.remove.length > 0}
         busy={busy}
         onConfirm={() => {
           setConfirming(false);
-          onAdd(pickedKeys);
+          onApply(change);
         }}
         onCancel={() => setConfirming(false)}
       />
@@ -338,8 +345,39 @@ function findScroller(root: HTMLElement): HTMLElement | null {
 /** One shared empty set, so a default prop and a cleared state are the same identity. */
 const EMPTY: ReadonlySet<string> = new Set<string>();
 
-function AddedMark(): ReactElement {
-  return <span className="text-[0.6875rem] tracking-wide text-apt-text-muted uppercase">Added</span>;
+function plural(n: number): string {
+  return `${n} ${n === 1 ? "feature" : "features"}`;
+}
+
+function confirmTitle({ add, remove }: FeatureChange): string {
+  if (remove.length === 0) return `Add ${plural(add.length)}?`;
+  if (add.length === 0) return `Remove ${plural(remove.length)}?`;
+  return `Add ${plural(add.length)} and remove ${plural(remove.length)}?`;
+}
+
+/** The confirm's body: what is added, what is removed, and what removing actually does. Spans,
+ *  not paragraphs: AlertModal renders its description INSIDE a `<p>`, which may hold no block. */
+function ChangeSummary({
+  change,
+  labelOf,
+}: {
+  change: FeatureChange;
+  labelOf: (key: string) => string;
+}): ReactElement {
+  return (
+    <span className="flex flex-col gap-2">
+      {change.add.length > 0 && <span>Add: {change.add.map(labelOf).join(", ")}</span>}
+      {change.remove.length > 0 && (
+        <>
+          <span>Remove: {change.remove.map(labelOf).join(", ")}</span>
+          <span>
+            A removed feature is hidden and turned off for this ecosystem, including over the REST
+            and MCP APIs. Its data is kept, and adding the feature back restores it.
+          </span>
+        </>
+      )}
+    </span>
+  );
 }
 
 function ComingSoonMark(): ReactElement {
@@ -353,19 +391,12 @@ function ComingSoonMark(): ReactElement {
  * feature and nothing enforces it. It is rendered anyway because the picker is where the
  * gate will be explained, and a line that appears later changes the layout people learned.
  */
-function FeatureDetail({
-  feature,
-  added,
-}: {
-  feature: CatalogFeature | undefined;
-  added: boolean;
-}): ReactElement | null {
+function FeatureDetail({ feature }: { feature: CatalogFeature | undefined }): ReactElement | null {
   if (!feature) return null;
   return (
     <div className="flex flex-col gap-4 p-5">
       <div className="flex items-baseline gap-3">
         <h3 className="text-base font-semibold text-apt-text">{feature.label}</h3>
-        {added && <AddedMark />}
         {feature.comingSoon && <ComingSoonMark />}
       </div>
       <p className="text-sm text-apt-text-dim">{feature.description}</p>

@@ -13,27 +13,59 @@ const CATALOG = [
   { ...feature('code-reviews', 'Code Reviews'), comingSoon: true },
 ]
 
-function renderPicker(onAdd = vi.fn()) {
+function renderPicker(onApply = vi.fn()) {
   render(
     <FeaturePickerDialog
       open
       catalog={CATALOG}
       alreadyProvisioned={new Set(['personas'])}
-      onAdd={onAdd}
+      onApply={onApply}
       onCancel={vi.fn()}
     />,
   )
 }
 
 describe('FeaturePickerDialog', () => {
-  it('shows an added feature ticked with its checkbox DISABLED, and a new one enabled', () => {
+  it('shows an added feature ticked and still ENABLED, with no "Added" mark', () => {
     renderPicker()
     const added = screen.getByRole('checkbox', { name: 'Personas' })
     expect(added).toBeChecked()
-    expect(added).toHaveAttribute('aria-disabled', 'true')
+    expect(added).not.toHaveAttribute('aria-disabled', 'true')
     const fresh = screen.getByRole('checkbox', { name: 'Research' })
     expect(fresh).not.toBeChecked()
     expect(fresh).not.toHaveAttribute('aria-disabled', 'true')
+    expect(screen.queryByText(/^Added$/i)).toBeNull()
+  })
+
+  it('removes an unticked feature only after a confirm that says its data is kept', () => {
+    const onApply = vi.fn()
+    renderPicker(onApply)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Personas' }))
+    expect(screen.getByRole('checkbox', { name: 'Personas' })).not.toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(onApply).not.toHaveBeenCalled()
+    expect(screen.getByText('Remove 1 feature?')).toBeInTheDocument()
+    expect(screen.getByText(/Its data is kept/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(onApply).toHaveBeenCalledWith({ add: [], remove: ['personas'] })
+  })
+
+  it('applies adds and removals together behind one confirm', () => {
+    const onApply = vi.fn()
+    renderPicker(onApply)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Personas' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Research' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(screen.getByText('Add 1 feature and remove 1 feature?')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(onApply).toHaveBeenCalledWith({ add: ['research'], remove: ['personas'] })
+  })
+
+  it('re-ticking a feature before applying cancels its removal', () => {
+    renderPicker()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Personas' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Personas' }))
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
   })
 
   it("still shows an added feature's details when its row is picked", () => {
@@ -63,6 +95,6 @@ describe('FeaturePickerDialog', () => {
     renderPicker()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Messaging' }))
     expect(screen.getByRole('checkbox', { name: 'Messaging' })).not.toBeChecked()
-    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
   })
 })
