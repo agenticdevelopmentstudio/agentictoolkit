@@ -3,6 +3,10 @@ import { render, screen } from '@testing-library/react'
 import { AppShell } from '../AppShell'
 import { useSettingsOverlay } from '../../settings/settings-overlay'
 
+// AdhAppShell mounts SlideTransitions, which takes the app router's push; there is no app
+// router under vitest, so stand one in.
+vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: () => {} }) }))
+
 // AppShell's footer slot renders SiteFooter, and SiteFooter.tsx itself self-references
 // '@agentic-toolkit/adh/footer' for the toolkit's AdhFooter primitive — which resolves to the
 // WHOLE footer/index.ts barrel, including its `useChatTheme` export from chat-theme-store.ts,

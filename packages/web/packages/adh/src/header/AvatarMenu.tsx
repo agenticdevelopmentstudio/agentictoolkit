@@ -11,6 +11,7 @@ import {
   DropdownMenuLinkItem,
   DropdownMenuSeparator,
 } from '@agenticdevelopertoolkit/ui/components/dropdown-menu'
+import { slideNavigate } from '../layout/SlideNavigation'
 
 export type AvatarMenuUser = {
   /** What this account is CALLED — the personal name when one is known, else the
@@ -162,7 +163,21 @@ export function AvatarMenu({
         </DropdownMenuLinkItem>
         {profileHref && (
           <DropdownMenuLinkItem
-            render={<Link href={profileHref} />}
+            // Profile SLIDES in, as if pushed onto a stack, and Back (button or swipe) slides it
+            // off again to wherever it was opened from — it is a destination you visit and
+            // return from, not a section you switch to. Still the same Link and the same push:
+            // a modified click (new tab), a click the unsaved-changes guard has already
+            // intercepted, or a browser that cannot animate all fall through to it untouched.
+            render={
+              <Link
+                href={profileHref}
+                onClick={(e) => {
+                  if (e.defaultPrevented || e.button !== 0) return
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                  if (slideNavigate(profileHref)) e.preventDefault()
+                }}
+              />
+            }
             className="adh-avatar-menu__item"
           >
             <UserIcon className="adh-avatar-menu__item-icon" />

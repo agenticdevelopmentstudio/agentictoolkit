@@ -1,7 +1,11 @@
 import { render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setHtdvLayoutLog, setSlowAnimations, slowAnimationVars } from '@agenticdevelopertoolkit/ui/blocks'
 import { AdhAppShell } from '../AdhAppShell'
+
+// AdhAppShell mounts SlideTransitions, which takes the app router's push; there is no app
+// router under vitest, so stand one in.
+vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: () => {} }) }))
 
 /**
  * The custom properties `DevAnimScale` writes onto <html>. Read from the implementation rather

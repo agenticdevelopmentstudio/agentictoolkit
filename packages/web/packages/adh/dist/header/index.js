@@ -17,6 +17,59 @@ import {
   DropdownMenuLinkItem,
   DropdownMenuSeparator
 } from "@agenticdevelopertoolkit/ui/components/dropdown-menu";
+
+// src/layout/SlideNavigation.tsx
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+var SLIDE_ATTR = "data-adh-slide";
+var RENDER_TIMEOUT_MS = 1500;
+var slides = [];
+var MAX_SLIDES = 20;
+var renderedPath = null;
+var waiters = /* @__PURE__ */ new Set();
+var push = null;
+function untilRendered(path) {
+  if (renderedPath === path) return Promise.resolve();
+  return new Promise((resolve) => {
+    const waiter = { path, resolve };
+    waiters.add(waiter);
+    setTimeout(() => {
+      if (waiters.delete(waiter)) resolve();
+    }, RENDER_TIMEOUT_MS);
+  });
+}
+function canSlide() {
+  if (typeof document === "undefined") return false;
+  if (typeof document.startViewTransition !== "function") return false;
+  return !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}
+function runSlide(direction, target, update) {
+  const root = document.documentElement;
+  root.setAttribute(SLIDE_ATTR, direction);
+  const transition = document.startViewTransition(async () => {
+    update();
+    await untilRendered(target);
+  });
+  void transition.finished.finally(() => {
+    if (root.getAttribute(SLIDE_ATTR) === direction) root.removeAttribute(SLIDE_ATTR);
+  });
+}
+function pathOf(href) {
+  return new URL(href, window.location.href).pathname;
+}
+function slideNavigate(href) {
+  const navigate = push;
+  if (!navigate || !canSlide()) return false;
+  const from = window.location.pathname;
+  const to = pathOf(href);
+  if (from === to) return false;
+  slides.push({ from, to });
+  if (slides.length > MAX_SLIDES) slides.shift();
+  runSlide("forward", to, () => navigate(href));
+  return true;
+}
+
+// src/header/AvatarMenu.tsx
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 function firstNameOf(name) {
   return name.trim().split(/\s+/)[0] || name;
@@ -64,7 +117,17 @@ function AvatarMenu({
       profileHref && /* @__PURE__ */ jsxs(
         DropdownMenuLinkItem,
         {
-          render: /* @__PURE__ */ jsx(Link, { href: profileHref }),
+          render: /* @__PURE__ */ jsx(
+            Link,
+            {
+              href: profileHref,
+              onClick: (e) => {
+                if (e.defaultPrevented || e.button !== 0) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                if (slideNavigate(profileHref)) e.preventDefault();
+              }
+            }
+          ),
           className: "adh-avatar-menu__item",
           children: [
             /* @__PURE__ */ jsx(UserIcon, { className: "adh-avatar-menu__item-icon" }),
@@ -126,7 +189,7 @@ import "react";
 import {
   Fragment as Fragment3,
   useCallback,
-  useEffect,
+  useEffect as useEffect2,
   useId,
   useMemo,
   useRef,
@@ -136,7 +199,7 @@ import { ChevronDown as ChevronDown2 } from "lucide-react";
 
 // src/header/NavLink.tsx
 import Link2 from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname as usePathname2 } from "next/navigation";
 import { jsx as jsx3 } from "react/jsx-runtime";
 function pathMatches(pathname, pattern) {
   if (pattern === pathname) return true;
@@ -147,7 +210,7 @@ function pathMatches(pathname, pattern) {
   return false;
 }
 function NavLinkItem({ link }) {
-  const pathname = usePathname() ?? "";
+  const pathname = usePathname2() ?? "";
   const matchers = link.matchPaths ?? [link.href];
   const active = matchers.some((m) => pathMatches(pathname, m));
   return /* @__PURE__ */ jsx3(
@@ -319,14 +382,14 @@ function NavigationPopover({
   const disclosed = nav.kind === "sub" ? nav.entry : nav.kind === "top" && nav.open ? nav.entry : null;
   const activeKey = searching ? cmdActive ? "cmd" : searchActive >= 0 ? `s${searchActive}` : null : nav.kind === "sub" ? `e${nav.entry}s${nav.item}` : nav.kind === "top" ? `e${nav.entry}` : null;
   const activeId = activeKey ? `${uid}-${activeKey}` : void 0;
-  useEffect(() => {
+  useEffect2(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {
       if (document.activeElement !== inputRef.current) inputRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [open, nav, searching]);
-  useEffect(() => {
+  useEffect2(() => {
     if (!navByKeyboard.current || !activeKey) return;
     document.getElementById(`${uid}-${activeKey}`)?.scrollIntoView({ block: "nearest" });
   }, [uid, activeKey, query]);
@@ -847,7 +910,7 @@ function SiteSwitcher({
 }
 
 // src/header/PreviewNotice.tsx
-import { useEffect as useEffect2, useId as useId2, useRef as useRef2, useState as useState2 } from "react";
+import { useEffect as useEffect3, useId as useId2, useRef as useRef2, useState as useState2 } from "react";
 import { ChevronDown as ChevronDown3, TriangleAlert } from "lucide-react";
 import { jsx as jsx8, jsxs as jsxs5 } from "react/jsx-runtime";
 var DEFAULT_PREVIEW_NOTICE = "Developer Preview Release";
@@ -859,7 +922,7 @@ function PreviewNotice({
   const [open, setOpen] = useState2(false);
   const panelId = useId2();
   const triggerRef = useRef2(null);
-  useEffect2(() => {
+  useEffect3(() => {
     if (!open) return;
     const onClick = (e) => {
       if (triggerRef.current?.contains(e.target)) return;
@@ -1069,10 +1132,10 @@ function buildRouteItems(sections, pathname) {
 }
 
 // src/header/useClientHost.ts
-import { useEffect as useEffect3, useState as useState3 } from "react";
+import { useEffect as useEffect4, useState as useState3 } from "react";
 function useClientHost() {
   const [host, setHost] = useState3(null);
-  useEffect3(() => setHost(window.location.host), []);
+  useEffect4(() => setHost(window.location.host), []);
   return host;
 }
 
@@ -1093,7 +1156,7 @@ function useWorkspacesMenu() {
 // src/header/SiteHeader.tsx
 import "react";
 import dynamic2 from "next/dynamic";
-import { usePathname as usePathname7 } from "next/navigation";
+import { usePathname as usePathname8 } from "next/navigation";
 import {
   AdhHeader as AdhHeader2,
   useClientHost as useClientHost4
@@ -1112,11 +1175,11 @@ function hasProfileRoute(siteId) {
 
 // src/header/SiteMenuSwitcher.tsx
 import { Fragment as Fragment5 } from "react";
-import { usePathname as usePathname5 } from "next/navigation";
+import { usePathname as usePathname6 } from "next/navigation";
 
 // src/header/SiteMenu.tsx
 import { useMemo as useMemo3 } from "react";
-import { usePathname as usePathname3 } from "next/navigation";
+import { usePathname as usePathname4 } from "next/navigation";
 import { CircleHelp as CircleHelp2, Settings as Settings3 } from "lucide-react";
 
 // src/footer/SitesOverview.tsx
@@ -1136,7 +1199,7 @@ import { useHubPreferences } from "@agentic-toolkit/adh/header/hub-preferences";
 
 // src/header/useSiteMenu.ts
 import { useCallback as useCallback2, useMemo as useMemo2 } from "react";
-import { usePathname as usePathname2, useRouter } from "next/navigation";
+import { usePathname as usePathname3, useRouter as useRouter2 } from "next/navigation";
 import { confirmNavigation as confirmNavigation2 } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
 import {
   buildSiteHref,
@@ -1421,8 +1484,8 @@ function menuIcon(key) {
 
 // src/header/useSiteMenu.ts
 function useSiteMenu(groups, { currentSiteId, resolveHref, personalSlug, authenticated, hubOffersFeature }) {
-  const pathname = usePathname2() ?? "/";
-  const router = useRouter();
+  const pathname = usePathname3() ?? "/";
+  const router = useRouter2();
   const currentSite = getSite(currentSiteId);
   const workspaceSlug = useMemo2(() => {
     if (currentSiteId === "hub")
@@ -1823,7 +1886,7 @@ function SiteMenu({
     authenticated,
     hubOffersFeature
   });
-  const pathname = usePathname3() ?? "/";
+  const pathname = usePathname4() ?? "/";
   const workspacesMenu = useWorkspacesMenu2();
   const recents = useRecents();
   const { siteMenuShortcut } = useHubPreferences();
@@ -2005,7 +2068,7 @@ function WorkspaceSiteMenu(props) {
 
 // src/header/WorkspaceMenu.tsx
 import { useCallback as useCallback4, useMemo as useMemo4 } from "react";
-import { usePathname as usePathname4, useRouter as useRouter2 } from "next/navigation";
+import { usePathname as usePathname5, useRouter as useRouter3 } from "next/navigation";
 import { Settings as Settings4 } from "lucide-react";
 import { confirmNavigation as confirmNavigation3 } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
 import {
@@ -2022,8 +2085,8 @@ function WorkspaceMenu({
   navLinks,
   triggerClassName
 }) {
-  const router = useRouter2();
-  const pathname = usePathname4() ?? "/";
+  const router = useRouter3();
+  const pathname = usePathname5() ?? "/";
   const { siteMenuShortcut } = useHubPreferences2();
   const openHelp = useHelp2().open;
   const current = menu.workspaces.find((w) => w.current);
@@ -2111,10 +2174,10 @@ function isWorkspaceMenuRoute(currentSiteId, pathname) {
 }
 
 // src/header/PrefetchSiblingSites.tsx
-import { useEffect as useEffect4 } from "react";
+import { useEffect as useEffect5 } from "react";
 import { detectEnv as detectEnv2 } from "@agentic-toolkit/adh-registry";
 function PrefetchSiblingSites() {
-  useEffect4(() => {
+  useEffect5(() => {
     if (typeof window === "undefined") return;
     if (detectEnv2(window.location.hostname) !== "local") return;
     const hostPattern = window.location.host.replace(/^[^.]+/, "*");
@@ -2140,7 +2203,7 @@ function PrefetchSiblingSites() {
 // src/header/SiteMenuSwitcher.tsx
 import { jsx as jsx18, jsxs as jsxs10 } from "react/jsx-runtime";
 function SiteMenuSwitcher(props) {
-  const pathname = usePathname5() ?? "/";
+  const pathname = usePathname6() ?? "/";
   const onWorkspaceRoute = isWorkspaceMenuRoute(props.currentSiteId, pathname);
   const workspacesMenu = useWorkspacesMenu3();
   if (props.authenticated && workspacesMenu) {
@@ -2162,8 +2225,8 @@ function SiteMenuSwitcher(props) {
 }
 
 // src/header/DevToolsMenu.tsx
-import { useEffect as useEffect5, useMemo as useMemo5, useState as useState4 } from "react";
-import { usePathname as usePathname6 } from "next/navigation";
+import { useEffect as useEffect6, useMemo as useMemo5, useState as useState4 } from "react";
+import { usePathname as usePathname7 } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Bug as Bug2 } from "lucide-react";
 import { detectEnv as detectEnv4 } from "@agentic-toolkit/adh-registry";
@@ -2314,12 +2377,12 @@ function DevToolsMenuPopover({
   routes,
   adminUnlocked
 }) {
-  const pathname = usePathname6() ?? "/";
+  const pathname = usePathname7() ?? "/";
   const groups = useMemo5(() => buildDebugSiteGroups(), []);
   const { entries, navigate } = useSiteMenu(groups, { currentSiteId, resolveHref, personalSlug });
   const [generated, setGenerated] = useState4();
   const wantGeneratedRoutes = !(routes && routes.length > 0);
-  useEffect5(() => {
+  useEffect6(() => {
     if (!wantGeneratedRoutes) return;
     let cancelled = false;
     void import("@agentic-toolkit/adh-registry/routes").then(({ SITE_ROUTES: SITE_ROUTES2 }) => {
@@ -2417,7 +2480,7 @@ function SiteHeader({
   const resolvedNavLinks = (typeof navLinks === "function" ? navLinks(user != null) : navLinks) ?? [];
   const hostname = useClientHost4();
   const conceptSite = isConceptSite(siteId);
-  const onLandingPage = usePathname7() === "/";
+  const onLandingPage = usePathname8() === "/";
   const site = getSite3(siteId);
   const siteName = site ? siteHeaderTitle2(site) : siteId;
   const siteShortName = site?.label ?? siteId;

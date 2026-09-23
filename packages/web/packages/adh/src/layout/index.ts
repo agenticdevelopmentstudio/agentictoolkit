@@ -3,6 +3,9 @@ export type { AdhAppShellProps } from './AdhAppShell'
 // AdhAppShell mounts this itself; it is exported for hosts that render their own shell
 // instead (adh's builds/status boards) and still want their stacks to answer to the flag.
 export { HierarchicalDetailViewFlag } from './HierarchicalDetailViewFlag'
+// Also mounted by AdhAppShell; `slideNavigate` is the call a link makes to slide instead of cut.
+export { SlideTransitions, slideNavigate, canSlide } from './SlideNavigation'
+export type { SlideDirection } from './SlideNavigation'
 export { AppErrorBoundary } from './AppErrorBoundary'
 export { ErrorFallback } from './ErrorFallback'
 export { RouteError } from './RouteError'

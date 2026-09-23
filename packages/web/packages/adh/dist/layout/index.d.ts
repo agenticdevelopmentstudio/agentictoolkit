@@ -1,6 +1,8 @@
 export { AdhAppShell } from './AdhAppShell';
 export type { AdhAppShellProps } from './AdhAppShell';
 export { HierarchicalDetailViewFlag } from './HierarchicalDetailViewFlag';
+export { SlideTransitions, slideNavigate, canSlide } from './SlideNavigation';
+export type { SlideDirection } from './SlideNavigation';
 export { AppErrorBoundary } from './AppErrorBoundary';
 export { ErrorFallback } from './ErrorFallback';
 export { RouteError } from './RouteError';

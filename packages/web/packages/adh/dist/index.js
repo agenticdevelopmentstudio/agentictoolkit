@@ -17,6 +17,59 @@ import {
   DropdownMenuLinkItem,
   DropdownMenuSeparator
 } from "@agenticdevelopertoolkit/ui/components/dropdown-menu";
+
+// src/layout/SlideNavigation.tsx
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+var SLIDE_ATTR = "data-adh-slide";
+var RENDER_TIMEOUT_MS = 1500;
+var slides = [];
+var MAX_SLIDES = 20;
+var renderedPath = null;
+var waiters = /* @__PURE__ */ new Set();
+var push = null;
+function untilRendered(path) {
+  if (renderedPath === path) return Promise.resolve();
+  return new Promise((resolve) => {
+    const waiter = { path, resolve };
+    waiters.add(waiter);
+    setTimeout(() => {
+      if (waiters.delete(waiter)) resolve();
+    }, RENDER_TIMEOUT_MS);
+  });
+}
+function canSlide() {
+  if (typeof document === "undefined") return false;
+  if (typeof document.startViewTransition !== "function") return false;
+  return !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}
+function runSlide(direction, target, update) {
+  const root = document.documentElement;
+  root.setAttribute(SLIDE_ATTR, direction);
+  const transition = document.startViewTransition(async () => {
+    update();
+    await untilRendered(target);
+  });
+  void transition.finished.finally(() => {
+    if (root.getAttribute(SLIDE_ATTR) === direction) root.removeAttribute(SLIDE_ATTR);
+  });
+}
+function pathOf(href) {
+  return new URL(href, window.location.href).pathname;
+}
+function slideNavigate(href) {
+  const navigate = push;
+  if (!navigate || !canSlide()) return false;
+  const from = window.location.pathname;
+  const to = pathOf(href);
+  if (from === to) return false;
+  slides.push({ from, to });
+  if (slides.length > MAX_SLIDES) slides.shift();
+  runSlide("forward", to, () => navigate(href));
+  return true;
+}
+
+// src/header/AvatarMenu.tsx
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 function firstNameOf(name) {
   return name.trim().split(/\s+/)[0] || name;
@@ -64,7 +117,17 @@ function AvatarMenu({
       profileHref && /* @__PURE__ */ jsxs(
         DropdownMenuLinkItem,
         {
-          render: /* @__PURE__ */ jsx(Link, { href: profileHref }),
+          render: /* @__PURE__ */ jsx(
+            Link,
+            {
+              href: profileHref,
+              onClick: (e) => {
+                if (e.defaultPrevented || e.button !== 0) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                if (slideNavigate(profileHref)) e.preventDefault();
+              }
+            }
+          ),
           className: "adh-avatar-menu__item",
           children: [
             /* @__PURE__ */ jsx(UserIcon, { className: "adh-avatar-menu__item-icon" }),
@@ -126,7 +189,7 @@ import "react";
 import {
   Fragment as Fragment3,
   useCallback,
-  useEffect,
+  useEffect as useEffect2,
   useId,
   useMemo,
   useRef,
@@ -136,7 +199,7 @@ import { ChevronDown as ChevronDown2 } from "lucide-react";
 
 // src/header/NavLink.tsx
 import Link2 from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname as usePathname2 } from "next/navigation";
 import { jsx as jsx3 } from "react/jsx-runtime";
 function pathMatches(pathname, pattern) {
   if (pattern === pathname) return true;
@@ -147,7 +210,7 @@ function pathMatches(pathname, pattern) {
   return false;
 }
 function NavLinkItem({ link }) {
-  const pathname = usePathname() ?? "";
+  const pathname = usePathname2() ?? "";
   const matchers = link.matchPaths ?? [link.href];
   const active = matchers.some((m) => pathMatches(pathname, m));
   return /* @__PURE__ */ jsx3(
@@ -319,14 +382,14 @@ function NavigationPopover({
   const disclosed = nav.kind === "sub" ? nav.entry : nav.kind === "top" && nav.open ? nav.entry : null;
   const activeKey = searching ? cmdActive ? "cmd" : searchActive >= 0 ? `s${searchActive}` : null : nav.kind === "sub" ? `e${nav.entry}s${nav.item}` : nav.kind === "top" ? `e${nav.entry}` : null;
   const activeId = activeKey ? `${uid}-${activeKey}` : void 0;
-  useEffect(() => {
+  useEffect2(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {
       if (document.activeElement !== inputRef.current) inputRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [open, nav, searching]);
-  useEffect(() => {
+  useEffect2(() => {
     if (!navByKeyboard.current || !activeKey) return;
     document.getElementById(`${uid}-${activeKey}`)?.scrollIntoView({ block: "nearest" });
   }, [uid, activeKey, query]);
@@ -847,7 +910,7 @@ function SiteSwitcher({
 }
 
 // src/header/PreviewNotice.tsx
-import { useEffect as useEffect2, useId as useId2, useRef as useRef2, useState as useState2 } from "react";
+import { useEffect as useEffect3, useId as useId2, useRef as useRef2, useState as useState2 } from "react";
 import { ChevronDown as ChevronDown3, TriangleAlert } from "lucide-react";
 import { jsx as jsx8, jsxs as jsxs5 } from "react/jsx-runtime";
 var DEFAULT_PREVIEW_NOTICE = "Developer Preview Release";
@@ -859,7 +922,7 @@ function PreviewNotice({
   const [open, setOpen] = useState2(false);
   const panelId = useId2();
   const triggerRef = useRef2(null);
-  useEffect2(() => {
+  useEffect3(() => {
     if (!open) return;
     const onClick = (e) => {
       if (triggerRef.current?.contains(e.target)) return;

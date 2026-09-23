@@ -104,8 +104,111 @@ function HtdvLayoutLogSwitch() {
   return null;
 }
 
-// src/layout/SwipeHistory.tsx
+// src/layout/SlideNavigation.tsx
 import { useEffect as useEffect4 } from "react";
+import { usePathname, useRouter } from "next/navigation";
+var SLIDE_ATTR = "data-adh-slide";
+var RENDER_TIMEOUT_MS = 1500;
+var slides = [];
+var MAX_SLIDES = 20;
+var renderedPath = null;
+var waiters = /* @__PURE__ */ new Set();
+var push = null;
+function markRendered(path) {
+  renderedPath = path;
+  for (const w of waiters) {
+    if (w.path === path) {
+      waiters.delete(w);
+      w.resolve();
+    }
+  }
+}
+function untilRendered(path) {
+  if (renderedPath === path) return Promise.resolve();
+  return new Promise((resolve) => {
+    const waiter = { path, resolve };
+    waiters.add(waiter);
+    setTimeout(() => {
+      if (waiters.delete(waiter)) resolve();
+    }, RENDER_TIMEOUT_MS);
+  });
+}
+function canSlide() {
+  if (typeof document === "undefined") return false;
+  if (typeof document.startViewTransition !== "function") return false;
+  return !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}
+function runSlide(direction, target, update) {
+  const root = document.documentElement;
+  root.setAttribute(SLIDE_ATTR, direction);
+  const transition = document.startViewTransition(async () => {
+    update();
+    await untilRendered(target);
+  });
+  void transition.finished.finally(() => {
+    if (root.getAttribute(SLIDE_ATTR) === direction) root.removeAttribute(SLIDE_ATTR);
+  });
+}
+function pathOf(href) {
+  return new URL(href, window.location.href).pathname;
+}
+function slideNavigate(href) {
+  const navigate = push;
+  if (!navigate || !canSlide()) return false;
+  const from = window.location.pathname;
+  const to = pathOf(href);
+  if (from === to) return false;
+  slides.push({ from, to });
+  if (slides.length > MAX_SLIDES) slides.shift();
+  runSlide("forward", to, () => navigate(href));
+  return true;
+}
+function slideDirectionFor(from, to) {
+  for (let i = slides.length - 1; i >= 0; i--) {
+    const s = slides[i];
+    if (s.to === from && s.from === to) return "back";
+    if (s.from === from && s.to === to) return "forward";
+  }
+  return null;
+}
+var REPLAYED = /* @__PURE__ */ Symbol("adh-slide-replayed");
+function SlideTransitions() {
+  const pathname = usePathname();
+  const router = useRouter();
+  useEffect4(() => {
+    const own = (href) => router.push(href);
+    push = own;
+    return () => {
+      if (push === own) push = null;
+    };
+  }, [router]);
+  useEffect4(() => {
+    if (pathname) markRendered(pathname);
+  }, [pathname]);
+  useEffect4(() => {
+    const onPopState = (e) => {
+      if (e[REPLAYED]) return;
+      const from = renderedPath;
+      const to = window.location.pathname;
+      if (!from || from === to || !canSlide()) return;
+      const direction = slideDirectionFor(from, to);
+      if (!direction) return;
+      e.stopImmediatePropagation();
+      const state = e.state;
+      runSlide(direction, to, () => {
+        const replay = new PopStateEvent("popstate", { state });
+        replay[REPLAYED] = true;
+        window.dispatchEvent(replay);
+      });
+    };
+    window.addEventListener("popstate", onPopState, { capture: true });
+    return () => window.removeEventListener("popstate", onPopState, { capture: true });
+  }, []);
+  return null;
+}
+
+// src/layout/SwipeHistory.tsx
+import { useEffect as useEffect5 } from "react";
 var SWIPE_MIN_DISTANCE = 80;
 var SWIPE_MAX_DURATION_MS = 600;
 var SWIPE_AXIS_RATIO = 2;
@@ -133,7 +236,7 @@ function swipeExempt(target) {
   return target.closest(EXEMPT_SELECTOR) !== null || insideHorizontalScroller(target);
 }
 function SwipeHistory() {
-  useEffect4(() => {
+  useEffect5(() => {
     if (!window.matchMedia?.("(pointer: coarse)").matches) return;
     let start = null;
     const onStart = (e) => {
@@ -178,6 +281,7 @@ function AdhAppShell({ header, children, footer, devTools = false }) {
     devTools && /* @__PURE__ */ jsx4(DevAnimScale, {}),
     devTools && /* @__PURE__ */ jsx4(HtdvLayoutLogSwitch, {}),
     /* @__PURE__ */ jsx4(SwipeHistory, {}),
+    /* @__PURE__ */ jsx4(SlideTransitions, {}),
     /* @__PURE__ */ jsx4(HierarchicalDetailViewFlag, { children: /* @__PURE__ */ jsxs2("div", { className: "adh-app-shell", children: [
       header,
       /* @__PURE__ */ jsx4("main", { className: "adh-app-shell__main", children: /* @__PURE__ */ jsx4(AppErrorBoundary, { children }) }),
@@ -187,7 +291,7 @@ function AdhAppShell({ header, children, footer, devTools = false }) {
 }
 
 // src/layout/RouteError.tsx
-import { useEffect as useEffect5 } from "react";
+import { useEffect as useEffect6 } from "react";
 import { captureException } from "@agentic-toolkit/adh/telemetry/report-error";
 import { jsx as jsx5 } from "react/jsx-runtime";
 function RouteError({
@@ -195,7 +299,7 @@ function RouteError({
   reset
 }) {
   const chunk = isChunkLoadError(error);
-  useEffect5(() => {
+  useEffect6(() => {
     captureException(error, { boundary: "route-error", digest: error.digest ?? null });
     recoverFromChunkError(error);
   }, [error]);
@@ -206,7 +310,7 @@ function RouteError({
 }
 
 // src/layout/GlobalError.tsx
-import { useEffect as useEffect6 } from "react";
+import { useEffect as useEffect7 } from "react";
 import { captureException as captureException2 } from "@agentic-toolkit/adh/telemetry/report-error";
 import { jsx as jsx6, jsxs as jsxs3 } from "react/jsx-runtime";
 function GlobalError({
@@ -214,7 +318,7 @@ function GlobalError({
   reset
 }) {
   const chunk = isChunkLoadError(error);
-  useEffect6(() => {
+  useEffect7(() => {
     captureException2(error, { boundary: "global-error", digest: error.digest ?? null });
     recoverFromChunkError(error);
   }, [error]);
@@ -251,13 +355,13 @@ function GlobalError({
 }
 
 // src/layout/SiteNotFound.tsx
-import { useEffect as useEffect7 } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useEffect as useEffect8 } from "react";
+import { usePathname as usePathname2, useRouter as useRouter2 } from "next/navigation";
 import { Fragment as Fragment2, jsx as jsx7, jsxs as jsxs4 } from "react/jsx-runtime";
 function SiteNotFound({ siteSwitchHash, children }) {
-  const pathname = usePathname() ?? "/";
-  const router = useRouter();
-  useEffect7(() => {
+  const pathname = usePathname2() ?? "/";
+  const router = useRouter2();
+  useEffect8(() => {
     if (typeof window === "undefined") return;
     const hash = window.location.hash;
     if (hash !== siteSwitchHash && !hash.startsWith(`${siteSwitchHash}&`)) return;
@@ -436,6 +540,9 @@ export {
   SiteHomePlaceholder,
   SiteLanding,
   SiteNotFound,
-  SiteSwitchNotFound
+  SiteSwitchNotFound,
+  SlideTransitions,
+  canSlide,
+  slideNavigate
 };
 //# sourceMappingURL=index.js.map

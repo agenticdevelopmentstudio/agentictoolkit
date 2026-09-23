@@ -809,3 +809,70 @@
 a.adh-dropdown-menu__item:hover .adh-nav-popover__link-name {
   text-decoration: underline;
 }
+
+/* SLIDE NAVIGATION — the stack-style push SlideNavigation.tsx plays for a link that
+   asks for it (Profile, in the avatar menu), and the pop Back plays between the same
+   two pages. `data-adh-slide` sits on <html> for the life of ONE view transition and
+   is gone after it, so an ordinary navigation keeps the browser default: no
+   animation at all. Everything below is keyed on it for that reason.
+
+   Only the page body moves. The header and footer are the same on both pages, so
+   they stay in the root snapshot with its crossfade switched off — the chrome holds
+   still while the content slides under it, the way a native navigation stack does.
+   Reduced motion never gets here: `canSlide()` declines before the attribute is set. */
+:root[data-adh-slide] .adh-app-shell__main {
+  view-transition-name: adh-page;
+}
+:root[data-adh-slide]::view-transition-old(root),
+:root[data-adh-slide]::view-transition-new(root) {
+  animation: none;
+}
+:root[data-adh-slide]::view-transition-image-pair(adh-page) {
+  overflow: hidden;
+}
+:root[data-adh-slide]::view-transition-old(adh-page),
+:root[data-adh-slide]::view-transition-new(adh-page) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation-fill-mode: both;
+  /* The pair's default is a crossfade blend; a slide wants each image opaque. */
+  mix-blend-mode: normal;
+}
+/* Push: the new page comes in from the right, over the old one easing left. */
+:root[data-adh-slide='forward']::view-transition-old(adh-page) {
+  animation-name: adh-slide-out-left;
+}
+:root[data-adh-slide='forward']::view-transition-new(adh-page) {
+  animation-name: adh-slide-in-right;
+}
+/* Pop: the reverse — the page that was pushed slides off to the right, on top, and
+   uncovers the one under it coming back from the left. */
+:root[data-adh-slide='back']::view-transition-old(adh-page) {
+  z-index: 1;
+  animation-name: adh-slide-out-right;
+}
+:root[data-adh-slide='back']::view-transition-new(adh-page) {
+  animation-name: adh-slide-in-left;
+}
+@keyframes adh-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes adh-slide-out-left {
+  to {
+    transform: translateX(-30%);
+    opacity: 0.6;
+  }
+}
+@keyframes adh-slide-out-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes adh-slide-in-left {
+  from {
+    transform: translateX(-30%);
+    opacity: 0.6;
+  }
+}
