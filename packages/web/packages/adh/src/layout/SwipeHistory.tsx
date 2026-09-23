@@ -79,8 +79,8 @@ export function SwipeHistory(): null {
 
     const onStart = (e: TouchEvent) => {
       start = null
-      if (e.touches.length !== 1 || swipeExempt(e.target)) return
       const touch = e.touches[0]
+      if (!touch || e.touches.length !== 1 || swipeExempt(e.target)) return
       start = { x: touch.clientX, y: touch.clientY, t: e.timeStamp }
     }
     const onEnd = (e: TouchEvent) => {

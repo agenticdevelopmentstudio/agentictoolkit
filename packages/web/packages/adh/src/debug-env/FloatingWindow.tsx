@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 import { Button } from '@agenticdevelopertoolkit/ui/components/button'
+import { useMediaQuery } from '@agenticdevelopertoolkit/ui/hooks/useMediaQuery'
 import { useIsMounted } from '../hooks/useIsMounted'
 
 // A macOS-style floating window: NO backdrop, so the live page stays visible behind
@@ -24,6 +25,13 @@ import { useIsMounted } from '../hooks/useIsMounted'
 // and `resize: both` owns it thereafter — React never re-applies width/height, so a
 // user resize sticks across re-renders with no ResizeObserver and no per-frame churn.
 // Only `pos` (drag) is React state.
+//
+// On a PHONE (below COMPACT_QUERY) it is a full-screen sheet instead: a floating, draggable
+// window cannot fit — its 520px floor overflowed a 390px iPhone, putting the × off-screen —
+// and there is no "page behind it" worth previewing at that width. Drag and the corner
+// resize are off there; the × and Escape still close it.
+const COMPACT_QUERY = '(max-width: 639px)'
+
 export function FloatingWindow({
   open,
   onClose,
@@ -41,10 +49,17 @@ export function FloatingWindow({
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const initialSize = useRef<{ w: number; h: number } | null>(null)
   const dragTeardown = useRef<(() => void) | null>(null)
+  const compact = useMediaQuery(COMPACT_QUERY)
 
-  // Centered placement + initial size each time it opens.
+  // Centered placement + initial size each time it opens — and again when the viewport
+  // crosses the compact line (a phone rotating), so the sheet never keeps a stale size.
   useEffect(() => {
     if (!open) return
+    if (compact) {
+      initialSize.current = { w: window.innerWidth, h: window.innerHeight }
+      setPos({ x: 0, y: 0 })
+      return
+    }
     const w = Math.min(1400, Math.round(window.innerWidth * 0.95))
     const h = Math.min(920, Math.round(window.innerHeight * 0.88))
     initialSize.current = { w, h }
@@ -52,7 +67,7 @@ export function FloatingWindow({
       x: Math.round((window.innerWidth - w) / 2),
       y: Math.round((window.innerHeight - h) / 2),
     })
-  }, [open])
+  }, [open, compact])
 
   // Apply the initial size to the element ONCE, before paint (no flash). After this
   // the native corner resize owns width/height; we never set them via React style.
@@ -101,7 +116,7 @@ export function FloatingWindow({
 
   const onHeaderPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (!pos || e.button !== 0) return
+      if (!pos || compact || e.button !== 0) return
       const startX = e.clientX
       const startY = e.clientY
       const origin = { ...pos }
@@ -122,7 +137,7 @@ export function FloatingWindow({
       window.addEventListener('pointermove', move)
       window.addEventListener('pointerup', teardown)
     },
-    [pos],
+    [pos, compact],
   )
 
   if (!open || !mounted || !pos) return null
@@ -138,20 +153,42 @@ export function FloatingWindow({
       ref={ref}
       role="dialog"
       aria-labelledby={titleId}
-      className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-apt-border bg-apt-surface text-apt-text shadow-2xl"
-      style={{
-        left: pos.x,
-        top: pos.y,
-        resize: 'both',
-        minWidth: 520,
-        minHeight: 360,
-        maxWidth: '100vw',
-        maxHeight: '100vh',
-      }}
+      className={
+        compact
+          ? 'fixed z-50 flex flex-col overflow-hidden bg-apt-surface text-apt-text'
+          : 'fixed z-50 flex flex-col overflow-hidden rounded-xl border border-apt-border bg-apt-surface text-apt-text shadow-2xl'
+      }
+      style={
+        compact
+          ? // `dvh`, not `vh`: iOS Safari's `vh` is the height with the toolbar HIDDEN, so a
+            // 100vh sheet runs under the toolbar and hides its own bottom edge. The safe-area
+            // padding keeps the title bar clear of the notch.
+            {
+              left: 0,
+              top: 0,
+              maxWidth: '100vw',
+              maxHeight: '100dvh',
+              paddingTop: 'env(safe-area-inset-top)',
+              paddingBottom: 'env(safe-area-inset-bottom)',
+            }
+          : {
+              left: pos.x,
+              top: pos.y,
+              resize: 'both',
+              minWidth: 520,
+              minHeight: 360,
+              maxWidth: '100vw',
+              maxHeight: '100vh',
+            }
+      }
     >
       <div
         onPointerDown={onHeaderPointerDown}
-        className="flex shrink-0 cursor-move select-none items-center justify-between border-b border-apt-border bg-apt-bg px-5 py-3"
+        className={
+          compact
+            ? 'flex shrink-0 select-none items-center justify-between border-b border-apt-border bg-apt-bg px-4 py-2'
+            : 'flex shrink-0 cursor-move select-none items-center justify-between border-b border-apt-border bg-apt-bg px-5 py-3'
+        }
       >
         <span id={titleId} className="font-mono text-sm text-apt-gold">
           {title}

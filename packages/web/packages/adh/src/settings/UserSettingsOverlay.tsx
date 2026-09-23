@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@agenticdevelopertoolkit/ui/components/dialog";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
+import { useMediaQuery } from "@agenticdevelopertoolkit/ui/hooks/useMediaQuery";
 import { SettingsLayout } from "@agentic-toolkit/account";
 import { SettingsDirtyProvider, useSettingsDirty } from "@agentic-toolkit/resource";
 // The react-query runtime every panel below fetches through, mounted HERE rather than in
@@ -90,6 +91,11 @@ function UserSettingsDialog({
     attemptExit(() => onOpenChange(false));
   }
 
+  // A phone gets the whole screen. The desktop footprint's 1rem margin and `vh` height left the
+  // bottom of the dialog — and the Save bar in it — under iOS Safari's toolbar, since `vh` there is
+  // measured with the toolbar hidden; `dvh` is the height actually visible.
+  const compact = useMediaQuery("(max-width: 639px)");
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       {/* Sizing via inline style (not Tailwind) so it's immune to utility
@@ -99,14 +105,27 @@ function UserSettingsDialog({
           resizes it; each panel scrolls internally instead. */}
       <DialogContent
         className="flex flex-col gap-0 overflow-hidden p-0"
-        style={{
-          width: "min(72rem, calc(100vw - 2rem))",
-          maxWidth: "min(72rem, calc(100vw - 2rem))",
-          // Tall enough to show all subscription plans without scrolling on a
-          // typical desktop; still caps to the viewport on shorter screens.
-          height: "min(56rem, calc(100vh - 2rem))",
-          maxHeight: "calc(100vh - 2rem)",
-        }}
+        style={
+          compact
+            ? {
+                width: "100vw",
+                maxWidth: "100vw",
+                height: "100dvh",
+                maxHeight: "100dvh",
+                borderRadius: 0,
+                borderWidth: 0,
+                paddingTop: "env(safe-area-inset-top)",
+                paddingBottom: "env(safe-area-inset-bottom)",
+              }
+            : {
+                width: "min(72rem, calc(100vw - 2rem))",
+                maxWidth: "min(72rem, calc(100vw - 2rem))",
+                // Tall enough to show all subscription plans without scrolling on a
+                // typical desktop; still caps to the viewport on shorter screens.
+                height: "min(56rem, calc(100dvh - 2rem))",
+                maxHeight: "calc(100dvh - 2rem)",
+              }
+        }
       >
         <DialogTitle className="shrink-0 border-b border-apt-border px-6 py-3 font-mono text-sm tracking-wide text-apt-gold">
           User Settings

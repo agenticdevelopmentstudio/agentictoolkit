@@ -123,6 +123,10 @@ export function SettingsLayout({
         const first = topics[0];
         if (first) void selectTopic(first);
       },
+      // …which, on a phone, would make the section list unreachable: the narrow stack's Back
+      // clears, this re-selects, and the detail comes straight back. Persistent selection makes
+      // that Back reveal the list instead.
+      persistentSelection: true,
     },
   ];
 
