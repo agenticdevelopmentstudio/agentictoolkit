@@ -3,6 +3,7 @@ import { AppErrorBoundary } from './AppErrorBoundary'
 import { DevAnimScale } from './DevAnimScale'
 import { HierarchicalDetailViewFlag } from './HierarchicalDetailViewFlag'
 import { HtdvLayoutLogSwitch } from './HtdvLayoutLogSwitch'
+import { SwipeHistory } from './SwipeHistory'
 
 export type AdhAppShellProps = {
   /** The site header (e.g. adh's <SiteHeader siteId=… />), supplied by the host so it can
@@ -55,6 +56,8 @@ export function AdhAppShell({ header, children, footer, devTools = false }: AdhA
       {devTools && <DevAnimScale />}
       {/* The HTDV layout log. Render-free — it just flips the toolkit's module switch once. */}
       {devTools && <HtdvLayoutLogSwitch />}
+      {/* Render-free: a horizontal flick on a touch screen is browser back / forward. */}
+      <SwipeHistory />
       {/* Wraps the HEADER and the FOOTER as well as the page, not just <main>: the debug
           console's stack hangs off the header's site menu, so a provider around <main> alone
           would leave it on the other view. */}
