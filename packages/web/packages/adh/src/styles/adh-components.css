@@ -573,15 +573,6 @@
   gap: 0.5rem;
 }
 
-/* The word beside the trigger. Muted and small: it names the control rather than competing
-   with it, and it is `aria-hidden` in the markup, so this is the only reader it has. */
-.adh-home__toolbar-label {
-  flex-shrink: 0;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
 .adh-footer {
   /* Pinned to the bottom of the window: sticky keeps it in flow (sits at the
      viewport bottom on short pages, stays visible while tall pages scroll

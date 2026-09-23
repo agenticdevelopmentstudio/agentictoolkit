@@ -15,6 +15,11 @@ export type SiteMenuSwitcherProps = SiteMenuChromeProps;
  * `sites` list, no menu taxonomy) that `AdhHeader`'s `siteSwitcher` slot expects.
  * The two are unrelated components that happen to share a role name; this one is
  * adh's actual switcher, injected through that slot by {@link SiteHeader}.
+ *
+ * SIGNED IN, on a host that supplies the user's workspaces (the hub, via WorkspacesMenuProvider),
+ * the fleet menu is set aside altogether and the slot holds the {@link WorkspaceMenu} instead —
+ * inside the product, switching workspace is the everyday move. A host with no provider (every
+ * satellite) keeps the site menu at every auth state: it has no workspaces to offer.
  */
 export declare function SiteMenuSwitcher(props: SiteMenuSwitcherProps): ReactElement;
 //# sourceMappingURL=SiteMenuSwitcher.d.ts.map

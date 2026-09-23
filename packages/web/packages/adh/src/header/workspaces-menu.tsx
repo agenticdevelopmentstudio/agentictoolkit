@@ -27,6 +27,12 @@ export type MenuWorkspace = {
 export type WorkspacesMenu = {
   workspaces: MenuWorkspace[]
   loading: boolean
+  /** How a chosen row switches, when the host has something better than following `href`. The
+   *  hub fills it while a workspace route is mounted: its switch KEEPS the feature you are on and
+   *  REMEMBERS the pick as your preference — and a plain link can do neither, since the
+   *  route's resolver cannot tell a followed link from the back button, which must never
+   *  persist. Absent ⇒ the menu navigates to `href`. */
+  select?: (workspace: MenuWorkspace) => void
 }
 
 const WorkspacesMenuContext = createContext<WorkspacesMenu | null>(null)

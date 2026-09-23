@@ -1093,7 +1093,7 @@ function useWorkspacesMenu() {
 // src/header/SiteHeader.tsx
 import "react";
 import dynamic2 from "next/dynamic";
-import { usePathname as usePathname6 } from "next/navigation";
+import { usePathname as usePathname7 } from "next/navigation";
 import {
   AdhHeader as AdhHeader2,
   useClientHost as useClientHost4
@@ -1112,7 +1112,7 @@ function hasProfileRoute(siteId) {
 
 // src/header/SiteMenuSwitcher.tsx
 import { Fragment as Fragment5 } from "react";
-import { usePathname as usePathname4 } from "next/navigation";
+import { usePathname as usePathname5 } from "next/navigation";
 
 // src/header/SiteMenu.tsx
 import { useMemo as useMemo3 } from "react";
@@ -2003,6 +2003,106 @@ function WorkspaceSiteMenu(props) {
   return /* @__PURE__ */ jsx16(SiteMenu, { groups: FLEET_MENU_GROUPS, ...props });
 }
 
+// src/header/WorkspaceMenu.tsx
+import { useCallback as useCallback4, useMemo as useMemo4 } from "react";
+import { usePathname as usePathname4, useRouter as useRouter2 } from "next/navigation";
+import { Settings as Settings4 } from "lucide-react";
+import { confirmNavigation as confirmNavigation3 } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
+import {
+  HubMark as HubMark3,
+  NavigationPopover as NavigationPopover3
+} from "@agentic-toolkit/adh/header";
+import { useHubPreferences as useHubPreferences2 } from "@agentic-toolkit/adh/header/hub-preferences";
+import { useHelp as useHelp2 } from "@agentic-toolkit/adh/help";
+import { jsx as jsx17 } from "react/jsx-runtime";
+function WorkspaceMenu({
+  menu,
+  onSettings,
+  settingsHref,
+  navLinks,
+  triggerClassName
+}) {
+  const router = useRouter2();
+  const pathname = usePathname4() ?? "/";
+  const { siteMenuShortcut } = useHubPreferences2();
+  const openHelp = useHelp2().open;
+  const current = menu.workspaces.find((w) => w.current);
+  const label = current?.label ?? (menu.loading ? "Loading\u2026" : "Workspaces");
+  const workspaceRows = useMemo4(() => {
+    const items = menu.workspaces.map((w) => ({
+      key: `ws:${w.id}`,
+      label: w.label,
+      href: w.href,
+      icon: menuIcon("workspaces"),
+      current: w.current
+    }));
+    if (!items.length) {
+      items.push({ key: "ws:empty", label: menu.loading ? "Loading\u2026" : "No workspaces yet" });
+    }
+    return items.map((item) => ({ kind: "leaf", section: 0, item }));
+  }, [menu]);
+  const linksCollapsed = useHeaderLinksCollapsed();
+  const navSection = useMemo4(
+    () => linksCollapsed ? buildSiteNavEntries(navLinks, { pathname }) : [],
+    [linksCollapsed, navLinks, pathname]
+  );
+  const entries = useMemo4(
+    () => [
+      ...navSection,
+      ...workspaceRows,
+      {
+        kind: "leaf",
+        section: 1,
+        item: { key: "help", label: "Help", icon: menuIcon("help"), onSelect: () => openHelp() }
+      }
+    ],
+    [navSection, workspaceRows, openHelp]
+  );
+  const navigate = useCallback4(
+    (item) => {
+      const href = item.href;
+      if (!href) return;
+      const workspace = menu.workspaces.find((w) => `ws:${w.id}` === item.key);
+      void confirmNavigation3().then((ok) => {
+        if (!ok) return;
+        if (workspace && menu.select) menu.select(workspace);
+        else router.push(href);
+      });
+    },
+    [menu, router]
+  );
+  return /* @__PURE__ */ jsx17(
+    NavigationPopover3,
+    {
+      entries,
+      openShortcut: { keys: siteMenuShortcut, label: "Workspace menu" },
+      onChoose: navigate,
+      triggerLabel: `${label} \u2014 switch workspace`,
+      triggerText: label,
+      triggerIcon: /* @__PURE__ */ jsx17(HubMark3, { className: "adh-nav-popover__mark" }),
+      triggerClassName,
+      placeholder: "Search workspaces",
+      emptyLabel: "No matching workspaces",
+      commandTrailing: ({ close }) => onSettings ? /* @__PURE__ */ jsx17(
+        "button",
+        {
+          type: "button",
+          className: "adh-site-switcher__help",
+          "aria-label": "User settings",
+          onClick: () => {
+            close({ restoreFocus: false });
+            requestAnimationFrame(() => onSettings());
+          },
+          children: /* @__PURE__ */ jsx17(Settings4, { className: "adh-site-switcher__help-icon", "aria-hidden": true })
+        }
+      ) : settingsHref ? /* @__PURE__ */ jsx17("a", { className: "adh-site-switcher__help", "aria-label": "User settings", href: settingsHref, children: /* @__PURE__ */ jsx17(Settings4, { className: "adh-site-switcher__help-icon", "aria-hidden": true }) }) : null
+    }
+  );
+}
+
+// src/header/SiteMenuSwitcher.tsx
+import { useWorkspacesMenu as useWorkspacesMenu3 } from "@agentic-toolkit/adh/header";
+
 // src/header/activeMenuGroups.ts
 import "@agentic-toolkit/adh-registry";
 import { isHubWorkspacePath as isHubWorkspacePath2 } from "@agentic-toolkit/adh/site/hubWorkspacePath";
@@ -2038,24 +2138,37 @@ function PrefetchSiblingSites() {
 }
 
 // src/header/SiteMenuSwitcher.tsx
-import { jsx as jsx17, jsxs as jsxs10 } from "react/jsx-runtime";
+import { jsx as jsx18, jsxs as jsxs10 } from "react/jsx-runtime";
 function SiteMenuSwitcher(props) {
-  const pathname = usePathname4() ?? "/";
+  const pathname = usePathname5() ?? "/";
   const onWorkspaceRoute = isWorkspaceMenuRoute(props.currentSiteId, pathname);
+  const workspacesMenu = useWorkspacesMenu3();
+  if (props.authenticated && workspacesMenu) {
+    return /* @__PURE__ */ jsx18(
+      WorkspaceMenu,
+      {
+        menu: workspacesMenu,
+        onSettings: props.onSettings,
+        settingsHref: props.settingsHref,
+        navLinks: props.navLinks,
+        triggerClassName: props.triggerClassName
+      }
+    );
+  }
   return /* @__PURE__ */ jsxs10(Fragment5, { children: [
-    /* @__PURE__ */ jsx17(PrefetchSiblingSites, {}),
-    onWorkspaceRoute ? /* @__PURE__ */ jsx17(WorkspaceSiteMenu, { ...props }) : /* @__PURE__ */ jsx17(MarketingSiteMenu, { ...props })
+    /* @__PURE__ */ jsx18(PrefetchSiblingSites, {}),
+    onWorkspaceRoute ? /* @__PURE__ */ jsx18(WorkspaceSiteMenu, { ...props }) : /* @__PURE__ */ jsx18(MarketingSiteMenu, { ...props })
   ] });
 }
 
 // src/header/DevToolsMenu.tsx
-import { useEffect as useEffect5, useMemo as useMemo4, useState as useState4 } from "react";
-import { usePathname as usePathname5 } from "next/navigation";
+import { useEffect as useEffect5, useMemo as useMemo5, useState as useState4 } from "react";
+import { usePathname as usePathname6 } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Bug as Bug2 } from "lucide-react";
 import { detectEnv as detectEnv4 } from "@agentic-toolkit/adh-registry";
 import {
-  NavigationPopover as NavigationPopover3,
+  NavigationPopover as NavigationPopover4,
   useClientHost as useClientHost3
 } from "@agentic-toolkit/adh/header";
 
@@ -2185,14 +2298,14 @@ function useEffectiveEnv(hostname) {
 }
 
 // src/header/DevToolsMenu.tsx
-import { Fragment as Fragment6, jsx as jsx18, jsxs as jsxs11 } from "react/jsx-runtime";
+import { Fragment as Fragment6, jsx as jsx19, jsxs as jsxs11 } from "react/jsx-runtime";
 var DebugConsoleWindow = dynamic(
   () => import("@agentic-toolkit/adh/debug-console").then((m) => m.DebugConsoleWindow)
 );
 function DevToolsMenu({ userIsAdmin, ...rest }) {
   const unlocked = DEV_TOOLS_BUILD_ENABLED || userIsAdmin === true;
   if (!unlocked) return null;
-  return /* @__PURE__ */ jsx18(DevToolsMenuPopover, { ...rest, adminUnlocked: userIsAdmin === true });
+  return /* @__PURE__ */ jsx19(DevToolsMenuPopover, { ...rest, adminUnlocked: userIsAdmin === true });
 }
 function DevToolsMenuPopover({
   currentSiteId,
@@ -2201,8 +2314,8 @@ function DevToolsMenuPopover({
   routes,
   adminUnlocked
 }) {
-  const pathname = usePathname5() ?? "/";
-  const groups = useMemo4(() => buildDebugSiteGroups(), []);
+  const pathname = usePathname6() ?? "/";
+  const groups = useMemo5(() => buildDebugSiteGroups(), []);
   const { entries, navigate } = useSiteMenu(groups, { currentSiteId, resolveHref, personalSlug });
   const [generated, setGenerated] = useState4();
   const wantGeneratedRoutes = !(routes && routes.length > 0);
@@ -2228,7 +2341,7 @@ function DevToolsMenuPopover({
   const realEnv = host ? detectEnv4(host) : null;
   const override = useEnvOverride();
   const [debugOpen, setDebugOpen] = useState4(false);
-  const devToolsSection = useMemo4(
+  const devToolsSection = useMemo5(
     () => buildDevToolsEntries({
       routes: effectiveRoutes,
       effectiveEnv,
@@ -2240,30 +2353,30 @@ function DevToolsMenuPopover({
     }),
     [effectiveRoutes, effectiveEnv, realEnv, adminUnlocked, override, pathname]
   );
-  const allEntries = useMemo4(
+  const allEntries = useMemo5(
     () => [...entries, ...devToolsSection],
     [entries, devToolsSection]
   );
   return /* @__PURE__ */ jsxs11(Fragment6, { children: [
-    /* @__PURE__ */ jsx18(
-      NavigationPopover3,
+    /* @__PURE__ */ jsx19(
+      NavigationPopover4,
       {
         entries: allEntries,
         onChoose: navigate,
         triggerLabel: "Debug tools",
-        triggerContent: /* @__PURE__ */ jsx18(Bug2, { className: "adh-nav-popover__mark", "aria-hidden": true }),
+        triggerContent: /* @__PURE__ */ jsx19(Bug2, { className: "adh-nav-popover__mark", "aria-hidden": true }),
         triggerClassName: "adh-nav-popover__trigger--icon",
         placeholder: "Search sites, routes and tools",
         emptyLabel: "No matching dev tools"
       }
     ),
-    debugOpen && /* @__PURE__ */ jsx18(DebugConsoleWindow, { open: true, onClose: () => setDebugOpen(false) })
+    debugOpen && /* @__PURE__ */ jsx19(DebugConsoleWindow, { open: true, onClose: () => setDebugOpen(false) })
   ] });
 }
 
 // src/header/SiteHeader.tsx
 import { SITE_TITLE_HELP_ID } from "@agentic-toolkit/adh-ui/help-ids";
-import { jsx as jsx19 } from "react/jsx-runtime";
+import { jsx as jsx20 } from "react/jsx-runtime";
 var NotificationBell = dynamic2(
   () => import("@agentic-toolkit/messaging/components/notification-bell").then((m) => m.NotificationBell)
 );
@@ -2304,7 +2417,7 @@ function SiteHeader({
   const resolvedNavLinks = (typeof navLinks === "function" ? navLinks(user != null) : navLinks) ?? [];
   const hostname = useClientHost4();
   const conceptSite = isConceptSite(siteId);
-  const onLandingPage = usePathname6() === "/";
+  const onLandingPage = usePathname7() === "/";
   const site = getSite3(siteId);
   const siteName = site ? siteHeaderTitle2(site) : siteId;
   const siteShortName = site?.label ?? siteId;
@@ -2314,11 +2427,11 @@ function SiteHeader({
   const resolvedLoginHref = loginHref ?? (onLogin ? void 0 : hubAuthHref("/login"));
   const resolvedSignupHref = signupHref ?? (onSignup ? void 0 : hubAuthHref("/signup"));
   const switcherSettingsHref = resolvedOnSettings ? void 0 : settingsHref ?? resolveHubHref("/settings");
-  return /* @__PURE__ */ jsx19(
+  return /* @__PURE__ */ jsx20(
     AdhHeader2,
     {
       siteName,
-      siteSwitcher: /* @__PURE__ */ jsx19(
+      siteSwitcher: /* @__PURE__ */ jsx20(
         SiteMenuSwitcher,
         {
           currentSiteId: siteId,
@@ -2334,7 +2447,7 @@ function SiteHeader({
           navLinks: resolvedNavLinks
         }
       ),
-      debugMenu: /* @__PURE__ */ jsx19(
+      debugMenu: /* @__PURE__ */ jsx20(
         DevToolsMenu,
         {
           currentSiteId: siteId,
@@ -2356,8 +2469,8 @@ function SiteHeader({
       previewDetail,
       homeHref: siteHomePath(siteId),
       profileHref: user?.slug && hasProfileRoute(siteId) ? `/${encodeURIComponent(user.slug)}/profile` : void 0,
-      preAuthLinks: conceptSite && onLandingPage ? /* @__PURE__ */ jsx19("a", { href: "/details", className: "adh-header__nav-link adh-header__nav-link--details", children: "Details" }) : void 0,
-      accountActions: user != null ? /* @__PURE__ */ jsx19(NotificationBell, {}) : void 0,
+      preAuthLinks: conceptSite && onLandingPage ? /* @__PURE__ */ jsx20("a", { href: "/details", className: "adh-header__nav-link adh-header__nav-link--details", children: "Details" }) : void 0,
+      accountActions: user != null ? /* @__PURE__ */ jsx20(NotificationBell, {}) : void 0,
       user,
       authLoading,
       loginHref: resolvedLoginHref,
@@ -2402,6 +2515,7 @@ export {
   SiteOptionsMenu,
   SiteSwitcher,
   StudioWordmark,
+  WorkspaceMenu,
   WorkspaceSiteMenu,
   WorkspacesMenuProvider,
   buildDebugSiteGroups,

@@ -1547,16 +1547,12 @@ describe("SiteHomeShell picker mount", () => {
     expect(pickers).toHaveLength(1);
     expect(list).toHaveBeenCalledTimes(1);
 
-    // It lives in the bar, beside the visible label the user reads it by.
+    // It lives in the bar, with no visible "Workspace" word beside it — the trigger reads as the
+    // workspace's name, and its own `ariaLabel="Workspace"` names it to assistive tech.
     const toolbar = container.querySelector(".adh-home__toolbar");
     expect(toolbar).not.toBeNull();
     expect(toolbar).toContainElement(pickers[0]!);
-    const label = toolbar!.querySelector(".adh-home__toolbar-label");
-    expect(label).not.toBeNull();
-    expect(label).toHaveTextContent("Workspace");
-    // Hidden from assistive tech: the trigger it labels carries its own `ariaLabel="Workspace"`,
-    // and announcing both would say the word twice.
-    expect(label).toHaveAttribute("aria-hidden");
+    expect(toolbar!.querySelector(".adh-home__toolbar-label")).toBeNull();
 
     // And it is wired: all three props reach the one mount.
     expect(pickers[0]!).toHaveAttribute("data-selected", "mine");

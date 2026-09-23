@@ -573,15 +573,6 @@
   gap: 0.5rem;
 }
 
-/* The word beside the trigger. Muted and small: it names the control rather than competing
-   with it, and it is `aria-hidden` in the markup, so this is the only reader it has. */
-.adh-home__toolbar-label {
-  flex-shrink: 0;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
 .adh-footer {
   /* Pinned to the bottom of the window: sticky keeps it in flow (sits at the
      viewport bottom on short pages, stays visible while tall pages scroll
@@ -773,6 +764,16 @@
   border-radius: 0.5rem;
   cursor: pointer;
   outline: none;
+}
+
+/* 30% taller on a touch screen — see "Touch rows" in @agenticdevelopertoolkit/ui's
+   components.css, which owns the factor. Natural height: 0.55rem × 2 + 0.93rem × 1.2 line
+   = 2.216rem. */
+@media (pointer: coarse) {
+  .adh-avatar-menu__item {
+    padding-top: calc(0.55rem + 2.216rem * var(--adh-touch-row-grow, 0.3) / 2);
+    padding-bottom: calc(0.55rem + 2.216rem * var(--adh-touch-row-grow, 0.3) / 2);
+  }
 }
 
 .adh-avatar-menu__item:hover,

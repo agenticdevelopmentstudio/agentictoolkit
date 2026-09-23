@@ -42,13 +42,10 @@ export function WorkspaceBar({
     // exactly the action's width, and a site that passes no action would centre it differently
     // again. The empty first and third tracks are what make the two cases identical.
     <div className="adh-home__toolbar">
-      {/* The visible word is decorative to assistive tech — `aria-hidden`, because the trigger it
-          labels already carries `ariaLabel="Workspace"` (see WorkspacePicker), and a <label>
-          pointing at it would make a screen reader say "Workspace" twice. */}
+      {/* No visible "Workspace" word: the picker's trigger reads as the workspace's name, which
+          says what the control is, and the label was a second element saying it again. Assistive
+          tech still hears it — the trigger carries `ariaLabel="Workspace"` (see WorkspacePicker). */}
       <div className="adh-home__toolbar-control">
-        <span className="adh-home__toolbar-label" aria-hidden>
-          Workspace
-        </span>
         <WorkspacePicker workspaces={workspaces} selected={selected} onSelect={onSelect} />
       </div>
       {action}

@@ -374,10 +374,7 @@ function WorkspaceBar({
     // exactly the action's width, and a site that passes no action would centre it differently
     // again. The empty first and third tracks are what make the two cases identical.
     /* @__PURE__ */ jsxs3("div", { className: "adh-home__toolbar", children: [
-      /* @__PURE__ */ jsxs3("div", { className: "adh-home__toolbar-control", children: [
-        /* @__PURE__ */ jsx5("span", { className: "adh-home__toolbar-label", "aria-hidden": true, children: "Workspace" }),
-        /* @__PURE__ */ jsx5(WorkspacePicker, { workspaces, selected, onSelect })
-      ] }),
+      /* @__PURE__ */ jsx5("div", { className: "adh-home__toolbar-control", children: /* @__PURE__ */ jsx5(WorkspacePicker, { workspaces, selected, onSelect }) }),
       action
     ] })
   );

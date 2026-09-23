@@ -22,6 +22,8 @@ export type { MenuWorkspace, WorkspacesMenu } from './workspaces-menu';
 export { SiteHeader } from './SiteHeader';
 export type { SiteHeaderProps } from './SiteHeader';
 export { SiteMenuSwitcher } from './SiteMenuSwitcher';
+export { WorkspaceMenu } from './WorkspaceMenu';
+export type { WorkspaceMenuProps } from './WorkspaceMenu';
 export type { SiteMenuSwitcherProps } from './SiteMenuSwitcher';
 export { DevToolsMenu } from './DevToolsMenu';
 export type { DevToolsMenuProps } from './DevToolsMenu';

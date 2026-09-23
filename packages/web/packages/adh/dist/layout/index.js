@@ -104,12 +104,80 @@ function HtdvLayoutLogSwitch() {
   return null;
 }
 
+// src/layout/SwipeHistory.tsx
+import { useEffect as useEffect4 } from "react";
+var SWIPE_MIN_DISTANCE = 80;
+var SWIPE_MAX_DURATION_MS = 600;
+var SWIPE_AXIS_RATIO = 2;
+var SWIPE_EDGE_GUTTER = 24;
+function classifySwipe(start, end, viewportWidth) {
+  if (start.x < SWIPE_EDGE_GUTTER || start.x > viewportWidth - SWIPE_EDGE_GUTTER) return null;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (end.t - start.t > SWIPE_MAX_DURATION_MS) return null;
+  if (Math.abs(dx) < SWIPE_MIN_DISTANCE) return null;
+  if (Math.abs(dx) < SWIPE_AXIS_RATIO * Math.abs(dy)) return null;
+  return dx > 0 ? "back" : "forward";
+}
+var EXEMPT_SELECTOR = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"], [data-no-swipe-nav]';
+function insideHorizontalScroller(el) {
+  for (let node = el; node && node !== document.body; node = node.parentElement) {
+    if (node.scrollWidth <= node.clientWidth) continue;
+    const overflowX = getComputedStyle(node).overflowX;
+    if (overflowX === "auto" || overflowX === "scroll") return true;
+  }
+  return false;
+}
+function swipeExempt(target) {
+  if (!(target instanceof Element)) return false;
+  return target.closest(EXEMPT_SELECTOR) !== null || insideHorizontalScroller(target);
+}
+function SwipeHistory() {
+  useEffect4(() => {
+    if (!window.matchMedia?.("(pointer: coarse)").matches) return;
+    let start = null;
+    const onStart = (e) => {
+      start = null;
+      const touch = e.touches[0];
+      if (!touch || e.touches.length !== 1 || swipeExempt(e.target)) return;
+      start = { x: touch.clientX, y: touch.clientY, t: e.timeStamp };
+    };
+    const onEnd = (e) => {
+      if (!start) return;
+      const touch = e.changedTouches[0];
+      const from = start;
+      start = null;
+      if (!touch) return;
+      const direction = classifySwipe(
+        from,
+        { x: touch.clientX, y: touch.clientY, t: e.timeStamp },
+        window.innerWidth
+      );
+      if (direction === "back") window.history.back();
+      else if (direction === "forward") window.history.forward();
+    };
+    const onCancel = () => {
+      start = null;
+    };
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchend", onEnd, { passive: true });
+    document.addEventListener("touchcancel", onCancel, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onCancel);
+    };
+  }, []);
+  return null;
+}
+
 // src/layout/AdhAppShell.tsx
 import { Fragment, jsx as jsx4, jsxs as jsxs2 } from "react/jsx-runtime";
 function AdhAppShell({ header, children, footer, devTools = false }) {
   return /* @__PURE__ */ jsxs2(Fragment, { children: [
     devTools && /* @__PURE__ */ jsx4(DevAnimScale, {}),
     devTools && /* @__PURE__ */ jsx4(HtdvLayoutLogSwitch, {}),
+    /* @__PURE__ */ jsx4(SwipeHistory, {}),
     /* @__PURE__ */ jsx4(HierarchicalDetailViewFlag, { children: /* @__PURE__ */ jsxs2("div", { className: "adh-app-shell", children: [
       header,
       /* @__PURE__ */ jsx4("main", { className: "adh-app-shell__main", children: /* @__PURE__ */ jsx4(AppErrorBoundary, { children }) }),
@@ -119,7 +187,7 @@ function AdhAppShell({ header, children, footer, devTools = false }) {
 }
 
 // src/layout/RouteError.tsx
-import { useEffect as useEffect4 } from "react";
+import { useEffect as useEffect5 } from "react";
 import { captureException } from "@agentic-toolkit/adh/telemetry/report-error";
 import { jsx as jsx5 } from "react/jsx-runtime";
 function RouteError({
@@ -127,7 +195,7 @@ function RouteError({
   reset
 }) {
   const chunk = isChunkLoadError(error);
-  useEffect4(() => {
+  useEffect5(() => {
     captureException(error, { boundary: "route-error", digest: error.digest ?? null });
     recoverFromChunkError(error);
   }, [error]);
@@ -138,7 +206,7 @@ function RouteError({
 }
 
 // src/layout/GlobalError.tsx
-import { useEffect as useEffect5 } from "react";
+import { useEffect as useEffect6 } from "react";
 import { captureException as captureException2 } from "@agentic-toolkit/adh/telemetry/report-error";
 import { jsx as jsx6, jsxs as jsxs3 } from "react/jsx-runtime";
 function GlobalError({
@@ -146,7 +214,7 @@ function GlobalError({
   reset
 }) {
   const chunk = isChunkLoadError(error);
-  useEffect5(() => {
+  useEffect6(() => {
     captureException2(error, { boundary: "global-error", digest: error.digest ?? null });
     recoverFromChunkError(error);
   }, [error]);
@@ -183,13 +251,13 @@ function GlobalError({
 }
 
 // src/layout/SiteNotFound.tsx
-import { useEffect as useEffect6 } from "react";
+import { useEffect as useEffect7 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Fragment as Fragment2, jsx as jsx7, jsxs as jsxs4 } from "react/jsx-runtime";
 function SiteNotFound({ siteSwitchHash, children }) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
-  useEffect6(() => {
+  useEffect7(() => {
     if (typeof window === "undefined") return;
     const hash = window.location.hash;
     if (hash !== siteSwitchHash && !hash.startsWith(`${siteSwitchHash}&`)) return;

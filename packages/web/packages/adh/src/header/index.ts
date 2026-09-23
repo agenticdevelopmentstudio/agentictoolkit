@@ -37,6 +37,8 @@ export type { MenuWorkspace, WorkspacesMenu } from './workspaces-menu'
 export { SiteHeader } from './SiteHeader'
 export type { SiteHeaderProps } from './SiteHeader'
 export { SiteMenuSwitcher } from './SiteMenuSwitcher'
+export { WorkspaceMenu } from './WorkspaceMenu'
+export type { WorkspaceMenuProps } from './WorkspaceMenu'
 export type { SiteMenuSwitcherProps } from './SiteMenuSwitcher'
 // The dev-tools dropdown that sits BESIDE the site menu (AdhHeader's `debugMenu`
 // slot). Everything build-gated or admin-gated lives in here and nowhere else, which

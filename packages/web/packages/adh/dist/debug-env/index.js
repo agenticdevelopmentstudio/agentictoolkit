@@ -20,6 +20,7 @@ import {
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import { useMediaQuery } from "@agenticdevelopertoolkit/ui/hooks/useMediaQuery";
 
 // src/hooks/useIsMounted.ts
 import { useEffect, useState } from "react";
@@ -31,6 +32,7 @@ function useIsMounted() {
 
 // src/debug-env/FloatingWindow.tsx
 import { jsx, jsxs } from "react/jsx-runtime";
+var COMPACT_QUERY = "(max-width: 639px)";
 function FloatingWindow({
   open,
   onClose,
@@ -43,8 +45,14 @@ function FloatingWindow({
   const [pos, setPos] = useState2(null);
   const initialSize = useRef(null);
   const dragTeardown = useRef(null);
+  const compact = useMediaQuery(COMPACT_QUERY);
   useEffect2(() => {
     if (!open) return;
+    if (compact) {
+      initialSize.current = { w: window.innerWidth, h: window.innerHeight };
+      setPos({ x: 0, y: 0 });
+      return;
+    }
     const w = Math.min(1400, Math.round(window.innerWidth * 0.95));
     const h = Math.min(920, Math.round(window.innerHeight * 0.88));
     initialSize.current = { w, h };
@@ -52,7 +60,7 @@ function FloatingWindow({
       x: Math.round((window.innerWidth - w) / 2),
       y: Math.round((window.innerHeight - h) / 2)
     });
-  }, [open]);
+  }, [open, compact]);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !initialSize.current) return;
@@ -80,7 +88,7 @@ function FloatingWindow({
   useEffect2(() => () => dragTeardown.current?.(), []);
   const onHeaderPointerDown = useCallback(
     (e) => {
-      if (!pos || e.button !== 0) return;
+      if (!pos || compact || e.button !== 0) return;
       const startX = e.clientX;
       const startY = e.clientY;
       const origin = { ...pos };
@@ -100,7 +108,7 @@ function FloatingWindow({
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", teardown);
     },
-    [pos]
+    [pos, compact]
   );
   if (!open || !mounted || !pos) return null;
   return createPortal(
@@ -110,8 +118,20 @@ function FloatingWindow({
         ref,
         role: "dialog",
         "aria-labelledby": titleId,
-        className: "fixed z-50 flex flex-col overflow-hidden rounded-xl border border-apt-border bg-apt-surface text-apt-text shadow-2xl",
-        style: {
+        className: compact ? "fixed z-50 flex flex-col overflow-hidden bg-apt-surface text-apt-text" : "fixed z-50 flex flex-col overflow-hidden rounded-xl border border-apt-border bg-apt-surface text-apt-text shadow-2xl",
+        style: compact ? (
+          // `dvh`, not `vh`: iOS Safari's `vh` is the height with the toolbar HIDDEN, so a
+          // 100vh sheet runs under the toolbar and hides its own bottom edge. The safe-area
+          // padding keeps the title bar clear of the notch.
+          {
+            left: 0,
+            top: 0,
+            maxWidth: "100vw",
+            maxHeight: "100dvh",
+            paddingTop: "env(safe-area-inset-top)",
+            paddingBottom: "env(safe-area-inset-bottom)"
+          }
+        ) : {
           left: pos.x,
           top: pos.y,
           resize: "both",
@@ -125,7 +145,7 @@ function FloatingWindow({
             "div",
             {
               onPointerDown: onHeaderPointerDown,
-              className: "flex shrink-0 cursor-move select-none items-center justify-between border-b border-apt-border bg-apt-bg px-5 py-3",
+              className: compact ? "flex shrink-0 select-none items-center justify-between border-b border-apt-border bg-apt-bg px-4 py-2" : "flex shrink-0 cursor-move select-none items-center justify-between border-b border-apt-border bg-apt-bg px-5 py-3",
               children: [
                 /* @__PURE__ */ jsx("span", { id: titleId, className: "font-mono text-sm text-apt-gold", children: title }),
                 /* @__PURE__ */ jsx(

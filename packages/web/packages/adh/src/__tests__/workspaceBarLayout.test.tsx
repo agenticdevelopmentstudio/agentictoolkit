@@ -26,17 +26,17 @@ const WORKSPACES: WorkspaceOption[] = [
 const control = (container: HTMLElement) => container.querySelector(".adh-home__toolbar-control");
 
 describe("WorkspaceBar layout", () => {
-  it("holds the label and the trigger in ONE centred group", () => {
+  it("holds the trigger in ONE centred group, with no visible label", () => {
     const { container } = render(
       <WorkspaceBar workspaces={WORKSPACES} selected="mine" onSelect={() => {}} />,
     );
 
     const group = control(container);
     expect(group).not.toBeNull();
-    // The bar is the group's parent, not the label's or the trigger's: both moved inside it
-    // together, which is what lets one `grid-column: 2` centre the pair.
+    // The bar is the group's parent, not the trigger's, which is what lets one `grid-column: 2`
+    // centre it.
     expect(group!.parentElement).toHaveClass("adh-home__toolbar");
-    expect(group!.querySelector(".adh-home__toolbar-label")).toHaveTextContent("Workspace");
+    expect(group!.querySelector(".adh-home__toolbar-label")).toBeNull();
     expect(group!).toContainElement(screen.getByRole("button", { name: "Workspace" }));
   });
 

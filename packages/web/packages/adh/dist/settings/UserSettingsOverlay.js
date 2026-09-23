@@ -10,6 +10,7 @@ import {
   DialogTitle
 } from "@agenticdevelopertoolkit/ui/components/dialog";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
+import { useMediaQuery } from "@agenticdevelopertoolkit/ui/hooks/useMediaQuery";
 import { SettingsLayout as SettingsLayout2 } from "@agentic-toolkit/account";
 import { SettingsDirtyProvider as SettingsDirtyProvider2, useSettingsDirty } from "@agentic-toolkit/resource";
 import { ToolkitQueryProvider } from "@agentic-toolkit/data/query";
@@ -671,17 +672,27 @@ function UserSettingsDialog({
     }
     attemptExit(() => onOpenChange(false));
   }
+  const compact = useMediaQuery("(max-width: 639px)");
   return /* @__PURE__ */ jsx4(Dialog, { open, onOpenChange: handleOpenChange, children: /* @__PURE__ */ jsxs4(
     DialogContent,
     {
       className: "flex flex-col gap-0 overflow-hidden p-0",
-      style: {
+      style: compact ? {
+        width: "100vw",
+        maxWidth: "100vw",
+        height: "100dvh",
+        maxHeight: "100dvh",
+        borderRadius: 0,
+        borderWidth: 0,
+        paddingTop: "env(safe-area-inset-top)",
+        paddingBottom: "env(safe-area-inset-bottom)"
+      } : {
         width: "min(72rem, calc(100vw - 2rem))",
         maxWidth: "min(72rem, calc(100vw - 2rem))",
         // Tall enough to show all subscription plans without scrolling on a
         // typical desktop; still caps to the viewport on shorter screens.
-        height: "min(56rem, calc(100vh - 2rem))",
-        maxHeight: "calc(100vh - 2rem)"
+        height: "min(56rem, calc(100dvh - 2rem))",
+        maxHeight: "calc(100dvh - 2rem)"
       },
       children: [
         /* @__PURE__ */ jsx4(DialogTitle, { className: "shrink-0 border-b border-apt-border px-6 py-3 font-mono text-sm tracking-wide text-apt-gold", children: "User Settings" }),

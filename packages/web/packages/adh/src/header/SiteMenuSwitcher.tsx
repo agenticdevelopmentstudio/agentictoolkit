@@ -5,6 +5,9 @@ import { usePathname } from 'next/navigation'
 import { type SiteMenuChromeProps } from './SiteMenu'
 import { MarketingSiteMenu } from './MarketingSiteMenu'
 import { WorkspaceSiteMenu } from './WorkspaceSiteMenu'
+import { WorkspaceMenu } from './WorkspaceMenu'
+// The package path, like SiteMenu's: the context must be the ONE the host's provider fills.
+import { useWorkspacesMenu } from '@agentic-toolkit/adh/header'
 import { isWorkspaceMenuRoute } from './activeMenuGroups'
 import { PrefetchSiblingSites } from './PrefetchSiblingSites'
 
@@ -24,10 +27,27 @@ export type SiteMenuSwitcherProps = SiteMenuChromeProps
  * `sites` list, no menu taxonomy) that `AdhHeader`'s `siteSwitcher` slot expects.
  * The two are unrelated components that happen to share a role name; this one is
  * adh's actual switcher, injected through that slot by {@link SiteHeader}.
+ *
+ * SIGNED IN, on a host that supplies the user's workspaces (the hub, via WorkspacesMenuProvider),
+ * the fleet menu is set aside altogether and the slot holds the {@link WorkspaceMenu} instead —
+ * inside the product, switching workspace is the everyday move. A host with no provider (every
+ * satellite) keeps the site menu at every auth state: it has no workspaces to offer.
  */
 export function SiteMenuSwitcher(props: SiteMenuSwitcherProps): ReactElement {
   const pathname = usePathname() ?? '/'
   const onWorkspaceRoute = isWorkspaceMenuRoute(props.currentSiteId, pathname)
+  const workspacesMenu = useWorkspacesMenu()
+  if (props.authenticated && workspacesMenu) {
+    return (
+      <WorkspaceMenu
+        menu={workspacesMenu}
+        onSettings={props.onSettings}
+        settingsHref={props.settingsHref}
+        navLinks={props.navLinks}
+        triggerClassName={props.triggerClassName}
+      />
+    )
+  }
   return (
     <Fragment>
       {/* Prerender same-site siblings on hover so the switch is instant + flash-free
