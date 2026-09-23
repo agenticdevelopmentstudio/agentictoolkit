@@ -325,7 +325,13 @@ export interface ProductsFeatureProps {
    *  to EcosystemSettingsPane — neither this package nor the one below it owns the workspace list
    *  or the mutation. Omitted ⇒ no section, same rule as renderTransfer. */
   renderTransferOwnership?: (ecosystem: { id: string; identifier: string }) => ReactNode;
+  /** What one entry of the list is called. Omitted ⇒ Product/Products, the products site's word.
+   *  The hub passes Ecosystem/Ecosystems: there this list IS the Ecosystems feature, and the
+   *  pane must read what the rail row and the feature picker call it. */
+  labels?: { singular: string; plural: string };
 }
+
+const PRODUCT_LABELS = { singular: "Product", plural: "Products" } as const;
 
 /**
  * The Products feature. Two hosts: the hub's `/<slug>/products` route (and its /home launcher)
@@ -346,6 +352,7 @@ export function ProductsFeature({
   renderFeaturePanel,
   renderTransfer,
   renderTransferOwnership,
+  labels = PRODUCT_LABELS,
 }: ProductsFeatureProps): ReactElement {
   // Memoized because the hub's version of this switch was a module constant, and closing over
   // `workspaceSlug` is what stopped it being one — rebuilding it every render would hand
@@ -364,7 +371,7 @@ export function ProductsFeature({
       renderFeaturePanel={renderFeaturePanel}
       renderTopicPane={renderTopicPane}
       helpFor={helpFor}
-      labels={{ singular: "Product", plural: "Products" }}
+      labels={labels}
       activeTopic={activeTopic}
       activeEcoId={activeEcoId}
       activeLeafId={activeLeafId}

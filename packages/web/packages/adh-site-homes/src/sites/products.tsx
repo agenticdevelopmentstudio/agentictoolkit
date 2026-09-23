@@ -83,6 +83,7 @@ export interface ProductsHostSeams {
   renderTransfer?: ProductsFeatureProps["renderTransfer"];
   /** Transfer Ownership for the PRODUCT itself, on its settings topic. Omitted ⇒ no section. */
   renderTransferOwnership?: ProductsFeatureProps["renderTransferOwnership"];
+  labels?: ProductsFeatureProps["labels"];
 }
 
 /**
@@ -96,6 +97,7 @@ function ProductsHome({
   renderFeaturePanel: hostFeaturePanel,
   renderTransfer,
   renderTransferOwnership,
+  labels,
   ...selection
 }: { base: string; workspaceSlug: string } & ProductsHostSeams &
   EcosystemsPathSelection): ReactElement {
@@ -112,6 +114,7 @@ function ProductsHome({
       renderFeaturePanel={hostFeaturePanel ?? siteFeaturePanel}
       renderTransfer={renderTransfer}
       renderTransferOwnership={renderTransferOwnership}
+      labels={labels}
       {...selection}
     />
   );
