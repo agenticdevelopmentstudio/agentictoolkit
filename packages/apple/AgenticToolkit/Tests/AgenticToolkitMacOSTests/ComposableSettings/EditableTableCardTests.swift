@@ -145,6 +145,67 @@ struct EditableTableCardTests {
         #expect(card.rows.map(\.id) == ["r9"])
     }
 
+    // MARK: - Real editing delegate
+
+    /// `commitEdit` above is the seam a test drives directly. These exercise
+    /// the actual `NSTextFieldDelegate` callback AppKit calls when a live
+    /// field editor resigns, tag/column lookup and all.
+    @Test("ending a real field's edit reports through the delegate, not just the test seam")
+    func realFieldEditReportsThroughDelegate() throws {
+        let card = makeCard()
+        card.setRows(rows())
+        var edited: (String, String, String)?
+        card.onEdit = { edited = ($0, $1, $2) }
+
+        // swiftlint:disable:next force_try
+        let field = try! #require(
+            card.tableView.view(atColumn: 1, row: 0, makeIfNecessary: true) as? NSTextField
+        )
+        field.stringValue = "$150"
+        card.controlTextDidEndEditing(Notification(name: NSControl.textDidEndEditingNotification, object: field))
+
+        #expect(edited?.0 == "r1")
+        #expect(edited?.1 == "rate")
+        #expect(edited?.2 == "$150")
+    }
+
+    @Test("a field tagged past the last row is not committed")
+    func outOfBoundsRowTagDoesNotCommit() throws {
+        let card = makeCard()
+        card.setRows(rows())
+        var edited: (String, String, String)?
+        card.onEdit = { edited = ($0, $1, $2) }
+
+        // swiftlint:disable:next force_try
+        let field = try! #require(
+            card.tableView.view(atColumn: 1, row: 0, makeIfNecessary: true) as? NSTextField
+        )
+        field.tag = rows().count
+        field.stringValue = "$999"
+        card.controlTextDidEndEditing(Notification(name: NSControl.textDidEndEditingNotification, object: field))
+
+        #expect(edited == nil, "a row index off the end of the data must never reach onEdit")
+    }
+
+    @Test("a field the table doesn't know about is not committed")
+    func fieldNotInTableDoesNotCommit() {
+        let card = makeCard()
+        card.setRows(rows())
+        var edited: (String, String, String)?
+        card.onEdit = { edited = ($0, $1, $2) }
+
+        // A standalone field, never handed out by the table: `column(for:)`
+        // answers -1 for it, the same as a field whose row view was detached
+        // by a reload landing between the field editor's begin and end.
+        let orphanField = NSTextField(string: "$1")
+        orphanField.tag = 0
+        card.controlTextDidEndEditing(
+            Notification(name: NSControl.textDidEndEditingNotification, object: orphanField)
+        )
+
+        #expect(edited == nil, "a field the table can't place a column for must never reach onEdit")
+    }
+
     // MARK: - Footer
 
     @Test("add is always live; remove follows the selection")
