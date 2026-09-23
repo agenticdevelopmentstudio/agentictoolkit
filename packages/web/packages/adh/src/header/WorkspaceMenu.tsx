@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, type ReactElement } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Settings } from 'lucide-react'
+import { ChevronDown, Settings } from 'lucide-react'
 import { confirmNavigation } from '@agenticdevelopertoolkit/ui/lib/navigation-guard'
 import {
   HubMark,
@@ -120,8 +120,24 @@ export function WorkspaceMenu({
       openShortcut={{ keys: siteMenuShortcut, label: 'Workspace menu' }}
       onChoose={navigate}
       triggerLabel={`${label} — switch workspace`}
-      triggerText={label}
-      triggerIcon={<HubMark className="adh-nav-popover__mark" />}
+      // A lockup rather than icon + text: the mark at twice the site menu's size spans two
+      // lines, and a small "Workspace:" caption takes the line above the name, so the name
+      // says WHAT it is without growing the bar. The caption is aria-hidden because the
+      // trigger's label already says "switch workspace".
+      triggerContent={
+        <>
+          <HubMark className="adh-nav-popover__mark adh-workspace-trigger__mark" />
+          <span className="adh-workspace-trigger__text">
+            <span className="adh-workspace-trigger__caption" aria-hidden>
+              Workspace:
+            </span>
+            <span className="adh-workspace-trigger__name">
+              <span className="adh-workspace-trigger__label">{label}</span>
+              <ChevronDown className="adh-nav-popover__chevron" aria-hidden />
+            </span>
+          </span>
+        </>
+      }
       triggerClassName={triggerClassName}
       placeholder="Search workspaces"
       emptyLabel="No matching workspaces"

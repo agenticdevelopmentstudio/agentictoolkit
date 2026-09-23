@@ -1194,7 +1194,7 @@ function hasProfileRoute(siteId) {
 }
 
 // src/header/SiteMenuSwitcher.tsx
-import { Fragment as Fragment5 } from "react";
+import { Fragment as Fragment6 } from "react";
 import { usePathname as usePathname6 } from "next/navigation";
 
 // src/header/SiteMenu.tsx
@@ -2089,7 +2089,7 @@ function WorkspaceSiteMenu(props) {
 // src/header/WorkspaceMenu.tsx
 import { useCallback as useCallback4, useMemo as useMemo4 } from "react";
 import { usePathname as usePathname5, useRouter as useRouter3 } from "next/navigation";
-import { Settings as Settings4 } from "lucide-react";
+import { ChevronDown as ChevronDown4, Settings as Settings4 } from "lucide-react";
 import { confirmNavigation as confirmNavigation3 } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
 import {
   HubMark as HubMark3,
@@ -2097,7 +2097,7 @@ import {
 } from "@agentic-toolkit/adh/header";
 import { useHubPreferences as useHubPreferences2 } from "@agentic-toolkit/adh/header/hub-preferences";
 import { useHelp as useHelp2 } from "@agentic-toolkit/adh/help";
-import { jsx as jsx17 } from "react/jsx-runtime";
+import { Fragment as Fragment5, jsx as jsx17, jsxs as jsxs10 } from "react/jsx-runtime";
 var WORKSPACES_SECTION = 0;
 var SECTION_LABELS = { [WORKSPACES_SECTION]: "Workspaces" };
 function WorkspaceMenu({
@@ -2163,8 +2163,16 @@ function WorkspaceMenu({
       openShortcut: { keys: siteMenuShortcut, label: "Workspace menu" },
       onChoose: navigate,
       triggerLabel: `${label} \u2014 switch workspace`,
-      triggerText: label,
-      triggerIcon: /* @__PURE__ */ jsx17(HubMark3, { className: "adh-nav-popover__mark" }),
+      triggerContent: /* @__PURE__ */ jsxs10(Fragment5, { children: [
+        /* @__PURE__ */ jsx17(HubMark3, { className: "adh-nav-popover__mark adh-workspace-trigger__mark" }),
+        /* @__PURE__ */ jsxs10("span", { className: "adh-workspace-trigger__text", children: [
+          /* @__PURE__ */ jsx17("span", { className: "adh-workspace-trigger__caption", "aria-hidden": true, children: "Workspace:" }),
+          /* @__PURE__ */ jsxs10("span", { className: "adh-workspace-trigger__name", children: [
+            /* @__PURE__ */ jsx17("span", { className: "adh-workspace-trigger__label", children: label }),
+            /* @__PURE__ */ jsx17(ChevronDown4, { className: "adh-nav-popover__chevron", "aria-hidden": true })
+          ] })
+        ] })
+      ] }),
       triggerClassName,
       placeholder: "Search workspaces",
       emptyLabel: "No matching workspaces",
@@ -2224,7 +2232,7 @@ function PrefetchSiblingSites() {
 }
 
 // src/header/SiteMenuSwitcher.tsx
-import { jsx as jsx18, jsxs as jsxs10 } from "react/jsx-runtime";
+import { jsx as jsx18, jsxs as jsxs11 } from "react/jsx-runtime";
 function SiteMenuSwitcher(props) {
   const pathname = usePathname6() ?? "/";
   const onWorkspaceRoute = isWorkspaceMenuRoute(props.currentSiteId, pathname);
@@ -2241,7 +2249,7 @@ function SiteMenuSwitcher(props) {
       }
     );
   }
-  return /* @__PURE__ */ jsxs10(Fragment5, { children: [
+  return /* @__PURE__ */ jsxs11(Fragment6, { children: [
     /* @__PURE__ */ jsx18(PrefetchSiblingSites, {}),
     onWorkspaceRoute ? /* @__PURE__ */ jsx18(WorkspaceSiteMenu, { ...props }) : /* @__PURE__ */ jsx18(MarketingSiteMenu, { ...props })
   ] });
@@ -2407,7 +2415,7 @@ function useDebugOptions(userIsAdmin) {
 
 // src/header/SiteHeader.tsx
 import { SITE_TITLE_HELP_ID } from "@agentic-toolkit/adh-ui/help-ids";
-import { Fragment as Fragment6, jsx as jsx20, jsxs as jsxs11 } from "react/jsx-runtime";
+import { Fragment as Fragment7, jsx as jsx20, jsxs as jsxs12 } from "react/jsx-runtime";
 var NotificationBell = dynamic2(
   () => import("@agentic-toolkit/messaging/components/notification-bell").then((m) => m.NotificationBell)
 );
@@ -2460,7 +2468,7 @@ function SiteHeader({
   const resolvedLoginHref = loginHref ?? (onLogin ? void 0 : hubAuthHref("/login"));
   const resolvedSignupHref = signupHref ?? (onSignup ? void 0 : hubAuthHref("/signup"));
   const switcherSettingsHref = resolvedOnSettings ? void 0 : settingsHref ?? resolveHubHref("/settings");
-  return /* @__PURE__ */ jsxs11(Fragment6, { children: [
+  return /* @__PURE__ */ jsxs12(Fragment7, { children: [
     /* @__PURE__ */ jsx20(
       AdhHeader2,
       {
@@ -2522,7 +2530,7 @@ import {
   NavigationPopover as NavigationPopover4,
   useClientHost as useClientHost5
 } from "@agentic-toolkit/adh/header";
-import { Fragment as Fragment7, jsx as jsx21, jsxs as jsxs12 } from "react/jsx-runtime";
+import { Fragment as Fragment8, jsx as jsx21, jsxs as jsxs13 } from "react/jsx-runtime";
 var DebugConsoleWindow2 = dynamic3(
   () => import("@agentic-toolkit/adh/debug-console").then((m) => m.DebugConsoleWindow)
 );
@@ -2581,7 +2589,7 @@ function DevToolsMenuPopover({
     () => [...entries, ...devToolsSection],
     [entries, devToolsSection]
   );
-  return /* @__PURE__ */ jsxs12(Fragment7, { children: [
+  return /* @__PURE__ */ jsxs13(Fragment8, { children: [
     /* @__PURE__ */ jsx21(
       NavigationPopover4,
       {

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import type { PopoverEntry, PopoverItem } from '@agentic-toolkit/adh/header'
 
 // The signed-in header's switcher. What it owes is data-shaped — which rows, which one is current,
@@ -33,7 +34,8 @@ const WORKSPACES: MenuWorkspace[] = [
 
 function props(): {
   entries: PopoverEntry[]
-  triggerText: string
+  triggerContent: ReactNode
+  triggerLabel: string
   onChoose: (item: PopoverItem) => void
 } {
   if (!seen.current) throw new Error('NavigationPopover never rendered')
@@ -54,9 +56,18 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('WorkspaceMenu', () => {
-  it('reads as the workspace you are in — no separate "Workspace" label', () => {
+  it('reads as the workspace you are in, captioned "Workspace:" inside the trigger itself', () => {
     render(<WorkspaceMenu menu={{ workspaces: WORKSPACES, loading: false }} />)
-    expect(props().triggerText).toBe('Mike Fullerton')
+    const trigger = render(<>{props().triggerContent}</>).container
+    expect(trigger.querySelector('.adh-workspace-trigger__label')?.textContent).toBe(
+      'Mike Fullerton',
+    )
+    // Above the name, in the trigger (so it is part of the click target) — and hidden from
+    // assistive tech, whose label already says "switch workspace".
+    const caption = trigger.querySelector('.adh-workspace-trigger__caption')
+    expect(caption?.textContent).toBe('Workspace:')
+    expect(caption).toHaveAttribute('aria-hidden')
+    expect(props().triggerLabel).toBe('Mike Fullerton — switch workspace')
   })
 
   it('lists every workspace, marking the current one', () => {
@@ -81,7 +92,7 @@ describe('WorkspaceMenu', () => {
 
   it('says it is loading rather than claiming there are no workspaces', () => {
     render(<WorkspaceMenu menu={{ workspaces: [], loading: true }} />)
-    expect(props().triggerText).toBe('Loading…')
+    expect(props().triggerLabel).toBe('Loading… — switch workspace')
     expect(workspaceItems().map((i) => i.label)).toEqual(['Loading…'])
   })
 

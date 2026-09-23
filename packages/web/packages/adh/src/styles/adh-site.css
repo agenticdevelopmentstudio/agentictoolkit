@@ -477,6 +477,53 @@
   flex-shrink: 0;
 }
 
+/* The signed-in workspace trigger (WorkspaceMenu): the mark at twice the size above,
+   beside a two-line stack — a small "Workspace:" caption over the name + caret. The
+   stack is what makes room for the caption: the name drops a line instead of the bar
+   growing, and at 2.4em the mark is still well inside the 3.5rem bar. */
+.adh-nav-popover__mark.adh-workspace-trigger__mark {
+  height: 2.4em;
+  width: 2.4em;
+}
+
+.adh-workspace-trigger__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+/* Upright UI type, not the title's italic serif: a caption names the control, it is not
+   part of the name. Dim, so the workspace name stays the loudest thing in the lead. */
+.adh-workspace-trigger__caption {
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-style: normal;
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  color: var(--color-text-dim);
+}
+
+.adh-workspace-trigger__name {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Ellipsis at the innermost box: on a phone the lead shrinks (see .adh-header__lead's
+   narrow rule), and a long workspace name must clip, never push the caret off. */
+.adh-workspace-trigger__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adh-workspace-trigger__name > .adh-nav-popover__chevron {
+  flex-shrink: 0;
+}
+
 .adh-nav-popover__item--current {
   color: var(--color-accent);
   font-weight: 600;
