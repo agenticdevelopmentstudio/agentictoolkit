@@ -199,6 +199,10 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
 
   // ── Can-save guard ─────────────────────────────────────────────────────────
   const slugFieldChanged = "slug" in edits;
+  // Shown only once the user edits the field — the same gate Save uses. A backend-minted handle
+  // that fails today's rule otherwise sat under the field in red, blaming the user for a value
+  // they never typed and could leave alone.
+  const shownSlugError = slugFieldChanged ? clientSlugError : null;
   const slugClearToSave =
     !slugFieldChanged ||
     (!clientSlugError &&
@@ -406,15 +410,15 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
                       setSaveError(null);
                     }}
                     placeholder={suggestedSlug || "your-handle"}
-                    aria-invalid={Boolean(clientSlugError)}
+                    aria-invalid={Boolean(shownSlugError)}
                     aria-describedby="profile-slug-hint"
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
                   />
                   <p id="profile-slug-hint" className="text-xs">
-                    {clientSlugError ? (
-                      <span className="text-apt-red">{clientSlugError}</span>
+                    {shownSlugError ? (
+                      <span className="text-apt-red">{shownSlugError}</span>
                     ) : slugStatus === "checking" ? (
                       <span className="text-apt-text-muted">Checking…</span>
                     ) : slugStatus === "available" ? (

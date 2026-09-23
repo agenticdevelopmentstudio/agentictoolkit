@@ -49,7 +49,9 @@ export interface GameChildPaneConfig<TRow, TInput> {
   toInput: (row: TRow) => TInput;
   normalize: (input: TInput) => TInput;
   differs: (a: TInput, b: TInput) => boolean;
-  validate: (draft: TInput, others: TRow[]) => string | null;
+  /** `base` is the selected row's stored input (null while creating) — the hook passes it so a
+   *  rule can exempt a value the record already holds; see useMasterDetailForm's `validate`. */
+  validate: (draft: TInput, others: TRow[], base: TInput | null) => string | null;
   renderFields: (
     draft: TInput,
     onChange: (next: TInput) => void,
@@ -225,7 +227,7 @@ export function GameChildPane<TRow, TInput>({
           ariaLabel={`New ${config.itemNoun}`}
           heading={`New ${config.itemNoun}`}
           blank={config.blank}
-          validate={(d) => config.validate(config.normalize(d), ordered)}
+          validate={(d) => config.validate(config.normalize(d), ordered, null)}
           create={(d) => {
             // A refusal the operator caused, so it carries a 4xx — see `clientRefusal`. The
             // rail cannot open this dialog without a game, so this is the unreachable guard.

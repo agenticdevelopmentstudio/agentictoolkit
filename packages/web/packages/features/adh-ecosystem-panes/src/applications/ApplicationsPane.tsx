@@ -28,12 +28,29 @@ import {
 } from "./ApplicationDetail";
 import type { RenderTransferSection } from "../transfer-seam";
 
-function appDiffers(a: ApplicationInput, b: ApplicationInput): boolean {
+/** JSON with every object's keys sorted, so two equal values always serialise identically. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)))
+      : v,
+  );
+}
+
+/** The grant set in a form that ignores order. Plain `JSON.stringify` was key-order sensitive:
+ *  a `tables` map loaded from the server and the same map rebuilt by an edit-and-undo serialised
+ *  differently, so Save lit up with nothing changed. Grants are one per schema, so `schemaId`
+ *  orders the list. */
+function grantsKey(grants: ApplicationInput["schemaGrants"]): string {
+  return canonicalJson([...grants].sort((x, y) => x.schemaId.localeCompare(y.schemaId)));
+}
+
+export function appDiffers(a: ApplicationInput, b: ApplicationInput): boolean {
   return (
     a.identifier.trim() !== b.identifier.trim() ||
     a.name.trim() !== b.name.trim() ||
     a.kind !== b.kind ||
-    JSON.stringify(a.schemaGrants) !== JSON.stringify(b.schemaGrants)
+    grantsKey(a.schemaGrants) !== grantsKey(b.schemaGrants)
   );
 }
 

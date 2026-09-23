@@ -337,7 +337,8 @@ export function IterationsPane({
     urlSelection: { selectedId: leaf.leafId, onSelect: leaf.onSelect },
     blank: iterationBlank,
     toInput: iterationToInput,
-    validate: (draft, others) => iterationValidate(draft, others.map((o) => o.name)),
+    validate: (draft, others, base) =>
+      iterationValidate(draft, others.map((o) => o.name), base?.name),
     differs: iterationDiffers,
     normalize: iterationNormalize,
     create: (input) => projectIterationsApi.create(input, ws),

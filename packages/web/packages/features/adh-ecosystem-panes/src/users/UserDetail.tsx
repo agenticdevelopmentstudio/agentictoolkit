@@ -23,12 +23,19 @@ export function userToInput(u: EcosystemUser): EcosystemUserInput {
   };
 }
 
-/** Returns an error message, or null when the draft is valid. */
+/** Returns an error message, or null when the draft is valid.
+ *
+ *  `storedEmail` is the address the record was loaded with. An unchanged email is never refused:
+ *  `POST /customer/resolve` creates users from an SSO/BYO `externalId` alone, with a NULL email
+ *  (read back as ""), and without this exemption every such user's Save stayed disabled for any
+ *  edit at all — renaming them included. A user who TYPES a new address still gets it checked. */
 export function userValidate(
   draft: EcosystemUserInput,
   takenEmails: string[] = [],
+  storedEmail?: string,
 ): string | null {
   const email = draft.email.trim();
+  if (storedEmail !== undefined && email === storedEmail.trim()) return null;
   if (!email) return "Email is required.";
   if (!EMAIL_RE.test(email)) return "Enter a valid email address.";
   if (takenEmails.some((e) => e.toLowerCase() === email.toLowerCase()))

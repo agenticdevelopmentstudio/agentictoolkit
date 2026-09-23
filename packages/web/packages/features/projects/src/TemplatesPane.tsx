@@ -99,10 +99,11 @@ export function TemplatesPane({
     urlSelection: { selectedId: leaf.leafId, onSelect: leaf.onSelect },
     blank: templateBlank,
     toInput: templateToInput,
-    validate: (draft, others) =>
+    validate: (draft, others, base) =>
       templateValidate(
         draft,
         others.map((o) => ({ name: o.name, kind: o.kind })),
+        base?.name,
       ),
     differs: templateDiffers,
     normalize: templateNormalize,

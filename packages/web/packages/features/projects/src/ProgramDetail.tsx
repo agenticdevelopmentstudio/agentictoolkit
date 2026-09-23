@@ -90,10 +90,17 @@ export function programDiffers(a: ProgramDraft, b: ProgramDraft): boolean {
  * on purpose — `YYYY-MM-DD` sorts lexicographically exactly as it sorts chronologically, so this
  * needs no parsing and, more to the point, no timezone.
  */
-export function programValidate(draft: ProgramDraft, takenNames: string[]): string | null {
+// A record that keeps the name it was stored with is never refused for it: the client folds case,
+// but the backend's unique index is on the raw column, so "Sprint 12" and "sprint 12" can both
+// exist — and each would otherwise block Save on every unrelated edit, forever.
+export function programValidate(
+  draft: ProgramDraft,
+  takenNames: string[],
+  storedName?: string,
+): string | null {
   const { name, color, startDate, targetDate } = programNormalize(draft);
   if (!name) return "Name is required.";
-  if (takenNames.some((n) => n.trim().toLowerCase() === name.toLowerCase())) {
+  if (name !== storedName?.trim() && takenNames.some((n) => n.trim().toLowerCase() === name.toLowerCase())) {
     return `A program named "${name}" already exists in this workspace.`;
   }
   if (!color) return "Color is required.";

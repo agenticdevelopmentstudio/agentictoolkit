@@ -171,7 +171,8 @@ export function ProgramsPane({
     urlSelection: { selectedId: leaf.leafId, onSelect: leaf.onSelect },
     blank: programBlank,
     toInput: programToInput,
-    validate: (draft, others) => programValidate(draft, others.map((o) => o.name)),
+    validate: (draft, others, base) =>
+      programValidate(draft, others.map((o) => o.name), base?.name),
     differs: programDiffers,
     normalize: programNormalize,
     create: (input) => projectProgramsApi.create(programToPatch(input), ws),

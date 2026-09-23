@@ -274,13 +274,18 @@ function cardProblem(c: TemplateCardDraft, where: string): string | null {
  * a column's key must be unique within the board it describes because the key IS how a card names
  * its column.
  */
+// A record that keeps the name it was stored with is never refused for it: the client folds case,
+// but the backend's unique index is on the raw column, so "Sprint 12" and "sprint 12" can both
+// exist — and each would otherwise block Save on every unrelated edit, forever.
 export function templateValidate(
   draft: TemplateDraft,
   taken: { name: string; kind: TemplateKind }[],
+  storedName?: string,
 ): string | null {
   const d = templateNormalize(draft);
   if (!d.name) return "Name is required.";
   if (
+    d.name !== storedName?.trim() &&
     taken.some(
       (t) => t.kind === d.kind && t.name.trim().toLowerCase() === d.name.toLowerCase(),
     )

@@ -256,7 +256,8 @@ export function MilestonesPane({
     urlSelection: { selectedId: leaf.leafId, onSelect: leaf.onSelect },
     blank: milestoneBlank,
     toInput: milestoneToInput,
-    validate: (draft, others) => milestoneValidate(draft, others.map((o) => o.name)),
+    validate: (draft, others, base) =>
+      milestoneValidate(draft, others.map((o) => o.name), base?.name),
     differs: milestoneDiffers,
     normalize: milestoneNormalize,
     create: (input) => projectMilestonesApi.create(projectId, milestoneToPatch(input)),

@@ -41,7 +41,9 @@ export interface InlineChildListConfig<TRow, TInput> {
   toInput: (row: TRow) => TInput;
   normalize: (input: TInput) => TInput;
   differs: (a: TInput, b: TInput) => boolean;
-  validate: (draft: TInput, others: TRow[]) => string | null;
+  /** `base` is the selected row's stored input (null while creating) — the hook passes it so a
+   *  rule can exempt a value the record already holds; see useMasterDetailForm's `validate`. */
+  validate: (draft: TInput, others: TRow[], base: TInput | null) => string | null;
   renderFields: (
     draft: TInput,
     onChange: (next: TInput) => void,

@@ -78,7 +78,8 @@ export function UsersPane({
     urlSelection,
     blank: userBlank,
     toInput: userToInput,
-    validate: (draft, others) => userValidate(draft, others.map((o) => o.email)),
+    validate: (draft, others, base) =>
+      userValidate(draft, others.map((o) => o.email), base?.email),
     differs: userDiffers,
     normalize: userNormalize,
     create: (input) => ecosystemUsersApi.create(input, ecosystemId ?? ""),
