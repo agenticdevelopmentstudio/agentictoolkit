@@ -46,19 +46,6 @@ vi.mock('../header/SiteMenuSwitcher', () => ({
   },
 }))
 
-// The dev-tools dropdown, probed the same way and for the same reason: its rows are
-// covered by header/__tests__/{debugSiteGroups,devToolsEntries}.test, and its own
-// unlock by devToolsMenu.test. What this file owns is that `routes` and `userIsAdmin`
-// reach THIS component and not the switcher above — that separation is the whole point
-// of the second menu, and it is invisible in the rendered bar.
-const devToolsProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }))
-vi.mock('../header/DevToolsMenu', () => ({
-  DevToolsMenu: (props: Record<string, unknown>) => {
-    devToolsProps.current = props
-    return <div data-testid="adh-dev-tools-menu" />
-  },
-}))
-
 // The avatar menu, stubbed to keep this file's subject in view: `AvatarMenu` is the only
 // thing the header renders when `user != null`, and a signed-in render is exactly what
 // the auth source's assertions below need — its whole job is producing `user`. Stubbing
@@ -244,20 +231,22 @@ describe('SiteHeader auth source injection', () => {
       expect(opts).toEqual({ clientId: 'demo', siteId: 'hub', onAfterLogout })
     }
     // ...and everything it returned crossed into the bar: `user` to the toolkit header,
-    // the derived signed-in flag on to adh's own switcher, and `userIsAdmin` to BOTH
-    // menus. Both menus are stubbed above, so what is observable here is the value
-    // each was handed — the avatar stub prints the name — not the bar's printed copy,
+    // the derived signed-in flag on to adh's own switcher, and `userIsAdmin` both to the
+    // switcher and to the avatar menu's Debug Options door. Both menus are stubbed above,
+    // so what is observable here is the value each was handed — the avatar stub prints the name — not the bar's printed copy,
     // which is now the avatar alone (pinned in the toolkit's own
     // header-contract.test.tsx).
     expect(screen.getByTestId('adh-avatar-menu').textContent).toBe('Ada')
     expect(headerProps.current?.user).toEqual({ name: 'Ada' })
     expect(switcherProps.current?.authenticated).toBe(true)
-    expect(devToolsProps.current?.userIsAdmin).toBe(true)
+    // An admin is offered Debug Options in every env — as the avatar menu's last row, not
+    // a bug-glyph dropdown in the bar, which the header no longer mounts at all.
+    expect(typeof headerProps.current?.onDebugOptions).toBe('function')
+    expect(headerProps.current?.debugMenu).toBeUndefined()
     // The site menu gets it too — it is what adds the admin consoles section. What
-    // must NOT reach it is `routes`, the dev-tools list: that is a fact about the
-    // BUILD, and the constraint the second menu exists for is that the site menu
-    // renders the same rows in a dev build and a shipped one. Who is signed in is a
-    // different question, and it is allowed to change the menu.
+    // must NOT reach it is `routes`, the old dev-tools list: that is a fact about the
+    // BUILD, and the site menu renders the same rows in a dev build and a shipped one.
+    // Who is signed in is a different question, and it is allowed to change the menu.
     expect(switcherProps.current?.userIsAdmin).toBe(true)
     expect(switcherProps.current).not.toHaveProperty('routes')
   })

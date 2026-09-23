@@ -7,7 +7,7 @@ import "react";
 
 // src/header/AvatarMenu.tsx
 import Link from "next/link";
-import { ChevronDown, Home, LogOut, Settings, User as UserIcon } from "lucide-react";
+import { ChevronDown, Home, LogOut, Settings, User as UserIcon, Wrench } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@agenticdevelopertoolkit/ui/components/avatar";
 import {
   DropdownMenu,
@@ -84,7 +84,9 @@ function AvatarMenu({
   profileHref,
   onLogout,
   settingsHref,
-  onSettings
+  onSettings,
+  onDebugOptions,
+  debugOptionsHint: debugOptionsHint2
 }) {
   const avatarInner = /* @__PURE__ */ jsxs(Avatar, { className: "adh-avatar-menu-trigger__avatar", children: [
     user.imageUrl && /* @__PURE__ */ jsx(AvatarImage, { src: user.imageUrl, alt: user.name }),
@@ -152,6 +154,14 @@ function AvatarMenu({
             ]
           }
         )
+      ] }),
+      onDebugOptions && /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(DropdownMenuSeparator, {}),
+        /* @__PURE__ */ jsxs(DropdownMenuItem, { onClick: onDebugOptions, className: "adh-avatar-menu__item", children: [
+          /* @__PURE__ */ jsx(Wrench, { className: "adh-avatar-menu__item-icon" }),
+          /* @__PURE__ */ jsx("span", { className: "adh-avatar-menu__item-label", children: "Debug Options" }),
+          debugOptionsHint2 && /* @__PURE__ */ jsx("span", { className: "adh-avatar-menu__item-hint", children: debugOptionsHint2 })
+        ] })
       ] })
     ] })
   ] });
@@ -983,6 +993,8 @@ function AdhHeader({
   accountActions,
   homeHref,
   profileHref,
+  onDebugOptions,
+  debugOptionsHint: debugOptionsHint2,
   previewNotice,
   previewDetail,
   user,
@@ -1062,7 +1074,9 @@ function AdhHeader({
             profileHref,
             onLogout,
             settingsHref,
-            onSettings
+            onSettings,
+            onDebugOptions,
+            debugOptionsHint: debugOptionsHint2
           }
         ) : /* @__PURE__ */ jsx9(
           AuthButtons,
@@ -1156,7 +1170,7 @@ function useWorkspacesMenu() {
 // src/header/SiteHeader.tsx
 import "react";
 import dynamic2 from "next/dynamic";
-import { usePathname as usePathname8 } from "next/navigation";
+import { usePathname as usePathname7 } from "next/navigation";
 import {
   AdhHeader as AdhHeader2,
   useClientHost as useClientHost4
@@ -1292,7 +1306,7 @@ import {
   UserPlus,
   Users,
   UsersRound,
-  Wrench
+  Wrench as Wrench2
 } from "lucide-react";
 import { SITE_FOR_HUB_SEGMENT } from "@agentic-toolkit/adh-registry";
 var ICONS = {
@@ -1304,7 +1318,7 @@ var ICONS = {
   // the community site; the hub has no communities feature to match
   personaregistry: UserCircle,
   // matches FEATURE_META `personas`
-  toolkit: Wrench,
+  toolkit: Wrench2,
   // matches the myagenticteams landing's toolkit glyph
   cookbook: ChefHat,
   // recipes/cookbook
@@ -2224,15 +2238,17 @@ function SiteMenuSwitcher(props) {
   ] });
 }
 
-// src/header/DevToolsMenu.tsx
-import { useEffect as useEffect6, useMemo as useMemo5, useState as useState4 } from "react";
-import { usePathname as usePathname7 } from "next/navigation";
+// src/header/useDebugOptions.tsx
+import { useState as useState4 } from "react";
 import dynamic from "next/dynamic";
-import { Bug as Bug2 } from "lucide-react";
 import { detectEnv as detectEnv4 } from "@agentic-toolkit/adh-registry";
+import { useClientHost as useClientHost3 } from "@agentic-toolkit/adh/header";
+
+// src/header/devToolsEntries.ts
+import { DEV_BUILD, isDevDeploymentEnv } from "@agentic-toolkit/adh-registry/deployment-env";
+import "@agentic-toolkit/adh-registry";
 import {
-  NavigationPopover as NavigationPopover4,
-  useClientHost as useClientHost3
+  buildRouteItems as buildRouteItems2
 } from "@agentic-toolkit/adh/header";
 
 // src/header/debugSiteGroups.ts
@@ -2256,14 +2272,18 @@ function buildDebugSiteGroups() {
 }
 
 // src/header/devToolsEntries.ts
-import { DEV_BUILD, isDevDeploymentEnv } from "@agentic-toolkit/adh-registry/deployment-env";
-import "@agentic-toolkit/adh-registry";
-import {
-  buildRouteItems as buildRouteItems2
-} from "@agentic-toolkit/adh/header";
 var DEV_TOOLS_BUILD_ENABLED = DEV_BUILD;
 function isDevEnv(env) {
   return isDevDeploymentEnv(env);
+}
+function debugOptionsAvailable({
+  realEnv,
+  adminUnlocked
+}) {
+  return adminUnlocked || isDevEnv(realEnv);
+}
+function debugOptionsHint(override) {
+  return override === "production" ? "Sim: prod" : void 0;
 }
 function buildDevToolsEntries({
   routes,
@@ -2284,7 +2304,7 @@ function buildDevToolsEntries({
       items: buildRouteItems2(routes, pathname)
     });
   }
-  if (adminUnlocked || isDevEnv(realEnv)) {
+  if (debugOptionsAvailable({ realEnv, adminUnlocked })) {
     out.push({
       kind: "leaf",
       section: DEBUG_SECTION,
@@ -2294,10 +2314,7 @@ function buildDevToolsEntries({
       item: {
         key: "debug-options",
         label: "Debug Options",
-        // Carries the old header pill's "Sim: prod" state, so it stays obvious the
-        // site is being viewed AS production rather than for real. Kept OUT of the
-        // label so the row's accessible name is stably "Debug Options".
-        description: override === "production" ? "Sim: prod" : void 0,
+        description: debugOptionsHint(override),
         icon: menuIcon("debug"),
         onSelect: onOpenDebug
       }
@@ -2360,86 +2377,28 @@ function useEffectiveEnv(hostname) {
   return resolveEffectiveEnv(override, hostname ? detectEnv3(hostname) : null);
 }
 
-// src/header/DevToolsMenu.tsx
-import { Fragment as Fragment6, jsx as jsx19, jsxs as jsxs11 } from "react/jsx-runtime";
+// src/header/useDebugOptions.tsx
+import { jsx as jsx19 } from "react/jsx-runtime";
 var DebugConsoleWindow = dynamic(
   () => import("@agentic-toolkit/adh/debug-console").then((m) => m.DebugConsoleWindow)
 );
-function DevToolsMenu({ userIsAdmin, ...rest }) {
-  const unlocked = DEV_TOOLS_BUILD_ENABLED || userIsAdmin === true;
-  if (!unlocked) return null;
-  return /* @__PURE__ */ jsx19(DevToolsMenuPopover, { ...rest, adminUnlocked: userIsAdmin === true });
-}
-function DevToolsMenuPopover({
-  currentSiteId,
-  resolveHref,
-  personalSlug,
-  routes,
-  adminUnlocked
-}) {
-  const pathname = usePathname7() ?? "/";
-  const groups = useMemo5(() => buildDebugSiteGroups(), []);
-  const { entries, navigate } = useSiteMenu(groups, { currentSiteId, resolveHref, personalSlug });
-  const [generated, setGenerated] = useState4();
-  const wantGeneratedRoutes = !(routes && routes.length > 0);
-  useEffect6(() => {
-    if (!wantGeneratedRoutes) return;
-    let cancelled = false;
-    void import("@agentic-toolkit/adh-registry/routes").then(({ SITE_ROUTES: SITE_ROUTES2 }) => {
-      if (cancelled) return;
-      const paths = SITE_ROUTES2[currentSiteId];
-      setGenerated({
-        siteId: currentSiteId,
-        sections: paths?.length ? [{ label: "Site", routes: paths.map((path) => ({ path })) }] : []
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [wantGeneratedRoutes, currentSiteId]);
-  const generatedRoutes = generated && generated.siteId === currentSiteId ? generated.sections : void 0;
-  const effectiveRoutes = routes && routes.length > 0 ? routes : generatedRoutes;
+function useDebugOptions(userIsAdmin) {
   const host = useClientHost3();
-  const effectiveEnv = useEffectiveEnv(host);
   const realEnv = host ? detectEnv4(host) : null;
   const override = useEnvOverride();
-  const [debugOpen, setDebugOpen] = useState4(false);
-  const devToolsSection = useMemo5(
-    () => buildDevToolsEntries({
-      routes: effectiveRoutes,
-      effectiveEnv,
-      realEnv,
-      adminUnlocked,
-      override,
-      pathname,
-      onOpenDebug: () => setDebugOpen(true)
-    }),
-    [effectiveRoutes, effectiveEnv, realEnv, adminUnlocked, override, pathname]
-  );
-  const allEntries = useMemo5(
-    () => [...entries, ...devToolsSection],
-    [entries, devToolsSection]
-  );
-  return /* @__PURE__ */ jsxs11(Fragment6, { children: [
-    /* @__PURE__ */ jsx19(
-      NavigationPopover4,
-      {
-        entries: allEntries,
-        onChoose: navigate,
-        triggerLabel: "Debug tools",
-        triggerContent: /* @__PURE__ */ jsx19(Bug2, { className: "adh-nav-popover__mark", "aria-hidden": true }),
-        triggerClassName: "adh-nav-popover__trigger--icon",
-        placeholder: "Search sites, routes and tools",
-        emptyLabel: "No matching dev tools"
-      }
-    ),
-    debugOpen && /* @__PURE__ */ jsx19(DebugConsoleWindow, { open: true, onClose: () => setDebugOpen(false) })
-  ] });
+  const [open, setOpen] = useState4(false);
+  const adminUnlocked = userIsAdmin === true;
+  const offered = (DEV_TOOLS_BUILD_ENABLED || adminUnlocked) && debugOptionsAvailable({ realEnv, adminUnlocked });
+  return {
+    onOpen: offered ? () => setOpen(true) : void 0,
+    hint: offered ? debugOptionsHint(override) : void 0,
+    window: open ? /* @__PURE__ */ jsx19(DebugConsoleWindow, { open: true, onClose: () => setOpen(false) }) : null
+  };
 }
 
 // src/header/SiteHeader.tsx
 import { SITE_TITLE_HELP_ID } from "@agentic-toolkit/adh-ui/help-ids";
-import { jsx as jsx20 } from "react/jsx-runtime";
+import { Fragment as Fragment6, jsx as jsx20, jsxs as jsxs11 } from "react/jsx-runtime";
 var NotificationBell = dynamic2(
   () => import("@agentic-toolkit/messaging/components/notification-bell").then((m) => m.NotificationBell)
 );
@@ -2453,7 +2412,8 @@ function SiteHeader({
   trailingNavLinks = [],
   previewNotice,
   previewDetail,
-  routes,
+  // Destructured only to keep it out of `authOverrides`; see its @deprecated note.
+  routes: _routes,
   personalSlug,
   hubOffersFeature,
   clientId,
@@ -2477,10 +2437,11 @@ function SiteHeader({
   } = { ...source, ...authOverrides };
   const overlay = useSettingsOverlay();
   const resolvedOnSettings = onSettings ?? (user != null ? overlay?.openSettings : void 0);
+  const debugOptions = useDebugOptions(userIsAdmin);
   const resolvedNavLinks = (typeof navLinks === "function" ? navLinks(user != null) : navLinks) ?? [];
   const hostname = useClientHost4();
   const conceptSite = isConceptSite(siteId);
-  const onLandingPage = usePathname8() === "/";
+  const onLandingPage = usePathname7() === "/";
   const site = getSite3(siteId);
   const siteName = site ? siteHeaderTitle2(site) : siteId;
   const siteShortName = site?.label ?? siteId;
@@ -2490,61 +2451,142 @@ function SiteHeader({
   const resolvedLoginHref = loginHref ?? (onLogin ? void 0 : hubAuthHref("/login"));
   const resolvedSignupHref = signupHref ?? (onSignup ? void 0 : hubAuthHref("/signup"));
   const switcherSettingsHref = resolvedOnSettings ? void 0 : settingsHref ?? resolveHubHref("/settings");
-  return /* @__PURE__ */ jsx20(
-    AdhHeader2,
-    {
-      siteName,
-      siteSwitcher: /* @__PURE__ */ jsx20(
-        SiteMenuSwitcher,
-        {
-          currentSiteId: siteId,
-          resolveHref: resolveSwitchHref,
-          personalSlug,
-          hubOffersFeature,
-          authenticated: user != null,
-          userIsAdmin,
-          onSettings: resolvedOnSettings,
-          settingsHref: switcherSettingsHref,
-          loginHref: resolvedLoginHref,
-          signupHref: resolvedSignupHref,
-          navLinks: resolvedNavLinks
-        }
-      ),
-      debugMenu: /* @__PURE__ */ jsx20(
-        DevToolsMenu,
-        {
-          currentSiteId: siteId,
-          resolveHref: resolveSwitchHref,
-          personalSlug,
-          routes,
-          userIsAdmin
-        }
-      ),
-      pageTitle: pageTitle ?? siteShortName,
-      pageTitleHelp: pageTitle == null ? SITE_TITLE_HELP_ID : void 0,
-      pageTitleHelpFallback: site?.description,
-      center,
-      badges,
-      leadingActions,
-      navLinks: resolvedNavLinks,
-      trailingNavLinks,
-      previewNotice,
-      previewDetail,
-      homeHref: siteHomePath(siteId),
-      profileHref: user?.slug && hasProfileRoute(siteId) ? `/${encodeURIComponent(user.slug)}/profile` : void 0,
-      preAuthLinks: conceptSite && onLandingPage ? /* @__PURE__ */ jsx20("a", { href: "/details", className: "adh-header__nav-link adh-header__nav-link--details", children: "Details" }) : void 0,
-      accountActions: user != null ? /* @__PURE__ */ jsx20(NotificationBell, {}) : void 0,
-      user,
-      authLoading,
-      loginHref: resolvedLoginHref,
-      signupHref: resolvedSignupHref,
-      onLogin,
-      onSignup,
-      onLogout,
-      settingsHref,
-      onSettings: resolvedOnSettings
-    }
+  return /* @__PURE__ */ jsxs11(Fragment6, { children: [
+    /* @__PURE__ */ jsx20(
+      AdhHeader2,
+      {
+        siteName,
+        siteSwitcher: /* @__PURE__ */ jsx20(
+          SiteMenuSwitcher,
+          {
+            currentSiteId: siteId,
+            resolveHref: resolveSwitchHref,
+            personalSlug,
+            hubOffersFeature,
+            authenticated: user != null,
+            userIsAdmin,
+            onSettings: resolvedOnSettings,
+            settingsHref: switcherSettingsHref,
+            loginHref: resolvedLoginHref,
+            signupHref: resolvedSignupHref,
+            navLinks: resolvedNavLinks
+          }
+        ),
+        pageTitle: pageTitle ?? siteShortName,
+        pageTitleHelp: pageTitle == null ? SITE_TITLE_HELP_ID : void 0,
+        pageTitleHelpFallback: site?.description,
+        center,
+        badges,
+        leadingActions,
+        navLinks: resolvedNavLinks,
+        trailingNavLinks,
+        previewNotice,
+        previewDetail,
+        homeHref: siteHomePath(siteId),
+        profileHref: user?.slug && hasProfileRoute(siteId) ? `/${encodeURIComponent(user.slug)}/profile` : void 0,
+        preAuthLinks: conceptSite && onLandingPage ? /* @__PURE__ */ jsx20("a", { href: "/details", className: "adh-header__nav-link adh-header__nav-link--details", children: "Details" }) : void 0,
+        accountActions: user != null ? /* @__PURE__ */ jsx20(NotificationBell, {}) : void 0,
+        user,
+        authLoading,
+        loginHref: resolvedLoginHref,
+        signupHref: resolvedSignupHref,
+        onLogin,
+        onSignup,
+        onLogout,
+        settingsHref,
+        onSettings: resolvedOnSettings,
+        onDebugOptions: debugOptions.onOpen,
+        debugOptionsHint: debugOptions.hint
+      }
+    ),
+    debugOptions.window
+  ] });
+}
+
+// src/header/DevToolsMenu.tsx
+import { useEffect as useEffect6, useMemo as useMemo5, useState as useState5 } from "react";
+import { usePathname as usePathname8 } from "next/navigation";
+import dynamic3 from "next/dynamic";
+import { Bug as Bug2 } from "lucide-react";
+import { detectEnv as detectEnv5 } from "@agentic-toolkit/adh-registry";
+import {
+  NavigationPopover as NavigationPopover4,
+  useClientHost as useClientHost5
+} from "@agentic-toolkit/adh/header";
+import { Fragment as Fragment7, jsx as jsx21, jsxs as jsxs12 } from "react/jsx-runtime";
+var DebugConsoleWindow2 = dynamic3(
+  () => import("@agentic-toolkit/adh/debug-console").then((m) => m.DebugConsoleWindow)
+);
+function DevToolsMenu({ userIsAdmin, ...rest }) {
+  const unlocked = DEV_TOOLS_BUILD_ENABLED || userIsAdmin === true;
+  if (!unlocked) return null;
+  return /* @__PURE__ */ jsx21(DevToolsMenuPopover, { ...rest, adminUnlocked: userIsAdmin === true });
+}
+function DevToolsMenuPopover({
+  currentSiteId,
+  resolveHref,
+  personalSlug,
+  routes,
+  adminUnlocked
+}) {
+  const pathname = usePathname8() ?? "/";
+  const groups = useMemo5(() => buildDebugSiteGroups(), []);
+  const { entries, navigate } = useSiteMenu(groups, { currentSiteId, resolveHref, personalSlug });
+  const [generated, setGenerated] = useState5();
+  const wantGeneratedRoutes = !(routes && routes.length > 0);
+  useEffect6(() => {
+    if (!wantGeneratedRoutes) return;
+    let cancelled = false;
+    void import("@agentic-toolkit/adh-registry/routes").then(({ SITE_ROUTES: SITE_ROUTES2 }) => {
+      if (cancelled) return;
+      const paths = SITE_ROUTES2[currentSiteId];
+      setGenerated({
+        siteId: currentSiteId,
+        sections: paths?.length ? [{ label: "Site", routes: paths.map((path) => ({ path })) }] : []
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [wantGeneratedRoutes, currentSiteId]);
+  const generatedRoutes = generated && generated.siteId === currentSiteId ? generated.sections : void 0;
+  const effectiveRoutes = routes && routes.length > 0 ? routes : generatedRoutes;
+  const host = useClientHost5();
+  const effectiveEnv = useEffectiveEnv(host);
+  const realEnv = host ? detectEnv5(host) : null;
+  const override = useEnvOverride();
+  const [debugOpen, setDebugOpen] = useState5(false);
+  const devToolsSection = useMemo5(
+    () => buildDevToolsEntries({
+      routes: effectiveRoutes,
+      effectiveEnv,
+      realEnv,
+      adminUnlocked,
+      override,
+      pathname,
+      onOpenDebug: () => setDebugOpen(true)
+    }),
+    [effectiveRoutes, effectiveEnv, realEnv, adminUnlocked, override, pathname]
   );
+  const allEntries = useMemo5(
+    () => [...entries, ...devToolsSection],
+    [entries, devToolsSection]
+  );
+  return /* @__PURE__ */ jsxs12(Fragment7, { children: [
+    /* @__PURE__ */ jsx21(
+      NavigationPopover4,
+      {
+        entries: allEntries,
+        onChoose: navigate,
+        triggerLabel: "Debug tools",
+        triggerContent: /* @__PURE__ */ jsx21(Bug2, { className: "adh-nav-popover__mark", "aria-hidden": true }),
+        triggerClassName: "adh-nav-popover__trigger--icon",
+        placeholder: "Search sites, routes and tools",
+        emptyLabel: "No matching dev tools"
+      }
+    ),
+    debugOpen && /* @__PURE__ */ jsx21(DebugConsoleWindow2, { open: true, onClose: () => setDebugOpen(false) })
+  ] });
 }
 
 // src/header/index.ts

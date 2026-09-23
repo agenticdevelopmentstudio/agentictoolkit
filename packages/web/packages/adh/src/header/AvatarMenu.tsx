@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ChevronDown, Home, LogOut, Settings, User as UserIcon } from 'lucide-react'
+import { ChevronDown, Home, LogOut, Settings, User as UserIcon, Wrench } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@agenticdevelopertoolkit/ui/components/avatar'
 import {
   DropdownMenu,
@@ -51,6 +51,13 @@ export type AvatarMenuProps = {
   onLogout?: () => void
   settingsHref?: string
   onSettings?: () => void
+  /** Opens the Debug console. Present ⇒ the menu ends with a divider and a "Debug
+   *  Options" row; absent ⇒ no row. The caller owns the gate (dev build, or an adh
+   *  admin) and the console — this component only offers the door. */
+  onDebugOptions?: () => void
+  /** Secondary text on the Debug row ("Sim: prod"), kept out of its label so the
+   *  row's accessible name is stably "Debug Options". */
+  debugOptionsHint?: string
 }
 
 /** The first whitespace-delimited word of a name — "Mike" from "Mike Fullerton".
@@ -72,21 +79,23 @@ function initialsOf(name: string | undefined | null): string {
 
 /**
  * The signed-in account menu: the avatar in the bar, and under it the user's name
- * plus the four account destinations — Home, Profile, User Settings, Log out.
+ * plus the account destinations — Home, Profile, User Settings, Log out — and, for a
+ * developer or an adh admin only, Debug Options, last and behind its own divider.
  *
  * It is an ACCOUNT menu, not a nav menu. A site's own destinations live in the bar
  * and in the site-name menu (the brand dropdown); routing them through here as well
  * grew this popup to the length of the site's whole feature list.
  *
- * **This menu is CLOSED at FIVE rows. Add nothing further** — no sixth row, no slot,
+ * **This menu is CLOSED at SIX rows. Add nothing further** — no seventh row, no slot,
  * no prop that lets a host inject one. Not a workspace picker, not a theme toggle,
  * not a docs link, not a site-specific action. Everything proposed for here already
  * has a home: `AdhHeader`'s bar slots (`navLinks`, `trailingNavLinks`, `preAuthLinks`,
  * `leadingActions`) or `SiteMenu`, which is also where the bar's links go below
  * 768px. The rows are what was LEFT after this popup had absorbed the hub's whole
  * feature list and had to be emptied again; there is no threshold at which one more
- * is harmless, which is why the rule is a count and not a taste. Profile was added by
- * the repo owner's explicit instruction — which is the only way the count moves.
+ * is harmless, which is why the rule is a count and not a taste. Profile, and then
+ * Debug Options (moved here from a bug-glyph dropdown of its own in the bar), were added
+ * by the repo owner's explicit instruction — which is the only way the count moves.
  * (Repo rule: `.claude/skills/project-guidelines/topics/ui-development.md`.)
  */
 export function AvatarMenu({
@@ -96,6 +105,8 @@ export function AvatarMenu({
   onLogout,
   settingsHref,
   onSettings,
+  onDebugOptions,
+  debugOptionsHint,
 }: AvatarMenuProps) {
   const avatarInner = (
     <Avatar className="adh-avatar-menu-trigger__avatar">
@@ -199,6 +210,20 @@ export function AvatarMenu({
             >
               <LogOut className="adh-avatar-menu__item-icon" />
               <span className="adh-avatar-menu__item-label">Log out</span>
+            </DropdownMenuItem>
+          </>
+        )}
+        {/* Last, and after Log out: it is a developer's tool, not an account
+            destination, so it sits apart from the rows every visitor uses. */}
+        {onDebugOptions && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onDebugOptions} className="adh-avatar-menu__item">
+              <Wrench className="adh-avatar-menu__item-icon" />
+              <span className="adh-avatar-menu__item-label">Debug Options</span>
+              {debugOptionsHint && (
+                <span className="adh-avatar-menu__item-hint">{debugOptionsHint}</span>
+              )}
             </DropdownMenuItem>
           </>
         )}

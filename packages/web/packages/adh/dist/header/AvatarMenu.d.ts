@@ -35,25 +35,34 @@ export type AvatarMenuProps = {
     onLogout?: () => void;
     settingsHref?: string;
     onSettings?: () => void;
+    /** Opens the Debug console. Present ⇒ the menu ends with a divider and a "Debug
+     *  Options" row; absent ⇒ no row. The caller owns the gate (dev build, or an adh
+     *  admin) and the console — this component only offers the door. */
+    onDebugOptions?: () => void;
+    /** Secondary text on the Debug row ("Sim: prod"), kept out of its label so the
+     *  row's accessible name is stably "Debug Options". */
+    debugOptionsHint?: string;
 };
 /**
  * The signed-in account menu: the avatar in the bar, and under it the user's name
- * plus the four account destinations — Home, Profile, User Settings, Log out.
+ * plus the account destinations — Home, Profile, User Settings, Log out — and, for a
+ * developer or an adh admin only, Debug Options, last and behind its own divider.
  *
  * It is an ACCOUNT menu, not a nav menu. A site's own destinations live in the bar
  * and in the site-name menu (the brand dropdown); routing them through here as well
  * grew this popup to the length of the site's whole feature list.
  *
- * **This menu is CLOSED at FIVE rows. Add nothing further** — no sixth row, no slot,
+ * **This menu is CLOSED at SIX rows. Add nothing further** — no seventh row, no slot,
  * no prop that lets a host inject one. Not a workspace picker, not a theme toggle,
  * not a docs link, not a site-specific action. Everything proposed for here already
  * has a home: `AdhHeader`'s bar slots (`navLinks`, `trailingNavLinks`, `preAuthLinks`,
  * `leadingActions`) or `SiteMenu`, which is also where the bar's links go below
  * 768px. The rows are what was LEFT after this popup had absorbed the hub's whole
  * feature list and had to be emptied again; there is no threshold at which one more
- * is harmless, which is why the rule is a count and not a taste. Profile was added by
- * the repo owner's explicit instruction — which is the only way the count moves.
+ * is harmless, which is why the rule is a count and not a taste. Profile, and then
+ * Debug Options (moved here from a bug-glyph dropdown of its own in the bar), were added
+ * by the repo owner's explicit instruction — which is the only way the count moves.
  * (Repo rule: `.claude/skills/project-guidelines/topics/ui-development.md`.)
  */
-export declare function AvatarMenu({ user, homeHref, profileHref, onLogout, settingsHref, onSettings, }: AvatarMenuProps): import("react").JSX.Element;
+export declare function AvatarMenu({ user, homeHref, profileHref, onLogout, settingsHref, onSettings, onDebugOptions, debugOptionsHint, }: AvatarMenuProps): import("react").JSX.Element;
 //# sourceMappingURL=AvatarMenu.d.ts.map

@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import { act, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -111,7 +112,7 @@ describe('SlideTransitions on Back', () => {
     document.documentElement.removeAttribute(SLIDE_ATTR)
   })
 
-  async function slideToProfile(vt: ReturnType<typeof installViewTransitions>, rerender: (ui: JSX.Element) => void) {
+  async function slideToProfile(vt: ReturnType<typeof installViewTransitions>, rerender: (ui: ReactElement) => void) {
     slideNavigate('/me/profile')
     const done = vt.runUpdate()
     setUrl('/me/profile')

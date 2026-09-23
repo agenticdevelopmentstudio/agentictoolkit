@@ -40,9 +40,12 @@ export { SiteMenuSwitcher } from './SiteMenuSwitcher'
 export { WorkspaceMenu } from './WorkspaceMenu'
 export type { WorkspaceMenuProps } from './WorkspaceMenu'
 export type { SiteMenuSwitcherProps } from './SiteMenuSwitcher'
-// The dev-tools dropdown that sits BESIDE the site menu (AdhHeader's `debugMenu`
-// slot). Everything build-gated or admin-gated lives in here and nowhere else, which
-// is what lets SiteMenu above be the same menu in a dev build and a shipped one.
+// The bug-glyph dev-tools dropdown for AdhHeader's `debugMenu` slot. SiteHeader no
+// longer mounts it — the repo owner asked for the glyph gone and Debug Options moved
+// to the end of the avatar menu (`useDebugOptions`) — so it is exported for a host
+// that wants its site-family and Routes flyouts back. Everything build- or
+// admin-gated stays out of SiteMenu, which is what lets that be the same menu in a
+// dev build and a shipped one.
 export { DevToolsMenu } from './DevToolsMenu'
 export type { DevToolsMenuProps } from './DevToolsMenu'
 // The two config-only menus behind the SiteMenuSwitcher dispatcher + their shared base

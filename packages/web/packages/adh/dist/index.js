@@ -7,7 +7,7 @@ import "react";
 
 // src/header/AvatarMenu.tsx
 import Link from "next/link";
-import { ChevronDown, Home, LogOut, Settings, User as UserIcon } from "lucide-react";
+import { ChevronDown, Home, LogOut, Settings, User as UserIcon, Wrench } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@agenticdevelopertoolkit/ui/components/avatar";
 import {
   DropdownMenu,
@@ -84,7 +84,9 @@ function AvatarMenu({
   profileHref,
   onLogout,
   settingsHref,
-  onSettings
+  onSettings,
+  onDebugOptions,
+  debugOptionsHint
 }) {
   const avatarInner = /* @__PURE__ */ jsxs(Avatar, { className: "adh-avatar-menu-trigger__avatar", children: [
     user.imageUrl && /* @__PURE__ */ jsx(AvatarImage, { src: user.imageUrl, alt: user.name }),
@@ -152,6 +154,14 @@ function AvatarMenu({
             ]
           }
         )
+      ] }),
+      onDebugOptions && /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(DropdownMenuSeparator, {}),
+        /* @__PURE__ */ jsxs(DropdownMenuItem, { onClick: onDebugOptions, className: "adh-avatar-menu__item", children: [
+          /* @__PURE__ */ jsx(Wrench, { className: "adh-avatar-menu__item-icon" }),
+          /* @__PURE__ */ jsx("span", { className: "adh-avatar-menu__item-label", children: "Debug Options" }),
+          debugOptionsHint && /* @__PURE__ */ jsx("span", { className: "adh-avatar-menu__item-hint", children: debugOptionsHint })
+        ] })
       ] })
     ] })
   ] });
@@ -983,6 +993,8 @@ function AdhHeader({
   accountActions,
   homeHref,
   profileHref,
+  onDebugOptions,
+  debugOptionsHint,
   previewNotice,
   previewDetail,
   user,
@@ -1062,7 +1074,9 @@ function AdhHeader({
             profileHref,
             onLogout,
             settingsHref,
-            onSettings
+            onSettings,
+            onDebugOptions,
+            debugOptionsHint
           }
         ) : /* @__PURE__ */ jsx9(
           AuthButtons,

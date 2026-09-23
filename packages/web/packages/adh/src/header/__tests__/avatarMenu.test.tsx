@@ -23,7 +23,7 @@ describe("AvatarMenu", () => {
     expect(screen.queryByText("User Settings")).not.toBeInTheDocument();
   });
 
-  it("still shows exactly the five closed rows, when the caller supplies profileHref", async () => {
+  it("still shows exactly the five account rows, when the caller supplies profileHref", async () => {
     render(
       <AvatarMenu
         user={userWithSlug}
@@ -93,5 +93,43 @@ describe("AvatarMenu", () => {
     const text = document.body.textContent ?? "";
     expect(text.indexOf("Profile")).toBeGreaterThan(text.indexOf("Home"));
     expect(text.indexOf("Profile")).toBeLessThan(text.indexOf("User Settings"));
+  });
+
+  it("offers no Debug Options row unless the caller hands in the door", async () => {
+    render(<AvatarMenu user={user} onSettings={vi.fn()} onLogout={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Mike Fullerton menu" }));
+    await screen.findByText("Log out");
+    expect(screen.queryByText("Debug Options")).not.toBeInTheDocument();
+  });
+
+  it("ends with Debug Options, after Log out and behind its own divider, and opens it", async () => {
+    const onDebugOptions = vi.fn();
+    render(
+      <AvatarMenu
+        user={userWithSlug}
+        profileHref="/mikefullerton/profile"
+        onSettings={vi.fn()}
+        onLogout={vi.fn()}
+        onDebugOptions={onDebugOptions}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Mike Fullerton menu" }));
+    const row = await screen.findByRole("menuitem", { name: "Debug Options" });
+    // LAST — every menuitem, in document order, and this one closes the list.
+    const items = screen.getAllByRole("menuitem");
+    expect(items[items.length - 1]).toBe(row);
+    // ...with a separator directly before it, so it reads as apart from the account rows.
+    expect(row.previousElementSibling?.getAttribute("role")).toBe("separator");
+    fireEvent.click(row);
+    expect(onDebugOptions).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the Debug row's hint beside its label without renaming the row", async () => {
+    render(
+      <AvatarMenu user={user} onLogout={vi.fn()} onDebugOptions={vi.fn()} debugOptionsHint="Sim: prod" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Mike Fullerton menu" }));
+    expect(await screen.findByText("Sim: prod")).toBeInTheDocument();
+    expect(screen.getByText("Debug Options")).toBeInTheDocument();
   });
 });

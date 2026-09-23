@@ -48,10 +48,12 @@ export type SiteHeaderProps = Omit<AdhHeaderAuthProps, 'user' | 'onLogin' | 'onL
      *  (which defaults it to `DEFAULT_PREVIEW_DETAIL`) — same passthrough, and the same
      *  reason, as `previewNotice` above. */
     previewDetail?: string;
-    /** Curated route map, forwarded straight through to the "Routes" flyout in the
-     *  dev-tools dropdown ({@link DevToolsMenu}) for quick in-app jumping. That whole
-     *  menu shows only in local/testing/staging or to a signed-in adh admin (any env);
-     *  when a site passes none it falls back to the generated per-site route map. */
+    /** Curated route map. UNREAD since the header stopped mounting the dev-tools
+     *  dropdown ({@link DevToolsMenu}), whose "Routes" flyout was its only reader: the
+     *  bug glyph that opened it came out of the bar, and its Debug Options row moved to
+     *  the avatar menu. Kept, not removed, because sites across the fleet pass it and
+     *  `DevToolsMenu` is still exported for any host that wants the dropdown back.
+     *  @deprecated Nothing in SiteHeader reads it. */
     routes?: RouteSection[];
     /** The signed-in user's personal workspace slug, forwarded to the site-switcher as
      *  the in-hub slug fallback on the slug-less workspace routes (`/home`, `/settings/*`).
@@ -100,5 +102,5 @@ export type SiteHeaderProps = Omit<AdhHeaderAuthProps, 'user' | 'onLogin' | 'onL
  * @adh-shared auth-shim wrapper that used to supply it into this component, so there is
  * one SiteHeader again — a site cannot get the registry half without the auth half.
  */
-export declare function SiteHeader({ siteId, pageTitle, center, badges, leadingActions, navLinks, trailingNavLinks, previewNotice, previewDetail, routes, personalSlug, hubOffersFeature, clientId, onAfterLogout, useAuthSource, ...authOverrides }: SiteHeaderProps): ReactElement;
+export declare function SiteHeader({ siteId, pageTitle, center, badges, leadingActions, navLinks, trailingNavLinks, previewNotice, previewDetail, routes: _routes, personalSlug, hubOffersFeature, clientId, onAfterLogout, useAuthSource, ...authOverrides }: SiteHeaderProps): ReactElement;
 //# sourceMappingURL=SiteHeader.d.ts.map

@@ -30,13 +30,13 @@ import { isConceptSite } from '@agentic-toolkit/adh/concepts/participating'
 import { useSettingsOverlay } from '@agentic-toolkit/adh/settings'
 import { hasProfileRoute } from '../profile/profileRoute'
 import { SiteMenuSwitcher } from './SiteMenuSwitcher'
-import { DevToolsMenu } from './DevToolsMenu'
+import { useDebugOptions } from './useDebugOptions'
 import { SITE_TITLE_HELP_ID } from '@agentic-toolkit/adh-ui/help-ids'
 
 import type { ReactNode } from 'react'
 
 // The notification inbox, mounted for every signed-in visitor of every site in the
-// family (see `accountActions` below). Code-split for the same reason DevToolsMenu
+// family (see `accountActions` below). Code-split for the same reason useDebugOptions
 // splits the debug console, and here it is load-bearing rather than a nicety: this
 // header ships on every PUBLIC page, and `@agentic-toolkit/messaging` reaches
 // `@agentic-toolkit/data` for its SSE wake channel — the one dependency the header
@@ -95,10 +95,12 @@ export type SiteHeaderProps = Omit<
    *  (which defaults it to `DEFAULT_PREVIEW_DETAIL`) — same passthrough, and the same
    *  reason, as `previewNotice` above. */
   previewDetail?: string
-  /** Curated route map, forwarded straight through to the "Routes" flyout in the
-   *  dev-tools dropdown ({@link DevToolsMenu}) for quick in-app jumping. That whole
-   *  menu shows only in local/testing/staging or to a signed-in adh admin (any env);
-   *  when a site passes none it falls back to the generated per-site route map. */
+  /** Curated route map. UNREAD since the header stopped mounting the dev-tools
+   *  dropdown ({@link DevToolsMenu}), whose "Routes" flyout was its only reader: the
+   *  bug glyph that opened it came out of the bar, and its Debug Options row moved to
+   *  the avatar menu. Kept, not removed, because sites across the fleet pass it and
+   *  `DevToolsMenu` is still exported for any host that wants the dropdown back.
+   *  @deprecated Nothing in SiteHeader reads it. */
   routes?: RouteSection[]
   /** The signed-in user's personal workspace slug, forwarded to the site-switcher as
    *  the in-hub slug fallback on the slug-less workspace routes (`/home`, `/settings/*`).
@@ -158,7 +160,8 @@ export function SiteHeader({
   trailingNavLinks = [],
   previewNotice,
   previewDetail,
-  routes,
+  // Destructured only to keep it out of `authOverrides`; see its @deprecated note.
+  routes: _routes,
   personalSlug,
   hubOffersFeature,
   clientId,
@@ -202,6 +205,11 @@ export function SiteHeader({
   // through to `undefined` below, so the row is correctly omitted rather than dead.
   const overlay = useSettingsOverlay()
   const resolvedOnSettings = onSettings ?? (user != null ? overlay?.openSettings : undefined)
+  // The avatar menu's last row. It used to be a bug-glyph dropdown of its own beside the
+  // site menu; that glyph is gone by the repo owner's instruction, and Debug Options —
+  // the one row in it anybody reached for — is the end of the account menu now. Same
+  // gate as before (dev build, or an adh admin), so a production visitor gets no row.
+  const debugOptions = useDebugOptions(userIsAdmin)
   // Auth-dependent nav resolved HERE, after the source decided signed-in-or-not, so a
   // page's header component doesn't need its own useAuth() read just to vary its nav.
   const resolvedNavLinks = (typeof navLinks === 'function' ? navLinks(user != null) : navLinks) ?? []
@@ -280,132 +288,121 @@ export function SiteHeader({
     : (settingsHref ?? resolveHubHref('/settings'))
 
   return (
-    <AdhHeader
-      // The registry-derived display name. adh always fills the `siteSwitcher` slot
-      // below, so this reaches no rendered node today — it is passed because it is
-      // the honest value, and because it is what the toolkit's default switcher
-      // would show if the slot were ever dropped.
-      siteName={siteName}
-      siteSwitcher={
-        <SiteMenuSwitcher
-          currentSiteId={siteId}
-          resolveHref={resolveSwitchHref}
-          personalSlug={personalSlug}
-          hubOffersFeature={hubOffersFeature}
-          authenticated={user != null}
-          // Appends the admin consoles to the family tree, and nothing else — the
-          // rest of the menu is identical for an admin. See SiteMenu's `userIsAdmin`
-          // for why showing the rows is not the same as granting the access.
-          userIsAdmin={userIsAdmin}
-          onSettings={resolvedOnSettings}
-          settingsHref={switcherSettingsHref}
-          // Signed-out top section: the menu's Login / Sign up rows reuse the same
-          // env-resolved hrefs as the header's auth buttons (omitted when the site
-          // uses onLogin/onSignup callbacks instead of hrefs).
-          loginHref={resolvedLoginHref}
-          signupHref={resolvedSignupHref}
-          // This site's own primary nav, so the menu can carry it on a phone — where
-          // the bar hides `.adh-header__links` and would otherwise leave the site with
-          // no primary navigation at all. `resolvedNavLinks`, not the raw prop: the
-          // menu must offer the same destinations the bar would, for the same auth
-          // state. `trailingNavLinks` is deliberately not included — it renders outside
-          // the collapsing group and survives the phone bar already.
-          navLinks={resolvedNavLinks}
-        />
-      }
-      // The dev-tools dropdown, beside the site menu and entirely separate from it.
-      // `routes` reaches ONLY this: the site menu above is the same menu in every
-      // BUILD, and that prop is what used to make it otherwise. (`userIsAdmin` goes
-      // to both, because who is signed in is not a fact about the build — it adds
-      // the consoles section there and unlocks this whole dropdown here.)
-      // DevToolsMenu renders nothing at all unless unlocked, so on a production site
-      // this slot is empty.
-      debugMenu={
-        <DevToolsMenu
-          currentSiteId={siteId}
-          resolveHref={resolveSwitchHref}
-          personalSlug={personalSlug}
-          routes={routes}
-          userIsAdmin={userIsAdmin}
-        />
-      }
-      // The site's short name unless the page named itself — see `siteShortName`.
-      pageTitle={pageTitle ?? siteShortName}
-      // Only when the page named nothing — see AdhHeader's `pageTitleHelp`.
-      //
-      // `== null`, matching the `??` above rather than a truthiness test: a page
-      // that passes `pageTitle=""` names itself with an empty string, so `??` keeps
-      // that empty string while `?` would fall through to the site help — annotating
-      // a title the site never wrote with copy about a different subject.
-      pageTitleHelp={pageTitle == null ? SITE_TITLE_HELP_ID : undefined}
-      // Last resort for the three layouts that mount no populated provider:
-      // `admin`, `hub-help` and `status` are the only sites of the 44 whose
-      // layout does not spread `site.shell` — none of them has a `site.config.ts`
-      // at all, so `defineSite` never runs and there is nothing to spread. The
-      // registry's own one-line `description` is defined for every site, so the
-      // site name still explains itself there instead of warning to the console.
-      pageTitleHelpFallback={site?.description}
-      center={center}
-      badges={badges}
-      leadingActions={leadingActions}
-      navLinks={resolvedNavLinks}
-      trailingNavLinks={trailingNavLinks}
-      // Undefined on every adh site today, which is exactly what makes AdhHeader's
-      // default apply — a default parameter, so forwarding `undefined` is the same as
-      // not forwarding at all. The point of the passthrough is that the words are
-      // REACHABLE from here.
-      previewNotice={previewNotice}
-      previewDetail={previewDetail}
-      // The avatar menu's "Home" — THIS site's post-login landing (its /home, or root
-      // when it has none), the same destination the default Login/Join links already
-      // return to. A relative path, not `selfReturn`'s absolute URL: Home never leaves
-      // the site, so it should navigate client-side rather than reload through the
-      // env-resolved origin.
-      homeHref={siteHomePath(siteId)}
-      // The avatar menu's Profile row: present only when BOTH the signed-in account has
-      // a slug (a stranger with no slug has no profile address at all) AND this site
-      // actually carries the `/<slug>/profile` route — `hasProfileRoute` reads that off
-      // the generated per-site route map, not a maintained list, so a site gaining or
-      // dropping the route can't drift out of step with this gate. Without the second
-      // half every site in the family would offer the row and three of them (today)
-      // would send it to a 404.
-      profileHref={
-        user?.slug && hasProfileRoute(siteId)
-          ? `/${encodeURIComponent(user.slug)}/profile`
-          : undefined
-      }
-      // Concept-graph affordances, before the auth cluster. A plain anchor so it
-      // works pre-hydration and resolves the real route. The `/details` path and the
-      // "Details" copy are adh vocabulary and stay on this side of the boundary.
-      preAuthLinks={
-        conceptSite && onLandingPage ? (
-          <a href="/details" className="adh-header__nav-link adh-header__nav-link--details">
-            Details
-          </a>
-        ) : undefined
-      }
-      // The notification inbox, on every site in the family rather than on the one
-      // that happened to mount it. It is the ONLY surface for account and
-      // announcement notifications, so it follows the SESSION, not the site: a
-      // visitor signed in on `projects` has the same unread mail as on the hub, and a
-      // bell that appears only after they navigate home is a bell they will not find.
-      //
-      // Gated on `user`, the same value the avatar cluster below reads — so the bell
-      // and the avatar can never disagree about whether anyone is signed in, and a
-      // site whose auth source never reads a session (the status board's
-      // `useAnonymousHeaderAuth`) mounts nothing and issues no request. `authLoading`
-      // is deliberately NOT part of the gate: the spinner branch below already owns
-      // that window, and `user` is null throughout it.
-      accountActions={user != null ? <NotificationBell /> : undefined}
-      user={user}
-      authLoading={authLoading}
-      loginHref={resolvedLoginHref}
-      signupHref={resolvedSignupHref}
-      onLogin={onLogin}
-      onSignup={onSignup}
-      onLogout={onLogout}
-      settingsHref={settingsHref}
-      onSettings={resolvedOnSettings}
-    />
+    <>
+      <AdhHeader
+        // The registry-derived display name. adh always fills the `siteSwitcher` slot
+        // below, so this reaches no rendered node today — it is passed because it is
+        // the honest value, and because it is what the toolkit's default switcher
+        // would show if the slot were ever dropped.
+        siteName={siteName}
+        siteSwitcher={
+          <SiteMenuSwitcher
+            currentSiteId={siteId}
+            resolveHref={resolveSwitchHref}
+            personalSlug={personalSlug}
+            hubOffersFeature={hubOffersFeature}
+            authenticated={user != null}
+            // Appends the admin consoles to the family tree, and nothing else — the
+            // rest of the menu is identical for an admin. See SiteMenu's `userIsAdmin`
+            // for why showing the rows is not the same as granting the access.
+            userIsAdmin={userIsAdmin}
+            onSettings={resolvedOnSettings}
+            settingsHref={switcherSettingsHref}
+            // Signed-out top section: the menu's Login / Sign up rows reuse the same
+            // env-resolved hrefs as the header's auth buttons (omitted when the site
+            // uses onLogin/onSignup callbacks instead of hrefs).
+            loginHref={resolvedLoginHref}
+            signupHref={resolvedSignupHref}
+            // This site's own primary nav, so the menu can carry it on a phone — where
+            // the bar hides `.adh-header__links` and would otherwise leave the site with
+            // no primary navigation at all. `resolvedNavLinks`, not the raw prop: the
+            // menu must offer the same destinations the bar would, for the same auth
+            // state. `trailingNavLinks` is deliberately not included — it renders outside
+            // the collapsing group and survives the phone bar already.
+            navLinks={resolvedNavLinks}
+          />
+        }
+        // The site's short name unless the page named itself — see `siteShortName`.
+        pageTitle={pageTitle ?? siteShortName}
+        // Only when the page named nothing — see AdhHeader's `pageTitleHelp`.
+        //
+        // `== null`, matching the `??` above rather than a truthiness test: a page
+        // that passes `pageTitle=""` names itself with an empty string, so `??` keeps
+        // that empty string while `?` would fall through to the site help — annotating
+        // a title the site never wrote with copy about a different subject.
+        pageTitleHelp={pageTitle == null ? SITE_TITLE_HELP_ID : undefined}
+        // Last resort for the three layouts that mount no populated provider:
+        // `admin`, `hub-help` and `status` are the only sites of the 44 whose
+        // layout does not spread `site.shell` — none of them has a `site.config.ts`
+        // at all, so `defineSite` never runs and there is nothing to spread. The
+        // registry's own one-line `description` is defined for every site, so the
+        // site name still explains itself there instead of warning to the console.
+        pageTitleHelpFallback={site?.description}
+        center={center}
+        badges={badges}
+        leadingActions={leadingActions}
+        navLinks={resolvedNavLinks}
+        trailingNavLinks={trailingNavLinks}
+        // Undefined on every adh site today, which is exactly what makes AdhHeader's
+        // default apply — a default parameter, so forwarding `undefined` is the same as
+        // not forwarding at all. The point of the passthrough is that the words are
+        // REACHABLE from here.
+        previewNotice={previewNotice}
+        previewDetail={previewDetail}
+        // The avatar menu's "Home" — THIS site's post-login landing (its /home, or root
+        // when it has none), the same destination the default Login/Join links already
+        // return to. A relative path, not `selfReturn`'s absolute URL: Home never leaves
+        // the site, so it should navigate client-side rather than reload through the
+        // env-resolved origin.
+        homeHref={siteHomePath(siteId)}
+        // The avatar menu's Profile row: present only when BOTH the signed-in account has
+        // a slug (a stranger with no slug has no profile address at all) AND this site
+        // actually carries the `/<slug>/profile` route — `hasProfileRoute` reads that off
+        // the generated per-site route map, not a maintained list, so a site gaining or
+        // dropping the route can't drift out of step with this gate. Without the second
+        // half every site in the family would offer the row and three of them (today)
+        // would send it to a 404.
+        profileHref={
+          user?.slug && hasProfileRoute(siteId)
+            ? `/${encodeURIComponent(user.slug)}/profile`
+            : undefined
+        }
+        // Concept-graph affordances, before the auth cluster. A plain anchor so it
+        // works pre-hydration and resolves the real route. The `/details` path and the
+        // "Details" copy are adh vocabulary and stay on this side of the boundary.
+        preAuthLinks={
+          conceptSite && onLandingPage ? (
+            <a href="/details" className="adh-header__nav-link adh-header__nav-link--details">
+              Details
+            </a>
+          ) : undefined
+        }
+        // The notification inbox, on every site in the family rather than on the one
+        // that happened to mount it. It is the ONLY surface for account and
+        // announcement notifications, so it follows the SESSION, not the site: a
+        // visitor signed in on `projects` has the same unread mail as on the hub, and a
+        // bell that appears only after they navigate home is a bell they will not find.
+        //
+        // Gated on `user`, the same value the avatar cluster below reads — so the bell
+        // and the avatar can never disagree about whether anyone is signed in, and a
+        // site whose auth source never reads a session (the status board's
+        // `useAnonymousHeaderAuth`) mounts nothing and issues no request. `authLoading`
+        // is deliberately NOT part of the gate: the spinner branch below already owns
+        // that window, and `user` is null throughout it.
+        accountActions={user != null ? <NotificationBell /> : undefined}
+        user={user}
+        authLoading={authLoading}
+        loginHref={resolvedLoginHref}
+        signupHref={resolvedSignupHref}
+        onLogin={onLogin}
+        onSignup={onSignup}
+        onLogout={onLogout}
+        settingsHref={settingsHref}
+        onSettings={resolvedOnSettings}
+        onDebugOptions={debugOptions.onOpen}
+        debugOptionsHint={debugOptions.hint}
+      />
+      {debugOptions.window}
+    </>
   )
 }

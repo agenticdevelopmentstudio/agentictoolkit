@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { buildDevToolsEntries, isDevEnv } from '../devToolsEntries'
+import {
+  buildDevToolsEntries,
+  debugOptionsAvailable,
+  debugOptionsHint,
+  isDevEnv,
+} from '../devToolsEntries'
 import { type PopoverEntry, type RouteSection } from '@agentic-toolkit/adh/header'
 import { type SiteEnv } from '@agentic-toolkit/adh-registry'
 
@@ -46,6 +51,28 @@ describe('isDevEnv', () => {
     expect(isDevEnv('production')).toBe(false)
     // Unknown/absent env is fail-safe — hidden, never shown by accident.
     expect(isDevEnv(null)).toBe(false)
+  })
+})
+
+describe('debugOptionsAvailable — the gate both Debug Options doors read', () => {
+  it('offers it in each dev env, and to an admin anywhere', () => {
+    for (const env of ['local', 'testing', 'staging'] as SiteEnv[]) {
+      expect(debugOptionsAvailable({ realEnv: env, adminUnlocked: false })).toBe(true)
+    }
+    expect(debugOptionsAvailable({ realEnv: 'production', adminUnlocked: true })).toBe(true)
+  })
+
+  it('withholds it from a non-admin in production, and when the env is unknown', () => {
+    expect(debugOptionsAvailable({ realEnv: 'production', adminUnlocked: false })).toBe(false)
+    expect(debugOptionsAvailable({ realEnv: null, adminUnlocked: false })).toBe(false)
+  })
+})
+
+describe('debugOptionsHint', () => {
+  it('reads "Sim: prod" only while production is being simulated', () => {
+    expect(debugOptionsHint('production')).toBe('Sim: prod')
+    expect(debugOptionsHint('staging')).toBeUndefined()
+    expect(debugOptionsHint(null)).toBeUndefined()
   })
 })
 

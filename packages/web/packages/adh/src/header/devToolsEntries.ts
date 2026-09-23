@@ -60,6 +60,26 @@ export type DevToolsOptions = {
 }
 
 /**
+ * Whether the Debug Options door is offered at all — the one gate both of its doors
+ * read (this dropdown's row, and the avatar menu's last row that SiteHeader wires).
+ * Follows the REAL env, never the simulated one, so previewing production can always
+ * be undone; an adh admin gets it in every env.
+ */
+export function debugOptionsAvailable({
+  realEnv,
+  adminUnlocked,
+}: Pick<DevToolsOptions, 'realEnv' | 'adminUnlocked'>): boolean {
+  return adminUnlocked || isDevEnv(realEnv)
+}
+
+/** The Debug row's secondary text: "Sim: prod" while the site is being viewed AS
+ *  production, so that stays obvious from the menu. Kept OUT of the row's label so its
+ *  accessible name is stably "Debug Options". */
+export function debugOptionsHint(override: SiteEnv | null): string | undefined {
+  return override === 'production' ? 'Sim: prod' : undefined
+}
+
+/**
  * The dev-only Routes / Debug Options rows for the current env, or `[]`.
  *
  * The two rows read DIFFERENT envs on purpose:
@@ -92,7 +112,7 @@ export function buildDevToolsEntries({
     })
   }
 
-  if (adminUnlocked || isDevEnv(realEnv)) {
+  if (debugOptionsAvailable({ realEnv, adminUnlocked })) {
     out.push({
       kind: 'leaf',
       section: DEBUG_SECTION,
@@ -102,10 +122,7 @@ export function buildDevToolsEntries({
       item: {
         key: 'debug-options',
         label: 'Debug Options',
-        // Carries the old header pill's "Sim: prod" state, so it stays obvious the
-        // site is being viewed AS production rather than for real. Kept OUT of the
-        // label so the row's accessible name is stably "Debug Options".
-        description: override === 'production' ? 'Sim: prod' : undefined,
+        description: debugOptionsHint(override),
         icon: menuIcon('debug'),
         onSelect: onOpenDebug,
       },

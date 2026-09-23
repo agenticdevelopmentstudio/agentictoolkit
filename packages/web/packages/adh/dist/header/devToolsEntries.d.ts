@@ -33,6 +33,17 @@ export type DevToolsOptions = {
     onOpenDebug: () => void;
 };
 /**
+ * Whether the Debug Options door is offered at all — the one gate both of its doors
+ * read (this dropdown's row, and the avatar menu's last row that SiteHeader wires).
+ * Follows the REAL env, never the simulated one, so previewing production can always
+ * be undone; an adh admin gets it in every env.
+ */
+export declare function debugOptionsAvailable({ realEnv, adminUnlocked, }: Pick<DevToolsOptions, 'realEnv' | 'adminUnlocked'>): boolean;
+/** The Debug row's secondary text: "Sim: prod" while the site is being viewed AS
+ *  production, so that stays obvious from the menu. Kept OUT of the row's label so its
+ *  accessible name is stably "Debug Options". */
+export declare function debugOptionsHint(override: SiteEnv | null): string | undefined;
+/**
  * The dev-only Routes / Debug Options rows for the current env, or `[]`.
  *
  * The two rows read DIFFERENT envs on purpose:

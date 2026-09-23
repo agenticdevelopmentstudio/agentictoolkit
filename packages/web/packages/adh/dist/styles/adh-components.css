@@ -884,6 +884,15 @@
   flex-shrink: 0;
 }
 
+/* A row's trailing state note — Debug Options' "Sim: prod". Quieter than the label and
+   warning-coloured, because what it reports (this site is being viewed AS production)
+   is exactly the thing a developer forgets they switched on. */
+.adh-avatar-menu__item-hint {
+  font-size: 0.75rem;
+  color: var(--color-warning, #e08a3c);
+  white-space: nowrap;
+}
+
 /* Avatar primitive (.adh-avatar / __image / __fallback) is owned by
  * @agenticdevelopertoolkit/ui/styles/components.css, @import'ed at the top of this file — a
  * drifted duplicate used to live here. Because it landed BELOW this file's own
