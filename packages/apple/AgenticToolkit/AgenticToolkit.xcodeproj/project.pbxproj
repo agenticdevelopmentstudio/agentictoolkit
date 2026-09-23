@@ -168,6 +168,7 @@
 		0BD6D1D7FE6E69935F420738 /* HubEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960CB1D0B8395783C6C4FF2F /* HubEnvironment.swift */; };
 		0BE59DB5987E195FED1B9C1D /* DocumentDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D87A3567E3ADED4B0DD35CA /* DocumentDestination.swift */; };
 		0C094A9A567FD8F7696CF4F2 /* PluginLoadFailuresPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22810CE993AF42226F22BA1 /* PluginLoadFailuresPanelTests.swift */; };
+		0C192260BD9D38E6BC0C4580 /* EditableTableCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83AC904A5F614AED46EF9C7C /* EditableTableCard.swift */; };
 		0C44FFF7181C70990FBECC3B /* CachedUserStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C886FC38B59A539BB862FE95 /* CachedUserStore.swift */; };
 		0C4E7364B7DD3D3FEB8F08D7 /* AgenticToolkitHubUI-macOS.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 37C1711D4F94B8D06C3D54B9 /* AgenticToolkitHubUI-macOS.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		0C9DB16E6B2C8C9A7A64E984 /* PerIDWindowControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACBB18975E24B8D883375313 /* PerIDWindowControllerTests.swift */; };
@@ -327,6 +328,7 @@
 		2565BCDFCCD010CC6E98560E /* ConversationFocusOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9AD92831D3EB96B47CCB8E /* ConversationFocusOverlay.swift */; };
 		25699D240C9850FF437C9124 /* AgenticDeveloperHubClient.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1135775DADF0951E93877DC0 /* AgenticDeveloperHubClient.framework */; };
 		2574598DAD92C7B1127E0465 /* Placeholder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C87939516A070CC66803F4 /* Placeholder.swift */; };
+		260B11537F9FAEE8E9A3F2CB /* EditableTableCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 985193AF903CF5BD0E25B3E5 /* EditableTableCardTests.swift */; };
 		26247FC0ED56ECD693F52B7C /* WindowScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 839EEDAD633D53FED2A00740 /* WindowScreenshotTests.swift */; };
 		267B27339E2C6E7F0EF08FF7 /* ModelCapabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7061EEA11CF025F2F72E5285 /* ModelCapabilityTests.swift */; };
 		26BE06ACBE439E71AC9795B6 /* WebAuthSocialSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4409829A32960FD0F62671C3 /* WebAuthSocialSignIn.swift */; };
@@ -436,6 +438,7 @@
 		3AA5608A715B68B29C10DD7D /* AIProviderMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC959528CF23522D84FE859F /* AIProviderMigration.swift */; };
 		3AA57BEF9E61D0E2C2B3F325 /* TabItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAEA589426DA19C4D308193A /* TabItem.swift */; };
 		3AB683FB70EEE7C88A44A438 /* SettingObserving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 389C59AE01B9DA4207DB6467 /* SettingObserving.swift */; };
+		3AD1633725AC96987B8873C6 /* AddRemoveFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A82A7C1D673C52ACEDA7C708 /* AddRemoveFooterView.swift */; };
 		3ADE06B60ED517895CD66573 /* AgenticToolkitScripting.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E2F77161C4E2801233B0E81B /* AgenticToolkitScripting.framework */; };
 		3AE0C5D64A94E7702E6BCB21 /* VSCodeAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BAD7FD50D3300898C1ECCAF /* VSCodeAPI.swift */; };
 		3B0C3CF82992A30AB0D92237 /* GitGlobalConfigTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E52E1F22188823DD9C7F9D2 /* GitGlobalConfigTableView.swift */; };
@@ -3895,6 +3898,7 @@
 		8346E6091CA80DA71C5FAF8D /* EcosystemsAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcosystemsAdapter.swift; sourceTree = "<group>"; };
 		83891226E4E59687EFD31663 /* UserSettings+SessionWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UserSettings+SessionWatcher.swift"; sourceTree = "<group>"; };
 		839EEDAD633D53FED2A00740 /* WindowScreenshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowScreenshotTests.swift; sourceTree = "<group>"; };
+		83AC904A5F614AED46EF9C7C /* EditableTableCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditableTableCard.swift; sourceTree = "<group>"; };
 		83D3EA6FFFEFD6FE486B378C /* LocalChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalChatSession.swift; sourceTree = "<group>"; };
 		840CCD8786140B660EF490DF /* ConfirmCancelControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmCancelControl.swift; sourceTree = "<group>"; };
 		849B8B69BAF693D7363446B8 /* CustomersTopicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomersTopicTests.swift; sourceTree = "<group>"; };
@@ -4001,6 +4005,7 @@
 		97968EFD1C9C7597C4C09F4D /* ThemePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemePreviewView.swift; sourceTree = "<group>"; };
 		97D73AE672A872337EA8DEB2 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		984EC531AE0882765A7D457F /* DaemonAIChatGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonAIChatGuardTests.swift; sourceTree = "<group>"; };
+		985193AF903CF5BD0E25B3E5 /* EditableTableCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditableTableCardTests.swift; sourceTree = "<group>"; };
 		987598EA55542AE43DD4E99B /* HelpContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpContentTests.swift; sourceTree = "<group>"; };
 		98B13923596E2430488F463B /* SpacingControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpacingControl.swift; sourceTree = "<group>"; };
 		99225A14BFC8D831A257177D /* PendingTeardownsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingTeardownsTests.swift; sourceTree = "<group>"; };
@@ -4058,6 +4063,7 @@
 		A8210E21B331ACFCEC3E0E04 /* ExtensionQuickPickModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionQuickPickModel.swift; sourceTree = "<group>"; };
 		A822229D4B74BB4B6D5371B4 /* SettingsPanelViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPanelViewController.swift; sourceTree = "<group>"; };
 		A826B8BF9237360F908B7330 /* PermissionChecking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionChecking.swift; sourceTree = "<group>"; };
+		A82A7C1D673C52ACEDA7C708 /* AddRemoveFooterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddRemoveFooterView.swift; sourceTree = "<group>"; };
 		A82CE7DDCDBDDF6097A247CF /* TextDocumentStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDocumentStorage.swift; sourceTree = "<group>"; };
 		A848D138A330A2134BADBE42 /* LLMProvidersListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMProvidersListViewModel.swift; sourceTree = "<group>"; };
 		A87319972A8D5FC214E263BC /* MultiChoiceFilterButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiChoiceFilterButton.swift; sourceTree = "<group>"; };
@@ -6635,6 +6641,7 @@
 		8E84EE8A9878D76C709384B3 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A82A7C1D673C52ACEDA7C708 /* AddRemoveFooterView.swift */,
 				BBFE6A254091C292617E372F /* ButtonView.swift */,
 				53642ACF172CFEC27284CADD /* CaptionedSliderView.swift */,
 				B80E4CA204954CD2D5B64C67 /* CheckboxView.swift */,
@@ -6643,6 +6650,7 @@
 				8018A3762727060A9F378AC2 /* ConditionalView.swift */,
 				7AE8B31750EED92B70F56F0E /* DismissibleHintView.swift */,
 				CB783DDA1E4AB17256866125 /* DividerView.swift */,
+				83AC904A5F614AED46EF9C7C /* EditableTableCard.swift */,
 				31E7501A87831CAE04B1416A /* ExplanationView.swift */,
 				9585893552485B2CC98ABCE4 /* FontChooserButton.swift */,
 				A5A6CCA7870DBDB74A35168A /* FontPickerView.swift */,
@@ -7492,6 +7500,7 @@
 		CF90ACA9F9E239292E9B622C /* ComposableSettings */ = {
 			isa = PBXGroup;
 			children = (
+				985193AF903CF5BD0E25B3E5 /* EditableTableCardTests.swift */,
 				4A618AF5B63FFF127DDA18A3 /* FontChooserButtonTests.swift */,
 				B95836248F50BCF8124D984C /* PathViewTests.swift */,
 				546447A5E3CFAF9218D61C4B /* PopupMenuChoiceViewTests.swift */,
@@ -10009,6 +10018,7 @@
 				C4F7D2D7C4B5E95B3E8B3A1C /* AbstractViewModel.swift in Sources */,
 				083C8A7CC91F643B9CB94F49 /* ActivateAppCommand.swift in Sources */,
 				7847162238C29E20CC2564BF /* ActivationTestLog.swift in Sources */,
+				3AD1633725AC96987B8873C6 /* AddRemoveFooterView.swift in Sources */,
 				70BF8765D4A701A3081C9801 /* AppCommand.swift in Sources */,
 				BFA5C197382FA80A40BFFD08 /* AppFeature.swift in Sources */,
 				371CA289D649C85620E0EA06 /* AppearanceManager.swift in Sources */,
@@ -10082,6 +10092,7 @@
 				86471C4DFC420DC8F286C7B7 /* DocumentEditorViewController.swift in Sources */,
 				6B3ED2030BA6D56C3927F079 /* DocumentTabsViewController.swift in Sources */,
 				386E5C4E6DA127E9F38558BF /* Edge.swift in Sources */,
+				0C192260BD9D38E6BC0C4580 /* EditableTableCard.swift in Sources */,
 				E40C0EBA8B564CFC45D5E3E1 /* EditorOptionsOverride.swift in Sources */,
 				5660E21076E17B85874E65A4 /* EditorPeripherals.swift in Sources */,
 				F93CCD29ADB58E31C9C14E60 /* EditorSettingsPanelViewController.swift in Sources */,
@@ -11016,6 +11027,7 @@
 				246E0BFA8CA1639D7CC339FA /* DisclosureCardTests.swift in Sources */,
 				30CE7177C74B112B1334B790 /* DocumentEditorViewControllerTests.swift in Sources */,
 				6D36928249D1C59F363EFC29 /* DocumentTabsViewControllerTests.swift in Sources */,
+				260B11537F9FAEE8E9A3F2CB /* EditableTableCardTests.swift in Sources */,
 				5CDF93805916ADCC1C33E7A4 /* EditorConfigurationTests.swift in Sources */,
 				C4D2C644128E02D5F1AA315D /* EditorOptionsOverrideTests.swift in Sources */,
 				2A932EAF5D82AF4C1184378F /* EditorSettingsPanelViewControllerTests.swift in Sources */,
