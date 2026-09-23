@@ -693,6 +693,18 @@
   padding-bottom: 0.35rem;
 }
 
+/* …and 30% taller on a touch screen, like every other row (see "Touch rows" in
+   @agenticdevelopertoolkit/ui's components.css, which owns the factor). This rule has to
+   restate it because the compact padding above out-specifies ui's base-item touch rule.
+   Natural height: 0.35rem × 2 + 0.75rem × 1.2 line = 1.6rem. */
+@media (pointer: coarse) {
+  .adh-nav-popover__list .adh-dropdown-menu__item,
+  .adh-nav-popover__submenu .adh-dropdown-menu__item {
+    padding-top: calc(0.35rem + 1.6rem * var(--adh-touch-row-grow, 0.3) / 2);
+    padding-bottom: calc(0.35rem + 1.6rem * var(--adh-touch-row-grow, 0.3) / 2);
+  }
+}
+
 /* The leading icon slot on a row — muted so the label + tagline stay primary.
    Sizing/flex-shrink come from the shared .adh-dropdown-menu__item-icon. */
 .adh-nav-popover__icon {

@@ -775,6 +775,16 @@
   outline: none;
 }
 
+/* 30% taller on a touch screen — see "Touch rows" in @agenticdevelopertoolkit/ui's
+   components.css, which owns the factor. Natural height: 0.55rem × 2 + 0.93rem × 1.2 line
+   = 2.216rem. */
+@media (pointer: coarse) {
+  .adh-avatar-menu__item {
+    padding-top: calc(0.55rem + 2.216rem * var(--adh-touch-row-grow, 0.3) / 2);
+    padding-bottom: calc(0.55rem + 2.216rem * var(--adh-touch-row-grow, 0.3) / 2);
+  }
+}
+
 .adh-avatar-menu__item:hover,
 .adh-avatar-menu__item:focus,
 .adh-avatar-menu__item[data-highlighted] {
