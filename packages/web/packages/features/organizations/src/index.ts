@@ -5,9 +5,8 @@
 // (its workspace rail reaches Members and Settings directly, without this feature's list around
 // them). They stay exported for exactly that reason — not as a general-purpose surface.
 //
-// `MembersPanel` is now mounted from BOTH sides — by the hub's own `/<slug>/members` route, and
-// by `OrgSettingsGroup` as this feature's Settings ▸ Members row — which is why it takes its
-// workspace as props rather than reading a context only one of them has.
+// `MembersPanel` is mounted by the hub's own `/<slug>/members` route, and takes its workspace as
+// props rather than reading a context only the hub has.
 
 export { OrganizationsFeature, type OrganizationsFeatureProps } from "./OrganizationsFeature";
 export { NewOrganizationModal } from "./NewOrganizationModal";

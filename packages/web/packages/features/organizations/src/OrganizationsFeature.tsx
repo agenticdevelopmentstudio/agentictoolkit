@@ -214,7 +214,7 @@ export function OrganizationsFeature({
       label: "Settings",
       icon: <Settings size={16} aria-hidden />,
       description: ORG_SETTINGS_DESCRIPTION,
-      // Five rows of its own (Members / Social links / Addresses / Usage / Settings), so it
+      // Four rows of its own (Social links / Addresses / Usage / Settings), so it
       // publishes a list.
       leadsTo: "list",
       render: (scopedId, _titleFor, leaf) => (

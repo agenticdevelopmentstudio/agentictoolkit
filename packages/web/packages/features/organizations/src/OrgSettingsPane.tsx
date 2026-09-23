@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookUser, Building2, Gauge, MapPin, Share2 } from "lucide-react";
+import { Building2, Gauge, MapPin, Share2 } from "lucide-react";
 import { ErrorText, useAction } from "@agentic-toolkit/crud";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
@@ -33,7 +33,6 @@ import {
   type TopicLeaf,
 } from "@agentic-toolkit/resource";
 import { SocialLinksPanel, AddressesPanel, UsagePanel } from "@agentic-toolkit/profile";
-import { MembersPanel } from "./MembersPanel";
 
 /**
  * The item-cache key the organization's own record is filed under, keyed by SLUG.
@@ -62,12 +61,11 @@ export interface OrgSettingsHrefs {
 }
 
 /**
- * The organization Settings group: Members + Social links + Addresses + Usage + Settings (the
- * org's own record), as levels of the ONE hierarchical stack.
+ * The organization Settings group: Social links + Addresses + Usage + Settings (the org's own
+ * record), as levels of the ONE hierarchical stack.
  *
- * Members is here because it stopped being a row of the workspace rail's root. The rail's row for
- * this group reads "Organization" now, and an organization's people are part of the organization
- * — where a Members row beside it was a second top-level door onto one roster. The ROUTE it used
+ * No Members row. An organization's people are answered by its Teams, which group them and the
+ * permissions they share; a roster here was a second door onto the same people. The ROUTE it used
  * to lead to is untouched: `/<slug>/members` still resolves.
  *
  * Social links and Addresses are ORG-owned here (`workspaceSlug` = the org slug) and carry NO
@@ -117,17 +115,6 @@ export function OrgSettingsGroup({
   );
   const items: GroupTopicItem[] = useMemo(
     () => [
-      // First, because it is the row that came down from the rail's root, and the one thing here
-      // that is people rather than fields. `workspaceType` is fixed rather than read: this group
-      // only ever edits an organization — both hosts address it by an org slug — and the panel's
-      // non-org branch exists for a `/<slug>/members` URL typed at an individual workspace, which
-      // cannot be what is standing here.
-      {
-        id: "members",
-        label: "Members",
-        icon: <BookUser size={16} aria-hidden />,
-        render: () => <MembersPanel workspaceSlug={slug} workspaceType="organization" />,
-      },
       {
         id: "social",
         label: "Social links",
@@ -146,10 +133,9 @@ export function OrgSettingsGroup({
         icon: <Gauge size={16} aria-hidden />,
         render: () => <UsagePanel workspaceSlug={slug} />,
       },
-      // Last, and called Settings. The group's own row reads "Organization" on the workspace rail
-      // now (workspaceFeatureLabel), so this is Organization ▸ Settings — the org's editable
-      // fields — where it used to be Settings ▸ Profile, which named a public page the org does
-      // not have. The id stays `profile` so every existing deep link still resolves.
+      // Last: the org's editable fields. It used to be Settings ▸ Profile, which named a public
+      // page the org does not have. The id stays `profile` so every existing deep link still
+      // resolves.
       {
         id: "profile",
         label: "Settings",
@@ -162,9 +148,9 @@ export function OrgSettingsGroup({
   return (
     <StackGroupDetail
       levelId="org-settings"
-      title="Organization"
+      title="Settings"
       items={items}
-      // The spinner in front of "Organization", for the ONE read this group holds itself: the
+      // The spinner in front of "Settings", for the ONE read this group holds itself: the
       // Settings member's.
       // Social links, Addresses and Usage each read inside their own pane, a component below this
       // level and unable to reach it — so they call `useReportBusy` and the host raises the same
@@ -178,8 +164,8 @@ export function OrgSettingsGroup({
 
 /** The group's blurb — the rail's topic overview and the breadcrumb help popover both read it. */
 export const ORG_SETTINGS_DESCRIPTION =
-  "This organization's own record — its people, its name and handle, the links and addresses " +
-  "it publishes, and what those people have used.";
+  "This organization's own record — its name and handle, the links and addresses it " +
+  "publishes, and what its people have used.";
 
 /** Edit an organization's own fields. Save PATCHes only the changed fields, so a name/description
  *  edit never trips the slug's site-admin gate.
