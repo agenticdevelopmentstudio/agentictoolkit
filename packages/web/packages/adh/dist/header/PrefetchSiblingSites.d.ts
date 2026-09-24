@@ -9,7 +9,7 @@
  * atomically.
  *
  * Scoped to LOCAL dev, where every sibling site is a SAME-SITE origin (the suite
- * serves them all as subdomains of one `*.dev.local` / `*.localhost` host), which
+ * serves them all as subdomains of one `*.dev.test` / `*.localhost` host), which
  * is the platform's precondition for cross-origin prerendering — paired with the
  * `Supports-Loading-Mode: credentialed-prerender` response header the apps send
  * (see `PRERENDER_HEADERS` in `@agentic-toolkit/next-headers`, merged into every
