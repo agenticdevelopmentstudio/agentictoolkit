@@ -28,21 +28,24 @@ export type SiteMenuSwitcherProps = SiteMenuChromeProps
  * The two are unrelated components that happen to share a role name; this one is
  * adh's actual switcher, injected through that slot by {@link SiteHeader}.
  *
- * SIGNED IN, on a host that supplies the user's workspaces (the hub, via WorkspacesMenuProvider),
- * the fleet menu is set aside altogether and the slot holds the {@link WorkspaceMenu} instead —
- * inside the product, switching workspace is the everyday move. A host with no provider (every
- * satellite) keeps the site menu at every auth state: it has no workspaces to offer.
+ * SIGNED IN, ON A WORKSPACE ROUTE, on a host that supplies the user's workspaces (the hub, via
+ * WorkspacesMenuProvider), the fleet menu is set aside and the slot holds the
+ * {@link WorkspaceMenu} instead — inside the product, switching workspace is the everyday move.
+ * Everywhere else — the landing `/` and the other marketing routes, even signed in — keeps the
+ * site menu: the swap once ignored the route and took the site menu off `/` for every signed-in
+ * visitor (Mike, 2026-09-24). A host with no provider (every satellite) keeps the site menu at
+ * every auth state: it has no workspaces to offer.
  *
  * The swap drops what is about SITES (the family tree, Home, Recents), the signed-out rows (which
  * cannot apply) and `triggerContent` (the WorkspaceMenu's trigger is its own). Everything else
- * passes through — `userIsAdmin` above all: the WorkspaceMenu is the only switcher a signed-in
- * admin on the hub sees, and the admin consoles have no other door.
+ * passes through — `userIsAdmin` above all: on a workspace route the WorkspaceMenu is the only
+ * switcher a signed-in admin sees, and the admin consoles have no other door there.
  */
 export function SiteMenuSwitcher(props: SiteMenuSwitcherProps): ReactElement {
   const pathname = usePathname() ?? '/'
   const onWorkspaceRoute = isWorkspaceMenuRoute(props.currentSiteId, pathname)
   const workspacesMenu = useWorkspacesMenu()
-  if (props.authenticated && workspacesMenu) {
+  if (props.authenticated && onWorkspaceRoute && workspacesMenu) {
     return (
       <WorkspaceMenu
         menu={workspacesMenu}
