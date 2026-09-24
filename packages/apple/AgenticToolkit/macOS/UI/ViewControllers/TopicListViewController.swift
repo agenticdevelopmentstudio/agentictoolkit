@@ -115,6 +115,17 @@ open class TopicListViewController: NSViewController {
         outlineView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         outlineView.dataSource = self
         outlineView.delegate = self
+        // `setItems`/`setSections` can run before the view ever loads — a
+        // caller populating the list from its own `init()`, before the owning
+        // window is ever shown, is the common case for a window whose sidebar
+        // tracks a model (`RecordDetailWindowController`). `reloadData()` at
+        // that point is a no-op: `dataSource` above is what makes it query
+        // anything, and it wasn't assigned yet. `rootNodesCache` still holds
+        // whatever was set, so reload against it now that the outline can
+        // actually ask for it — without this, the list stays empty until
+        // something reloads it a second time after the window has shown.
+        outlineView.reloadData()
+        outlineView.expandItem(nil, expandChildren: true)
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
