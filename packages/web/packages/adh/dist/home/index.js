@@ -12,7 +12,6 @@ import { useCallback as useCallback3 } from "react";
 import { usePathname } from "next/navigation";
 import { TopicSelectHint } from "@agenticdevelopertoolkit/ui/blocks";
 import { useResourceList, workspacesApi } from "@agentic-toolkit/data";
-import { HomeBarHost } from "@agentic-toolkit/resource";
 
 // src/profile/ProfileFallback.tsx
 import { useEffect as useEffect3, useMemo, useState as useState4 } from "react";
@@ -530,15 +529,13 @@ function SiteHomeShell({
         onSelect
       }
     ),
-    /* @__PURE__ */ jsxs3(HomeBarHost, { children: [
-      error !== null && workspaces === null && /* @__PURE__ */ jsx6(TopicSelectHint, { title: "Couldn't load your workspaces. Reload the page to try again." }),
-      resolved === null && /* @__PURE__ */ jsx6(TopicSelectHint, { title: "No workspaces yet \u2014 create one from the hub to get started." }),
-      resolved !== void 0 && resolved !== null && resolved === workspaceSlug && workspace !== null && children({
-        workspaceSlug: resolved,
-        scopedBase: `/${resolved}`,
-        workspace
-      })
-    ] })
+    error !== null && workspaces === null && /* @__PURE__ */ jsx6(TopicSelectHint, { title: "Couldn't load your workspaces. Reload the page to try again." }),
+    resolved === null && /* @__PURE__ */ jsx6(TopicSelectHint, { title: "No workspaces yet \u2014 create one from the hub to get started." }),
+    resolved !== void 0 && resolved !== null && resolved === workspaceSlug && workspace !== null && children({
+      workspaceSlug: resolved,
+      scopedBase: `/${resolved}`,
+      workspace
+    })
   ] });
 }
 

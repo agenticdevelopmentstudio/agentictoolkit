@@ -2255,7 +2255,7 @@ function SiteMenuSwitcher(props) {
   const pathname = usePathname5() ?? "/";
   const onWorkspaceRoute = isWorkspaceMenuRoute(props.currentSiteId, pathname);
   const workspacesMenu = useWorkspacesMenu3();
-  if (props.authenticated && workspacesMenu) {
+  if (props.authenticated && onWorkspaceRoute && workspacesMenu) {
     return /* @__PURE__ */ jsx19(
       WorkspaceMenu,
       {
