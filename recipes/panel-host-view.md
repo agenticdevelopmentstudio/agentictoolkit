@@ -3,7 +3,7 @@ id: faf4ec69-7b5c-44c2-a8c2-d7e81dc94ea8
 title: PanelHostView
 domain: agentictoolkit://recipes/panel-host-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,7 +22,9 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/split-view-controller
+- agentictoolkit://recipes/settings-window
 references: []
 approved-by: ''
 approved-date: ''
@@ -60,24 +62,21 @@ button or opening a second drawer.
   leaving the content area empty.
 - **content-pinned-to-container-edges**: An installed content view MUST be
   pinned to its content container's top, leading, trailing, and bottom
-  edges with zero inset (`NSView.pinToEdges(_:of:)`).
+  edges with zero inset.
 - **content-container-pinned-to-view-edges**: The content container itself
   MUST be pinned to `PanelHostView`'s own top, leading, trailing, and
   bottom edges with zero inset.
 - **help-button-inset-from-content-container**: The help button's top edge
   MUST sit 12pt below the content container's top edge, and its trailing
-  edge MUST sit 12pt inside the content container's trailing edge
-  (`buttonInset = 12`).
+  edge MUST sit 12pt inside the content container's trailing edge.
 - **help-button-above-content**: The help button MUST be added as a
   subview of `PanelHostView` itself, after the content container, so
   swapping the hosted content via `setContent(_:)` never removes,
   reorders, or redraws the button.
-- **help-button-hidden-when-not-shown-or-no-presenter**: The help button
-  MUST be hidden whenever `showsHelpButton` is `false`, or whenever
-  `helpPresenter` is `nil`, or both.
-- **help-button-shown-when-enabled-and-presenter-set**: The help button
-  MUST be visible whenever `showsHelpButton` is `true` and `helpPresenter`
-  is non-`nil`.
+- **help-button-visibility**: The help button MUST be hidden whenever
+  `showsHelpButton` is `false`, or whenever `helpPresenter` is `nil`, or
+  both, and MUST be visible whenever `showsHelpButton` is `true` and
+  `helpPresenter` is non-`nil`.
 - **help-button-icon-reflects-visibility**: The help button MUST display
   the filled `questionmark.circle.fill` symbol while
   `helpPresenter?.isHelpVisible` is `true`, and the outlined
@@ -96,12 +95,19 @@ button or opening a second drawer.
 - **help-button-accessibility-label-fixed**: The help button's
   accessibility label MUST be the literal string `"Help"`, set once at
   construction, regardless of visibility state.
+- **help-button-keyboard-focusable**: `PanelHostView` MUST NOT remove the
+  help button from the keyboard/assistive-technology focus order, and
+  MUST NOT override its default activation behavior, while the button is
+  visible (AppKit: no override of `acceptsFirstResponder`, `keyDown`, or
+  `performClick`, so `NSButton`'s stock key-view-loop and Space/Return
+  activation apply unmodified).
 - **help-button-borderless-image-only**: The help button MUST render with
   no bezel/border (`isBordered = false`) and MUST show only its image
   (`imagePosition = .imageOnly`).
-- **help-button-momentary-type**: The help button MUST use AppKit's
-  momentary-change button type (`setButtonType(.momentaryChange)`) rather
-  than a persistent on/off toggle.
+- **help-button-momentary-type**: The help button MUST behave as a
+  momentary push control — firing its action once per click and holding
+  no on/off state of its own — rather than as a persistent toggle
+  (AppKit: `setButtonType(.momentaryChange)`).
 - **toggle-help-delegates-to-presenter**: `toggleHelp()` MUST forward to
   `helpPresenter?.toggleHelp()` and MUST have no effect when
   `helpPresenter` is `nil`.
@@ -118,7 +124,7 @@ button or opening a second drawer.
   current presenter invokes its `onVisibilityChange` callback,
   `PanelHostView` MUST, after refreshing its own button, invoke its own
   `onHelpVisibilityChange` callback if one is set.
-- **presenter-reassignment-rewires-callback-and-content**: Assigning a new
+- **presenter-reassignment**: Assigning a new
   value to `helpPresenter` MUST install this view's own closure as that
   new presenter's `onVisibilityChange`, MUST re-run the help-anchor claim,
   MUST hand the new presenter the view's currently stored help content via
@@ -130,7 +136,7 @@ button or opening a second drawer.
 - **is-help-visible-reflects-presenter-or-false**: `isHelpVisible` MUST
   report `helpPresenter!.isHelpVisible` when a presenter is set, and MUST
   report `false` when `helpPresenter` is `nil`.
-- **shows-help-button-toggle-refreshes-anchor-and-button**: Assigning a
+- **shows-help-button-toggle**: Assigning a
   new value to `showsHelpButton` MUST re-run the help-anchor claim and
   MUST refresh the help button.
 - **theme-change-refreshes-button-tint**: `PanelHostView` MUST re-run the
@@ -139,10 +145,11 @@ button or opening a second drawer.
 - **rejects-coder-initialization**: `PanelHostView` MUST NOT support
   construction via `init(coder:)`; that initializer is marked
   `@available(*, unavailable)` and MUST trigger a fatal error.
-- **constraint-based-layout-only**: `PanelHostView` MUST disable
-  `translatesAutoresizingMaskIntoConstraints` on itself, its content
-  container, and its help button, and MUST position all three exclusively
-  through Auto Layout constraints.
+- **constraint-based-layout-only**: `PanelHostView` MUST position itself,
+  its content container, and its help button entirely through the
+  platform's layout-constraint system, never by assigning frames manually
+  (AppKit: `translatesAutoresizingMaskIntoConstraints = false` on all
+  three, positioned only via Auto Layout constraints).
 
 ## Appearance
 
@@ -178,7 +185,7 @@ button or opening a second drawer.
 |-------|------------------|
 | Help hidden (default) | Help button, if shown, displays the outlined `questionmark.circle` symbol tinted `secondaryTextColor`, tooltip `"Show Help"`. |
 | Help visible | Help button displays the filled `questionmark.circle.fill` symbol tinted `accentColor`, tooltip `"Hide Help"`. |
-| No presenter / button disabled | Help button is hidden entirely (`isHidden = true`) — see **help-button-hidden-when-not-shown-or-no-presenter**. |
+| No presenter / button disabled | Help button is hidden entirely (`isHidden = true`) — see **help-button-visibility**. |
 | Pressed | Not applicable: `PanelHostView.swift` defines no custom pressed-state styling for the help button; `NSButton` with `.momentaryChange` supplies AppKit's own built-in momentary highlight, which this source does not override. |
 | Disabled | Not applicable: the source never sets `isEnabled` on the help button or on `PanelHostView` itself; there is no disabled-state path in this file. |
 | Focused | Not applicable: the source configures no custom focus ring or focused-state appearance; `NSButton`'s default AppKit focus ring applies unmodified. |
@@ -191,12 +198,12 @@ button or opening a second drawer.
   button is a stock `NSButton`, exposed to assistive technology with
   AppKit's default push-button role; `PanelHostView.swift` does not
   override it.
-- **Keyboard / assistive technology navigation**: `PanelHostView.swift`
-  neither removes the help button from the key-view loop nor overrides
+- **Keyboard / assistive technology navigation**: Satisfied — see
+  **help-button-keyboard-focusable**. `PanelHostView.swift` neither
+  removes the help button from the key-view loop nor overrides
   `acceptsFirstResponder`, `keyDown`, or `performClick`, so Tab/Shift-Tab
-  focus traversal and Space/Return activation MUST remain exactly
-  `NSButton`'s unmodified default behavior; the source MUST NOT introduce
-  a custom key-view chain that skips this button while it is visible.
+  focus traversal and Space/Return activation remain exactly `NSButton`'s
+  unmodified default behavior.
 - **Label requirements**: Satisfied for the help button — its
   accessibility label is always the literal string `"Help"`
   (**help-button-accessibility-label-fixed**), and both symbol variants
@@ -244,14 +251,14 @@ button or opening a second drawer.
 | panel-host-view-004 | content-container-pinned-to-view-edges | Construct `PanelHostView()` | The content container's top/leading/trailing/bottom anchors are each constrained equal to `PanelHostView`'s corresponding anchor with 0 constant |
 | panel-host-view-005 | help-button-inset-from-content-container | Construct `PanelHostView()` | The help button's top anchor equals the content container's top anchor + 12; its trailing anchor equals the content container's trailing anchor − 12 |
 | panel-host-view-006 | help-button-above-content | Construct `PanelHostView()`, then call `setContent(viewA)` | The help button remains a subview of `PanelHostView` (not of the content container) both before and after the call, and is not removed or reordered by it |
-| panel-host-view-007 | help-button-hidden-when-not-shown-or-no-presenter | Set `showsHelpButton = false` with `helpPresenter` non-`nil` | `helpButton.isHidden == true` |
-| panel-host-view-008 | help-button-hidden-when-not-shown-or-no-presenter | Set `helpPresenter = nil` with `showsHelpButton == true` | `helpButton.isHidden == true` |
-| panel-host-view-009 | help-button-shown-when-enabled-and-presenter-set | Set `showsHelpButton = true` and assign a non-`nil` `helpPresenter` | `helpButton.isHidden == false` |
-| panel-host-view-010 | help-button-icon-reflects-visibility | Assign a presenter whose `isHelpVisible == true`, then call `setHelp`/refresh | The help button's image is `questionmark.circle.fill` |
+| panel-host-view-007 | help-button-visibility | Set `showsHelpButton = false` with `helpPresenter` non-`nil` | `helpButton.isHidden == true` |
+| panel-host-view-008 | help-button-visibility | Set `helpPresenter = nil` with `showsHelpButton == true` | `helpButton.isHidden == true` |
+| panel-host-view-009 | help-button-visibility | Set `showsHelpButton = true` and assign a non-`nil` `helpPresenter` | `helpButton.isHidden == false` |
+| panel-host-view-010 | help-button-icon-reflects-visibility | Set `helpPresenter` to a presenter stub whose `isHelpVisible` returns `true` | The help button's image is `questionmark.circle.fill` |
 | panel-host-view-011 | help-button-icon-reflects-visibility | Assign a presenter whose `isHelpVisible == false` | The help button's image is `questionmark.circle` |
-| panel-host-view-012 | help-button-symbol-configuration | Inspect the help button's image after any refresh | The image's symbol configuration reports point size 15 and weight `.regular` |
-| panel-host-view-013 | help-button-tint-reflects-visibility | Presenter reports `isHelpVisible == true` under Theme A | `helpButton.contentTintColor == ThemeA.accentColor` |
-| panel-host-view-014 | help-button-tint-reflects-visibility | Presenter reports `isHelpVisible == false` under Theme A | `helpButton.contentTintColor == ThemeA.secondaryTextColor` |
+| panel-host-view-012 | help-button-symbol-configuration | Construct `PanelHostView()` | The image's symbol configuration reports point size 15 and weight `.regular` |
+| panel-host-view-013 | help-button-tint-reflects-visibility | Presenter reports `isHelpVisible == true` while the active theme is "Solarized Dark" | `helpButton.contentTintColor` equals Solarized Dark's `SemanticPalette.accentColor` |
+| panel-host-view-014 | help-button-tint-reflects-visibility | Presenter reports `isHelpVisible == false` while the active theme is "Solarized Dark" | `helpButton.contentTintColor` equals Solarized Dark's `SemanticPalette.secondaryTextColor` |
 | panel-host-view-015 | help-button-tooltip-reflects-visibility | Presenter reports `isHelpVisible == true` | `helpButton.toolTip == "Hide Help"` |
 | panel-host-view-016 | help-button-tooltip-reflects-visibility | Presenter reports `isHelpVisible == false` | `helpButton.toolTip == "Show Help"` |
 | panel-host-view-017 | help-button-accessibility-label-fixed | Toggle help visible, then hidden | `helpButton`'s accessibility label reads `"Help"` in both states |
@@ -263,14 +270,15 @@ button or opening a second drawer.
 | panel-host-view-023 | help-anchor-untouched-when-button-hidden | With `showsHelpButton == false`, assign a presenter whose `helpAnchorView` was previously set to some other view | `presenter.helpAnchorView` is unchanged by the assignment |
 | panel-host-view-024 | help-visibility-change-refreshes-button | With a presenter assigned, invoke the presenter's stored `onVisibilityChange` closure | The help button's icon/tint/tooltip are re-evaluated against the presenter's current `isHelpVisible` |
 | panel-host-view-025 | help-visibility-change-notifies-external-observer | With `onHelpVisibilityChange` set, invoke the presenter's `onVisibilityChange` closure | `onHelpVisibilityChange` is invoked exactly once, after the button refresh |
-| panel-host-view-026 | presenter-reassignment-rewires-callback-and-content | Call `setHelp(contentA)`, then assign a new `helpPresenter` | The new presenter receives `setHelp(contentA)`, its `helpAnchorView` is claimed (if shown), and its `onVisibilityChange` is this view's closure |
+| panel-host-view-026 | presenter-reassignment | Call `setHelp(contentA)`, then assign a new `helpPresenter` | The new presenter receives `setHelp(contentA)`, its `helpAnchorView` is claimed (if shown), and its `onVisibilityChange` is this view's closure |
 | panel-host-view-027 | set-help-forwards-to-presenter | With a presenter assigned, call `setHelp(nil)` | The presenter receives `setHelp(nil)` and the help button is refreshed |
 | panel-host-view-028 | is-help-visible-reflects-presenter-or-false | Query `isHelpVisible` with `helpPresenter == nil` | Returns `false` |
 | panel-host-view-029 | is-help-visible-reflects-presenter-or-false | Query `isHelpVisible` with a presenter whose `isHelpVisible == true` | Returns `true` |
-| panel-host-view-030 | shows-help-button-toggle-refreshes-anchor-and-button | Toggle `showsHelpButton` from `false` to `true` with a presenter assigned | The presenter's `helpAnchorView` is claimed and the help button's hidden/icon/tint state is refreshed |
-| panel-host-view-031 | theme-change-refreshes-button-tint | With help visible under Theme A, switch the active theme to Theme B | `helpButton.contentTintColor` updates to `ThemeB.accentColor` without reconstructing the view |
+| panel-host-view-030 | shows-help-button-toggle | Toggle `showsHelpButton` from `false` to `true` with a presenter assigned | The presenter's `helpAnchorView` is claimed and the help button's hidden/icon/tint state is refreshed |
+| panel-host-view-031 | theme-change-refreshes-button-tint | With help visible while the active theme is "Solarized Dark", call `ThemeManager.selectTheme(id:)` with Solarized Light's id | `helpButton.contentTintColor` updates to Solarized Light's `SemanticPalette.accentColor` without reconstructing the view |
 | panel-host-view-032 | rejects-coder-initialization | Attempt `PanelHostView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | panel-host-view-033 | constraint-based-layout-only | Inspect `PanelHostView`, its content container, and its help button after construction | `translatesAutoresizingMaskIntoConstraints == false` for all three |
+| panel-host-view-034 | help-button-keyboard-focusable | Construct `PanelHostView()`, Tab focus to the visible help button, then press Space | The help button receives key-view focus via Tab/Shift-Tab and its action fires on Space/Return, using `NSButton`'s unmodified default first-responder and key-equivalent handling |
 
 ## Edge Cases
 
@@ -304,21 +312,19 @@ button or opening a second drawer.
   `onVisibilityChange`. If a caller keeps a reference to the old presenter
   and it later fires `onVisibilityChange` on its own, this view's closure
   still runs and repaints the help button as if that stale presenter were
-  still current. This is a source behavior, not a documented safeguard;
-  see Design Decisions.
+  still current. This is what the `didSet` implementation does, not an
+  intentional safeguard.
 - **`showsHelpButton` toggled while help is currently visible**: Setting
-  it to `false` hides the button (**help-button-hidden-when-not-shown-or-no-presenter**)
+  it to `false` hides the button (**help-button-visibility**)
   but does not itself close help — `helpPresenter.isHelpVisible` and any
   window drawer/popover the presenter owns are unaffected; only this
   view's own button disappears.
-- **`helpPresenter.helpAnchorView` observed by a popover-style presenter
-  after the anchor view is hidden**: `HelpPopoverController.toggleHelp()`
-  guards on `anchor.window != nil` before showing, so a hidden help button
-  (from `showsHelpButton == false`) simply prevents the popover from
-  opening rather than crashing; this is the presenter's guard, not
-  `PanelHostView`'s, and is included here because it is the direct
-  consequence of `help-anchor-claimed-when-button-shown` leaving a stale
-  anchor in place when the button later hides.
+- **Anchor left stale when the button hides**: Per
+  **help-anchor-untouched-when-button-hidden**, `PanelHostView` does not
+  clear `helpPresenter?.helpAnchorView` when `showsHelpButton` becomes
+  `false` — the presenter is left pointing at a now-hidden view. What a
+  presenter does with a hidden anchor (for example guarding before
+  presenting) is that presenter's own contract, not `PanelHostView`'s.
 
 ## Configuration
 
@@ -456,13 +462,16 @@ Not applicable: the source contains no logging call (no `print`,
   container so it always draws above swapped panels regardless of what
   they contain; the shared `NSView.pinToEdges(_:of:)` static helper
   (`ViewLayout.swift`) used for both the container's and the content
-  view's edge constraints; and the `buttonInset` constant (12pt) driving
-  the button's own two constraints. A UIKit port would use a `UIView`
+  view's edge constraints; the `buttonInset` constant (12pt) driving
+  the button's own two constraints; and
+  `translatesAutoresizingMaskIntoConstraints = false` set on
+  `PanelHostView` itself, the content container, and the help button, per
+  **constraint-based-layout-only**. A UIKit port would use a `UIView`
   overlaying a `UIButton(configuration: .plain())` pinned with
   `NSLayoutConstraint`s the same way, but no analogue currently exists
   elsewhere in this codebase's `ComposableSettingsWindow/` tree — the rest
   of it is AppKit-only.
-- **WinUI 3** (the reason this recipe exists): Build this as a single-cell
+- **WinUI 3**: Build this as a single-cell
   `Grid`: the swapped panel content (a `ContentControl` or `Frame` whose
   `Content` is reassigned the way `setContent(_:)` swaps subviews) fills
   the cell, and a borderless `Button` (`BorderThickness="0"`,
@@ -489,73 +498,48 @@ Not applicable: the source contains no logging call (no `print`,
 
 ## Design Decisions
 
-Decision: The help button is shown for every panel a split hosts, based
+**Decision**: The help button is shown for every panel a split hosts, based
 solely on `showsHelpButton` and whether a `helpPresenter` is assigned —
 never on whether the panel currently on screen has any help content.
-Rationale: per the source's own comment on `updateHelpButton()`, it used
+**Rationale**: per the source's own comment on `updateHelpButton()`, it used
 to come and go with `help != nil`, which "put a control in the corner of
 some panels and not others and made the drawer look like a property of
 the panel rather than of the window."
-Approved: pending
+**Approved**: pending
 
-Decision: `claimHelpAnchorIfShown()` re-runs unconditionally on every
+**Decision**: `claimHelpAnchorIfShown()` re-runs unconditionally on every
 `helpPresenter` assignment and every `showsHelpButton` change, rather than
 claiming the anchor once at construction.
-Rationale: per the source's own comment on `claimHelpAnchorIfShown()`,
+**Rationale**: per the source's own comment on `claimHelpAnchorIfShown()`,
 claiming the anchor only once meant a later `helpPresenter` reassignment
 "silently took it back" from whoever held it, "and handed a popover
 presenter a hidden, zero-size view to hang off."
-Approved: pending
+**Approved**: pending
 
-Decision: Route chrome outside this view (e.g. a toolbar help button)
+**Decision**: Route chrome outside this view (e.g. a toolbar help button)
 through a dedicated `onHelpVisibilityChange` callback rather than sharing
 `helpPresenter.onVisibilityChange` directly.
-Rationale: per the source's own comment on `onHelpVisibilityChange`,
+**Rationale**: per the source's own comment on `onHelpVisibilityChange`,
 `onVisibilityChange` "has exactly one slot" on the presenter and this view
 claims it for its own inline button; anything else that needs the same
 notification has to be told by whoever holds that slot rather than
 overwriting it.
-Approved: pending
-
-Decision (observed source behavior, not a stated rationale): Reassigning
-`helpPresenter` rewires only the new presenter's `onVisibilityChange`; the
-previously assigned presenter's `onVisibilityChange` is left pointing back
-at this view's closure.
-Rationale: not explained anywhere in source; inferred directly from the
-`didSet` implementation, which reads and writes only `self.helpPresenter`
-(the new value) and never reaches the old one. Documented here, per
-source-fidelity, as an observed behavior rather than an idealized one — a
-caller that keeps the old presenter alive and later fires its
-`onVisibilityChange` on its own will still repaint this view's button (see
-Edge Cases).
-Approved: pending
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [cookbook-compliance](agenticdevelopercookbook://compliance/recipe-quality#cookbook-compliance) | passed | recipe-quality |
-| [cross-recipe-consistency](agenticdevelopercookbook://compliance/recipe-quality#cross-recipe-consistency) | passed | recipe-quality |
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | internationalization |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
 | [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | platform-compliance |
 
-Statuses rest on: the class being `@MainActor`-isolated throughout with no
-off-actor mutation surface (main-actor-confined); every color coming from
-`SemanticPalette` with no raw hex or literal `NSColor` anywhere in source
-(no-raw-hex, platform-theming); the help-visible/hidden distinction being
-carried by both icon shape and tint, never color alone
-(differentiate-without-color); the help button being a stock `NSButton`
+Statuses rest on: every color coming from `SemanticPalette`, with the
+help-visible/hidden distinction carried by both icon shape and tint, never
+color alone (platform-theming); the help button being a stock `NSButton`
 with no override that removes it from the key-view loop or blocks its
 default activation (keyboard-navigable); the fixed accessibility label
 never reflecting the toggled visibility state, with no
@@ -571,3 +555,4 @@ string-catalog reference anywhere in `PanelHostView.swift`
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved private source identifiers (`buttonInset`, `NSView.pinToEdges`) and AppKit-specific mechanics (`constraint-based-layout-only`, `help-button-momentary-type`) out of requirement bodies and into Platform Notes; merged and renamed condition-laden requirement names to subject-only form (`help-button-visibility`, `presenter-reassignment`, `shows-help-button-toggle`); promoted the implicit keyboard-focus guarantee to a named requirement (`help-button-keyboard-focusable`) with a conformance vector; moved the stale-presenter-callback observation out of Design Decisions (it was a bug, not an approved choice) and left it as the single Edge Case description; trimmed the popover edge case to what this component guarantees; reformatted Design Decisions to the bold three-line form; fixed Compliance statuses and pruned Compliance rows to checks that exist in the catalog; named concrete conformance-vector fixtures (Solarized Dark/Light, `ThemeManager.selectTheme(id:)`) and precise call sequences; removed the unsupported WinUI 3 parenthetical; and listed related ingredients in frontmatter. |

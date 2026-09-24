@@ -3,7 +3,7 @@ id: ba8d9517-2528-4ae9-bc52-16046d68b126
 title: SettingsPanelSplitViewController
 domain: agentictoolkit://recipes/settings-panel-split-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -20,10 +20,13 @@ tags:
 - settings
 - split-view
 - view-controller
-- macos
+- nesting
 - appkit
-depends-on: []
-related: []
+depends-on:
+- agentictoolkit://recipes/split-view-controller
+related:
+- agentictoolkit://recipes/settings-panel-view-controller
+- agentictoolkit://recipes/settings-panel-list-view-controller
 references: []
 approved-by: ''
 approved-date: ''
@@ -48,8 +51,8 @@ sub-hierarchy be a subclass and an `addPanel` call rather than a second
 window or sheet. This recipe documents only what this class itself declares
 or overrides; the sidebar/detail mechanics it inherits (panel management,
 navigation history, theming, the help drawer plumbing) belong to
-`SplitViewController`'s own recipe, and the panel-list/theme-driven rendering
-it composes belongs to that class's own recipe.
+`SplitViewController`'s own recipe, and the panel-list rendering it composes
+belongs to `PanelListViewController`'s own recipe.
 
 ## Behavioral Requirements
 
@@ -81,6 +84,15 @@ it composes belongs to that class's own recipe.
   value is non-`nil`, and MUST fall back to this panel's own `helpContent`
   when there is no inner selection or the inner selection's
   `effectiveHelpContent` is `nil`.
+- **surfaces-empty-help-when-chain-exhausted**: Composing
+  **falls-back-help-content-through-inner-selection** with
+  **returns-nil-help-content-by-default**, when there is no inner selection
+  (or the inner selection's `effectiveHelpContent` is `nil`) and no subclass
+  overrides this panel's own `helpContent`, the component's
+  `effectiveHelpContent` MUST evaluate to `nil` rather than to a placeholder
+  value, per `ComposableSettingsPanel.helpContent`'s own doc comment: a
+  panel with nothing to add gets the drawer's own empty state rather than
+  losing its help affordance.
 - **reports-no-additional-search-keywords**: The component's
   `searchKeywords` MUST return an empty array; it contributes no keywords
   of its own beyond whatever its hosted inner panels supply to their own
@@ -109,9 +121,10 @@ it composes belongs to that class's own recipe.
 - **Shadow**: Not applicable — no shadow is configured in this file.
 - **Min/Max size**: `detailMinimumThickness` is overridden to `200`
   points — a floor on the nested detail pane's width, not a maximum; no
-  maximum size is set anywhere in this file. Per the source's own comment,
-  this floor deliberately stays below the inherited base's `400`pt default
-  so it caps only the inner content rather than compounding the window's
+  maximum size is set anywhere in this file. Per the doc comment on this
+  override, the floor deliberately stays below the inherited
+  `SplitViewController.detailMinimumThickness` default of `400` points, so
+  it caps only the inner content rather than compounding the window's
   overall minimum width.
 
 ## States
@@ -157,11 +170,17 @@ it composes belongs to that class's own recipe.
 | settings-panel-split-view-controller-005 | acts-as-hostable-panel | Construct an instance and call `enclosingSplit.addPanel(instance)` on a separate, outer `SplitViewController` | The outer split accepts it without a compile or runtime error; the instance appears in the outer split's `panels` |
 | settings-panel-split-view-controller-006 | returns-nil-help-content-by-default | Read `helpContent` on a plain (non-subclassed) instance | Returns `nil` |
 | settings-panel-split-view-controller-007 | falls-back-help-content-through-inner-selection | Select an inner panel whose `effectiveHelpContent` is non-`nil` | `effectiveHelpContent` on this instance returns that same value |
-| settings-panel-split-view-controller-007b | falls-back-help-content-through-inner-selection | No inner panel selected, and a subclass overrides `helpContent` to a non-`nil` value | `effectiveHelpContent` returns that overridden `helpContent` value |
-| settings-panel-split-view-controller-008 | reports-no-additional-search-keywords | Read `searchKeywords` on a plain (non-subclassed) instance | Returns `[]` |
-| settings-panel-split-view-controller-009 | narrows-detail-minimum-thickness | Read `detailMinimumThickness` | Returns `200` |
-| settings-panel-split-view-controller-010 | fixes-content-sized-sidebar | Read `contentSizedSidebar` | Returns `true` |
-| settings-panel-split-view-controller-011 | runs-on-main-actor | Attempt to construct or mutate an instance from a non-main actor context | Rejected at compile time by Swift's actor isolation checking |
+| settings-panel-split-view-controller-008 | falls-back-help-content-through-inner-selection | No inner panel selected, and a subclass overrides `helpContent` to a non-`nil` value | `effectiveHelpContent` returns that overridden `helpContent` value |
+| settings-panel-split-view-controller-009 | falls-back-help-content-through-inner-selection | An inner panel is selected, its `effectiveHelpContent` is `nil`, and a subclass overrides this panel's own `helpContent` to a non-`nil` value | `effectiveHelpContent` falls through the inner selection's `nil` and returns the subclass's overridden `helpContent` value |
+| settings-panel-split-view-controller-010 | surfaces-empty-help-when-chain-exhausted | No inner panel is selected (or the inner selection's `effectiveHelpContent` is `nil`), and no subclass overrides `helpContent` | `effectiveHelpContent` evaluates `nil ?? nil` and returns `nil` |
+| settings-panel-split-view-controller-011 | reports-no-additional-search-keywords | Read `searchKeywords` on a plain (non-subclassed) instance | Returns `[]` |
+| settings-panel-split-view-controller-012 | narrows-detail-minimum-thickness | Read `detailMinimumThickness` | Returns `200` |
+| settings-panel-split-view-controller-013 | fixes-content-sized-sidebar | Read `contentSizedSidebar` | Returns `true` |
+
+**runs-on-main-actor** has no conformance vector: Swift's actor isolation
+checking rejects construction or mutation from off the main actor at
+compile time, so there is no runtime behavior left to assert — the
+requirement stands on the compiler's own enforcement.
 
 ## Edge Cases
 
@@ -174,7 +193,8 @@ it composes belongs to that class's own recipe.
   `contentSizedSidebar`'s `true` are fixed override values, not
   caller-supplied inputs, so there is no boundary range to exercise on
   them directly; the only defined relationship is that `200` MUST stay
-  below the inherited base's `400`pt default (see Design Decisions).
+  below `SplitViewController.detailMinimumThickness`'s inherited `400`pt
+  default (see Design Decisions).
 - **Concurrent access**: Not applicable — the class is `@MainActor`, so
   the Swift compiler rejects construction or mutation from off the main
   actor; there is no concurrent-access surface for this file to define
@@ -188,17 +208,18 @@ it composes belongs to that class's own recipe.
 - **Help chain resolves to no help at all**: When there is no inner
   selection and no subclass override of `helpContent`,
   `effectiveHelpContent` evaluates `nil ?? nil` and returns `nil`
-  (**falls-back-help-content-through-inner-selection**); per
+  (**surfaces-empty-help-when-chain-exhausted**, composing
+  **falls-back-help-content-through-inner-selection**); per
   `ComposableSettingsPanel`'s own doc comment, this is a defined state —
   the outer split's help drawer shows its own empty state rather than
-  hiding its help affordance. This is a MUST.
+  hiding its help affordance.
 - **`descriptor.isDisabled` and `descriptor.section` go unused by this
   file**: `SettingsPanelDescriptor` carries both fields, but neither is
   read anywhere in `SettingsPanelSplitViewController.swift`; this is not a
   gap in this file — both are consumed by the sidebar-row renderer
   (`PanelListViewController`) and by `SplitViewController.ordered(_:)`'s
-  sort-by-section logic, outside this file. This is a MUST: this file
-  MUST NOT be expected to act on either field itself.
+  sort-by-section logic, outside this file. This file simply has no code
+  path that reads either field.
 
 ## Configuration
 
@@ -282,7 +303,7 @@ appears anywhere in `SettingsPanelSplitViewController.swift`.
   inheritance, and stores a `ComposableSettings.SettingsPanelDescriptor`
   (`SettingsPanelDescriptor.swift`) — all three defined elsewhere in
   `AgenticToolkit` and not reimplemented here.
-- **WinUI 3** (the reason this recipe exists): Nest one `NavigationView`
+- **WinUI 3**: Nest one `NavigationView`
   inside another's `Content`. Give the inner `NavigationView`
   `PaneDisplayMode="Left"` and `IsPaneToggleButtonVisible="False"`; its
   built-in pane has no draggable splitter (unlike `SplitView`), which
@@ -304,62 +325,64 @@ appears anywhere in `SettingsPanelSplitViewController.swift`.
 
 ## Design Decisions
 
-Decision: Override `detailMinimumThickness` to `200` points rather than
-inheriting the base class's `400`pt default.
-Rationale: Per the source's own comment, "a modest floor so the nested
-detail (the sub-panel content) can't be squeezed to a sliver. It stays
-below the outer detail's own floor, so it caps the inner content rather
-than compounding the window's minimum width."
-Approved: pending
+**Decision**: Override `detailMinimumThickness` to `200` points rather than
+inheriting `SplitViewController`'s `400`pt default.
+**Rationale**: Per the doc comment on
+`SettingsPanelSplitViewController.detailMinimumThickness`, "a modest floor
+so the nested detail (the sub-panel content) can't be squeezed to a
+sliver. It stays below the outer detail's own floor, so it caps the inner
+content rather than compounding the window's minimum width."
+**Approved**: pending
 
-Decision: Override `contentSizedSidebar` to `true` rather than inheriting
-the base class's draggable, autosaved default.
-Rationale: Per the source's own comment, "nested topic lists are
-content-sized and unified to one width by the parent split, so switching
-between sibling panels never shifts the inner divider and every title
-stays fully disclosed."
-Approved: pending
+**Decision**: Override `contentSizedSidebar` to `true` rather than
+inheriting `SplitViewController`'s draggable, autosaved default.
+**Rationale**: Per the doc comment on
+`SettingsPanelSplitViewController.contentSizedSidebar`, "nested topic lists
+are content-sized and unified to one width by the parent split, so
+switching between sibling panels never shifts the inner divider and every
+title stays fully disclosed."
+**Approved**: pending
 
-Decision: Redeclare `helpContent`, `effectiveHelpContent`, and
+**Decision**: Redeclare `helpContent`, `effectiveHelpContent`, and
 `searchKeywords` on this class rather than relying solely on
 `ComposableSettingsPanel`'s protocol-extension defaults.
-Rationale: Per the source's own comment (citing the same reasoning
-documented on the sibling `SettingsPanelViewController`), a protocol
-extension's default is bound at the point of conformance; a subclass
-override reachable only through the extension default would be invisible
-through the `any ComposableSettingsPanel` existential the enclosing split
-holds. Redeclaring the properties on the class keeps subclass overrides
-reachable.
-Approved: pending
+**Rationale**: Per the doc comment on
+`SettingsPanelSplitViewController.helpContent` (citing the same reasoning
+documented on the sibling `SettingsPanelViewController.helpContent`), a
+protocol extension's default is bound at the point of conformance; a
+subclass override reachable only through the extension default would be
+invisible through the `any ComposableSettingsPanel` existential the
+enclosing split holds. Redeclaring the properties on the class keeps
+subclass overrides reachable.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [cookbook-compliance](agenticdevelopercookbook://compliance/recipe-quality#cookbook-compliance) | passed | recipe-quality |
-| [cross-recipe-consistency](agenticdevelopercookbook://compliance/recipe-quality#cross-recipe-consistency) | passed | recipe-quality |
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 
-Statuses rest on: the class being `@MainActor`-isolated throughout with no
-off-actor mutation surface (main-actor-confined); this file overriding only
-the four properties that differ from its base class and delegating every
-other behavior to `SplitViewController` rather than reimplementing it
-(separation-of-concerns); this file adding no keyboard handling that could
-remove a control from the tab order or block default activation
-(keyboard-navigable); this file introducing no accessibility role, label, or
-announcement of its own to regress (screen-reader-support); and this file
-rendering no custom-drawn chrome, composing only inherited AppKit split-view
-behavior (native-controls-preference).
+Statuses rest on: this file overriding only the four properties that differ
+from its base class and delegating every other behavior to
+`SplitViewController` rather than reimplementing it
+(separation-of-concerns); this file adding no keyboard handling of its own
+that could remove a control from the tab order or block default activation,
+while the actual keyboard path (search-field arrow keys, split-view tab
+order) is inherited and evaluated by `SplitViewController`'s own recipe —
+hence `partial` here rather than `passed` (keyboard-navigable); this file
+introducing no accessibility role, label, or announcement of its own to
+regress, while the rendered role/label surface is likewise
+`SplitViewController`'s and `PanelListViewController`'s to evaluate — hence
+`partial` here as well (screen-reader-support); and this file rendering no
+custom-drawn chrome, composing only inherited AppKit split-view behavior
+(native-controls-preference).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reformat Design Decisions to the bold three-line form and cite the specific member behind each quoted claim; move two implicit MUSTs out of Edge Cases into a new named requirement and plain prose; add missing help-chain conformance vectors and drop the untestable main-actor compile-time vector; renumber test vector IDs sequentially; populate depends-on/related with the base class and sibling recipes; de-duplicate the `macos` tag; disambiguate the Overview's dangling class reference; remove editorializing from the WinUI 3 bullet; mark keyboard-navigable/screen-reader-support partial and point to SplitViewController's recipe; clean up Compliance rows to match the catalog |

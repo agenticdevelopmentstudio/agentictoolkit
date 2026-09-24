@@ -3,7 +3,7 @@ id: 7774cbd3-4883-43f0-aef0-f49a29389b98
 title: RadioButtonChoiceView
 domain: agentictoolkit://recipes/radio-button-choice-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -55,49 +55,54 @@ writes the user's radio-button selection back into the view model's
 ## Behavioral Requirements
 
 - **arranges-heading-above-controls-stack**: Component MUST arrange the title
-  label above a `controlsStack` of radio buttons in a single outer, vertical
-  `NSStackView` (`[label, controlsStack]`), and MUST pin that outer stack to
+  label above a group of choice controls in a single outer, vertical
+  container (`[label, controls group]`), and MUST pin that outer container to
   the edges of the view.
-- **builds-one-radio-button-per-choice**: Component MUST create one `NSButton`
-  configured as a radio button (`NSButton(radioButtonWithTitle:target:action:)`)
-  for each entry in `viewModel.choices`, in the same order, using that
-  choice's `label` as the button's own title text.
-- **lays-out-controls-along-axis**: Component MUST arrange the created radio
-  buttons, in order, inside a single `NSStackView` (`controlsStack`) whose
-  `orientation` is set to the constructor's `axis` parameter (default
+- **builds-one-radio-button-per-choice**: Component MUST create one
+  radio-type choice control for each entry in `viewModel.choices`, in the
+  same order, using that choice's `label` as the control's own visible text.
+- **lays-out-controls-along-axis**: Component MUST arrange the created
+  choice controls, in order, inside a single controls group whose layout
+  orientation is set to the constructor's `axis` parameter (default
   `.vertical`).
-- **aligns-controls-stack-by-axis**: Component MUST set `controlsStack`'s
-  `alignment` to `.leading` when `axis` is `.vertical`, and to
-  `.firstBaseline` when `axis` is not `.vertical`.
-- **spaces-stacks-by-row-spacing**: Component MUST set both the outer stack's
-  and `controlsStack`'s `spacing` to `SettingsLayout.default[.rowSpacing]`.
+- **aligns-controls-stack-by-axis**: Component MUST align the controls group
+  along its leading edge when `axis` is `.vertical`, and along a shared first
+  baseline when `axis` is not `.vertical`.
+- **spaces-stacks-by-row-spacing**: Component MUST set both the spacing
+  between the label and the controls group, and the spacing between each
+  control within the group, to `SettingsLayout.default[.rowSpacing]`.
 - **initializes-from-view-model**: Component MUST, at the end of
-  initialization, set the label's text to `viewModel.title`, and set each
-  radio button's `state` to `.on` when its associated choice's `value` equals
-  `viewModel.value`, and to `.off` otherwise.
+  initialization, set the label's text to `viewModel.title`, and select the
+  choice control whose associated choice `value` equals `viewModel.value`
+  while deselecting every other choice control.
 - **commits-radio-selection**: Component MUST write the value paired with the
-  radio button that fired the action into `viewModel.settingObserver.value`
-  whenever that value differs from the current `settingObserver.value`.
+  choice control that fired the selection action into
+  `viewModel.settingObserver.value` whenever that value differs from the
+  current `settingObserver.value`.
 - **skips-redundant-commits**: Component MUST NOT write to
-  `viewModel.settingObserver.value` when the firing button's paired value
+  `viewModel.settingObserver.value` when the firing control's paired value
   equals the current `settingObserver.value`.
 - **ignores-unmatched-sender**: Component MUST NOT write to
-  `viewModel.settingObserver.value` when the button that fired the action is
-  not present in the component's recorded button-value pairs.
+  `viewModel.settingObserver.value` when the control that fired the
+  selection action is not present in the component's recorded
+  control-value pairs.
 - **syncs-on-external-change**: Component MUST re-set the label's text from
-  `viewModel.title`, and re-set every radio button's `state` to reflect
-  `viewModel.value`, whenever `viewModel.onChange` fires.
-- **exposes-constituent-views**: Component MUST expose `label` and
-  `radioButtons` as public, directly-accessible properties; `radioButtons`
-  MUST NOT be publicly replaceable as a whole (`private(set)`).
+  `viewModel.title`, and re-select the choice control matching
+  `viewModel.value` while deselecting the rest, whenever `viewModel.onChange`
+  fires.
+- **exposes-constituent-views**: Component MUST expose the heading label and
+  the ordered list of choice controls as public, directly-accessible
+  properties; the choice-controls list MUST NOT be publicly replaceable as a
+  whole (readable from outside the type, but not externally settable).
 - **requires-designated-initializer**: Component MUST NOT support
-  construction via `init(coder:)`; that initializer MUST trigger a fatal
-  error.
+  construction through a serialization/coder-based initializer; that
+  construction path MUST trigger a fatal error.
 - **rejects-frame-only-initialization**: Component MUST NOT support
-  construction via the frame-only `init(frame:)`; that initializer MUST
-  trigger a fatal error.
-- **confines-to-main-actor**: Component MUST be usable only on the main
-  actor; the class is declared `@MainActor`.
+  construction through a frame/bounds-only initializer that bypasses the
+  required view-model parameter; that construction path MUST trigger a fatal
+  error.
+- **confines-to-main-actor**: Component MUST be usable only on the UI (main)
+  thread of execution.
 
 ## Appearance
 
@@ -189,6 +194,12 @@ writes the user's radio-button selection back into the view model's
   pointer-interface requirement. `RadioButtonChoiceView` sets no
   `controlSize` on any `radioButtons` element, so each keeps `NSButton`'s
   regular system click-target metrics.
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
+  heading `label` text color resolves from the active theme's `.primaryText` role against
+  the hosting background at runtime; the component performs no contrast
+  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
+  determined from this file. This would be settled by a theme-level
+  contrast audit of `.primaryText` against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -198,31 +209,33 @@ writes the user's radio-button selection back into the view model's
 | radio-button-choice-view-002 | builds-one-radio-button-per-choice | `viewModel.choices` has 3 entries with labels `"A"`, `"B"`, `"C"` | After init, `radioButtons.count == 3` and `radioButtons[0].title == "A"`, `radioButtons[1].title == "B"`, `radioButtons[2].title == "C"`, in that order |
 | radio-button-choice-view-003 | lays-out-controls-along-axis | Construct with `axis: .horizontal` | `controlsStack.orientation == .horizontal` and every `radioButtons` element is an arranged subview of `controlsStack` |
 | radio-button-choice-view-004 | aligns-controls-stack-by-axis | Construct with `axis: .vertical` (default) | `controlsStack.alignment == .leading` |
-| radio-button-choice-view-004b | aligns-controls-stack-by-axis | Construct with `axis: .horizontal` | `controlsStack.alignment == .firstBaseline` |
-| radio-button-choice-view-005 | spaces-stacks-by-row-spacing | Construct the component | Both the outer stack's `spacing` and `controlsStack.spacing` equal `SettingsLayout.default[.rowSpacing]` (8pt) |
-| radio-button-choice-view-006 | initializes-from-view-model | `viewModel.title = "Theme"`, `viewModel.choices = [(label: "Light", value: .light), (label: "Dark", value: .dark)]`, `viewModel.value = .dark` | After init, `label.stringValue == "Theme"`, the button paired with `.dark` has `state == .on`, the button paired with `.light` has `state == .off` |
-| radio-button-choice-view-007 | commits-radio-selection | `viewModel.settingObserver.value == choices[0].value`; invoke `radioChanged(radioButtons[1])` | `viewModel.settingObserver.value == choices[1].value` after the call |
-| radio-button-choice-view-008 | skips-redundant-commits | `viewModel.settingObserver.value == choices[0].value`; invoke `radioChanged(radioButtons[0])` (same value) | `viewModel.settingObserver.value`'s setter is not invoked a second time (e.g. no additional write/observer notification is recorded) |
-| radio-button-choice-view-009 | ignores-unmatched-sender | Invoke `radioChanged(_:)` with an `NSButton` instance that is not one of `radioButtons` | `viewModel.settingObserver.value` is unchanged; no crash occurs |
-| radio-button-choice-view-010 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.value` to a value present in `choices`, then invoke `viewModel.onChange(newValue)` | `label.stringValue` updates to the new title, and exactly the radio button paired with `newValue` has `state == .on` while every other button has `state == .off` |
-| radio-button-choice-view-011 | exposes-constituent-views | Construct the component, then access `.label` and `.radioButtons` from outside the type | Both properties are accessible and return the same `NSTextField`/`[NSButton]` instances built during init; `radioButtons` has no public setter |
-| radio-button-choice-view-012 | requires-designated-initializer | Attempt `RadioButtonChoiceView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
-| radio-button-choice-view-013 | rejects-frame-only-initialization | Attempt `RadioButtonChoiceView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
-| radio-button-choice-view-014 | confines-to-main-actor | Attempt to construct or mutate a `RadioButtonChoiceView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| radio-button-choice-view-005 | aligns-controls-stack-by-axis | Construct with `axis: .horizontal` | `controlsStack.alignment == .firstBaseline` |
+| radio-button-choice-view-006 | spaces-stacks-by-row-spacing | Construct the component | Both the outer stack's `spacing` and `controlsStack.spacing` equal `SettingsLayout.default[.rowSpacing]` (8pt) |
+| radio-button-choice-view-007 | initializes-from-view-model | `viewModel.title = "Theme"`, `viewModel.choices = [(label: "Light", value: .light), (label: "Dark", value: .dark)]`, `viewModel.value = .dark` | After init, `label.stringValue == "Theme"`, the button paired with `.dark` has `state == .on`, the button paired with `.light` has `state == .off` |
+| radio-button-choice-view-008 | commits-radio-selection | `viewModel.settingObserver.value == choices[0].value`; invoke `radioChanged(radioButtons[1])` | `viewModel.settingObserver.value == choices[1].value` after the call |
+| radio-button-choice-view-009 | skips-redundant-commits | `viewModel.settingObserver.value == choices[0].value`; invoke `radioChanged(radioButtons[0])` (same value) | No write to `settingObserver.value` is recorded (e.g. a spy wrapping `settingObserver` that counts value-writes/notifications reports zero additional writes after the call) |
+| radio-button-choice-view-010 | ignores-unmatched-sender | Invoke `radioChanged(_:)` with an `NSButton` instance that is not one of `radioButtons` | `viewModel.settingObserver.value` is unchanged; no crash occurs |
+| radio-button-choice-view-011 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.value` to a value present in `choices`, then invoke `viewModel.onChange(newValue)` directly | `label.stringValue` updates to the new title, and exactly the radio button paired with `newValue` has `state == .on` while every other button has `state == .off` |
+| radio-button-choice-view-012 | syncs-on-external-change, commits-radio-selection | Click `radioButtons[1]` (currently `.off`, paired value differs from `choices[0].value`); then, on a later main-queue turn, `settingObserver` delivers the accepted write and `viewModel.onChange` fires | Synchronously after the click, `viewModel.settingObserver.value == choices[1].value` (per commits-radio-selection); after `onChange` fires, `radioButtons[1].state == .on` and every other button is `.off` |
+| radio-button-choice-view-013 | syncs-on-external-change, commits-radio-selection | Click `radioButtons[1]`; before the next main-queue turn, an intermediary rejects/transforms the write so `viewModel.value` ends up equal to `choices[0].value` instead; `viewModel.onChange(choices[0].value)` then fires | After `onChange` fires, `syncSelection()` overrides the native click toggle: `radioButtons[0].state == .on` and `radioButtons[1].state == .off`, matching the actual `viewModel.value` rather than the clicked button |
+| radio-button-choice-view-014 | exposes-constituent-views | Construct the component, then access `.label` and `.radioButtons` from outside the type | Both properties are accessible and return the same `NSTextField`/`[NSButton]` instances built during init; `radioButtons` has no public setter |
+| radio-button-choice-view-015 | requires-designated-initializer | Attempt `RadioButtonChoiceView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| radio-button-choice-view-016 | rejects-frame-only-initialization | Attempt `RadioButtonChoiceView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
+| radio-button-choice-view-017 | confines-to-main-actor | Attempt to construct or mutate a `RadioButtonChoiceView` from off the main actor | This is a static/compile-time check, not a runtime conformance test: the compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
 
 ## Edge Cases
 
 - Null/empty input: `viewModel` (`ChoiceViewModel<Value>`) is a non-optional,
-  typed constructor parameter; Swift's type system rules out `nil`. This is
-  a MUST: the component provides, and needs, no nil-handling path for its
-  one required initializer parameter.
+  typed constructor parameter, so Swift's type system rules out `nil`; the
+  component provides, and needs, no nil-handling path for its one required
+  initializer parameter.
 - Boundary values — empty `choices`: when `viewModel.choices.isEmpty`, the
   `for choice in viewModel.choices` loop never runs, `radioButtons` and
   `buttonValues` stay empty, and `NSStackView(views: [])` produces a
   zero-arranged-subview `controlsStack`. `syncSelection()`'s loop over
   `buttonValues` also never runs. No crash occurs; the row renders only its
-  heading label. This is a MUST: source performs no guard against, or
-  special-casing for, an empty `choices` array.
+  heading label. Source performs no guard against, or special-casing for, an
+  empty `choices` array.
 - Boundary values — single choice: when `viewModel.choices.count == 1`,
   exactly one radio button is created. Per AppKit's own radio-button
   behavior, once that button is selected (either at init, from
@@ -250,10 +263,8 @@ writes the user's radio-button selection back into the view model's
   property. `RadioButtonChoiceView`'s initializer unconditionally assigns
   `viewModel.onChange = { [weak self] _ in self?.syncSelection() }`,
   replacing whatever handler (if any) was previously registered on that
-  `ChoiceViewModel` instance. This is a MUST-level, source-traceable
-  consequence of plain closure-property assignment: the component MUST NOT
-  be assumed to coexist with another `onChange` observer already registered
-  on the same view model instance.
+  `ChoiceViewModel` instance (see Design Decisions for this as a known
+  limitation).
 - Native mutual exclusion races the observer round trip: `NSButton(
   radioButtonWithTitle:)` configures each button with AppKit's `.radio`
   button type; multiple such buttons sharing the same immediate superview
@@ -361,13 +372,19 @@ Not applicable: `RadioButtonChoiceView.swift` contains no logging call (no
 - **AppKit/UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/RadioButtonChoiceView.swift`.
   A macOS-only (`import AppKit`), generic-over-`Value` `NSView` subclass,
-  `@MainActor`, inside the `ComposableSettings` namespace, conforming to
-  `SettingsViewProtocol`. It composes a `ThemedLabel` heading (via
-  `ComposableSettings.makeRowLabel`) and one native `.radio`-type `NSButton`
-  per choice into two nested `NSStackView`s and `pinToEdges` — unlike its
-  sibling row views, it does not use `ComposableSettings.makeRow`. There is
-  no UIKit code path in source; UIKit has no native radio-button control, so
-  a port would need `UIButton`s manually toggled in a target/action handler
+  isolated to the main actor via Swift's `@MainActor`, inside the
+  `ComposableSettings` namespace, conforming to `SettingsViewProtocol`. It
+  composes a `ThemedLabel` heading (via `ComposableSettings.makeRowLabel`)
+  and, for each choice, one native `.radio`-type `NSButton` built from
+  `NSButton(radioButtonWithTitle:target:action:)` wired to the
+  `radioChanged(_:)` action, into two nested `NSStackView`s
+  (`controlsStack.orientation`/`.alignment` driven by `axis`) pinned via
+  `pinToEdges` — unlike its sibling row views, it does not use
+  `ComposableSettings.makeRow`. Selection state is AppKit's `NSButton.state`
+  (`.on`/`.off`); the `radioButtons` array is exposed as `public
+  private(set)` so callers can read but not replace it. There is no UIKit
+  code path in source; UIKit has no native radio-button control, so a port
+  would need `UIButton`s manually toggled in a target/action handler
   (clearing every sibling's selected state before setting the tapped one),
   or a `UISegmentedControl`/checkmarked table rows as an alternate native
   composition.
@@ -391,53 +408,71 @@ Not applicable: `RadioButtonChoiceView.swift` contains no logging call (no
 
 ## Design Decisions
 
-- Decision: Compose two nested `NSStackView`s (an outer vertical
+- **Decision**: Compose two nested `NSStackView`s (an outer vertical
   `[label, controlsStack]` plus an inner `controlsStack`) rather than using
   `ComposableSettings.makeRow`'s single horizontal `[label, spacer,
   control...]` layout that every other `ComposableSettings` row view uses.
-  Rationale: a multi-choice radio group needs to grow along its own axis
+  **Rationale**: a multi-choice radio group needs to grow along its own axis
   independent of the heading, unlike a single trailing control (a switch,
   slider, or popup) that fits beside the label in one row's height; source
   never calls `makeRow` anywhere in this file.
-  Approved: pending
-- Decision: Switch `controlsStack.alignment` between `.leading` (vertical
+  **Approved**: pending
+- **Decision**: Switch `controlsStack.alignment` between `.leading` (vertical
   axis) and `.firstBaseline` (horizontal axis) via the source's own
   ternary, rather than using one alignment for both orientations.
-  Rationale: stacked buttons of possibly different widths want a common left
-  edge when arranged vertically, while buttons placed side by side want
+  **Rationale**: stacked buttons of possibly different widths want a common
+  left edge when arranged vertically, while buttons placed side by side want
   their title text sitting on one shared line, which `.firstBaseline`
   provides and `.leading` does not.
-  Approved: pending
-- Decision: Build each choice's control from AppKit's stock
+  **Approved**: pending
+- **Decision**: Build each choice's control from AppKit's stock
   `NSButton(radioButtonWithTitle:)` factory rather than pairing a bare radio
   `NSButton` with a separate `ThemedLabel` per choice, the way the heading
   label is built.
-  Rationale: `radioButtonWithTitle:` is the standard AppKit factory that
+  **Rationale**: `radioButtonWithTitle:` is the standard AppKit factory that
   bundles a radio control and its title into one control; source builds no
   second `ThemedLabel` per row, at the traceable cost that per-choice titles
   do not follow the app's theme `sizeScale` or repaint-on-theme-change path
   the way the heading label does (see Appearance).
-  Approved: pending
-- Decision: Leave every radio button `.off` when `viewModel.value` matches no
-  choice's `value`, rather than falling back to a default selection.
-  Rationale: `syncSelection()`'s `(value == current) ? .on : .off` comparison
-  is evaluated independently per button with no fallback branch in source;
-  the component makes no attempt to guarantee "exactly one selected" when the
-  view model's value is not representable by any choice.
-  Approved: pending
-- Decision: Both `init(coder:)` and the frame-only `init(frame:)` trigger a
-  fatal error, leaving `init(viewModel:axis:)` as the only usable
-  initializer; the frame-only override's message string is the identical,
-  truncated `"init(frame frameRect: NSRect"` literal (missing its closing
-  parenthesis) used by this file's sibling row views.
-  Rationale: The view has no meaningful default state — it cannot render a
-  title, choice set, or value without a `viewModel` — so both inherited
+  **Approved**: pending
+- **Decision**: Leave every radio button `.off` when `viewModel.value` matches
+  no choice's `value`, rather than falling back to a default selection.
+  **Rationale**: `syncSelection()`'s `(value == current) ? .on : .off`
+  comparison is evaluated independently per button with no fallback branch in
+  source; the component makes no attempt to guarantee "exactly one selected"
+  when the view model's value is not representable by any choice.
+  **Approved**: pending
+- **Decision**: Both `init(coder:)` and the frame-only `init(frame:)` trigger
+  a fatal error, leaving `init(viewModel:axis:)` as the only usable
+  initializer.
+  **Rationale**: The view has no meaningful default state — it cannot render
+  a title, choice set, or value without a `viewModel` — so both inherited
   `NSView` initializers that could construct it without one are
-  intentionally disabled. The shared, truncated message text across sibling
-  files indicates the string was copied forward from an earlier row view
-  rather than authored fresh for this one; it is reproduced here as written
-  rather than corrected, per source fidelity.
-  Approved: pending
+  intentionally disabled.
+  **Approved**: pending
+  Known defect: the frame-only override's fatal-error message is the
+  truncated string `"init(frame frameRect: NSRect"` (missing its closing
+  parenthesis); it is reproduced here exactly as written in source, not
+  corrected.
+- **Decision**: The initializer unconditionally assigns `viewModel.onChange`,
+  replacing whatever handler (if any) was previously registered on that
+  `ChoiceViewModel` instance, rather than composing with an existing handler.
+  **Rationale**: `viewModel.onChange` is a single closure property; a plain
+  assignment is the simplest way to route external changes into
+  `syncSelection()`, at the traceable cost that another party's previously
+  registered `onChange` observer on the same view-model instance is silently
+  discarded (see Edge Cases).
+  **Approved**: pending
+- **Decision**: Leave the heading `label` with no accessibility group or
+  title-UI-element linkage to the radio buttons beneath it (no
+  `NSAccessibilityGroupRole`, no `setAccessibilityTitleUIElement`), unlike
+  sibling `CheckboxView`, which does link its single control to its label.
+  **Rationale**: Not yet decided; see the open question in Accessibility
+  (Label requirements) for what would settle it. WinUI's
+  `RadioButtons.Header`, Compose's `selectableGroup()`, and the Web
+  `<fieldset>`/`<legend>` notes already assume a named accessibility group as
+  the eventual target for this component.
+  **Approved**: pending
 
 ## Compliance
 
@@ -445,12 +480,25 @@ Not applicable: `RadioButtonChoiceView.swift` contains no logging call (no
 |-------|--------|----------|
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | accessibility |
 | [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | partial | accessibility |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+
+`native-controls-preference` and `platform-design-language` pass because every
+control is a stock AppKit `NSButton`/`NSTextField`; `keyboard-navigable` is
+`partial` because source sets no explicit key-view-loop or Full Keyboard
+Access handling of its own (only AppKit's default `NSControl` tab behavior),
+and Accessibility carries an open question on the group-to-heading link;
+`semantic-markup` stays `partial` for that same unresolved linkage;
+`idempotent-operations` passes on `skips-redundant-commits`; and
+`separation-of-concerns` passes because Behavioral Requirements now state
+platform-neutral behavior, with the AppKit-specific mechanics confined to
+Platform Notes.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded Behavioral Requirements as platform-neutral behavior and moved the AppKit mechanics (NSButton/NSStackView factories, `.on`/`.off` state, `private(set)`, `@MainActor`) into the AppKit/UIKit platform note; replaced the unsupported "copied forward" guess in the fatal-error Design Decision with a factual known-defect note; reformatted all Design Decisions into the three-line bold form and added decisions for the onChange-overwrite limitation and the open accessibility group-heading question; removed false MUST framing from descriptive Edge Cases and pointed the onChange-overwrite edge case at its Design Decision; downgraded the `keyboard-navigable` compliance row to partial and added the compliance status sentence; renumbered the conformance test vectors sequentially, reworded vector 009 (formerly 008) to assert "no write is recorded", marked vector 017 (formerly 014) as a static/compile-time check, and added vectors for the click-to-async-`syncSelection()` round trip including a rejected-write case; records the unverified theme-token contrast as an open question. |

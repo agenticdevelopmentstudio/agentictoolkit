@@ -3,7 +3,7 @@ id: 1727e605-6f83-42d7-960f-45fbdf714d94
 title: Quick Look Preview
 domain: agentictoolkit://recipes/quick-look-preview
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -38,16 +38,16 @@ approved-date: ''
 
 ## Behavioral Requirements
 
-- **conforms-to-viewrepresentable**: The component MUST conform to `NSViewRepresentable`, presenting a `QLPreviewView` as a SwiftUI view.
+- **wraps-native-preview-control**: The component MUST present the platform's native file-preview control within the surrounding SwiftUI (or platform-equivalent) view hierarchy, as a wrapped native view rather than a bespoke re-implementation.
 - **requires-preview-url**: The component MUST expose `url: URL` as a required, non-optional, immutable (`let`) stored property naming the file to preview.
 - **confines-to-main-actor**: The component MUST be usable only on the main actor: `NSViewRepresentable`'s `makeNSView(context:)`, `updateNSView(_:context:)`, and `dismantleNSView(_:coordinator:)` requirements are `@MainActor`-isolated by the protocol declaration itself, not by an explicit annotation in this file.
-- **constructs-preview-view-with-normal-style**: On creation, the component MUST construct its `QLPreviewView` via `QLPreviewView(frame: .zero, style: .normal)`.
-- **falls-back-to-default-style-when-unavailable**: If `QLPreviewView(frame:style:)` returns `nil`, the component MUST construct the view via the parameterless `QLPreviewView()` initializer instead.
-- **enables-autostart**: The component MUST set the created `QLPreviewView`'s `autostarts` property to `true`.
-- **sets-initial-preview-item**: The component MUST assign `url`, cast to `NSURL`, to the created view's `previewItem` before returning it from `makeNSView(context:)`.
-- **skips-redundant-preview-item-updates**: The component MUST NOT reassign `previewItem` when the view's current `previewItem`, cast back to `URL`, already equals the incoming `url`.
-- **updates-preview-item-on-url-change**: The component MUST reassign the view's `previewItem` to the incoming `url`, cast to `NSURL`, when it differs from the view's current `previewItem`.
-- **closes-preview-view-on-dismantle**: The component MUST call `close()` on the `QLPreviewView` from `dismantleNSView(_:coordinator:)` when SwiftUI removes it from the hierarchy.
+- **constructs-preview-view-with-normal-style**: On creation, the component MUST initialize the native preview control in its full-featured ("normal") presentation style rather than a reduced one.
+- **falls-back-to-default-style-when-unavailable**: If the native preview control's full-featured-style initializer is unavailable (yields no instance), the component MUST fall back to constructing the control at its default style instead of crashing or leaving no view.
+- **enables-autostart**: The component MUST configure the native preview control to begin generating its preview immediately upon creation, without requiring a separate, explicit start call.
+- **sets-initial-preview-item**: On creation, the component MUST configure the native preview control to preview the file at `url` before the control is returned to the view hierarchy.
+- **skips-redundant-preview-item-updates**: The component MUST NOT re-trigger preview generation when the incoming `url` is unchanged from the file the control is already showing.
+- **updates-preview-item-on-url-change**: The component MUST update the native preview control to display the new file when `url` changes to a value different from the file it is currently showing.
+- **closes-preview-view-on-dismantle**: The component MUST release the native preview control's underlying preview-generation resources when the component is removed from the view hierarchy.
 
 ## Appearance
 
@@ -81,14 +81,14 @@ approved-date: ''
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| quick-look-preview-001 | conforms-to-viewrepresentable | Embed `QuickLookPreview(url:)` in a SwiftUI view hierarchy | It compiles and renders as an `NSViewRepresentable`-backed `NSView` (a `QLPreviewView`) inside the SwiftUI tree |
+| quick-look-preview-001 | wraps-native-preview-control | Embed `QuickLookPreview(url:)` in a SwiftUI view hierarchy | It compiles and renders as an `NSViewRepresentable`-backed `NSView` (a `QLPreviewView`) inside the SwiftUI tree |
 | quick-look-preview-002 | requires-preview-url | Attempt to construct `QuickLookPreview()` with no `url` argument | Compilation fails; `url` has no default value and is not optional |
 | quick-look-preview-003 | confines-to-main-actor | Call `makeNSView(context:)` from off the main actor | The compiler rejects the call at compile time under Swift's `@MainActor` isolation checking, inherited from `NSViewRepresentable`'s protocol requirements |
 | quick-look-preview-004 | constructs-preview-view-with-normal-style | Construct `QuickLookPreview(url:)` in an environment where `QLPreviewView(frame:style:)` succeeds | `makeNSView` returns a `QLPreviewView` constructed with `frame: .zero, style: .normal` |
-| quick-look-preview-005 | falls-back-to-default-style-when-unavailable | Construct `QuickLookPreview(url:)` in an environment where `QLPreviewView(frame:style:)` returns `nil` | `makeNSView` returns a `QLPreviewView` constructed via the parameterless `QLPreviewView()` initializer, without crashing |
+| quick-look-preview-005 | falls-back-to-default-style-when-unavailable | Code inspection (not runtime-exercisable: nothing in this codebase lets a test make `QLPreviewView(frame:style:)` return `nil`) | Per source, if the initializer returned `nil`, `makeNSView` would construct the view via the parameterless `QLPreviewView()` initializer instead, without crashing |
 | quick-look-preview-006 | enables-autostart | Inspect the `QLPreviewView` returned by `makeNSView(context:)` | `view.autostarts == true` |
 | quick-look-preview-007 | sets-initial-preview-item | Construct `QuickLookPreview(url: someURL)` | `(view.previewItem as? NSURL) as URL? == someURL` immediately after `makeNSView` returns |
-| quick-look-preview-008 | skips-redundant-preview-item-updates | Call `updateNSView(_:context:)` with the `url` the view's `previewItem` already holds | `view.previewItem` is not reassigned (no generator restart) |
+| quick-look-preview-008 | skips-redundant-preview-item-updates | Call `updateNSView(_:context:)` with the `url` the view's `previewItem` already holds | `view.previewItem` is the same object after the call as before it (its setter is not invoked), verifiable via an identity comparison or a spy on the setter |
 | quick-look-preview-009 | updates-preview-item-on-url-change | Call `updateNSView(_:context:)` with a `url` different from the view's current `previewItem` | `view.previewItem` is reassigned to the new `url` |
 | quick-look-preview-010 | closes-preview-view-on-dismantle | SwiftUI removes `QuickLookPreview` from the view hierarchy, invoking `dismantleNSView(_:coordinator:)` | `close()` is called on the `QLPreviewView` |
 
@@ -97,10 +97,10 @@ approved-date: ''
 - **Null/empty input**: Not applicable — `url: URL` is a required, non-optional, `let` stored property with no failable construction path in this file; Swift's type system prevents constructing `QuickLookPreview` with a missing or null `url` (see **requires-preview-url**).
 - **Boundary values**: Not applicable — the component takes no numeric, size-constrained, or range-bound input; its only input is a file `URL`.
 - **Concurrent access**: Not applicable — `makeNSView`, `updateNSView`, and `dismantleNSView` are `@MainActor`-isolated by `NSViewRepresentable`'s protocol declaration (see **confines-to-main-actor**), so SwiftUI never invokes them concurrently with one another.
-- **Error states**: MUST, as observed in source — the only fallible operation in this file is `QLPreviewView(frame: .zero, style: .normal)`; its failure (a `nil` return, per the source's comment "returns nil only when QuickLook is unavailable") is handled by constructing `QLPreviewView()` instead (see **falls-back-to-default-style-when-unavailable**). Beyond that one path, this file defines no error handling: if `url` names a file that cannot be read, no longer exists, or has no QuickLook generator, `QLPreviewView` renders its own native "no preview available" state (per the source's doc comment) — this wrapper neither detects nor reports that condition itself, so it is documented here as `QLPreviewView`'s own behavior, not an error path this file implements.
+- **Error states**: The only fallible operation in this file is the preview control's full-featured initializer, `QLPreviewView(frame: .zero, style: .normal)`; its failure (a `nil` return, per the source's comment "returns nil only when QuickLook is unavailable") is handled by falling back to `QLPreviewView()` instead (see **falls-back-to-default-style-when-unavailable**). Beyond that one path, this file defines no error handling. The source's own doc comment states that a file type with no QuickLook generator makes `QLPreviewView` draw its own native "no preview available" state; the doc comment makes no equivalent claim for a file that cannot be read or no longer exists, so this recipe does not extend that claim to those cases. This wrapper neither detects nor reports any of these conditions itself — whatever `QLPreviewView` does with an unreadable or missing file is its own behavior, unconfirmed by this source file.
 - **Offline/disconnected state**: Not applicable — the component performs no networking; `url` identifies a local file and QuickLook rendering happens entirely on-device.
-- **`url` changes while a preview is still generating**: MUST, as observed in source — when `updateNSView` receives a new `url` while `QLPreviewView` is still generating the previous preview, the component reassigns `previewItem` immediately (see **updates-preview-item-on-url-change**) without first canceling or waiting on the prior generation; any cancellation is internal to `QLPreviewView` and not implemented in this file.
-- **Repeated identical `url` across consecutive `updateNSView` calls**: MUST, as observed in source — the component does not restart generation by reassigning an unchanged `previewItem` (see **skips-redundant-preview-item-updates**); per the source's own comment, reassigning the same item "restarts the generator and flickers."
+- **`url` changes while a preview is still generating**: When `updateNSView` receives a new `url` while `QLPreviewView` is still generating the previous preview, the component reassigns `previewItem` immediately (see **updates-preview-item-on-url-change**) without first canceling or waiting on the prior generation; any cancellation is internal to `QLPreviewView` and not implemented in this file.
+- **Repeated identical `url` across consecutive `updateNSView` calls**: The component does not restart generation by reassigning an unchanged `previewItem` (see **skips-redundant-preview-item-updates**); per the source's own comment, reassigning the same item "restarts the generator and flickers."
 
 ## Configuration
 
@@ -145,48 +145,48 @@ Not applicable — the source contains no logging call (no `os_log`, `Logger`, o
 
 ## Platform Notes
 
-- **SwiftUI** (source): `QuickLookPreview.swift` (`packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/Views/QuickLookPreview.swift`) is the entire source: an `NSViewRepresentable` struct with one stored property, `url: URL`, wrapping AppKit's `QLPreviewView` (from `QuickLookUI`) via `makeNSView`, `updateNSView`, and the static `dismantleNSView`. No other SwiftUI-native content — no `Text`, `Image`, shape, or custom drawing — appears in the file; every visible pixel comes from the wrapped `QLPreviewView`.
+- **SwiftUI** (source): `QuickLookPreview.swift` (`packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/Views/QuickLookPreview.swift`) is the entire source: an `NSViewRepresentable` struct with one stored property, `url: URL`, wrapping AppKit's `QLPreviewView` (from `QuickLookUI`) via `makeNSView`, `updateNSView`, and the static `dismantleNSView` (see **wraps-native-preview-control**). `makeNSView` constructs the view via the failable `QLPreviewView(frame: .zero, style: .normal)` initializer, falling back to the parameterless `QLPreviewView()` when that returns `nil` (see **constructs-preview-view-with-normal-style**, **falls-back-to-default-style-when-unavailable**); sets `autostarts = true` (see **enables-autostart**); and assigns `url`, cast to `NSURL`, to `previewItem` (see **sets-initial-preview-item**). `updateNSView` reassigns `previewItem` to `url` cast to `NSURL` only when `(view.previewItem as? NSURL) as URL? != url` (see **updates-preview-item-on-url-change**, **skips-redundant-preview-item-updates**). `dismantleNSView` calls `view.close()` (see **closes-preview-view-on-dismantle**). No other SwiftUI-native content — no `Text`, `Image`, shape, or custom drawing — appears in the file; every visible pixel comes from the wrapped `QLPreviewView`.
 - **Compose**: There is no first-party Android/Compose equivalent of QuickLook. Reproduce "show it if we can" per file type instead: `AsyncImage`/Coil for images, ExoPlayer's `PlayerView` (wrapped in `AndroidView`) for video/audio, `PdfRenderer` rendered into a `Bitmap` shown in an `Image` for PDFs, and a plain "no preview available" `Column` for everything else — since no single OS-level control does what `QLPreviewView` does here, each format's fallback has to be composed explicitly rather than delegated.
 - **React/Web**: Browsers likewise have no single universal preview control. Compose the same per-format fallback: an `<img>` for image MIME types, `<video>`/`<audio>` for media, an `<iframe>` or `pdf.js` for PDFs, and a plain fallback message for anything else, branching on the file's MIME type rather than delegating to one renderer.
 - **AppKit / UIKit**: A pure-AppKit host would use `QLPreviewView` directly as a subview, calling `close()` from `deinit`/`viewWillDisappear` in place of `dismantleNSView`. UIKit has no `QLPreviewView` — the iOS analogue is `QLPreviewController`, a full-screen, `UIViewController`-based, one-item-at-a-time browser driven by `QLPreviewControllerDataSource`; porting to iOS means wrapping it as a `UIViewControllerRepresentable` presented modally, rather than embedding it inline the way `QLPreviewView` is embedded here.
-- **WinUI 3** (the reason this recipe exists): Windows has no OS-level QuickLook equivalent — Explorer's Preview Pane host (`IPreviewHandler`) is a COM interface with no XAML/WinUI wrapper, so no single control can stand in for `QLPreviewView`. Build this as a `Frame` or `ContentControl` that inspects the file's extension/MIME type and swaps in the matching native control: an `Image` bound to a `BitmapImage` for image formats, a `MediaPlayerElement` for audio/video, and a `Microsoft.Web.WebView2` control navigated to the local file (`webView.CoreWebView2.Navigate(fileUri)`) for PDFs — WebView2's Chromium engine renders PDF natively — and any other browser-viewable format. Fall back to a plain "No preview available" `TextBlock` for everything else, mirroring `QLPreviewView`'s own graceful degradation (see Design Decisions), since there is no single control here to delegate that fallback to the way this source does. Swap the active child on `url`/file-type change the same way `updateNSView` swaps `previewItem`, guarding against reassigning an unchanged source the same way **skips-redundant-preview-item-updates** avoids restarting an unchanged `QLPreviewView` generator.
+- **WinUI 3**: Windows has no OS-level QuickLook equivalent — Explorer's Preview Pane host (`IPreviewHandler`) is a COM interface with no XAML/WinUI wrapper, so no single control can stand in for `QLPreviewView`. Build this as a `Frame` or `ContentControl` that inspects the file's extension/MIME type and swaps in the matching native control: an `Image` bound to a `BitmapImage` for image formats, a `MediaPlayerElement` for audio/video, and a `Microsoft.Web.WebView2` control navigated to the local file (`webView.CoreWebView2.Navigate(fileUri)`) for PDFs — WebView2's Chromium engine renders PDF natively — and any other browser-viewable format. Fall back to a plain "No preview available" `TextBlock` for everything else, mirroring `QLPreviewView`'s own graceful degradation (see Design Decisions), since there is no single control here to delegate that fallback to the way this source does. Swap the active child on `url`/file-type change the same way `updateNSView` swaps `previewItem`, guarding against reassigning an unchanged source the same way **skips-redundant-preview-item-updates** avoids restarting an unchanged `QLPreviewView` generator.
 
 ## Design Decisions
 
 **Decision**: Lean on QuickLook (`QLPreviewView`) rather than a stack of per-file-type views.
 **Rationale**: Per the source's own doc comment, this "is what keeps 'show it if we can' from becoming a format list this repo has to maintain," and reuses "the same renderer the user already knows from the Finder."
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: An unsupported file format's "no preview available" message is left entirely to `QLPreviewView`, with no fallback view or message coded in this file.
 **Rationale**: Per the source's own doc comment, "a type QuickLook has no generator for draws its own 'no preview available' — that is the honest answer, and it costs nothing."
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `updateNSView` guards reassignment of `previewItem` behind an equality check rather than always reassigning it.
 **Rationale**: Per the source's own comment, "reassigning the same item restarts the generator and flickers, so only a genuine change is pushed through."
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `dismantleNSView` explicitly calls `view.close()` rather than relying on ARC/`deinit` to release the view.
 **Rationale**: Per the source's own comment, "QuickLook holds a generator process alive per view; closing releases it rather than waiting for the view to be collected."
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: The failable `QLPreviewView(frame:style:)` initializer is used with a fallback to `QLPreviewView()` rather than force-unwrapping it.
 **Rationale**: Per the source's own comment, "the failable initializer is the only one that takes a style; it returns nil only when QuickLook is unavailable, and the plain initializer is the same view at the default style" — a genuine but rare fallback is handled rather than risking a crash.
-**Approved: pending**
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
-| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
-| [graceful-degradation](agenticdevelopercookbook://compliance/reliability#graceful-degradation) | passed | reliability |
-| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | Platform Compliance |
+| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | Reliability |
+| [graceful-degradation](agenticdevelopercookbook://compliance/reliability#graceful-degradation) | partial | Reliability |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
 
-`native-controls-preference` and `platform-design-language` pass because the component delegates all preview rendering to `QLPreviewView`, Finder's own native QuickLook control, rather than a bespoke per-format viewer. `main-actor-confined` passes because `NSViewRepresentable`'s `makeNSView`/`updateNSView`/`dismantleNSView` requirements are `@MainActor`-isolated by the protocol itself (see **confines-to-main-actor**). `idempotent-operations` passes because `updateNSView` is a no-op when the incoming `url` already matches the view's current `previewItem` (see **skips-redundant-preview-item-updates**). `graceful-degradation` passes because an unsupported or unreadable file falls back to `QLPreviewView`'s own native "no preview available" rendering rather than crashing or leaving a blank view (see Design Decisions). `separation-of-concerns` passes because this file contains no per-file-type logic of its own — it only bridges SwiftUI to `QLPreviewView` and defers all format-specific rendering to QuickLook.
+`native-controls-preference` and `platform-design-language` pass because the component delegates all preview rendering to `QLPreviewView`, Finder's own native QuickLook control, rather than a bespoke per-format viewer. `idempotent-operations` passes because `updateNSView` is a no-op when the incoming `url` already matches the view's current `previewItem` (see **skips-redundant-preview-item-updates**). `graceful-degradation` is `partial`: the source's own doc comment confirms `QLPreviewView` draws its own "no preview available" state for a file type with no generator, but makes no equivalent claim for a file that cannot be read or no longer exists, and that case cannot be confirmed from the source alone (see Edge Cases, **Error states**). `separation-of-concerns` passes because this file contains no per-file-type logic of its own — it only bridges SwiftUI to `QLPreviewView` and defers all format-specific rendering to QuickLook.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: platform-neutralized behavioral requirements (moved AppKit specifics to the SwiftUI Platform Notes bullet), fixed RFC 2119 misuse in edge cases, corrected Design Decisions colon placement, reworded test vectors 005 and 008 to be checkable, narrowed the "no preview available" claim and downgraded graceful-degradation to partial pending verification of the unreadable/missing-file case, removed the unsupported WinUI 3 parenthetical, and cleaned up Compliance (title-cased categories, dropped the invalid main-actor-confined/architecture check) |

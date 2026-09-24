@@ -3,7 +3,7 @@ id: 46b9d1b8-8a6e-4b61-98ec-5201be24302f
 title: Pointing Hand Button
 domain: agentictoolkit://recipes/pointing-hand-button
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -24,7 +24,11 @@ tags:
 - cursor
 depends-on: []
 related: []
-references: []
+references:
+- https://developer.apple.com/documentation/appkit/nscursor
+- https://developer.apple.com/documentation/appkit/nstrackingarea
+- https://developer.apple.com/documentation/appkit/nsview/resetcursorrects()
+- https://developer.apple.com/documentation/swiftui/view/pointerstyle(_:)
 approved-by: ''
 approved-date: ''
 ---
@@ -33,17 +37,16 @@ approved-date: ''
 
 ## Overview
 
-`PointingHandButton` is an AppKit `NSButton` subclass (`packages/apple/AgenticToolkit/CoreUI/PointingHandButton.swift`) that shows the pointing-hand cursor over itself whenever the pointer is inside its bounds, whether or not its window is the key window. Per the source's own doc comment, `resetCursorRects`/cursor rects alone are not enough for the windows this toolkit puts on screen: a floating panel beside the terminal the user is typing into is not key, and AppKit honours cursor rects only in the key window, so the one clickable thing in an unfocused list would otherwise look like the surrounding text. `PointingHandButton` combines the ordinary cursor-rect override with an `.activeAlways` `NSTrackingArea` that sets the cursor directly from mouse-entered/moved/exited callbacks, covering the non-key case, while the cursor rect still covers the ordinary case where AppKit resets the cursor on the way out.
+`PointingHandButton` is an AppKit `NSButton` subclass (`packages/apple/AgenticToolkit/CoreUI/PointingHandButton.swift`) that shows the pointing-hand cursor over itself whenever the pointer is inside its bounds, whether or not its window is the key window. Per the source's own doc comment, [`resetCursorRects()`](https://developer.apple.com/documentation/appkit/nsview/resetcursorrects%28%29)/cursor rects alone are not enough for the windows this toolkit puts on screen: a floating panel beside the terminal the user is typing into is not key, and AppKit honours cursor rects only in the key window, so the one clickable thing in an unfocused list would otherwise look like the surrounding text. `PointingHandButton` combines the ordinary cursor-rect override with an `.activeAlways` [`NSTrackingArea`](https://developer.apple.com/documentation/appkit/nstrackingarea) that sets the [`NSCursor`](https://developer.apple.com/documentation/appkit/nscursor) directly from mouse-entered/moved/exited callbacks, covering the non-key case, while the cursor rect still covers the ordinary case where AppKit resets the cursor on the way out.
 
 ## Behavioral Requirements
 
-- **sets-pointing-hand-cursor-rect-on-bounds**: The component MUST add a cursor rect covering its full `bounds` with the `NSCursor.pointingHand` cursor from `resetCursorRects()`.
-- **calls-super-update-tracking-areas**: The component MUST call `super.updateTrackingAreas()` at the start of its `updateTrackingAreas()` override.
-- **replaces-existing-tracking-area-on-update**: WHEN `updateTrackingAreas()` is called AND a previously registered tracking area exists, the component MUST remove that tracking area before adding a new one.
-- **tracks-mouse-across-bounds-regardless-of-key-window-state**: WHEN `updateTrackingAreas()` is called, the component MUST register a new `NSTrackingArea` covering its full `bounds`, owned by itself, with options `.mouseEnteredAndExited`, `.mouseMoved`, and `.activeAlways`, so tracking remains active whether or not the button's window is key.
-- **sets-pointing-hand-cursor-on-mouse-entered**: WHEN `mouseEntered(with:)` is invoked, the component MUST set the current cursor to `NSCursor.pointingHand`.
-- **sets-pointing-hand-cursor-on-mouse-moved**: WHEN `mouseMoved(with:)` is invoked, the component MUST set the current cursor to `NSCursor.pointingHand`.
-- **restores-arrow-cursor-on-mouse-exited**: WHEN `mouseExited(with:)` is invoked, the component MUST set the current cursor to `NSCursor.arrow`.
+- **cursor-rect**: The component MUST add a cursor rect covering its full `bounds` with the `NSCursor.pointingHand` cursor from `resetCursorRects()`.
+- **tracking-area-replacement**: WHEN `updateTrackingAreas()` is called, the component MUST call `super.updateTrackingAreas()` first, and, if a previously registered tracking area exists, MUST remove it before adding the new one.
+- **always-active-tracking**: WHEN `updateTrackingAreas()` is called, the component MUST register a new `NSTrackingArea` covering its full `bounds`, owned by itself, with options `.mouseEnteredAndExited`, `.mouseMoved`, and `.activeAlways`, so tracking remains active whether or not the button's window is key.
+- **enter-cursor**: WHEN `mouseEntered(with:)` is invoked, the component MUST set the current cursor to `NSCursor.pointingHand`.
+- **move-cursor**: WHEN `mouseMoved(with:)` is invoked, the component MUST set the current cursor to `NSCursor.pointingHand`.
+- **exit-cursor**: WHEN `mouseExited(with:)` is invoked, the component MUST set the current cursor to `NSCursor.arrow`.
 
 ## Appearance
 
@@ -72,19 +75,18 @@ approved-date: ''
 - **Label**: Not set by `PointingHandButton`; the accessible name follows `NSButton`'s own title, which this class never reads or writes.
 - **Announce state changes**: Not applicable: `PointingHandButton` introduces no state of its own beyond the standard `NSButton` states (see States); the one behavior it does add — cursor shape on hover — is not a state AppKit's accessibility APIs announce.
 - **Keyboard navigation**: Inherited from `NSButton` unmodified — `PointingHandButton` overrides no key-handling, focus, or responder-chain method, so Tab/Shift-Tab focus movement and Space/Return activation follow `NSButton`'s native behavior.
-- **Minimum tap target**: `PointingHandButton` sets no `controlSize`, width, or height of its own, so its click target is `NSButton`'s regular system-metrics bezel sized to its title, per the macOS Human Interface Guidelines for pointer-driven controls. Ports to touch platforms MUST give the equivalent control at least the platform minimum (44×44 pt on iOS, 48×48 dp on Android, 40×40 epx on WinUI 3).
+- **Minimum tap target**: `PointingHandButton` sets no `controlSize`, width, or height of its own, so its click target is whatever `NSButton`'s regular-size system bezel computes for its title. macOS is a pointer-driven platform, not a touch-driven one, so no minimum touch-target size applies here (see Compliance). Ports to touch platforms MUST give the equivalent control at least the platform minimum (44×44 pt on iOS, 48×48 dp on Android, 40×40 epx on WinUI 3).
 
 ## Conformance Test Vectors
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| pointing-hand-button-001 | sets-pointing-hand-cursor-rect-on-bounds | Call `resetCursorRects()` on a `PointingHandButton` laid out at bounds (0, 0, 100, 30) | A cursor rect covering (0, 0, 100, 30) is registered with cursor `NSCursor.pointingHand` |
-| pointing-hand-button-002 | calls-super-update-tracking-areas | Call `updateTrackingAreas()` | `NSButton`'s own base tracking-area setup runs (via `super.updateTrackingAreas()`) before the hover tracking area is (re)configured |
-| pointing-hand-button-003 | replaces-existing-tracking-area-on-update | Call `updateTrackingAreas()` twice in succession on the same instance | After the second call, the button's tracking areas contain exactly one hover-tracking entry, not two |
-| pointing-hand-button-004 | tracks-mouse-across-bounds-regardless-of-key-window-state | Call `updateTrackingAreas()` on a button whose window is not key | A registered `NSTrackingArea` has `rect == bounds`, `owner === button`, and `options` containing `.mouseEnteredAndExited`, `.mouseMoved`, and `.activeAlways` |
-| pointing-hand-button-005 | sets-pointing-hand-cursor-on-mouse-entered | Invoke `mouseEntered(with:)` with a synthetic `NSEvent` | The current system cursor becomes `NSCursor.pointingHand` |
-| pointing-hand-button-006 | sets-pointing-hand-cursor-on-mouse-moved | Invoke `mouseMoved(with:)` with a synthetic `NSEvent` | The current system cursor becomes `NSCursor.pointingHand` |
-| pointing-hand-button-007 | restores-arrow-cursor-on-mouse-exited | Invoke `mouseExited(with:)` with a synthetic `NSEvent` | The current system cursor becomes `NSCursor.arrow` |
+| pointing-hand-button-001 | cursor-rect | Call `resetCursorRects()` on a `PointingHandButton` laid out at bounds (0, 0, 100, 30) | A cursor rect covering (0, 0, 100, 30) is registered with cursor `NSCursor.pointingHand` |
+| pointing-hand-button-003 | tracking-area-replacement | Call `updateTrackingAreas()` twice in succession on the same instance | Among the button's registered tracking areas, exactly one has `owner === button` and `options` containing `.activeAlways` — the second call replaced the first instead of adding a duplicate |
+| pointing-hand-button-004 | always-active-tracking | Call `updateTrackingAreas()` on a button whose window is not key | A registered `NSTrackingArea` has `rect == bounds`, `owner === button`, and `options` containing `.mouseEnteredAndExited`, `.mouseMoved`, and `.activeAlways` |
+| pointing-hand-button-005 | enter-cursor | Invoke `mouseEntered(with:)` with a synthetic `NSEvent` | The current system cursor becomes `NSCursor.pointingHand` |
+| pointing-hand-button-006 | move-cursor | Invoke `mouseMoved(with:)` with a synthetic `NSEvent` | The current system cursor becomes `NSCursor.pointingHand` |
+| pointing-hand-button-007 | exit-cursor | Invoke `mouseExited(with:)` with a synthetic `NSEvent` | The current system cursor becomes `NSCursor.arrow` |
 
 ## Edge Cases
 
@@ -94,6 +96,7 @@ approved-date: ''
 - **Error states**: Not applicable — `PointingHandButton` has no dependency on network, database, or file-system access; cursor and tracking-area management cannot fail in the way this source uses them.
 - **Offline/disconnected state**: Not applicable — `PointingHandButton` performs no networking.
 - **Non-key window with pointer inside bounds**: This is the case the class exists to handle. Because tracking uses `.activeAlways` rather than `.activeInKeyWindow` (per the source's own comment), `mouseEntered`/`mouseMoved`/`mouseExited` continue to fire even while the button's window is not key, so the pointing-hand cursor still appears — unlike a plain `NSButton` relying on `resetCursorRects()` alone, whose cursor rect AppKit only honors in the key window.
+- **Exit into a cursor-owning sibling**: `mouseExited(with:)` unconditionally calls `NSCursor.arrow.set()` (see conformance vector pointing-hand-button-007), with no check on what the pointer moved onto. If the pointer exits `PointingHandButton`'s bounds directly into a sibling view that manages its own cursor (for example, a text view showing the I-beam cursor), this handler's `.arrow` push can momentarily overwrite that sibling's cursor before the sibling's own tracking area or cursor rect re-asserts it. This is a known limitation of the source's unconditional `.arrow` reset, not a coordinated hand-off between views.
 
 ## Configuration
 
@@ -136,11 +139,11 @@ Not applicable: the source contains no logging calls.
 
 ## Platform Notes
 
-- **SwiftUI**: There is no direct `NSButton`-subclassing counterpart. On macOS, apply `.onHover { isHovering in if isHovering { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() } }` to a `Button`. SwiftUI's `onHover` already fires from AppKit-level mouse tracking regardless of key-window state, so most of the source's rationale for the `.activeAlways` tracking area — the reason `resetCursorRects()` alone was not enough — does not need re-deriving in a SwiftUI port.
-- **Compose**: On Compose for Desktop, apply `Modifier.pointerHoverIcon(PointerIcon.Hand)` to the composable. There is no equivalent to the source's key-window/`resetCursorRects()` distinction to port, since Compose Desktop's pointer-icon system applies regardless of window focus.
+- **SwiftUI**: There is no direct `NSButton`-subclassing counterpart. On macOS 15+, prefer [`.pointerStyle(.link)`](https://developer.apple.com/documentation/swiftui/view/pointerstyle%28_:%29) on a `Button` — SwiftUI's native pointing-hand affordance. On earlier macOS targets, apply `.onHover { isHovering in if isHovering { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() } }` instead; verify in a non-key panel that the hover callback still fires there, since SwiftUI's documentation does not state whether `onHover` depends on key-window status the way `resetCursorRects()` does.
+- **Compose**: On Compose for Desktop, apply `Modifier.pointerHoverIcon(PointerIcon.Hand)` to the composable; verify in a non-key panel that the pointer icon still applies there, since Compose Desktop's documentation does not state whether pointer-icon handling depends on window focus the way AppKit's cursor rects do.
 - **React/Web**: Set CSS `cursor: pointer` on the element. Browsers already display the pointer cursor over an element in any window, focused or not, so there is no equivalent to the source's key-window workaround to port.
 - **AppKit / UIKit (source)**: `PointingHandButton.swift` (`packages/apple/AgenticToolkit/CoreUI/PointingHandButton.swift`) is macOS-only (`import AppKit`); there is no iOS/UIKit counterpart, since UIKit has no cursor-rect or `NSCursor` concept — cursors do not apply to a touch interface. The class subclasses `NSButton` and layers an `.activeAlways` `NSTrackingArea` (`mouseEntered`/`mouseMoved`/`mouseExited`) on top of the ordinary `resetCursorRects()` override, specifically to also cover floating, non-key panels that `resetCursorRects()` alone does not reach.
-- **WinUI 3**: Handle `PointerEntered` on the `Button` to set `ProtectedCursor` (or the containing element's cursor) to `InputSystemCursor.Create(InputSystemCursorShape.Hand)`, and handle `PointerExited` to restore `InputSystemCursor.Create(InputSystemCursorShape.Arrow)`. Win32/WinUI cursor-setting through `InputCursor` applies per-pointer-event and has no Cocoa-style "only in the key window" restriction, so `PointerEntered`/`PointerExited` alone cover what the source needs both `resetCursorRects()` and the `.activeAlways` `NSTrackingArea` for — a WinUI 3 port needs only the one pair of handlers (or the XAML `ProtectedCursor` property on recent WinUI 3 releases), not a second, always-active tracking mechanism.
+- **WinUI 3**: Subclass `Button` and set `ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.Hand)` in the constructor. WinUI applies and restores the protected cursor automatically as the pointer enters and exits the control, so no `PointerEntered`/`PointerExited` handlers are needed. `ProtectedCursor` is `protected`, so this must be set from within a `Button` subclass, not from a containing element — a WinUI 3 port needs only this one constructor assignment, not a second, always-active tracking mechanism.
 
 ## Design Decisions
 
@@ -162,15 +165,13 @@ Not applicable: the source contains no logging calls.
 |-------|--------|----------|
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | passed | Accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | not-applicable | Internationalization |
 
-`keyboard-navigable` and `screen-reader-support` pass because `PointingHandButton` overrides no keyboard, focus, or accessibility method, leaving `NSButton`'s own compliant behavior intact. `touch-target-size` passes on macOS because the class sets no size override, keeping the system bezel's regular control metrics (see Minimum tap target under Accessibility). `differentiate-without-color` passes because the class's one added affordance — the pointing-hand cursor shape — is a shape change, not a color change. `native-controls-preference` passes because the whole implementation is `NSCursor.pointingHand`/`NSCursor.arrow`, AppKit's own system cursors, with no custom cursor image. `string-externalization` is `not-applicable` because the source defines no string literal of its own to externalize.
+`keyboard-navigable` and `screen-reader-support` pass because `PointingHandButton` overrides no keyboard, focus, or accessibility method, leaving `NSButton`'s own compliant behavior intact. `native-controls-preference` passes because the whole implementation is `NSCursor.pointingHand`/`NSCursor.arrow`, AppKit's own system cursors, with no custom cursor image.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only names and folded the unobservable super-call requirement into tracking-area-replacement; softened the unverified SwiftUI/Compose key-window claims and added the macOS 15 `.pointerStyle(.link)` note; added Apple doc references and linked them in Overview; documented the exit-into-a-cursor-owning-sibling edge case; sharpened the tracking-area-replacement test vector's owner/option assertion and dropped the unobservable super-call-order vector; prescribed a single WinUI 3 `ProtectedCursor` approach; cleaned up the Compliance table (removed the not-applicable touch-target-size and string-externalization rows per the compliance catalog). |

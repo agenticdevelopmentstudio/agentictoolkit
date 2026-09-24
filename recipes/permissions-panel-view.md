@@ -3,7 +3,7 @@ id: 07388a5c-901d-4cf3-b818-bf52c180be08
 title: Permissions Panel View
 domain: agentictoolkit://recipes/permissions-panel-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,10 +21,11 @@ tags:
 - settings
 - macos
 - appkit
-depends-on: []
-related: []
-references:
+depends-on:
+- agentictoolkit://recipes/permission-row-view
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -42,13 +43,18 @@ Settings), and after a row's grant action completes. It runs no polling
 timer of its own and is free of any settings-framework dependency, so any
 app or window can host it.
 
+Because `AgenticDeveloperToolkit` also exports a type named `Permission`,
+a caller whose target imports both modules MUST spell this component's
+permission type `AgenticToolkitPermissions.Permission` to resolve the
+ambiguity.
+
 ## Behavioral Requirements
 
 - **one-row-per-permission-in-order**: The component MUST create exactly
   one `PermissionRowView` per entry in the `permissions` array passed to
   `init(permissions:checker:)`, in that array's order, and MUST NOT create
   a row for any permission not present in that array.
-- **checker-injected-with-system-default**: The component MUST pass the
+- **checker-default**: The component MUST pass the
   `checker` supplied to `init(permissions:checker:)` to every row it
   creates and to its own action handling, and MUST default `checker` to a
   freshly constructed `SystemPermissionChecker()` when the caller supplies
@@ -69,7 +75,7 @@ app or window can host it.
 - **refresh-aborts-on-cancellation**: `refresh()` MUST stop before
   refreshing any further row as soon as its enclosing task is cancelled,
   leaving any not-yet-reached row's displayed status unchanged.
-- **starts-observing-activation-on-window-attach**: The component MUST
+- **activation-observer**: The component MUST
   begin observing `NSApplication.didBecomeActiveNotification` the first
   time it moves to a non-nil window, and MUST NOT register that observer a
   second time on any subsequent move to a non-nil window.
@@ -81,7 +87,7 @@ app or window can host it.
   already in flight before starting the new one, so that of any two
   refreshes that overlap, only the one scheduled last can apply its
   results to the rows.
-- **presents-then-refreshes-after-action**: A row's action callback MUST
+- **action-refresh**: A row's action callback MUST
   first await `PermissionPresenter.present(_:shownAs:using:)` for that
   row's permission and displayed status, and MUST schedule (not await) a
   refresh only after that call returns.
@@ -102,11 +108,12 @@ app or window can host it.
 - **Padding**: 0pt on all sides — the stack view is pinned to the panel's
   own edges with no constant (see `rows-in-full-bleed-vertical-stack`).
   Between rows, the vertical stack applies 8pt of spacing.
-- **Font**: Not applicable. This file creates no text element of its own;
-  all label fonts belong to `PermissionRowView`.
+- **Font**: Not applicable. The component creates no text element of its
+  own; all label fonts belong to `PermissionRowView`.
 - **Background**: None set. `PermissionsPanelView` does not set
   `wantsLayer` or a background color; it is a transparent layout container.
-- **Foreground/Text**: Not applicable. This file renders no text.
+- **Foreground/Text**: Not applicable. The component renders no text of
+  its own.
 - **Border**: None set on the panel itself.
 - **Shadow**: None specified in source.
 - **Min/Max size**: None set. The panel's size is whatever its pinned
@@ -124,74 +131,82 @@ app or window can host it.
 
 ## Accessibility
 
-- Role/trait: Not applicable at this component's level. `PermissionsPanelView`
+- Role/trait: Not applicable at this component's level. The component
   never calls `setAccessibilityElement` or overrides any accessibility
   role; it is a plain `NSView` container, and VoiceOver traverses directly
   into each row's own accessibility elements.
-- Label requirements: Not applicable. This file creates no accessible
+- Label requirements: Not applicable. The component creates no accessible
   label of its own; every row's title, description, and status text carry
   their own labeling, as does that row's action button.
 - Announce state changes: Not applicable at this component's level. The
-  panel issues no accessibility notification of its own when a refresh
-  completes; a status change is reflected as an ordinary text/color update
-  inside the affected row, which is `PermissionRowView`'s concern.
-- Minimum tap target: Not applicable. The panel has no tappable surface of
-  its own — the tap targets are each row's action button, sized by
-  `PermissionRowView`.
-- Keyboard navigation: Not applicable. `PermissionsPanelView.swift` sets no
-  custom key-view loop, first responder, or key-equivalent; whatever tab
-  order AppKit derives automatically from the arranged-subview hierarchy
+  component issues no accessibility notification of its own when a
+  refresh completes; a status change is reflected as an ordinary
+  text/color update inside the affected row, which is
+  `PermissionRowView`'s concern.
+- Minimum tap target: Not applicable. The component has no tappable
+  surface of its own — the tap targets are each row's action button,
+  sized by `PermissionRowView`.
+- Keyboard navigation: Not applicable. The component sets no custom
+  key-view loop, first responder, or key-equivalent; whatever tab order
+  AppKit derives automatically from the arranged-subview hierarchy
   applies unmodified.
+
+NEEDS REVIEW: Not implemented in source — the component calls no
+accessibility-grouping API of its own (no `setAccessibilityElement`,
+`setAccessibilityRole`, or `setAccessibilityLabel`), so VoiceOver gets no
+grouping cue for the row list beyond the plain view hierarchy and
+traverses straight into each row. Settling this needs a decision on
+whether the panel should call `setAccessibilityRole(.group)` with a label
+such as "Permissions" (`PermissionsPanelView.swift`'s `buildLayout()`,
+lines 67-95).
 
 ## Conformance Test Vectors
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
 | permissions-panel-view-001 | one-row-per-permission-in-order | Construct with `permissions == [.accessibility, .microphone, .location]`. | Exactly 3 `PermissionRowView` instances are created, arranged in that same order. |
-| permissions-panel-view-002 | checker-injected-with-system-default | Construct with a fake `PermissionChecking`; separately, construct via `init(permissions:)` with no checker argument. | Every row from the first construction holds the identical injected checker instance; the second construction's rows hold a `SystemPermissionChecker`. |
+| permissions-panel-view-002 | checker-default | Construct with a fake `PermissionChecking`; separately, construct via `init(permissions:)` with no checker argument. | Every row from the first construction holds the identical injected checker instance; the second construction's rows hold a `SystemPermissionChecker`. |
 | permissions-panel-view-003 | rows-in-full-bleed-vertical-stack | Construct the view and inspect its subview and constraints. | The sole subview is a vertical `NSStackView` with `spacing == 8` and `alignment == .leading`, whose top/leading/trailing/bottom anchors equal the panel's own with a 0 constant. |
 | permissions-panel-view-004 | row-width-pinned-to-stack | Construct with 2 permissions and inspect each row's active constraints. | Each row has an active constraint equating its `widthAnchor` to the stack's `widthAnchor`. |
 | permissions-panel-view-005 | layout-built-once | Construct the view, then trigger several refreshes and an app activation. | The subview/row count and identities are unchanged after any of those events. |
 | permissions-panel-view-006 | refreshes-serially-in-order | Inject a checker whose `status(_:)` records call order and yields before returning; call `refresh()`. | Calls to `checker.status` occur one at a time, in row order — the second call is not made until the first row's `refresh()` has completed. |
 | permissions-panel-view-007 | refresh-aborts-on-cancellation | Start `refresh()` in a task; cancel that task after the first row's status resolves but before the second row's refresh begins. | No row after the first ever has `checker.status` called for it during that run. |
-| permissions-panel-view-008 | starts-observing-activation-on-window-attach | Add the view to a window, remove it from that window, then add it to a window again; post one activation notification afterward. | Each row's `refresh()` is invoked exactly once for that single posted notification (no duplicate refresh from a doubly-registered observer). |
+| permissions-panel-view-008 | activation-observer | Add the view to a window, remove it from that window, then add it to a window again; post one activation notification afterward. | Each row's `refresh()` is invoked exactly once for that single posted notification (no duplicate refresh from a doubly-registered observer). |
 | permissions-panel-view-009 | schedules-refresh-on-window-attach | Add a view with rows to a window. | Each row's `refresh()` is invoked shortly after the attach. |
 | permissions-panel-view-010 | schedules-refresh-on-app-activation | With the view already attached to a window, post `NSApplication.didBecomeActiveNotification`. | Each row's `refresh()` is invoked again. |
-| permissions-panel-view-011 | latest-refresh-wins | Trigger a window attach and, before its refresh completes, immediately post an activation notification. | The first refresh's task is cancelled; only the second (activation-triggered) refresh's results are applied to the rows. |
-| permissions-panel-view-012 | presents-then-refreshes-after-action | Simulate a row's action callback firing, with a `PermissionPresenter.present` stand-in that is slow to return. | `present` is awaited to completion before a new refresh is scheduled; the code path that schedules the refresh does not itself await that refresh's completion. |
+| permissions-panel-view-011 | latest-refresh-wins | Inject a checker whose `status(_:)` returns `.undetermined` on its first call and `.granted` on its second call for the same permission; trigger a window attach and, before its refresh completes, immediately post an activation notification. | Every row's displayed status ends up `.granted` (the second call's result); no row is left showing `.undetermined` (the first call's result). |
+| permissions-panel-view-012 | action-refresh | Simulate a row's action callback firing, with a `PermissionPresenter.present` stand-in that appends `"present"` to a shared call-order log before returning (slow to return), and a checker whose `status(_:)` appends `"status"` to that same log. | The log records `present` before any `status` entry, and the action callback's own asynchronous work returns control to its caller before the first `status` entry is appended — showing the resulting refresh runs as a separate, unawaited task. |
 | permissions-panel-view-013 | cancels-refresh-and-observer-on-deinit | Start a refresh, deallocate the view before it completes, then post an activation notification. | The in-flight refresh task is cancelled with no crash; the posted notification produces no further row update from the deallocated instance. |
-| permissions-panel-view-014 | coder-init-unavailable | Attempt to construct the view via `NSCoder`-based decoding. | Compilation fails (the initializer is unavailable), or a runtime `fatalError` occurs if that is bypassed. |
 | permissions-panel-view-015 | supports-direct-refresh | Call `refresh()` directly, with no window attach or activation event having occurred. | All rows' `refresh()` are invoked and the call returns only once every row's refresh has completed. |
+
+`coder-init-unavailable` is a compile-time guarantee (`@available(*, unavailable)` on `init(coder:)`) rather than something a runtime test vector observes; conformance is a build that fails to compile a call to it, or a runtime `fatalError` if that unavailability is bypassed (for example through Objective-C bridging).
 
 ## Edge Cases
 
 - **Null/empty input** (MUST): `permissions` MUST be permitted to be an
   empty array. The component MUST then build zero rows, and `refresh()`
-  MUST complete immediately with no row refreshed — both `buildLayout()`'s
-  and `refresh()`'s `for` loops iterate the given collection with no
-  special-casing for zero elements.
-- **Boundary values** (MUST): Not applicable in the constrained-range sense
-  — `permissions` has no minimum or maximum length enforced in source. A
-  `permissions` array containing the same `Permission` value more than once
-  (for example two `.accessibility` entries) MUST still produce one row per
-  entry, including the duplicate: `buildLayout()`'s `for permission in
-  permissions` performs no deduplication.
-- **Concurrent access** (MUST): Every property and method in this file is
-  `@MainActor`-isolated, so all mutation of `rows`, `refreshTask`, and
-  `isObserving` is serialized onto the main actor. Window attach, app
-  activation, and a completed grant action can all ask for a refresh in
-  close succession; the component MUST resolve that through the
-  cancel-and-replace pattern in `scheduleRefresh()` (see
-  `latest-refresh-wins`), cancelling whatever task `refreshTask` already
-  holds before assigning the new one.
+  MUST complete immediately with no row refreshed — both the
+  row-construction step and `refresh()` iterate the given collection with
+  no special-casing for zero elements.
+- **Duplicate values** (MUST): A `permissions` array containing the same
+  `Permission` value more than once (for example two `.accessibility`
+  entries) MUST still produce one row per entry, including the duplicate;
+  the component performs no deduplication when building rows.
+- **Concurrent access** (MUST): Every property and operation of the
+  component is `@MainActor`-isolated, so its internal state is serialized
+  onto the main actor. Window attach, app activation, and a completed
+  grant action can all ask for a refresh in close succession; the
+  component MUST resolve that through the cancel-and-replace pattern
+  named in **latest-refresh-wins**, cancelling whatever refresh is already
+  in flight before starting the new one.
 - **Error states** (MUST): `PermissionChecking.status(_:)` and
-  `.request(_:)` are non-throwing, so this file has no `catch` path and
-  performs no error handling of its own. `PermissionStatus` has no
+  `.request(_:)` are non-throwing, so the component has no `catch` path
+  and performs no error handling of its own. `PermissionStatus` has no
   "error" case, so a misbehaving checker implementation can only surface
   as `.granted`, `.denied`, or `.undetermined` — this component does not
   detect or separately report a failing checker.
-- **Offline/disconnected state**: Not applicable. `PermissionsPanelView.swift`
-  makes no network call directly; any network or cross-process dependency a
+- **Offline/disconnected state**: Not applicable. The component makes no
+  network call directly; any network or cross-process dependency a
   particular permission's status check has is the injected `checker`'s
   concern, not this component's.
 
@@ -204,39 +219,39 @@ app or window can host it.
 
 ## Deep Linking
 
-Not applicable: `PermissionsPanelView.swift` contains no URL-scheme or
-route handling of its own. (Opening a System Settings pane by URL is
-`PermissionPresenter`'s responsibility, driven by `Permission.settingsPaneURL`
-— a separate file from this component.)
+Not applicable: the component contains no URL-scheme or route handling of
+its own. (Opening a System Settings pane by URL is `PermissionPresenter`'s
+responsibility, driven by `Permission.settingsPaneURL`, a different
+component's concern.)
 
 ## Localization
 
-Not applicable: `PermissionsPanelView.swift` defines no user-facing string
-literal of its own. All row text — title, description, status, and action
-button titles — originates from `PermissionRowView` and `Permission`, not
-this file.
+Not applicable: the component defines no user-facing string literal of
+its own. All row text — title, description, status, and action button
+titles — originates from `PermissionRowView` and `Permission`, not this
+component.
 
 ## Accessibility Options
 
-- **Reduce Motion**: Not applicable. This file contains no animation,
-  transition, or animator-proxy call; it changes constraints and reload
-  state, not motion.
-- **Increase Contrast**: Not applicable at this component's level.
-  `PermissionsPanelView.swift` sets no color of its own; every color value
-  used on screen belongs to `PermissionRowView`.
+- **Reduce Motion**: Not applicable. The component makes no layout
+  changes after initialization (see **layout-built-once**) and contains
+  no animation, transition, or animator-proxy call.
+- **Increase Contrast**: Not applicable at this component's level. The
+  component sets no color of its own; every color value used on screen
+  belongs to `PermissionRowView`.
 - **Differentiate Without Color**: Not applicable at this component's
-  level, for the same reason — this file draws no color-conveyed state of
-  its own for a "differentiate without color" setting to act on.
+  level, for the same reason — the component draws no color-conveyed
+  state of its own for a "differentiate without color" setting to act on.
 
 ## Feature Flags
 
-Not applicable: `PermissionsPanelView.swift` contains no feature-flag or
+Not applicable: the component contains no feature-flag or
 build-configuration check of any kind.
 
 ## Analytics
 
-Not applicable: `PermissionsPanelView.swift` contains no analytics or
-event-tracking call.
+Not applicable: the component contains no analytics or event-tracking
+call.
 
 ## Privacy
 
@@ -244,22 +259,22 @@ event-tracking call.
   the `permissions` array it was constructed with (which privacy
   permissions to display) and forwards status/request calls to the
   injected `checker`; it inspects no personal data itself.
-- **Storage**: None. `PermissionsPanelView.swift` writes nothing to disk,
-  `UserDefaults`, or the keychain. (Recording a remembered keychain grant
-  is `SystemPermissionChecker`/`KeychainPermissionLedger`'s responsibility,
-  in a different file.)
+- **Storage**: None. The component writes nothing to disk, `UserDefaults`,
+  or the keychain. (Recording a remembered keychain grant is
+  `SystemPermissionChecker`/`KeychainPermissionLedger`'s responsibility, a
+  different component's concern.)
 - **Transmission**: None directly. Any cross-process communication a
   status read or grant request needs (an Apple Event, a system consent
   dialog, a `CLLocationManager` round trip, etc.) happens inside the
-  injected `checker`, not in this file.
+  injected `checker`, not in the component itself.
 - **Retention**: None beyond the life of the instance. The panel keeps its
   `permissions` array and its live `rows` in memory only; it persists
   nothing across launches.
 
 ## Logging
 
-Not applicable: `PermissionsPanelView.swift` contains no `os_log`,
-`Logger`, or other logging call.
+Not applicable: the component contains no `os_log`, `Logger`, or other
+logging call.
 
 ## Platform Notes
 
@@ -270,10 +285,9 @@ Not applicable: `PermissionsPanelView.swift` contains no `os_log`,
   refresh-on-appear maps to `.task { await refreshAll() }` on the stack;
   the app-activation refresh maps to observing `scenePhase` (or an
   `NSApplication.didBecomeActiveNotification` publisher on macOS) and
-  re-running the same refresh; the cancel-and-replace "latest wins"
-  pattern maps to reassigning a `Task` handle stored in state, cancelling
-  the previous one before starting a new one, exactly as `scheduleRefresh()`
-  does.
+  re-running the same refresh; the cancel-and-replace pattern named in
+  **latest-refresh-wins** maps to reassigning a `Task` handle stored in
+  state, cancelling the previous one before starting a new one.
 - **Compose**: Android's permission model has no per-item equivalent to
   Accessibility, Automation, or Keychain grants, so a literal port does not
   apply — treat this as guidance for whichever permissions do map. Lay out
@@ -284,8 +298,8 @@ Not applicable: `PermissionsPanelView.swift` contains no `os_log`,
   entering composition (`LaunchedEffect(Unit)`) and again on resume via a
   `DisposableEffect` observing `Lifecycle.Event.ON_RESUME` — the Compose
   analog of the window-attach and app-activation triggers here — cancelling
-  and relaunching the refresh coroutine the same way `scheduleRefresh()`
-  cancels and reassigns `refreshTask`.
+  and relaunching the refresh coroutine the same way the source's
+  cancel-and-replace pattern (**latest-refresh-wins**) does.
 - **React/Web**: The permissions this component lists (Accessibility,
   Automation, Screen Capture, Keychain) have no web equivalent; only
   Notifications, Location, and Microphone map to the web Permissions API
@@ -298,16 +312,22 @@ Not applicable: `PermissionsPanelView.swift` contains no `os_log`,
   ref holding the latest request id) that a new refresh call replaces
   before its own run starts.
 - **AppKit / UIKit**: This is the source platform (AppKit, macOS):
-  `PermissionsPanelView.swift` (this file — the container, layout, and
-  refresh orchestration), `PermissionRowView.swift` (the per-permission
-  card), `PermissionPresenter.swift` (the grant-flow dispatch this
-  component's rows call into), and `PermissionChecking.swift`/
+  `PermissionsPanelView.swift` (the container, layout, and refresh
+  orchestration), `PermissionRowView.swift` (the per-permission card),
+  `PermissionPresenter.swift` (the grant-flow dispatch this component's
+  rows call into), and `PermissionChecking.swift`/
   `SystemPermissionChecker.swift` (the injected status/request provider).
-  UIKit has no drop-in counterpart: iOS's permission set and its consent
-  flows (App Tracking Transparency, `CLLocationManager`, etc.) differ
-  enough from macOS's TCC permissions that this component's structure
-  (one card per `Permission` case, refresh on appear/foreground) is the
-  part worth porting to a `UICollectionView`/`UIStackView` layout, not a
+  Internally, `PermissionsPanelView.swift`'s private `buildLayout()`
+  constructs the row hierarchy once from `init`; its private
+  `scheduleRefresh()` implements the cancel-and-replace pattern by
+  cancelling and reassigning the private `refreshTask` field; and its
+  private `isObserving` flag guards `startObservingActivation()` against
+  registering the activation observer more than once. UIKit has no
+  drop-in counterpart: iOS's permission set and its consent flows (App
+  Tracking Transparency, `CLLocationManager`, etc.) differ enough from
+  macOS's TCC permissions that this component's structure (one card per
+  `Permission` case, refresh on appear/foreground) is the part worth
+  porting to a `UICollectionView`/`UIStackView` layout, not a
   line-for-line translation of the permission set itself.
 - **WinUI 3**: Model the vertical stack as a `StackPanel` with
   `Orientation="Vertical"` and `Spacing="8"` (or an `ItemsRepeater` bound
@@ -322,74 +342,81 @@ Not applicable: `PermissionsPanelView.swift` contains no `os_log`,
   event (the WinUI analog of `NSApplication.didBecomeActiveNotification`);
   implement `latest-refresh-wins` with a `CancellationTokenSource` field
   that a `RefreshAsync()` method cancels and replaces before starting its
-  new pass, mirroring `refreshTask?.cancel()` followed by a fresh `Task`
-  assignment. A completed grant action awaits its own flow, then calls
-  `RefreshAsync()` without awaiting it — matching
-  `presents-then-refreshes-after-action` — and each row's own "open
-  settings" affordance uses `Windows.System.Launcher.LaunchUriAsync` with
-  an `ms-settings:` URI, the Windows analog of this component's
-  `x-apple.systempreferences:` pane URLs (constructed in `Permission.swift`,
-  not in this file).
+  new pass, mirroring the source's own cancel-and-replace pattern. A
+  completed grant action awaits its own flow, then calls
+  `RefreshAsync()` without awaiting it — matching **action-refresh** — and
+  each row's own "open settings" affordance uses
+  `Windows.System.Launcher.LaunchUriAsync` with an `ms-settings:` URI, the
+  Windows analog of this component's `x-apple.systempreferences:` pane
+  URLs (constructed in `Permission.swift`, a different component's
+  concern).
 
 ## Design Decisions
 
-Decision: Cancel any refresh already in flight before starting a new one
-(`scheduleRefresh()`'s cancel-and-replace pattern), rather than letting
-concurrent refreshes run to completion independently.
-Rationale: source comments state that appearing, app reactivation, and a
-finished grant action each ask for a refresh, and each row's status read
-is a cross-process round trip they suspend on; left unserialized, whichever
-refresh *resumed* last would win even if it was the older request — for
-example landing a pre-grant snapshot after a post-grant one and leaving a
-row reading "Not Granted" until the next activation. Cancelling the
-in-flight refresh before starting a new one guarantees the most recently
-requested refresh is the one that lands.
-Approved: pending.
+**Decision**: Cancel any refresh already in flight before starting a new
+one (the cancel-and-replace pattern named in **latest-refresh-wins**),
+rather than letting concurrent refreshes run to completion independently.
+**Rationale**: Appearing, app reactivation, and a finished grant action
+each ask for a refresh, and each row's status read is a cross-process
+round trip they suspend on; left unserialized, whichever refresh *resumed*
+last would win even if it was the older request — for example landing a
+pre-grant snapshot after a post-grant one and leaving a row reading "Not
+Granted" until the next activation. Cancelling the in-flight refresh
+before starting a new one guarantees the most recently requested refresh
+is the one that lands.
+**Approved**: pending.
 
-Decision: Schedule (not await) a refresh after `PermissionPresenter.present`
-returns from a row's action.
-Rationale: source comments state that returning from System Settings has
-already fired a refresh through the activation notification, and the
-action-triggered refresh — being requested later — is the one that should
-land; scheduling rather than awaiting lets that later refresh cancel and
-supersede the activation-triggered one via the same cancel-and-replace
-pattern.
-Approved: pending.
+**Decision**: Schedule (not await) a refresh after
+`PermissionPresenter.present` returns from a row's action.
+**Rationale**: Returning from System Settings has already fired a refresh
+through the activation notification, and the action-triggered refresh —
+being requested later — is the one that should land; scheduling rather
+than awaiting lets that later refresh cancel and supersede the
+activation-triggered one via the same cancel-and-replace pattern.
+**Approved**: pending.
 
-Decision: Pin each row's width explicitly to the stack's width, rather
-than relying on the stack's own alignment.
-Rationale: source comments state that a vertical `NSStackView` does not
-stretch arranged subviews across its width — `alignment` governs cross-axis
-*positioning*, not fill — so without this constraint each row would size
-to its own intrinsic content width instead of spanning the panel.
-Approved: pending.
+**Decision**: Pin each row's width explicitly to the stack's width,
+rather than relying on the stack's own alignment.
+**Rationale**: A vertical `NSStackView` does not stretch arranged
+subviews across its width — `alignment` governs cross-axis *positioning*,
+not fill — so without this constraint each row would size to its own
+intrinsic content width instead of spanning the panel.
+**Approved**: pending.
 
-Decision: Observe `NSApplication.didBecomeActiveNotification` rather than
-`NSWorkspace.didActivateApplicationNotification`.
-Rationale: source comments state the intent is to refresh when *this* app
-becomes active (for example, the user returning from System Settings), not
-on every app switch system-wide, which the `NSWorkspace` notification would
-fire for.
-Approved: pending.
+**Decision**: Observe `NSApplication.didBecomeActiveNotification` rather
+than `NSWorkspace.didActivateApplicationNotification`.
+**Rationale**: The intent is to refresh when *this* app becomes active
+(for example, the user returning from System Settings), not on every app
+switch system-wide, which the `NSWorkspace` notification would fire for.
+**Approved**: pending.
 
-Decision: Remove the notification observer explicitly in `deinit`, even
-though selector-based observers have been auto-zeroed on dealloc since
+**Decision**: Remove the notification observer explicitly in `deinit`,
+even though the `NotificationCenter.addObserver(_:selector:name:object:)`
+registration this component uses has been auto-zeroed on dealloc since
 macOS 10.11.
-Rationale: source comments state this guards against a view deallocated
-while still attached to a window leaving a dangling registration; the
-explicit removal is defensive rather than strictly required by the current
-minimum-deployment behavior.
-Approved: pending.
+**Rationale**: This guards against a view deallocated while still
+attached to a window leaving a dangling registration; because the
+observer is registered through the selector-based API rather than a
+block-based one, removal here is defensive rather than strictly required
+by the current minimum-deployment behavior.
+**Approved**: pending.
 
 ## Compliance
 
-No automated compliance checks have been run against this recipe yet. This
-table will be populated by the cookbook's compliance tooling on review.
-
 | Check | Status | Category |
 |-------|--------|----------|
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+
+`screen-reader-support` is partial because the component registers no
+accessibility-grouping role for its row list (see the open question in
+Accessibility); `keyboard-navigable` passed because the source overrides
+no key-view loop, first responder, or key-equivalent, leaving AppKit's
+automatic tab order across the arranged rows intact.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded file-centric phrasing ("this file", `PermissionsPanelView.swift`, "source comments state") to describe the component's observable behavior and moved private identifiers (`buildLayout()`, `scheduleRefresh()`, `refreshTask`, `isObserving`) into the AppKit/UIKit Platform Notes bullet; noted the `AgenticToolkitPermissions.Permission` module-qualification needed alongside ADT; added `permission-row-view` to `depends-on`; moved the platform-design-languages guideline from `references` to `related`; renamed the `checker-injected-with-system-default`, `starts-observing-activation-on-window-attach`, and `presents-then-refreshes-after-action` requirements to subject-only names (`checker-default`, `activation-observer`, `action-refresh`) and updated their citations; reworded the duplicate-permissions edge case to drop its "Not applicable" lead-in; rewrote vectors 011 and 012 to assert observable outcomes through a fake checker and a call-order log, and moved vector 014 (a compile-time check) to a note; corrected the Reduce Motion note that contradicted `layout-built-once`; flagged the panel's missing VoiceOver grouping role as an open question; bolded the Design Decisions labels and named the exact `NotificationCenter` observer API; and filled in the Compliance table. |

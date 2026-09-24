@@ -3,7 +3,7 @@ id: ea2dae31-1020-4930-aa12-15f7d04967a5
 title: ProgressView
 domain: agentictoolkit://recipes/progress-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,8 +23,15 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
-references: []
+related:
+- agentictoolkit://recipes/checkbox-view
+- agentictoolkit://recipes/button-view
+- agentictoolkit://recipes/explanation-view
+references:
+- https://developer.apple.com/documentation/appkit/nsprogressindicator
+- https://developer.apple.com/documentation/uikit/uiprogressview
+- https://learn.microsoft.com/en-us/uwp/api/windows.ui.xaml.controls.progressbar.isindeterminate
+- https://developer.mozilla.org/en-US/docs/Web/HTML/Element/progress
 approved-by: ''
 approved-date: ''
 ---
@@ -53,9 +60,10 @@ bar showing a numeric value and an animating indeterminate bar every time
 - **exposes-progress-indicator-publicly**: The component MUST expose the
   underlying `NSProgressIndicator` as a public, read-only `progressIndicator`
   property.
-- **disables-autoresizing-mask-translation**: The component MUST set
-  `translatesAutoresizingMaskIntoConstraints = false` on both itself and
-  `progressIndicator`.
+- **uses-constraint-based-layout**: The component MUST be positioned using
+  Auto Layout constraints, not the legacy autoresizing mask, for both itself
+  and `progressIndicator` (see AppKit / UIKit Platform Notes for the exact
+  API).
 - **adds-progress-indicator-as-subview**: The component MUST add
   `progressIndicator` as a subview of itself.
 - **pins-progress-indicator-to-edges**: The component MUST pin
@@ -75,10 +83,10 @@ bar showing a numeric value and an animating indeterminate bar every time
   `viewModel.progress` is `nil`, the component MUST set
   `progressIndicator.isIndeterminate` to `true` and call
   `progressIndicator.startAnimation(nil)`.
-- **retains-progress-subscription-for-view-lifetime**: The component MUST
-  hold the `viewModel.$progress` subscription in a stored `cancellable`
-  property so that updates from **tracks-progress-changes** continue for as
-  long as the view instance is retained.
+- **continues-updates-while-retained**: The component MUST continue applying
+  updates from **tracks-progress-changes** for as long as the view instance
+  is retained (see AppKit / UIKit Platform Notes for the exact subscription
+  mechanism).
 - **rejects-frame-initializer**: The component MUST fatal-error if
   constructed through the inherited `NSView.init(frame:)` initializer.
 - **rejects-coder-initializer**: The component MUST fatal-error if
@@ -165,7 +173,7 @@ bar showing a numeric value and an animating indeterminate bar every time
 |----|-------------|-------|----------|
 | progress-view-001 | constructs-progress-indicator-at-regular-control-size | `ProgressView(viewModel: vm)` | `view.progressIndicator.controlSize == .regular` |
 | progress-view-002 | exposes-progress-indicator-publicly | Any initialized `ProgressView` | `view.progressIndicator` is externally accessible and is the same `NSProgressIndicator` instance added as its subview |
-| progress-view-003 | disables-autoresizing-mask-translation | Any initialized `ProgressView` | `view.translatesAutoresizingMaskIntoConstraints == false` and `view.progressIndicator.translatesAutoresizingMaskIntoConstraints == false` |
+| progress-view-003 | uses-constraint-based-layout | Any initialized `ProgressView` | `view.translatesAutoresizingMaskIntoConstraints == false` and `view.progressIndicator.translatesAutoresizingMaskIntoConstraints == false` |
 | progress-view-004 | adds-progress-indicator-as-subview | Any initialized `ProgressView` | `view.subviews` contains `view.progressIndicator` |
 | progress-view-005 | pins-progress-indicator-to-edges | Host view laid out at a fixed frame, e.g. 200×20 | `progressIndicator`'s resolved frame equals the host view's frame exactly, with zero inset on all four edges |
 | progress-view-006 | reflects-initial-progress-value | `ProgressViewModel(title: "T", progress: 0.5)` | Immediately after `init`, `progressIndicator.isIndeterminate == false` and `progressIndicator.doubleValue == 0.5` |
@@ -174,10 +182,19 @@ bar showing a numeric value and an animating indeterminate bar every time
 | progress-view-009 | tracks-progress-changes | Construct with `progress: 0.2`, then set `viewModel.progress = nil` | `progressIndicator.isIndeterminate` becomes `true` |
 | progress-view-010 | shows-determinate-bar-for-non-nil-progress | Set `viewModel.progress = 42.0` | `progressIndicator.isIndeterminate == false`; `progressIndicator.doubleValue == 42.0`; the indicator's animation is stopped |
 | progress-view-011 | shows-indeterminate-animation-for-nil-progress | Set `viewModel.progress = nil` | `progressIndicator.isIndeterminate == true`; the indicator's animation is running |
-| progress-view-012 | retains-progress-subscription-for-view-lifetime | Construct the view, keep no external reference to its Combine subscription, then set `viewModel.progress` to three different values in turn | `progressIndicator` updates on every one of the three changes |
+| progress-view-012 | continues-updates-while-retained | Construct the view, keep no external reference to its Combine subscription, then set `viewModel.progress` to three different values in turn | `progressIndicator` updates on every one of the three changes |
 | progress-view-013 | rejects-frame-initializer | Construct via `ProgressView(frame: .zero)` | Execution traps via `fatalError` with message `init(frame frameRect: NSRect` |
 | progress-view-014 | rejects-coder-initializer | Construct via `ProgressView(coder:)` with any `NSCoder` | Execution traps via `fatalError` with message `init(coder:) has not been implemented` |
 | progress-view-015 | confines-to-main-actor | Attempt to construct or mutate a `ProgressView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+
+progress-view-006, -008, and -009 use progress values in a 0–1-normalized
+range (0.5, 0.2, 0.9) while progress-view-010 uses the source's native 0–100
+range (42.0); `ProgressView` passes `viewModel.progress` through to
+`progressIndicator.doubleValue` unmodified regardless of scale — the consumer
+chooses the scale (see the Design Decision on `minValue`/`maxValue` below).
+progress-view-015 is a static, compile-time check: `@MainActor` isolation is
+enforced by the Swift compiler and verified by the build, not by a runtime
+assertion.
 
 ## Edge Cases
 
@@ -198,8 +215,8 @@ bar showing a numeric value and an animating indeterminate bar every time
 - **Concurrent access**: Not applicable — both
   `ComposableSettings.ProgressView` and `ComposableSettings.ProgressViewModel`
   are `@MainActor`-isolated (**confines-to-main-actor**); the Swift compiler
-  serializes construction, subscription delivery, and `progress` mutation
-  to the main actor.
+  enforces that isolation at compile time, and the main actor serializes
+  construction, subscription delivery, and `progress` mutation at runtime.
 - **Error states**: Not applicable — `ProgressView` performs no network,
   database, or file-system access of its own. It only reflects whatever
   value `viewModel.progress` reports; any error signaling for the
@@ -282,16 +299,26 @@ or logger reference anywhere in source).
 ## Platform Notes
 
 - **SwiftUI**: Use SwiftUI's own `ProgressView` type (same name as this
-  component, a different API) — `ProgressView(value: viewModel.progress)`
-  when `progress` is non-nil for a determinate bar, or `ProgressView()` with
-  no `value` argument when it's `nil` for SwiftUI's built-in indeterminate
-  spinner. SwiftUI already switches rendering based on whether `value` is
-  `nil`, mirroring `apply(progress:)`'s branch. Read `viewModel.progress`
-  directly from an `ObservableObject`/`Observable`-backed view model in the
-  view body instead of a manual Combine `sink`, letting SwiftUI's own
-  diffing replace **tracks-progress-changes** and the stored `cancellable`.
+  component, a different API) —
+  `ProgressView(value: viewModel.progress, total: 100).progressViewStyle(.linear)`
+  when `progress` is non-nil for a determinate bar, or
+  `ProgressView().progressViewStyle(.linear)` when it's `nil`. The explicit
+  `.progressViewStyle(.linear)` is required on both branches: on macOS a bare
+  `ProgressView()` renders a circular spinner by default, not the source's
+  `.bar` style. The explicit `total: 100` is required on the determinate
+  branch: `ProgressView(value:)` normalizes against a `0...1` range by
+  default, while `NSProgressIndicator`'s default range (and this recipe's
+  `progress` values) is 0–100. SwiftUI already switches rendering based on
+  whether `value` is `nil`, mirroring `apply(progress:)`'s branch. Read
+  `viewModel.progress` directly from an `ObservableObject`/`Observable`-backed
+  view model in the view body instead of a manual Combine `sink`, letting
+  SwiftUI's own diffing replace **tracks-progress-changes** and the stored
+  `cancellable`.
 - **Compose**: Use `LinearProgressIndicator(progress = { it })` bound to a
-  `0f..1f`-normalized value when `progress` is non-nil, or the no-argument
+  `0f..1f`-normalized value — divide the source's 0–100 `progress` by 100
+  (`progress / 100f`, or by `maxValue − minValue` if a caller has changed
+  those through the public `progressIndicator` property) — when `progress` is
+  non-nil, or the no-argument
   `LinearProgressIndicator()` overload (Compose's built-in indeterminate
   animation) when it's `nil`. Compose Material3 already splits determinate
   and indeterminate into two separate composables rather than one mutable
@@ -311,13 +338,18 @@ or logger reference anywhere in source).
   `NSProgressIndicator` pinned edge-to-edge inside an `NSView`, driven by a
   Combine subscription to `ProgressViewModel.$progress`, with `init(frame:)`
   and `init?(coder:)` fatal-erroring rather than being usable, and the whole
-  type isolated to `@MainActor`. A UIKit port would need `UIProgressView`
+  type isolated to `@MainActor`. **uses-constraint-based-layout** is
+  implemented by setting `translatesAutoresizingMaskIntoConstraints = false`
+  on both `self` and `progressIndicator`; **continues-updates-while-retained**
+  is implemented by holding the `viewModel.$progress` subscription in a
+  stored `cancellable: AnyCancellable?` property for the view's lifetime. A
+  UIKit port would need `UIProgressView`
   for the determinate case and `UIActivityIndicatorView` for the
   indeterminate case, since `UIProgressView` — unlike `NSProgressIndicator`
   — has no built-in indeterminate mode of its own; the nil/non-nil branch in
   `apply(progress:)` would need to swap between two different UIKit control
   types rather than flip one `isIndeterminate` flag.
-- **WinUI 3** (the reason this recipe exists): Use a `ProgressBar` control.
+- **WinUI 3**: Use a `ProgressBar` control.
   Bind `ProgressBar.Value` to the caller's progress number (a 0–100 scale,
   matching `NSProgressIndicator`'s own default `minValue`/`maxValue`) when
   it's non-nil, and set `ProgressBar.IsIndeterminate="True"` when it's
@@ -353,7 +385,7 @@ This recipe records the deviation from sibling views rather than assuming a
 row-composition convention (e.g. that a caller always pairs `ProgressView`
 with a separate label or `ExplanationView`) that the given source does not
 itself show.
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: The initial progress value is applied twice at construction —
 once implicitly, because `viewModel.$progress.sink` (a `@Published`
@@ -365,7 +397,7 @@ applied twice in a row, both before `init` returns), but it is present in
 source as written; this recipe records it rather than silently simplifying
 it away. No comment in source explains whether the explicit call is
 defensive redundancy or an oversight.
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `progressIndicator`'s `minValue`/`maxValue` are never set by
 `ProgressView`, leaving `NSProgressIndicator`'s default 0–100 range in
@@ -376,7 +408,7 @@ non-nil value "drives a determinate bar (consumer chooses the scale)."
 must reach through the public `progressIndicator` property and set
 `minValue`/`maxValue` directly — neither `ProgressView` nor
 `ProgressViewModel` provides a dedicated API for it.
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `init(frame frameRect: NSRect)`'s fatal-error message is the
 literal string `init(frame frameRect: NSRect`, missing a closing
@@ -386,7 +418,7 @@ parenthesis, and does not follow the sentence form of the sibling
 the same reason sibling recipes in this file family record it: it reads as
 a truncated fragment of the initializer's own signature, very likely a
 typo, but the source is unchanged for this recipe.
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `progressIndicator`'s edges are pinned to the view's edges
 with required-priority equal constraints (`Self.pinToEdges`) rather than
@@ -396,28 +428,28 @@ offering a placement choice the way `ButtonView` offers `.fill`/`.leading`/
 no enum or parameter offering an alternative. This recipe records that as a
 genuine difference in scope from `ButtonView`, not an oversight; the source
 gives it no other placement to describe.
-**Approved: pending**
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | passed | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | passed | Accessibility |
 
-`contrast-ratio` and `differentiate-without-color` are `passed` because
-`ProgressView` sets no color of its own — all rendering is
-`NSProgressIndicator`'s unmodified system chrome, which already tracks
-platform contrast and does not rely on color alone to convey state.
-`main-actor-confined` is `passed` per **confines-to-main-actor**.
-`screen-reader-support` is `needs-review` because of the open question
-tracked under Accessibility above: no accessibility label or
-title-UI-element link connects `progressIndicator` to `viewModel.title`.
+`contrast-ratio` is `passed` because `ProgressView` sets no color of its
+own — all rendering is `NSProgressIndicator`'s unmodified system chrome,
+which already tracks platform contrast; the same absence of custom coloring
+means `ProgressView` conveys its determinate/indeterminate state through
+fill proportion and motion rather than a color-only cue (see Accessibility
+Options). `screen-reader-support` is `failed` because of the open question
+tracked under Accessibility above: no accessibility label or title-UI-element
+link connects `progressIndicator` to `viewModel.title`, so `ProgressView`
+plainly does not implement this check today.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `ProgressView` (AppKit, macOS) source. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: corrected the SwiftUI and Compose Platform Notes for scale and default style mismatches; restated two implementation-detail requirements as observable behavior and moved their AppKit mechanics into Platform Notes; added references for platform API claims and related links to sibling row recipes; reformatted Design Decisions' Approved line; fixed the concurrent-access wording; annotated the mixed-scale and compile-time-only test vectors; removed an editorial aside from the WinUI 3 bullet; corrected the Compliance status and category casing and pruned non-catalog compliance checks. |
