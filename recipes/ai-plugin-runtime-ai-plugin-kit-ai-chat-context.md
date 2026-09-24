@@ -3,11 +3,11 @@ id: 613d7a36-d0cd-4415-97be-d983b3d6c644
 title: AI Chat Context
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-ai-chat-context
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -89,7 +89,7 @@ Not applicable — this is a data-only value-type file, not a visual component.
 
 - **Empty `messages` array**: `AIChatContext.init` MUST NOT reject `messages: []`; the source has no non-empty check. What a plugin's `buildRequest(_:)` does with zero conversation turns is outside this file's scope.
 - **Empty `model` string**: `AIChatContext.init` MUST NOT reject `model: ""`; the source performs no content validation on `model`.
-- **`maxTokens` non-positive**: NEEDS REVIEW: Not implemented in source. `AIChatContext.init` accepts any `Int` for `maxTokens`, including `0` or a negative value, with no lower-bound check; a grep of every current plugin (`GooglePlugin.swift`, `OpenAICompatiblePlugin.swift`, `ClaudeAPIPlugin.swift`, `OpenAIPlugin.swift`) shows each forwards `context.maxTokens` verbatim into the provider's request body with no clamping either, so a non-positive value would reach the network layer unvalidated. What is missing: a defined minimum (and whether construction should reject it or a downstream layer should clamp it). Evidence that would settle it: a decision from whoever owns `AIPluginKit` on where that validation belongs.
+- **`maxTokens` non-positive**: `AIChatContext.init` does not reject `0` or a negative `maxTokens`; the source has no lower-bound check, and every current plugin (`GooglePlugin.swift`, `OpenAICompatiblePlugin.swift`, `ClaudeAPIPlugin.swift`, `OpenAIPlugin.swift`) forwards `context.maxTokens` verbatim into its provider's request body with no clamping either, so a non-positive value reaches the network layer unvalidated. Per the Design Decisions section below, this is deliberate: `maxTokens` is treated as an opaque budget number, and enforcing a floor is left to `AIPlugin.buildRequest(_:)` or a downstream layer, not to this file.
 - **`AIPluginConfig` with an empty `values` dictionary**: `apiKey`, `baseURL`, `model`, and the keyed subscript MUST all return `nil` for any key, since an empty `[String: String]` returns `nil` for every lookup.
 - **`AIPluginConfig` subscript with an unrecognized key**: MUST return `nil`; the subscript is a direct dictionary lookup with no fallback or default.
 - **`AIToolSpec.parametersJSONSchema` containing non-JSON or malformed bytes**: `AIToolSpec.init` MUST NOT reject it; the type performs no validation that the `Data` it carries is well-formed JSON — despite the field's name, `AIToolSpec` treats it as an opaque byte buffer. Any parsing or validation happens in the plugin that reads it.
@@ -146,7 +146,7 @@ Not applicable: the source contains no analytics or event-emission calls.
 - **Storage**: `AIChatContext.swift` itself stores nothing durably — `AIPluginConfig` is an in-memory value type with no persistence of its own ("the plugin never touches storage itself," per the source doc comment); the actual credential storage (the Keychain) lives outside this file, in whatever `SecretStoring` implementation the host uses.
 - **Transmission**: this file performs no transmission itself; `config.apiKey`, if present, leaves the value's scope only when `AIPlugin.buildRequest(_:)` (a different file) reads it to build an outgoing request's headers or body.
 - **Retention**: `AIChatContext` and `AIPluginConfig` have no retention policy of their own — an instance is expected to be constructed fresh per request ("Everything a plugin needs to build one chat request," per the source doc comment) and released once the request is built; the source provides no caching that would extend a credential's in-memory lifetime beyond that.
-- **Disclosure safeguard**: NEEDS REVIEW: Not implemented in source. `AIPluginConfig` declares no `CustomStringConvertible`/`CustomDebugStringConvertible` override, so the compiler-synthesized default description of an `AIPluginConfig` (or of an `AIChatContext` containing one) would print the entire `values` dictionary, including any credential, if a caller were to log or print the value. What is missing: a redacted description that omits or masks `apiKey`. Evidence that would settle it: whether any caller today logs or prints an `AIChatContext`/`AIPluginConfig` value (none of `AIChatContext.swift`'s own callers do, per this file's source, but the type itself provides no protection if one did).
+- **Disclosure safeguard**: `AIPluginConfig` declares no `CustomStringConvertible`/`CustomDebugStringConvertible` override, so the compiler-synthesized default description of an `AIPluginConfig` (or of an `AIChatContext` containing one) would print the entire `values` dictionary, including any credential, if a caller were to log or print the value; no redacted description exists. No caller in this repo (`LocalChatSession.swift`, `AIPluginChatBackend.swift`, `AIPluginLanguageModelProvider.swift`, `DaemonAIChat.swift`) logs or prints an `AIChatContext`/`AIPluginConfig` value today, but the type itself provides no protection against a future one doing so.
 
 ## Logging
 
@@ -177,10 +177,11 @@ Not applicable: the source contains no `os_log`, `Logger`, `print`, or other log
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
 | [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | partial | Privacy and Data |
 
-`separation-of-concerns` passes because `AIChatContext.swift` performs no I/O, storage, or transport of its own — per its own doc comments, the host resolves and injects configuration, `AIPlugin.buildRequest(_:)` translates the context into a request, and this file is only the data shape shared between them. `data-minimization` is `partial`: `AIPluginConfig.values` carries the plugin's *entire* resolved field set — including a credential, when the template declares one — as a single undifferentiated dictionary passed into `AIChatContext`, with no narrower, credential-free view available to a caller that only needs `model` or `baseURL`, and no redaction safeguard on the type's default description (see the open question in the Privacy section).
+`separation-of-concerns` passes because `AIChatContext.swift` performs no I/O, storage, or transport of its own — per its own doc comments, the host resolves and injects configuration, `AIPlugin.buildRequest(_:)` translates the context into a request, and this file is only the data shape shared between them. `data-minimization` is `partial`: `AIPluginConfig.values` carries the plugin's *entire* resolved field set — including a credential, when the template declares one — as a single undifferentiated dictionary passed into `AIChatContext`, with no narrower, credential-free view available to a caller that only needs `model` or `baseURL`, and no redaction safeguard on the type's default description (see the Privacy section).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

@@ -3,11 +3,11 @@ id: 39de0dff-2b26-4d3d-97a3-ebdbdb38846a
 title: AI Plugin Descriptor
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-ai-plugin-descriptor
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -104,7 +104,7 @@ Not applicable — this is a host-side data model decoded from a plugin's `descr
 - **`templates` absent, explicit `null`, or an empty array**: all three MUST route to the same implicit-template branch of `resolvedTemplates`, since the guard is `if let templates, !templates.isEmpty` — only a non-nil, non-empty array bypasses synthesis.
 - **`schemaVersion` at or beyond its documented boundary** (`0`, negative, `currentSchemaVersion`, or above): this type imposes no minimum or maximum; every `Int` value decodes successfully. Range acceptance (`2...currentSchemaVersion`) is validated by `AIPluginManager.discoverPlugins()`, not by this type (see Design Decisions).
 - **Malformed `kind` string** (e.g. `"masked"` instead of `"secret"`/`"text"`): decoding a `Field` MUST throw `DecodingError.dataCorrupted`, since `Field.Kind` is a `String`-backed `RawRepresentable` enum whose synthesized `init(from:)` has no unknown-case fallback.
-- **Identifier, field-key, and template-id uniqueness**: NEEDS REVIEW: Not implemented in source. Neither `AIPluginDescriptor.identifier`, nor `Field.key` values within one descriptor's `fields` array, nor `ProviderTemplate.id` values within one descriptor's `templates` array are checked for uniqueness by this type on decode or construction. Downstream, `AIPluginManager.template(pluginIdentifier:templateId:)` resolves a `templateId` via `first(where:)`, silently returning only the first match with no signal that a collision occurred. What is missing: whether duplicate keys/ids should be rejected at decode time, or are intentionally permissive with first-match-wins left entirely to callers. Evidence that would settle it: a decision from whoever owns `AIPluginKit` on where, if anywhere, that validation belongs.
+- **Identifier, field-key, and template-id uniqueness**: Neither `AIPluginDescriptor.identifier`, nor `Field.key` values within one descriptor's `fields` array, nor `ProviderTemplate.id` values within one descriptor's `templates` array are checked for uniqueness by this type on decode or construction; duplicates decode and construct successfully. Downstream, `AIPluginManager.template(pluginIdentifier:templateId:)` resolves a `templateId` via `resolvedTemplates.first { $0.id == templateId }`, so a duplicate `id` silently returns only the first match, with no error or signal that a collision occurred.
 - **Concurrent access**: Because every stored property across all four types is `let` and every type is `Sendable`, a single constructed value MAY be read concurrently from multiple tasks or actors (e.g. simultaneously by a SwiftUI view and an AppKit controller) with no synchronization; no operation defined in this file mutates shared state.
 - **Error states from a dependency**: Not applicable — this file has no dependency (no network, database, or file-system call) of its own to fail; locating and reading `descriptor.json` from a bundle is `AIPluginManager.readDescriptor(from:)`'s responsibility, not this type's.
 - **Offline or disconnected state**: Not applicable — this file performs no network access of its own; the descriptor is decoded from a local resource shipped inside the `.aiplugin` bundle, per the type's own doc comment ("A plugin ships this as a plain JSON resource inside its `.aiplugin` bundle").
@@ -211,10 +211,11 @@ Not applicable: `AIPluginDescriptor.swift` contains no `os_log`, `Logger`, `prin
 | [data-integrity](agenticdevelopercookbook://compliance/reliability#data-integrity) | partial | Reliability |
 | [secure-storage](agenticdevelopercookbook://compliance/security#secure-storage) | partial | Security |
 
-`separation-of-concerns` passes because `AIPluginDescriptor.swift` performs no file I/O, network access, or persistence of its own — bundle discovery lives in `AIPluginManager`, and credential/setting storage lives in `PluginConfigStore`/`AIProviderConfigStore`; this file is only the decoded shape and its pure resolution helpers. `no-hardcoded-strings` fails: `resolvedConfigType` returns the literal, non-localized English strings `"API Key"` and `"Local"`, which the provider picker's Config Type column displays directly (see Localization). `data-integrity` is `partial`: `identifier`, `Field.key`, and `ProviderTemplate.id` carry no uniqueness or non-empty validation in this type (see the open question in Edge Cases). `secure-storage` is `partial`: `Field.Kind.secret` correctly signals which values downstream consumers MUST route to the Keychain (confirmed in `PluginConfigStore.swift`/`AIProviderConfigStore.swift`), but this type performs no storage or enforcement of its own — a consumer that ignored `isSecret` would not be caught by anything in this file.
+`separation-of-concerns` passes because `AIPluginDescriptor.swift` performs no file I/O, network access, or persistence of its own — bundle discovery lives in `AIPluginManager`, and credential/setting storage lives in `PluginConfigStore`/`AIProviderConfigStore`; this file is only the decoded shape and its pure resolution helpers. `no-hardcoded-strings` fails: `resolvedConfigType` returns the literal, non-localized English strings `"API Key"` and `"Local"`, which the provider picker's Config Type column displays directly (see Localization). `data-integrity` is `partial`: `identifier`, `Field.key`, and `ProviderTemplate.id` carry no uniqueness or non-empty validation in this type — duplicates decode and construct successfully, and `AIPluginManager.template(pluginIdentifier:templateId:)` silently resolves to the first match on a colliding `id` (see Edge Cases). `secure-storage` is `partial`: `Field.Kind.secret` correctly signals which values downstream consumers MUST route to the Keychain (confirmed in `PluginConfigStore.swift`/`AIProviderConfigStore.swift`), but this type performs no storage or enforcement of its own — a consumer that ignored `isSecret` would not be caught by anything in this file.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

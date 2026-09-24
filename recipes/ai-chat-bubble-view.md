@@ -3,11 +3,11 @@ id: 24199c9b-53ce-41a7-9cce-3b914f0a424a
 title: AIChatBubbleView
 domain: agentictoolkit://recipes/ai-chat-bubble-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -190,11 +190,7 @@ Not applicable: `AIChatBubbleView` is a subview embedded directly into a chat wi
 | (none — hardcoded) | "Show less" | `collapseTitle`, the toggle's label/tooltip when expanded; same as above |
 | (none — hardcoded) | "…" | `ellipsis`, appended after truncated text; same as above |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. The two toggle
-titles are private `String` literals assigned to AppKit (`toolTip` and the
-accessibility label), so they are never looked up in a string table and
-always render in English. Whether they should be localized, and under which
-keys, is unresolved.
+The two toggle titles are private `String` literals (`expandTitle`, `collapseTitle`) assigned directly to AppKit (`NSImage`'s `accessibilityDescription`, `setAccessibilityLabel`, and `toolTip`); the source never looks either one up in a string table, so both always render in English regardless of the user's locale.
 
 ## Accessibility Options
 
@@ -288,3 +284,4 @@ Statuses rest on: the expand toggle's explicit accessibility label versus the bu
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial creation from AIChatBubbleView.swift and its TerminalBoxStyle/TerminalAppearance/SemanticPalette dependencies |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved private source identifiers (vPad, textInset, toggleGap, toggleSize, appliedPalette) into Platform Notes, defined the isExpandable condition inline in States, pinned locale and gave exact values in the timestamp test vectors, added WinUI chevron code points, cited Themeable/ThemePaletteObserver's source file, and corrected MessageBubbleView's toolkit attribution throughout |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

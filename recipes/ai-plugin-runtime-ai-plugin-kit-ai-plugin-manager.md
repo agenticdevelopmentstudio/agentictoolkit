@@ -3,11 +3,11 @@ id: 0a729d47-fc2d-427c-b474-26072dc8b336
 title: AI Plugin Manager
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-ai-plugin-manager
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -74,9 +74,8 @@ approved-date: ''
 - **testing-initializer-explicit**: `init(searchPaths:appName:)` MUST use exactly the given `searchPaths`, with no default-location derivation, defaulting `appName` to `"AgenticPlugins"` when the argument is omitted.
 - **in-memory-state-only**: `records`, `loadedPlugins`, and `loadedBundles` MUST exist only in memory for the lifetime of the `AIPluginManager` instance; none of this state MUST be persisted to disk, and a newly created instance MUST report empty `descriptors`, empty `availableTemplates`, and no loaded plugins until `discoverPlugins()` is called at least once.
 
-NEEDS REVIEW: Not implemented in source. `discoverPlugins()` swallows the error from `try? fileManager.contentsOfDirectory(at:includingPropertiesForKeys:options:)` for a search path that exists but cannot be enumerated (e.g. a permissions failure, or a path that exists as a non-directory file) — the `guard ... else { continue }` produces no log line and no way for a caller to distinguish "this path had nothing in it" from "this path could not be read." Every other skip branch in the same method (an unreadable descriptor, an incompatible schema) logs a warning; this one does not. What is missing: whether an enumeration failure should be logged, surfaced through a return value, or left silent as it is today. This could not be determined from the source alone because the asymmetry with the sibling skip branches gives no signal of intent. It can be resolved by whoever owns `AIPluginManager`'s callers confirming whether silent operation here is acceptable or whether it should log like the other skip paths.
-
-NEEDS REVIEW: Not implemented in source. `init(appName:additionalSearchPaths:)` never validates that `appName` is non-empty before passing it to `InstalledContentLocation.applicationSupport(appName:subdirectory:)`. That helper's own documentation (`packages/apple/AgenticToolkit/Core/Extensions/ExtensionResourcePath.swift`) states an empty `appName` component "collapses the path onto the *shared* `Application Support/<subdirectory>` and silently widens the search to every app's content of that kind" — for this manager, `Application Support/Plugins`. What is missing: whether an empty `appName` should be rejected (precondition/assertion), defaulted, or is simply never expected to occur in practice. This could not be determined from `AIPluginManager.swift` alone, since the risk is documented only in the helper it calls, not enforced at this call site. It can be resolved by whoever owns the manager's call sites confirming whether `appName` can ever be empty before app metadata is configured.
+- **search-path-enumeration-failure**: NEEDS REVIEW: Not implemented in source. `discoverPlugins()` swallows the error from `try? fileManager.contentsOfDirectory(at:includingPropertiesForKeys:options:)` for a search path that exists but cannot be enumerated (e.g. a permissions failure, or a path that exists as a non-directory file) — the `guard ... else { continue }` produces no log line and no way for a caller to distinguish "this path had nothing in it" from "this path could not be read." Every other skip branch in the same method (an unreadable descriptor, an incompatible schema) logs a warning; this one does not. What is missing: whether an enumeration failure should be logged, surfaced through a return value, or left silent as it is today. This could not be determined from the source alone because the asymmetry with the sibling skip branches gives no signal of intent. It can be resolved by whoever owns `AIPluginManager`'s callers confirming whether silent operation here is acceptable or whether it should log like the other skip paths.
+- **empty-app-name-unvalidated**: NEEDS REVIEW: Not implemented in source. `init(appName:additionalSearchPaths:)` never validates that `appName` is non-empty before passing it to `InstalledContentLocation.applicationSupport(appName:subdirectory:)`. That helper's own documentation (`packages/apple/AgenticToolkit/Core/Extensions/ExtensionResourcePath.swift`) states an empty `appName` component "collapses the path onto the *shared* `Application Support/<subdirectory>` and silently widens the search to every app's content of that kind" — for this manager, `Application Support/Plugins`. What is missing: whether an empty `appName` should be rejected (precondition/assertion), defaulted, or is simply never expected to occur in practice. This could not be determined from `AIPluginManager.swift` alone, since the risk is documented only in the helper it calls, not enforced at this call site. It can be resolved by whoever owns the manager's call sites confirming whether `appName` can ever be empty before app metadata is configured.
 
 ## Appearance
 
@@ -123,7 +122,7 @@ Not applicable — this is a plugin discovery and loading manager, not a visual 
 
 - Empty `searchPaths` (e.g. `init(searchPaths: [], appName: "Test")`): `discoverPlugins()` MUST leave `descriptors` and `availableTemplates` empty; no error is raised.
 - A `searchPaths` entry that does not exist on disk: MUST be skipped silently by `existing-search-paths-only`; no log, no error.
-- A `searchPaths` entry that exists but cannot be enumerated (permissions failure, or a non-directory file at that path): silently skipped with no log — see the open question above about `existing-search-paths-only`.
+- A `searchPaths` entry that exists but cannot be enumerated (permissions failure, or a non-directory file at that path): silently skipped with no log — see the open question on search-path-enumeration-failure.
 - A directory entry with the `.aiplugin` extension that is not a valid bundle: caught by `unreadable-candidate-skip` (`Bundle(url:)` returns `nil`), logged and skipped, MUST NOT throw.
 - `descriptor.json` absent, unreadable, or not valid JSON for the declared `AIPluginDescriptor` shape: caught by `unreadable-candidate-skip`, logged and skipped, MUST NOT throw. This is also how a pre-descriptor "v1" plugin (no `descriptor.json` at all) is ignored, per the source's own doc comment.
 - `schemaVersion` below `2` or above `AIPluginDescriptor.currentSchemaVersion`: caught by `schema-version-filter`, logged and skipped, MUST NOT throw.
@@ -140,7 +139,7 @@ Not applicable — this is a plugin discovery and loading manager, not a visual 
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `appName` (`init(appName:additionalSearchPaths:)`) | `String` | none — required | Names the `~/Library/Application Support/<appName>/Plugins` search location; not validated for emptiness (see the open question above) |
+| `appName` (`init(appName:additionalSearchPaths:)`) | `String` | none — required | Names the `~/Library/Application Support/<appName>/Plugins` search location; not validated for emptiness (see the open question on empty-app-name-unvalidated) |
 | `additionalSearchPaths` (`init(appName:additionalSearchPaths:)`) | `[URL]` | `[]` | Extra directories appended after the three default locations, in the order given |
 | `searchPaths` (`init(searchPaths:appName:)`) | `[URL]` | none — required | Replaces all default-location derivation entirely; used by tests |
 | `appName` (`init(searchPaths:appName:)`) | `String` | `"AgenticPlugins"` | Retained alongside explicit `searchPaths`, but not consulted to derive any path in this initializer |
@@ -226,10 +225,11 @@ Subsystem: `Bundle.main.bundleIdentifier` (falls back to `"nil"` if unset, via t
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
 | [no-pii-in-logs](agenticdevelopercookbook://compliance/privacy-and-data#no-pii-in-logs) | passed | Privacy And Data |
 
-Explicit-error-handling is `partial`: `loadPlugin`/`loadAllPlugins` report every failure as a typed, thrown `AIPluginError`, but `discoverPlugins()`'s directory-enumeration failure is swallowed with no log and no thrown error (see the open question in Behavioral Requirements). Fault-tolerance passes because `loadAllPlugins()` isolates each plugin's failure into `PluginLoadResult.failures` and keeps loading the rest. No-hardcoded-strings fails because every `AIPluginError.errorDescription` is an unlocalized English literal (see Localization). No-pii-in-logs passes because every logged value is a plugin identifier, display name, schema number, or bundle filename — never a credential or user-content value.
+Explicit-error-handling is `partial`: `loadPlugin`/`loadAllPlugins` report every failure as a typed, thrown `AIPluginError`, but `discoverPlugins()`'s directory-enumeration failure is swallowed with no log and no thrown error (see the open question on search-path-enumeration-failure). Fault-tolerance passes because `loadAllPlugins()` isolates each plugin's failure into `PluginLoadResult.failures` and keeps loading the rest. No-hardcoded-strings fails because every `AIPluginError.errorDescription` is an unlocalized English literal (see Localization). No-pii-in-logs passes because every logged value is a plugin identifier, display name, schema number, or bundle filename — never a credential or user-content value.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

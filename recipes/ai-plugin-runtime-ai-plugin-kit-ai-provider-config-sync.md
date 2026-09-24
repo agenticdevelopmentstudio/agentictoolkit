@@ -3,11 +3,11 @@ id: 1d7812e7-28cb-4874-897f-43aab62fe009
 title: AI Provider Config Sync
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-ai-provider-config-sync
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -153,7 +153,7 @@ Not applicable: the source contains no analytics or event-emission call of any k
 - **Storage**: `AIProviderConfigSync.swift` performs no storage of its own (see `no-persistence`); per its doc comment, the receiving side is expected to persist each configuration "under `AIProviderConfigKeys` keyed by `id`" — plain settings keys for `values`, and a secure store (Keychain, per `AIProviderConfigKeys`'s doc comment) for `secrets` — but no such receiver exists in this repository (see `sync-application-unimplemented`), so today nothing in this codebase actually stores a value carried by this type.
 - **Transmission**: this file defines the payload's shape but performs no transmission itself; it is documented as crossing the app-to-daemon boundary (a process boundary, and per `AIProviderConfigKeys`'s doc comment, potentially between the app's storage and "the daemon's registry"), but no sender exists in this repository either (see `sync-application-unimplemented`).
 - **Retention**: `AIProviderConfigSync` and `ResolvedProviderConfig` define no retention policy or expiry of their own; a constructed instance is a transient in-memory value with no cache. Any retention of the credentials it carries is entirely the responsibility of whatever (currently unimplemented) receiver persists them.
-- **Disclosure safeguard**: NEEDS REVIEW: Not implemented in source. Neither `AIProviderConfigSync` nor `ResolvedProviderConfig` overrides `CustomStringConvertible`/`CustomDebugStringConvertible`, so the compiler-synthesized default description of a `ResolvedProviderConfig` (or an `AIProviderConfigSync` containing one) would print the entire `secrets` dictionary — including any credential — if a caller were to log or print the value. What is missing: a redacted description that omits or masks `secrets`. Evidence that would settle it: whether any caller (in this repository or the daemon host outside it) logs or prints an `AIProviderConfigSync`/`ResolvedProviderConfig` value; none does today in `packages/apple/AgenticToolkit`, but the type itself provides no protection if one did.
+- **Disclosure safeguard**: Neither `AIProviderConfigSync` nor `ResolvedProviderConfig` overrides `CustomStringConvertible`/`CustomDebugStringConvertible`, so the compiler-synthesized default description of either type prints the entire `secrets` dictionary — including any credential — verbatim; the types apply no redaction of their own. No caller in `packages/apple/AgenticToolkit` logs or prints an `AIProviderConfigSync`/`ResolvedProviderConfig` value today, so this has no live effect in this repository, but nothing in the type would stop a future caller from doing so.
 
 ## Logging
 
@@ -191,9 +191,10 @@ Not applicable: `AIProviderConfigSync.swift` contains no `Logger`, `os_log`, `pr
 | [input-sanitization](agenticdevelopercookbook://compliance/security#input-sanitization) | failed | Security |
 | [secure-storage](agenticdevelopercookbook://compliance/security#secure-storage) | partial | Security |
 
-`separation-of-concerns` passes because `AIProviderConfigSync.swift` performs no storage, no transport, and no business logic of its own; it is only the data shape shared between an app-side sender and a daemon-side receiver, neither of which lives in this file. `idempotent-operations` passes because encoding, decoding, and equality are all deterministic computations of a value's stored properties, with no shared state that could make repeated calls diverge (see `codable-field-names`, `equatable-structural`). `data-minimization` is `partial`: `ResolvedProviderConfig` carries a configuration's *entire* resolved value and secret bag in one undifferentiated pair of dictionaries, with no narrower, credential-free view for a caller that only needs identity or model, and no redaction safeguard on the type's default description (see the open `Disclosure safeguard` question in Privacy). `input-sanitization` fails because neither `configs`' `id` uniqueness nor `selectedConfigId`'s reference into `configs` is validated at construction or decode time (see `configs-id-uniqueness-unenforced`). `secure-storage` is `partial`: the `values`/`secrets` split gives a future receiver a clean signal for which fields need a secure store, but nothing in this file enforces that a receiver actually routes `secrets` there — that enforcement, like the receiver itself, does not yet exist in this repository (see `sync-application-unimplemented`).
+`separation-of-concerns` passes because `AIProviderConfigSync.swift` performs no storage, no transport, and no business logic of its own; it is only the data shape shared between an app-side sender and a daemon-side receiver, neither of which lives in this file. `idempotent-operations` passes because encoding, decoding, and equality are all deterministic computations of a value's stored properties, with no shared state that could make repeated calls diverge (see `codable-field-names`, `equatable-structural`). `data-minimization` is `partial`: `ResolvedProviderConfig` carries a configuration's *entire* resolved value and secret bag in one undifferentiated pair of dictionaries, with no narrower, credential-free view for a caller that only needs identity or model, and no redaction on the type's default description, which prints `secrets` verbatim if ever logged or printed (see `Disclosure safeguard` in Privacy). `input-sanitization` fails because neither `configs`' `id` uniqueness nor `selectedConfigId`'s reference into `configs` is validated at construction or decode time (see `configs-id-uniqueness-unenforced`). `secure-storage` is `partial`: the `values`/`secrets` split gives a future receiver a clean signal for which fields need a secure store, but nothing in this file enforces that a receiver actually routes `secrets` there — that enforcement, like the receiver itself, does not yet exist in this repository (see `sync-application-unimplemented`).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |
