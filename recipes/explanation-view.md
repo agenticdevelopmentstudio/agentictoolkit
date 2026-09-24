@@ -3,11 +3,11 @@ id: 25046f90-559d-4e32-8516-b5dae5f09c43
 title: ExplanationView
 domain: agentictoolkit://recipes/explanation-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -142,20 +142,7 @@ shares instead of a copy of it."
 - **Minimum tap target**: Not applicable — the source defines no
   target/action, gesture recognizer, or click handling; this is a purely
   visual, non-interactive display element with no tap target to size.
-- **Minimum contrast ratio**: NEEDS REVIEW: the 3:1 floor is implemented;
-  4.5:1 for small text is unverified. The label's `.secondaryText` color is
-  derived with an enforced *minimum* contrast ratio of 3.0 against the
-  background (`SemanticPalette`'s `dimmed(towards:by:minContrast:)`), but
-  the caption text role this label uses defaults to 11pt regular — small
-  text under WCAG 2.1's size threshold for the relaxed 3:1 large-text ratio
-  (WCAG 1.4.3) — so the guaranteed floor of 3.0 does not by itself establish
-  the 4.5:1 the WCAG AA small-text criterion calls for. Whether any given
-  theme's actual resolved `secondaryText`-on-background ratio reaches 4.5:1
-  cannot be determined from `ExplanationView.swift` or `SemanticPalette.swift`
-  alone — it depends on each theme's concrete foreground/background color
-  pair. This would be settled by auditing the computed contrast ratio of
-  `.secondaryText` at `.caption` size against the background it is placed
-  on, for every theme this component ships with.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `SemanticPalette`'s `dimmed(towards:by:minContrast:)` enforces only a 3.0 minimum contrast ratio for `.secondaryText`, but the `.caption` role this label uses defaults to 11pt regular — small text under WCAG 2.1's size threshold for the relaxed 3:1 large-text ratio (WCAG 1.4.3) — so the guaranteed floor of 3.0 does not by itself establish the 4.5:1 the WCAG AA small-text criterion calls for; whether any given theme's actual resolved `secondaryText`-on-background ratio reaches 4.5:1 depends on each theme's concrete foreground/background color pair and cannot be determined from `ExplanationView.swift` or `SemanticPalette.swift` alone.
 
 ## Conformance Test Vectors
 
@@ -249,7 +236,7 @@ defines no string literal of its own that would need translation.
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable — the source performs no animation, transition, or `NSAnimationContext`/`CATransaction` call; text assignment is a synchronous property set. |
-| Increase Contrast | `ExplanationView.swift` sets no custom `NSColor` — its coloring comes entirely from the theme's `.secondaryText` role, resolved through `SemanticPalette` — and no code in `ExplanationView.swift` or `SemanticPalette.swift` observes or reacts to the system's Increase Contrast setting; the color choice is unconditional. Whether the resulting per-theme contrast is sufficient at all is the open question tracked once under Accessibility above (minimum contrast ratio), not duplicated here. |
+| Increase Contrast | `ExplanationView.swift` sets no custom `NSColor` — its coloring comes entirely from the theme's `.secondaryText` role, resolved through `SemanticPalette` — and no code in `ExplanationView.swift` or `SemanticPalette.swift` observes or reacts to the system's Increase Contrast setting; the color choice is unconditional. Whether the resulting per-theme contrast is sufficient at all is the open question on minimum-contrast-ratio, not duplicated here. |
 | Differentiate Without Color | Not applicable — the view conveys no state through color at all; it renders only the caller-supplied text in a single, fixed secondary-text color, with no color-coded meaning to differentiate. |
 
 ## Feature Flags
@@ -426,3 +413,4 @@ or any observation of the system's content-size-category setting.
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the `init(frame:)` typo design decision as a known issue instead of behavior to reproduce; moved AppKit implementation mechanics (`ComposableSettings.makeValueLabel`, the fatal-error initializers) out of Behavioral Requirements and into the AppKit Platform Note; merged the two initializer-rejection requirements into a single cross-platform `requires-text-at-construction` requirement and corrected the UIKit note's false claim about `init(frame:)`/`init(coder:)`; moved the caller text-update guidance from a SHOULD requirement into Configuration usage notes; reformatted Design Decisions into the three-line Decision/Rationale/Approved form and dropped the authoring-scope-comparison entry; rebuilt the Compliance table to cite only checks that exist in the compliance catalog, with corrected statuses; added `related`/`references` frontmatter entries; reworded the contrast-ratio and Increase Contrast accessibility text to state what is and isn't implemented; clarified that a container must constrain the view's width for correct wrapped height; flagged the two fatal-error test vectors as requiring a crash-test harness; switched the Compose mapping from `labelSmall` to `bodySmall`; and dropped the ad hoc MUST/SHOULD tags on Edge Cases bullets and the WinUI 3 Platform Note's editorial aside. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `ExplanationView` (AppKit, macOS) source. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

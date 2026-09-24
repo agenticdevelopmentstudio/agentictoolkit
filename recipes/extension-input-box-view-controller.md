@@ -3,11 +3,11 @@ id: b85dc186-31e9-472b-99ea-2c097fc926c8
 title: ExtensionInputBoxViewController
 domain: agentictoolkit://recipes/extension-input-box-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -172,7 +172,7 @@ pre-filled value), and reports the user's decision through the `onAccept`,
 | Pressed | Not applicable — no `NSButton` or other pressable control appears anywhere in `ExtensionInputBoxViewController.swift`; the field is a text-entry control, not a press target. |
 | Disabled | Not applicable — `isEnabled` is never set on the field (or on either label) anywhere in source; the field is always enabled once the panel is on screen. |
 | Focused | The field can become first responder (via normal Tab/click focus, or via `focusField()`). No custom focus-ring styling is set in source — AppKit's default `NSTextField`/`NSSecureTextField` focus ring applies. `focusField()` additionally applies `model.initialSelectionUTF16Range()` as the field's text selection, but only when explicitly invoked — not automatically on every focus event. |
-| Loading | NEEDS REVIEW: Not implemented in source. Behavior undefined. `model.isValidating` (set true by `beginValidating()`, cleared by `recordValidation(_:)`) changes only the acceptance logic (Return is held and replayed — see `acceptance-deferral`); no view property (opacity, a spinner, a disabled state, or any other visual cue) is read from or set based on `model.isValidating` anywhere in `ExtensionInputBoxViewController.swift`. What is missing: whether a user should see any indication that the extension's `validateInput` is in flight for the currently-typed value. What would settle it: a design decision on whether to add a visible in-progress indicator (e.g. dim the validation area or show a small progress indicator) while `model.isValidating` is true, or confirmation that no indicator is intended because the round trip is expected to be fast. |
+| Loading | No loading indication — `model.isValidating` (set true by `beginValidating()`, cleared by `recordValidation(_:)`) changes only the acceptance logic (Return is held and replayed — see `acceptance-deferral`); no view property (opacity, a spinner, a disabled state, or any other visual cue) is read from or set based on `model.isValidating` anywhere in `ExtensionInputBoxViewController.swift`. |
 
 ## Accessibility
 
@@ -182,28 +182,20 @@ pre-filled value), and reports the user's decision through the `onAccept`,
   *identifier*, for UI testing, not a role or label). `NSTextField`/
   `NSSecureTextField` each carry AppKit's built-in text-field accessibility
   role automatically.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. No `accessibilityLabel`, `setAccessibilityLabel`, or
-  `setAccessibilityTitleUIElement` call links the field to `titleLabel` or
-  `promptLabel` anywhere in `ExtensionInputBoxViewController.swift`. What
-  is missing: whether VoiceOver announces the panel's title/prompt text
-  when focus lands in the field, or only whatever AppKit derives on its
-  own (the field has no `stringValue`-derived label of its own beyond its
-  placeholder). What would settle it: a VoiceOver pass over an
-  instantiated panel, or a decision to call something equivalent to
-  `field.setAccessibilityTitleUIElement(promptLabel ?? titleLabel)` in
-  `loadView`.
+- **Label requirements**: No `accessibilityLabel`, `setAccessibilityLabel`,
+  or `setAccessibilityTitleUIElement` call links the field to `titleLabel`
+  or `promptLabel` anywhere in `ExtensionInputBoxViewController.swift`;
+  VoiceOver announces only whatever AppKit derives on its own when focus
+  lands in the field — the field has no `stringValue`-derived label of
+  its own beyond its placeholder.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable for
   Disabled — the component never disables itself (see States). For the
-  validation message: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. `showValidation(_:)` toggles `validationLabel.isHidden` and
-  its text with no explicit accessibility notification call (e.g. an
-  `NSAccessibility.post` equivalent) anywhere in source. What is missing:
-  confirmation that VoiceOver announces the validation message appearing
-  or disappearing without an explicit notification. What would settle it:
-  a VoiceOver pass over a live validation round trip, or an explicit
-  accessibility-announcement call added alongside the
-  `isHidden`/`stringValue` changes.
+  validation message: `showValidation(_:)` toggles
+  `validationLabel.isHidden` and its text with no explicit accessibility
+  notification call (e.g. an `NSAccessibility.post` equivalent) anywhere
+  in source; any VoiceOver announcement of the change comes from AppKit's
+  own default behavior on the label's text/visibility change, not from an
+  explicit call in this file.
 - **Minimum tap target**: Not applicable — this is a macOS,
   pointer/trackpad-driven `NSViewController`/`NSControl` composition (no
   touch input path in source); the 44×44pt minimum is iOS/touch guidance,
@@ -337,15 +329,10 @@ if one existed — none does).
   follows the active theme/system Increase Contrast automatically. The
   field's coloring is AppKit's own default control appearance, likewise
   system-managed.
-- **Differentiate Without Color**: NEEDS REVIEW: Not implemented in
-  source. Behavior undefined. `validationLabel`'s three severities
+- **Differentiate Without Color**: `validationLabel`'s three severities
   (`.error`/`.warning`/`.information`) are distinguished only by `role`
   (color) in `showValidation(_:)` — no icon, prefix, or other non-color
-  cue is added anywhere in source. What is missing: whether Differentiate
-  Without Color requires an additional non-color cue to distinguish
-  severities. What would settle it: a decision on whether/how to add a
-  severity icon or text prefix when Differentiate Without Color is
-  enabled.
+  cue is added anywhere in source.
 
 ## Feature Flags
 
@@ -540,3 +527,4 @@ Without Color entry under Accessibility Options).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ExtensionInputBoxViewController, covering layout, per-edit revalidation, the Return accept/defer/drop three-way logic, and four open accessibility/UX review points (loading indicator, field accessibility label, validation-change announcement, Differentiate Without Color) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: trimmed tags/summary to convention limits, added the sibling picker recipe to `related`, renamed every requirement to subject-only kebab-case, restated private-state requirements/vectors/edge cases as observable behavior, bolded the Design Decisions form, corrected the WinUI 3 bullet's WPF-only APIs and `PasswordBox` selection gap, described SwiftUI's pending-submit replay, added the secure-storage/contrast-ratio compliance rows, downgraded the arrow-key edge case from MUST to a documented known quirk, and added test vectors for empty-string acceptance and Escape from another window. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

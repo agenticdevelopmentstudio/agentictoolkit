@@ -3,7 +3,7 @@ id: f6acc431-0443-4b14-8ae4-e1f2dc227c0c
 title: ExtensionResourcePath
 domain: agentictoolkit://recipes/extension-host-core-extensions-extension-resource-path
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -159,19 +159,7 @@ file rather than re-deriving the rule.
   consult the file system (through symlink resolution) to canonicalize a
   path, but no function in this file MUST create, delete, or write to any
   file or directory.
-- **application-support-appname-validation**: NEEDS REVIEW: Not implemented in source.
-  `applicationSupport(appName:subdirectory:)` performs no check
-  that `appName` is non-empty before composing the path. The function's own
-  doc comment states the consequence of an empty value directly — it
-  "collapses the path onto the shared Application Support/subdirectory and
-  silently widens the search to every app's content of that kind" — but no
-  guard in the function itself prevents this; the hazard the doc comment
-  names is left entirely to callers (today, only `AIPluginManager.init`,
-  which always supplies a non-empty display name) to avoid. What would
-  settle it: a decision from the AgenticToolkit maintainers on whether
-  `applicationSupport` should itself return `nil` (or a caller-visible
-  failure) for an empty `appName`, rather than relying on every present and
-  future caller never passing one.
+- **application-support-appname-validation**: `applicationSupport(appName:subdirectory:)` performs no check that `appName` is non-empty before composing the path. Its doc comment makes non-empty a caller precondition — an empty component "collapses the path onto the shared Application Support/subdirectory and silently widens the search to every app's content of that kind" — and says callers derive the name through something that cannot answer `""` (`AppStorageLocation.displayName`); today the only caller, `AIPluginManager.init`, always supplies a non-empty display name.
 
 ## Appearance
 
@@ -276,7 +264,7 @@ not a visual component.
 | `root` | `URL` | none (required) | The directory the resolved candidate may not leave, in the two-argument overload. |
 | `component` | `String` | none (required) | The not-yet-existing child name appended to `parent` by `canonicalChild(_:of:)`. |
 | `parent` | `URL` | none (required) | The directory, assumed to already exist, that `component` is appended to by `canonicalChild(_:of:)`. |
-| `appName` | `String` | none (required) | The app's display name, passed to `InstalledContentLocation.applicationSupport(appName:subdirectory:)`; the function's own doc comment states it must not be empty, though nothing in the function enforces this (see the `application-support-appname-validation` marker above). |
+| `appName` | `String` | none (required) | The app's display name, passed to `InstalledContentLocation.applicationSupport(appName:subdirectory:)`; the function's own doc comment states it must not be empty, though nothing in the function enforces this (see `application-support-appname-validation` above). |
 | `subdirectory` | `String` | none (required) | The content-kind folder name (for example `"Plugins"` or `"Extensions"`) appended under the app's Application Support directory. |
 | `name` | `String` | none (required) | The dotless folder name passed to `homeDotDirectory(named:in:)` (for example `"agenticplugins"` or `"agenticextensions"`); the leading dot is added by the function. |
 | `home` | `URL` | the process's real home directory | The home directory `homeDotDirectory` resolves against; a caller — typically a test — overrides it so that a test run reads its own fixture rather than a real developer's installed content. |
@@ -455,9 +443,9 @@ to a log by this component itself.
 - **Decision**: `InstalledContentLocation` derives locations but never
   validates its own string inputs (`appName`, `subdirectory`, `name`) for
   emptiness or shape, leaving that entirely to callers.
-  **Rationale**: this is the open question on
-  application-support-appname-validation — the source's own doc comment names the empty-`appName`
-  hazard explicitly, yet the function performs no guard against it, and no
+  **Rationale**: per `application-support-appname-validation`, the source's
+  own doc comment makes a non-empty `appName` a caller precondition rather
+  than a guard in the function, and no
   test in `InstalledContentLocationTests.swift` exercises an empty
   `appName`. Documented here rather than silently left as an assumption,
   per the source's own naming of the risk.
@@ -506,3 +494,4 @@ host's locale (`error-message`, Localization).
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

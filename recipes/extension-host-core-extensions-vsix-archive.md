@@ -3,7 +3,7 @@ id: dbe4b3b6-ac5b-4d45-ba2a-84aad1a8582e
 title: VSIXArchive
 domain: agentictoolkit://recipes/extension-host-core-extensions-vsix-archive
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -317,24 +317,10 @@ not a visual component.
   be refused (`public-key-parsing`); a `.signature.sig` of exactly
   `ed25519SignatureLength` (64) bytes MUST be accepted, and any other length
   MUST be refused (`signature-archive-extraction`).
-- **Concurrent access**: NEEDS REVIEW: Not implemented in source. Two
-  concurrent calls to `expand` given the *same* `destination` URL are not
-  serialized against each other and no lock or exclusive-create primitive
-  guards the check-then-create sequence at lines 152–156:
-  `FileManager.default.createDirectory(at:withIntermediateDirectories: true)`
-  does not throw when the directory already exists, so both callers can pass
-  the `!fileExists` guard and then run two `ditto` processes writing into the
-  same directory concurrently, with no defined outcome for which files
-  survive. What is missing is a decision — a lock, a required-unique-path
-  contract documented on `expand`, or an atomic exclusive directory create —
-  and evidence that would settle it is either a doc-comment amendment stating
-  callers must supply a fresh `destination` per call, or a test demonstrating
-  the current behavior under that condition. (In practice the source's only
-  caller, `VSIXInstaller`, always supplies a fresh `UUID`-named `destination`
-  per install, so this path may be unreachable today; that does not resolve
-  what `expand` itself guarantees.) Calls to `verify`, and calls to `expand`
-  with distinct `destination` values, remain independent
-  (`concurrent-calls-independent-when-destinations-differ`).
+- **concurrent-access**: NEEDS REVIEW: Not implemented in source. Two concurrent calls to `expand` given the same `destination` URL are not serialized against each other — no lock or exclusive-create primitive guards the check-then-create sequence at lines 152–156, since `FileManager.default.createDirectory(at:withIntermediateDirectories: true)` does not throw when the directory already exists, so both callers can pass the `!fileExists` guard and then run two `ditto` processes writing into the same directory concurrently with no defined outcome for which files survive; resolving this needs either a doc-comment contract requiring a fresh `destination` per call or a lock/atomic-create primitive — today's only caller, `VSIXInstaller`, always supplies a fresh `UUID`-named `destination` per install, which does not settle what `expand` itself guarantees.
+
+  Calls to `verify`, and calls to `expand` with distinct `destination` values,
+  remain independent (`concurrent-calls-independent-when-destinations-differ`).
 - **Error states (dependency unavailable)**: When `/usr/bin/ditto` cannot be
   launched at all — for example if it were removed or unexecutable —
   `CommandRunner.runToCompletion` throws, and `expand` MUST report this as
@@ -654,11 +640,12 @@ state — removed, never partially written — when either fires
 partial: the type does handle a hostile or malformed archive without
 crashing (a non-zip file, a zip bomb, a traversing or symlinked entry all
 throw or fail cleanly), but concurrent calls to `expand` sharing the same
-`destination` are not guarded against, which is the open question named
-under Concurrent access in Edge Cases.
+`destination` are not guarded against, which is the open question on
+`concurrent-access`.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

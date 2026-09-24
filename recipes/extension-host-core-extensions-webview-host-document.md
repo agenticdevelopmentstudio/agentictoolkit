@@ -3,7 +3,7 @@ id: a380ec4a-df3f-42ee-8b07-3a8838d753e9
 title: WebviewHostDocument
 domain: agentictoolkit://recipes/extension-host-core-extensions-webview-host-document
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -156,24 +156,7 @@ convenience.
   observable effect — every member is callable from any actor or thread
   without crossing an isolation boundary a caller could violate. The nested
   `MessageKind` MUST be declared explicitly `Sendable` (lines 28, 40).
-- **initial-state-json-validity**: NEEDS REVIEW: Not implemented in source.
-  `html(wrapping:initialState:)`'s doc comment names `initialState` as "The
-  JSON text of whatever the panel last passed to `setState`" (lines 52-55),
-  but neither `html(wrapping:initialState:)` nor
-  `escapedForScriptElement(_:)` validates that a non-nil `initialState` is
-  syntactically valid JSON before wrapping it in a `JSON.parse` call; a
-  non-nil value that is not valid JSON (an empty string, or state corrupted
-  wherever it was persisted) makes the generated immediately-invoked
-  function expression throw a `SyntaxError` at page-load time — uncaught
-  inside that expression and never reaching the native host — so the page
-  loads with no `window.acquireVsCodeApi` and no signal that this happened.
-  What is missing: whether `html(wrapping:initialState:)` should validate
-  `initialState` before embedding it, or fall back to `undefined` on invalid
-  input. Evidence that would settle it: confirmation from whoever owns the
-  pane-state persistence layer
-  (`packages/apple/AgenticToolkit/Core/Extensions/WebviewPanelState.swift`)
-  that it can only ever produce syntactically valid JSON text and never an
-  empty string, or a decision on the fallback behavior here.
+- **initial-state-json-validity**: NEEDS REVIEW: Not implemented in source. `html(wrapping:initialState:)`'s doc comment names `initialState` as "The JSON text of whatever the panel last passed to `setState`" (lines 52-55), but neither `html(wrapping:initialState:)` nor `escapedForScriptElement(_:)` validates that a non-nil `initialState` is syntactically valid JSON before wrapping it in a `JSON.parse` call; a non-nil value that is not valid JSON (an empty string, or state corrupted wherever it was persisted) makes the generated immediately-invoked function expression throw a `SyntaxError` at page-load time — uncaught inside that expression and never reaching the native host — so the page loads with no `window.acquireVsCodeApi` and no signal that this happened. What is missing: whether `html(wrapping:initialState:)` should validate `initialState` before embedding it, or fall back to `undefined` on invalid input. Evidence that would settle it: confirmation from whoever owns the pane-state persistence layer (`packages/apple/AgenticToolkit/Core/Extensions/WebviewPanelState.swift`) that it can only ever produce syntactically valid JSON text and never an empty string, or a decision on the fallback behavior here.
 
 ## Appearance
 
@@ -462,3 +445,4 @@ honestly-reported gap in the source, not a hidden one.
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

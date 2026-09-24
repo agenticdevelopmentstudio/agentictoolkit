@@ -3,7 +3,7 @@ id: b1a34260-3966-4309-ac58-6249752c95fb
 title: WebviewPanelState
 domain: agentictoolkit://recipes/extension-host-core-extensions-webview-panel-state
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -134,19 +134,7 @@ and the four fields it carries: `viewType`, `title`, `state`, and `options`.
   `WebviewPanelOptions`, itself `Sendable`) is immutable (`let`) and itself
   `Sendable`, a value of this type MUST be safe to pass across actor and
   thread boundaries without additional synchronization.
-- **empty-view-type-validation**: NEEDS REVIEW: Not implemented in source.
-  `init(from:)` refuses JSON with no `viewType` key at all
-  (`missing-view-type-refused`), but a JSON object whose `viewType` key is
-  present with the value of an empty string decodes successfully, since
-  `decode(String.self, forKey:)` only requires a string, not a non-empty one.
-  The source's own doc comment gives the reason the missing case is refused —
-  "a default would hand the panel to whichever provider happened to answer to
-  the empty string" — and that same hazard applies to an explicit empty
-  string exactly as much as to an absent key, but only the absent case is
-  guarded. What would settle it: a decision from the `AgenticToolkit`
-  maintainers on whether `init(from:)` should also refuse an empty
-  `viewType`, and whether `WebviewPanelStateError` needs a second case for
-  that refusal or should reuse the decoder's own missing-key error shape.
+- **empty-view-type-validation**: NEEDS REVIEW: Not implemented in source. `init(from:)` refuses JSON with no `viewType` key at all (`missing-view-type-refused`), but a JSON object whose `viewType` key is present with the value of an empty string decodes successfully, since `decode(String.self, forKey:)` only requires a string, not a non-empty one. The source's own doc comment gives the reason the missing case is refused — "a default would hand the panel to whichever provider happened to answer to the empty string" — and that same hazard applies to an explicit empty string exactly as much as to an absent key, but only the absent case is guarded. What would settle it: a decision from the `AgenticToolkit` maintainers on whether `init(from:)` should also refuse an empty `viewType`, and whether `WebviewPanelStateError` needs a second case for that refusal or should reuse the decoder's own missing-key error shape.
 
 ## Appearance
 
@@ -424,3 +412,4 @@ returning a partially-populated or best-guess value (`malformed-text-refused`,
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
